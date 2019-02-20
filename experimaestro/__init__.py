@@ -21,7 +21,7 @@ from cffi import FFI
 import re
 
 ffi = FFI()
-with open(modulepath.parent / "api.h", "r") as fp:
+with open(modulepath / "api.h", "r") as fp:
     RE_SKIP = re.compile(r"""^\s*(?:#include|#ifn?def|#endif|#define|extern "C") .*""")
     RE_CALLBACK = re.compile(r"""^\s*typedef\s+\w+\s*\(\s*\*.*callback""")
     cdef = ""
@@ -33,7 +33,7 @@ with open(modulepath.parent / "api.h", "r") as fp:
 
     ffi.cdef(cdef)
 
-lib = ffi.dlopen(str(modulepath.parent / "libexperimaestro.so"))
+lib = ffi.dlopen(str(modulepath / "libexperimaestro.so"))
 
 def cstr(s):
     return str(s).encode("utf-8")

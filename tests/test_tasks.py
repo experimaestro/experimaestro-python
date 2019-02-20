@@ -1,9 +1,9 @@
 # --- Task and types definitions
 
 import logging
-import click
 from experimaestro import *
 from experimaestro.click import cli, CliRegisterTask
+import click
 
 # --- Define the tasks
 
@@ -41,6 +41,4 @@ def xp(workdir):
 
     # Concat will depend on the two first tasks
     Concat(strings=[hello, world]).submit()
-
-cli()
 
