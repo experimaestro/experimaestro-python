@@ -1,0 +1,15 @@
+global-exclude .DS_Store
+
+include CMakeLists.txt
+include Doxyfile.in
+include config.ini
+include clienttest.cpp
+
+graft googletest
+graft cmake_pip
+graft asio
+graft include
+graft src
+graft test
+graft websocketpp
+

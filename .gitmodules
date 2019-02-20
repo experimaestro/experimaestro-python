@@ -1,0 +1,4 @@
+[submodule "experimaestro"]
+	path = cpp
+	url = git@github.com:experimaestro/experimaestro.git
+	branch = master
