@@ -1,3 +1,11 @@
+global-exclude *.pyc
 global-exclude .DS_Store
 
+include MANIFEST.in
+include setup.py
+include setup.cfg
+
 graft cpp
+
+recursive-include experimaestro *.py
+recursive-include tests *.py
