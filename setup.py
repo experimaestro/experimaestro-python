@@ -1,23 +1,19 @@
-import os.path as op
-import sys
-import os
+import configparser
 import logging
+import os
 import platform
 import subprocess
-
-
+import sys
 from distutils.core import setup
-from distutils.command.build import build as _build
-from distutils.command.install import install as _install
 from distutils.sysconfig import get_python_lib
 
+from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
-from setuptools import setup, Extension
-
 
 logging.basicConfig(level=logging.DEBUG)
-# Read the configuration
-import configparser
+
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
 
 class CMakeExtension(Extension):
@@ -81,18 +77,19 @@ author = config["author"]
 
 
 setup(name='experimaestro',
-      version=informations["version"],
-      description=informations["description"],
-      author=author["name"],
-      author_email=author["email"],
-      url=informations["url"],
-      packages=['experimaestro'],
-      package_dir = {'experimaestro': 'experimaestro'},
-      data_files=[
-          ('.', ['./cpp/include/public/xpm/api.h'])
-      ],
-      # add custom build_ext command
-      cmdclass=dict(build_ext=CMakeBuild),
-      ext_modules=[CMakeExtension('experimaestro', 'cpp')],
-      zip_safe=False,
+    version=informations["version"],
+    description=long_description,
+    long_description_content_type="text/markdown",
+        author=author["name"],
+    author_email=author["email"],
+    url=informations["url"],
+    packages=['experimaestro'],
+    package_dir = {'experimaestro': 'experimaestro'},
+    data_files=[
+        ('.', ['./cpp/include/public/xpm/api.h'])
+    ],
+    # add custom build_ext command
+    cmdclass=dict(build_ext=CMakeBuild),
+    ext_modules=[CMakeExtension('experimaestro', 'cpp')],
+    zip_safe=False,
 )
