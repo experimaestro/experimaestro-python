@@ -54,8 +54,6 @@ def xp(workdir):
     # Sets the working directory and the name of the xp
     experiment(workdir, "helloworld")
     
-    # Submit two tasks
-
     # Submit the tasks
     t1 = Add(x=1, y=tag("y", 2)).submit()
     t2 = Add(x=1, y=tag("y", 3)).submit()
