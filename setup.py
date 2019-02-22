@@ -12,7 +12,11 @@ from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install
 
-# --- Read information
+# --- Current version
+
+VERSION = "0.3.0"
+
+# --- Read information from main package
 
 config = configparser.ConfigParser()
 config.read('cpp/config.ini')
