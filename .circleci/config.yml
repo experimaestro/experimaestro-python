@@ -10,7 +10,7 @@ workflows:
             - build
           filters:
             branches:
-              only: master
+              ignore: /^.*/
             tags:
               only: /^v.*/
 jobs:
@@ -34,15 +34,26 @@ jobs:
           command: |
             python3 -m venv venv
             . venv/bin/activate
-            pip install -r requirements.txt
             pip install wheel
-            
+            pip install -r requirements.txt
+
 
       - run:
-          name: Build and test
+          name: Build
+          command: |
+            . venv/bin/activate
+            python setup.py build
+
+      - run:
+          name: Test
           command: |
             . venv/bin/activate
             python setup.py test
+
+      - run:
+          name: Build packages
+          command: |
+            . venv/bin/activate
             python setup.py sdist
             python setup.py bdist_wheel
 
