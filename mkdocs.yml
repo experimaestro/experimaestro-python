@@ -1,0 +1,28 @@
+site_name: Experimaestro (Python)
+site_description: experimaestro Computer science experiments manager and scheduler
+
+pages:
+    - Introduction: index.md
+
+
+theme: 
+    name: material
+    feature:
+        tabs: true
+    palette:
+        primary: 'indigo'
+        accent: 'indigo'
+    font:
+        text: 'Roboto'
+        code: 'Roboto Mono'
+
+markdown_extensions:
+  # https://pypi.org/project/markdown-include
+  - markdown_include.include:
+       base_path: .
+  - codehilite:
+        linenums: true
+  - admonition
+  - pymdownx.superfences
+
+repo_url: 'https://github.com/experimaestro/experimaestro-python'
