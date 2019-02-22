@@ -4,7 +4,10 @@ workflows:
   version: 2
   main:
     jobs:
-      - build
+      - build:
+          filters:  # required since `deploy` has tag filters AND requires `build`
+            tags:
+              only: /.*/
       - publish:
           requires:
             - build

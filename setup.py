@@ -14,15 +14,16 @@ from setuptools.command.install import install
 
 # --- Current version
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 # --- Read information from main package
 
 config = configparser.ConfigParser()
 config.read('cpp/config.ini')
 informations = config["informations"]
+description = informations["description"]
 author = config["author"]
-version = informations["version"]
+cppversion = informations["version"]
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
@@ -34,13 +35,13 @@ class VerifyVersionCommand(install):
     description = 'verify that the git tag matches our version'
 
     def run(self):
-        global version
+        global VERSION
 
         tag = os.getenv('CIRCLE_TAG')
 
-        if tag != "v%s" % version:
+        if tag != "v%s" % VERSION:
             info = "Git tag: {0} does not match the version of this app: {1}".format(
-                tag, version
+                tag, VERSION
             )
             sys.exit(info)
 
@@ -115,8 +116,9 @@ class CMakeBuild(build_ext):
 setup(
     # Basic informatoin
     name='experimaestro',
-    version=version,
-    description=long_description,
+    version=VERSION,
+    description=description,
+    long_description=long_description,
     long_description_content_type="text/markdown",
     author=author["name"],
     author_email=author["email"],
