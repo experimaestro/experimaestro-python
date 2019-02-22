@@ -1,5 +1,18 @@
 version: 2
 
+workflows:
+  version: 2
+  main:
+    jobs:
+      - build
+      - publish:
+          requires:
+            - build
+          filters:
+            branches:
+              only: master
+            tags:
+              only: /^v.*/
 jobs:
   build:
     docker:
@@ -18,42 +31,40 @@ jobs:
             git submodule update
 
       - run:
-          name: verify git tag vs. version
+          name: Install requirements
           command: |
             python3 -m venv venv
             . venv/bin/activate
-            pip install cffi click wheel twine
-            python setup.py verify
+            pip install -r requirements.txt
+            pip install wheel
             
+
       - run:
-          name: init .pypirc
+          name: Build and test
           command: |
+            . venv/bin/activate
+            python setup.py test
+            python setup.py sdist
+            python setup.py bdist_wheel
+
+      - persist_to_workspace:
+          root: .
+          paths:
+            - dist
+
+  publish:
+    docker:
+      - image: "debian:buster"
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: Upload to pypi
+          command: |
+            . venv/bin/activate
+            python setup.py verify
             echo -e "[pypi]" >> ~/.pypirc
             echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
             echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
-
-      - run:
-        name: Build and test
-        command: |
-          python setup.py test
-          python setup.py sdist
-          python setup.py bdist_wheel
-
-      - run:
-        name: upload to pypi
-        command: |
-          . venv/bin/activate
-          twine upload dist/*
-      - run:
-          name: Creating Build Files
-          command: |
-            cmake -GNinja -H. -Bbuild
-      - run:
-          name: Building
-          command: |
-            ninja -j 2 -C build experimaestro-tests
-      - run:
-          name: Test
-          # TODO: run SSH server to test remote calls
-          command: |
-            GTEST_FILTER="-SshTest.*" CTEST_OUTPUT_ON_FAILURE=1 ninja -C build test
+            pip install twine
+            twine upload dist/*
