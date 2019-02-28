@@ -1,8 +1,10 @@
 site_name: Experimaestro (Python)
 site_description: experimaestro Computer science experiments manager and scheduler
 
-pages:
+nav:
     - Introduction: index.md
+    - Installing: install.md
+
 
 
 theme: 
@@ -25,4 +27,7 @@ markdown_extensions:
   - admonition
   - pymdownx.superfences
 
+plugins:
+    - multiple:
+        parent: cpp
 repo_url: 'https://github.com/experimaestro/experimaestro-python'

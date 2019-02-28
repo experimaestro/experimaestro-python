@@ -2,7 +2,7 @@
 
 import logging
 from experimaestro import *
-from experimaestro.click import cli, CliRegisterTask
+from experimaestro.click import cli, TASK_PREFIX
 import click
 
 # --- Define the tasks
@@ -10,13 +10,13 @@ import click
 hw = Typename("helloworld")
 
 @TypeArgument("word", type=str, required=True, help="Word to generate")
-@CliRegisterTask(hw.say)
+@RegisterTask(hw.say, prefix_args=TASK_PREFIX)
 class Say:
     def execute(self):
         print(self.word.upper(),)
 
 @TypeArgument("strings", type=ArrayOf(Say), help="Strings to concat")
-@CliRegisterTask(hw.concat)
+@RegisterTask(hw.concat, prefix_args=TASK_PREFIX)
 class Concat:
     def execute(self):
         # We access the file where standard output was stored

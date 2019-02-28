@@ -2,11 +2,8 @@ import click
 from experimaestro import register
 from experimaestro import RegisterTask, Type, Value
 
-class CliRegisterTask(RegisterTask):
-    """Registers a task when the tasks and main command line are in the same file"""
-    def __init__(self, *args, **kwargs):
-        kwargs["prefix_args"] = ["xpm", "--"]
-        super().__init__(*args, **kwargs)
+"""Defines the task command line argument prefix for experimaestro-handled command lines"""
+TASK_PREFIX=["xpm", "--"]
 
 @click.group()
 def cli():
