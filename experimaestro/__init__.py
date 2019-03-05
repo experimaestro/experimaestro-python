@@ -33,7 +33,13 @@ with open(modulepath / "api.h", "r") as fp:
 
     ffi.cdef(cdef)
 
-lib = ffi.dlopen(str(modulepath / "libexperimaestro.so"))
+for name in ["libexperimaestro.so", "libexperimaestro.dylib", None]:
+    if name is None:
+        raise Exception("Cannot find experimaestro library")
+    path = modulepath / name 
+    if path.is_file():
+        lib = ffi.dlopen(str(path))
+        break
 
 def cstr(s):
     return str(s).encode("utf-8")
