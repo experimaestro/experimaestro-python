@@ -19,14 +19,10 @@ workflows:
 jobs:
   build:
     docker:
-      - image: "debian:buster"
+      - image: "bpiwowar/experimaestro-python"
     steps:
       - checkout
-      - run:
-          name: Installing packages
-          command: |
-            apt-get update
-            apt-get install -y libpoco-dev git g++ cmake libssh-dev ninja-build doxygen python3-dev pkg-config python3-venv
+            
       - run:
           name: "Pull Submodules"
           command: |
@@ -35,31 +31,31 @@ jobs:
       - run:
           name: Install requirements
           command: |
-            python3 -m venv venv
-            . venv/bin/activate
+            PATH=/opt/python/cp37-cp37m/bin:$PATH
             pip install wheel
-            pip install -r requirements.txt
+            pip install -r requirements
 
 
       - run:
           name: Build
           command: |
-            . venv/bin/activate
+            PATH=/opt/python/cp37-cp37m/bin:$PATH
             python setup.py build
 
       - run:
           name: Test
           command: |
-            . venv/bin/activate
+            PATH=/opt/python/cp37-cp37m/bin:$PATH
             python setup.py test
 
       - run:
           name: Build packages
           command: |
-            . venv/bin/activate
+            PATH=/opt/python/cp37-cp37m/bin:$PATH
             python setup.py sdist
             python setup.py bdist_wheel
 
+      # Allows twine uploads
       - persist_to_workspace:
           root: .
           paths:
@@ -67,7 +63,7 @@ jobs:
 
   publish:
     docker:
-      - image: "debian:buster"
+      - image: "bpiwowar/experimaestro-python"
     steps:
       - attach_workspace:
           at: .
