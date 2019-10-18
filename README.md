@@ -12,6 +12,12 @@ Full documentation can be found in [https://experimaestro.github.io/experimaestr
 
 # Install
 
+## From binary wheel
+
+Binary wheels are available with a recent version of pip.
+
+## From source
+
 Experimaestro depends on external libraries [Poco](https://pocoproject.org/) and [libssh](https://www.libssh.org/). 
 You can install them using
 

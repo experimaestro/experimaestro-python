@@ -6,5 +6,5 @@ class TemporaryDirectory:
         return self.path
 
     def __exit__(self, exc_type, exc_value, traceback):
-        print("Removing %s" %  self.path)
+        print("WARNNNINNNGG - NOT Removing %s" %  self.path)
         # shutil.rmtree(self.path)

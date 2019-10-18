@@ -116,6 +116,7 @@ class Task(Type):
         t.__xpmtask__ = task
         register.addTask(task)
 
+        # Construct command       
         command = api.Command()
         command.add(api.CommandPath(self.pythonpath))
         command.add(api.CommandPath(op.realpath(self.scriptpath)))

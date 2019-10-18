@@ -1,9 +1,9 @@
 # --- Task and types definitions
 
-import logging
 import unittest
-import click
+import os
 from pathlib import Path
+import logging
 
 from experimaestro import *
 from experimaestro.click import cli, TASK_PREFIX
@@ -19,6 +19,9 @@ from .tasks import *
 class MainTest(unittest.TestCase):
     def test_simple(self):
         with TemporaryDirectory() as workdir:
+            # Set some useful environment variables
+            Launcher.DEFAULT.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
+
             # Sets the working directory and the name of the xp
             experiment(workdir, "helloworld")
 

@@ -609,7 +609,6 @@ class PyObject:
         if send:
             launcher = launcher or Launcher.DEFAULT
             workspace = workspace or Workspace.DEFAULT
-            print(workspace, launcher)
             self.__class__.__xpmtask__.submit(workspace, launcher, self.__xpm__.sv, self.__xpm__.dependencies)
 
         self.__xpm__.submitted = True

@@ -14,7 +14,7 @@ from setuptools.command.install import install
 
 # --- Current version
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 # --- Read information from main package
 
