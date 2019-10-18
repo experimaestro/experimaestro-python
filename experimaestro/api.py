@@ -9,8 +9,9 @@ import os
 import logging
 import pathlib
 from pathlib import Path as BasePath, PosixPath
+from cffi import FFI
+import re
 from typing import Union
-
 
 # --- Initialization
 
@@ -19,8 +20,7 @@ modulepath = BasePath(__file__).parent
 
 # --- Import C bindings
 
-from cffi import FFI
-import re
+class NullPointerException(BaseException): pass
 
 ffi = FFI()
 with open(modulepath / "api.h", "r") as fp:
@@ -70,6 +70,7 @@ class FFIObject:
     @classmethod
     def _wrap(cls, ptr):
         """Returns a pointer wrapper that will deallocate the pointer"""
+        assert ptr is not None
         return ffi.gc(ptr, getattr(lib, "%s_free" % cls.__name__.lower()))
 
 class Typename(FFIObject):
@@ -230,6 +231,8 @@ class Task(FFIObject):
 
     def submit(self, workspace, launcher, value, dependencies: DependencyArray):
         Workspace.SUBMITTED = True
+        if launcher is None:
+            raise NullPointerException("Launcher is a null ptr")
         lib.task_submit(self.ptr, workspace.ptr, Launcher._ptr(launcher), Value._ptr(value), dependencies.ptr)
 
     @classmethod
@@ -428,6 +431,8 @@ class LocalConnector(Connector):
 
 
 class Launcher(FFIObject):
+    DEFAULT = None
+
     @property
     def launcherPtr(self):
         return ffi.cast("Launcher *", self.ptr)
@@ -478,9 +483,6 @@ JSON_ENCODER = JSONEncoder()
 
 # Flag for simulating
 SUBMIT_TASKS = True
-
-# Default launcher
-DEFAULT_LAUNCHER = None
 
 
 # --- XPM Objects
@@ -605,8 +607,9 @@ class PyObject:
         if self.__xpm__.submitted:
             raise Exception("Task %s was already submitted" % self)
         if send:
-            launcher = launcher or DEFAULT_LAUNCHER
+            launcher = launcher or Launcher.DEFAULT
             workspace = workspace or Workspace.DEFAULT
+            print(workspace, launcher)
             self.__class__.__xpmtask__.submit(workspace, launcher, self.__xpm__.sv, self.__xpm__.dependencies)
 
         self.__xpm__.submitted = True
@@ -785,6 +788,35 @@ class Argument(FFIObject):
     @property
     def defaultvalue(self):
         return Value.fromcptr(lib.argument_getdefaultvalue(self.ptr))
+
+
+
+
+
+class Workspace():
+    DEFAULT = None
+
+    """True if a job was submitted"""
+    SUBMITTED = False
+
+    """An experimental workspace"""
+    def __init__(self, path):
+        # Initialize the base class
+        self.ptr = ffi.gc(lib.workspace_new(cstr(path)), lib.workspace_free)
+
+    def current(self):
+        """Set this workspace as being the default workspace for all the tasks"""
+        lib.workspace_current(self.ptr)
+
+    def experiment(self, name):
+        """Sets the current experiment name"""
+        lib.workspace_experiment(self.ptr, cstr(name))
+
+    def server(self, port: int):
+        lib.workspace_server(self.ptr, port, cstr(modulepath / "htdocs"))
+        checkexception()
+
+Workspace.waitUntilTaskCompleted = lib.workspace_waitUntilTaskCompleted
 
 
 # --- 

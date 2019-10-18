@@ -11,7 +11,7 @@ from pathlib import Path as BasePath, PosixPath
 from typing import Union
 
 import experimaestro.api as api
-from .api import register, DirectLauncher, LocalConnector, Typename, logger
+from .api import register, DirectLauncher, LocalConnector, Workspace, Typename, Launcher, logger
 
 # --- Annotations to define tasks and types
 
@@ -180,33 +180,6 @@ class ConstantArgument(api.Argument):
 
 
 
-
-class Workspace():
-    DEFAULT = None
-
-    """True if a job was submitted"""
-    SUBMITTED = False
-
-    """An experimental workspace"""
-    def __init__(self, path):
-        # Initialize the base class
-        self.ptr = ffi.gc(lib.workspace_new(cstr(path)), lib.workspace_free)
-
-    def current(self):
-        """Set this workspace as being the default workspace for all the tasks"""
-        lib.workspace_current(self.ptr)
-
-    def experiment(self, name):
-        """Sets the current experiment name"""
-        lib.workspace_experiment(self.ptr, cstr(name))
-
-    def server(self, port: int):
-        lib.workspace_server(self.ptr, port, cstr(modulepath / "htdocs"))
-        checkexception()
-
-Workspace.waitUntilTaskCompleted = api.lib.workspace_waitUntilTaskCompleted
-
-
 def experiment(path, name):
     """Defines an experiment
     
@@ -222,8 +195,7 @@ def experiment(path, name):
     return workspace
 
 def set_launcher(launcher):
-    global DEFAULT_LAUNCHER
-    DEFAULT_LAUNCHER = launcher
+    Launcher.DEFAULT = launcher
 
 launcher = DirectLauncher(LocalConnector())
 if os.getenv("PYTHONPATH"):
