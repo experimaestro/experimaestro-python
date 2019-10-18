@@ -9,14 +9,14 @@ import click
 
 hw = Typename("helloworld")
 
-@TypeArgument("word", type=str, required=True, help="Word to generate")
-@RegisterTask(hw.say, prefix_args=TASK_PREFIX)
+@Argument("word", type=str, required=True, help="Word to generate")
+@Task(hw.say, prefix_args=TASK_PREFIX)
 class Say:
     def execute(self):
         print(self.word.upper(),)
 
-@TypeArgument("strings", type=ArrayOf(Say), help="Strings to concat")
-@RegisterTask(hw.concat, prefix_args=TASK_PREFIX)
+@Argument("strings", type=Array(Say), help="Strings to concat")
+@Task(hw.concat, prefix_args=TASK_PREFIX)
 class Concat:
     def execute(self):
         # We access the file where standard output was stored

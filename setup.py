@@ -70,6 +70,7 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext):
+        print("Building extension", self.get_ext_fullpath(ext.name), self.get_ext_fullname(ext.name), ext)
         extdir = os.path.abspath(
             os.path.dirname(self.get_ext_fullpath(ext.name)))
 

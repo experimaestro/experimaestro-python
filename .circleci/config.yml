@@ -4,20 +4,23 @@ workflows:
   version: 2
   main:
     jobs:
-      - build:
+      - build-37:
           filters:  # required since `deploy` has tag filters AND requires `build`
             tags:
               only: /.*/
+
       - publish:
           requires:
-            - build
+            - build-37
           filters:
             branches:
               ignore: /^.*/
             tags:
               only: /^v.*/
 jobs:
-  build:
+  build-37:
+    environment: 
+      PYTHONBIN: /opt/python/cp37-cp37m/bin
     docker:
       - image: "bpiwowar/experimaestro-python"
     steps:
@@ -31,7 +34,7 @@ jobs:
       - run:
           name: Install requirements
           command: |
-            PATH=/opt/python/cp37-cp37m/bin:$PATH
+            PATH=${PYTHONBIN}:$PATH
             pip install wheel
             pip install -r requirements.txt
 
@@ -39,19 +42,19 @@ jobs:
       - run:
           name: Build
           command: |
-            PATH=/opt/python/cp37-cp37m/bin:$PATH
+            PATH=${PYTHONBIN}:$PATH
             python setup.py build
 
       - run:
           name: Test
           command: |
-            PATH=/opt/python/cp37-cp37m/bin:$PATH
+            PATH=${PYTHONBIN}:$PATH
             python setup.py test
 
       - run:
           name: Build packages
           command: |
-            PATH=/opt/python/cp37-cp37m/bin:$PATH
+            PATH=$PYTHONBIN:$PATH
             python setup.py sdist
             python setup.py bdist_wheel
 

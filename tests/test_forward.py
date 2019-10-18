@@ -3,8 +3,8 @@ from experimaestro import *
 from experimaestro.click import cli, forwardoption
 import click
 
-@TypeArgument("epochs", type=int, default=100, help="Number of learning epochs")
-@RegisterType("mymodel")
+@Argument("epochs", type=int, default=100, help="Number of learning epochs")
+@Type("mymodel")
 class MyModel: pass
 
 @forwardoption(MyModel, "epochs")
@@ -19,5 +19,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(epochs, 100)
 
 if __name__ == '__main__':
+    import sys
+    logging.warn(sys.path)
     unittest.main()
 

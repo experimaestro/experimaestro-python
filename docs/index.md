@@ -7,8 +7,8 @@ Types can be either used by tasks or other types
 ```
 from experimaestro import *
 
-@TypeArgument("gamma", type=float, required=False)
-@RegisterType("my.model")
+@Type("gamma", type=float, required=False)
+@Type("my.model")
 class MyModel:
     def _init(self):
         """Called when the object has been created and arguments set"""
@@ -25,9 +25,9 @@ A task is a special type that can be:
 ```
 from experimaestro import *
 
-@TypeArgument("epochs", type=int, default=100)
-@TypeArgument("model", type=Model, required=True)
-@RegisterTask("model.learn")
+@Argument("epochs", type=int, default=100)
+@Argument("model", type=Model, required=True)
+@Task("model.learn")
 class ModelLearn:
     def _init(self):
         """Called when the object has been created and arguments set"""
@@ -47,8 +47,11 @@ Easily define arguments with click
 
 ```python
 
-@TypeArgument("epochs", type=int, default=100, help="Number of learning epochs")
-@RegisterType("mymodel")
+from experimaestro import Argument, Type
+from experimaestro.click import forwardoption
+
+@Argument("epochs", type=int, default=100, help="Number of learning epochs")
+@Type("mymodel")
 class MyModel: ...
 
 @forwardoption(MyModel, "epochs")

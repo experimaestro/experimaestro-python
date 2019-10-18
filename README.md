@@ -44,13 +44,13 @@ import click
 
 hw = Typename("helloworld")
 
-@TypeArgument("word", type=str, required=True, help="Word to generate")
+@Type("word", type=str, required=True, help="Word to generate")
 @RegisterTask(hw.say, prefix_args=TASK_PREFIX)
 class Say:
     def execute(self):
         print(self.word.upper(),)
 
-@TypeArgument("strings", type=ArrayOf(Say), help="Strings to concat")
+@Type("strings", type=ArrayOf(Say), help="Strings to concat")
 @RegisterTask(hw.concat, prefix_args=TASK_PREFIX)
 class Concat:
     def execute(self):

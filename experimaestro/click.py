@@ -1,6 +1,6 @@
 import click
 from experimaestro import register
-from experimaestro import RegisterTask, Type, Value
+from experimaestro.api import Type, Value
 
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
 TASK_PREFIX=["xpm", "--"]
