@@ -38,26 +38,26 @@ Under the curtain,
   so you can easily keep track of them
 
 ```python
-
 # --- Task and types definitions
 
 import logging
 from experimaestro import *
 from experimaestro.click import cli, TASK_PREFIX
 import click
+import time
 
 # --- Define the tasks
 
 hw = Typename("helloworld")
 
-@Type("word", type=str, required=True, help="Word to generate")
-@RegisterTask(hw.say, prefix_args=TASK_PREFIX)
+@Argument("word", type=str, required=True, help="Word to generate")
+@Task(hw.say, prefix_args=TASK_PREFIX)
 class Say:
     def execute(self):
         print(self.word.upper(),)
 
-@Type("strings", type=ArrayOf(Say), help="Strings to concat")
-@RegisterTask(hw.concat, prefix_args=TASK_PREFIX)
+@Argument("strings", type=Array(Say), help="Strings to concat")
+@Task(hw.concat, prefix_args=TASK_PREFIX)
 class Concat:
     def execute(self):
         # We access the file where standard output was stored
@@ -73,6 +73,8 @@ class Concat:
 @click.argument("workdir", type=str)
 @cli.command()
 def xp(workdir):
+    """Runs an experiment"""
+
     # Sets the working directory and the name of the xp
     experiment(workdir, "helloworld")
 
@@ -83,4 +85,9 @@ def xp(workdir):
     # Concat will depend on the two first tasks
     Concat(strings=[hello, world]).submit()
 
+
+if __name__ == "__main__":
+    cli()
 ```
+
+which can be launched with `python test.py xp /tmp/helloworld-workdir`
