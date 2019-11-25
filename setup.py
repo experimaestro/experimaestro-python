@@ -144,6 +144,9 @@ setup(
     # We do not allow archives
     zip_safe=False,
 
+    # Use MANIFEST.in
+    include_package_data=True,
+
     # Version verification
     cmdclass={
         'verify': VerifyVersionCommand,

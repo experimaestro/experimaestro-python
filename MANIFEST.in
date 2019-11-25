@@ -1,9 +1,7 @@
-global-exclude *.pyc
-global-exclude .DS_Store
-
 include MANIFEST.in
 include setup.py
 include setup.cfg
+
 recursive-include experimaestro *.py
 recursive-include tests *.py
 
@@ -12,6 +10,7 @@ graft cpp/include
 graft cpp/src
 graft cpp/cmake
 include cpp/CMakeLists.txt
+include cpp/config.ini
 
 graft cpp/app/build
 graft cpp/app/public
@@ -19,3 +18,5 @@ graft cpp/app/sass
 graft cpp/app/src
 
 
+global-exclude *.pyc
+global-exclude .DS_Store
