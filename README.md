@@ -46,6 +46,14 @@ from experimaestro.click import cli, TASK_PREFIX
 import click
 import time
 
+# --- Just to be able to monitor the tasks
+
+def slowdown(N: int):
+    for i in range(N):
+        time.sleep(2)
+        progress((i+1)/N)
+
+
 # --- Define the tasks
 
 hw = Typename("helloworld")
@@ -54,6 +62,7 @@ hw = Typename("helloworld")
 @Task(hw.say, prefix_args=TASK_PREFIX)
 class Say:
     def execute(self):
+        slowdown(len(self.word))
         print(self.word.upper(),)
 
 @Argument("strings", type=Array(Say), help="Strings to concat")
@@ -62,6 +71,7 @@ class Concat:
     def execute(self):
         # We access the file where standard output was stored
         says = []
+        slowdown(len(self.strings))
         for string in self.strings:
             with open(string._stdout()) as fp:
                 says.append(fp.read().strip())
@@ -70,13 +80,15 @@ class Concat:
 
 # --- Defines the experiment
 
+@click.option("--port", type=int, default=12345, help="Port for monitoring")
 @click.argument("workdir", type=str)
 @cli.command()
-def xp(workdir):
+def xp(port, workdir):
     """Runs an experiment"""
 
     # Sets the working directory and the name of the xp
-    experiment(workdir, "helloworld")
+    ws = experiment(workdir, "helloworld")
+    ws.server(port)
 
     # Submit the tasks
     hello = Say(word="hello").submit()

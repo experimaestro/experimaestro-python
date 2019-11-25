@@ -5,7 +5,7 @@ FROM quay.io/pypa/manylinux2010_x86_64 as intermediate
 ARG COMPILE_THREADS=8
 ARG POCO_VERSION=1.9.3
 ARG LIBSSH_VERSION=0.9.0
-
+ARG NODEJS_VERSION=12.13.1
 WORKDIR /root
 
 # Necessary packages: xz to uncompress, openssl-devel for libssh
@@ -25,11 +25,19 @@ ADD https://github.com/pocoproject/poco/archive/poco-${POCO_VERSION}-release.tar
 COPY build-poco.sh /root
 RUN bash build-poco.sh
 
+# Install nodejs
+ADD https://nodejs.org/dist/v${NODEJS_VERSION}/node-v${NODEJS_VERSION}.tar.gz /root
+COPY build-nodejs.sh /root
+RUN bash build-nodejs.sh
+
 # Install a patched version of patchelf
 # To remove when upstream bug is fixed: 
 # See https://github.com/pypa/auditwheel/issues/159
 COPY build-patchelf.sh /root
 RUN bash build-patchelf.sh
+
+# Install npm
+RUN curl -sL https://rpm.nodesource.com/setup_13
 
 # Final image - just copy /usr/local
 

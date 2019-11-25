@@ -6,7 +6,7 @@ import subprocess
 import sys
 from distutils.core import setup
 from distutils.sysconfig import get_python_lib
-from shutil import copyfile
+from shutil import copyfile, copytree, rmtree
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
@@ -14,7 +14,7 @@ from setuptools.command.install import install
 
 # --- Current version
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 
 # --- Read information from main package
 
@@ -109,6 +109,15 @@ class CMakeBuild(build_ext):
         # Building
         subprocess.check_call(['cmake', '--build', '.', '--target', 'experimaestro_shared'] + build_args,
                               cwd=self.build_temp)
+        subprocess.check_call(['cmake', '--build', '.', '--target', 'webapp'] + build_args,
+                              cwd=self.build_temp)
+
+        # Copy web application
+        htdocspath = op.join(extdir, "htdocs")
+        print("Copying web application in ", htdocspath)
+        if op.exists(htdocspath):
+            rmtree(htdocspath)
+        copytree('./cpp/app/build', htdocspath)
 
         print()  # Add an empty line for cleaner output
 

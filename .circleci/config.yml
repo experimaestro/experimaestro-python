@@ -79,4 +79,5 @@ jobs:
             echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
             echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
             pip install twine
-            twine upload dist/*
+            auditwheel repair dist/*.whl
+            twine upload wheelhouse/*

@@ -4,8 +4,18 @@ global-exclude .DS_Store
 include MANIFEST.in
 include setup.py
 include setup.cfg
-
-graft cpp
-
 recursive-include experimaestro *.py
 recursive-include tests *.py
+
+graft cpp/ext
+graft cpp/include
+graft cpp/src
+graft cpp/cmake
+include cpp/CMakeLists.txt
+
+graft cpp/app/build
+graft cpp/app/public
+graft cpp/app/sass
+graft cpp/app/src
+
+
