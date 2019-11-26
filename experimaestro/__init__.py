@@ -162,9 +162,9 @@ class PathArgument(api.Argument):
         :param name: The name of argument (in python)
         :param path: The relative path
         """
-        Argument.__init__(self, name, PathType, help=help)
-        generator = PathGenerator(path)
-        api.lib.argument_setgenerator(self.ptr, Generator._ptr(generator))
+        Argument.__init__(self, name, api.PathType, help=help)
+        generator = api.PathGenerator(path)
+        api.lib.argument_setgenerator(self.ptr, api.Generator._ptr(generator))
 
 class ConstantArgument(api.Argument):
     """
@@ -179,6 +179,10 @@ class ConstantArgument(api.Argument):
 
 # --- Export some useful functions
 
+
+JOB_RUNNING = api.lib.JOB_RUNNING
+JOB_DONE = api.lib.JOB_DONE
+JOB_ERROR = api.lib.JOB_ERROR
 
 
 def experiment(path, name):

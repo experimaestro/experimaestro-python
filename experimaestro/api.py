@@ -43,6 +43,7 @@ for name in ["libexperimaestro.so", "libexperimaestro.dylib", None]:
         lib = ffi.dlopen(str(path))
         break
 
+
 def cstr(s):
     return str(s).encode("utf-8")
 
@@ -53,6 +54,8 @@ class FFIObject:
     """C++ managed object"""
     @classmethod
     def _ptr(cls, self):
+        if self is None:
+            raise NullPointerException("Pointer is null (for class %s)", cls.__name__)
         return ffi.cast(f"{cls.__name__} *", self.ptr)
 
     @classmethod
@@ -231,8 +234,6 @@ class Task(FFIObject):
 
     def submit(self, workspace, launcher, value, dependencies: DependencyArray):
         Workspace.SUBMITTED = True
-        if launcher is None:
-            raise NullPointerException("Launcher is a null ptr")
         lib.task_submit(self.ptr, workspace.ptr, Launcher._ptr(launcher), Value._ptr(value), dependencies.ptr)
 
     @classmethod
@@ -248,9 +249,20 @@ class String(FFIObject):
     def __str__(self):
         return fromcstr(lib.string_ptr(self.ptr))
 
-class Job(FFIObject):
+
+class Job(FFIObject):   
+    def state(self):
+        return lib.job_state(self.ptr)
+
+    def wait(self):
+        return lib.job_wait(self.ptr)
+
+    def codePath(self):
+        return Path.fromcptr(lib.job_codepath(self.ptr))
+
     def stdoutPath(self):
         return Path.fromcptr(lib.job_stdoutpath(self.ptr))
+
     def stderrPath(self):
         return Path.fromcptr(lib.job_stderrpath(self.ptr))
 
@@ -626,9 +638,16 @@ class PyObject:
         """Prepare object after creation"""
         pass
 
-    
+    @property
+    def _job(self):
+        return self.__xpm__.job
+
     def _stdout(self):
         return self.__xpm__.job.stdoutPath().localpath()
+
+    def _code(self):
+        return self.__xpm__.job.codePath().localpath()
+
     def _stderr(self):
         return self.__xpm__.job.stderrPath().localpath()
 

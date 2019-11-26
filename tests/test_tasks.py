@@ -8,7 +8,7 @@ import logging
 from experimaestro import *
 from experimaestro.click import cli, TASK_PREFIX
 
-from .utils import TemporaryDirectory
+from .utils import TemporaryDirectory, Experiment
 
 # --- Define the tasks
 
