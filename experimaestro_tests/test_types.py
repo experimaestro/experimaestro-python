@@ -8,8 +8,8 @@ import logging
 from experimaestro.click import cli, TASK_PREFIX
 from experimaestro import Workspace, JOB_DONE
 
-from utils import Experiment
-from definitions_types import *
+from .utils import Experiment
+from .definitions_types import *
 
 # --- Defines the experiment
 

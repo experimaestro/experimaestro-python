@@ -621,6 +621,9 @@ class PyObject:
         if send:
             launcher = launcher or Launcher.DEFAULT
             workspace = workspace or Workspace.DEFAULT
+            assert workspace is not None, "No experiment has been defined"
+            assert launcher is not None, "No launcher has been set"
+
             self.__class__.__xpmtask__.submit(workspace, launcher, self.__xpm__.sv, self.__xpm__.dependencies)
 
         self.__xpm__.submitted = True
