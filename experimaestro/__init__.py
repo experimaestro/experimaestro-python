@@ -13,6 +13,7 @@ from typing import Union
 import experimaestro.api as api
 from .api import register, DirectLauncher, LocalConnector, Workspace, Typename, Launcher, logger
 
+
 # --- Annotations to define tasks and types
 
 class Type:
@@ -37,8 +38,11 @@ class Type:
 
         # Add XPM object if needed
         if not issubclass(t, api.PyObject):
-            __bases__ = (api.PyObject, ) + t.__bases__
-            t = type(t.__name__, __bases__, dict(t.__dict__))
+            __bases__ = (  api.PyObject, ) 
+            if t.__bases__ != (object, ):
+                __bases__ += t.__bases__
+            __dict__ = {key: value for key, value in t.__dict__.items() if key not in ["__dict__"]}
+            t = type(t.__name__, __bases__, __dict__)
 
         # Find first registered ancestor
         parentinfo = None
@@ -236,6 +240,11 @@ def tagspath(value: api.PyObject):
     for key, value in value.__xpm__.sv.tags().items():
         p /= "%s=%s" % (key.replace("/","-"), value)
     return p
+
+
+def parse_commandline():
+    register.parse()
+
 
 # --- Handle signals
 
