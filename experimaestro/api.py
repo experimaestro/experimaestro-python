@@ -630,9 +630,8 @@ class PyObject:
         return self
 
     def __setattr__(self, name, value):
-        if not Task.isRunning:
-            # If task is not running, we update the structured
-            # value
+        if not Task.isRunning():
+            # If task is not running, we update the structured value
             if name != "__xpm__":
                 self.__xpm__.set(name, value)
         super().__setattr__(name, value)
@@ -836,6 +835,7 @@ class Workspace():
     def server(self, port: int):
         lib.workspace_server(self.ptr, port, cstr(modulepath / "htdocs"))
         checkexception()
+        Launcher.DEFAULT.setNotificationURL("http://127.0.0.1:{}/notify".format(port))
 
 Workspace.waitUntilTaskCompleted = lib.workspace_waitUntilTaskCompleted
 

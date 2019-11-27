@@ -29,7 +29,6 @@ class Experiment:
         self.workdir = TemporaryDirectory(prefix="xpm", suffix=self.name)
         workdir = self.workdir.__enter__()
 
-        print(workdir)
         # Set some useful environment variables
         Launcher.DEFAULT.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
 
