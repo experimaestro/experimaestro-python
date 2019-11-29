@@ -188,29 +188,28 @@ JOB_RUNNING = api.lib.JOB_RUNNING
 JOB_DONE = api.lib.JOB_DONE
 JOB_ERROR = api.lib.JOB_ERROR
 
+class experiment:
+    def __init__(self, path, name):
+        if isinstance(path, BasePath):
+            path = path.absolute()
+        self.path = path
+        self.name = name
+        self.old_workspace = Workspace.CURRENT
 
-def experiment(path, name):
-    """Defines an experiment
-    
-    :param path: The working directory for the experiment
-    :param name: The name of the experiment
-    """
-    if isinstance(path, BasePath):
-        path = path.absolute()
-    workspace = Workspace(str(path))
-    workspace.current()
-    workspace.experiment(name)
-    Workspace.DEFAULT = workspace
-    return workspace
+    def __enter__(self):
+        workspace = Workspace(str(self.path))
+        Workspace.setcurrent(workspace)
+        workspace.experiment(self.name)
+        workspace.launcher = DirectLauncher(LocalConnector())
+        if os.getenv("PYTHONPATH"):
+            workspace.launcher.setenv("PYTHONPATH", os.getenv("PYTHONPATH"))
+        return workspace
+
+    def __exit__(self, *args):
+        Workspace.setcurrent(self.old_workspace)
 
 def set_launcher(launcher):
-    Launcher.DEFAULT = launcher
-
-launcher = DirectLauncher(LocalConnector())
-if os.getenv("PYTHONPATH"):
-    launcher.setenv("PYTHONPATH", os.getenv("PYTHONPATH"))
-
-set_launcher(launcher)
+    Workspace.launcher = launcher
 
 def tag(name: str, x, object:api.PyObject=None, context=None):
     """Tag a value"""

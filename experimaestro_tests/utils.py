@@ -29,12 +29,14 @@ class Experiment:
         self.workdir = TemporaryDirectory(prefix="xpm", suffix=self.name)
         workdir = self.workdir.__enter__()
 
+        self.experiment = experiment(workdir, self.name)
+        workspace = self.experiment.__enter__()
+
         # Set some useful environment variables
-        Launcher.DEFAULT.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
+        workspace.launcher.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
 
-        # Sets the working workdir and the name of the xp
-        experiment(workdir, self.name)
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.workdir.__exit__(exc_type, exc_value, traceback)
+    def __exit__(self, *args):
+        self.experiment.__exit__(*args)
+        self.workdir.__exit__(*args)
 

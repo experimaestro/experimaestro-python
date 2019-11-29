@@ -18,13 +18,7 @@ from .tasks import *
 
 class MainTest(unittest.TestCase):
     def test_simple(self):
-        with TemporaryDirectory() as workdir:
-            # Set some useful environment variables
-            Launcher.DEFAULT.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
-
-            # Sets the working directory and the name of the xp
-            experiment(workdir, "helloworld")
-
+        with Experiment("helloworld"):
             # Submit the tasks
             hello = Say(word="hello").submit()
             world = Say(word="world").submit()

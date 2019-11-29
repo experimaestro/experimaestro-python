@@ -37,6 +37,7 @@ Under the curtain,
 - A tag `y` is created for each task - tags are experimental parameters you vary in your experiments,
   so you can easily keep track of them
 
+
 ```python
 # --- Task and types definitions
 
@@ -87,15 +88,15 @@ def xp(port, workdir):
     """Runs an experiment"""
 
     # Sets the working directory and the name of the xp
-    ws = experiment(workdir, "helloworld")
-    ws.server(port)
+    with experiment(workdir, "helloworld") as xp:
+        xp.server(port)
 
-    # Submit the tasks
-    hello = Say(word="hello").submit()
-    world = Say(word="world").submit()
+        # Submit the tasks
+        hello = Say(word="hello").submit()
+        world = Say(word="world").submit()
 
-    # Concat will depend on the two first tasks
-    Concat(strings=[hello, world]).submit()
+        # Concat will depend on the two first tasks
+        Concat(strings=[hello, world]).submit()
 
 
 if __name__ == "__main__":

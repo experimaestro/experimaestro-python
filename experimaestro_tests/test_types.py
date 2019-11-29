@@ -16,7 +16,6 @@ from .definitions_types import *
 class MainTest(unittest.TestCase):
     def test_simple(self):
         with Experiment("simple") as xp:
-
             self.assertEqual(TestInteger(value=5).submit()._job.wait(), JOB_DONE, "test integer failed")
             self.assertEqual(TestFloat(value=5.1).submit()._job.wait(), JOB_DONE, "test float failed")
 

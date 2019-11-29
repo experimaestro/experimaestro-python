@@ -53,8 +53,10 @@ def fromcstr(s):
 class FFIObject:
     """C++ managed object"""
     @classmethod
-    def _ptr(cls, self):
+    def _ptr(cls, self, allowNone=False):
         if self is None:
+            if allowNone: 
+                return ffi.cast(f"{cls.__name__} *", 0)
             raise NullPointerException("Pointer is null (for class %s)", cls.__name__)
         return ffi.cast(f"{cls.__name__} *", self.ptr)
 
@@ -443,8 +445,6 @@ class LocalConnector(Connector):
 
 
 class Launcher(FFIObject):
-    DEFAULT = None
-
     @property
     def launcherPtr(self):
         return ffi.cast("Launcher *", self.ptr)
@@ -557,11 +557,8 @@ class XPMObject(FFIObject):
         raise Exception("No job associated with value %s" % self.sv)
         
     def set(self, k, v):
-        if self.setting: return
-
         logger.debug("Called set: %s, %s (%s)", k, v, type(v))
         try:
-            self.setting = True
             # Check if the value corresponds to a task; if so,
             # raise an exception if the task was not submitted
             if isinstance(v, PyObject) and hasattr(v.__class__, "__xpmtask__"):
@@ -578,22 +575,16 @@ class XPMObject(FFIObject):
 
     def setValue(self, key, sv):
         """Called by XPM when value has been validated"""
-        if self.setting: return
-        try:
-            self.setting = True
-            if sv is None:
-                value = None
-                svtype = None
-            else:
-                value = sv.toPython()
-                svtype = sv.type()
+        if sv is None:
+            value = None
+            svtype = None
+        else:
+            value = sv.toPython()
+            svtype = sv.type()
 
-            # Set the value on the object if not setting otherwise
-            logger.debug("Really setting %s to %s [%s => %s] on %s", key, value,
-                    svtype, type(value), type(self.pyobject))
-            setattr(self.pyobject, key, value)
-        finally:
-            self.setting = False
+        logger.debug("Really setting %s to %s [%s => %s] on %s", key, value,
+                svtype, type(value), type(self.pyobject))
+        object.__setattr__(self.pyobject, key, value)
     
     def run(self):
         self.pyobject.execute()
@@ -612,15 +603,15 @@ class PyObject:
 
         # Initialize with arguments
         for k, v in kwargs.items():
-            self.__xpm__.set(k, v)
+            self.__setattr__(k, v)
 
     def submit(self, *, workspace=None, launcher=None, send=SUBMIT_TASKS):
         """Submit this task"""
         if self.__xpm__.submitted:
             raise Exception("Task %s was already submitted" % self)
         if send:
-            launcher = launcher or Launcher.DEFAULT
-            workspace = workspace or Workspace.DEFAULT
+            workspace = workspace or Workspace.CURRENT
+            launcher = launcher or workspace.launcher
             assert workspace is not None, "No experiment has been defined"
             assert launcher is not None, "No launcher has been set"
 
@@ -813,8 +804,8 @@ class Argument(FFIObject):
 
 
 
-class Workspace():
-    DEFAULT = None
+class Workspace(FFIObject):
+    CURRENT = None
 
     """True if a job was submitted"""
     SUBMITTED = False
@@ -823,9 +814,16 @@ class Workspace():
     def __init__(self, path):
         # Initialize the base class
         self.ptr = ffi.gc(lib.workspace_new(cstr(path)), lib.workspace_free)
+        self.launcher = None
+
+    @staticmethod
+    def setcurrent(workspace: "Workspace"):
+        """Set this workspace as being the default workspace for all the tasks"""
+        lib.workspace_current(Workspace._ptr(workspace, allowNone=True))
+        Workspace.CURRENT = workspace
 
     def current(self):
-        """Set this workspace as being the default workspace for all the tasks"""
+        """(deprecated) Set this workspace as being the default workspace for all the tasks"""
         lib.workspace_current(self.ptr)
 
     def experiment(self, name):
@@ -835,7 +833,7 @@ class Workspace():
     def server(self, port: int):
         lib.workspace_server(self.ptr, port, cstr(modulepath / "htdocs"))
         checkexception()
-        Launcher.DEFAULT.setNotificationURL("http://127.0.0.1:{}/notify".format(port))
+        self.launcher.setNotificationURL("http://127.0.0.1:{}/notify".format(port))
 
 Workspace.waitUntilTaskCompleted = lib.workspace_waitUntilTaskCompleted
 
