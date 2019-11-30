@@ -605,6 +605,9 @@ class PyObject:
         for k, v in kwargs.items():
             self.__setattr__(k, v)
 
+        # Initialize with default arguments
+        lib.mapvalue_set_unsets(self.__xpm__.sv.ptr)
+
     def submit(self, *, workspace=None, launcher=None, send=SUBMIT_TASKS):
         """Submit this task"""
         if self.__xpm__.submitted:
