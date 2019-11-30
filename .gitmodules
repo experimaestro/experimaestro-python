@@ -1,4 +1,0 @@
-[submodule "experimaestro"]
-	path = cpp
-	url = https://github.com/experimaestro/experimaestro.git
-	branch = master
