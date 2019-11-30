@@ -1,0 +1,204 @@
+/* Icons with an action */
+.fa.link {
+    padding: 3pt;
+    cursor: pointer;
+}
+
+.fa.link:hover {
+    background: black;
+    color: red;
+    padding: 3pt;
+    cursor: pointer;
+}
+#resources {
+    list-style-type: none;
+    padding: 5px;
+}
+
+#resources .task-id {
+    font-size: .8rem;
+    padding: 3px;
+    margin-left: 0em;
+    margin-right: 0.5em;
+    color: #777;
+    // color: white;
+    font-weight: bold;
+    border-radius: 3px;
+}
+#resources .job-id {
+    font-size: .8rem;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+#resources > div {
+    text-align: left;
+}
+
+#resources span.with-progressbar::before {
+    display: none;
+}
+
+#resources .resource {
+    margin: 3px;
+}
+
+#resources .resource .status {
+    position: relative;
+    display: inline-block;
+    font-variant-caps: all-small-caps;
+    font-weight: bold;
+    font-stretch: condensed;
+    font-size: 1.7ex;
+
+    margin-right: 0.5ex;
+    
+    width: 60px;
+    line-height: 1.3rem;
+
+    white-space: nowrap;
+    vertical-align: middle;
+    text-align: center;
+    
+    border-radius: 4px;
+    border: 1px solid #aaa;
+
+}
+
+.status.progressbar-container {
+    position: relative;
+    background: lightgreen;
+    z-index: -2;
+}
+
+.progressbar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: -1;
+    background: green;
+}
+
+.status div.status-running {
+    color: white;
+    display: inline-block;
+    z-index: 1;
+}
+
+
+
+#resources div.resource-link {
+    display: inline-block;
+}
+
+#resources span.status-waiting {
+    background: orange;
+    color: white;
+}
+
+#resources span.status-ready {
+    background: yellow;
+    color: black;
+}
+
+#resources span.status-on_hold {
+    background: orangered;
+    color: white;
+}
+
+
+#resources span.status-done {
+    background: darkgreen;
+    color: white;
+}
+
+#resources span.status-error {
+    background: red;
+    color: white;
+}
+
+
+
+/* Restart */
+
+#resources .resource-actions > div.actions {
+    position: absolute;
+    background: white;
+    display: none;
+    transition: 5s ease-out;
+}
+
+#resources .resource-actions:hover > div.actions {
+    display: inline-block;
+    padding: 2px;
+    border: 1px solid black;
+    transition: 1s ease-out;
+}
+
+#resources .resource-actions i.fa {
+    display: none;
+    padding: 2px;
+}
+
+#resources .resource-actions i.fa {
+    display:  inline;
+}
+
+#resources .resource-actions i.fa[name="restart"] {
+    display: none;
+}
+
+#resources .resource-actions i.fa[name^="fileview"] {
+    display: none;
+}
+
+#resources .resource-actions i.fa[name="kill"] {
+    display: none;
+}
+
+
+#resources span.status-running .resource-actions i.fa[name="kill"] {
+    display: inline;
+}
+#resources span.status-on_hold .resource-actions i.fa[name="restart"] {
+    display: inline;
+}
+#resources span.status-error .resource-actions i.fa[name="restart"] {
+    display: inline;
+}
+#resources span.status-done .resource-actions i.fa[name="restart"] {
+    display: inline;
+}
+
+#resources span.status-running i.fa[name^="fileview"],
+#resources span.status-done i.fa[name^="fileview"],
+#resources span.status-error i.fa[name^="fileview"] {
+    display: inline;
+}
+
+/* Delete */
+
+#resources span.status-done .resource-actions:hover i.fa[name="delete"] {
+    display: none;
+}
+
+.resource .tag {
+    display: inline-block;
+    padding: 0px;
+    margin: 2px;
+    color: white;
+    font-size: 0.8rem;
+    line-height: 1.2rem;
+    
+    .name {
+        border-radius: 5px 0 0 5px;
+        background: #1976d2;
+        padding: 3px;
+    }
+    .value {
+        border-radius: 0 5px 5px 0;
+        padding: 3px;
+        background: rgb(33, 150, 243);;
+        font-weight: bold;
+    }
+}
