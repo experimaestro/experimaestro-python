@@ -1,4 +1,4 @@
-from experimaestro import Argument, Task, register
+from experimaestro import Argument, Task, parse_commandline
 
 @Argument("value", type=int)
 @Task("testinteger")
@@ -16,4 +16,4 @@ class TestFloat:
 
 
 if __name__ == "__main__":
-    register.parse()
+    parse_commandline()

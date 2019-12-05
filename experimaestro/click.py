@@ -1,6 +1,5 @@
 import click
-from experimaestro import register
-from experimaestro.api import Type, Value
+from experimaestro import parse_commandline
 
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
 TASK_PREFIX=["xpm", "--"]
@@ -14,15 +13,15 @@ def cli():
 @click.pass_context
 def xpm(context):
     """Command used to run a task"""
-    register.parse(context.args)
+    parse_commandline(context)
 
 
-def forwardoption(xpmtype, option_name):
+def forwardoption(argument, option_name):
     """Helper function
     
     Arguments:
         xpmtype {class or typename} -- The experimaestro type name or a class corresponding to a type
-        option_name {str} -- The name of the option
+        option_name {str} -- The name of the option (or None if inferred from attribute)
     
     Raises:
         Exception -- Raised if the option `option_name` does not exist in the type, or if the type is not defined
@@ -31,13 +30,8 @@ def forwardoption(xpmtype, option_name):
         click.option -- Returns a click option annotation
     """
 
-    xpmtype = register.getType(xpmtype)
-    a = xpmtype.getArgument(option_name)
-    if a is None:
-        raise Exception("No argument with name %s in %s" % (option_name, xpmtype))
-
-    name = "--%s" % a.name.replace("_", "-")
-    
-    ptype = Type.topython(a.type)
-    default = Value.toPython(a.defaultvalue) if a.defaultvalue else None
-    return click.option(name, help=a.help, type=ptype, default=default)
+    xpmtype = argument.type
+    name = "--%s" % (option_name or argument.name.replace("_", "-"))
+    default = argument.defaultvalue
+    # FIXME: type
+    return click.option(name, help=argument.help, default=default)

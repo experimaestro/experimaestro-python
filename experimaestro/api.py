@@ -7,91 +7,30 @@ import inspect
 import os.path as op
 import os
 import logging
-import pathlib
-from pathlib import Path as BasePath, PosixPath
-from cffi import FFI
+from pathlib import Path, PosixPath
 import re
-from typing import Union
+from typing import Union, Dict
+import hashlib
+import struct
+from .server import Server
 
 # --- Initialization
 
 logger = logging.getLogger("xpm")
-modulepath = BasePath(__file__).parent
+modulepath = Path(__file__).parent
 
-# --- Import C bindings
-
-class NullPointerException(BaseException): pass
-
-ffi = FFI()
-with open(modulepath / "api.h", "r") as fp:
-    RE_SKIP = re.compile(r"""^\s*(?:#include|#ifn?def|#endif|#define|extern "C") .*""")
-    RE_CALLBACK = re.compile(r"""^\s*typedef\s+\w+\s*\(\s*\*.*callback""")
-    cdef = ""
-    for line in fp:
-        if RE_CALLBACK.match(line):
-            cdef += "extern \"Python\" %s" % line
-        elif not RE_SKIP.match(line):
-            cdef += line
-
-    ffi.cdef(cdef)
-
-for name in ["libexperimaestro.so", "libexperimaestro.dylib", None]:
-    if name is None:
-        raise Exception("Cannot find experimaestro library")
-    path = modulepath / name 
-    if path.is_file():
-        lib = ffi.dlopen(str(path))
-        break
-
-
-def cstr(s):
-    return str(s).encode("utf-8")
-
-def fromcstr(s):
-    return ffi.string(s).decode("utf-8")
-
-class FFIObject:
-    """C++ managed object"""
-    @classmethod
-    def _ptr(cls, self, allowNone=False):
-        if self is None:
-            if allowNone: 
-                return ffi.cast(f"{cls.__name__} *", 0)
-            raise NullPointerException("Pointer is null (for class %s)", cls.__name__)
-        return ffi.cast(f"{cls.__name__} *", self.ptr)
-
-    @classmethod
-    def fromcptr(cls, ptr, managed=True, notnull=False):
-        """Wraps a returned pointer into an object"""
-        if ptr == ffi.NULL:
-            if notnull:
-                raise ValueError("Null pointer")
-            else:
-                return None
-        self = cls.__new__(cls)
-        self.ptr = cls._wrap(ptr) if managed else ptr
-        return self
-
-    @classmethod
-    def _wrap(cls, ptr):
-        """Returns a pointer wrapper that will deallocate the pointer"""
-        assert ptr is not None
-        return ffi.gc(ptr, getattr(lib, "%s_free" % cls.__name__.lower()))
-
-class Typename(FFIObject):
+class Typename():
     def __init__(self, name: str):
-        self.ptr = ffi.gc(lib.typename_new(cstr(name)), lib.typename_free)
+        self.name = name
 
     def __getattr__(self, key):
         return self(key)
 
     def __call__(self, key):
-        tn = Typename.__new__(Typename)
-        tn.ptr = ffi.gc(lib.typename_sub(self.ptr, cstr(key)), lib.typename_free)
-        return tn
+        return Typename(self.name + "." + key)
 
     def __str__(self):
-        return fromcstr(lib.typename_name(self.ptr))
+        return self.name
 
 
 def typename(name: Union[str, Typename]):
@@ -99,40 +38,102 @@ def typename(name: Union[str, Typename]):
         return name
     return Typename(str(name))
 
-class Type(FFIObject):
-    XPM2PYTHON = {}
-    PYTHON2XPM = {}
 
-    def __init__(self, tn: Union[str, Typename], parentType: "Type" = None): 
-        self.ptr = ffi.gc(lib.type_new(typename(tn).ptr, parentType.ptr if parentType else ffi.NULL), lib.type_free)
+class BaseArgument:
+    def __init__(self, name, type, help=None):
+        self.name = name
+        self.help = help
+        self.type = Type.fromType(type)
+        self.ignored = False
+        self.defaultvalue = None
+
+    def validate(self, name, value):
+        raise AssertionError("Value cannot be changed for argument of type %s" % type(self))
+
+
+class TypeAttribute:
+    def __init__(self, type, key):
+        self.type = type
+        self.path = [key]
+
+class Type():
+    DEFINED:Dict[type, "Type"] = {}
+
+    def __init__(self, tn: Union[str, Typename], description=None): 
+        if tn is None:
+            tn = None
+        elif isinstance(tn, str):
+            tn = Typename(tn)
+        self.typename = tn
+        self.description = description
+        self.arguments:Dict[str, BaseArgument] = {}
 
     def __str__(self):
-        return self.name()
+        return "Type({})".format(self.typename)
 
     def name(self):
-        return fromcstr(lib.type_tostring(Type._ptr(self)))
+        return str(self.typename)
 
-    def addArgument(self, argument: "Argument"):
-        lib.type_addargument(Type._ptr(self), argument.ptr)
+    def addArgument(self, argument: BaseArgument):
+        self.arguments[argument.name] = argument
 
-    def getArgument(self, key: str):
-        return Argument.fromcptr(lib.type_getargument(Type._ptr(self), cstr(key)))
+    def getArgument(self, key: str) -> BaseArgument:
+        return self.arguments[key]
 
     def isArray(self):
-        return lib.type_isarray(Type._ptr(self))
+        return False
 
     @staticmethod
-    def frompython(pythontype):
-        if pythontype is None:
-            return Type.fromcptr(lib.ANY_TYPE, managed=False)
-        return Type.PYTHON2XPM.get(pythontype, None)
+    def fromType(key):
+        """Returns the Type object corresponding to the given type"""
+        logger.debug("Searching for type %s", key)
 
-    def topython(self):
-        return Type.XPM2PYTHON.get(self.name()).pythontypes[0]
+        if key is None:
+            return AnyType
+
+        defined = Type.DEFINED.get(key, None)
+        if defined:
+            return defined
+
+        if isinstance(key, Type):
+            return key
+
+        if isinstance(key, TypeProxy):
+            return key()
+
+        if isinstance(key, PyObject):
+            return key.__class__.__xpm__
+        
+        if inspect.isclass(key) and issubclass(key, PyObject):
+            return key.__xpm__
+
+        raise Exception("No type found for %s", key)
+
+def definetype(*types):
+    def call(typeclass):
+        instance = typeclass()
+        for t in types:
+            Type.DEFINED[t] = instance
+    return call
+
+@definetype(int)
+class IntType: 
+    def validate(self, value):
+        return int(value)
+
+@definetype(str)
+class StrType: 
+    def validate(self, value):
+        return str(value)
+
+@definetype(float)
+class FloatType: 
+    def validate(self, value):
+        return float(value)
 
 class ArrayType(Type):  
     def __init__(self, type: Type):
-        self.ptr = ffi.gc(lib.arraytype_new(Type._ptr(type)), lib.arraytype_free)      
+        self.type = type
 
 class PredefinedType(Type):
     def __init__(self, ptr, pythontypes, topython, frompython):
@@ -145,470 +146,238 @@ class PredefinedType(Type):
         for pythontype in pythontypes:
             Type.PYTHON2XPM[pythontype] = self
 
-BooleanType = PredefinedType(lib.BOOLEAN_TYPE, [bool],
-    lambda v: v.asScalar().asBoolean(), lib.scalarvalue_fromboolean)
-StringType = PredefinedType(lib.STRING_TYPE, [str],
-    lambda v: v.asScalar().asString(), lambda s: lib.scalarvalue_fromstring(cstr(s)))
-IntegerType = PredefinedType(lib.INTEGER_TYPE, [int],
-    lambda v: v.asScalar().asInteger(), lib.scalarvalue_frominteger)
-RealType = PredefinedType(lib.REAL_TYPE, [float],
-    lambda v: v.asScalar().asReal(), lib.scalarvalue_fromreal)
-PathType = PredefinedType(lib.PATH_TYPE, [BasePath, PosixPath],
-    lambda v: v.asScalar().asPath(), 
-    lambda p: lib.scalarvalue_frompathstring(cstr(str(p.absolute()))))
 
-AnyType = Type.fromcptr(lib.ANY_TYPE, managed=False)
+AnyType = Type("any")
 
-class TypeProxy: 
-    def __call__(self, register):
-        raise NotImplementedError
+class AbstractCommandComponent(): pass
 
+def aspath(path: [Path, str]):
+    if isinstance(path, str):
+        return Path(path)
+    return path
 
-
-class Path(FFIObject):
-    def __init__(self, path: str):
-        self.ptr =  ffi.gc(lib.path_new(cstr(path)), lib.path_free)
-    def str(self):
-        return str(String(lib.path_string(self.ptr)))
-
-    def localpath(self):
-        s = String.fromcptr(lib.path_localpath(self.ptr))
-        if s is None:
-            raise ValueError("Path %s is not local", self)
-        return str(s)
-
-class AbstractCommandComponent(FFIObject): pass
 class CommandPath(AbstractCommandComponent):
     def __init__(self, path: [Path, str]):
-        self.ptr =  ffi.gc(lib.commandpath_new(aspath(path).ptr), lib.commandpath_free)
+        self.path = aspath(path)
 
 class CommandString(AbstractCommandComponent):
     def __init__(self, string: str):
-        self.ptr =  ffi.gc(lib.commandstring_new(cstr(string)), lib.commandstring_free)
+        self.string = string
 
-class CommandParameters(AbstractCommandComponent):
-    def __init__(self):
-        self.ptr =  ffi.gc(lib.commandparameters_new(), lib.commandparameters_free)
+class CommandParameters(AbstractCommandComponent): pass
 
-
-class AbstractCommand(FFIObject): pass
+class AbstractCommand(): pass
 
 class Command(AbstractCommand):
     def __init__(self):
-        self.ptr = ffi.gc(lib.command_new(), lib.command_free)
+        self.components = []
 
     def add(self, component: AbstractCommandComponent):
-        lib.command_add(Command._ptr(self), AbstractCommandComponent._ptr(component))
-
+        self.components.append(component)
 
 class CommandLine(Command):
     def __init__(self):
-        self.ptr = ffi.gc(lib.commandline_new(), lib.commandline_free)
+        self.commands = []
 
     def add(self, command: Command):
-        lib.commandline_add(self.ptr, Command._ptr(command))
+        self.commands.append(command)
 
-class Dependency(FFIObject): pass
+class Dependency(): pass
 
 class DependencyArray:
     def __init__(self):
-        self.ptr = ffi.gc(lib.dependencyarray_new(), lib.dependencyarray_free)
+        self.dependencies = []
 
     def add(self, dependency: Dependency):
-        lib.dependencyarray_add(self.ptr, Dependency._ptr(dependency))
+        self.dependencies.append(dependency)
 
-class StringArray:
-    def __init__(self):
-        self.ptr = ffi.gc(lib.stringarray_new(), lib.stringarray_free)
-    def add(self, string: str):
-        lib.stringarray_add(self.ptr, cstr(string))
-
-class Task(FFIObject):
+class Task():
     def __init__(self, tasktype: Type, *, taskId:Typename=None):
-        tn_ptr = typename(taskId).ptr if taskId else ffi.NULL
-        self.ptr =  ffi.gc(lib.task_new(tn_ptr, tasktype.ptr), lib.task_free)
+        assert tasktype and isinstance(tasktype, Type)
+        self.type = tasktype
+        self._commandline = None
 
     def name(self):
-        return fromcstr(lib.typename_name(lib.task_name(self.ptr)))
+        return str(self.type)
 
     def commandline(self, commandline: CommandLine):
-        lib.task_commandline(self.ptr, commandline.ptr)
+        assert commandline and isinstance(tasktype, CommandLine)
+        self._commandline = commandline
 
     def submit(self, workspace, launcher, value, dependencies: DependencyArray):
         Workspace.SUBMITTED = True
-        lib.task_submit(self.ptr, workspace.ptr, Launcher._ptr(launcher), Value._ptr(value), dependencies.ptr)
-
-    @classmethod
-    def isRunning(cls):
-        return lib.task_isrunning()
+        raise NotImplementedError("Task submit")
 
 def aspath(path: Union[str, Path]):
     if isinstance(path, Path): 
         return path
     return Path(path)
 
-class String(FFIObject): 
-    def __str__(self):
-        return fromcstr(lib.string_ptr(self.ptr))
 
-
-class Job(FFIObject):   
+class Job():   
     def state(self):
-        return lib.job_state(self.ptr)
+        raise NotImplementedError()
 
     def wait(self):
-        return lib.job_wait(self.ptr)
+        raise NotImplementedError()
 
     def codePath(self):
-        return Path.fromcptr(lib.job_codepath(self.ptr))
+        return self.code
 
     def stdoutPath(self):
-        return Path.fromcptr(lib.job_stdoutpath(self.ptr))
+        return self.stdout
 
     def stderrPath(self):
-        return Path.fromcptr(lib.job_stderrpath(self.ptr))
-
-class Value(FFIObject): 
-    def type(self):
-        return Type.fromcptr(lib.value_gettype(Value._ptr(self)))
-
-    def __str__(self):
-        return String.fromcptr(lib.value_tostring(Value._ptr(self))).__str__()
-
-    def isMap(self):
-        return lib.value_ismap(Value._ptr(self))
-
-    def asMap(self):
-        ptr = lib.value_asmap(Value._ptr(self))   
-        if ptr == ffi.NULL:
-            raise ValueError("Value is not a map: %s" % self)
-        return MapValue.fromcptr(ptr)
-
-    def asArray(self):
-        ptr = lib.value_asarray(Value._ptr(self))   
-        if ptr == ffi.NULL:
-            raise ValueError("Value is not an array: %s" % self)
-        return ArrayValue.fromcptr(ptr)
-
-    def asScalar(self):
-        ptr = lib.value_asscalar(Value._ptr(self))   
-        if ptr == ffi.NULL:
-            raise ValueError("Value is not a scalar: %s" % self)
-        return ScalarValue.fromcptr(ptr)
-
-    def isNull(self):
-        return lib.scalarvalue_isnull(ScalarValue._ptr(self))
-
-    def tags(self):
-        iterator = ffi.gc(lib.value_tags(Value._ptr(self)), lib.tagvalueiterator_free)
-        m = {}
-        while lib.tagvalueiterator_next(iterator):
-            key = fromcstr(lib.tagvalueiterator_key(iterator))
-            value = ScalarValue.fromcptr(lib.tagvalueiterator_value(iterator))
-            m[key] = value.toPython()
-        return m
-
-    def toPython(self):
-        """Converts a value into a Python object"""
-
-        # Returns object if it is one
-        object = self.asMap().object if self.isMap() else None
-        if object:
-            return object.pyobject
-
-        # Returns array
-        svtype = self.type()
-        if svtype.isArray():
-            array  = self.asArray()
-            r = []
-            for i in range(len(array)):
-                r.append(array[i].toPython())
-            return r
-
-        if self.isNull(): return None
-
-        return Type.XPM2PYTHON.get(str(svtype), None).topython(self)
-
-    @staticmethod
-    def frompython(value):
-        """Transforms a Python value into a structured value"""
-        # Simple case: it is already a configuration
-        if isinstance(value, Value):
-            return value
-
-        # It is a PyObject: get the associated configuration
-        if isinstance(value, PyObject):
-            return value.__xpm__.sv
-
-        # A dictionary: transform
-        if isinstance(value, dict):
-            v = register.build(JSON_ENCODER.encode(value))
-            return v
-
-        # A list
-        if isinstance(value, list):
-            newvalue = ArrayValue()
-            for v in value:
-                newvalue.add(Value.frompython(v))
-
-            return newvalue
-
-        # For anything else, we try to convert it to a value
-        return ScalarValue(value)
-
-class ComplexValue(Value):
-    def setTagContext(self, key: str):
-        lib.complexvalue_settagcontext(ComplexValue._ptr(self), cstr(key))
+        return self.stderr
 
 
-
-class MapValue(ComplexValue):
-    def __init__(self):
-        self.ptr = ffi.gc(lib.mapvalue_new(), lib.mapvalue_free)
-
-    @property
-    def object(self):
-        object = lib.mapvalue_getobjecthandle(self.ptr)
-        if object == ffi.NULL: 
-            checkexception()
-            raise Exception()
-        return ffi.from_handle(object)
-
-    @object.setter
-    def object(self, object):
-        lib.mapvalue_setobject(self.ptr, object.ptr)
-
-    def set(self, key: str, value: Value):
-        lib.mapvalue_set(self.ptr, cstr(key), Value._ptr(value))
-
-    @property
-    def job(self): 
-        return Job.fromcptr(lib.mapvalue_getjob(self.ptr))
-
-    @property
-    def type(self): raise NotImplementedError()
-
-    @type.setter
-    def type(self, type: Type):
-        return lib.mapvalue_settype(self.ptr, Type._ptr(type))
-
-    def addTag(self, key, value):
-        lib.mapvalue_addtag(self.ptr, cstr(key), Value.frompython(value).ptr)
-
-class ScalarValue(Value):
-    def __init__(self, value):
-        if value is None:
-            self.ptr = scalarvalue_new()
-        else:
-            predefinedType = Type.PYTHON2XPM.get(type(value), None)
-            if predefinedType is None:
-                raise NotImplementedError("Cannot create scalar from %s", type(value))
-            self.ptr = predefinedType.frompython(value)
-
-        self.ptr = ffi.gc(self.ptr, lib.scalarvalue_free)       
-
-    def asReal(self):
-        return lib.scalarvalue_asreal(self.ptr) 
-    def asInteger(self):
-        return lib.scalarvalue_asinteger(self.ptr) 
-    def asBoolean(self):
-        return lib.scalarvalue_asboolean(self.ptr) 
-    def asString(self):
-        s = String.fromcptr(lib.scalarvalue_asstring(self.ptr))
-        return str(s)
-    def asPath(self):
-        return Path.fromcptr(lib.scalarvalue_aspath(self.ptr))
-
-    def tag(self, key:str):
-        lib.scalarvalue_tag(self.ptr, cstr(key))
-        
-
-class ArrayValue(Value):
-    def __init__(self):
-        self.ptr = ffi.gc(lib.arrayvalue_new(), lib.arrayvalue_free)
-
-    def __len__(self):
-        return lib.arrayvalue_size(self.ptr)
-
-    def __getitem__(self, index: int):
-        return Value.fromcptr(lib.arrayvalue_get(self.ptr, index))
-
-    def add(self, value: Value):
-        lib.arrayvalue_add(self.ptr, Value._ptr(value))
-
-class Connector(FFIObject): 
+class Connector(): 
     pass
 
-class LocalConnector(Connector):
+class LocalConnector(Connector): pass
+
+class Launcher():
     def __init__(self):
-        self.ptr = ffi.gc(lib.localconnector_new(), lib.localconnector_free)
-
-
-class Launcher(FFIObject):
-    @property
-    def launcherPtr(self):
-        return ffi.cast("Launcher *", self.ptr)
+        self.environ = {}
+        self.notificationURL = None
 
     def setenv(self, key: str, value: str):
-        lib.launcher_setenv(Launcher._ptr(self), cstr(key), cstr(value))
+        self.environ[key] = value
 
     def setNotificationURL(self, url: str):
-        lib.launcher_setnotificationURL(Launcher._ptr(self), cstr(url))
+        self.notificationURL = url
 
-    @staticmethod
-    def defaultLauncher():
-        return Launcher.fromcptr(lib.launcher_defaultlauncher())
+class DirectLauncher(Launcher): pass
 
-class DirectLauncher(Launcher):
-    def __init__(self, connector: Connector):
-        self.ptr = ffi.gc(lib.directlauncher_new(Connector._ptr(connector)), lib.directlauncher_free)
+class Generator(): pass
 
-class Generator(FFIObject): pass
+class TypeProxy: pass
 
-class PathGenerator(Generator):
-    def __init__(self, path: str):
-        self.ptr = PathGenerator._wrap(lib.pathgenerator_new(cstr(path)))
+class Token(): pass
 
-class Token(FFIObject): pass
 class CounterToken(Token):
-    def __init__(self, tokens: int):
-        self.ptr = CounterToken._wrap(lib.countertoken_new(tokens))
+    def __init__(self, path: Path, tokens: int=-1):
+        self.path = path
+        self.tokens = tokens
+
     def createDependency(self, count: int):
-        return Dependency.fromcptr(lib.countertoken_createdependency(self.ptr, count))
-
-# --- Utilities and constants
-
-class JSONEncoder(json.JSONEncoder):
-    """A JSON encoder for Python objects"""
-    def default(self, o):
-        if type(o) == Typename:
-            return str(o)
-
-        if isinstance(o, BasePath):
-            return {"$type": "path", "$value": str(o.resolve())}
-
-        return json.JSONEncoder.default(self, o)
-
-
-# Json encoder
-JSON_ENCODER = JSONEncoder()
-
-# Flag for simulating
-SUBMIT_TASKS = True
+        return Dependency()
 
 
 # --- XPM Objects
 
-def callback(args):
-    def wrapper(function):
-        def _wrapped(*args, **kwargs):
-            try:
-                function(*args, **kwargs)
-                return 0
-            except Exception:
-                tb.print_exc()
-                return 1
-        return ffi.callback(args)(_wrapped)
-    return wrapper
-
-@callback("int(void *, CString, Value *)")
-def object_setvalue_cb(handle, key, value):
-    ffi.from_handle(handle).setValue(fromcstr(key), Value.fromcptr(value, managed=False))
-
-@callback("int(void *)")
-def object_init_cb(handle):
-    ffi.from_handle(handle).init()
-
-@callback("int(void *)")
-def object_delete_cb(handle):
-    logging.info("Deleting object")
-    object = ffi.from_handle(handle)
-    logging.debug("Deleting object of type %s [%s]", object.pyobject.__class__.__name__, object)
-    del XPMObject.OBJECTS[handle]
-
-class XPMObject(FFIObject):
-    OBJECTS = {}
-
-    """Holds XPM information for a PyObject"""
-    def __init__(self, pyobject, sv=None):
-        handle = ffi.new_handle(self)
-        self.ptr = ffi.gc(lib.object_new(handle, object_init_cb, object_delete_cb, object_setvalue_cb), lib.object_free)
-        # Keep a copy of the handle
-        XPMObject.OBJECTS[handle] = self
-
-        self.pyobject = pyobject
-        logging.debug("Created object of type %s [%s]", self.pyobject.__class__.__name__, handle)
-
-        if sv is None:
-            self.sv = MapValue()
+class HashComputer():
+    def __init__(self):
+        self.hasher = hashlib.sha512()
+    def digest(self):
+        return self.hasher.digest()
+    def update(self, value):
+        if isinstance(value, float):
+            self.hasher.update(struct.pack('!d', value))
+        elif isinstance(value, int):
+            self.hasher.update(struct.pack('!q', value))
+        elif isinstance(value, str):
+            self.hasher.update(value.encode("utf-8"))
+        elif isinstance(value, PyObject):
+            self.hasher.update(value.__xpm__.identifier)
         else:
-            self.sv = sv.asMap()
+            raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
-        self.sv.object = self
-        self.sv.type = self.pyobject.__class__.__xpmtype__
-        self.setting = False
-        self.submitted = False
+class Information():
+    """Holds experimaestro information for a PyObject (Type or Task)"""
+
+    def __init__(self, pyobject):
+        # The underlying pyobject and XPM type
+        self.pyobject = pyobject
+        self.xpmtype = self.pyobject.__class__.__xpm__
+
+        # Meta-informations
+        self.tags = {}
         self.dependencies = DependencyArray()
 
-    @property
-    def job(self):
-        job = self.sv.job
-        if job: return job
-        raise Exception("No job associated with value %s" % self.sv)
-        
+        # State information
+        self.job = None
+        self.setting = False
+        self.submitted = False
+
+        # Cached information
+        self._identifier = None
+        self._validated = False
+
     def set(self, k, v):
-        logger.debug("Called set: %s, %s (%s)", k, v, type(v))
-        try:
-            # Check if the value corresponds to a task; if so,
-            # raise an exception if the task was not submitted
-            if isinstance(v, PyObject) and hasattr(v.__class__, "__xpmtask__"):
-                if not v.__xpm__.submitted:
-                    raise Exception("Task for argument '%s' was not submitted" % k)
-            pv = Value.frompython(v)
-            self.sv.set(k, pv)
-        except:
-            logger.error("Error while setting %s", k)
-            raise
-        finally:
-            self.setting = False
-
-
-    def setValue(self, key, sv):
-        """Called by XPM when value has been validated"""
-        if sv is None:
-            value = None
-            svtype = None
+        argument = self.xpmtype.arguments.get(k, None)
+        if argument:
+            # If argument, check the value
+            object.__setattr__(self.pyobject, k, argument.type.validate(v))
         else:
-            value = sv.toPython()
-            svtype = sv.type()
+            object.__setattr__(k, v)
 
-        logger.debug("Really setting %s to %s [%s => %s] on %s", key, value,
-                svtype, type(value), type(self.pyobject))
-        object.__setattr__(self.pyobject, key, value)
-    
     def run(self):
         self.pyobject.execute()
 
     def init(self):
         self.pyobject._init()
 
-class PyObject:
+
+    def validate(self):
+        """Validate the value"""
+        raise NotImplementedError()
+    
+    @property
+    def identifier(self):
+        """Computes the unique identifier"""
+        hashcomputer = HashComputer()
+        hashcomputer.update(self.xpmtype.typename.name)
+        if not self._identifier:
+            for k, v in self.xpmtype.arguments.items():
+                value = getattr(self.pyobject, k, None)
+                if v.ignored:
+                    continue
+                if v.defaultvalue and v.defaultvalue == value:
+                    # No update if same value
+                    continue
+
+                hashcomputer.update(value)
+                self._identifier = hashcomputer.digest()
+        return self._identifier
+
+def clone(v):
+    """Clone a value"""
+    if isinstance(v, (str, float, int)):
+        return v
+    if isinstance(v, list):
+        return [clone(x) for x in v]
+    raise NotImplementedError("For type %s" % v)
+
+class PyObjectMetaclass(type):
+    def __getattr__(cls, key):
+        """Access to a class field"""
+        return cls.__xpm__.arguments[key]
+
+class PyObject(metaclass=PyObjectMetaclass):
     """Base type for all objects in python interface"""
 
     def __init__(self, **kwargs):
-        assert self.__class__.__xpmtype__, "No XPM type associated with this XPM object"
+        assert self.__class__.__xpm__, "No XPM type associated with this XPM object"
 
         # Add configuration
-        self.__xpm__ = XPMObject(self)
+        self.__xpm__ = Information(self)
 
         # Initialize with arguments
         for k, v in kwargs.items():
             self.__setattr__(k, v)
 
         # Initialize with default arguments
-        lib.mapvalue_set_unsets(self.__xpm__.sv.ptr)
+        for k, v in self.__class__.__xpm__.arguments.items():
+            if k not in kwargs and v.defaultvalue is not None:
+                self.__setattr__(k, clone(v.defaultvalue))
 
-    def submit(self, *, workspace=None, launcher=None, send=SUBMIT_TASKS):
+    def __setattr__(self, name, value):
+        if name != "__xpm__":
+            return self.__xpm__.set(name, value)
+        return super().__setattr__(name, value)
+
+    def submit(self, *, workspace=None, launcher=None):
         """Submit this task"""
         if self.__xpm__.submitted:
             raise Exception("Task %s was already submitted" % self)
@@ -618,264 +387,49 @@ class PyObject:
             assert workspace is not None, "No experiment has been defined"
             assert launcher is not None, "No launcher has been set"
 
-            self.__class__.__xpmtask__.submit(workspace, launcher, self.__xpm__.sv, self.__xpm__.dependencies)
+            self.__class__.__xpm__.submit(workspace, launcher, self, self.__xpm__.dependencies)
 
         self.__xpm__.submitted = True
         return self
 
-    def __setattr__(self, name, value):
-        if not Task.isRunning():
-            # If task is not running, we update the structured value
-            if name != "__xpm__":
-                self.__xpm__.set(name, value)
-        super().__setattr__(name, value)
+    def tag(self, name, value):
+        self.__xpm__.tags[name] = value
 
     def _init(self):
         """Prepare object after creation"""
         pass
 
-    @property
-    def _job(self):
-        return self.__xpm__.job
-
-    def _stdout(self):
-        return self.__xpm__.job.stdoutPath().localpath()
-
-    def _code(self):
-        return self.__xpm__.job.codePath().localpath()
-
-    def _stderr(self):
-        return self.__xpm__.job.stderrPath().localpath()
-
-    def _adddependency(self, dependency):
-        self.__xpm__.dependencies.add(dependency)
-
-
-# Another way to submit if the method is overriden
-def submit(*args, **kwargs):
-    PyObject.submit(*args, **kwargs)
-
-# Defines a class property
-PyObject.__xpmtype__ = lib.ANY_TYPE
-
-import traceback as tb
-@ffi.callback("Object * (void * handle, Value *)")
-def register_create_object_callback(handle, value):
-    try:
-        object = ffi.from_handle(handle).createObject(Value.fromcptr(value, managed=False))
-        return object.ptr
-    except Exception as e:
-        tb.print_exc()
-        logger.error("Error while creating object: %s", e)
-        return None
-
-@ffi.callback("int (void * handle, Task *, Value *)")
-def register_run_task_callback(handle, task, value):
-    try:
-        ffi.from_handle(handle).runTask(Task.fromcptr(task, managed=False), Value.fromcptr(value, managed=False))
-        return 0
-    except Exception as e:
-        tb.print_exc()
-        logger.error("Error while running task: %s", e)
-        return 1
-
-
-
-class Register(FFIObject):
-    """The register contains a reference"""
+class Register():
     def __init__(self):
-        # Initialize the base class
-        self.handle = ffi.new_handle(self)
-        self.ptr = ffi.gc(lib.register_new(self.handle, register_create_object_callback, register_run_task_callback), 
-            lib.register_free)
-        self.registered = {}
-
-
-    def associateType(self, pythonType, xpmType):
-        pythonType.__xpmtype__ = xpmType
-        self.registered[xpmType.name()] = pythonType
-
-    def addTask(self, task: Task):
-        lib.register_addTask(self.ptr, task.ptr)
-
-    def addType(self, pythonType, typeName, parentType, description=None):
-        xpmType = Type(typeName, parentType)
-        if description is not None:
-            xpmType.description(description)
-
-        self.associateType(pythonType, xpmType)
-        lib.register_addType(self.ptr, xpmType.ptr)
-
-    def getType(self, key):
-        """Returns the Type object corresponding to the given type or None if not found
-        """
-        logger.debug("Searching for type %s", key)
-
-        if key is None:
-            return AnyType
-
-        if isinstance(key, Type):
-            return key
-
-        if isinstance(key, TypeProxy):
-            return key(self)
-
-        if isinstance(key, type):
-            t = Type.frompython(key)
-            if t is None:
-                return getattr(key, "__xpmtype__", None)
-            return t
-
-        if isinstance(key, PyObject):
-            return key.__class__.__xpmtype__
-        
-        if isinstance(key, Typename):
-            return self.registered.get(str(key), None)
-
-        return None
-
-    def getTask(self, name):
-        lib.register_getTask()
-
-
-    def runTask(self, task: Task, value: Value):
-        logger.info("Running %s", task)
-        value.asMap().object.run()
-
-    def build(self, string: str):
-        return Value.fromcptr(lib.register_build(self.ptr, cstr(string)))
-
-    def createObject(self, sv: Value):
-        type = self.registered.get(sv.type().name(), PyObject)
-        logger.debug("Creating object for %s [%s]", sv, type)
-        pyobject = type.__new__(type)
-        pyobject.__xpm__ = XPMObject(pyobject, sv=sv)
-        logger.debug("Preparing object for %s", type)
-        return pyobject.__xpm__
-
-    def parse(self, arguments=None, try_parse=False):
-        if arguments is None:
-            arguments = sys.argv[1:]
-        array = StringArray()
-        for argument in arguments:
-            array.add(argument)
-        return lib.register_parse(self.ptr, array.ptr, try_parse)
-
-
-    def try_parse(self, arguments=None):
-        return self.parse(arguments, True)
+        self.tasks = {}
 
 register = Register()
 
 
-class Argument(FFIObject):
-    """Abstract class for all arguments (standard, path, etc.)"""
-
-    def __init__(self, name: str, argtype, help=""):
-        self.ptr = ffi.gc(lib.argument_new(cstr(name)), lib.argument_free)
-
-        if argtype:
-            lib.argument_settype(self.ptr, Type._ptr(argtype))
-        lib.argument_sethelp(self.ptr, cstr(help))
-
-
-    def __call__(self, t):
-        xpminfo = register.getType(t)
-        if xpminfo is None:
-            raise Exception("%s is not an XPM type" % t)
-
-        xpminfo.addArgument(self)
-        return t
-
-    @property
-    def name(self):
-        return fromcstr(lib.argument_getname(self.ptr))
-    
-    @property
-    def type(self):
-        return Type.fromcptr(lib.argument_gettype(self.ptr))
-    
-    @property
-    def help(self):
-        return fromcstr(lib.argument_gethelp(self.ptr))
-    
-    @property
-    def defaultvalue(self):
-        return Value.fromcptr(lib.argument_getdefaultvalue(self.ptr))
-
-
-
-
-
-class Workspace(FFIObject):
+class Workspace():
+    """A workspace
+    """
     CURRENT = None
 
     """True if a job was submitted"""
     SUBMITTED = False
 
     """An experimental workspace"""
-    def __init__(self, path):
+    def __init__(self, path: Path):
         # Initialize the base class
-        self.ptr = ffi.gc(lib.workspace_new(cstr(path)), lib.workspace_free)
+        self.path = path
         self.launcher = None
 
     @staticmethod
     def setcurrent(workspace: "Workspace"):
         """Set this workspace as being the default workspace for all the tasks"""
-        lib.workspace_current(Workspace._ptr(workspace, allowNone=True))
         Workspace.CURRENT = workspace
-
-    def current(self):
-        """(deprecated) Set this workspace as being the default workspace for all the tasks"""
-        lib.workspace_current(self.ptr)
 
     def experiment(self, name):
         """Sets the current experiment name"""
-        lib.workspace_experiment(self.ptr, cstr(name))
+        self.experiment_name = name
 
-    def server(self, port: int):
-        lib.workspace_server(self.ptr, port, cstr(modulepath / "htdocs"))
-        checkexception()
-        self.launcher.setNotificationURL("http://127.0.0.1:{}/notify".format(port))
+    @staticmethod
+    def waitUntilTaskCompleted():
+        raise NotImplementedError()
 
-Workspace.waitUntilTaskCompleted = lib.workspace_waitUntilTaskCompleted
-
-
-# --- 
-
-class _Definitions:
-    """Allow easy access to XPM tasks with dot notation to tasks or types"""
-
-    def __init__(self, retriever, path=None):
-        self.__retriever = retriever
-        self.__path = path
-
-    def __getattr__(self, name):
-        if name.startswith("__"):
-            return object.__getattr__(self, name)
-        if self.__path is None:
-            return Definitions(self.__retriever, name)
-        return Definitions(self.__retriever, "%s.%s" % (self.__path, name))
-
-    def __call__(self, *args, **options):
-        definition = self.__retriever(self.__path)
-        if definition is None:
-            raise AttributeError("Task/Type %s not found" % self.__path)
-        return definition.__call__(*args, **options)
-
-
-types = _Definitions(register.getType)
-tasks = _Definitions(register.getTask)
-
-
-
-# --- Exceptions
-
-EXCEPTIONS = {
-    lib.ERROR_RUNTIME: RuntimeError
-}
-
-def checkexception():
-    code = lib.lasterror_code()
-    if code != lib.ERROR_NONE:
-        raise EXCEPTIONS.get(code, Exception)(fromcstr(lib.lasterror_message()))

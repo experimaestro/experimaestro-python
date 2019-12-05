@@ -17,6 +17,7 @@ from .tasks import *
 # --- Defines the experiment
 
 class MainTest(unittest.TestCase):
+    @unittest.skip("Disabled for now")
     def test_simple(self):
         with Experiment("helloworld"):
             # Submit the tasks
