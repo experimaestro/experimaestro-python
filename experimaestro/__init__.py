@@ -2,7 +2,8 @@ from pathlib import Path
 
 # Annotations
 from .annotations import Type, Task, Argument, PathArgument, ConstantArgument, Typename, Array
-from .workspace import Workspace, experiment
+from .workspace import Workspace
+from .scheduler import Scheduler, experiment
 from .connectors import Launcher
 
 # Deprecated Annotation

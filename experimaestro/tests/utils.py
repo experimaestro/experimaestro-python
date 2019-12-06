@@ -3,6 +3,7 @@ import shutil
 import os
 from pathlib import Path
 import logging
+import signal
 from experimaestro import Launcher, experiment
 
 class TemporaryDirectory:
@@ -22,9 +23,30 @@ class TemporaryDirectory:
         else:
             shutil.rmtree(self.path)
 
+
+class TimeoutError(Exception): pass 
+
+class timeout:
+  def __init__(self, seconds, error_message=None):
+    if error_message is None:
+      error_message = 'test timed out after {}s.'.format(seconds)
+    self.seconds = seconds
+    self.error_message = error_message
+
+  def handle_timeout(self, signum, frame):
+    raise TimeoutError(self.error_message)
+
+  def __enter__(self):
+    signal.signal(signal.SIGALRM, self.handle_timeout)
+    signal.alarm(self.seconds)
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    signal.alarm(0)
+
 class TemporaryExperiment:
-    def __init__(self, name):
+    def __init__(self, name, maxwait=10):
         self.name = name
+        self.timeout = timeout(maxwait)
 
     def __enter__(self):
         self.workdir = TemporaryDirectory(prefix="xpm", suffix=self.name)
@@ -36,9 +58,12 @@ class TemporaryExperiment:
         # Set some useful environment variables
         workspace.launcher.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
 
+        self.timeout.__enter__()
+
         return workspace
 
     def __exit__(self, *args):
         self.experiment.__exit__(*args)
+        self.timeout.__exit__(*args)
         self.workdir.__exit__(*args)
 

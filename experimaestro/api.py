@@ -11,7 +11,7 @@ import os
 import logging
 from pathlib import Path, PosixPath
 import re
-from typing import Union, Dict
+from typing import Union, Dict, List, Set
 import hashlib
 import struct
 from experimaestro.utils import logger
@@ -119,6 +119,7 @@ class Type():
 
         raise Exception("No type found for %s", key)
 
+
 class ObjectType(Type):
     """The type of PyObject"""
 
@@ -131,11 +132,16 @@ class ObjectType(Type):
             raise Exception("Experimaestro type %s is already declared" % self.typename)
         ObjectType.REGISTERED[self.typename] = objecttype
 
+        self.task = None
+
     def validate(self, value):
         if not isinstance(value, PyObject):
             raise ValueError("%s is not an experimaestro type or task", value)
         if not isinstance(value, self.objecttype):
             raise ValueError("%s is not a subtype of %s")
+
+        if self.task and not value.__xpm__.job:
+            raise ValueError("The value must be submitted before giving it")
         return value
 
 
@@ -177,61 +183,11 @@ class ArrayType(Type):
     def __init__(self, type: Type):
         self.type = type
 
+    def validate(self, value):
+        if not isinstance(value, List):
+            raise ValueError("value is not a list")
 
-
-
-# --- Command components
-
-class AbstractCommandComponent(): pass
-
-def aspath(path: [Path, str]):
-    if isinstance(path, str):
-        return Path(path)
-    return path
-
-class CommandPath(AbstractCommandComponent):
-    def __init__(self, path: [Path, str]):
-        self.path = aspath(path)
-
-class CommandString(AbstractCommandComponent):
-    def __init__(self, string: str):
-        self.string = string
-
-class CommandParameters(AbstractCommandComponent): pass
-
-class AbstractCommand(): pass
-
-class Command(AbstractCommand):
-    def __init__(self):
-        self.components = []
-
-    def add(self, component: AbstractCommandComponent):
-        self.components.append(component)
-
-class CommandLine(Command):
-    def __init__(self):
-        self.commands = []
-
-    def add(self, command: Command):
-        self.commands.append(command)
-
-
-class Task():
-    def __init__(self, tasktype: Type, *, taskId:Typename=None):
-        assert tasktype and isinstance(tasktype, Type)
-        self.type = tasktype
-        self._commandline = None
-
-    def name(self):
-        return str(self.type)
-
-    def commandline(self, commandline: CommandLine):
-        assert commandline and isinstance(tasktype, CommandLine)
-        self._commandline = commandline
-
-    def submit(self, workspace, launcher, value, dependencies: "List[Dependency]"):
-        Workspace.SUBMITTED = True
-        raise NotImplementedError("Task submit")
+        return [self.type.validate(x) for x in value]
 
 
 # --- XPM Objects
@@ -244,6 +200,7 @@ class HashComputer():
     PATH_ID = b'\x04'
     NAME_ID = b'\x05'
     NONE_ID = b'\x06'
+    LIST_ID = b'\x06'
 
     def __init__(self):
         self.hasher = hashlib.sha256()
@@ -263,6 +220,11 @@ class HashComputer():
         elif isinstance(value, str):
             self.hasher.update(HashComputer.STR_ID)
             self.hasher.update(value.encode("utf-8"))
+        elif isinstance(value, list):
+            self.hasher.update(HashComputer.LIST_ID)
+            self.hasher.update(struct.pack('!d', len(value)))
+            for x in value:
+                self.update(x)
         elif isinstance(value, PyObject):
             xpmtype = value.__class__.__xpm__ # type: Type
             self.hasher.update(HashComputer.OBJECT_ID)
@@ -287,16 +249,14 @@ class TypeInformation():
     def __init__(self, pyobject):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
-        self.xpmtype = self.pyobject.__class__.__xpm__
+        self.xpmtype = self.pyobject.__class__.__xpm__ # type: ObjectType
 
         # Meta-informations
         self.tags = {}
-        self.dependencies:List["Dependency"] = []
 
         # State information
         self.job = None
         self.setting = False
-        self.submitted = False
 
         # Cached information
         self._identifier = None
@@ -335,7 +295,7 @@ class TypeInformation():
                     if not argument.generator:
                         raise ValueError("Value %s is required but missing", k)
 
-    def seal(self, jobcontext: "experimaestro.job.JobContext"):
+    def seal(self, jobcontext: "experimaestro.job.Job"):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
         if self._sealed:
             return
@@ -353,6 +313,40 @@ class TypeInformation():
             hashcomputer.update(self.pyobject)
             self._identifier = hashcomputer.digest()
         return self._identifier
+
+    def updatedependencies(self, dependencies: Set["experimaestro.dependencies.Dependency"]):
+        for argument in self.xpmtype.arguments.values():
+            if isinstance(argument.type, ObjectType):
+                if argument.type.task:
+                    raise NotImplementedError(argument.type.task)
+                else:
+                    getattr(self.pyobject, argument.name).__xpm__.updatedependencies(dependencies)
+                
+
+    def submit(self, workspace, launcher):
+        # --- Prepare the object
+        if self.job:
+            raise Exception("Task %s was already submitted" % self)
+        if not self.xpmtype.task:
+            raise ValueError("%s is not a task" % self.xpmtype)
+
+        self.validate()
+
+        # --- Submit the job
+        from .scheduler import Job, Scheduler
+
+        self.job = self.xpmtype.task(self.pyobject, launcher=launcher, workspace=workspace)
+        self.seal(self.job)
+
+        # --- Search for dependencies
+        self.updatedependencies(self.job.dependencies)
+
+        if Scheduler.CURRENT.submitjobs:
+            Scheduler.CURRENT.submit(self.job)
+        else:
+            logger.warning("Simulating: not submitting task", self.xpmtype.task)
+        
+
 
 def clone(v):
     """Clone a value"""
@@ -392,17 +386,7 @@ class PyObject(metaclass=PyObjectMetaclass):
 
     def submit(self, *, workspace=None, launcher=None):
         """Submit this task"""
-        if self.__xpm__.submitted:
-            raise Exception("Task %s was already submitted" % self)
-        if send:
-            workspace = workspace or Workspace.CURRENT
-            launcher = launcher or workspace.launcher
-            assert workspace is not None, "No experiment has been defined"
-            assert launcher is not None, "No launcher has been set"
-
-            self.__class__.__xpm__.submit(workspace, launcher, self, self.__xpm__.dependencies)
-
-        self.__xpm__.submitted = True
+        self.__xpm__.submit(workspace, launcher)
         return self
 
     def tag(self, name, value):
@@ -411,3 +395,6 @@ class PyObject(metaclass=PyObjectMetaclass):
     def _init(self):
         """Prepare object after creation"""
         pass
+
+    def _stdout(self):
+        return self.__xpm__.job.stdout

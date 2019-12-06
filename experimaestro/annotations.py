@@ -14,6 +14,7 @@ import experimaestro.api as api
 from .api import PyObject, Typename
 from .utils import logger
 from .workspace import Workspace
+import experimaestro.commandline as commandline
 
 # --- Annotations to define tasks and types
         
@@ -84,19 +85,19 @@ class Task(Type):
                      self.scriptpath)
  
         # Construct command       
-        command = api.Command()
-        command.add(api.CommandPath(self.pythonpath))
-        command.add(api.CommandPath(op.realpath(self.scriptpath)))
+        command = commandline.Command()
+        command.add(commandline.CommandPath(self.pythonpath))
+        command.add(commandline.CommandPath(op.realpath(self.scriptpath)))
         for arg in self.prefix_args:
-            command.add(api.CommandString(arg))
-        command.add(api.CommandString("run"))
-        command.add(api.CommandString("--json-file"))
-        command.add(api.CommandParameters())
-        command.add(api.CommandString(self.typename))
-        commandLine = api.CommandLine()
+            command.add(commandline.CommandString(arg))
+        command.add(commandline.CommandString("run"))
+        command.add(commandline.CommandString("--json-file"))
+        command.add(commandline.CommandParameters())
+        command.add(commandline.CommandString(self.typename))
+        commandLine = commandline.CommandLine()
         commandLine.add(command)
-        self.commandline = commandLine
 
+        objecttype.__xpm__.task = commandline.CommandLineTask(commandLine)
         return objecttype
 
 

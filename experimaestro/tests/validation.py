@@ -3,7 +3,7 @@
 import unittest
 from pathlib import Path
 from experimaestro import Type, Argument, PathArgument, ConstantArgument
-from experimaestro.scheduler import JobContext
+from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
 
 @Argument("value", type=int)
@@ -68,7 +68,7 @@ class MainTest(unittest.TestCase):
         a = A()
         a.__xpm__.validate()
         with TemporaryExperiment("constant") as ws:
-            jobcontext = JobContext(ws, a)
+            jobcontext = Job(a)
             a.__xpm__.seal(jobcontext)
             self.assertTrue(isinstance(a.value, Path))
             parents = list(a.value.parents)
@@ -87,7 +87,7 @@ class MainTest(unittest.TestCase):
         a = A()
         a.__xpm__.validate()
         with TemporaryExperiment("constant") as ws:
-            jobcontext = JobContext(ws, a)
+            jobcontext = Job(a)
             a.__xpm__.seal(jobcontext)
             self.assertEqual(a.value, 1)
 

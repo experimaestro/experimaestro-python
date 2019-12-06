@@ -17,9 +17,15 @@ from .tasks import *
 # --- Defines the experiment
 
 class MainTest(unittest.TestCase):
-    @unittest.skip("Disabled for now")
-    def test_simple(self):
+    def test_fail(self):
+        """A not submitted task should not be accepted as an argument"""
         with TemporaryExperiment("helloworld"):
+            hello = Say(word="hello")
+            self.assertRaises(ValueError, Concat, strings=[hello])
+
+
+    def test_simple(self):
+        with TemporaryExperiment("helloworld", maxwait=1):
             # Submit the tasks
             hello = Say(word="hello").submit()
             world = Say(word="world").submit()
