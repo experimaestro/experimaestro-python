@@ -8,7 +8,7 @@ import logging
 from experimaestro.click import cli, TASK_PREFIX
 from experimaestro import Workspace
 
-from .utils import Experiment
+from .utils import TemporaryExperiment
 from .definitions_types import *
 
 # --- Defines the experiment
@@ -16,7 +16,7 @@ from .definitions_types import *
 class MainTest(unittest.TestCase):
     @unittest.skip("Disabled for now")
     def test_simple(self):
-        with Experiment("simple") as xp:
+        with TemporaryExperiment("simple") as xp:
             self.assertEqual(TestInteger(value=5).submit()._job.wait(), JOB_DONE, "test integer failed")
             self.assertEqual(TestFloat(value=5.1).submit()._job.wait(), JOB_DONE, "test float failed")
 

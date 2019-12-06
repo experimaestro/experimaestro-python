@@ -2,3 +2,5 @@ dist
 *.pyc
 __pycache__/
 *.egg-info
+.vscode/
+.mypy_cache/

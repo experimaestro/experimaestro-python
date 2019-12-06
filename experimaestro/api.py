@@ -1,4 +1,6 @@
-""" Object wrapping the C-api objects and methods
+"""Old layer between the C API and experimaestro
+
+TODO: re-organize
 """
 
 import json
@@ -12,11 +14,10 @@ import re
 from typing import Union, Dict
 import hashlib
 import struct
-from .server import Server
+from experimaestro.utils import logger
 
 # --- Initialization
 
-logger = logging.getLogger("xpm")
 modulepath = Path(__file__).parent
 
 class Typename():
@@ -39,24 +40,22 @@ def typename(name: Union[str, Typename]):
     return Typename(str(name))
 
 
-class BaseArgument:
-    def __init__(self, name, type, help=None):
+class Argument:
+    def __init__(self, name, type: "Type", required=None, help=None, generator=None, ignored=False, default=None):
+        required = (default is None) if required is None else required
+        if default is not None and required is not None and required:
+            raise Exception("Argument '%s' is required but default value is given" % name)
+
         self.name = name
         self.help = help
-        self.type = Type.fromType(type)
-        self.ignored = False
-        self.required = True
-        self.defaultvalue = None
+        self.type = type
+        self.ignored = ignored
+        self.required = required
+        self.default = default
+        self.generator = generator
 
-    def __call__(self, t):
-        t.__xpm__.addArgument(self)
-        return t
-
-class GeneratedArgument:
-    """An argument that is generated"""
-    def generate(self):
-        pass
-
+    def __repr__(self):
+        return "argument[{name}:{type}]".format(**self.__dict__)
 
 class TypeAttribute:
     def __init__(self, type, key):
@@ -73,22 +72,26 @@ class Type():
             tn = Typename(tn)
         self.typename = tn
         self.description = description
-        self.arguments:Dict[str, BaseArgument] = {}
+        self.arguments:Dict[str, Argument] = {}
 
     def __str__(self):
+        return "Type({})".format(self.typename)
+
+    def __repr__(self):
         return "Type({})".format(self.typename)
 
     def name(self):
         return str(self.typename)
 
-    def addArgument(self, argument: BaseArgument):
+    def addArgument(self, argument: Argument):
         self.arguments[argument.name] = argument
 
-    def getArgument(self, key: str) -> BaseArgument:
+    def getArgument(self, key: str) -> Argument:
         return self.arguments[key]
 
     def isArray(self):
         return False
+
 
     @staticmethod
     def fromType(key):
@@ -136,50 +139,48 @@ class ObjectType(Type):
         return value
 
 
+class TypeProxy: 
+    def __call__(self) -> Type:
+        """Returns the real type"""
+        raise NotImplementedError()
+
 def definetype(*types):
     def call(typeclass):
-        instance = typeclass()
+        instance = typeclass(types[0].__name__)
         for t in types:
             Type.DEFINED[t] = instance
     return call
 
 @definetype(int)
-class IntType: 
+class IntType(Type): 
     def validate(self, value):
         return int(value)
 
 @definetype(str)
-class StrType: 
+class StrType(Type): 
     def validate(self, value):
         return str(value)
 
 @definetype(float)
-class FloatType: 
+class FloatType(Type): 
     def validate(self, value):
         return float(value)
 
 @definetype(Path)
-class PathType: 
+class PathType(Type): 
     def validate(self, value):
         return Path(value)
+
+AnyType = Type("any")
 
 class ArrayType(Type):  
     def __init__(self, type: Type):
         self.type = type
 
-class PredefinedType(Type):
-    def __init__(self, ptr, pythontypes, topython, frompython):
-        self.ptr = ptr
-        self.pythontypes = pythontypes
-        self.topython = topython
-        self.frompython = frompython
-
-        Type.XPM2PYTHON[str(self)] = self
-        for pythontype in pythontypes:
-            Type.PYTHON2XPM[pythontype] = self
 
 
-AnyType = Type("any")
+
+# --- Command components
 
 class AbstractCommandComponent(): pass
 
@@ -214,14 +215,6 @@ class CommandLine(Command):
     def add(self, command: Command):
         self.commands.append(command)
 
-class Dependency(): pass
-
-class DependencyArray:
-    def __init__(self):
-        self.dependencies = []
-
-    def add(self, dependency: Dependency):
-        self.dependencies.append(dependency)
 
 class Task():
     def __init__(self, tasktype: Type, *, taskId:Typename=None):
@@ -236,86 +229,59 @@ class Task():
         assert commandline and isinstance(tasktype, CommandLine)
         self._commandline = commandline
 
-    def submit(self, workspace, launcher, value, dependencies: DependencyArray):
+    def submit(self, workspace, launcher, value, dependencies: "List[Dependency]"):
         Workspace.SUBMITTED = True
         raise NotImplementedError("Task submit")
-
-def aspath(path: Union[str, Path]):
-    if isinstance(path, Path): 
-        return path
-    return Path(path)
-
-
-class Job():   
-    def state(self):
-        raise NotImplementedError()
-
-    def wait(self):
-        raise NotImplementedError()
-
-    def codePath(self):
-        return self.code
-
-    def stdoutPath(self):
-        return self.stdout
-
-    def stderrPath(self):
-        return self.stderr
-
-
-class Connector(): 
-    pass
-
-class LocalConnector(Connector): pass
-
-class Launcher():
-    def __init__(self):
-        self.environ = {}
-        self.notificationURL = None
-
-    def setenv(self, key: str, value: str):
-        self.environ[key] = value
-
-    def setNotificationURL(self, url: str):
-        self.notificationURL = url
-
-class DirectLauncher(Launcher): pass
-
-class Generator(): pass
-
-class TypeProxy: pass
-
-class Token(): pass
-
-class CounterToken(Token):
-    def __init__(self, path: Path, tokens: int=-1):
-        self.path = path
-        self.tokens = tokens
-
-    def createDependency(self, count: int):
-        return Dependency()
 
 
 # --- XPM Objects
 
 class HashComputer():
+    OBJECT_ID = b'\x00'
+    INT_ID = b'\x01'
+    FLOAT_ID = b'\x02'
+    STR_ID = b'\x03'
+    PATH_ID = b'\x04'
+    NAME_ID = b'\x05'
+    NONE_ID = b'\x06'
+
     def __init__(self):
-        self.hasher = hashlib.sha512()
+        self.hasher = hashlib.sha256()
+
     def digest(self):
         return self.hasher.digest()
+
     def update(self, value):
+        if value is None:
+            self.hasher.update(NONE_ID)
         if isinstance(value, float):
+            self.hasher.update(HashComputer.FLOAT_ID)
             self.hasher.update(struct.pack('!d', value))
         elif isinstance(value, int):
+            self.hasher.update(HashComputer.INT_ID)
             self.hasher.update(struct.pack('!q', value))
         elif isinstance(value, str):
+            self.hasher.update(HashComputer.STR_ID)
             self.hasher.update(value.encode("utf-8"))
         elif isinstance(value, PyObject):
-            self.hasher.update(value.__xpm__.identifier)
+            xpmtype = value.__class__.__xpm__ # type: Type
+            self.hasher.update(HashComputer.OBJECT_ID)
+            self.hasher.update(xpmtype.typename.name.encode("utf-8"))
+            arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
+            for argument in arguments:
+                argvalue = getattr(value, argument.name, None)
+                if argument.ignored or argument.generator:
+                    continue
+                if argument.default and argument.default == argvalue:
+                    # No update if same value
+                    continue
+                self.hasher.update(HashComputer.NAME_ID)
+                self.update(argvalue)
+            
         else:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
-class Information():
+class TypeInformation():
     """Holds experimaestro information for a PyObject (Type or Task)"""
 
     def __init__(self, pyobject):
@@ -325,7 +291,7 @@ class Information():
 
         # Meta-informations
         self.tags = {}
-        self.dependencies = DependencyArray()
+        self.dependencies:List["Dependency"] = []
 
         # State information
         self.job = None
@@ -335,11 +301,17 @@ class Information():
         # Cached information
         self._identifier = None
         self._validated = False
+        self._sealed = False
 
-    def set(self, k, v):
+    def set(self, k, v, bypass=False):
+        if self._sealed:
+            raise AssertionError("Object is read-only")
+
         argument = self.xpmtype.arguments.get(k, None)
         if argument:
             # If argument, check the value
+            if not bypass and argument.generator:
+                raise AssertionError("Property %s is read-only" % (k))
             object.__setattr__(self.pyobject, k, argument.type.validate(v))
         else:
             object.__setattr__(k, v)
@@ -351,7 +323,7 @@ class Information():
         self.pyobject._init()
 
     def validate(self):
-        """Validate values and generate if needed"""
+        """Validate values and seal the values"""
         if not self._validated:
             self._validated = True
             for k, argument in self.xpmtype.arguments.items():
@@ -360,26 +332,26 @@ class Information():
                     if isinstance(value, PyObject):
                         value.__xpm__.validate()
                 elif argument.required:
-                    raise ValueError("Value %s is required but missing", k)
+                    if not argument.generator:
+                        raise ValueError("Value %s is required but missing", k)
 
+    def seal(self, jobcontext: "experimaestro.job.JobContext"):
+        """Seal the object, generating values when needed, before scheduling the associated job(s)"""
+        if self._sealed:
+            return
 
-    
+        for k, argument in self.xpmtype.arguments.items():
+            if argument.generator:
+                self.set(k, argument.generator(jobcontext), bypass=True)
+        self._sealed = True
+
     @property
     def identifier(self):
         """Computes the unique identifier"""
-        hashcomputer = HashComputer()
-        hashcomputer.update(self.xpmtype.typename.name)
-        if not self._identifier:
-            for k, v in self.xpmtype.arguments.items():
-                value = getattr(self.pyobject, k, None)
-                if v.ignored:
-                    continue
-                if v.defaultvalue and v.defaultvalue == value:
-                    # No update if same value
-                    continue
-
-                hashcomputer.update(value)
-                self._identifier = hashcomputer.digest()
+        if self._identifier is None:
+            hashcomputer = HashComputer()
+            hashcomputer.update(self.pyobject)
+            self._identifier = hashcomputer.digest()
         return self._identifier
 
 def clone(v):
@@ -402,7 +374,7 @@ class PyObject(metaclass=PyObjectMetaclass):
         assert self.__class__.__xpm__, "No XPM type associated with this XPM object"
 
         # Add configuration
-        self.__xpm__ = Information(self)
+        self.__xpm__ = TypeInformation(self)
 
         # Initialize with arguments
         for k, v in kwargs.items():
@@ -410,8 +382,8 @@ class PyObject(metaclass=PyObjectMetaclass):
 
         # Initialize with default arguments
         for k, v in self.__class__.__xpm__.arguments.items():
-            if k not in kwargs and v.defaultvalue is not None:
-                self.__setattr__(k, clone(v.defaultvalue))
+            if k not in kwargs and v.default is not None:
+                self.__setattr__(k, clone(v.default))
 
     def __setattr__(self, name, value):
         if name != "__xpm__":
@@ -439,38 +411,3 @@ class PyObject(metaclass=PyObjectMetaclass):
     def _init(self):
         """Prepare object after creation"""
         pass
-
-class Register():
-    def __init__(self):
-        self.tasks = {}
-
-register = Register()
-
-
-class Workspace():
-    """A workspace
-    """
-    CURRENT = None
-
-    """True if a job was submitted"""
-    SUBMITTED = False
-
-    """An experimental workspace"""
-    def __init__(self, path: Path):
-        # Initialize the base class
-        self.path = path
-        self.launcher = None
-
-    @staticmethod
-    def setcurrent(workspace: "Workspace"):
-        """Set this workspace as being the default workspace for all the tasks"""
-        Workspace.CURRENT = workspace
-
-    def experiment(self, name):
-        """Sets the current experiment name"""
-        self.experiment_name = name
-
-    @staticmethod
-    def waitUntilTaskCompleted():
-        raise NotImplementedError()
-

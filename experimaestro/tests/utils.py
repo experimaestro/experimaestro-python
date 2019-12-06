@@ -1,8 +1,9 @@
 import tempfile
 import shutil
 import os
-from experimaestro import Launcher, experiment
+from pathlib import Path
 import logging
+from experimaestro import Launcher, experiment
 
 class TemporaryDirectory:
     def __init__(self, suffix=None, prefix=None, dir=None):
@@ -12,7 +13,7 @@ class TemporaryDirectory:
         self.path = None
 
     def __enter__(self):
-        self.path = tempfile.mkdtemp(suffix=self.suffix, prefix=self.prefix, dir=self.dir)
+        self.path = Path(tempfile.mkdtemp(suffix=self.suffix, prefix=self.prefix, dir=self.dir))
         return self.path
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -21,7 +22,7 @@ class TemporaryDirectory:
         else:
             shutil.rmtree(self.path)
 
-class Experiment:
+class TemporaryExperiment:
     def __init__(self, name):
         self.name = name
 
@@ -35,6 +36,7 @@ class Experiment:
         # Set some useful environment variables
         workspace.launcher.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
 
+        return workspace
 
     def __exit__(self, *args):
         self.experiment.__exit__(*args)

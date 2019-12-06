@@ -32,6 +32,6 @@ def forwardoption(argument, option_name):
 
     xpmtype = argument.type
     name = "--%s" % (option_name or argument.name.replace("_", "-"))
-    default = argument.defaultvalue
+    default = argument.default
     # FIXME: type
     return click.option(name, help=argument.help, default=default)

@@ -1,7 +1,10 @@
 """Tests for type validation"""
 
 import unittest
-from experimaestro import Type, Argument, PathArgument
+from pathlib import Path
+from experimaestro import Type, Argument, PathArgument, ConstantArgument
+from experimaestro.scheduler import JobContext
+from .utils import TemporaryExperiment
 
 @Argument("value", type=int)
 @Type()
@@ -14,6 +17,7 @@ class B: pass
 @PathArgument("path", "outdir")
 @Type()
 class C: pass
+
 
 def expect_validate(method):
     def test(self):
@@ -30,6 +34,9 @@ def expect_notvalidate(method):
         except ValueError:
             pass
     return test
+
+
+
 
 class MainTest(unittest.TestCase):
     @expect_validate
@@ -53,6 +60,35 @@ class MainTest(unittest.TestCase):
         return b
 
     def test_path(self):
-        c = C()
-        c.__xpm__.validate()
+        """Test of @PathArgument"""
+        @PathArgument("value", "file.txt")
+        @Type()
+        class A: pass
+
+        a = A()
+        a.__xpm__.validate()
+        with TemporaryExperiment("constant") as ws:
+            jobcontext = JobContext(ws, a)
+            a.__xpm__.seal(jobcontext)
+            self.assertTrue(isinstance(a.value, Path))
+            parents = list(a.value.parents)
+            self.assertEqual(a.value.name, "file.txt")
+            self.assertEqual(a.value.parents[0].name, a.__xpm__.identifier.hex())
+            self.assertEqual(a.value.parents[1].name, str(a.__class__.__xpm__.typename))
+            self.assertEqual(a.value.parents[2].name, "jobs")
+            self.assertEqual(a.value.parents[3], ws.path)
+
+    def test_constant(self):
+        """Test of @ConstantArgument"""
+        @ConstantArgument("value", 1)
+        @Type()
+        class A: pass
+
+        a = A()
+        a.__xpm__.validate()
+        with TemporaryExperiment("constant") as ws:
+            jobcontext = JobContext(ws, a)
+            a.__xpm__.seal(jobcontext)
+            self.assertEqual(a.value, 1)
+
         

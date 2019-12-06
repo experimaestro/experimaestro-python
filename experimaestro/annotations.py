@@ -11,7 +11,9 @@ from pathlib import Path, PosixPath
 from typing import Union, Dict
 
 import experimaestro.api as api
-from .api import PyObject, DirectLauncher, LocalConnector, Workspace, Typename, Launcher, logger, register
+from .api import PyObject, Typename
+from .utils import logger
+from .workspace import Workspace
 
 # --- Annotations to define tasks and types
         
@@ -100,22 +102,30 @@ class Task(Type):
 
 # --- Argument related annotations
 
-class Argument(api.BaseArgument):
+class Argument():
     """Defines an argument for an experimaestro type"""
     def __init__(self, name, type=None, default=None, required=None,
                  ignored=False, help=None):
-
-        super().__init__(name, type, help=help)
-
-        required = (default is None) if required is None else required
-        if default is not None and required is not None and required:
-            raise Exception("Argument is required but default value is given")
-
+        # Determine if required
+        self.name = name                
+        self.type = api.Type.fromType(type) if type else None
+        self.help = help
         self.ignored = ignored
-        self.defaultvalue = default
+        self.default = default
         self.required = required
+        self.generator = None
 
-class PathArgument(api.BaseArgument):
+    def __call__(self, objecttype):
+        if self.type is None:
+            if default: 
+                self.type = api.Type.fromType(type(default))
+            else:
+                raise ValueError("Type is not defined for argument %s", self.name)
+        argument = api.Argument(self.name, self.type, help=self.help, required=self.required, ignored=self.ignored, generator=self.generator, default=self.default)
+        objecttype.__xpm__.addArgument(argument)
+        return objecttype
+
+class PathArgument(Argument):
     """Defines a an argument that will be a relative path (automatically
     set by experimaestro)"""
     def __init__(self, name, path, help=""):
@@ -124,18 +134,16 @@ class PathArgument(api.BaseArgument):
         :param path: The relative path
         """
         super().__init__(name, type=Path, help=help)
-        from .generators import PathGenerator
-        self.generator = PathGenerator(path)
+        self.generator = lambda jobcontext: jobcontext.jobpath / path
 
-class ConstantArgument(api.BaseArgument):
+
+class ConstantArgument(Argument):
     """
     An constant argument (useful for versionning tasks)
     """
-    def __init__(self, name: str, value, help=""):
-        value = Value.frompython(value)
-        xpmtype = register.getType(value)
-        super().__init__(name, xpmtype, help=help)
-        self.constant = True
+    def __init__(self, name: str, value, xpmtype=None, help=""):
+        super().__init__(name, type=xpmtype or api.Type.fromType(type(value)), help=help)
+        self.generator = lambda jobcontext: api.clone(value)
 
 class TaggedValue:
     def __init__(self, name: str, value):

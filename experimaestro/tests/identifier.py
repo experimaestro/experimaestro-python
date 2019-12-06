@@ -24,6 +24,12 @@ class D: pass
 @Type()
 class Float: pass
 
+
+@Argument("value1", type=float)
+@Argument("value2", type=float)
+@Type()
+class Values: pass
+
 def expect_equal(method):
     def test(self):
         a, b = method(self)
@@ -43,6 +49,10 @@ class MainTest(unittest.TestCase):
     @expect_notequal
     def test_different_type(self):
         return A(a=1), B(a=1)
+
+    @expect_equal
+    def test_order(self):
+        return Values(value1=1, value2=2), Values(value2=2, value1=1)
 
     @expect_equal
     def test_default(self):
