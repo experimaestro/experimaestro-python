@@ -7,7 +7,7 @@ import os.path as op
 import os
 import logging
 import pathlib
-from pathlib import Path as BasePath, PosixPath
+from pathlib import Path, PosixPath
 from typing import Union, Dict
 
 import experimaestro.api as api
@@ -92,7 +92,7 @@ class Task(Type):
             self.scriptpath = op.join(
                 op.dirname(inspect.getfile(t)), self.scriptpath)
 
-        self.scriptpath = BasePath(self.scriptpath).absolute()
+        self.scriptpath = Path(self.scriptpath).absolute()
 
         logger.debug("Task %s command: %s %s", t, self.pythonpath,
                      self.scriptpath)
@@ -128,10 +128,6 @@ class Argument(api.BaseArgument):
         self.ignored = ignored
         self.defaultvalue = default
         self.required = required
-
-    def __call__(self, t):
-        t.__xpm__.addArgument(self)
-        return t
 
 class PathArgument(api.BaseArgument):
     """Defines a an argument that will be a relative path (automatically
@@ -172,7 +168,7 @@ def tags(value):
 
 def tagspath(value: api.PyObject):
     """Return the tags associated with a value"""
-    p = BasePath()
+    p = Path()
     for key, value in value.__xpm__.sv.tags().items():
         p /= "%s=%s" % (key.replace("/","-"), value)
     return p

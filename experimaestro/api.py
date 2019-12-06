@@ -45,10 +45,17 @@ class BaseArgument:
         self.help = help
         self.type = Type.fromType(type)
         self.ignored = False
+        self.required = True
         self.defaultvalue = None
 
-    def validate(self, name, value):
-        raise AssertionError("Value cannot be changed for argument of type %s" % type(self))
+    def __call__(self, t):
+        t.__xpm__.addArgument(self)
+        return t
+
+class GeneratedArgument:
+    """An argument that is generated"""
+    def generate(self):
+        pass
 
 
 class TypeAttribute:
@@ -130,6 +137,11 @@ class StrType:
 class FloatType: 
     def validate(self, value):
         return float(value)
+
+@definetype(Path)
+class PathType: 
+    def validate(self, value):
+        return Path(value)
 
 class ArrayType(Type):  
     def __init__(self, type: Type):
@@ -318,10 +330,19 @@ class Information():
     def init(self):
         self.pyobject._init()
 
-
     def validate(self):
-        """Validate the value"""
-        raise NotImplementedError()
+        """Validate values and generate if needed"""
+        if not self._validated:
+            self._validated = True
+            for k, argument in self.xpmtype.arguments.items():
+                if hasattr(self.pyobject, k):
+                    value = getattr(self.pyobject, k)
+                    if isinstance(value, PyObject):
+                        value.__xpm__.validate()
+                elif argument.required:
+                    raise ValueError("Value %s is required but missing", k)
+
+
     
     @property
     def identifier(self):

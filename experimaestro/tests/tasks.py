@@ -20,4 +20,4 @@ class Concat:
         print(" ".join(says))
 
 if __name__ == "__main__":
-    register.parse()
+    parse_commandline()

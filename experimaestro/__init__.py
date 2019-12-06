@@ -1,7 +1,7 @@
 from pathlib import Path
 
 # Annotations
-from .annotations import Type, Task, Argument, Typename, Array, Launcher, Workspace
+from .annotations import Type, Task, Argument, PathArgument, Typename, Array, Launcher, Workspace
 
 # Deprecated Annotation
 from .annotations import RegisterType, RegisterTask, TypeArgument
