@@ -116,6 +116,26 @@ class Type():
 
         raise Exception("No type found for %s", key)
 
+class ObjectType(Type):
+    """The type of PyObject"""
+
+    REGISTERED:Dict[Typename, "PyObject"] = {}
+    def __init__(self, objecttype: "PyObject", typename, description):
+        super().__init__(typename, description)
+        self.objecttype = objecttype
+
+        if self.typename in ObjectType.REGISTERED:
+            raise Exception("Experimaestro type %s is already declared" % self.typename)
+        ObjectType.REGISTERED[self.typename] = objecttype
+
+    def validate(self, value):
+        if not isinstance(value, PyObject):
+            raise ValueError("%s is not an experimaestro type or task", value)
+        if not isinstance(value, self.objecttype):
+            raise ValueError("%s is not a subtype of %s")
+        return value
+
+
 def definetype(*types):
     def call(typeclass):
         instance = typeclass()

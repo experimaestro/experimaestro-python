@@ -15,43 +15,30 @@ from .api import PyObject, DirectLauncher, LocalConnector, Workspace, Typename, 
 
 # --- Annotations to define tasks and types
         
-class Type(api.Type):
-    REGISTERED:Dict[Typename, PyObject] = {}
+class Type:
 
     """Annotations for experimaestro types"""
     def __init__(self, typename=None, description=None):
-        super().__init__(typename, description)
+        super().__init__()
+        self.typename = typename
+        self.description = description
 
-    def __call__(self, t):
+    def __call__(self, objecttype):
         # Check if conditions are fullfilled
         if self.typename is None:
-            self.typename = Typename("%s.%s" % (t.__module__, t.__name__))
+            self.typename = Typename("%s.%s" % (objecttype.__module__, objecttype.__name__))
 
-        if self.typename in Type.REGISTERED:
-            raise Exception("Experimaestro type %s is already declared" % self.typename)
-        Type.REGISTERED[self.typename] = t
         
         # --- Add PyObject as an ancestor of t if needed
-        if not issubclass(t, api.PyObject):
+        if not issubclass(objecttype, api.PyObject):
             __bases__ = (api.PyObject, )
-            if t.__bases__ != (object, ):
-                __bases__ += t.__bases__
-            __dict__ = {key: value for key, value in t.__dict__.items() if key not in ["__dict__"]}
-            t = type(t.__name__, __bases__, __dict__)
+            if objecttype.__bases__ != (object, ):
+                __bases__ += objecttype.__bases__
+            __dict__ = {key: value for key, value in objecttype.__dict__.items() if key not in ["__dict__"]}
+            objecttype = type(objecttype.__name__, __bases__, __dict__)
 
-        t.__xpm__ = self
-
-        self.objecttype = t
-        return t
-
-    def validate(self, value):
-        if not isinstance(value, PyObject):
-            raise ValueError("%s is not an experimaestro type or task", value)
-        if not isinstance(value, self.objecttype):
-            raise ValueError("%s is not a subtype of %s")
-        return value
-
-# --- Type proxies are useful shortcuts in python
+        objecttype.__xpm__ = api.ObjectType(objecttype, self.typename, self.description)
+        return objecttype
 
 
 class Array(api.TypeProxy):
@@ -63,6 +50,7 @@ class Array(api.TypeProxy):
         return api.ArrayType(self.type)
 
 class Choice(api.TypeProxy):
+    """A string with a choice among several alternative"""
     def __init__(self, *args):
         self.choices = args
 
@@ -72,29 +60,25 @@ class Choice(api.TypeProxy):
 
 class Task(Type):
     """Register a task"""
-
     def __init__(self, typename, scriptpath=None, pythonpath=None, prefix_args=[], description=None, associate=None):
-        super().__init__(typename, description=description)
+        super().__init__(typename, description)
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
         self.scriptpath = scriptpath
         self.prefix_args = prefix_args
 
-    def __call__(self, t):
+    def __call__(self, objecttype):
         # Register the type
-        t = super().__call__(t)
+        objecttype = super().__call__(objecttype)
         
-        if not issubclass(t, api.PyObject):
-            raise Exception("Only experimaestro objects (annotated with Type or AssociateType) can be tasks")
-
         if self.scriptpath is None:
-            self.scriptpath = inspect.getfile(t)
+            self.scriptpath = inspect.getfile(objecttype)
         else:
             self.scriptpath = op.join(
-                op.dirname(inspect.getfile(t)), self.scriptpath)
+                op.dirname(inspect.getfile(objecttype)), self.scriptpath)
 
         self.scriptpath = Path(self.scriptpath).absolute()
 
-        logger.debug("Task %s command: %s %s", t, self.pythonpath,
+        logger.debug("Task %s command: %s %s", objecttype, self.pythonpath,
                      self.scriptpath)
  
         # Construct command       
@@ -111,8 +95,10 @@ class Task(Type):
         commandLine.add(command)
         self.commandline = commandLine
 
-        return t
+        return objecttype
 
+
+# --- Argument related annotations
 
 class Argument(api.BaseArgument):
     """Defines an argument for an experimaestro type"""
