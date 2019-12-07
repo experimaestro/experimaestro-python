@@ -3,6 +3,7 @@ import threading
 import re
 import time
 from typing import Optional, Set
+import enum
 
 from .workspace import Workspace
 from .connectors import Launcher
@@ -10,12 +11,14 @@ from .api import PyObject
 from .utils import logger
 from .dependencies import LockError, Dependency
 
+class JobState(enum.Enum):
+    WAITING = 0
+    READY = 1
+    RUNNING = 2
+    DONE = 3
+    ERROR = 4
+
 class Job():
-    STATE_WAITING = 0
-    STATE_READY = 1
-    STATE_RUNNING = 2
-    STATE_DONE = 3
-    STATE_ERROR = 4
 
     """Context of a job"""
     def __init__(self, object: PyObject, *, workspace:Workspace = None, launcher:Launcher = None):
@@ -29,7 +32,7 @@ class Job():
         self.object = object   
         self.type = object.__class__.__xpm__
         self.starttime:Optional[float] = None
-        self.state:int = Job.STATE_WAITING
+        self.state:int = JobState.WAITING
 
         # Dependencies
         self.dependencies:Set[Dependency] = set() # as target
@@ -39,7 +42,7 @@ class Job():
 
     @property
     def ready(self):
-        return self.state == Job.STATE_READY
+        return self.state == JobState.READY
 
     @property
     def jobpath(self):
@@ -95,24 +98,24 @@ class JobThread(threading.Thread):
                     except LockError:
                         logger.warning("Could not lock %s, aborting start for job %s", dependency, self.job)
                         dependency.check()
-                        self.job.state = Job.STATE_READY
+                        self.job.state = JobState.READY
                         return
                 
                 self.job.scheduler.jobstarted(self.job)
 
             self.job.run()
-            self.job.state = Job.STATE_DONE
+            self.job.state = JobState.DONE
 
         except JobError:
             logger.warning("Error while running job")
-            self.job.state = Job.STATE_ERROR
+            self.job.state = JobState.ERROR
 
         except:
             logger.warning("Error while running job (in experimaestro)", exc_info=True)
-            self.job.state = Job.STATE_ERROR
+            self.job.state = JobState.ERROR
 
         finally:
-            if self.job.state in [Job.STATE_DONE, Job.STATE_ERROR]:
+            if self.job.state in [JobState.DONE, JobState.ERROR]:
                 self.job.scheduler.jobfinished(self.job)
 
             with self.job.scheduler.cv:
@@ -175,7 +178,7 @@ class Scheduler():
             for listener in self.listeners:
                 listener.job_submitted(job)
 
-            job.state = Job.STATE_WAITING if job.dependencies else Job.STATE_READY
+            job.state = JobState.WAITING if job.dependencies else JobState.READY
 
             if job.ready:
                 self.start(job)

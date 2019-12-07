@@ -6,6 +6,7 @@ from pathlib import Path
 import logging
 
 from experimaestro import *
+from experimaestro.scheduler import JobState
 from experimaestro.click import cli, TASK_PREFIX
 
 from .utils import TemporaryExperiment
@@ -33,6 +34,7 @@ class MainTest(unittest.TestCase):
             # Concat will depend on the two first tasks
             concat = Concat(strings=[hello, world]).submit()
 
+        self.assertEqual(concat.__xpm__.job.state, JobState.DONE)
         self.assertEqual(Path(concat._stdout()).read_text(), "HELLO WORLD\n")
         
 

@@ -1,14 +1,7 @@
-from pathlib import Path, PosixPath
-
-class Connector(): 
-    pass
-
-class LocalConnector(Connector): pass
-
 class Launcher():
     def __init__(self, connector: Connector):
         self.connector = connector
-        self.environ = {}
+        self.environ:Dict[str,str] = {}
         self.notificationURL = None
 
     def setenv(self, key: str, value: str):
@@ -24,6 +17,6 @@ class Launcher():
             return DirectLauncher(LocalConnector())
         raise ValueError("Cannot create a default launcher for %s", type(path))
 
+
 class DirectLauncher(Launcher):
     pass
-
