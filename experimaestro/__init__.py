@@ -17,6 +17,7 @@ def set_launcher(launcher):
 def parse_commandline():
     register.parse()
 
+__version__ = "0.5.0"
 # Signal handling
 
 # import atexit

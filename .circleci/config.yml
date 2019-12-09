@@ -1,83 +1,49 @@
-version: 2
-
+version: 2.1
 workflows:
-  version: 2
-  main:
+  build_and_deploy:
     jobs:
-      - build-37:
-          filters:  # required since `deploy` has tag filters AND requires `build`
-            tags:
-              only: /.*/
-
-      - publish:
-          requires:
-            - build-37
+      - build:
+          context: PyPI
           filters:
-            branches:
-              ignore: /^.*/
-            tags:
-              only: /^v.*/
+              tags:
+                only: /.*/
+
 jobs:
-  build-37:
-    environment: 
-      PYTHONBIN: /opt/python/cp37-cp37m/bin
+  build:
     docker:
-      - image: "bpiwowar/experimaestro-python"
+      - image:  quay.io/pypa/manylinux1_x86_64
     steps:
       - checkout
-            
-      - run:
-          name: "Pull Submodules"
-          command: |
-            git submodule update --init --recursive
+
+      # TODO: restore dependency cache
+      # - restore_cache:
+      #     key: v1-dependency-cache-{{ checksum "setup.py" }}-{{ checksum "Makefile" }}
+      # - run:
+      #     name: install python dependencies
+      #     command: |
+      #       python3 -m venv venv
+      #       . venv/bin/activate
+      #       make dev
+      # - save_cache:
+      #     key: v1-dependency-cache-{{ checksum "setup.py" }}-{{ checksum "Makefile" }}
+      #     paths:
+      #       - "venv"
 
       - run:
-          name: Install requirements
-          command: |
-            PATH=${PYTHONBIN}:$PATH
-            pip install wheel
-            pip install -r requirements.txt
-
-
-      - run:
-          name: Build
-          command: |
-            PATH=${PYTHONBIN}:$PATH
-            python setup.py build
-
-      - run:
-          name: Test
-          command: |
-            PATH=${PYTHONBIN}:$PATH
-            python setup.py test
-
-      - run:
-          name: Build packages
-          command: |
-            PATH=$PYTHONBIN:$PATH
-            python setup.py sdist
-            python setup.py bdist_wheel
-
-      # Allows twine uploads
-      - persist_to_workspace:
-          root: .
-          paths:
-            - dist
-
-  publish:
-    docker:
-      - image: "bpiwowar/experimaestro-python"
-    steps:
-      - attach_workspace:
-          at: .
-      - run:
-          name: Upload to pypi
+          name: run tests
           command: |
             . venv/bin/activate
-            python setup.py verify
-            echo -e "[pypi]" >> ~/.pypirc
-            echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
-            echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
-            pip install twine
-            auditwheel repair dist/*.whl
-            twine upload wheelhouse/*
+            make test
+      - run: 
+          name: Upload
+          command: |
+            if [ "$CIRCLE_TAG" ]; then
+              echo "Uploading using twine"
+              echo -e "[pypi]" >> ~/.pypirc
+              echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
+              echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
+              . venv/bin/activate
+              python setup.py verify
+              make package
+              twine upload dist/*
+            fi

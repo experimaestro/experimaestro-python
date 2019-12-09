@@ -4,3 +4,4 @@ __pycache__/
 *.egg-info
 .vscode/
 .mypy_cache/
+.tox
