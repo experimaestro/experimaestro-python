@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from .connectors import Launcher
+from .launchers import Launcher
 
 
 class Workspace():

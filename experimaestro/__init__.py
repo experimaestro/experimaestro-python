@@ -4,7 +4,8 @@ from pathlib import Path
 from .annotations import Type, Task, Argument, PathArgument, ConstantArgument, Typename, Array
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment
-from .connectors import Launcher
+from .launchers import Launcher
+from .utils import logger
 
 # Deprecated Annotation
 from .annotations import RegisterType, RegisterTask, TypeArgument
@@ -18,16 +19,16 @@ def parse_commandline():
 
 # Signal handling
 
-import atexit
-import signal
+# import atexit
+# import signal
 
-EXIT_MODE = False
+# EXIT_MODE = False
 
-def handleKill():
-    EXIT_MODE = True
-    logger.warn("Received SIGINT or SIGTERM")
+# def handleKill(*args):
+#     EXIT_MODE = True
+#     logger.warning("Received SIGINT or SIGTERM")
 
-signal.signal(signal.SIGINT, handleKill)
-signal.signal(signal.SIGTERM, handleKill)
-signal.signal(signal.SIGQUIT, handleKill)
+# signal.signal(signal.SIGINT, handleKill)
+# signal.signal(signal.SIGTERM, handleKill)
+# signal.signal(signal.SIGQUIT, handleKill)
 

@@ -252,7 +252,7 @@ class TypeInformation():
         self.xpmtype = self.pyobject.__class__.__xpm__ # type: ObjectType
 
         # Meta-informations
-        self.tags = {}
+        self._tags = {}
 
         # State information
         self.job = None
@@ -275,6 +275,24 @@ class TypeInformation():
             object.__setattr__(self.pyobject, k, argument.type.validate(v))
         else:
             object.__setattr__(k, v)
+
+
+    def addtag(self, name, value):
+        self._tags[name] = value
+
+    def xpmvalues(self):
+        """Returns an iterarator over arguments and associated values"""
+        for argument in self.xpmtype.arguments.values():
+            if hasattr(self.pyobject, argument.name):
+                yield argument, getattr(self.pyobject, argument.name)
+
+    def tags(self, tags={}):
+        tags.update(self._tags)
+        for argument, value in self.xpmvalues():
+            if isinstance(value, PyObject):
+                value.tags(value, tags)
+        return tags
+
 
     def run(self):
         self.pyobject.execute()
@@ -389,8 +407,13 @@ class PyObject(metaclass=PyObjectMetaclass):
         self.__xpm__.submit(workspace, launcher)
         return self
 
-    def tag(self, name, value):
-        self.__xpm__.tags[name] = value
+    def tag(self, name, value) -> "PyObject":
+        self.__xpm__.addtag(name, value)
+        return self
+
+    def tags(self):
+        """Returns the tag associated with this object (and below)"""
+        return self.__xpm__.tags()
 
     def _init(self):
         """Prepare object after creation"""

@@ -6,7 +6,7 @@ from typing import Optional, Set
 import enum
 
 from .workspace import Workspace
-from .connectors import Launcher
+from experimaestro.launchers import Launcher
 from .api import PyObject
 from .utils import logger
 from .dependencies import LockError, Dependency
@@ -21,24 +21,27 @@ class JobState(enum.Enum):
 class Job():
 
     """Context of a job"""
-    def __init__(self, object: PyObject, *, workspace:Workspace = None, launcher:Launcher = None):
+    def __init__(self, parameters: PyObject, *, workspace:Workspace = None, launcher:Launcher = None):
         self.workspace = workspace or Workspace.CURRENT
         assert self.workspace is not None, "No experiment has been defined"
 
         self.launcher = launcher or self.workspace.launcher
         assert self.launcher is not None, "No default launcher in workspace %s" % workspace
 
+        self.type = parameters.__class__.__xpm__
+        self.name = str(self.type.typename).rsplit(".", 1)[-1]
+
         self.scheduler:Optional["Scheduler"] = None
-        self.object = object   
-        self.type = object.__class__.__xpm__
+        self.parameters = parameters   
         self.starttime:Optional[float] = None
-        self.state:int = JobState.WAITING
+        self.state:JobState = JobState.WAITING
 
         # Dependencies
         self.dependencies:Set[Dependency] = set() # as target
         self.dependents:Set[Dependency] = set() # as source
 
-        self.name = str(self.type.typename).rsplit(".", 1)[-1]
+        # Process
+        self.process = None
 
     @property
     def ready(self):
@@ -46,9 +49,13 @@ class Job():
 
     @property
     def jobpath(self):
-        return self.workspace.jobspath  / str(self.type.typename) / self.object.__xpm__.identifier.hex()
+        return self.workspace.jobspath  / str(self.type.typename) / self.identifier
 
-    def run(self):
+    @property
+    def identifier(self):
+        return self.parameters.__xpm__.identifier.hex()
+
+    def run(self, jobLock, locks):
         """Actually run the code"""
         raise NotImplementedError()
 
@@ -60,8 +67,20 @@ class Job():
         return self.jobpath / ("%s.done" % self.name)
 
     @property
-    def codePath(self):
+    def lockpath(self):
+        return self.jobpath / ("%s.lock" % self.name)
+
+    @property
+    def startlockpath(self):
+        return self.jobpath / ("%s.startlock" % self.name)
+
+    @property
+    def codepath(self):
         return self.jobpath / ("%s.code" % self.name)
+
+    @property
+    def pidpath(self):
+        return self.jobpath / ("%s.pid" % self.name)
 
     @property
     def stdout(self) -> Path:
@@ -83,6 +102,28 @@ class JobError(Exception):
     def __init__(self, code):
         super.__init__("Job exited with code %d", self.code)
 
+class ForwardWith:
+    """Useful to forward the with statement in a function"""
+    def __init__(self, context):
+        self.context = context
+        self.count = 0
+
+    def __enter__(self):
+        if self.count == 0:
+            return self.context.__enter__()
+        self.count += 1
+        return self
+    
+    def previous(self):
+        self.count -= 1
+        return self
+
+    def __exit__(self, *args):
+        self.count -= 1
+        if self.count == 0:
+            logger.debug("Release lock in forward")
+            return self.context.__exit__(*args)
+
 class JobThread(threading.Thread):
     def __init__(self, job: Job):
         super().__init__()
@@ -91,7 +132,7 @@ class JobThread(threading.Thread):
     def run(self):
         locks = []
         try:
-            with self.job.scheduler.cv:
+            with ForwardWith(self.job.scheduler.cv) as joblock:
                 for dependency in self.job.dependencies:
                     try:
                         locks.append(dependency.lock())
@@ -101,9 +142,8 @@ class JobThread(threading.Thread):
                         self.job.state = JobState.READY
                         return
                 
-                self.job.scheduler.jobstarted(self.job)
-
-            self.job.run()
+                    self.job.scheduler.jobstarted(self.job)
+                    self.job.run(joblock, locks)
             self.job.state = JobState.DONE
 
         except JobError:

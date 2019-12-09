@@ -1,13 +1,17 @@
 """All classes related to localhost management
 """
-import os
+import subprocess
 
-from .connectors import Connector
-from .process import ProcessBuilder, RedirectType, Redirect
+from . import Connector, ProcessBuilder, RedirectType, Redirect
 
 class LocalProcessBuilder(ProcessBuilder):
-    pass
+    def start(self):
+
+        creationflags = 0
+        if self.detach:
+            creationflags = subprocess.DETACHED_PROCESS
+
+        subprocess.Popen(self.command, creationflags=creationflags)
 
 class LocalConnector(Connector):
-    def start(self):
-        os.
+    pass

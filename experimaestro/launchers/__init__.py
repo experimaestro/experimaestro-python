@@ -1,8 +1,12 @@
+from pathlib import Path, PosixPath
+from typing import Dict, Optional
+from experimaestro.connectors.local import Connector, LocalConnector
+
 class Launcher():
-    def __init__(self, connector: Connector):
+    def __init__(self, connector: "experimaestro.connectors.Connector"):
         self.connector = connector
         self.environ:Dict[str,str] = {}
-        self.notificationURL = None
+        self.notificationURL:Optional[str] = None
 
     def setenv(self, key: str, value: str):
         self.environ[key] = value
@@ -14,9 +18,8 @@ class Launcher():
     def get(path: Path):
         """Get a default launcher for a given path"""
         if isinstance(path, PosixPath):
-            return DirectLauncher(LocalConnector())
+            from .unix import UnixLauncher
+            return UnixLauncher(LocalConnector())
         raise ValueError("Cannot create a default launcher for %s", type(path))
 
 
-class DirectLauncher(Launcher):
-    pass
