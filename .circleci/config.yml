@@ -15,7 +15,7 @@ jobs:
     - run:
         name: install python dependencies
         command: |
-          tox --notest
+          tox --notest -e ALL
     - save_cache:
         key: v1-dependency-cache-{{ checksum "setup.cfg" }}
         paths:
@@ -25,7 +25,7 @@ jobs:
     - run:
         name: run tests
         command: |
-          tox
+          tox -e ALL
     - run:
         name: Upload
         command: |
