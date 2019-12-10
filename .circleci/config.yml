@@ -1,51 +1,47 @@
-version: 2.1
-workflows:
-  build_and_deploy:
-    jobs:
-      - build:
-          context: PyPI
-          filters:
-              tags:
-                only: /.*/
-
+version: 2
 jobs:
   build:
     docker:
-      - image:  quay.io/pypa/manylinux1_x86_64
+    - image: quay.io/pypa/manylinux1_x86_64
     steps:
-      - checkout
-
-      - run:
+    - checkout
+    - run:
         name: Setup basic environment
         command: |
           echo "export PATH=/opt/python/cp37-cp37m/bin:/opt/python/cp38-cp38m/bin:/opt/python/cp36-cp36m/bin:$PATH" >> $BASH_ENV
-          pip install tox twine
-
-      - restore_cache:
-          key: v1-dependency-cache-{{ checksum "setup.cfg" }}
-      - run:
-          name: install python dependencies
-          command: |
-            tox --notest
-      - save_cache:
-          key: v1-dependency-cache-{{ checksum "setup.cfg" }}
-          paths:
-            - ".tox/py36"
-            - ".tox/py37"
-            - ".tox/py38"
-
-      - run:
-          name: run tests
-          command: |
-            tox
-
-      - run: 
-          name: Upload
-          command: |
-            if [ "$(python setup.py --version)" = "$CIRCLE_TAG" ]; then
-              echo "Uploading using twine"
-              echo -e "[pypi]" >> ~/.pypirc
-              echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
-              echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
-              twine upload dist/experimaestro-*.zip
-            fi
+          /opt/python/cp37-cp37m/bin/pip install tox twine
+    - restore_cache:
+        key: v1-dependency-cache-{{ checksum "setup.cfg" }}
+    - run:
+        name: install python dependencies
+        command: |
+          tox --notest
+    - save_cache:
+        key: v1-dependency-cache-{{ checksum "setup.cfg" }}
+        paths:
+        - .tox/py36
+        - .tox/py37
+        - .tox/py38
+    - run:
+        name: run tests
+        command: |
+          tox
+    - run:
+        name: Upload
+        command: |
+          if [ "$(python setup.py --version)" = "$CIRCLE_TAG" ]; then
+            echo "Uploading using twine"
+            echo -e "[pypi]" >> ~/.pypirc
+            echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
+            echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
+            twine upload dist/experimaestro-*.zip
+          fi
+workflows:
+  build_and_deploy:
+    jobs:
+    - build:
+        filters:
+          tags:
+            only: /.*/
+        context: PyPI
+  version: 2

@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 import logging
 import signal
-from experimaestro import Launcher, experiment
+
+from experimaestro.launchers import Launcher
+from experimaestro import experiment
 
 class TemporaryDirectory:
     def __init__(self, suffix=None, prefix=None, dir=None):

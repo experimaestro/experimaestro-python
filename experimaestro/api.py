@@ -15,7 +15,6 @@ import re
 from typing import Union, Dict, List, Set
 import hashlib
 import struct
-import jsonstreams
 
 from experimaestro.utils import logger
 
@@ -420,6 +419,7 @@ class TypeInformation():
             outputjson(objectout, context, value, [argument.name])
 
     def outputjson(self, out: io.TextIOBase, context):
+        import jsonstreams
         with jsonstreams.Stream(jsonstreams.Type.object, fd=out) as objectout:
             self._outputjson_inner(objectout, context)
 

@@ -1,7 +1,5 @@
 import os
 from pathlib import Path
-from .launchers import Launcher
-
 
 class Workspace():
     """A workspace
@@ -13,6 +11,7 @@ class Workspace():
         if isinstance(path, Path):
             path = path.absolute()
         self.path = path
+        from .launchers import Launcher
         self.launcher = Launcher.get(path)
 
 

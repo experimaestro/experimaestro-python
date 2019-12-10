@@ -4,18 +4,16 @@ from pathlib import Path
 from .annotations import Type, Task, Argument, PathArgument, ConstantArgument, Typename, Array
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment
-from .launchers import Launcher
-from .utils import logger
 from .register import parse_commandline
+from .meta import __version__
 
 # Deprecated Annotation
 from .annotations import RegisterType, RegisterTask, TypeArgument
 
-
 def set_launcher(launcher):
     Workspace.CURRENT.launcher = launcher
 
-__version__ = "0.5.0"
+
 # Signal handling
 
 # import atexit
