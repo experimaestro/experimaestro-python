@@ -8,7 +8,6 @@ workflows:
               tags:
                 only: /.*/
 
-                jobs:
   build:
     docker:
       - image:  quay.io/pypa/manylinux1_x86_64
