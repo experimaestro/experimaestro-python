@@ -90,10 +90,8 @@ class Task(Type):
         command.add(commandline.CommandPath(op.realpath(self.scriptpath)))
         for arg in self.prefix_args:
             command.add(commandline.CommandString(arg))
-        command.add(commandline.CommandString("run"))
-        command.add(commandline.CommandString("--json-file"))
+        command.add(commandline.CommandString(str(self.typename)))
         command.add(commandline.CommandParameters())
-        command.add(commandline.CommandString(self.typename))
         commandLine = commandline.CommandLine()
         commandLine.add(command)
 

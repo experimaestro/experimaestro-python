@@ -44,20 +44,24 @@ class timeout:
     signal.alarm(0)
 
 class TemporaryExperiment:
-    def __init__(self, name, maxwait=10):
+    def __init__(self, name, workdir=None, maxwait=10):
         self.name = name
+        self.workdir = workdir
+        self.clean_workdir = workdir is None
         self.timeout = timeout(maxwait)
 
     def __enter__(self):
-        self.workdir = TemporaryDirectory(prefix="xpm", suffix=self.name)
-        workdir = self.workdir.__enter__()
+        if self.clean_workdir:
+          self.workdir = TemporaryDirectory(prefix="xpm", suffix=self.name)
+          workdir = self.workdir.__enter__()
+        else:
+          workdir = self.workdir
 
         self.experiment = experiment(workdir, self.name)
         workspace = self.experiment.__enter__()
 
         # Set some useful environment variables
-        workspace.launcher.setenv("LD_LIBRARY_PATH", os.getenv("LD_LIBRARY_PATH"))
-
+        workspace.launcher.setenv("PYTHONPATH", str(Path(__file__).parents[2]))
         self.timeout.__enter__()
 
         return workspace
@@ -65,5 +69,8 @@ class TemporaryExperiment:
     def __exit__(self, *args):
         self.experiment.__exit__(*args)
         self.timeout.__exit__(*args)
-        self.workdir.__exit__(*args)
+        if self.clean_workdir:
+          self.workdir.__exit__(*args)
 
+
+logging.basicConfig(level=logging.DEBUG)

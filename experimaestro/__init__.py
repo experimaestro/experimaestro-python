@@ -6,6 +6,7 @@ from .workspace import Workspace
 from .scheduler import Scheduler, experiment
 from .launchers import Launcher
 from .utils import logger
+from .register import parse_commandline
 
 # Deprecated Annotation
 from .annotations import RegisterType, RegisterTask, TypeArgument
@@ -13,9 +14,6 @@ from .annotations import RegisterType, RegisterTask, TypeArgument
 
 def set_launcher(launcher):
     Workspace.CURRENT.launcher = launcher
-
-def parse_commandline():
-    register.parse()
 
 __version__ = "0.5.0"
 # Signal handling

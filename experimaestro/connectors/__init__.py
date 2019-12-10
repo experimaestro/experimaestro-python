@@ -11,6 +11,7 @@ This module contains :
 import enum
 from typing import Dict, Optional
 from pathlib import Path, PosixPath
+from experimaestro.locking import Lock
 
 class RedirectType(enum.Enum):
     INHERIT = 0
@@ -20,13 +21,13 @@ class RedirectType(enum.Enum):
 
 
 class Redirect:
-    NONE: "Redirect"
-    INHERIT: "Redirect"
+    _NONE: "Redirect"
+    _INHERIT: "Redirect"
 
-    def __init__(self, type: RedirectType, path=None, pipe=None):
-        self.type = RedirectType
+    def __init__(self, type: RedirectType, path=None, function=None):
+        self.type = type
         self.path = path
-        self.pipe = pipe
+        self.function = function
 
     @staticmethod
     def file(path: Path):
@@ -34,31 +35,31 @@ class Redirect:
 
     @staticmethod
     def pipe(function):
-        return Redirect(RedirectType.PIPE, pipe=function)
+        return Redirect(RedirectType.PIPE, function=function)
 
     @staticmethod
     def none():
-        return Redirect.NONE
+        return Redirect._NONE
 
     @staticmethod
     def inherit():
-        return Redirect.INHERIT
+        return Redirect._INHERIT
 
-Redirect.NONE = Redirect(RedirectType.NONE)
-Redirect.INHERIT = Redirect(RedirectType.INHERIT)
+Redirect._NONE = Redirect(RedirectType.NONE)
+Redirect._INHERIT = Redirect(RedirectType.INHERIT)
 
 class Process: pass
 
 class ProcessBuilder:
     """A process builder
     """
-    def __init__(self, workingDirectory):
-      self.workingDirectory = workingDirectory
-      self.stdin = None
-      self.stdout = None
-      self.stderr = None
+    def __init__(self):
+      self.workingDirectory = None
+      self.stdin = Redirect.inherit()
+      self.stdout = Redirect.inherit()
+      self.stderr = Redirect.inherit()
       self.detach = True
-      self.environement = {}
+      self.environ = {}
       self.command = []
 
     def start(self) -> Process:
@@ -68,6 +69,10 @@ class ProcessBuilder:
 
 class Connector(): 
     def processbuilder(self) -> ProcessBuilder:
+        raise NotImplementedError()
+
+    def lock(self, path: Path) -> Lock:
+        """Returns a lock on a file"""
         raise NotImplementedError()
 
     def resolve(self, path: Path, basepath:Path=None):

@@ -4,10 +4,11 @@ import os
 import io
 from pathlib import Path
 from typing import Union, Callable, Dict
+import itertools
 
 from experimaestro.utils import logger
 from .scheduler import Job, JobError, JobState
-from .connectors import Redirect, Connector
+from .connectors import Redirect, RedirectType, Connector
 from .scheduler import Workspace
 from .api import PyObject
 
@@ -15,34 +16,57 @@ from .api import PyObject
 # 5 seconds wait for locking file
 LOCKFILE_WAIT_DURATION = 5
 
+
 class NamedPipeRedirections:
     """List of named pipes"""
+
     def __init__(self):
         self.outputRedirections: List[Path] = []
         self.errorRedirections: List[Path] = []
 
+    def redirections(self):
+        return itertools.chain(self.outputRedirections, self.errorRedirections)
+
 EMPTY_REDIRECTIONS = NamedPipeRedirections()
 
+
 class CommandPart:
-  def forEach(self, f: Callable[["CommandPart"], None]):
-      raise NotImplementedError()
+    def __init__(self):
+        self.inputRedirect = Redirect.inherit()
+        self.outputRedirect = Redirect.inherit()
+        self.errorRedirect = Redirect.inherit()
 
-  def output(self, context: "CommandContext", out: io.TextIOBase):
-      raise NotImplementedError()
+    def forEach(self, f: Callable[["CommandPart"], None]):
+        f(self)
 
-class AbstractCommandComponent(CommandPart): pass
+    def output(self, context: "CommandContext", out: io.TextIOBase):
+        raise NotImplementedError("output for %s" % self.__class__)
 
-class CommandContext: 
+
+class AbstractCommandComponent(CommandPart):
+    pass
+
+
+class CommandContext:
     def __init__(self, workspace: Workspace, connector: Connector, path: Path, name: str, parameters: PyObject):
         self.workspace = workspace
         self.connector = connector
         self.path = path
         self.name = name
         self.parameters = parameters
-        self.namedPipeRedirectionsMap:Dict["CommandPart", NamedPipeRedirections] = {}
+        self.namedPipeRedirectionsMap: Dict["CommandPart", NamedPipeRedirections] = {}
+        self.auxiliary:Dict[str,int] = {}
+
+    def getAuxiliaryFile(self, name, suffix):
+        ix = self.auxiliary.get(name, 0) + 1
+        self.auxiliary[name] = ix
+        return self.path / ("%s-%d%s" % (name, ix, suffix))
+        
+    def relpath(self, path):
+        return self.connector.resolve(path, self.path)
 
     def getNamedRedirections(self, key: "CommandPart", create: bool) -> NamedPipeRedirections:
-        x = self.namedPipeRedirectionsMap.get(key, None)        
+        x = self.namedPipeRedirectionsMap.get(key, None)
         if x:
             return x
 
@@ -53,136 +77,181 @@ class CommandContext:
         self.namedPipeRedirectionsMap[key] = x
         return x
 
+    def writeRedirection(self, out, redirect, stream):  
+        raise NotImplementedError()
+
+    def printRedirections(self, stream: int, out, outputRedirect: Redirect, outputRedirects):
+        raise NotImplementedError()
+
+
 class CommandPath(AbstractCommandComponent):
     def __init__(self, path: Union[Path, str]):
+        super().__init__()
         self.path = Path(path)
+
+    def output(self, context, out):
+        out.write(context.relpath(self.path))
+
+    def __repr__(self):
+        return "Path({})".format(self.path)
 
 class CommandString(AbstractCommandComponent):
     def __init__(self, string: str):
+        super().__init__()
         self.string = string
 
+    def output(self, context, out):
+        out.write(self.string)
+
+    def __repr__(self):
+        return "String({})".format(self.string)
+
 class CommandParameters(AbstractCommandComponent):
-    def output(self, context: CommandContext, out: io.TextIOBase): 
-        raise NotImplementedError()
+    def output(self, context: CommandContext, out: io.TextIOBase):
+        path = context.getAuxiliaryFile("params", ".json")
+        with path.open("wt") as fileout:
+            context.parameters.__xpm__.outputjson(fileout, context)
+        out.write(context.relpath(path))
 
 class AbstractCommand(CommandPart):
+    def reorder(self): raise NotImplementedError()
+
     def output(self, context: CommandContext, out: io.TextIOBase):
-        raise NotImplementedError()
+        list = self.reorder()
+        detached = 0
+
+        if len(list) > 1:    
+            out.write("(\n")
+        
+        for command in list:
+            # Write files
+            namedRedirections = context.getNamedRedirections(command, False)
+
+            # Write named pipes
+            def mkfifo(file: Path):
+                out.write(" mkfifo {}" % context.relpath(file))
+
+            for file in namedRedirections.redirections():
+                mkfifo(file)
+
+            if command.inputRedirect.type == RedirectType.FILE:      
+                out.write(" cat {} | ".format(context.relpath(command.inputRedirect.path)))
+
+            command.output(context, out)
+
+            context.printRedirections(1, out, command.outputRedirect,
+                                namedRedirections.outputRedirections)
+            context.printRedirections(2, out, command.errorRedirect,
+                                namedRedirections.errorRedirections)
+
+
+            out.write("|| checkerror \"${PIPESTATUS[@]}\" || exit $?")
+
+        # Monitors detached jobs
+        for i in range(detached):
+            out.write("wait $CHILD_{} || exit $?%\n".format(i))
+
+
+        if len(list) > 1:    
+            out.write(")\n")
+
 
 class Command(AbstractCommand):
     def __init__(self):
+        super().__init__()
         self.components = []
 
     def add(self, component: AbstractCommandComponent):
         self.components.append(component)
 
-class CommandLine():
+    def __repr__(self):
+        return "Command({})".format(",".join(str(c) for c in self.components))
+
+    def output(self, context, out):  
+        first = True
+        for c in self.components:
+            if first: 
+                first = False
+            else:
+                out.write(" ")
+            c.output(context, out)
+
+    def forEach(self, f: Callable[["CommandPart"], None]):
+        f(self)
+        for c in self.components:
+            c.forEach(f)
+
+
+class CommandLine(AbstractCommand):
     """A command line is composed of one or more commands"""
+
     def __init__(self):
+        super().__init__()
         self.commands = []
 
     def add(self, command: Command):
         self.commands.append(command)
 
+    def forEach(self, f: Callable[["CommandPart"], None]):
+        f(self)
+        for command in self.commands:
+            command.forEach(f)
 
+    def reorder(self): 
+        return self.commands
 
+class CommandLineJob(Job):
+    def __init__(self, commandline: CommandLine, parameters, workspace=None, launcher=None):
+        super().__init__(parameters, workspace=workspace, launcher=launcher)
+        self.commandline = commandline
 
-class CommandLineJob(Job): 
+    def run(self, locks):
+        # Use the lock during preparation
+        logger.info("Running job %s...", self)
 
-    def run(self, jobLock, locks):
-        with jobLock.previous():
-            # Use the lock during preparation
-            logger.info("Running job %s...", self)
+        scriptbuilder = self.launcher.scriptbuilder()
+        processbuilder = self.launcher.processbuilder()
+        connector = self.launcher.connector
+        donepath = self.donepath
 
-            scriptBuilder = self.launcher.scriptbuilder()
-            processBuilder = self.launcher.processbuilder()
-            connector = self.launcher.connector()
-            donepath = self.job.donepath
+        # Lock the job and check done again (just in case)
+        logger.debug("Making directories job %s...", self.jobpath)
+        directory = self.jobpath.parent
+        directory.mkdir(parents=True, exist_ok=True)
 
-            # Check if already done
-            def check():
-                if donepath.is_file():      
-                    logger.info("Job %s is already done", self)
-                    job.state = JobState.DONE
-                    self.job.scheduler.jobfinished(self.job)
-                    return True
-
-                # check if done
-                self.process = self.launcher.check(self)
-                if self.process:      
-                    waitUntilFinished()
-
-                return False
-
-            if check():
-                return
-
-            # Lock the job and check done again (just in case)
-            logger.debug("Making directories job %s...", self.locator)
-            directory = self.locator.parent
-            directory.mkdir(directory, parents_ok=True, exist_ok=False)
-
-            # Lock
-            lockPath = self.job.lockpath
-            lock = self.launcher.connector.lock(lockPath, LOCKFILE_WAIT_DURATION)
-            if not lock:    
-                # FIXME: put on hold for a while
-                logger.warn("Could not lock %s", self.locator)
-                return
-
-
-            # Check again if done (now that we have locked everything)
-            if check():
-                return
+        with connector.lock(self.lockpath, LOCKFILE_WAIT_DURATION) as out:
+            # Check again if done (now that we have locked)
+            if donepath.is_file():
+                logger.info("Job %s is already done", self)
+                job.state = JobState.DONE
+                self.scheduler.jobfinished(self)
+                return True
 
             # Now we can write the script
-            scriptBuilder.command = self.command
-            scriptBuilder.lockFiles.push_back(lockPath)
-            scriptPath = scriptBuilder.write(self.workspace, connector, self.locator, self)
-            startlock = self.launcher.connector().lock(self.job.startlockpath, LOCKFILE_WAIT_DURATION)
-            if not startlock:    
-                logger.warn("Could not lock start file %s", self.locator)
-                return
+            scriptbuilder.lockfiles.append(self.lockpath)
+            scriptbuilder.command = self.commandline
+            scriptPath = scriptbuilder.write(self)
 
+            logger.info("Starting job %s", self.jobpath)
+            processbuilder.environ = self.launcher.environ
+            processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
+            processbuilder.stderr = Redirect.file(self.stderr)
+            processbuilder.stdout = Redirect.file(self.stdout)
 
-            logger.info("Starting job %s", self.locator)
-            processBuilder.environment = self.launcher.environment()
-            processBuilder.command.push_back(self.launcher.connector().resolve(scriptPath))
-            processBuilder.stderr = Redirect.file(connector.resolve(directory.resolve({self.locator.name() + ".err"})))
-            processBuilder.stdout = Redirect.file(connector.resolve(directory.resolve({self.locator.name() + ".out"})))
+        self.state = JobState.RUNNING
+        self._process = processbuilder.start()
+        return self._process
 
-            self.process = processBuilder.start()
-            self.state = JobState.RUNNING
-
-            # Avoid to remove the locks ourselves
-            startlock.detachState(True)
-            lock.detachState(True)
-
-            # Unlock since started
-            jobLock.unlock()
-
-        # Wait for end of execution
-        def waitUntilFinished():
-            logger.info("Waiting for job %s to finish", self.locator)
-            exitCode = -1
-            # try      exitCode = self.process.exitCode()
-            # } catch(exited_error &)      # Could not read the exit value, fallback
-            #     logger.info("Process exited before wait process was in place, from file")
-            #     codepath = pathTo(EXIT_CODE_PATH)
-            #     istream = connector.istream(codepath)
-            #     *istream >> exitCode
-            # } catch(...)      logger.warn("Unhandled exception while waiting for job to finish: setting state to fail")
-            # state(exitCode == 0 ? JobState.DONE : JobState.ERROR)
-            # logger.info("Job %s finished with exit code %s (state %s)", self.locator, exitCode, state())
-
-        waitUntilFinished()
+    # def wait(self):
+    #     logger.info("Waiting for job %s to finish", self.jobpath)
+    #     exitCode = self.process.exitCode()
+    #     self.state = JobState.DONE if exitCode == 0 else JobState.ERROR
+    #     logger.info("Job %s finished with exit code %s (state %s)", self.jobpath, exitCode, self.state)
 
 
 class CommandLineTask():
     def __init__(self, commandline: CommandLine):
         self.commandline = commandline
-        
 
     def __call__(self, pyobject, *, launcher=None, workspace=None) -> Job:
-        return CommandLineJob(pyobject, launcher=launcher, workspace=workspace)
-
+        return CommandLineJob(self.commandline, pyobject, launcher=launcher, workspace=workspace)

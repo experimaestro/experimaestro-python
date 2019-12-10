@@ -4,6 +4,7 @@ TODO: re-organize
 """
 
 import json
+import io
 import sys
 import inspect
 import os.path as op
@@ -14,6 +15,8 @@ import re
 from typing import Union, Dict, List, Set
 import hashlib
 import struct
+import jsonstreams
+
 from experimaestro.utils import logger
 
 # --- Initialization
@@ -124,17 +127,23 @@ class ObjectType(Type):
     """The type of PyObject"""
 
     REGISTERED:Dict[Typename, "PyObject"] = {}
+
     def __init__(self, objecttype: "PyObject", typename, description):
         super().__init__(typename, description)
         self.objecttype = objecttype
 
         if self.typename in ObjectType.REGISTERED:
             raise Exception("Experimaestro type %s is already declared" % self.typename)
-        ObjectType.REGISTERED[self.typename] = objecttype
+        ObjectType.REGISTERED[str(self.typename)] = objecttype
 
         self.task = None
 
     def validate(self, value):
+        if isinstance(value, dict):
+            valuetype = value.get("$type", None)
+            if valuetype is None:
+                raise ValueError("Object has no $type")
+            return ObjectType.REGISTERED[valuetype](**value)
         if not isinstance(value, PyObject):
             raise ValueError("%s is not an experimaestro type or task", value)
         if not isinstance(value, self.objecttype):
@@ -243,6 +252,40 @@ class HashComputer():
         else:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
+def outputjson(jsonout, context, value, key=[]):
+    if isinstance(value, PyObject):
+        value.__xpm__._outputjson(jsonout, context, key)
+    elif isinstance(value, list):
+        with jsonout.subarray(*key) as arrayout:
+            for el in value:
+                outputjson(arrayout, context, el)
+    elif isinstance(value, dict):
+        with jsonout.subobject(*key) as objectout:
+            for name, el in value.items():
+                outputjson(objectout, context, el, [name])
+    else:
+        jsonout.write(*key, value)
+
+def updatedependencies(dependencies, value):
+    if isinstance(value, PyObject):
+        if value.__class__.__xpm__.task:
+            dependencies.add(value.__xpm__.dependency())
+        else:
+            value.__xpm__.updatedependencies(dependencies)
+    elif isinstance(value, list):
+        for el in value:
+            updatedependencies(dependencies, el)
+    elif isinstance(value, (str, int, float)):
+        pass
+    else:
+        raise NotImplementedError("update dependencies for type %s" % type(value))
+
+class FakeJob:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.stdout = self.path.with_suffix(".out")
+        self.stderr = self.path.with_suffix(".err")
+        
 class TypeInformation():
     """Holds experimaestro information for a PyObject (Type or Task)"""
 
@@ -273,9 +316,12 @@ class TypeInformation():
             if not bypass and argument.generator:
                 raise AssertionError("Property %s is read-only" % (k))
             object.__setattr__(self.pyobject, k, argument.type.validate(v))
+        elif k == "$type":
+            assert v == str(self.xpmtype.typename)
+        elif k == "$job":
+            self.job = FakeJob(v)
         else:
-            object.__setattr__(k, v)
-
+            object.__setattr__(self, k, v)
 
     def addtag(self, name, value):
         self._tags[name] = value
@@ -313,14 +359,14 @@ class TypeInformation():
                     if not argument.generator:
                         raise ValueError("Value %s is required but missing", k)
 
-    def seal(self, jobcontext: "experimaestro.job.Job"):
+    def seal(self, job: "experimaestro.job.Job"):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
         if self._sealed:
             return
 
         for k, argument in self.xpmtype.arguments.items():
             if argument.generator:
-                self.set(k, argument.generator(jobcontext), bypass=True)
+                self.set(k, argument.generator(job), bypass=True)
         self._sealed = True
 
     @property
@@ -332,13 +378,15 @@ class TypeInformation():
             self._identifier = hashcomputer.digest()
         return self._identifier
 
+    def dependency(self):
+        """Returns a dependency"""
+        from experimaestro.scheduler import JobDependency
+        assert self.job
+        return JobDependency(self.job)
+
     def updatedependencies(self, dependencies: Set["experimaestro.dependencies.Dependency"]):
-        for argument in self.xpmtype.arguments.values():
-            if isinstance(argument.type, ObjectType):
-                if argument.type.task:
-                    raise NotImplementedError(argument.type.task)
-                else:
-                    getattr(self.pyobject, argument.name).__xpm__.updatedependencies(dependencies)
+        for argument, value in self.xpmvalues():
+            updatedependencies(dependencies, value)
                 
 
     def submit(self, workspace, launcher):
@@ -364,7 +412,20 @@ class TypeInformation():
         else:
             logger.warning("Simulating: not submitting task", self.xpmtype.task)
         
+    def _outputjson_inner(self, objectout, context):
+        objectout.write("$type", str(self.xpmtype.typename))
+        if self.job:
+            objectout.write("$job", str(self.job.launcher.connector.resolve(self.job.jobpath / self.job.name)))
+        for argument, value in self.xpmvalues():
+            outputjson(objectout, context, value, [argument.name])
 
+    def outputjson(self, out: io.TextIOBase, context):
+        with jsonstreams.Stream(jsonstreams.Type.object, fd=out) as objectout:
+            self._outputjson_inner(objectout, context)
+
+    def _outputjson(self, jsonout, context, key=[]):
+        with jsonout.subobject(*key) as objectout:
+            self._outputjson_inner(objectout, context)
 
 def clone(v):
     """Clone a value"""
@@ -377,7 +438,9 @@ def clone(v):
 class PyObjectMetaclass(type):
     def __getattr__(cls, key):
         """Access to a class field"""
-        return cls.__xpm__.arguments[key]
+        if key in cls.__xpm__.arguments:
+            return cls.__xpm__.arguments[key]
+        return super().__getattr__(key)
 
 class PyObject(metaclass=PyObjectMetaclass):
     """Base type for all objects in python interface"""

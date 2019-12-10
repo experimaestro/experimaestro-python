@@ -9,7 +9,8 @@ from .workspace import Workspace
 from experimaestro.launchers import Launcher
 from .api import PyObject
 from .utils import logger
-from .dependencies import LockError, Dependency
+from .dependencies import LockError, Dependency, DependencyStatus
+from .locking import Lock
 
 class JobState(enum.Enum):
     WAITING = 0
@@ -18,8 +19,31 @@ class JobState(enum.Enum):
     DONE = 3
     ERROR = 4
 
-class Job():
+class JobLock(Lock):
+    def __init__(self, job):
+        self.job = job
+    
+    def acquire(self): 
+        return self.job.status == JobState.DONE
 
+    def release(self): 
+        return False
+
+class JobDependency(Dependency):
+    def __init__(self, job):
+        super().__init__(job)
+
+    def status(self) -> DependencyStatus:
+        if self.origin.state == JobState.DONE:
+            return DependencyStatus.OK
+        elif self.origin.state == JobState.ERROR:
+            return DependencyStatus.FAIL
+        return DependencyStatus.WAIT
+
+    def lock(self):
+        return JobLock(self.origin)
+
+class Job():
     """Context of a job"""
     def __init__(self, parameters: PyObject, *, workspace:Workspace = None, launcher:Launcher = None):
         self.workspace = workspace or Workspace.CURRENT
@@ -41,7 +65,11 @@ class Job():
         self.dependents:Set[Dependency] = set() # as source
 
         # Process
-        self.process = None
+        self._process = None
+        self.unsatisfied = 0
+
+    def __str__(self):
+        return "Job[{}]".format(self.identifier)
 
     @property
     def ready(self):
@@ -55,32 +83,35 @@ class Job():
     def identifier(self):
         return self.parameters.__xpm__.identifier.hex()
 
-    def run(self, jobLock, locks):
+    def run(self, locks):
         """Actually run the code"""
         raise NotImplementedError()
 
     def wait(self):
         raise NotImplementedError()
 
+
     @property
-    def donepath(self):
-        return self.jobpath / ("%s.done" % self.name)
+    def process(self):
+        """Returns the process"""
+        if self._process: 
+            return self._process
+        raise NotImplementedError("Should construct a new checker object")
 
     @property
     def lockpath(self):
+        """This file is used as a lock and also stores the PID of the job when running"""
         return self.jobpath / ("%s.lock" % self.name)
 
     @property
-    def startlockpath(self):
-        return self.jobpath / ("%s.startlock" % self.name)
+    def donepath(self):
+        """When a job has been successful, this file is written"""
+        return self.jobpath / ("%s.done" % self.name)
 
     @property
-    def codepath(self):
-        return self.jobpath / ("%s.code" % self.name)
-
-    @property
-    def pidpath(self):
-        return self.jobpath / ("%s.pid" % self.name)
+    def failedpath(self):
+        """When a job has been unsuccessful, this file is written with an error code inside"""
+        return self.jobpath / ("%s.failed" % self.name)
 
     @property
     def stdout(self) -> Path:
@@ -89,6 +120,23 @@ class Job():
     @property
     def stderr(self) -> Path:
         return self.jobpath / ("%s.err" % self.name)
+
+    def dependencychanged(self, dependency, oldstatus, status):
+        value = lambda s: 1 if s == DependencyStatus.OK else 0
+        self.unsatisfied -= value(status) - value(oldstatus)
+
+
+        logger.info("Job %s: unsatisfied %d", self, self.unsatisfied)
+
+        if status == DependencyStatus.FAIL:    
+            # Job completed
+            self.scheduler.jobfinished()
+            return
+
+        if self.unsatisfied == 0:    
+            logger.info("Job %s is ready to run", self)
+            self.scheduler.start(self)
+
 
 
 class Listener:
@@ -102,29 +150,8 @@ class JobError(Exception):
     def __init__(self, code):
         super.__init__("Job exited with code %d", self.code)
 
-class ForwardWith:
-    """Useful to forward the with statement in a function"""
-    def __init__(self, context):
-        self.context = context
-        self.count = 0
-
-    def __enter__(self):
-        if self.count == 0:
-            return self.context.__enter__()
-        self.count += 1
-        return self
-    
-    def previous(self):
-        self.count -= 1
-        return self
-
-    def __exit__(self, *args):
-        self.count -= 1
-        if self.count == 0:
-            logger.debug("Release lock in forward")
-            return self.context.__exit__(*args)
-
 class JobThread(threading.Thread):
+    """Job starting and monitoring thread"""
     def __init__(self, job: Job):
         super().__init__()
         self.job = job
@@ -132,7 +159,9 @@ class JobThread(threading.Thread):
     def run(self):
         locks = []
         try:
-            with ForwardWith(self.job.scheduler.cv) as joblock:
+            with self.job.scheduler.cv:
+                logger.info("Starting job %s with %d dependencies", self.job, len(self.job.dependencies))
+
                 for dependency in self.job.dependencies:
                     try:
                         locks.append(dependency.lock())
@@ -142,10 +171,13 @@ class JobThread(threading.Thread):
                         self.job.state = JobState.READY
                         return
                 
-                    self.job.scheduler.jobstarted(self.job)
-                    self.job.run(joblock, locks)
-            self.job.state = JobState.DONE
-
+                logger.info("Running job %s", self.job)
+                self.job.scheduler.jobstarted(self.job)    
+                process = self.job.run(locks)
+            
+            code = process.wait()
+            self.job.state = JobState.DONE if code == 0 else JobState.ERROR
+            
         except JobError:
             logger.warning("Error while running job")
             self.job.state = JobState.ERROR
@@ -192,7 +224,9 @@ class Scheduler():
 
     def __exit__(self, *args):
         # Wait until all tasks are completed
+        logger.info("Waiting that experiment %s finishes", self.name)
         with self.cv:
+            logger.info("Waiting for %d jobs to complete", len(self.waitingjobs))
             self.cv.wait_for(lambda : not self.waitingjobs)
 
         # Set back the old scheduler, if any
@@ -200,16 +234,18 @@ class Scheduler():
         Scheduler.CURRENT = self.old_experiment
 
     def submit(self, job: Job):
-        if self.exitmode:
-            logger.warning("Exit mode: not submitting")
-            return
-
         with self.cv:
+            if self.exitmode:
+                logger.warning("Exit mode: not submitting")
+                return
+
             job.starttime = time.time()
             job.scheduler = self
 
             # Add dependencies, and add to blocking resources
+            job.unsatisfied = len(job.dependencies)
             for dependency in job.dependencies:
+                dependency.target = job
                 dependency.origin.dependents.add(dependency)
                 dependency.check()
 
@@ -238,12 +274,11 @@ class Scheduler():
     def jobfinished(self, job: Job):
         """Called when the job is finished (state = error or done)"""
         with self.cv:
+            logger.info("Job %s has finished", job)
             self.waitingjobs.remove(job)
-            self.cv.notify_all()
             for dependency in job.dependents:
                 dependency.check()
-
-            
+            self.cv.notify_all()
 
         for listener in self.listeners:
             listener.job_state(job)
