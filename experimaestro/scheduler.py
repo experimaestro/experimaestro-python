@@ -18,6 +18,7 @@ class JobState(enum.Enum):
     DONE = 3
     ERROR = 4
 
+
 class JobLock(Lock):
     def __init__(self, job):
         self.job = job
@@ -87,8 +88,12 @@ class Job():
         raise NotImplementedError()
 
     def wait(self):
-        raise NotImplementedError()
+        """Waiting for job to finish"""
+        with self.scheduler.cv:
+            self.scheduler.cv.wait_for(lambda: self.state in [JobState.ERROR, JobState.DONE])
 
+        logger.info("Waiting for job %s to finish", self.jobpath)
+        return self.state
 
     @property
     def process(self):

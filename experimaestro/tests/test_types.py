@@ -1,6 +1,6 @@
 # --- Task and types definitions
 
-import unittest
+import pytest
 import os
 from pathlib import Path
 import logging
@@ -9,19 +9,12 @@ from experimaestro.click import cli, TASK_PREFIX
 from experimaestro import Workspace
 
 from .utils import TemporaryExperiment
+from experimaestro.scheduler import JobState
+
 from .definitions_types import *
 
-# --- Defines the experiment
-
-class MainTest(unittest.TestCase):
-    @unittest.skip("Disabled for now")
-    def test_simple(self):
-        with TemporaryExperiment("simple") as xp:
-            self.assertEqual(TestInteger(value=5).submit()._job.wait(), JOB_DONE, "test integer failed")
-            self.assertEqual(TestFloat(value=5.1).submit()._job.wait(), JOB_DONE, "test float failed")
-
-if __name__ == '__main__':
-    import sys
-    logging.warn(sys.path)
-    unittest.main()
+def test_simple():
+    with TemporaryExperiment("simple") as xp:
+        assert IntegerTask(value=5).submit().__xpm__.job.wait() == JobState.DONE
+        assert FloatTask(value=5.1).submit().__xpm__.job.wait() ==  JobState.DONE
 

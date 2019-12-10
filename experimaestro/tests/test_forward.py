@@ -1,4 +1,3 @@
-import unittest
 from experimaestro import *
 from experimaestro.click import cli, forwardoption
 import click
@@ -12,14 +11,8 @@ class MyModel: pass
 def experiment(epochs):
     return(epochs)
 
-class MainTest(unittest.TestCase):
-    @unittest.skip("Disabled for now")
-    def test_main(self):
-        epochs = cli(["experiment", "--epochs", "100"], standalone_mode=False)
-        self.assertEqual(epochs, 100)
+def test_main():
+    epochs = cli(["experiment", "--epochs", "100"], standalone_mode=False)
+    assert epochs == 100
 
-if __name__ == '__main__':
-    import sys
-    logging.warn(sys.path)
-    unittest.main()
 

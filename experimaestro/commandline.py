@@ -242,11 +242,6 @@ class CommandLineJob(Job):
         self._process = processbuilder.start()
         return self._process
 
-    # def wait(self):
-    #     logger.info("Waiting for job %s to finish", self.jobpath)
-    #     exitCode = self.process.exitCode()
-    #     self.state = JobState.DONE if exitCode == 0 else JobState.ERROR
-    #     logger.info("Job %s finished with exit code %s (state %s)", self.jobpath, exitCode, self.state)
 
 
 class CommandLineTask():
