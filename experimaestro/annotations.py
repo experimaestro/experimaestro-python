@@ -29,7 +29,7 @@ class Type:
     def __call__(self, objecttype):
         # Check if conditions are fullfilled
         if self.typename is None:
-            self.typename = Typename("%s.%s" % (objecttype.__module__, objecttype.__name__))
+            self.typename = Typename("%s.%s" % (objecttype.__module__.lower(), objecttype.__name__.lower()))
 
         
         # --- Add PyObject as an ancestor of t if needed
@@ -63,7 +63,7 @@ class Choice(api.TypeProxy):
 
 class Task(Type):
     """Register a task"""
-    def __init__(self, typename, scriptpath=None, pythonpath=None, prefix_args=[], description=None, associate=None):
+    def __init__(self, typename=None, scriptpath=None, pythonpath=None, prefix_args=[], description=None, associate=None):
         super().__init__(typename, description)
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
         self.scriptpath = scriptpath

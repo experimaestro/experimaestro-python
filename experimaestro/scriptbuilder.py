@@ -166,7 +166,7 @@ class ShScriptBuilder:
             out.write(") & \n")
 
             # Retrieve PID
-            out.write("PID=$not\n")
+            out.write("PID=$!\n")
             out.write("wait $PID\n")
             out.write("code=$?\n")
             out.write("if test $code -ne 0; then\n")

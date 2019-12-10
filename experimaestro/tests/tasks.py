@@ -19,5 +19,11 @@ class Concat:
                 says.append(fp.read().strip())
         print(" ".join(says))
 
+@Task()
+class Fail:
+    def execute(self):
+        raise AssertionError("Failing")
+
+
 if __name__ == "__main__":
     parse_commandline()

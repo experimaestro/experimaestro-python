@@ -278,7 +278,7 @@ class Scheduler():
     def jobfinished(self, job: Job):
         """Called when the job is finished (state = error or done)"""
         with self.cv:
-            logger.info("Job %s has finished", job)
+            logger.info("Job %s has finished (%s)", job, job.state)
             self.waitingjobs.remove(job)
             for dependency in job.dependents:
                 dependency.check()
