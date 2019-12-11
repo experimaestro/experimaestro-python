@@ -26,6 +26,10 @@ jobs:
         name: run tests
         command: |
           tox -e ALL
+    
+    - store_test_results:
+        path: test-reports
+
     - run:
         name: Upload
         command: |
