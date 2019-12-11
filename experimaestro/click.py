@@ -2,7 +2,6 @@ import click
 from experimaestro import parse_commandline
 
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
-TASK_PREFIX=["xpm", "--"]
 
 @click.group()
 def cli():

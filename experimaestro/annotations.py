@@ -63,11 +63,10 @@ class Choice(api.TypeProxy):
 
 class Task(Type):
     """Register a task"""
-    def __init__(self, typename=None, scriptpath=None, pythonpath=None, prefix_args=[], description=None, associate=None):
+    def __init__(self, typename=None, scriptpath=None, pythonpath=None, description=None, associate=None):
         super().__init__(typename, description)
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
         self.scriptpath = scriptpath
-        self.prefix_args = prefix_args
 
     def __call__(self, objecttype):
         # Register the type
@@ -87,9 +86,15 @@ class Task(Type):
         # Construct command       
         command = commandline.Command()
         command.add(commandline.CommandPath(self.pythonpath))
-        command.add(commandline.CommandPath(op.realpath(self.scriptpath)))
-        for arg in self.prefix_args:
-            command.add(commandline.CommandString(arg))
+        command.add(commandline.CommandString("-m"))
+        command.add(commandline.CommandString("experimaestro"))
+        command.add(commandline.CommandString("run"))
+        if objecttype.__module__ and objecttype.__module__ != "__main__":
+            command.add(commandline.CommandString(objecttype.__module__))
+        else:
+            command.add(commandline.CommandString("--file"))
+            command.add(commandline.CommandPath(objecttype.__file__))
+
         command.add(commandline.CommandString(str(self.typename)))
         command.add(commandline.CommandParameters())
         commandLine = commandline.CommandLine()

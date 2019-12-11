@@ -7,7 +7,7 @@ import pytest
 
 from experimaestro import *
 from experimaestro.scheduler import JobState
-from experimaestro.click import cli, TASK_PREFIX
+from experimaestro.click import cli
 
 from .utils import TemporaryDirectory, TemporaryExperiment
 

@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import logging
 
-from experimaestro.click import cli, TASK_PREFIX
 from experimaestro import Workspace
 
 from .utils import TemporaryExperiment
