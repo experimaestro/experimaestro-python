@@ -350,7 +350,7 @@ class TypeInformation():
         tags.update(self._tags)
         for argument, value in self.xpmvalues():
             if isinstance(value, PyObject):
-                value.tags(value, tags)
+                value.__xpm__.tags(tags)
         return tags
 
 
