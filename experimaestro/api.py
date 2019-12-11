@@ -455,7 +455,7 @@ class PyObjectMetaclass(type):
         """Access to a class field"""
         if key in cls.__xpm__.arguments:
             return cls.__xpm__.arguments[key]
-        return super().__getattr__(key)
+        return type.__getattribute__(cls, key)
 
 class PyObject(metaclass=PyObjectMetaclass):
     """Base type for all objects in python interface"""
