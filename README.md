@@ -12,19 +12,17 @@ Full documentation can be found in [https://experimaestro.github.io/experimaestr
 
 # Install
 
-## From binary wheel
-
-Binary wheels are available with a recent version of pip.
-
-## From source
-
-Experimaestro depends on external libraries [Poco](https://pocoproject.org/) and [libssh](https://www.libssh.org/). 
-You can install them using
-
-- on Mac or Linux (user) `brew install poco libssh` 
-- on Debian/Ubuntu Linux (root) `apt-get install libpoco-dev libssh-dev`
+## With pip
 
 You can then install the package using `pip install experimaestro`
+
+## Develop
+
+Checkout the git directory, then
+
+```
+pip install -e .
+```
 
 # Example
 
