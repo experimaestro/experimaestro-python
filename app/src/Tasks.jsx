@@ -10,9 +10,9 @@ import { withStyles } from '@material-ui/core/styles';
 import TextField from '@material-ui/core/TextField';
 
 import { type State, type Jobs } from './reducer'
-import confirm from 'util/confirm';
-import client from 'client'
-import Theme from 'theme'
+import confirm from './util/confirm';
+import client from './client'
+import Theme from './theme'
 import TaskDetail from './TaskDetail'
 
 type StateProps = {

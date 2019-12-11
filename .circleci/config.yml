@@ -11,13 +11,13 @@ jobs:
           echo "export PATH=/opt/python/cp37-cp37m/bin:/opt/python/cp38-cp38m/bin:/opt/python/cp36-cp36m/bin:$PATH" >> $BASH_ENV
           /opt/python/cp37-cp37m/bin/pip install tox twine
     - restore_cache:
-        key: v1-dependency-cache-{{ checksum "setup.cfg" }}
+        key: v1-dependency-cache-{{ checksum "setup.cfg" }}-{{ checksum "tox.ini" }}
     - run:
         name: install python dependencies
         command: |
           tox --notest -e ALL
     - save_cache:
-        key: v1-dependency-cache-{{ checksum "setup.cfg" }}
+        key: v1-dependency-cache-{{ checksum "setup.cfg" }}-{{ checksum "tox.ini" }}
         paths:
         - .tox/py36
         - .tox/py37

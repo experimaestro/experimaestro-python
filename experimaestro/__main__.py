@@ -48,7 +48,7 @@ def run(file, path, taskid, parameters):
     """Run a task"""
 
     if file:
-        loader = importlib.machinery.SourceFileLoader(path.name, path)
+        loader = importlib.machinery.SourceFileLoader(path, path)
         mod = loader.load_module()
     else:
         logging.debug("Importing module %s", path)

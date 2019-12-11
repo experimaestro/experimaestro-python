@@ -223,8 +223,7 @@ class CommandLineJob(Job):
             # Check again if done (now that we have locked)
             if donepath.is_file():
                 logger.info("Job %s is already done", self)
-                self.scheduler.jobfinished(self, JobState.DONE)
-                return True
+                return JobState.DONE
 
             # Now we can write the script
             scriptbuilder.lockfiles.append(self.lockpath)

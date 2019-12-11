@@ -31,13 +31,20 @@ class Client {
     }
 
     message = (event: any) => {    
-        store.dispatch(JSON.parse(event.data));
+        console.log("[WS:in]", event.data)
+        let action = JSON.parse(event.data)
+        if (action.error) {
+            toast.error(action.message)
+        } else {
+            store.dispatch(action)
+        }
     }
 
 
     /** Send without waiting for an answer */
     send = (data: any, message: ?string) => {
         if (this.ws.readyState === WebSocket.OPEN) {
+            console.log("[WS:out]", data)
             return this.ws.send(JSON.stringify(data));
         } else {
             console.log("Connection not ready");

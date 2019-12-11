@@ -3,7 +3,7 @@ import Dialog from 'material-ui/Dialog';
 import FlatButton from 'material-ui/FlatButton';
 import { confirmable } from 'react-confirm';
 
-import Theme from 'theme'
+import Theme from '../theme'
 
 class Confirmation extends React.Component {
 

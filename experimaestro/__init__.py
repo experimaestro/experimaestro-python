@@ -3,7 +3,7 @@ from pathlib import Path
 # Annotations
 from .annotations import Type, Task, Argument, PathArgument, ConstantArgument, Typename, Array
 from .workspace import Workspace
-from .scheduler import Scheduler, experiment
+from .scheduler import Scheduler, experiment, progress
 from .register import parse_commandline
 from .meta import __version__
 

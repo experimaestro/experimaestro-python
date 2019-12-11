@@ -42,8 +42,8 @@ Under the curtain,
 # --- Task and types definitions
 
 import logging
+from pathlib import Path
 from experimaestro import *
-from experimaestro.click import cli, TASK_PREFIX
 import click
 import time
 
@@ -60,14 +60,14 @@ def slowdown(N: int):
 hw = Typename("helloworld")
 
 @Argument("word", type=str, required=True, help="Word to generate")
-@Task(hw.say, prefix_args=TASK_PREFIX)
+@Task(hw.say)
 class Say:
     def execute(self):
         slowdown(len(self.word))
         print(self.word.upper(),)
 
 @Argument("strings", type=Array(Say), help="Strings to concat")
-@Task(hw.concat, prefix_args=TASK_PREFIX)
+@Task(hw.concat)
 class Concat:
     def execute(self):
         # We access the file where standard output was stored
@@ -81,16 +81,16 @@ class Concat:
 
 # --- Defines the experiment
 
+@click.option("--debug", is_flag=True, help="Print debug information")
 @click.option("--port", type=int, default=12345, help="Port for monitoring")
-@click.argument("workdir", type=str)
-@cli.command()
-def xp(port, workdir):
+@click.argument("workdir", type=Path)
+@click.command()
+def cli(port, workdir, debug):
     """Runs an experiment"""
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
     # Sets the working directory and the name of the xp
-    with experiment(workdir, "helloworld") as xp:
-        xp.server(port)
-
+    with experiment(workdir, "helloworld", port=12345) as xp:
         # Submit the tasks
         hello = Say(word="hello").submit()
         world = Say(word="world").submit()

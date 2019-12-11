@@ -57,3 +57,8 @@ def test_fail_dep():
 def test_restart():
     """Restarting the experiment should take back running tasks"""
     pass
+
+@pytest.mark.skip()
+def test_done():
+    """Already done job"""
+    pass

@@ -92,8 +92,9 @@ class Task(Type):
         if objecttype.__module__ and objecttype.__module__ != "__main__":
             command.add(commandline.CommandString(objecttype.__module__))
         else:
+            filepath = inspect.getfile(objecttype)
             command.add(commandline.CommandString("--file"))
-            command.add(commandline.CommandPath(objecttype.__file__))
+            command.add(commandline.CommandPath(filepath))
 
         command.add(commandline.CommandString(str(self.typename)))
         command.add(commandline.CommandParameters())

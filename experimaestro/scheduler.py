@@ -59,7 +59,6 @@ class Job():
 
         self.scheduler:Optional["Scheduler"] = None
         self.parameters = parameters   
-        self.starttime:Optional[float] = None
         self.state:JobState = JobState.WAITING
 
         # Dependencies
@@ -70,6 +69,13 @@ class Job():
         self._process = None
         self.unsatisfied = 0
 
+        # Meta-information
+        self.starttime:Optional[float] = None
+        self.submittime:Optional[float] = None
+        self.endtime:Optional[float] = None
+        self.progress = 0
+        self.tags = parameters.tags()
+        
     def __str__(self):
         return "Job[{}]".format(self.identifier)
 
@@ -179,11 +185,16 @@ class JobThread(threading.Thread):
                         return
                 
                 logger.info("Running job %s", self.job)
-                self.job.scheduler.jobstarted(self.job)    
+                self.job.scheduler.jobstarted(self.job)
+                self.job.starttime = time.time()
                 process = self.job.run(locks)
             
-            code = process.wait()
-            state = JobState.DONE if code == 0 else JobState.ERROR
+            if isinstance(process, JobState):
+                state = process
+            else:
+                code = process.wait()
+                state = JobState.DONE if code == 0 else JobState.ERROR
+
             
         except JobError:
             logger.warning("Error while running job")
@@ -218,6 +229,9 @@ class Scheduler():
         # Exit mode activated
         self.exitmode = False
 
+        # List of all jobs
+        self.jobs = set()
+
         # List of jobs
         self.waitingjobs = set()
 
@@ -246,7 +260,7 @@ class Scheduler():
                 logger.warning("Exit mode: not submitting")
                 return
 
-            job.starttime = time.time()
+            job.submittime = time.time()
             job.scheduler = self
 
             # Add dependencies, and add to blocking resources
@@ -256,6 +270,7 @@ class Scheduler():
                 dependency.origin.dependents.add(dependency)
                 dependency.check()
 
+            self.jobs.add(job)
             self.waitingjobs.add(job)
 
             for listener in self.listeners:
@@ -281,6 +296,7 @@ class Scheduler():
     def jobfinished(self, job: Job, state: JobState):
         """Called when the job is finished (state = error or done)"""
         with self.cv:
+            job.endtime = time.time()
             job.state = state
             logger.debug("Job %s has finished (%s)", job, job.state)
             self.waitingjobs.remove(job)
@@ -291,18 +307,34 @@ class Scheduler():
         for listener in self.listeners:
             listener.job_state(job)
 
+    def addlistener(self, listener: Listener):
+        self.listeners.add(listener)
+    def removelistener(self, listener: Listener):
+        self.listeners.remove(listener)
+
 class experiment:
     """Experiment environment"""
     def __init__(self, path: Path, name: str, *, port:int=None):
+        from experimaestro.server import Server
+    
         self.workspace = Workspace(path)
-        self.experiment = Scheduler(name)
-        self.port = port
+        self.scheduler = Scheduler(name)
+        self.server = Server(self.scheduler, port) if port else None
 
     def __enter__(self):
+        if self.server:
+            self.server.start()
+
         self.workspace.__enter__()
-        self.experiment.__enter__()
+        self.scheduler.__enter__()
         return self.workspace
 
     def __exit__(self, *args):
-        self.experiment.__exit__()
+        self.scheduler.__exit__()
         self.workspace.__exit__()
+        if self.server:
+            self.server.stop()
+
+
+def progress(value: float):
+    logger.debug("Got progress value of %s", value)
