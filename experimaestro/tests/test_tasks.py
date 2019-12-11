@@ -52,3 +52,8 @@ def test_fail_dep():
 
     assert fail.__xpm__.job.wait() == JobState.ERROR
     assert dep.__xpm__.job.wait() == JobState.ERROR
+
+@pytest.mark.skip()
+def test_restart():
+    """Restarting the experiment should take back running tasks"""
+    pass

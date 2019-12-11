@@ -136,7 +136,7 @@ class ObjectType(Type):
         super().__init__(typename, description)
         self.objecttype = objecttype
 
-        if self.typename in ObjectType.REGISTERED:
+        if str(self.typename) in ObjectType.REGISTERED:
             raise Exception("Experimaestro type %s is already declared" % self.typename)
         ObjectType.REGISTERED[str(self.typename)] = objecttype
         self.task = None

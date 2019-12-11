@@ -2,9 +2,11 @@
 
 import unittest
 from pathlib import Path
-from experimaestro import Type, Argument, PathArgument, ConstantArgument
+from experimaestro import Type, Typename, Argument, PathArgument, ConstantArgument
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
+
+valns = Typename("validation")
 
 @Argument("value", type=int)
 @Type()
@@ -62,7 +64,7 @@ class MainTest(unittest.TestCase):
     def test_path(self):
         """Test of @PathArgument"""
         @PathArgument("value", "file.txt")
-        @Type()
+        @Type(valns.path.a)
         class A: pass
 
         a = A()
@@ -81,7 +83,7 @@ class MainTest(unittest.TestCase):
     def test_constant(self):
         """Test of @ConstantArgument"""
         @ConstantArgument("value", 1)
-        @Type()
+        @Type(valns.constant.a)
         class A: pass
 
         a = A()
