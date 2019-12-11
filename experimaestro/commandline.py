@@ -223,8 +223,7 @@ class CommandLineJob(Job):
             # Check again if done (now that we have locked)
             if donepath.is_file():
                 logger.info("Job %s is already done", self)
-                job.state = JobState.DONE
-                self.scheduler.jobfinished(self)
+                self.scheduler.jobfinished(self, JobState.DONE)
                 return True
 
             # Now we can write the script

@@ -26,6 +26,11 @@ class Typename():
     def __init__(self, name: str):
         self.name = name
 
+    def __hash__(self):
+        return self.name.__hash__()
+    def __eq__(self, other):
+        return other.name.__eq__(self.name)
+
     def __getattr__(self, key):
         return self(key)
 
@@ -134,7 +139,6 @@ class ObjectType(Type):
         if self.typename in ObjectType.REGISTERED:
             raise Exception("Experimaestro type %s is already declared" % self.typename)
         ObjectType.REGISTERED[str(self.typename)] = objecttype
-
         self.task = None
 
     def validate(self, value):
@@ -183,6 +187,8 @@ class FloatType(Type):
 @definetype(Path)
 class PathType(Type): 
     def validate(self, value):
+        if isinstance(value, dict) and value.get("$type", None) == "path":
+            return Path(value.get("$value"))
         return Path(value)
 
 AnyType = Type("any")
@@ -262,8 +268,14 @@ def outputjson(jsonout, context, value, key=[]):
         with jsonout.subobject(*key) as objectout:
             for name, el in value.items():
                 outputjson(objectout, context, el, [name])
-    else:
+    elif isinstance(value, Path):
+        with jsonout.subobject(*key) as objectout:
+            objectout.write("$type", "path")
+            objectout.write("$value", str(value))
+    elif isinstance(value, (int, float, str)):
         jsonout.write(*key, value)
+    else:
+        raise NotImplementedError("Cannot serialize objects of type %s", type(value))
 
 def updatedependencies(dependencies, value):
     if isinstance(value, PyObject):
@@ -274,7 +286,7 @@ def updatedependencies(dependencies, value):
     elif isinstance(value, list):
         for el in value:
             updatedependencies(dependencies, el)
-    elif isinstance(value, (str, int, float)):
+    elif isinstance(value, (str, int, float, Path)):
         pass
     else:
         raise NotImplementedError("update dependencies for type %s" % type(value))
@@ -287,6 +299,9 @@ class FakeJob:
         
 class TypeInformation():
     """Holds experimaestro information for a PyObject (Type or Task)"""
+
+    # Set to true when loading from JSON
+    LOADING = False
 
     def __init__(self, pyobject):
         # The underlying pyobject and XPM type
@@ -449,16 +464,17 @@ class PyObject(metaclass=PyObjectMetaclass):
         assert self.__class__.__xpm__, "No XPM type associated with this XPM object"
 
         # Add configuration
-        self.__xpm__ = TypeInformation(self)
+        xpm = TypeInformation(self)
+        self.__xpm__ = xpm
 
         # Initialize with arguments
-        for k, v in kwargs.items():
-            self.__setattr__(k, v)
+        for name, value in kwargs.items():
+            xpm.set(name, value, bypass=TypeInformation.LOADING)
 
         # Initialize with default arguments
-        for k, v in self.__class__.__xpm__.arguments.items():
-            if k not in kwargs and v.default is not None:
-                self.__setattr__(k, clone(v.default))
+        for name, value in self.__class__.__xpm__.arguments.items():
+            if name not in kwargs and value.default is not None:
+                self.set(name, clone(value.default))
 
     def __setattr__(self, name, value):
         if name != "__xpm__":

@@ -14,5 +14,3 @@ def experiment(epochs):
 def test_main():
     epochs = cli(["experiment", "--epochs", "100"], standalone_mode=False)
     assert epochs == 100
-
-

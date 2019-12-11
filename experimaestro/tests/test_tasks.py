@@ -29,14 +29,26 @@ def test_simple():
     
 def test_not_submitted():
     """A not submitted task should not be accepted as an argument"""
-    with TemporaryExperiment("helloworld"):
+    with TemporaryExperiment("helloworld", maxwait=2):
         hello = Say(word="hello")
         with pytest.raises(ValueError):
             Concat(strings=[hello])
 
 def test_fail():
     """Failing task... should fail"""
-    with TemporaryExperiment("failing"):
-        failing = Fail().submit()
+    with TemporaryExperiment("failing", maxwait=2):
+        fail = Fail().submit()
+        fail.touch()
 
-    assert failing.__xpm__.job.wait() == JobState.ERROR
+    assert fail.__xpm__.job.wait() == JobState.ERROR
+
+
+def test_fail_dep():
+    """Failing task... should cancel dependent"""
+    with TemporaryExperiment("failingdep"):
+        fail = Fail().submit()
+        dep = FailConsumer(fail=fail).submit()
+        fail.touch()
+
+    assert fail.__xpm__.job.wait() == JobState.ERROR
+    assert dep.__xpm__.job.wait() == JobState.ERROR

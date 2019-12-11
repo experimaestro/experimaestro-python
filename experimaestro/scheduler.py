@@ -18,6 +18,8 @@ class JobState(enum.Enum):
     DONE = 3
     ERROR = 4
 
+    def notstarted(self):
+        return self.value <= JobState.READY.value
 
 class JobLock(Lock):
     def __init__(self, job):
@@ -90,9 +92,10 @@ class Job():
     def wait(self):
         """Waiting for job to finish"""
         with self.scheduler.cv:
+            logger.debug("Waiting for job %s to finish", self.jobpath)
             self.scheduler.cv.wait_for(lambda: self.state in [JobState.ERROR, JobState.DONE])
 
-        logger.info("Waiting for job %s to finish", self.jobpath)
+        logger.debug("Job %s finished with state %s", self, self.state)
         return self.state
 
     @property
@@ -134,7 +137,7 @@ class Job():
 
         if status == DependencyStatus.FAIL:    
             # Job completed
-            self.scheduler.jobfinished()
+            self.scheduler.jobfinished(self, JobState.ERROR)
             return
 
         if self.unsatisfied == 0:    
@@ -180,19 +183,19 @@ class JobThread(threading.Thread):
                 process = self.job.run(locks)
             
             code = process.wait()
-            self.job.state = JobState.DONE if code == 0 else JobState.ERROR
+            state = JobState.DONE if code == 0 else JobState.ERROR
             
         except JobError:
             logger.warning("Error while running job")
-            self.job.state = JobState.ERROR
+            state = JobState.ERROR
 
         except:
             logger.warning("Error while running job (in experimaestro)", exc_info=True)
-            self.job.state = JobState.ERROR
+            state = JobState.ERROR
 
         finally:
-            if self.job.state in [JobState.DONE, JobState.ERROR]:
-                self.job.scheduler.jobfinished(self.job)
+            if state in [JobState.DONE, JobState.ERROR]:
+                self.job.scheduler.jobfinished(self.job, state)
 
             with self.job.scheduler.cv:
                 for lock in locks:
@@ -230,7 +233,7 @@ class Scheduler():
         # Wait until all tasks are completed
         logger.info("Waiting that experiment %s finishes", self.name)
         with self.cv:
-            logger.info("Waiting for %d jobs to complete", len(self.waitingjobs))
+            logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
             self.cv.wait_for(lambda : not self.waitingjobs)
 
         # Set back the old scheduler, if any
@@ -275,10 +278,11 @@ class Scheduler():
         for listener in self.listeners:
             listener.job_state(job)
 
-    def jobfinished(self, job: Job):
+    def jobfinished(self, job: Job, state: JobState):
         """Called when the job is finished (state = error or done)"""
         with self.cv:
-            logger.info("Job %s has finished (%s)", job, job.state)
+            job.state = state
+            logger.debug("Job %s has finished (%s)", job, job.state)
             self.waitingjobs.remove(job)
             for dependency in job.dependents:
                 dependency.check()
