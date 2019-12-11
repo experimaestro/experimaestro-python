@@ -1,7 +1,8 @@
 include MANIFEST.in
 include setup.py
 
-recursive-include experimaestro *.py
+recursive-include experimaestro *.py 
+graft experimaestro/server/data
 
 global-exclude *.pyc
 global-exclude .DS_Store
