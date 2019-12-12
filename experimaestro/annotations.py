@@ -86,19 +86,7 @@ class Task(Type):
 
     def __call__(self, objecttype):
         # Register the type
-        objecttype = super().__call__(objecttype)
-        
-        if self.scriptpath is None:
-            self.scriptpath = inspect.getfile(objecttype)
-        else:
-            self.scriptpath = op.join(
-                op.dirname(inspect.getfile(objecttype)), self.scriptpath)
-
-        self.scriptpath = Path(self.scriptpath).absolute()
-
-        logger.debug("Task %s command: %s %s", objecttype, self.pythonpath,
-                     self.scriptpath)
- 
+        objecttype = super().__call__(objecttype) 
 
         # Construct command  
         _type = objecttype.__xpm__.originaltype
@@ -112,7 +100,7 @@ class Task(Type):
             logger.debug("Task: using module %s [%s]", _type.__module__, _type)
             command.add(commandline.CommandString(_type.__module__))
         else:
-            filepath = inspect.getfile(_type)
+            filepath = Path(inspect.getfile(_type)).absolute()
             logger.debug("Task: using file %s [%s]", filepath, _type)
             command.add(commandline.CommandString("--file"))
             command.add(commandline.CommandPath(filepath))
