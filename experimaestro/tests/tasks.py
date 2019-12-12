@@ -40,6 +40,11 @@ class FailConsumer:
     def execute(self):
         return True
 
+@Argument("a", int)
+@Task(tasks.method)
+def Method(a: int):
+    assert a == 1
+
 
 if __name__ == "__main__":
     parse_commandline()

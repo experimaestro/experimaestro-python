@@ -53,6 +53,14 @@ def test_fail_dep():
     assert fail.__xpm__.job.wait() == JobState.ERROR
     assert dep.__xpm__.job.wait() == JobState.ERROR
 
+def test_function():
+    """Failing task... should cancel dependent"""
+    with TemporaryExperiment("function"):
+        method = Method(a=1).submit()
+
+    assert method.__xpm__.job.wait() == JobState.DONE
+
+
 @pytest.mark.skip()
 def test_restart():
     """Restarting the experiment should take back running tasks"""

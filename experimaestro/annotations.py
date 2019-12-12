@@ -21,26 +21,42 @@ import experimaestro.commandline as commandline
 class Type:
 
     """Annotations for experimaestro types"""
-    def __init__(self, typename=None, description=None):
+    def __init__(self, typename=None, description=None, parents=[]):
         super().__init__()
         self.typename = typename
         self.description = description
+        self.parents = parents
 
     def __call__(self, objecttype):
         # Check if conditions are fullfilled
         if self.typename is None:
             self.typename = Typename("%s.%s" % (objecttype.__module__.lower(), objecttype.__name__.lower()))
 
+        originaltype = objecttype
+        
+        # --- If this is a method, encapsulate
+        if inspect.isfunction(objecttype):
+            objecttype = api.getfunctionpyobject(objecttype, self.parents)
         
         # --- Add PyObject as an ancestor of t if needed
-        if not issubclass(objecttype, api.PyObject):
-            __bases__ = (api.PyObject, )
-            if objecttype.__bases__ != (object, ):
-                __bases__ += objecttype.__bases__
-            __dict__ = {key: value for key, value in objecttype.__dict__.items() if key not in ["__dict__"]}
-            objecttype = type(objecttype.__name__, __bases__, __dict__)
+        elif inspect.isclass(objecttype):
+            assert not self.parents, "parents can be used only for functions"
+            if not issubclass(objecttype, api.PyObject):
+                __bases__ = (api.PyObject, )
+                if objecttype.__bases__ != (object, ):
+                    __bases__ += objecttype.__bases__
+                __dict__ = {key: value for key, value in objecttype.__dict__.items() if key not in ["__dict__"]}
+                objecttype = type(objecttype.__name__, __bases__, __dict__)
 
-        objecttype.__xpm__ = api.ObjectType(objecttype, self.typename, self.description)
+
+        else:
+            raise ValueError("Cannot use type %s as a type/task" % objecttype)
+
+        logging.debug("Registering %s", self.typename)
+        
+        xpmtype = api.ObjectType(objecttype, self.typename, self.description)
+        objecttype.__xpm__ = xpmtype
+        xpmtype.originaltype = originaltype
         return objecttype
 
 
@@ -83,16 +99,21 @@ class Task(Type):
         logger.debug("Task %s command: %s %s", objecttype, self.pythonpath,
                      self.scriptpath)
  
-        # Construct command       
+
+        # Construct command  
+        _type = objecttype.__xpm__.originaltype
         command = commandline.Command()
         command.add(commandline.CommandPath(self.pythonpath))
         command.add(commandline.CommandString("-m"))
         command.add(commandline.CommandString("experimaestro"))
         command.add(commandline.CommandString("run"))
-        if objecttype.__module__ and objecttype.__module__ != "__main__":
-            command.add(commandline.CommandString(objecttype.__module__))
+
+        if _type.__module__ and _type.__module__ != "__main__":
+            logger.debug("Task: using module %s [%s]", _type.__module__, _type)
+            command.add(commandline.CommandString(_type.__module__))
         else:
-            filepath = inspect.getfile(objecttype)
+            filepath = inspect.getfile(_type)
+            logger.debug("Task: using file %s [%s]", filepath, _type)
             command.add(commandline.CommandString("--file"))
             command.add(commandline.CommandPath(filepath))
 

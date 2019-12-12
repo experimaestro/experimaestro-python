@@ -44,6 +44,7 @@ from pathlib import Path
 from experimaestro import *
 import click
 import time
+from typing import List
 
 # --- Just to be able to monitor the tasks
 
@@ -59,22 +60,20 @@ hw = Typename("helloworld")
 
 @Argument("word", type=str, required=True, help="Word to generate")
 @Task(hw.say)
-class Say:
-    def execute(self):
-        slowdown(len(self.word))
-        print(self.word.upper(),)
+def Say(word: str):
+    slowdown(len(word))
+    print(word.upper(),)
 
 @Argument("strings", type=Array(Say), help="Strings to concat")
 @Task(hw.concat)
-class Concat:
-    def execute(self):
-        # We access the file where standard output was stored
-        says = []
-        slowdown(len(self.strings))
-        for string in self.strings:
-            with open(string._stdout()) as fp:
-                says.append(fp.read().strip())
-        print(" ".join(says))
+def Concat(strings):
+    # We access the file where standard output was stored
+    says = []
+    slowdown(len(strings))
+    for string in strings:
+        with open(string._stdout()) as fp:
+            says.append(fp.read().strip())
+    print(" ".join(says))
 
 
 # --- Defines the experiment
@@ -85,7 +84,7 @@ class Concat:
 @click.command()
 def cli(port, workdir, debug):
     """Runs an experiment"""
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    logging.getLogger().setLevel(logging.DEBUG if debug else logging.INFO)
 
     # Sets the working directory and the name of the xp
     with experiment(workdir, "helloworld", port=12345) as xp:

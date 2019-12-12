@@ -130,7 +130,7 @@ class Type():
 class ObjectType(Type):
     """The type of PyObject"""
 
-    REGISTERED:Dict[Typename, "PyObject"] = {}
+    REGISTERED:Dict[str, "PyObject"] = {}
 
     def __init__(self, objecttype: "PyObject", typename, description):
         super().__init__(typename, description)
@@ -140,6 +140,7 @@ class ObjectType(Type):
             raise Exception("Experimaestro type %s is already declared" % self.typename)
         ObjectType.REGISTERED[str(self.typename)] = objecttype
         self.task = None
+        self.originaltype = None
 
     def validate(self, value):
         if isinstance(value, dict):
@@ -453,7 +454,7 @@ def clone(v):
 class PyObjectMetaclass(type):
     def __getattr__(cls, key):
         """Access to a class field"""
-        if key in cls.__xpm__.arguments:
+        if key != "__xpm__" and key in cls.__xpm__.arguments:
             return cls.__xpm__.arguments[key]
         return type.__getattribute__(cls, key)
 
@@ -500,3 +501,14 @@ class PyObject(metaclass=PyObjectMetaclass):
 
     def _stdout(self):
         return self.__xpm__.job.stdout
+
+
+def getfunctionpyobject(function, parents):
+    class _PyObject(PyObject):
+        def execute(self):
+            kwargs = {}
+            for argument, value in self.__xpm__.xpmvalues():
+                kwargs[argument.name] = value
+            function(**kwargs)
+
+    return _PyObject

@@ -1,6 +1,6 @@
 """Tests for type validation"""
 
-import unittest
+import pytest
 from pathlib import Path
 from experimaestro import Type, Typename, Argument, PathArgument, ConstantArgument
 from experimaestro.scheduler import Job
@@ -22,75 +22,102 @@ class C: pass
 
 
 def expect_validate(method):
-    def test(self):
-        a = method(self)
+    def test():
+        a = method()
         a.__xpm__.validate()
     return test
 
 def expect_notvalidate(method):
-    def test(self):
-        try:
-            a = method(self)
+    def test():
+        with pytest.raises(ValueError):
+            a = method()
             a.__xpm__.validate()
-            self.fail("Value validated, but should not have")
-        except ValueError:
-            pass
+            assert False, "Value validated, but should not have"
     return test
 
 
 
 
-class MainTest(unittest.TestCase):
-    @expect_validate
-    def test_simple(self):
-        return A(value=1)
+@expect_validate
+def test_simple():
+    return A(value=1)
 
-    @expect_notvalidate
-    def test_missing(self):
-        return A()
+@expect_notvalidate
+def test_missing():
+    return A()
 
-    @expect_validate
-    def test_simple_nested(self):
-        b = B()
-        b.a = A(value=1)
-        return b
+@expect_validate
+def test_simple_nested():
+    b = B()
+    b.a = A(value=1)
+    return b
 
-    @expect_notvalidate
-    def test_missing_nested(self):
-        b = B()
-        b.a = A()
-        return b
+@expect_notvalidate
+def test_missing_nested():
+    b = B()
+    b.a = A()
+    return b
+    
+@expect_notvalidate
+def test_type():
+    @Type(valns.type.a)
+    class A(): pass
 
-    def test_path(self):
-        """Test of @PathArgument"""
-        @PathArgument("value", "file.txt")
-        @Type(valns.path.a)
-        class A: pass
+    @Type(valns.type.b)
+    class B: pass
 
-        a = A()
-        a.__xpm__.validate()
-        with TemporaryExperiment("constant") as ws:
-            jobcontext = Job(a)
-            a.__xpm__.seal(jobcontext)
-            self.assertTrue(isinstance(a.value, Path))
-            parents = list(a.value.parents)
-            self.assertEqual(a.value.name, "file.txt")
-            self.assertEqual(a.value.parents[0].name, a.__xpm__.identifier.hex())
-            self.assertEqual(a.value.parents[1].name, str(a.__class__.__xpm__.typename))
-            self.assertEqual(a.value.parents[2].name, "jobs")
-            self.assertEqual(a.value.parents[3], ws.path)
+    @Argument("a", A)
+    @Type(valns.type.c)
+    class C: pass
 
-    def test_constant(self):
-        """Test of @ConstantArgument"""
-        @ConstantArgument("value", 1)
-        @Type(valns.constant.a)
-        class A: pass
+    return C(a=B())
 
-        a = A()
-        a.__xpm__.validate()
-        with TemporaryExperiment("constant") as ws:
-            jobcontext = Job(a)
-            a.__xpm__.seal(jobcontext)
-            self.assertEqual(a.value, 1)
 
-        
+@expect_validate
+def test_subtype():
+    @Type(valns.subtype.a)
+    class A(): pass
+
+    @Type(valns.subtype.a1)
+    class A1(A): pass
+
+    @Argument("a", A)
+    @Type(valns.subtype.b)
+    class B: pass
+
+    return B(a=A1())
+
+
+def test_path():
+    """Test of @PathArgument"""
+    @PathArgument("value", "file.txt")
+    @Type(valns.path.a)
+    class A: pass
+
+    a = A()
+    a.__xpm__.validate()
+    with TemporaryExperiment("constant") as ws:
+        jobcontext = Job(a)
+        a.__xpm__.seal(jobcontext)
+        assert isinstance(a.value, Path)
+        parents = list(a.value.parents)
+        assert a.value.name == "file.txt"
+        assert a.value.parents[0].name == a.__xpm__.identifier.hex()
+        assert a.value.parents[1].name == str(a.__class__.__xpm__.typename)
+        assert a.value.parents[2].name == "jobs"
+        assert a.value.parents[3] == ws.path
+
+def test_constant():
+    """Test of @ConstantArgument"""
+    @ConstantArgument("value", 1)
+    @Type(valns.constant.a)
+    class A: pass
+
+    a = A()
+    a.__xpm__.validate()
+    with TemporaryExperiment("constant") as ws:
+        jobcontext = Job(a)
+        a.__xpm__.seal(jobcontext)
+        assert a.value == 1
+
+    
