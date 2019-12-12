@@ -25,7 +25,7 @@ def test_simple():
             concat = Concat(strings=[hello, world]).submit()
 
         assert concat.__xpm__.job.state == JobState.DONE
-        assert Path(concat._stdout()).read_text() == "HELLO WORLD\n"
+        assert Path(concat.stdout()).read_text() == "HELLO WORLD\n"
     
 def test_not_submitted():
     """A not submitted task should not be accepted as an argument"""

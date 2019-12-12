@@ -4,7 +4,7 @@ import click
 
 @Argument("epochs", type=int, default=100, help="Number of learning epochs")
 @Type("mymodel")
-class MyModel(api.PyObject): pass
+class MyModel(api.XPMObject): pass
 
 @forwardoption(MyModel.epochs, "epochs")
 @cli.command()

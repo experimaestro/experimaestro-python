@@ -11,7 +11,7 @@ from pathlib import Path, PosixPath
 from typing import Union, Dict
 
 import experimaestro.api as api
-from .api import PyObject, Typename
+from .api import XPMObject, Typename
 from .utils import logger
 from .workspace import Workspace
 import experimaestro.commandline as commandline
@@ -27,7 +27,7 @@ class Type:
         self.description = description
         self.parents = parents
 
-    def __call__(self, objecttype):
+    def __call__(self, objecttype, basetype=api.XPMObject):
         # Check if conditions are fullfilled
         if self.typename is None:
             self.typename = Typename("%s.%s" % (objecttype.__module__.lower(), objecttype.__name__.lower()))
@@ -36,13 +36,13 @@ class Type:
         
         # --- If this is a method, encapsulate
         if inspect.isfunction(objecttype):
-            objecttype = api.getfunctionpyobject(objecttype, self.parents)
+            objecttype = api.getfunctionpyobject(objecttype, self.parents, basetype=basetype)
         
-        # --- Add PyObject as an ancestor of t if needed
+        # --- Add XPMObject as an ancestor of t if needed
         elif inspect.isclass(objecttype):
             assert not self.parents, "parents can be used only for functions"
-            if not issubclass(objecttype, api.PyObject):
-                __bases__ = (api.PyObject, )
+            if not issubclass(objecttype, basetype):
+                __bases__ = (basetype, )
                 if objecttype.__bases__ != (object, ):
                     __bases__ += objecttype.__bases__
                 __dict__ = {key: value for key, value in objecttype.__dict__.items() if key not in ["__dict__"]}
@@ -86,7 +86,7 @@ class Task(Type):
 
     def __call__(self, objecttype):
         # Register the type
-        objecttype = super().__call__(objecttype) 
+        objecttype = super().__call__(objecttype, basetype=api.XPMTask) 
 
         # Construct command  
         _type = objecttype.__xpm__.originaltype
@@ -174,7 +174,7 @@ def tags(value):
         return value.tags()
     return value.__xpm__.sv.tags()
 
-def tagspath(value: api.PyObject):
+def tagspath(value: api.XPMObject):
     """Return the tags associated with a value"""
     p = Path()
     for key, value in value.__xpm__.sv.tags().items():

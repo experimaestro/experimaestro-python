@@ -6,7 +6,7 @@ from typing import Optional, Set
 import enum
 
 from .workspace import Workspace
-from .api import PyObject
+from .api import XPMObject
 from .utils import logger
 from .dependencies import LockError, Dependency, DependencyStatus
 from .locking import Lock
@@ -47,7 +47,7 @@ class JobDependency(Dependency):
 
 class Job():
     """Context of a job"""
-    def __init__(self, parameters: PyObject, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
+    def __init__(self, parameters: XPMObject, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
         self.workspace = workspace or Workspace.CURRENT
         assert self.workspace is not None, "No experiment has been defined"
 

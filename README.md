@@ -71,7 +71,7 @@ def Concat(strings):
     says = []
     slowdown(len(strings))
     for string in strings:
-        with open(string._stdout()) as fp:
+        with open(string.stdout()) as fp:
             says.append(fp.read().strip())
     print(" ".join(says))
 

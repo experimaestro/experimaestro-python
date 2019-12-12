@@ -118,21 +118,21 @@ class Type():
         if isinstance(key, TypeProxy):
             return key()
 
-        if isinstance(key, PyObject):
+        if isinstance(key, XPMObject):
             return key.__class__.__xpm__
         
-        if inspect.isclass(key) and issubclass(key, PyObject):
+        if inspect.isclass(key) and issubclass(key, XPMObject):
             return key.__xpm__
 
         raise Exception("No type found for %s", key)
 
 
 class ObjectType(Type):
-    """The type of PyObject"""
+    """The type of XPMObject"""
 
-    REGISTERED:Dict[str, "PyObject"] = {}
+    REGISTERED:Dict[str, "XPMObject"] = {}
 
-    def __init__(self, objecttype: "PyObject", typename, description):
+    def __init__(self, objecttype: "XPMObject", typename, description):
         super().__init__(typename, description)
         self.objecttype = objecttype
 
@@ -148,7 +148,7 @@ class ObjectType(Type):
             if valuetype is None:
                 raise ValueError("Object has no $type")
             return ObjectType.REGISTERED[valuetype](**value)
-        if not isinstance(value, PyObject):
+        if not isinstance(value, XPMObject):
             raise ValueError("%s is not an experimaestro type or task", value)
         if not isinstance(value, self.objecttype):
             raise ValueError("%s is not a subtype of %s")
@@ -240,7 +240,7 @@ class HashComputer():
             self.hasher.update(struct.pack('!d', len(value)))
             for x in value:
                 self.update(x)
-        elif isinstance(value, PyObject):
+        elif isinstance(value, XPMObject):
             xpmtype = value.__class__.__xpm__ # type: Type
             self.hasher.update(HashComputer.OBJECT_ID)
             self.hasher.update(xpmtype.typename.name.encode("utf-8"))
@@ -259,7 +259,7 @@ class HashComputer():
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
 def outputjson(jsonout, context, value, key=[]):
-    if isinstance(value, PyObject):
+    if isinstance(value, XPMObject):
         value.__xpm__._outputjson(jsonout, context, key)
     elif isinstance(value, list):
         with jsonout.subarray(*key) as arrayout:
@@ -279,7 +279,7 @@ def outputjson(jsonout, context, value, key=[]):
         raise NotImplementedError("Cannot serialize objects of type %s", type(value))
 
 def updatedependencies(dependencies, value):
-    if isinstance(value, PyObject):
+    if isinstance(value, XPMObject):
         if value.__class__.__xpm__.task:
             dependencies.add(value.__xpm__.dependency())
         else:
@@ -299,7 +299,7 @@ class FakeJob:
         self.stderr = self.path.with_suffix(".err")
         
 class TypeInformation():
-    """Holds experimaestro information for a PyObject (Type or Task)"""
+    """Holds experimaestro information for a XPMObject (Type or Task)"""
 
     # Set to true when loading from JSON
     LOADING = False
@@ -350,7 +350,7 @@ class TypeInformation():
     def tags(self, tags={}):
         tags.update(self._tags)
         for argument, value in self.xpmvalues():
-            if isinstance(value, PyObject):
+            if isinstance(value, XPMObject):
                 value.__xpm__.tags(tags)
         return tags
 
@@ -387,7 +387,7 @@ class TypeInformation():
             for k, argument in self.xpmtype.arguments.items():
                 if hasattr(self.pyobject, k):
                     value = getattr(self.pyobject, k)
-                    if isinstance(value, PyObject):
+                    if isinstance(value, XPMObject):
                         value.__xpm__.validate()
                 elif argument.required:
                     if not argument.generator:
@@ -470,14 +470,14 @@ def clone(v):
         return [clone(x) for x in v]
     raise NotImplementedError("For type %s" % v)
 
-class PyObjectMetaclass(type):
+class XPMObjectMetaclass(type):
     def __getattr__(cls, key):
         """Access to a class field"""
         if key != "__xpm__" and key in cls.__xpm__.arguments:
             return cls.__xpm__.arguments[key]
         return type.__getattribute__(cls, key)
 
-class PyObject(metaclass=PyObjectMetaclass):
+class XPMObject(metaclass=XPMObjectMetaclass):
     """Base type for all objects in python interface"""
 
     def __init__(self, **kwargs):
@@ -501,12 +501,7 @@ class PyObject(metaclass=PyObjectMetaclass):
             return self.__xpm__.set(name, value)
         return super().__setattr__(name, value)
 
-    def submit(self, *, workspace=None, launcher=None):
-        """Submit this task"""
-        self.__xpm__.submit(workspace, launcher)
-        return self
-
-    def tag(self, name, value) -> "PyObject":
+    def tag(self, name, value) -> "XPMObject":
         self.__xpm__.addtag(name, value)
         return self
 
@@ -514,20 +509,31 @@ class PyObject(metaclass=PyObjectMetaclass):
         """Returns the tag associated with this object (and below)"""
         return self.__xpm__.tags()
 
-    def _init(self):
+class XPMTask(XPMObject):
+    """Base type for all tasks"""
+
+    def submit(self, *, workspace=None, launcher=None):
+        """Submit this task"""
+        self.__xpm__.submit(workspace, launcher)
+        return self
+
+    def init(self):
         """Prepare object after creation"""
         pass
 
-    def _stdout(self):
+    def stdout(self):
         return self.__xpm__.job.stdout
 
+    def stderr(self):
+        return self.__xpm__.job.stderr
 
-def getfunctionpyobject(function, parents):
-    class _PyObject(PyObject):
+def getfunctionpyobject(function, parents, basetype=XPMObject):
+    """Returns a PyTask"""
+    class _XPMObject(basetype):
         def execute(self):
             kwargs = {}
             for argument, value in self.__xpm__.xpmvalues():
                 kwargs[argument.name] = value
             function(**kwargs)
 
-    return _PyObject
+    return _XPMObject

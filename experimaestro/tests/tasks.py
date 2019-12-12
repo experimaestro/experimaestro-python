@@ -16,7 +16,7 @@ class Concat:
         # We access the file where standard output was stored
         says = []
         for string in self.strings:
-            with open(string._stdout()) as fp:
+            with open(string.stdout()) as fp:
                 says.append(fp.read().strip())
         print(" ".join(says))
 
