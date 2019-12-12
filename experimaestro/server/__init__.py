@@ -151,14 +151,16 @@ class RequestProcessor:
         if path == "/ws":
             return None
 
+        headers = websockets.http.Headers()
+
         if path.startswith("/notifications/"):
             m = re.match(r"^/notifications/([a-z0-9]+)/progress/([0-9.]+)$", path)
             if m:
                 jobid = m.group(1)
                 progress = float(m.group(2))
                 self.scheduler.jobs[jobid].progress = progress
+                return (http.HTTPStatus.OK, headers, "")
 
-        headers = websockets.http.Headers()
         if path == "/":
             path = "/index.html"
 

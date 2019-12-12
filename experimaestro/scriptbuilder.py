@@ -84,8 +84,8 @@ class ShScriptBuilder:
 
             # Output tags
             out.write("# __tags__ = ")
-            for item in job.parameters.tags():
-                out.write("%s: %s" % (item.first, item.second))
+            for key, value in job.parameters.tags().items():
+                out.write("%s: %s" % (key, value))
             out.write("\n\n")
 
 
