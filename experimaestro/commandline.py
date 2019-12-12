@@ -228,6 +228,7 @@ class CommandLineJob(Job):
             # Now we can write the script
             scriptbuilder.lockfiles.append(self.lockpath)
             scriptbuilder.command = self.commandline
+            scriptbuilder.notificationURL = self.launcher.notificationURL
             scriptPath = scriptbuilder.write(self)
 
             logger.info("Starting job %s", self.jobpath)

@@ -10,6 +10,7 @@ from typing import Optional
 import time
 import functools
 from experimaestro.scheduler import Scheduler
+import re
 
 def formattime(v: Optional[float]):
     if not v:
@@ -26,7 +27,7 @@ def job_details(job):
             "taskId": job.name,
 
             "locator": str(job.jobpath),
-            "status": job.state.name,
+            "status": job.state.name.lower(),
 
             "start": formattime(job.starttime),
             "end": formattime(job.endtime),
@@ -45,7 +46,7 @@ def job_create(job):
             "taskId": job.name,
 
             "locator": str(job.jobpath),
-            "status": job.state.name,
+            "status": job.state.name.lower(),
 
             "tags": list(job.tags.items()),
             "progress": job.progress
@@ -74,7 +75,8 @@ class Listener:
             "type": "JOB_UPDATE",
             "payload": {
                 "jobId": job.identifier,
-                "status": job.state.name
+                "status": job.state.name.lower(),
+                "progress": job.progress
             }
         })
         # self.loop.call_soon_threadsafe(print, "!!!! Job state changed")
@@ -141,27 +143,36 @@ MIMETYPES = {
 }
 
 
-async def process_request(path, request_headers):
-    if path == "/ws":
-        return None
+class RequestProcessor:
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
 
+    async def __call__(self, path, request_headers):
+        if path == "/ws":
+            return None
 
-    headers = websockets.http.Headers()
-    if path == "/":
-        path = "/index.html"
+        if path.startswith("/notifications/"):
+            m = re.match(r"^/notifications/([a-z0-9]+)/progress/([0-9.]+)$", path)
+            if m:
+                jobid = m.group(1)
+                progress = float(m.group(2))
+                self.scheduler.jobs[jobid].progress = progress
 
-    datapath = "data%s" % path
-    if pkg_resources.resource_exists("experimaestro.server", datapath):
-        code = http.HTTPStatus.OK
-        headers['Cache-Control'] = 'max-age=0'
-        headers['Content-Type'] = MIMETYPES[datapath.rsplit(".", 1)[1]]
-        logging.info("Reading %s", datapath)
-        body = pkg_resources.resource_string("experimaestro.server", datapath)
-        return (code, headers, body)
+        headers = websockets.http.Headers()
+        if path == "/":
+            path = "/index.html"
 
-    headers['Content-Type'] = MIMETYPES["txt"]
-    return (http.HTTPStatus.OK, headers, "No such path %s" % path)
+        datapath = "data%s" % path
+        if pkg_resources.resource_exists("experimaestro.server", datapath):
+            code = http.HTTPStatus.OK
+            headers['Cache-Control'] = 'max-age=0'
+            headers['Content-Type'] = MIMETYPES[datapath.rsplit(".", 1)[1]]
+            logging.info("Reading %s", datapath)
+            body = pkg_resources.resource_string("experimaestro.server", datapath)
+            return (code, headers, body)
 
+        headers['Content-Type'] = MIMETYPES["txt"]
+        return (http.HTTPStatus.NOT_FOUND, headers, "No such path %s" % path)
 
 
 
@@ -172,6 +183,9 @@ class Server:
         self.scheduler = scheduler
         self._loop = None
         self._stop  = None
+
+    def getNotificationURL(self):
+        return "http://{host}:{port}/notifications".format(**self.__dict__)
 
     def stop(self):
         if self._stop:
@@ -197,6 +211,7 @@ class Server:
     async def _serve(self, stop):
         logging.info("Webserver started on http://%s:%d", self.host, self.port)
         bound_handler = functools.partial(handler, listener=self.listener)
+        process_request = RequestProcessor(self.scheduler)
         async with websockets.serve(bound_handler, self.host, self.port, process_request=process_request):
             await stop
         logging.info("Server stopped")

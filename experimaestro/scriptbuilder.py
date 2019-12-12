@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 
 from experimaestro.utils import logger
-from .scheduler import Workspace
+from .scheduler import Workspace, NOTIFICATIONURL_VARNAME
 from .connectors import Connector, RedirectType, Redirect
 from .commandline import CommandLineJob, AbstractCommand, CommandContext, CommandPart
 from shlex import quote as shquote
@@ -109,8 +109,8 @@ class ShScriptBuilder:
 
             # Adds notification URL to script
             if self.notificationURL:
-                out.write("export XPM_NOTIFICATION_URL={}/{}\n".format(
-                    shquote(self.notificationURL), job.identifier))
+                out.write("export {}={}/{}\n".format(
+                    NOTIFICATIONURL_VARNAME, shquote(self.notificationURL), job.identifier))
 
 
             # Write some command

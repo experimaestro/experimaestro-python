@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import threading
 import re
@@ -11,6 +12,8 @@ from .utils import logger
 from .dependencies import LockError, Dependency, DependencyStatus
 from .locking import Lock
 
+NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
+
 class JobState(enum.Enum):
     WAITING = 0
     READY = 1
@@ -20,6 +23,9 @@ class JobState(enum.Enum):
 
     def notstarted(self):
         return self.value <= JobState.READY.value
+
+    def finished(self):
+        return self.value >= JobState.DONE.value
 
 class JobLock(Lock):
     def __init__(self, job):
@@ -73,11 +79,23 @@ class Job():
         self.starttime:Optional[float] = None
         self.submittime:Optional[float] = None
         self.endtime:Optional[float] = None
-        self.progress = 0
+        self._progress = 0.
         self.tags = parameters.tags()
         
     def __str__(self):
         return "Job[{}]".format(self.identifier)
+
+
+    @property
+    def progress(self):
+        return self._progress
+
+    @progress.setter
+    def progress(self, progress: float):
+        assert progress >= 0 and progress <= 1
+        self._progress = progress
+        for listener in self.scheduler.listeners:
+            listener.job_state(self)
 
     @property
     def ready(self):
@@ -143,8 +161,8 @@ class Job():
 
         if status == DependencyStatus.FAIL:    
             # Job completed
-            self.scheduler.jobfinished(self, JobState.ERROR)
-            return
+            if not self.state.finished():
+                self.scheduler.jobfinished(self, JobState.ERROR)
 
         if self.unsatisfied == 0:    
             logger.info("Job %s is ready to run", self)
@@ -320,6 +338,8 @@ class experiment:
         self.workspace = Workspace(Path(path))
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None
+        if port:
+            self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
 
     def __enter__(self):
         if self.server:
@@ -334,7 +354,3 @@ class experiment:
         self.workspace.__exit__()
         if self.server:
             self.server.stop()
-
-
-def progress(value: float):
-    logger.debug("Got progress value of %s", value)
