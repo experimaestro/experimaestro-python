@@ -120,4 +120,19 @@ def test_constant():
         a.__xpm__.seal(jobcontext)
         assert a.value == 1
 
-    
+
+@Argument("a", int)
+@Type()
+def notset(a, b): pass
+
+@expect_notvalidate
+def test_notset():
+    return notset(a=1)
+
+@Argument("a", int)
+@Type()
+def notdeclared(): pass
+
+@expect_notvalidate
+def test_notdeclared():
+    return notdeclared(a=1)

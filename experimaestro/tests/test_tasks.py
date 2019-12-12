@@ -60,7 +60,6 @@ def test_function():
 
     assert method.__xpm__.job.wait() == JobState.DONE
 
-
 @pytest.mark.skip()
 def test_restart():
     """Restarting the experiment should take back running tasks"""

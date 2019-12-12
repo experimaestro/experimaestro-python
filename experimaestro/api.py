@@ -365,6 +365,25 @@ class TypeInformation():
         """Validate values and seal the values"""
         if not self._validated:
             self._validated = True
+            
+            # Check function
+            if inspect.isfunction(self.xpmtype.originaltype):
+                argnames = set()
+                for argument, value in self.xpmvalues():
+                    argnames.add(argument.name)
+                spec = inspect.getfullargspec(self.xpmtype.originaltype)
+
+                declaredargs = set(spec.args)
+                
+                # Arguments declared but not set
+                notset = declaredargs.difference(argnames)
+                notdeclared = argnames.difference(declaredargs)
+
+                if notset or notdeclared:
+                    raise ValueError("Some arguments were set but not declared (%s) or declared but not set (%s)" %  (",".join(notdeclared), ",".join(notset)))
+
+            
+            # Check each argument
             for k, argument in self.xpmtype.arguments.items():
                 if hasattr(self.pyobject, k):
                     value = getattr(self.pyobject, k)
