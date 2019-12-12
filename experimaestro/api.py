@@ -33,6 +33,9 @@ class Typename():
 
     def __getattr__(self, key):
         return self(key)
+        
+    def __getitem__(self, key):
+        return self(key)
 
     def __call__(self, key):
         return Typename(self.name + "." + key)
@@ -57,6 +60,10 @@ class Argument:
         self.help = help
         self.type = type
         self.ignored = ignored
+        if ignored is None:
+            self.ignored = self.type.ignore
+        else:
+            self.ignored = False
         self.required = required
         self.default = default
         self.generator = generator
@@ -80,6 +87,12 @@ class Type():
         self.typename = tn
         self.description = description
         self.arguments:Dict[str, Argument] = {}
+
+
+    @property
+    def ignore(self):
+        """Ignore by default"""
+        return False
 
     def __str__(self):
         return "Type({})".format(self.typename)
@@ -168,6 +181,7 @@ def definetype(*types):
         instance = typeclass(types[0].__name__)
         for t in types:
             Type.DEFINED[t] = instance
+        return typeclass
     return call
 
 @definetype(int)
@@ -185,12 +199,24 @@ class FloatType(Type):
     def validate(self, value):
         return float(value)
 
+
+@definetype(bool)
+class BoolType(Type): 
+    def validate(self, value):
+        return bool(value)
+
+
 @definetype(Path)
 class PathType(Type): 
     def validate(self, value):
         if isinstance(value, dict) and value.get("$type", None) == "path":
             return Path(value.get("$value"))
         return Path(value)
+        
+    @property
+    def ignore(self):
+        """Ignore by default"""
+        return True
 
 AnyType = Type("any")
 
@@ -489,12 +515,14 @@ class XPMObject(metaclass=XPMObjectMetaclass):
 
         # Initialize with arguments
         for name, value in kwargs.items():
+            if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
+                raise ValueError("%s is not an argument for %s" % (name, self.__class__))
             xpm.set(name, value, bypass=TypeInformation.LOADING)
 
         # Initialize with default arguments
         for name, value in self.__class__.__xpm__.arguments.items():
             if name not in kwargs and value.default is not None:
-                self.set(name, clone(value.default))
+                self.__xpm__.set(name, clone(value.default))
 
     def __setattr__(self, name, value):
         if name != "__xpm__":

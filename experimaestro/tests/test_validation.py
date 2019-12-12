@@ -3,10 +3,22 @@
 import pytest
 from pathlib import Path
 from experimaestro import Type, Typename, Argument, PathArgument, ConstantArgument
+import experimaestro.api as api
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
+import logging
 
 valns = Typename("validation")
+
+
+def expect_validate(value):
+    value.__xpm__.validate()
+
+def expect_notvalidate(value):
+    with pytest.raises(ValueError):
+        value.__xpm__.validate()
+
+
 
 @Argument("value", type=int)
 @Type()
@@ -21,44 +33,23 @@ class B: pass
 class C: pass
 
 
-def expect_validate(method):
-    def test():
-        a = method()
-        a.__xpm__.validate()
-    return test
-
-def expect_notvalidate(method):
-    def test():
-        with pytest.raises(ValueError):
-            a = method()
-            a.__xpm__.validate()
-            assert False, "Value validated, but should not have"
-    return test
-
-
-
-
-@expect_validate
 def test_simple():
-    return A(value=1)
+    expect_validate(A(value=1))
 
-@expect_notvalidate
 def test_missing():
-    return A()
+    expect_notvalidate(A())
 
-@expect_validate
+
 def test_simple_nested():
     b = B()
     b.a = A(value=1)
-    return b
+    expect_validate(b)
 
-@expect_notvalidate
 def test_missing_nested():
     b = B()
     b.a = A()
-    return b
+    expect_notvalidate(b)
     
-@expect_notvalidate
 def test_type():
     @Type(valns.type.a)
     class A(): pass
@@ -70,10 +61,13 @@ def test_type():
     @Type(valns.type.c)
     class C: pass
 
-    return C(a=B())
+    with pytest.raises(ValueError):
+        C(a=B())
 
+    with pytest.raises(ValueError):
+        c = C()
+        c.a = B()
 
-@expect_validate
 def test_subtype():
     @Type(valns.subtype.a)
     class A(): pass
@@ -85,7 +79,7 @@ def test_subtype():
     @Type(valns.subtype.b)
     class B: pass
 
-    return B(a=A1())
+    expect_validate(B(a=A1()))
 
 
 def test_path():
@@ -125,14 +119,26 @@ def test_constant():
 @Type()
 def notset(a, b): pass
 
-@expect_notvalidate
+
 def test_notset():
-    return notset(a=1)
+    expect_notvalidate(notset(a=1))
 
 @Argument("a", int)
 @Type()
 def notdeclared(): pass
 
-@expect_notvalidate
 def test_notdeclared():
-    return notdeclared(a=1)
+    expect_notvalidate(notdeclared(a=1))
+
+# --- Default value
+
+
+@pytest.mark.parametrize('value,apitype', [(1.5, api.FloatType), (1, api.IntType), (False, api.BoolType)])
+def test_default(value, apitype):
+    @Argument("default", default=value)
+    @Type(valns.default[str(type(value))])
+    class Default: pass
+
+    value = Default()
+    expect_validate(value)
+    assert Default.__xpm__.arguments["default"].type.__class__ == apitype

@@ -317,7 +317,7 @@ class experiment:
     def __init__(self, path: Path, name: str, *, port:int=None):
         from experimaestro.server import Server
     
-        self.workspace = Workspace(path)
+        self.workspace = Workspace(Path(path))
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None
 

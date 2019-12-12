@@ -119,7 +119,7 @@ class Task(Type):
 class Argument():
     """Defines an argument for an experimaestro type"""
     def __init__(self, name, type=None, default=None, required=None,
-                 ignored=False, help=None):
+                 ignored=None, help=None):
         # Determine if required
         self.name = name                
         self.type = api.Type.fromType(type) if type else None
@@ -130,11 +130,12 @@ class Argument():
         self.generator = None
 
     def __call__(self, objecttype):
+        # Get type from default if needed
         if self.type is None:
-            if default: 
-                self.type = api.Type.fromType(type(default))
-            else:
+            if self.default is None: 
                 raise ValueError("Type is not defined for argument %s", self.name)
+            self.type = api.Type.fromType(type(self.default))
+
         argument = api.Argument(self.name, self.type, help=self.help, required=self.required, ignored=self.ignored, generator=self.generator, default=self.default)
         objecttype.__xpm__.addArgument(argument)
         return objecttype
