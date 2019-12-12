@@ -17,9 +17,10 @@ def formattime(v: Optional[float]):
 
     return time.strftime("%Y-%m-%d %H:%M:%S" , time.localtime(v))
 
-def newjob_action(job):
+
+def job_details(job):
     return {
-        "type": "JOB_ADD",
+        "type": "JOB_UPDATE",
         "payload": {
             "jobId": job.identifier,
             "taskId": job.name,
@@ -30,6 +31,21 @@ def newjob_action(job):
             "start": formattime(job.starttime),
             "end": formattime(job.endtime),
             "submitted": formattime(job.submittime),
+
+            "tags": list(job.tags.items()),
+            "progress": job.progress
+        }
+    }
+
+def job_create(job):
+    return {
+        "type": "JOB_ADD",
+        "payload": {
+            "jobId": job.identifier,
+            "taskId": job.name,
+
+            "locator": str(job.jobpath),
+            "status": job.state.name,
 
             "tags": list(job.tags.items()),
             "progress": job.progress
@@ -51,7 +67,7 @@ class Listener:
             )
 
     def job_submitted(self, job):
-        self.send_message(newjob_action(job))
+        self.send_message(job_create(job))
 
     def job_state(self, job):
         self.send_message({
@@ -91,10 +107,12 @@ async def handler(websocket, path, listener):
 
             
             if actiontype == "refresh":
-                for job in Scheduler.CURRENT.jobs:
-                    await websocket.send(json.dumps(newjob_action(job)))
+                for job in listener.scheduler.jobs.values():
+                    await websocket.send(json.dumps(job_create(job)))
             elif actiontype == "quit":
                 break
+            elif actiontype == "details":
+                await websocket.send(json.dumps(job_details(listener.scheduler.jobs[job.identifier])))
             else:
                 await websocket.send(json.dumps({
                     "error": True,

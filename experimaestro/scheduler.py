@@ -230,7 +230,7 @@ class Scheduler():
         self.exitmode = False
 
         # List of all jobs
-        self.jobs = set()
+        self.jobs: Dict[str,Job] = {}
 
         # List of jobs
         self.waitingjobs = set()
@@ -270,7 +270,7 @@ class Scheduler():
                 dependency.origin.dependents.add(dependency)
                 dependency.check()
 
-            self.jobs.add(job)
+            self.jobs[job.identifier] = job
             self.waitingjobs.add(job)
 
             for listener in self.listeners:
