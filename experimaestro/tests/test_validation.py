@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from experimaestro import Type, Typename, Argument, PathArgument, ConstantArgument
+from experimaestro import config, Typename, argument, pathargument, ConstantArgument
 import experimaestro.api as api
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
@@ -20,16 +20,16 @@ def expect_notvalidate(value):
 
 
 
-@Argument("value", type=int)
-@Type()
+@argument("value", type=int)
+@config()
 class A: pass
 
-@Argument("a", type=A)
-@Type()
+@argument("a", type=A)
+@config()
 class B: pass
 
-@PathArgument("path", "outdir")
-@Type()
+@pathargument("path", "outdir")
+@config()
 class C: pass
 
 
@@ -51,14 +51,14 @@ def test_missing_nested():
     expect_notvalidate(b)
     
 def test_type():
-    @Type(valns.type.a)
+    @config(valns.type.a)
     class A(): pass
 
-    @Type(valns.type.b)
+    @config(valns.type.b)
     class B: pass
 
-    @Argument("a", A)
-    @Type(valns.type.c)
+    @argument("a", A)
+    @config(valns.type.c)
     class C: pass
 
     with pytest.raises(ValueError):
@@ -69,23 +69,23 @@ def test_type():
         c.a = B()
 
 def test_subtype():
-    @Type(valns.subtype.a)
+    @config(valns.subtype.a)
     class A(): pass
 
-    @Type(valns.subtype.a1)
+    @config(valns.subtype.a1)
     class A1(A): pass
 
-    @Argument("a", A)
-    @Type(valns.subtype.b)
+    @argument("a", A)
+    @config(valns.subtype.b)
     class B: pass
 
     expect_validate(B(a=A1()))
 
 
 def test_path():
-    """Test of @PathArgument"""
-    @PathArgument("value", "file.txt")
-    @Type(valns.path.a)
+    """Test of @pathargument"""
+    @pathargument("value", "file.txt")
+    @config(valns.path.a)
     class A: pass
 
     a = A()
@@ -104,7 +104,7 @@ def test_path():
 def test_constant():
     """Test of @ConstantArgument"""
     @ConstantArgument("value", 1)
-    @Type(valns.constant.a)
+    @config(valns.constant.a)
     class A: pass
 
     a = A()
@@ -115,16 +115,16 @@ def test_constant():
         assert a.value == 1
 
 
-@Argument("a", int)
-@Type()
+@argument("a", int)
+@config()
 def notset(a, b): pass
 
 
 def test_notset():
     expect_notvalidate(notset(a=1))
 
-@Argument("a", int)
-@Type()
+@argument("a", int)
+@config()
 def notdeclared(): pass
 
 def test_notdeclared():
@@ -135,8 +135,8 @@ def test_notdeclared():
 
 @pytest.mark.parametrize('value,apitype', [(1.5, api.FloatType), (1, api.IntType), (False, api.BoolType)])
 def test_default(value, apitype):
-    @Argument("default", default=value)
-    @Type(valns.default[str(type(value))])
+    @argument("default", default=value)
+    @config(valns.default[str(type(value))])
     class Default: pass
 
     value = Default()

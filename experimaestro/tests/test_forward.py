@@ -1,9 +1,9 @@
-from experimaestro import Argument, Type, api
+from experimaestro import argument, config, api
 from experimaestro.click import cli, forwardoption
 import click
 
-@Argument("epochs", type=int, default=100, help="Number of learning epochs")
-@Type("mymodel")
+@argument("epochs", type=int, default=100, help="Number of learning epochs")
+@config("mymodel")
 class MyModel(api.XPMObject): pass
 
 @forwardoption(MyModel.epochs, "epochs")

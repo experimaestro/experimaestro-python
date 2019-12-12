@@ -54,7 +54,7 @@ class Argument:
     def __init__(self, name, type: "Type", required=None, help=None, generator=None, ignored=False, default=None):
         required = (default is None) if required is None else required
         if default is not None and required is not None and required:
-            raise Exception("Argument '%s' is required but default value is given" % name)
+            raise Exception("argument '%s' is required but default value is given" % name)
 
         self.name = name
         self.help = help
@@ -86,7 +86,7 @@ class Type():
             tn = Typename(tn)
         self.typename = tn
         self.description = description
-        self.arguments:Dict[str, Argument] = {}
+        self.arguments:Dict[str, argument] = {}
 
 
     @property
@@ -115,7 +115,7 @@ class Type():
 
     @staticmethod
     def fromType(key):
-        """Returns the Type object corresponding to the given type"""
+        """Returns the type object corresponding to the given type"""
         logger.debug("Searching for type %s", key)
 
         if key is None:
@@ -136,6 +136,11 @@ class Type():
         
         if inspect.isclass(key) and issubclass(key, XPMObject):
             return key.__xpm__
+
+        import typing
+        if type(key) == type(typing.List):
+            if key.__origin__ == list:
+                return ArrayType(Type.fromType(*key.__args__))
 
         raise Exception("No type found for %s", key)
 
@@ -267,7 +272,7 @@ class HashComputer():
             for x in value:
                 self.update(x)
         elif isinstance(value, XPMObject):
-            xpmtype = value.__class__.__xpm__ # type: Type
+            xpmtype = value.__class__.__xpm__ # type: config
             self.hasher.update(HashComputer.OBJECT_ID)
             self.hasher.update(xpmtype.typename.name.encode("utf-8"))
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
@@ -325,7 +330,7 @@ class FakeJob:
         self.stderr = self.path.with_suffix(".err")
         
 class TypeInformation():
-    """Holds experimaestro information for a XPMObject (Type or Task)"""
+    """Holds experimaestro information for a XPMObject (config or task)"""
 
     # Set to true when loading from JSON
     LOADING = False
@@ -452,7 +457,7 @@ class TypeInformation():
     def submit(self, workspace, launcher):
         # --- Prepare the object
         if self.job:
-            raise Exception("Task %s was already submitted" % self)
+            raise Exception("task %s was already submitted" % self)
         if not self.xpmtype.task:
             raise ValueError("%s is not a task" % self.xpmtype)
 

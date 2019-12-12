@@ -1,6 +1,6 @@
-from experimaestro import Task, Argument
+from experimaestro import task, argument
 
-@Task()
+@task()
 def restart():
     pass
 

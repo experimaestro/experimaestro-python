@@ -18,7 +18,7 @@ import experimaestro.commandline as commandline
 
 # --- Annotations to define tasks and types
         
-class Type:
+class config:
 
     """Annotations for experimaestro types"""
     def __init__(self, typename=None, description=None, parents=[]):
@@ -77,7 +77,7 @@ class Choice(api.TypeProxy):
         return api.StringType
 
 
-class Task(Type):
+class task(config):
     """Register a task"""
     def __init__(self, typename=None, scriptpath=None, pythonpath=None, description=None, associate=None):
         super().__init__(typename, description)
@@ -97,11 +97,11 @@ class Task(Type):
         command.add(commandline.CommandString("run"))
 
         if _type.__module__ and _type.__module__ != "__main__":
-            logger.debug("Task: using module %s [%s]", _type.__module__, _type)
+            logger.debug("task: using module %s [%s]", _type.__module__, _type)
             command.add(commandline.CommandString(_type.__module__))
         else:
             filepath = Path(inspect.getfile(_type)).absolute()
-            logger.debug("Task: using file %s [%s]", filepath, _type)
+            logger.debug("task: using file %s [%s]", filepath, _type)
             command.add(commandline.CommandString("--file"))
             command.add(commandline.CommandPath(filepath))
 
@@ -114,9 +114,9 @@ class Task(Type):
         return objecttype
 
 
-# --- Argument related annotations
+# --- argument related annotations
 
-class Argument():
+class argument():
     """Defines an argument for an experimaestro type"""
     def __init__(self, name, type=None, default=None, required=None,
                  ignored=None, help=None):
@@ -133,14 +133,14 @@ class Argument():
         # Get type from default if needed
         if self.type is None:
             if self.default is None: 
-                raise ValueError("Type is not defined for argument %s", self.name)
+                raise ValueError("config is not defined for argument %s", self.name)
             self.type = api.Type.fromType(type(self.default))
 
         argument = api.Argument(self.name, self.type, help=self.help, required=self.required, ignored=self.ignored, generator=self.generator, default=self.default)
         objecttype.__xpm__.addArgument(argument)
         return objecttype
 
-class PathArgument(Argument):
+class pathargument(argument):
     """Defines a an argument that will be a relative path (automatically
     set by experimaestro)"""
     def __init__(self, name, path, help=""):
@@ -152,7 +152,7 @@ class PathArgument(Argument):
         self.generator = lambda jobcontext: jobcontext.jobpath / path
 
 
-class ConstantArgument(Argument):
+class ConstantArgument(argument):
     """
     An constant argument (useful for versionning tasks)
     """
@@ -201,10 +201,10 @@ def deprecateClass(klass):
     return klass
 
 @deprecateClass
-class RegisterType(Type): pass
+class RegisterType(config): pass
 
 @deprecateClass
-class RegisterTask(Task): pass
+class RegisterTask(task): pass
 
 @deprecateClass
-class TypeArgument(Argument): pass
+class TypeArgument(argument): pass

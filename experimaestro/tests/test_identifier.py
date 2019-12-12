@@ -3,33 +3,33 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import Type, Argument
+from experimaestro import config, argument
 
-@Argument(name="a", type=int)
-@Type()
+@argument(name="a", type=int)
+@config()
 class A: pass
 
-@Argument(name="a", type=int)
-@Type()
+@argument(name="a", type=int)
+@config()
 class B: pass
 
-@Argument(name="a", type=int, default=1)
-@Argument(name="b", type=int)
-@Type()
+@argument(name="a", type=int, default=1)
+@argument(name="b", type=int)
+@config()
 class C: pass
 
-@Argument("a", type=A)
-@Type()
+@argument("a", type=A)
+@config()
 class D: pass
 
-@Argument("value", type=float)
-@Type()
+@argument("value", type=float)
+@config()
 class Float: pass
 
 
-@Argument("value1", type=float)
-@Argument("value2", type=float)
-@Type()
+@argument("value1", type=float)
+@argument("value2", type=float)
+@config()
 class Values: pass
 
 def assert_equal(a, b):
@@ -66,9 +66,9 @@ def test_float2():
 
 # --- Ignore paths
 
-@Argument("a", int)
-@Argument("path", Path)
-@Type()
+@argument("a", int)
+@argument("path", Path)
+@config()
 class TypeWithPath: pass
 
 def test_path():

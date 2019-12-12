@@ -1,14 +1,14 @@
-from experimaestro import Argument, Task, parse_commandline
+from experimaestro import argument, task, parse_commandline
 
-@Argument("value", type=int)
-@Task("testinteger")
+@argument("value", type=int)
+@task("testinteger")
 class IntegerTask:
     def execute(self):
         if not isinstance(self.value, int):
             raise AssertionError("Not an integer")
 
-@Argument("value", type=float)
-@Task("testfloat")
+@argument("value", type=float)
+@task("testfloat")
 class FloatTask:
     def execute(self):
         if not isinstance(self.value, float):

@@ -3,14 +3,14 @@ from experimaestro import *
 
 tasks = Typename("tasks")
 
-@Argument("word", type=str, required=True, help="Word to generate")
-@Task(tasks.say)
+@argument("word", type=str, required=True, help="Word to generate")
+@task(tasks.say)
 class Say:
     def execute(self):
         print(self.word.upper(),)
 
-@Argument("strings", type=Array(Say), help="Strings to concat")
-@Task(tasks.concat)
+@argument("strings", type=Array(Say), help="Strings to concat")
+@task(tasks.concat)
 class Concat:
     def execute(self):
         # We access the file where standard output was stored
@@ -20,8 +20,8 @@ class Concat:
                 says.append(fp.read().strip())
         print(" ".join(says))
 
-@PathArgument("wait", "wait")
-@Task(tasks.fail)
+@pathargument("wait", "wait")
+@task(tasks.fail)
 class Fail:
     def execute(self):
         while not self.wait.is_file():
@@ -34,14 +34,14 @@ class Fail:
         with open(self.wait, "w") as out:
             out.write("hello")
 
-@Argument("fail", Fail)
-@Task(tasks.failconsumer)
+@argument("fail", Fail)
+@task(tasks.failconsumer)
 class FailConsumer:
     def execute(self):
         return True
 
-@Argument("a", int)
-@Task(tasks.method)
+@argument("a", int)
+@task(tasks.method)
 def Method(a: int):
     assert a == 1
 

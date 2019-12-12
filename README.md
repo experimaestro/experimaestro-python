@@ -58,15 +58,15 @@ def slowdown(N: int):
 
 hw = Typename("helloworld")
 
-@Argument("word", type=str, required=True, help="Word to generate")
-@Task(hw.say)
+@argument("word", type=str, required=True, help="Word to generate")
+@task(hw.say)
 def Say(word: str):
     slowdown(len(word))
     print(word.upper(),)
 
-@Argument("strings", type=Array(Say), help="Strings to concat")
-@Task(hw.concat)
-def Concat(strings):
+@argument("strings", type=List[Say], help="Strings to concat")
+@task(hw.concat)
+def Concat(strings: List[Say]):
     # We access the file where standard output was stored
     says = []
     slowdown(len(strings))
