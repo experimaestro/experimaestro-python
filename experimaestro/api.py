@@ -86,7 +86,7 @@ class Type():
             tn = Typename(tn)
         self.typename = tn
         self.description = description
-        self.arguments:Dict[str, argument] = {}
+        self.arguments:Dict[str, Argument] = {}
 
 
     @property

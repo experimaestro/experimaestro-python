@@ -3,9 +3,16 @@ site_description: experimaestro Computer science experiments manager and schedul
 
 nav:
     - Introduction: index.md
-    - Installing: install.md
-
-
+    - Tutorial: tutorial.md
+    - Concepts: concepts.md
+    - Experiments: 
+        - Configuration: experiments/config.md
+        - Plan: experiments/plan.md
+    - Launchers:
+        introduction: launchers/index.md
+    - Connectors:
+        introduction: connectors/index.md
+    
 
 theme: 
     name: material
@@ -26,8 +33,7 @@ markdown_extensions:
         linenums: true
   - admonition
   - pymdownx.superfences
+  - pymdownx.snippets:
+        base_path: .
 
-plugins:
-    - multiple:
-        parent: cpp
 repo_url: 'https://github.com/experimaestro/experimaestro-python'

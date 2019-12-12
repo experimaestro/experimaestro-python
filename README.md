@@ -26,7 +26,7 @@ pip install -e .
 
 # Example
 
-This very simple example shows how to submit two tasks that add two numbers.
+This very simple example shows how to submit two tasks that concatenate two strings.
 Under the curtain, 
 
 - A directory is created for each task (in `workdir/jobs/helloworld.add`)
