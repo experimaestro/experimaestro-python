@@ -454,7 +454,7 @@ class TypeInformation():
             updatedependencies(dependencies, value)
                 
 
-    def submit(self, workspace, launcher):
+    def submit(self, workspace, launcher, dryrun=None):
         # --- Prepare the object
         if self.job:
             raise Exception("task %s was already submitted" % self)
@@ -472,10 +472,10 @@ class TypeInformation():
         # --- Search for dependencies
         self.updatedependencies(self.job.dependencies)
 
-        if Scheduler.CURRENT.submitjobs:
+        if dryrun == False or (Scheduler.CURRENT.submitjobs and dryrun is None):
             Scheduler.CURRENT.submit(self.job)
         else:
-            logger.warning("Simulating: not submitting task", self.xpmtype.task)
+            logger.warning("Simulating: not submitting job %s", self.job)
         
     def _outputjson_inner(self, objectout, context):
         objectout.write("$type", str(self.xpmtype.typename))
@@ -545,9 +545,9 @@ class XPMObject(metaclass=XPMObjectMetaclass):
 class XPMTask(XPMObject):
     """Base type for all tasks"""
 
-    def submit(self, *, workspace=None, launcher=None):
+    def submit(self, *, workspace=None, launcher=None, dryrun=None):
         """Submit this task"""
-        self.__xpm__.submit(workspace, launcher)
+        self.__xpm__.submit(workspace, launcher, dryrun=dryrun)
         return self
 
     def init(self):

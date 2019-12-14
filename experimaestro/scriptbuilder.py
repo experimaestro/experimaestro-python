@@ -75,7 +75,7 @@ class ShScriptBuilder:
         scriptpath = job.jobpath / ("%s.sh" % job.name)
         donepath = relpath(job.donepath)
         lockpath = relpath(job.lockpath)
-
+        pidpath = relpath(job.pidpath)
 
         logger.info("Writing script %s", scriptpath)
         with scriptpath.open("wt") as out:
@@ -102,7 +102,7 @@ class ShScriptBuilder:
             # Use pipefail for fine grained analysis of errors in commands
             out.write("set -o pipefail\n\n")
 
-            out.write('''echo $$ > %s\n\n''' % lockpath)
+            out.write('''echo $$ > %s\n\n''' % pidpath)
 
             for name, value in job.launcher.environ.items():
                 out.write('''export {}={}\n'''.format(name, shquote(value)))
@@ -126,6 +126,9 @@ class ShScriptBuilder:
 
             # Remove traps
             out.write(" trap - 0\n")
+
+            # Remove PID file
+            out.write('''rm %s\n''' % pidpath)
 
             # Remove temporary files
 

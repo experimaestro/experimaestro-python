@@ -5,6 +5,7 @@ import io
 from pathlib import Path
 from typing import Union, Callable, Dict
 import itertools
+import psutil
 
 from experimaestro.utils import logger
 from .scheduler import Job, JobError, JobState
@@ -200,10 +201,34 @@ class CommandLine(AbstractCommand):
     def reorder(self): 
         return self.commands
 
+class PsutilProcess():
+    def __init__(self, job, process):
+        self.job = job
+        self.process = process
+    def wait(self):
+        self.process.wait()
+        if self.job.donepath.is_file(): 
+            return 0
+        return int(self.job.codepath.read_text())
+
 class CommandLineJob(Job):
     def __init__(self, commandline: CommandLine, parameters, workspace=None, launcher=None):
         super().__init__(parameters, workspace=workspace, launcher=launcher)
         self.commandline = commandline
+
+    @property
+    def process(self):
+        """Returns the process"""
+        if self._process: 
+            return self._process
+
+        if self.pidpath.is_file():
+            pid = int(self.pidpath.read_text())
+            p = psutil.Process(pid)
+            if p.is_running():
+                return PsutilProcess(self, p)
+            
+        return None
 
     def run(self, locks):
         # Use the lock during preparation
@@ -213,11 +238,17 @@ class CommandLineJob(Job):
         processbuilder = self.launcher.processbuilder()
         connector = self.launcher.connector
         donepath = self.donepath
+        pidpath = self.pidpath
 
         # Lock the job and check done again (just in case)
         logger.debug("Making directories job %s...", self.jobpath)
         directory = self.jobpath.parent
-        directory.mkdir(parents=True, exist_ok=True)
+        if not directory.is_dir():
+            directory.mkdir(parents=True, exist_ok=True)
+
+        process = self.process
+        if process:
+            return process
 
         with connector.lock(self.lockpath, LOCKFILE_WAIT_DURATION) as out:
             # Check again if done (now that we have locked)

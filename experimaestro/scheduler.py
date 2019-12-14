@@ -127,11 +127,16 @@ class Job():
         """Returns the process"""
         if self._process: 
             return self._process
-        raise NotImplementedError("Should construct a new checker object")
+        raise NotImplementedError("Not implemented")
+
+    @property
+    def pidpath(self):
+        """This file contains the file PID"""
+        return self.jobpath / ("%s.pid" % self.name)
 
     @property
     def lockpath(self):
-        """This file is used as a lock and also stores the PID of the job when running"""
+        """This file is used as a lock for running the job"""
         return self.jobpath / ("%s.lock" % self.name)
 
     @property
@@ -210,7 +215,9 @@ class JobThread(threading.Thread):
             if isinstance(process, JobState):
                 state = process
             else:
+                logger.debug("Waiting for job %s process to end", self.job)
                 code = process.wait()
+                logger.debug("Job %s ended with code %s", self.job, code)
                 state = JobState.DONE if code == 0 else JobState.ERROR
 
             
@@ -274,8 +281,13 @@ class Scheduler():
 
     def submit(self, job: Job):
         with self.cv:
+            logger.info("Submitting job %s", job)
             if self.exitmode:
                 logger.warning("Exit mode: not submitting")
+                return
+
+            if job.identifier in self.jobs:
+                logger.warning("Job %s already submitted", job)
                 return
 
             job.submittime = time.time()
