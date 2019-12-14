@@ -14,7 +14,6 @@ import experimaestro.api as api
 from .api import XPMObject, Typename
 from .utils import logger
 from .workspace import Workspace
-import experimaestro.commandline as commandline
 
 # --- Annotations to define tasks and types
         
@@ -85,6 +84,8 @@ class task(config):
         self.scriptpath = scriptpath
 
     def __call__(self, objecttype):
+        import experimaestro.commandline as commandline
+
         # Register the type
         objecttype = super().__call__(objecttype, basetype=api.XPMTask) 
 
