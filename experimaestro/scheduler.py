@@ -5,6 +5,7 @@ import re
 import time
 from typing import Optional, Set
 import enum
+import signal
 
 from .workspace import Workspace
 from .api import XPMObject
@@ -237,6 +238,24 @@ class JobThread(threading.Thread):
                 for lock in locks:
                     lock.release()
 
+
+class SignalHandler():
+    def __init__(self):
+        self.schedulers = set()
+        signal.signal(signal.SIGINT, self)
+
+    def add(self, scheduler):
+        self.schedulers.add(scheduler)
+
+    def remove(self, scheduler):
+        self.schedulers.remove(scheduler)
+
+    def __call__(self, signum, frame):
+        """SIGINT signal handler"""
+        logger.warning("Signal received")
+
+SIGNAL_HANDLER = SignalHandler()
+
 class Scheduler():
     """Represents an experiment"""
     CURRENT = None
@@ -266,7 +285,7 @@ class Scheduler():
     def __enter__(self):
         self.old_experiment = Scheduler.CURRENT
         Scheduler.CURRENT = self
-
+        SIGNAL_HANDLER.add(self)
 
     def __exit__(self, *args):
         # Wait until all tasks are completed
@@ -278,6 +297,7 @@ class Scheduler():
         # Set back the old scheduler, if any
         logger.info("Exiting experiment %s", self.name)
         Scheduler.CURRENT = self.old_experiment
+        SIGNAL_HANDLER.remove(self)
 
     def submit(self, job: Job):
         with self.cv:

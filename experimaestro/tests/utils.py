@@ -75,4 +75,14 @@ class TemporaryExperiment:
           self.workdir.__exit__(*args)
 
 
+
+def is_posix():
+    try:
+        import posix
+        return True
+    except ImportError:
+        return False
+
+
 logging.basicConfig(level=logging.DEBUG)
+

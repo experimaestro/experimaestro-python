@@ -13,7 +13,6 @@ class NotificationThread(threading.Thread):
         super().__init__(daemon=True)
         self.url = os.environ.get(NOTIFICATIONURL_VARNAME, None)
 
-
         self.progress = 0
         self.previous_progress = -1
 
@@ -28,7 +27,6 @@ class NotificationThread(threading.Thread):
             self.progress_threshold = .05
 
     def stop(self):
-        print("STOP")
         if self.url:
             self.stopping = True
             with self.cv:
@@ -36,7 +34,6 @@ class NotificationThread(threading.Thread):
 
     def run(self):
         logger.info("Running notification thread")
-
 
         while not self.stopping:
             with self.cv:
