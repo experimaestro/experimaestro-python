@@ -7,9 +7,7 @@ from .scheduler import Scheduler, experiment
 from .notifications import progress
 from .register import parse_commandline
 from .meta import __version__
-
-# Deprecated Annotation
-from .annotations import RegisterType, RegisterTask, TypeArgument
+from .api import Any
 
 def set_launcher(launcher):
     Workspace.CURRENT.launcher = launcher

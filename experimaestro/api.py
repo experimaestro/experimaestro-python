@@ -12,9 +12,10 @@ import os
 import logging
 from pathlib import Path, PosixPath
 import re
-from typing import Union, Dict, List, Set
+from typing import Union, Dict, List, Set, Iterator
 import hashlib
 import struct
+from collections import ChainMap
 
 from experimaestro.utils import logger
 
@@ -76,6 +77,7 @@ class TypeAttribute:
         self.type = type
         self.path = [key]
 
+# FIXME: most methods should be in ObjectType
 class Type():
     DEFINED:Dict[type, "Type"] = {}
 
@@ -86,8 +88,6 @@ class Type():
             tn = Typename(tn)
         self.typename = tn
         self.description = description
-        self.arguments:Dict[str, Argument] = {}
-
 
     @property
     def ignore(self):
@@ -103,12 +103,6 @@ class Type():
     def name(self):
         return str(self.typename)
 
-    def addArgument(self, argument: Argument):
-        self.arguments[argument.name] = argument
-
-    def getArgument(self, key: str) -> Argument:
-        return self.arguments[key]
-
     def isArray(self):
         return False
 
@@ -119,7 +113,7 @@ class Type():
         logger.debug("Searching for type %s", key)
 
         if key is None:
-            return AnyType
+            return Any
 
         defined = Type.DEFINED.get(key, None)
         if defined:
@@ -149,16 +143,42 @@ class ObjectType(Type):
     """The type of XPMObject"""
 
     REGISTERED:Dict[str, "XPMObject"] = {}
-
-    def __init__(self, objecttype: "XPMObject", typename, description):
+    
+    def __init__(self, objecttype: type, typename, description):
         super().__init__(typename, description)
-        self.objecttype = objecttype
 
-        if str(self.typename) in ObjectType.REGISTERED:
-            raise Exception("Experimaestro type %s is already declared" % self.typename)
-        ObjectType.REGISTERED[str(self.typename)] = objecttype
+        self.objecttype = objecttype
         self.task = None
         self.originaltype = None
+
+        self.arguments = ChainMap(*(tp.arguments for tp in self.parents()))
+
+    def addArgument(self, argument: Argument):
+        self.arguments[argument.name] = argument
+
+    def getArgument(self, key: str) -> Argument:
+        return self.arguments[key]
+
+    def parents(self) -> Iterator["ObjectType"]:
+        for tp in self.objecttype.__bases__:
+            if issubclass(tp, XPMObject) and tp not in [XPMObject, XPMTask]:
+                yield tp.__xpm__
+        
+    @staticmethod
+    def create(objecttype: "XPMObject", typename, description):
+        if str(typename) in ObjectType.REGISTERED:
+            _objecttype = ObjectType.REGISTERED[typename]
+            if _objecttype.__xpm__.originaltype != objecttype:
+                # raise Exception("Experimaestro type %s is already declared" % typename)
+                pass
+
+            logging.error("Experimaestro type %s is already declared" % typename)
+            return _objecttype
+
+
+        ObjectType.REGISTERED[str(typename)] = objecttype
+        return ObjectType(objecttype, typename, description)
+
 
     def validate(self, value):
         if isinstance(value, dict):
@@ -166,10 +186,12 @@ class ObjectType(Type):
             if valuetype is None:
                 raise ValueError("Object has no $type")
             return ObjectType.REGISTERED[valuetype](**value)
+
         if not isinstance(value, XPMObject):
             raise ValueError("%s is not an experimaestro type or task", value)
+
         if not isinstance(value, self.objecttype):
-            raise ValueError("%s is not a subtype of %s")
+            raise ValueError("%s is not a subtype of %s" % (value, self.objecttype))
 
         if self.task and not value.__xpm__.job:
             raise ValueError("The value must be submitted before giving it")
@@ -223,7 +245,14 @@ class PathType(Type):
         """Ignore by default"""
         return True
 
-AnyType = Type("any")
+class AnyType(Type):
+    def __init__(self):
+        super().__init__("any")
+
+    def validate(self, value):
+        return value
+
+Any = AnyType()
 
 class ArrayType(Type):  
     def __init__(self, type: Type):
@@ -356,18 +385,22 @@ class TypeInformation():
         if self._sealed:
             raise AssertionError("Object is read-only")
 
-        argument = self.xpmtype.arguments.get(k, None)
-        if argument:
-            # If argument, check the value
-            if not bypass and argument.generator:
-                raise AssertionError("Property %s is read-only" % (k))
-            object.__setattr__(self.pyobject, k, argument.type.validate(v))
-        elif k == "$type":
-            assert v == str(self.xpmtype.typename)
-        elif k == "$job":
-            self.job = FakeJob(v)
-        else:
-            object.__setattr__(self, k, v)
+        try:
+            argument = self.xpmtype.arguments.get(k, None)
+            if argument:
+                # If argument, check the value
+                if not bypass and argument.generator:
+                    raise AssertionError("Property %s is read-only" % (k))
+                object.__setattr__(self.pyobject, k, argument.type.validate(v))
+            elif k == "$type":
+                assert v == str(self.xpmtype.typename)
+            elif k == "$job":
+                self.job = FakeJob(v)
+            else:
+                object.__setattr__(self, k, v)
+        except:
+            logger.error("Error while setting value %s" % k)
+            raise
 
     def addtag(self, name, value):
         self._tags[name] = value
