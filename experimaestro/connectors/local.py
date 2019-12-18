@@ -6,10 +6,12 @@ from pathlib import Path, WindowsPath, PosixPath
 import os
 import subprocess
 import threading
+import sys
 import fasteners
+import psutil
 from experimaestro.locking import Lock
 
-from . import Connector, Process, ProcessBuilder, RedirectType, Redirect
+from . import Connector, Process, ProcessBuilder, RedirectType, Redirect, ProcessThreadError
 from experimaestro.utils import logger
 
 class LocalProcess(Process):
@@ -17,7 +19,7 @@ class LocalProcess(Process):
         self._process = process
     
     def wait(self):
-        return self._process.wait()
+        self._process.wait()
 
 def getstream(redirect: Redirect, write: bool):
     if redirect.type == RedirectType.FILE:
@@ -31,14 +33,50 @@ def getstream(redirect: Redirect, write: bool):
 
     raise NotImplementedError("For %s", redirect)
 
+
+
 class LocalProcessBuilder(ProcessBuilder):
     def start(self):
-        stdin = getstream(self.stdin, False)
-        stdout = getstream(self.stdout, True)
-        stderr = getstream(self.stderr, True)
+        if self.detach:
+            return self.unix_daemon()
+        else:
+            return self.start_nodetach()
+    
+    def start_nodetach(self):
+            stdin = getstream(self.stdin, False)
+            stdout = getstream(self.stdout, True)
+            stderr = getstream(self.stderr, True)
 
-        # Valid values are PIPE, DEVNULL, an existing file descriptor (a positive integer), an existing file object, and None
-        return LocalProcess(subprocess.Popen(self.command, stdin=stdin, stderr=stderr, stdout=stdout))
+            # Valid values are PIPE, DEVNULL, an existing file descriptor (a positive integer), an existing file object, and None
+            return LocalProcess(subprocess.Popen(self.command, stdin=stdin, stderr=stderr, stdout=stdout))
+
+
+    def unix_daemon(self):
+        # From https://stackoverflow.com/questions/6011235/run-a-program-from-python-and-have-it-continue-to-run-after-the-script-is-kille
+        # do the UNIX double-fork magic, see Stevens' "Advanced 
+        # Programming in the UNIX Environment" for details (ISBN 0201563177)
+
+        readpipe, writepipe = os.pipe()
+
+        try: 
+            pid = os.fork() 
+            if pid > 0:
+                # parent process, return and keep running
+                pid = int(os.read(readpipe, 100).decode("utf-8"))
+                return psutil.Process(pid)
+        except OSError as e:
+            logger.error("Fork #1 failed: %d (%s)" % (e.errno, e.strerror))
+            raise
+
+        os.chdir("/")
+        os.setsid()
+
+        # The second fork is done with Popen
+        logger.info("(forked process) starting process")
+        p = self.start_nodetach()
+        os.write(writepipe, str(p._process.pid).encode("utf-8"))
+        # Exit now - this will leave the process running
+        raise ProcessThreadError()
 
 
 class InterProcessLock(fasteners.InterProcessLock, Lock):

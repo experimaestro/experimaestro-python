@@ -71,10 +71,12 @@ def test_done():
     pass
 
 
-TERMINATES_FUNC = [lambda p: p.terminate()]
+def terminate(p): p.terminate()
+def sigint(p): p.send_signal(signal.SIGINT)
 
+TERMINATES_FUNC = [terminate]
 if is_posix():
-    TERMINATES_FUNC.append(lambda p: p.send_signal(signal.SIGINT))
+    TERMINATES_FUNC.append(sigint)
 
 @pytest.mark.parametrize('terminate', TERMINATES_FUNC)
 def test_restart(terminate):

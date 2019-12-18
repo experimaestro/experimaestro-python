@@ -50,6 +50,10 @@ Redirect._INHERIT = Redirect(RedirectType.INHERIT)
 
 class Process: pass
 
+class ProcessThreadError(Exception):
+    """Exception thrown by the forked process, to exit properly""" 
+    pass
+
 class ProcessBuilder:
     """A process builder
     """
