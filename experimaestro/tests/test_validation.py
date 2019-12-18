@@ -130,6 +130,18 @@ def notdeclared(): pass
 def test_notdeclared():
     expect_notvalidate(notdeclared(a=1))
 
+
+@argument("x", type=int)
+@config()
+class Parent: pass
+
+@config()
+class Child(Parent): pass
+
+def test_child():
+    expect_validate(Child(x=1))
+
+
 # --- Default value
 
 
