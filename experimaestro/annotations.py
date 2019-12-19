@@ -21,42 +21,50 @@ class config:
 
     """Annotations for experimaestro types"""
     def __init__(self, typename=None, description=None, parents=[]):
+        """[summary]
+        
+        Keyword Arguments:
+            typename {Typename, str} -- Unique identifier of the type (default: {None} will use the module/class name)
+            description {str} -- Description of the config/task (default: {None})
+            parents {list} -- Parent classes if annotating a method (default: {[]})
+        """
         super().__init__()
         self.typename = typename
         self.description = description
         self.parents = parents
 
-    def __call__(self, objecttype, basetype=api.XPMObject):
+    def __call__(self, tp, basetype=api.XPMObject):
         # Check if conditions are fullfilled
         if self.typename is None:
-            self.typename = Typename("%s.%s" % (objecttype.__module__.lower(), objecttype.__name__.lower()))
+            self.typename = Typename("%s.%s" % (tp.__module__.lower(), tp.__name__.lower()))
 
-        originaltype = objecttype
+        originaltype = tp
         
         # --- If this is a method, encapsulate
-        if inspect.isfunction(objecttype):
-            objecttype = api.getfunctionpyobject(objecttype, self.parents, basetype=basetype)
+        if inspect.isfunction(tp):
+            tp = api.getfunctionpyobject(tp, self.parents, basetype=basetype)
         
         # --- Add XPMObject as an ancestor of t if needed
-        elif inspect.isclass(objecttype):
+        elif inspect.isclass(tp):
             assert not self.parents, "parents can be used only for functions"
-            if not issubclass(objecttype, basetype):
+            if not issubclass(tp, basetype):
                 __bases__ = (basetype, )
-                if objecttype.__bases__ != (object, ):
-                    __bases__ += objecttype.__bases__
-                __dict__ = {key: value for key, value in objecttype.__dict__.items() if key not in ["__dict__"]}
-                objecttype = type(objecttype.__name__, __bases__, __dict__)
+                if tp.__bases__ != (object, ):
+                    __bases__ += tp.__bases__
+                __dict__ = {key: value for key, value in tp.__dict__.items() if key not in ["__dict__"]}
+                tp = type(tp.__name__, __bases__, __dict__)
 
 
         else:
-            raise ValueError("Cannot use type %s as a type/task" % objecttype)
+            raise ValueError("Cannot use type %s as a type/task" % tp)
 
         logging.debug("Registering %s", self.typename)
         
-        xpmtype = api.ObjectType(objecttype, self.typename, self.description)
-        objecttype.__xpm__ = xpmtype
-        xpmtype.originaltype = originaltype
-        return objecttype
+        objecttype = api.ObjectType.create(tp, self.typename, self.description)
+        tp.__xpm__ = objecttype
+        objecttype.originaltype = originaltype
+        
+        return tp
 
 
 class Array(api.TypeProxy):
@@ -130,16 +138,19 @@ class argument():
         self.required = required
         self.generator = None
 
-    def __call__(self, objecttype):
+    def __call__(self, tp):
         # Get type from default if needed
         if self.type is None:
-            if self.default is None: 
-                raise ValueError("config is not defined for argument %s", self.name)
-            self.type = api.Type.fromType(type(self.default))
+            if self.default is not None: 
+                self.type = api.Type.fromType(type(self.default))
+
+        # Type = any if no type
+        if self.type is None:
+            self.type = api.Any
 
         argument = api.Argument(self.name, self.type, help=self.help, required=self.required, ignored=self.ignored, generator=self.generator, default=self.default)
-        objecttype.__xpm__.addArgument(argument)
-        return objecttype
+        tp.__xpm__.addArgument(argument)
+        return tp
 
 class pathargument(argument):
     """Defines a an argument that will be a relative path (automatically
@@ -200,12 +211,3 @@ def deprecateClass(klass):
         
     klass.__init__ = __init__
     return klass
-
-@deprecateClass
-class RegisterType(config): pass
-
-@deprecateClass
-class RegisterTask(task): pass
-
-@deprecateClass
-class TypeArgument(argument): pass

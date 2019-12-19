@@ -11,6 +11,7 @@ from .workspace import Workspace
 from .api import XPMObject
 from .utils import logger
 from .dependencies import LockError, Dependency, DependencyStatus
+from .connectors import ProcessThreadError
 from .locking import Lock
 
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
@@ -195,6 +196,7 @@ class JobThread(threading.Thread):
 
     def run(self):
         locks = []
+        childprocess = False
         try:
             with self.job.scheduler.cv:
                 logger.info("Starting job %s with %d dependencies", self.job, len(self.job.dependencies))
@@ -215,13 +217,27 @@ class JobThread(threading.Thread):
             
             if isinstance(process, JobState):
                 state = process
+                logger.debug("Job %s ended (state %s)", self.job, state)
             else:
                 logger.debug("Waiting for job %s process to end", self.job)
+
                 code = process.wait()
+                    
+                if code is None:
+                    # Case where we cannot retrieve the code right away
+                    if self.job.donepath.is_file(): 
+                        code = 0
+                    else:
+                        code = int(self.job.codepath.read_text())
+
                 logger.debug("Job %s ended with code %s", self.job, code)
                 state = JobState.DONE if code == 0 else JobState.ERROR
 
-            
+
+        except ProcessThreadError:
+            childprocess = True
+            return
+
         except JobError:
             logger.warning("Error while running job")
             state = JobState.ERROR
@@ -231,12 +247,14 @@ class JobThread(threading.Thread):
             state = JobState.ERROR
 
         finally:
-            if state in [JobState.DONE, JobState.ERROR]:
-                self.job.scheduler.jobfinished(self.job, state)
-
             with self.job.scheduler.cv:
                 for lock in locks:
                     lock.release()
+
+            if not childprocess:
+                if state in [JobState.DONE, JobState.ERROR]:
+                    self.job.scheduler.jobfinished(self.job, state)
+
 
 
 class SignalHandler():
@@ -253,6 +271,10 @@ class SignalHandler():
     def __call__(self, signum, frame):
         """SIGINT signal handler"""
         logger.warning("Signal received")
+        for scheduler in self.schedulers:
+            scheduler.exitmode = True
+            with scheduler.cv:
+                scheduler.cv.notify_all()
 
 SIGNAL_HANDLER = SignalHandler()
 
@@ -292,7 +314,7 @@ class Scheduler():
         logger.info("Waiting that experiment %s finishes", self.name)
         with self.cv:
             logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
-            self.cv.wait_for(lambda : not self.waitingjobs)
+            self.cv.wait_for(lambda : not self.waitingjobs or self.exitmode)
 
         # Set back the old scheduler, if any
         logger.info("Exiting experiment %s", self.name)
@@ -336,7 +358,9 @@ class Scheduler():
             if self.exitmode:
                 logger.warning("Exit mode: not starting")
                 return
-            JobThread(job).start()
+            thread = JobThread(job)            
+            thread.daemon = True
+            thread.start()
             
     def jobstarted(self, job: Job):
         """Called just before a job is run"""

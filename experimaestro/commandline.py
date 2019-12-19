@@ -205,6 +205,7 @@ class PsutilProcess():
     def __init__(self, job, process):
         self.job = job
         self.process = process
+
     def wait(self):
         self.process.wait()
         if self.job.donepath.is_file(): 
@@ -270,6 +271,7 @@ class CommandLineJob(Job):
 
         self.state = JobState.RUNNING
         self._process = processbuilder.start()
+        logger.warning("Process started (%s)", self._process)
         return self._process
 
 

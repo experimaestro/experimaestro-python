@@ -38,18 +38,12 @@ class Dependency():
             self.target.dependencychanged(self, self.currentstatus, status)
             self.currentstatus = status
 
-class Lock: pass
+class Lock: 
+    def acquire(self): 
+        raise NotImplementedError()
+
+    def release(self): 
+        raise NotImplementedError()
+
 
 class LockError(Exception): pass
-
-# --- Token dependencies
-
-class Token(): pass
-
-class CounterToken(Token):
-    def __init__(self, path: Path, tokens: int=-1):
-        self.path = path
-        self.tokens = tokens
-
-    def createDependency(self, count: int):
-        return Dependency(self)
