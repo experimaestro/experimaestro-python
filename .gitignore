@@ -1,7 +1,9 @@
 dist
 *.pyc
-__pycache__/
 *.egg-info
 .vscode/
-.mypy_cache/
 .tox
+
+__pycache__/
+.mypy_cache/
+.pytest_cache
