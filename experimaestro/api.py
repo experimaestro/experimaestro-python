@@ -405,11 +405,11 @@ class TypeInformation():
     def addtag(self, name, value):
         self._tags[name] = value
 
-    def xpmvalues(self):
+    def xpmvalues(self, generated=False):
         """Returns an iterarator over arguments and associated values"""
         for argument in self.xpmtype.arguments.values():
-            if hasattr(self.pyobject, argument.name):
-                yield argument, getattr(self.pyobject, argument.name)
+            if hasattr(self.pyobject, argument.name) or (generated and argument.generator):
+                yield argument, getattr(self.pyobject, argument.name, None)
 
     def tags(self, tags={}):
         tags.update(self._tags)
@@ -433,7 +433,7 @@ class TypeInformation():
             # Check function
             if inspect.isfunction(self.xpmtype.originaltype):
                 argnames = set()
-                for argument, value in self.xpmvalues():
+                for argument, value in self.xpmvalues(True):
                     argnames.add(argument.name)
                 spec = inspect.getfullargspec(self.xpmtype.originaltype)
 
