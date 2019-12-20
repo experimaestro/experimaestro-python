@@ -306,6 +306,10 @@ class HashComputer():
             self.hasher.update(xpmtype.typename.name.encode("utf-8"))
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
+                # Hash name
+                self.update(argument.name)
+
+                # Hash value
                 argvalue = getattr(value, argument.name, None)
                 if argument.ignored or argument.generator:
                     continue
