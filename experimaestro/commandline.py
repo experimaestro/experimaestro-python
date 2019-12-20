@@ -210,7 +210,7 @@ class PsutilProcess():
         self.process.wait()
         if self.job.donepath.is_file(): 
             return 0
-        return int(self.job.codepath.read_text())
+        return int(self.job.failedpath.read_text())
 
 class CommandLineJob(Job):
     def __init__(self, commandline: CommandLine, parameters, workspace=None, launcher=None):
