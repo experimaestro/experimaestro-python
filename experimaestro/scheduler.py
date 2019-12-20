@@ -228,7 +228,7 @@ class JobThread(threading.Thread):
                     if self.job.donepath.is_file(): 
                         code = 0
                     else:
-                        code = int(self.job.codepath.read_text())
+                        code = int(self.job.failedpath.read_text())
 
                 logger.debug("Job %s ended with code %s", self.job, code)
                 state = JobState.DONE if code == 0 else JobState.ERROR
