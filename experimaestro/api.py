@@ -402,7 +402,8 @@ class TypeInformation():
             elif k == "$job":
                 self.job = FakeJob(v)
             else:
-                object.__setattr__(self, k, v)
+                raise AttributeError("Cannot set non existing attribute %s", k)
+                # object.__setattr__(self, k, v)
         except:
             logger.error("Error while setting value %s" % k)
             raise
@@ -553,6 +554,9 @@ class XPMObjectMetaclass(type):
 class XPMObject(metaclass=XPMObjectMetaclass):
     """Base type for all objects in python interface"""
 
+    # Set to true when executing a task to remove all checks
+    TASKMODE = False
+    
     def __init__(self, **kwargs):
         assert self.__class__.__xpm__, "No XPM type associated with this XPM object"
 
@@ -572,7 +576,7 @@ class XPMObject(metaclass=XPMObjectMetaclass):
                 self.__xpm__.set(name, clone(value.default))
 
     def __setattr__(self, name, value):
-        if name != "__xpm__":
+        if not XPMObject.TASKMODE and name != "__xpm__":
             return self.__xpm__.set(name, value)
         return super().__setattr__(name, value)
 

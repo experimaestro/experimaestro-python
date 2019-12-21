@@ -58,8 +58,16 @@ def test_fail_dep():
     assert fail.__xpm__.job.wait() == JobState.ERROR
     assert dep.__xpm__.job.wait() == JobState.ERROR
 
+
+def test_unknown_attribute():
+    """No check when setting attributes while executing"""
+    with TemporaryExperiment("unknown"):
+        method = SetUnknown().submit()
+
+    assert method.__xpm__.job.wait() == JobState.DONE
+
+
 def test_function():
-    """Failing task... should cancel dependent"""
     with TemporaryExperiment("function"):
         method = Method(a=1).submit()
 

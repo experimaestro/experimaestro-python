@@ -45,6 +45,7 @@ class FailConsumer:
 def Method(a: int):
     assert a == 1
 
-
-if __name__ == "__main__":
-    parse_commandline()
+@task(tasks.setunknown)
+class SetUnknown():
+    def execute(self):
+        self.abc = 1
