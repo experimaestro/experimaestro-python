@@ -154,3 +154,17 @@ def test_default(value, apitype):
     value = Default()
     expect_validate(value)
     assert Default.__xpm__.arguments["default"].type.__class__ == apitype
+
+
+def test_seal():
+    """Test value sealing"""
+
+    @argument("a", int)
+    @config(register=False)
+    class A(): pass
+
+    a = A(a=2)
+    a.__xpm__.seal(None)
+    
+    with pytest.raises(AttributeError):
+        a.a = 1

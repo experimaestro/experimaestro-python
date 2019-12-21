@@ -166,7 +166,7 @@ class ObjectType(Type):
         
     @staticmethod
     def create(objecttype: "XPMObject", typename, description, register=True):
-        if str(typename) in ObjectType.REGISTERED:
+        if register and str(typename) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[typename]
             if _objecttype.__xpm__.originaltype != objecttype:
                 # raise Exception("Experimaestro type %s is already declared" % typename)
@@ -388,7 +388,7 @@ class TypeInformation():
 
     def set(self, k, v, bypass=False):
         if self._sealed:
-            raise AssertionError("Object is read-only")
+            raise AttributeError("Object is read-only")
 
         try:
             argument = self.xpmtype.arguments.get(k, None)
@@ -470,6 +470,10 @@ class TypeInformation():
         for k, argument in self.xpmtype.arguments.items():
             if argument.generator:
                 self.set(k, argument.generator(job), bypass=True)
+            elif hasattr(self.pyobject, k):
+                v = getattr(self.pyobject, k)
+                if isinstance(v, XPMObject):
+                    v.__xpm__.seal(job)
         self._sealed = True
 
     @property
