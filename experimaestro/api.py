@@ -165,7 +165,7 @@ class ObjectType(Type):
                 yield tp.__xpm__
         
     @staticmethod
-    def create(objecttype: "XPMObject", typename, description):
+    def create(objecttype: "XPMObject", typename, description, register=True):
         if str(typename) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[typename]
             if _objecttype.__xpm__.originaltype != objecttype:
@@ -176,7 +176,8 @@ class ObjectType(Type):
             return _objecttype
 
 
-        ObjectType.REGISTERED[str(typename)] = objecttype
+        if register:
+            ObjectType.REGISTERED[str(typename)] = objecttype
         return ObjectType(objecttype, typename, description)
 
 

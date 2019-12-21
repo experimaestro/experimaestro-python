@@ -20,18 +20,20 @@ from .workspace import Workspace
 class config:
 
     """Annotations for experimaestro types"""
-    def __init__(self, typename=None, description=None, parents=[]):
+    def __init__(self, typename=None, description=None, register=True, parents=[]):
         """[summary]
         
         Keyword Arguments:
             typename {Typename, str} -- Unique identifier of the type (default: {None} will use the module/class name)
             description {str} -- Description of the config/task (default: {None})
             parents {list} -- Parent classes if annotating a method (default: {[]})
+            register {bool} -- False if the type should not be registered (debug only)
         """
         super().__init__()
         self.typename = typename
         self.description = description
         self.parents = parents
+        self.register = register
 
     def __call__(self, tp, basetype=api.XPMObject):
         # Check if conditions are fullfilled
@@ -60,7 +62,7 @@ class config:
 
         logging.debug("Registering %s", self.typename)
         
-        objecttype = api.ObjectType.create(tp, self.typename, self.description)
+        objecttype = api.ObjectType.create(tp, self.typename, self.description, register=self.register)
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
         

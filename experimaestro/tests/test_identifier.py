@@ -63,6 +63,26 @@ def test_float():
 def test_float2():
     assert_equal(Float(value=1.), Float(value=1))
 
+# --- Argument name
+
+def test_name():
+    """Path should be ignored"""
+    @argument("a", int)
+    @config("test.identifier.argumentname", register=False)
+    class Config0: pass
+
+    @argument("b", int)
+    @config("test.identifier.argumentname", register=False)
+    class Config1: pass
+
+    @argument("a", int)
+    @config("test.identifier.argumentname", register=False)
+    class Config3: pass
+
+
+    assert_notequal(Config0(a=2), Config1(b=2))
+    assert_equal(Config0(a=2), Config3(a=2))
+
 
 # --- Ignore paths
 
