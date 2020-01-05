@@ -271,7 +271,7 @@ class CommandLineJob(Job):
 
         self.state = JobState.RUNNING
         self._process = processbuilder.start()
-        logger.warning("Process started (%s)", self._process)
+        logger.info("Process started (%s)", self._process)
         return self._process
 
 

@@ -133,3 +133,8 @@ def test_restart(terminate):
         if p and p.is_running():
             logging.warning("Forcing to quit process %s", p.pid)
             p.terminate()
+
+
+@pytest.skip("Test to implemented")
+def test_submitted_twice():
+    pass

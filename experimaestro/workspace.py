@@ -24,6 +24,11 @@ class Workspace():
         Workspace.CURRENT = self.old_workspace
 
     @property
+    def connector(self):
+        """Returns the default connector"""
+        return self.launcher.connector
+        
+    @property
     def jobspath(self):
         """Folder for jobs"""
         return self.path / "jobs"

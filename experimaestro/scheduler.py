@@ -6,6 +6,8 @@ import time
 from typing import Optional, Set
 import enum
 import signal
+import asyncio
+import sys
 
 from .workspace import Workspace
 from .api import XPMObject
@@ -276,11 +278,22 @@ class SignalHandler():
             with scheduler.cv:
                 scheduler.cv.notify_all()
 
-SIGNAL_HANDLER = SignalHandler()
+class EventLoopThread(threading.Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.loop = None
+
+    def run(self):
+        logger.debug("Starting event loop thread")
+        self.loop = asyncio.new_event_loop()
+        self.loop.run_forever()
+
+SIGNAL_HANDLER = None
 
 class Scheduler():
     """Represents an experiment"""
     CURRENT = None
+    EVENT_LOOP = None
 
     def __init__(self, name):
         # Name of the experiment
@@ -305,8 +318,25 @@ class Scheduler():
         self.listeners:Set[Listener] = set()
 
     def __enter__(self):
+        global SIGNAL_HANDLER
         self.old_experiment = Scheduler.CURRENT
         Scheduler.CURRENT = self
+
+        # Check for XPM IPC
+        from experimaestro.server.ipc import client
+        try:
+            self.ipc = client()
+        except ProcessThreadError:
+            sys.exit(0)
+
+        # Create an event loop for checking things
+        if Scheduler.EVENT_LOOP is None:
+            Scheduler.EVENT_LOOP = EventLoopThread()
+            Scheduler.EVENT_LOOP.start()
+
+        if not SIGNAL_HANDLER:
+            SIGNAL_HANDLER = SignalHandler()
+
         SIGNAL_HANDLER.add(self)
 
     def __exit__(self, *args):
@@ -315,6 +345,8 @@ class Scheduler():
         with self.cv:
             logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
             self.cv.wait_for(lambda : not self.waitingjobs or self.exitmode)
+
+        self.ipc.__exit__(*args)
 
         # Set back the old scheduler, if any
         logger.info("Exiting experiment %s", self.name)

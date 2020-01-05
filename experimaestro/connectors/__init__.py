@@ -12,6 +12,7 @@ import enum
 from typing import Dict, Optional
 from pathlib import Path, PosixPath
 from experimaestro.locking import Lock
+from experimaestro.tokens import Token
 
 class RedirectType(enum.Enum):
     INHERIT = 0
@@ -72,6 +73,24 @@ class ProcessBuilder:
 
 
 class Connector(): 
+    def __init__(self, localpath: Path):
+        """Creates a new connector
+        
+        Arguments:
+            localpath {Path} -- The working directory
+        """
+        self._localpath = localpath
+
+    @property
+    def localpath(self):
+        if not self._localpath.is_dir():
+            self._localpath.mkdir(parents=True)
+        return self._localpath
+
+    @localpath.setter
+    def localpath(self, localpath: Path):
+        self._localpath = localpath
+
     def processbuilder(self) -> ProcessBuilder:
         raise NotImplementedError()
 
@@ -83,4 +102,8 @@ class Connector():
         raise NotImplementedError()
 
     def setExecutable(self, path: Path, flag: bool):
+        raise NotImplementedError()
+
+    def createtoken(self, name: str) -> Token:
+        """Returns a token in the default path for the connector"""
         raise NotImplementedError()

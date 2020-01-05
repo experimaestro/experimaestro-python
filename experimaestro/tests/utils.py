@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import logging
 import signal
+import pytest
 
 from experimaestro.launchers import Launcher
 from experimaestro import experiment
@@ -45,12 +46,21 @@ class timeout:
   def __exit__(self, exc_type, exc_val, exc_tb):
     signal.alarm(0)
 
+
+@pytest.fixture(scope="session")
+def set_workdir(tmpdir_factory):
+  """Set the work dir"""
+  fn = tmpdir_factory.mktemp("xpmworkdir")
+  os.environ["XPM_WORKDIR"] = str(f)
+  return fn
+
 class TemporaryExperiment:
     def __init__(self, name, workdir=None, maxwait=10):
         self.name = name
         self.workdir = workdir
         self.clean_workdir = workdir is None
         self.timeout = timeout(maxwait)
+        set_workdir()
 
     def __enter__(self):
         if self.clean_workdir:

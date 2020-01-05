@@ -12,6 +12,7 @@ import psutil
 from experimaestro.locking import Lock
 
 from . import Connector, Process, ProcessBuilder, RedirectType, Redirect, ProcessThreadError
+from experimaestro.tokens import Token, CounterToken
 from experimaestro.utils import logger
 
 class LocalProcess(Process):
@@ -94,6 +95,14 @@ class InterProcessLock(fasteners.InterProcessLock, Lock):
 
 
 class LocalConnector(Connector):
+    def __init__(self, localpath: Path = None):
+        localpath = localpath
+        if not localpath:
+            localpath = Path(os.environ.get("XPM_WORKDIR", "~/.local/share/experimaestro")).expanduser()
+        super().__init__(localpath)
+
+        self.ipcsocket = "ipc://%s/%s" % (self.localpath, "server.sock")
+
     def lock(self, path: Path, max_delay: int=-1) -> Lock:
         """Returns a lockable path
         
@@ -102,6 +111,11 @@ class LocalConnector(Connector):
             max_delay {int} -- Maximum wait duration (seconds)
         """
         return InterProcessLock(path, max_delay)
+
+    def createtoken(self, name: str, total: int) -> Token:
+        tokendir = self.localpath / "tokens"
+        tokendir.mkdir(exist_ok=True)
+        return CounterToken(name, tokendir / ("%s.counter" % name), total)
 
     def processbuilder(self) -> ProcessBuilder:
         return LocalProcessBuilder()

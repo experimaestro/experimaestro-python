@@ -6,6 +6,7 @@ import importlib
 import importlib.machinery
 import json
 
+from .utils import logger
 from experimaestro.api import ObjectType, XPMObject, TypeInformation
 
 # --- Command line main options
@@ -66,7 +67,17 @@ def run(file, path, taskid, parameters):
         
         task.execute()
 
-if __name__ == "__main__":
+
+@cli.command()
+def serve():
+    """Runs experimaestro server for IPC communication"""
+    from experimaestro.server.ipc import serve
+    serve()
+
+def main():
     cli(obj=None)
+
+if __name__ == "__main__":
+    main()
 
 

@@ -588,6 +588,10 @@ class XPMObject(metaclass=XPMObjectMetaclass):
         """Returns the tag associated with this object (and below)"""
         return self.__xpm__.tags()
 
+    def tokens(self, *tokens):
+        """Adds tokens to the task"""
+        raise NotImplementedError()
+
 class XPMTask(XPMObject):
     """Base type for all tasks"""
 

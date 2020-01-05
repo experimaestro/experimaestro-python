@@ -158,7 +158,11 @@ class RequestProcessor:
             if m:
                 jobid = m.group(1)
                 progress = float(m.group(2))
-                self.scheduler.jobs[jobid].progress = progress
+                try:
+                    self.scheduler.jobs[jobid].progress = progress
+                except KeyError:
+                    # Just ignore
+                    pass
                 return (http.HTTPStatus.OK, headers, "")
 
         if path == "/":
