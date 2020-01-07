@@ -6,7 +6,6 @@ from .workspace import Workspace
 from .scheduler import Scheduler, experiment
 from .notifications import progress
 from .register import parse_commandline
-from .meta import __version__
 from .api import Any
 
 def set_launcher(launcher):
