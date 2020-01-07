@@ -37,6 +37,7 @@ class timeout:
     self.error_message = error_message
 
   def handle_timeout(self, signum, frame):
+    logging.error("Timeout - sending signal")
     raise TimeoutError(self.error_message)
 
   def __enter__(self):

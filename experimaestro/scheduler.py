@@ -333,9 +333,10 @@ class Scheduler():
 
         SIGNAL_HANDLER.add(self)
 
-    def __exit__(self, *args):
-        # Wait until all tasks are completed
-        self.wait()
+    def __exit__(self, exc_type, *args):
+        # Wait until all tasks are completed (unless an exception was thrown)
+        if not exc_type:
+            self.wait()
 
         # Set back the old scheduler, if any
         logger.info("Exiting experiment %s", self.name)
@@ -438,7 +439,7 @@ class experiment:
         return self
 
     def __exit__(self, *args):
-        self.scheduler.__exit__()
-        self.workspace.__exit__()
+        self.scheduler.__exit__(*args)
+        self.workspace.__exit__(*args)
         if self.server:
             self.server.stop()
