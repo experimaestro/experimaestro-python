@@ -1,5 +1,6 @@
 # CLI
 click
+fasteners
 
 # SSH support
 paramiko

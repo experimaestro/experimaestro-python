@@ -402,7 +402,7 @@ class TypeInformation():
             elif k == "$job":
                 self.job = FakeJob(v)
             else:
-                raise AttributeError("Cannot set non existing attribute %s", k)
+                raise AttributeError("Cannot set non existing attribute %s in %s" % (k, self.xpmtype))
                 # object.__setattr__(self, k, v)
         except:
             logger.error("Error while setting value %s" % k)
