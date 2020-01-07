@@ -1,6 +1,11 @@
 # CLI
 click
+
+# Other
 fasteners
+psutil
+websockets
+jsonstreams
 
 # SSH support
 paramiko

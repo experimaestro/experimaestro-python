@@ -1,6 +1,8 @@
 include MANIFEST.in
 include setup.py
 include LICENSE
+include requirements.txt
+include requirements-dev.txt
 
 recursive-include experimaestro *.py 
 graft experimaestro/server/data

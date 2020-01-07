@@ -4,6 +4,11 @@ from pathlib import Path
 from enum import Enum
 from .utils import logger
 
+
+class Resource():
+    def __init__(self):
+        self.dependents:Set[Dependency] = set() # as source
+
 class DependencyStatus(Enum):
     """Waiting for dependency to be available"""
     WAIT = 0

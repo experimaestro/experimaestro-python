@@ -46,21 +46,12 @@ class timeout:
   def __exit__(self, exc_type, exc_val, exc_tb):
     signal.alarm(0)
 
-
-@pytest.fixture(scope="session")
-def set_workdir(tmpdir_factory):
-  """Set the work dir"""
-  fn = tmpdir_factory.mktemp("xpmworkdir")
-  os.environ["XPM_WORKDIR"] = str(f)
-  return fn
-
 class TemporaryExperiment:
     def __init__(self, name, workdir=None, maxwait=10):
         self.name = name
         self.workdir = workdir
         self.clean_workdir = workdir is None
         self.timeout = timeout(maxwait)
-        set_workdir()
 
     def __enter__(self):
         if self.clean_workdir:
@@ -70,13 +61,13 @@ class TemporaryExperiment:
           workdir = self.workdir
 
         self.experiment = experiment(workdir, self.name)
-        workspace = self.experiment.__enter__()
+        self.experiment.__enter__()
 
         # Set some useful environment variables
-        workspace.launcher.setenv("PYTHONPATH", str(Path(__file__).parents[2]))
+        self.experiment.workspace.launcher.setenv("PYTHONPATH", str(Path(__file__).parents[2]))
         self.timeout.__enter__()
 
-        return workspace
+        return self.experiment
 
     def __exit__(self, *args):
         self.experiment.__exit__(*args)

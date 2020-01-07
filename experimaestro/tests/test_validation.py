@@ -90,7 +90,7 @@ def test_path():
 
     a = A()
     a.__xpm__.validate()
-    with TemporaryExperiment("constant") as ws:
+    with TemporaryExperiment("constant") as xp:
         jobcontext = Job(a)
         a.__xpm__.seal(jobcontext)
         assert isinstance(a.value, Path)
@@ -99,7 +99,7 @@ def test_path():
         assert a.value.parents[0].name == a.__xpm__.identifier.hex()
         assert a.value.parents[1].name == str(a.__class__.__xpm__.typename)
         assert a.value.parents[2].name == "jobs"
-        assert a.value.parents[3] == ws.path
+        assert a.value.parents[3] == xp.workspace.path
 
 def test_constant():
     """Test of @ConstantArgument"""

@@ -75,7 +75,7 @@ def test_function():
 
 @pytest.mark.skip()
 def test_done():
-    """Already done job"""
+    """Checks that we do not run an already done job"""
     pass
 
 
@@ -92,13 +92,13 @@ def test_restart(terminate):
     p = None
     xpmprocess = None
     try:
-        with TemporaryExperiment("restart", maxwait=10) as ws:
+        with TemporaryExperiment("restart", maxwait=10) as xp:
             # Create the task and so we can get the file paths
             task = restart.Restart()
             task.submit(dryrun=True)
 
             # Start the experiment with another process, and kill the job
-            command = [sys.executable, restart.__file__, ws.path]
+            command = [sys.executable, restart.__file__, xp.workspace.path]
             logging.debug("Starting other process with: %s", command)
             xpmprocess = subprocess.Popen(command)
             while not task.touch.is_file():
@@ -135,6 +135,7 @@ def test_restart(terminate):
             p.terminate()
 
 
-@pytest.skip("Test to implemented")
+@pytest.mark.skip("Test to implemented")
 def test_submitted_twice():
+    """Check that a job cannot be submitted twice"""
     pass

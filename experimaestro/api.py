@@ -343,7 +343,8 @@ def outputjson(jsonout, context, value, key=[]):
     else:
         raise NotImplementedError("Cannot serialize objects of type %s", type(value))
 
-def updatedependencies(dependencies, value):
+def updatedependencies(dependencies, value: "XPMObject"):
+    """Search recursively jobs to add them as dependencies"""
     if isinstance(value, XPMObject):
         if value.__class__.__xpm__.task:
             dependencies.add(value.__xpm__.dependency())
@@ -379,6 +380,7 @@ class TypeInformation():
 
         # State information
         self.job = None
+        self.dependencies = []
         self.setting = False
 
         # Cached information
@@ -514,6 +516,7 @@ class TypeInformation():
 
         # --- Search for dependencies
         self.updatedependencies(self.job.dependencies)
+        self.job.dependencies.update(self.dependencies)
 
         if dryrun == False or (Scheduler.CURRENT.submitjobs and dryrun is None):
             Scheduler.CURRENT.submit(self.job)
@@ -536,6 +539,9 @@ class TypeInformation():
         with jsonout.subobject(*key) as objectout:
             self._outputjson_inner(objectout, context)
 
+    def add_dependencies(self, *dependencies):
+        self.dependencies.extend(dependencies)
+        
 def clone(v):
     """Clone a value"""
     if isinstance(v, (str, float, int)):
@@ -588,9 +594,10 @@ class XPMObject(metaclass=XPMObjectMetaclass):
         """Returns the tag associated with this object (and below)"""
         return self.__xpm__.tags()
 
-    def tokens(self, *tokens):
+    def add_dependencies(self, *dependencies):
         """Adds tokens to the task"""
-        raise NotImplementedError()
+        self.__xpm__.add_dependencies(*dependencies)
+        return self
 
 class XPMTask(XPMObject):
     """Base type for all tasks"""

@@ -12,7 +12,7 @@ import sys
 from .workspace import Workspace
 from .api import XPMObject
 from .utils import logger
-from .dependencies import LockError, Dependency, DependencyStatus
+from .dependencies import LockError, Dependency, DependencyStatus, Resource
 from .connectors import ProcessThreadError
 from .locking import Lock
 
@@ -55,9 +55,10 @@ class JobDependency(Dependency):
     def lock(self):
         return JobLock(self.origin)
 
-class Job():
+class Job(Resource):
     """Context of a job"""
     def __init__(self, parameters: XPMObject, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
+        super().__init__()
         self.workspace = workspace or Workspace.CURRENT
         assert self.workspace is not None, "No experiment has been defined"
 
@@ -73,7 +74,6 @@ class Job():
 
         # Dependencies
         self.dependencies:Set[Dependency] = set() # as target
-        self.dependents:Set[Dependency] = set() # as source
 
         # Process
         self._process = None
@@ -237,6 +237,7 @@ class JobThread(threading.Thread):
 
 
         except ProcessThreadError:
+            # Thrown by the child process so we can exit gracefully
             childprocess = True
             return
 
@@ -322,13 +323,6 @@ class Scheduler():
         self.old_experiment = Scheduler.CURRENT
         Scheduler.CURRENT = self
 
-        # Check for XPM IPC
-        from experimaestro.server.ipc import client
-        try:
-            self.ipc = client()
-        except ProcessThreadError:
-            sys.exit(0)
-
         # Create an event loop for checking things
         if Scheduler.EVENT_LOOP is None:
             Scheduler.EVENT_LOOP = EventLoopThread()
@@ -341,17 +335,19 @@ class Scheduler():
 
     def __exit__(self, *args):
         # Wait until all tasks are completed
-        logger.info("Waiting that experiment %s finishes", self.name)
-        with self.cv:
-            logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
-            self.cv.wait_for(lambda : not self.waitingjobs or self.exitmode)
-
-        self.ipc.__exit__(*args)
+        self.wait()
 
         # Set back the old scheduler, if any
         logger.info("Exiting experiment %s", self.name)
         Scheduler.CURRENT = self.old_experiment
         SIGNAL_HANDLER.remove(self)
+
+    def wait(self):
+        # Wait until all tasks are completed
+        logger.info("Waiting that experiment %s finishes", self.name)
+        with self.cv:
+            logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
+            self.cv.wait_for(lambda : not self.waitingjobs or self.exitmode)
 
     def submit(self, job: Job):
         with self.cv:
@@ -426,8 +422,12 @@ class experiment:
         self.workspace = Workspace(Path(path))
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None
-        if port:
+        if self.server:
             self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
+
+    def wait(self):
+        """Wait until the running processes have finished"""
+        self.scheduler.wait()
 
     def __enter__(self):
         if self.server:
@@ -435,7 +435,7 @@ class experiment:
 
         self.workspace.__enter__()
         self.scheduler.__enter__()
-        return self.workspace
+        return self
 
     def __exit__(self, *args):
         self.scheduler.__exit__()
