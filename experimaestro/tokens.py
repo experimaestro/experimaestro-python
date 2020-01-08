@@ -6,7 +6,8 @@ from pathlib import Path
 import fasteners
 import threading
 import struct
-from .dependencies import Dependency, Lock, DependencyStatus, Resource
+from .locking import Lock
+from .dependencies import Dependency, DependencyStatus, Resource
 from .utils import logger
 
 
@@ -17,13 +18,13 @@ class Token(Resource):
 
 class CounterTokenLock(Lock):
     def __init__(self, dependency: "CounterTokenDependency"):
+        super().__init__()
         self.dependency = dependency
-        self.acquire()
 
-    def acquire(self): 
+    def _acquire(self): 
         self.dependency.token.acquire(self.dependency.count)                
 
-    def release(self): 
+    def _release(self): 
         self.dependency.token.release(self.dependency.count)
 
 
@@ -83,6 +84,8 @@ class CounterToken(Token):
         # Set the number of available tokens
         self.available = total - taken
 
+    def __str__(self):
+        return "token[{}]".format(self.name)
 
     def dependency(self, count):
         return CounterTokenDependency(self, count)
@@ -101,6 +104,9 @@ class CounterToken(Token):
             self.available = total - taken
             logger.info("Token state [acquired %d]: %d, %d", count, total, taken)
 
+            total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
+            logger.info("Token state [acquired/w %d]: %d, %d", count, total, taken)
+
     def release(self, count):
         """Release"""
         with self.lock:
@@ -114,3 +120,8 @@ class CounterToken(Token):
             self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
             logger.info("Token state [released %d]: %d, %d", count, total, taken)
             self.available = total - taken
+
+        if self.available > 0:
+            # Notify jobs
+            for dependency in self.dependents:
+                dependency.check()

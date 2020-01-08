@@ -10,5 +10,5 @@ from experimaestro import task, argument, pathargument
 def TokenTask(path: Path, x: int):
     print(time.time())
     while not path.is_file():
-        time.sleep(0.1)
+        time.sleep(.5)
     print(time.time())

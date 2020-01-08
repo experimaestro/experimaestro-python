@@ -67,13 +67,6 @@ def run(file, path, taskid, parameters):
         
         task.execute()
 
-
-@cli.command()
-def serve():
-    """Runs experimaestro server for IPC communication"""
-    from experimaestro.server.ipc import serve
-    serve()
-
 def main():
     cli(obj=None)
 

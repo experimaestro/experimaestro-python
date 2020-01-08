@@ -49,6 +49,7 @@ class LocalProcessBuilder(ProcessBuilder):
             stderr = getstream(self.stderr, True)
 
             # Valid values are PIPE, DEVNULL, an existing file descriptor (a positive integer), an existing file object, and None
+            logger.debug("Popen process")
             return LocalProcess(subprocess.Popen(self.command, stdin=stdin, stderr=stderr, stdout=stdout))
 
 
@@ -59,6 +60,7 @@ class LocalProcessBuilder(ProcessBuilder):
 
         readpipe, writepipe = os.pipe()
 
+        # First fork
         try: 
             pid = os.fork() 
             if pid > 0:

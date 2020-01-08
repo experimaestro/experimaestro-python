@@ -12,7 +12,8 @@ import sys
 from .workspace import Workspace
 from .api import XPMObject
 from .utils import logger
-from .dependencies import LockError, Dependency, DependencyStatus, Resource
+from .dependencies import Dependency, DependencyStatus, Resource
+from .locking import Locks, LockError, Lock
 from .connectors import ProcessThreadError
 from .locking import Lock
 
@@ -33,12 +34,13 @@ class JobState(enum.Enum):
 
 class JobLock(Lock):
     def __init__(self, job):
+        super().__init__()
         self.job = job
     
-    def acquire(self): 
-        return self.job.status == JobState.DONE
+    def _acquire(self): 
+        return self.job.state == JobState.DONE
 
-    def release(self): 
+    def _release(self): 
         return False
 
 class JobDependency(Dependency):
@@ -197,64 +199,67 @@ class JobThread(threading.Thread):
         self.job = job
 
     def run(self):
-        locks = []
-        childprocess = False
-        try:
-            with self.job.scheduler.cv:
-                logger.info("Starting job %s with %d dependencies", self.job, len(self.job.dependencies))
+        """Run a job
+        
+        This method will lock all the dependencies before calling `self.job.run(locks)`
+        where `locks` are the taken locks
+        """
+        with Locks() as locks:
+            try:
+                with self.job.scheduler.cv:
+                    logger.info("Starting job %s with %d dependencies", self.job, len(self.job.dependencies))
 
-                for dependency in self.job.dependencies:
-                    try:
-                        locks.append(dependency.lock())
-                    except LockError:
-                        logger.warning("Could not lock %s, aborting start for job %s", dependency, self.job)
-                        dependency.check()
-                        self.job.state = JobState.READY
-                        return
-                
-                logger.info("Running job %s", self.job)
-                self.job.scheduler.jobstarted(self.job)
-                self.job.starttime = time.time()
-                process = self.job.run(locks)
-            
-            if isinstance(process, JobState):
-                state = process
-                logger.debug("Job %s ended (state %s)", self.job, state)
-            else:
-                logger.debug("Waiting for job %s process to end", self.job)
-
-                code = process.wait()
+                    for dependency in self.job.dependencies:
+                        try:
+                            locks.append(dependency.lock().acquire())
+                        except LockError:
+                            logger.warning("Could not lock %s, aborting start for job %s", dependency, self.job)
+                            dependency.check()
+                            self.job.state = JobState.READY
+                            return
                     
-                if code is None:
-                    # Case where we cannot retrieve the code right away
-                    if self.job.donepath.is_file(): 
-                        code = 0
-                    else:
-                        code = int(self.job.failedpath.read_text())
+                    logger.info("Running job %s", self.job)
+                    self.job.scheduler.jobstarted(self.job)
+                    self.job.starttime = time.time()
+                    process = self.job.run(locks)
+                
+                if isinstance(process, JobState):
+                    state = process
+                    logger.debug("Job %s ended (state %s)", self.job, state)
+                else:
+                    logger.debug("Waiting for job %s process to end", self.job)
 
-                logger.debug("Job %s ended with code %s", self.job, code)
-                state = JobState.DONE if code == 0 else JobState.ERROR
+                    code = process.wait()
+                        
+                    if code is None:
+                        # Case where we cannot retrieve the code right away
+                        if self.job.donepath.is_file(): 
+                            code = 0
+                        else:
+                            code = int(self.job.failedpath.read_text())
+
+                    logger.debug("Job %s ended with code %s", self.job, code)
+                    state = JobState.DONE if code == 0 else JobState.ERROR
 
 
-        except ProcessThreadError:
-            # Thrown by the child process so we can exit gracefully
-            childprocess = True
-            return
+            except ProcessThreadError:
+                # Thrown by the child process so we can exit gracefully
+                logger.debug("Graceful exit")
+                # We set state to none so nothing is done
+                state = None
+                # We prevent locks to be unlocked
+                locks.detach()
+                return
 
-        except JobError:
-            logger.warning("Error while running job")
-            state = JobState.ERROR
+            except JobError:
+                logger.warning("Error while running job")
+                state = JobState.ERROR
 
-        except:
-            logger.warning("Error while running job (in experimaestro)", exc_info=True)
-            state = JobState.ERROR
+            except:
+                logger.warning("Error while running job (in experimaestro)", exc_info=True)
+                state = JobState.ERROR
 
-        finally:
-            with self.job.scheduler.cv:
-                for lock in locks:
-                    lock.release()
-
-            if not childprocess:
+            finally:
                 if state in [JobState.DONE, JobState.ERROR]:
                     self.job.scheduler.jobfinished(self.job, state)
 

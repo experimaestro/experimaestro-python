@@ -617,6 +617,10 @@ class XPMTask(XPMObject):
     def stderr(self):
         return self.__xpm__.job.stderr
 
+    @property
+    def job(self):
+        return self.__xpm__.job
+
 def getfunctionpyobject(function, parents, basetype=XPMObject):
     """Returns a PyTask"""
     class _XPMObject(basetype):

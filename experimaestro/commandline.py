@@ -269,8 +269,8 @@ class CommandLineJob(Job):
             processbuilder.stderr = Redirect.file(self.stderr)
             processbuilder.stdout = Redirect.file(self.stdout)
 
-        self.state = JobState.RUNNING
         self._process = processbuilder.start()
+        self.state = JobState.RUNNING
         logger.info("Process started (%s)", self._process)
         return self._process
 

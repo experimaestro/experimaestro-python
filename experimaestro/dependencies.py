@@ -42,13 +42,3 @@ class Dependency():
             logger.info("Dependency %s is %s (was: %s)", self, status, self.currentstatus)
             self.target.dependencychanged(self, self.currentstatus, status)
             self.currentstatus = status
-
-class Lock: 
-    def acquire(self): 
-        raise NotImplementedError()
-
-    def release(self): 
-        raise NotImplementedError()
-
-
-class LockError(Exception): pass
