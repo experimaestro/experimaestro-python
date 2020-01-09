@@ -21,13 +21,10 @@ class TemporaryDirectory:
         return self.path
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if os.environ.get("XPM_KEEPWORKDIR", False):
+        if os.environ.get("XPM_KEEPWORKDIR", False) == 1:
             logging.warning("NOT Removing %s" %  self.path)
         else:
             shutil.rmtree(self.path)
-
-
-class TimeoutError(Exception): pass 
 
 class timeout:
   def __init__(self, seconds, error_message=None):

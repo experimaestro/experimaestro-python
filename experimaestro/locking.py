@@ -34,7 +34,6 @@ class Lock:
     def _release(self): 
         raise NotImplementedError()
 
-
 class LockError(Exception): pass
 
 class Locks(Lock):

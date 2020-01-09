@@ -126,7 +126,7 @@ class Type():
             return key()
 
         if isinstance(key, XPMObject):
-            return key.__class__.__xpm__
+            return key.__xpmtype__
         
         if inspect.isclass(key) and issubclass(key, XPMObject):
             return key.__xpm__
@@ -302,7 +302,7 @@ class HashComputer():
             for x in value:
                 self.update(x)
         elif isinstance(value, XPMObject):
-            xpmtype = value.__class__.__xpm__ # type: config
+            xpmtype = value.__xpmtype__ # type: ObjectType
             self.hasher.update(HashComputer.OBJECT_ID)
             self.hasher.update(xpmtype.typename.name.encode("utf-8"))
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
@@ -346,7 +346,7 @@ def outputjson(jsonout, context, value, key=[]):
 def updatedependencies(dependencies, value: "XPMObject"):
     """Search recursively jobs to add them as dependencies"""
     if isinstance(value, XPMObject):
-        if value.__class__.__xpm__.task:
+        if value.__xpmtype__.task:
             dependencies.add(value.__xpm__.dependency())
         else:
             value.__xpm__.updatedependencies(dependencies)
@@ -372,8 +372,8 @@ class TypeInformation():
 
     def __init__(self, pyobject):
         # The underlying pyobject and XPM type
-        self.pyobject = pyobject
-        self.xpmtype = self.pyobject.__class__.__xpm__ # type: ObjectType
+        self.pyobject = pyobject       
+        self.xpmtype = pyobject.__xpmtype__ # type: ObjectType
 
         # Meta-informations
         self._tags = {}
@@ -553,7 +553,7 @@ def clone(v):
 class XPMObjectMetaclass(type):
     def __getattr__(cls, key):
         """Access to a class field"""
-        if key != "__xpm__" and key in cls.__xpm__.arguments:
+        if not key.startswith("__xpm") and key in cls.__xpm__.arguments:
             return cls.__xpm__.arguments[key]
         return type.__getattribute__(cls, key)
 
@@ -564,7 +564,8 @@ class XPMObject(metaclass=XPMObjectMetaclass):
     TASKMODE = False
     
     def __init__(self, **kwargs):
-        assert self.__class__.__xpm__, "No XPM type associated with this XPM object"
+        if not isinstance(self, XPMTaskFunction):
+            self.__xpmtype__ = self.__class__.__xpm__
 
         # Add configuration
         xpm = TypeInformation(self)
@@ -577,12 +578,12 @@ class XPMObject(metaclass=XPMObjectMetaclass):
             xpm.set(name, value, bypass=TypeInformation.LOADING)
 
         # Initialize with default arguments
-        for name, value in self.__class__.__xpm__.arguments.items():
+        for name, value in self.__xpmtype__.arguments.items():
             if name not in kwargs and value.default is not None:
                 self.__xpm__.set(name, clone(value.default))
 
-    def __setattr__(self, name, value):
-        if not XPMObject.TASKMODE and name != "__xpm__":
+    def __setattr__(self, name, value):            
+        if not XPMObject.TASKMODE and not name.startswith("__xpm"):
             return self.__xpm__.set(name, value)
         return super().__setattr__(name, value)
 
@@ -621,13 +622,29 @@ class XPMTask(XPMObject):
     def job(self):
         return self.__xpm__.job
 
-def getfunctionpyobject(function, parents, basetype=XPMObject):
-    """Returns a PyTask"""
-    class _XPMObject(basetype):
-        def execute(self):
-            kwargs = {}
-            for argument, value in self.__xpm__.xpmvalues():
-                kwargs[argument.name] = value
-            function(**kwargs)
+# XPM task as a function
 
-    return _XPMObject
+class XPMTaskFunction(XPMTask):
+    def __init__(self, function, xpmtype, **kwargs):
+        self.__xpmtype__ = xpmtype
+        super().__init__(**kwargs)
+        object.__setattr__(self, "function", function)
+
+    def execute(self):
+        kwargs = {}
+        for argument, value in self.__xpm__.xpmvalues():
+            kwargs[argument.name] = value
+        self.function(**kwargs)
+
+
+class XPMTaskFunctionCreator():
+    """A class that creates an XPMTask"""
+    def __init__(self, function, basetype):
+        self.function = function
+        self.__bases__ = [basetype]
+
+    def __call__(self, **kwargs):
+        return XPMTaskFunction(self.function, self.__xpm__, **kwargs)
+
+def getfunctionpyobject(function, parents, basetype=XPMObject):
+    return XPMTaskFunctionCreator(function, basetype)

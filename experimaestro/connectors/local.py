@@ -103,7 +103,6 @@ class LocalConnector(Connector):
             localpath = Path(os.environ.get("XPM_WORKDIR", "~/.local/share/experimaestro")).expanduser()
         super().__init__(localpath)
 
-        self.ipcsocket = "ipc://%s/%s" % (self.localpath, "server.sock")
 
     def lock(self, path: Path, max_delay: int=-1) -> Lock:
         """Returns a lockable path
@@ -117,7 +116,7 @@ class LocalConnector(Connector):
     def createtoken(self, name: str, total: int) -> Token:
         tokendir = self.localpath / "tokens"
         tokendir.mkdir(exist_ok=True)
-        return CounterToken(name, tokendir / ("%s.counter" % name), total)
+        return CounterToken.create(name, tokendir / ("%s.counter" % name), total)
 
     def processbuilder(self) -> ProcessBuilder:
         return LocalProcessBuilder()

@@ -97,7 +97,7 @@ def test_path():
         parents = list(a.value.parents)
         assert a.value.name == "file.txt"
         assert a.value.parents[0].name == a.__xpm__.identifier.hex()
-        assert a.value.parents[1].name == str(a.__class__.__xpm__.typename)
+        assert a.value.parents[1].name == str(a.__xpmtype__.typename)
         assert a.value.parents[2].name == "jobs"
         assert a.value.parents[3] == xp.workspace.path
 

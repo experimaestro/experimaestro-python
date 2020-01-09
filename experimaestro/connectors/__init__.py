@@ -104,6 +104,6 @@ class Connector():
     def setExecutable(self, path: Path, flag: bool):
         raise NotImplementedError()
 
-    def createtoken(self, name: str) -> Token:
+    def createtoken(self, name: str, total: int) -> Token:
         """Returns a token in the default path for the connector"""
         raise NotImplementedError()
