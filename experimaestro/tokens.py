@@ -6,7 +6,10 @@ from pathlib import Path
 import fasteners
 import threading
 import struct
-from .locking import Lock
+from watchdog.events import FileSystemEventHandler
+
+from .ipc import ipcom
+from .locking import Lock, LockError
 from .dependencies import Dependency, DependencyStatus, Resource
 from .utils import logger
 
@@ -46,7 +49,7 @@ class CounterTokenDependency(Dependency):
     def token(self):
         return self._token
 
-class CounterToken(Token): 
+class CounterToken(Token, FileSystemEventHandler): 
     """File-based counter token"""
 
     VALUES = struct.Struct("<LL")
@@ -60,23 +63,27 @@ class CounterToken(Token):
         """
         super().__init__()
         self.path = path
-        self.lock = fasteners.InterProcessLock(path)
+        self.lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
         self.name = name
-        
+
+        # Watched path
+        self.watchedpath = str(path.absolute())
+        self.watcher = ipcom().fswatch(self, str(path.parent.absolute()))
+        logger.info("Watching %s", self.watchedpath)
 
         # Set the new number of tokens
         with self.lock:
-            bytes = self.path.read_bytes()
+            bytes = self.path.read_bytes() if self.path.is_file() else None
 
             if bytes:
-                logger.info("Reading token from %s", self.path)
                 total, taken = CounterToken.VALUES.unpack(bytes)
+                logger.info("Read token from %s: %d/%d", self.path, total, taken)
             else:
                 taken = 0
                 total = count
 
             if total != count:
-                logger.info("Changing number of tokens from %d to %d", total, count)
+                logger.warning("Changing number of tokens from %d to %d", total, count)
                 total = count
                 
             self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
@@ -87,38 +94,56 @@ class CounterToken(Token):
     def __str__(self):
         return "token[{}]".format(self.name)
 
+    
+    def on_modified(self, event): 
+        if event.src_path == self.watchedpath:
+            with self.lock:
+                total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
+                available = total - taken
+                if available != self.available:
+                    logger.info("Counter token changed: %d to %d", self.available, available)
+                    self.available = available
+                    logger.error("... and we should do something")
+
+
     def dependency(self, count):
         return CounterTokenDependency(self, count)
+
+    def _read(self):
+        # Should only be called when locked
+        total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
+        self.available = total - taken
+        logger.debug("Read token information from %s: %d/%d", self.path, total, taken)
+        return total, taken
 
     def acquire(self, count):
         """Acquire"""
         with self.lock:
-            total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-            logger.info("Token state [acquire %d]: %d, %d", count, total, taken)
+            total, taken = self._read()
+            logger.debug("Token state [acquire %d]: %d, %d", count, total, taken)
             if  count + taken > total:
-                return False
+                logger.warning("No more token available - cannot lock")
+                raise LockError("No token")
 
             taken += count
 
             self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
-            self.available = total - taken
-            logger.info("Token state [acquired %d]: %d, %d", count, total, taken)
-
-            total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-            logger.info("Token state [acquired/w %d]: %d, %d", count, total, taken)
+            logger.debug("Token state [acquired %d]: %d, %d", count, total, taken)
+            self._read()
 
     def release(self, count):
         """Release"""
         with self.lock:
+            logger.debug("Reading token information from %s", self.path)
             total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-            logger.info("Token state [release %d]: %d, %d", count, total, taken)
+            logger.debug("Token state [release %d]: %d, %d", count, total, taken)
             taken -= count
             if taken < 0:
                 taken = 0
                 logger.error("More tokens released that taken")
             
             self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
-            logger.info("Token state [released %d]: %d, %d", count, total, taken)
+            logger.debug("Token state [released %d]: %d, %d", count, total, taken)
             self.available = total - taken
 
         if self.available > 0:

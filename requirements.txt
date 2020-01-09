@@ -7,5 +7,7 @@ psutil
 websockets
 jsonstreams
 
+watchdog
+
 # SSH support
 paramiko

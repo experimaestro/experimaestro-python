@@ -3,19 +3,21 @@
 from pathlib import Path
 from enum import Enum
 from .utils import logger
-
+from .locking import Lock
 
 class Resource():
     def __init__(self):
         self.dependents:Set[Dependency] = set() # as source
 
 class DependencyStatus(Enum):
-    """Waiting for dependency to be available"""
     WAIT = 0
-    """Dependency is available"""
+    """Waiting for dependency to be available"""
+    
     OK = 1
-    """Dependency won't be available"""
+    """Dependency can be locked"""
+    
     FAIL = 2
+    """Dependency won't be availabe in the foreseeable future"""
 
 class Dependency(): 
     # Dependency status
@@ -29,7 +31,7 @@ class Dependency():
     def status(self) -> DependencyStatus:
         raise NotImplementedError()
 
-    def lock(self) -> "Lock":
+    def lock(self) -> Lock:
         raise NotImplementedError()
 
     def __repr__(self) -> str:
