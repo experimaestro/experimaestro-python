@@ -21,6 +21,20 @@ A task is a special configuration that can be:
 1. Submitted to the task scheduler using `submit` (preparation of the experiment)
 1. Executed with the method `execute` (running a specific task within the experiment)
 
+
+In most cases, it is easier to use a function
+```
+from experimaestro import *
+
+@argument("epochs", type=int, default=100)
+@argument("model", type=Model, required=True)
+@task("model.learn")
+def modellearn(epochs: int, model: Model):
+    pass
+```
+
+It is possible to use classes if variables need to be defined
+
 ```
 from experimaestro import *
 
@@ -32,5 +46,4 @@ class ModelLearn:
         """Called when this task is run"""
         pass
 ```
-
 

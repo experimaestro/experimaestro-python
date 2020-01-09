@@ -7,7 +7,7 @@ import importlib.machinery
 import json
 
 from .utils import logger
-from experimaestro.api import ObjectType, XPMObject, TypeInformation
+from experimaestro.api import ObjectType, XPMConfig, TypeInformation
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -58,7 +58,7 @@ def run(file, path, taskid, parameters):
     tasktype = ObjectType.REGISTERED[taskid]
 
     with open(parameters, "r") as fp:
-        XPMObject.TASKMODE = True
+        XPMConfig.TASKMODE = True
         
         params = json.load(fp)
         TypeInformation.LOADING = True

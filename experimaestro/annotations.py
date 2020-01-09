@@ -11,7 +11,7 @@ from pathlib import Path, PosixPath
 from typing import Union, Dict
 
 import experimaestro.api as api
-from .api import XPMObject, Typename
+from .api import XPMConfig, Typename
 from .utils import logger
 from .workspace import Workspace
 
@@ -35,7 +35,7 @@ class config:
         self.parents = parents
         self.register = register
 
-    def __call__(self, tp, basetype=api.XPMObject):
+    def __call__(self, tp, basetype=api.XPMConfig):
         # Check if conditions are fullfilled
         if self.typename is None:
             self.typename = Typename("%s.%s" % (tp.__module__.lower(), tp.__name__.lower()))
@@ -46,7 +46,7 @@ class config:
         if inspect.isfunction(tp):
             tp = api.getfunctionpyobject(tp, self.parents, basetype=basetype)
         
-        # --- Add XPMObject as an ancestor of t if needed
+        # --- Add XPMConfig as an ancestor of t if needed
         elif inspect.isclass(tp):
             assert not self.parents, "parents can be used only for functions"
             if not issubclass(tp, basetype):
@@ -174,14 +174,13 @@ class ConstantArgument(argument):
         super().__init__(name, type=xpmtype or api.Type.fromType(type(value)), help=help)
         self.generator = lambda jobcontext: api.clone(value)
 
-class TaggedValue:
-    def __init__(self, name: str, value):
-        self.name = name
-        self.value = value
 
-def tag(name: str, value):
+# --- Tags
+
+
+def tag(value):
     """Tag a value"""
-    return TaggedValue(name, value)
+    return api.TaggedValue(value)
 
 def tags(value):
     """Return the tags associated with a value"""
@@ -189,7 +188,7 @@ def tags(value):
         return value.tags()
     return value.__xpm__.sv.tags()
 
-def tagspath(value: api.XPMObject):
+def tagspath(value: api.XPMConfig):
     """Return the tags associated with a value"""
     p = Path()
     for key, value in value.__xpm__.sv.tags().items():

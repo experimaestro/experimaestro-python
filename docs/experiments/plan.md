@@ -6,6 +6,29 @@ Once tasks and configurations are defined, experiments are defined imperatively 
 
 Tags allow to monitor specific experimental parameters.
 
+## Tagging a value
+
+Tagging a value can be done easily by using the `tag` function from `experimaestro`
+```
+tag(value: Union[str, int, float, bool])
+```
+
+For example,
+```python
+model = MyModel(epochs=tag(100))
+```
+
+then `model.tags()` will return `{"epochs": 100}`
+
+## Adding a tag
+
+Adding a tag can be done by using a configuration instance method:
+```python
+tag(name: str, value: Union[str, int, float, bool])
+```
+
+
+
 # Misc
 
 ## Click integration
