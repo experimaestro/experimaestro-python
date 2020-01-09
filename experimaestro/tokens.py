@@ -49,6 +49,7 @@ class CounterTokenDependency(Dependency):
     def token(self):
         return self._token
 
+
 class CounterToken(Token, FileSystemEventHandler): 
     """File-based counter token"""
 
@@ -63,7 +64,8 @@ class CounterToken(Token, FileSystemEventHandler):
         """
         super().__init__()
         self.path = path
-        self.lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
+        self.ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
+        self.lock = threading.Lock()
         self.name = name
 
         # Watched path
@@ -72,7 +74,7 @@ class CounterToken(Token, FileSystemEventHandler):
         logger.info("Watching %s", self.watchedpath)
 
         # Set the new number of tokens
-        with self.lock:
+        with self.lock, self.ipc_lock:
             bytes = self.path.read_bytes() if self.path.is_file() else None
 
             if bytes:
@@ -86,7 +88,7 @@ class CounterToken(Token, FileSystemEventHandler):
                 logger.warning("Changing number of tokens from %d to %d", total, count)
                 total = count
                 
-            self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
+            self._write(total, taken)
 
         # Set the number of available tokens
         self.available = total - taken
@@ -97,17 +99,23 @@ class CounterToken(Token, FileSystemEventHandler):
     
     def on_modified(self, event): 
         if event.src_path == self.watchedpath:
-            with self.lock:
+            with self.lock, self.ipc_lock:
                 total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
                 available = total - taken
-                if available != self.available:
-                    logger.info("Counter token changed: %d to %d", self.available, available)
-                    self.available = available
-                    logger.error("... and we should do something")
+            
+            if available != self.available:
+                logger.info("Counter token changed: %d to %d", self.available, available)
+                self.available = available
+                self._check()
 
 
     def dependency(self, count):
         return CounterTokenDependency(self, count)
+
+    def _write(self, total, taken):
+        # Should only be called when locked
+        self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
+        logger.debug("Token: wrote %d/%d to %s", total, taken, self.path)
 
     def _read(self):
         # Should only be called when locked
@@ -116,9 +124,17 @@ class CounterToken(Token, FileSystemEventHandler):
         logger.debug("Read token information from %s: %d/%d", self.path, total, taken)
         return total, taken
 
+    def _check(self):
+        """Notify dependents if there is a change in available tokens"""
+        if self.available > 0:
+            # Notify jobs
+            for dependency in self.dependents:
+                dependency.check()
+
+
     def acquire(self, count):
         """Acquire"""
-        with self.lock:
+        with self.lock, self.ipc_lock:
             total, taken = self._read()
             logger.debug("Token state [acquire %d]: %d, %d", count, total, taken)
             if  count + taken > total:
@@ -127,13 +143,13 @@ class CounterToken(Token, FileSystemEventHandler):
 
             taken += count
 
-            self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
+            self._write(total, taken)
             logger.debug("Token state [acquired %d]: %d, %d", count, total, taken)
             self._read()
 
     def release(self, count):
         """Release"""
-        with self.lock:
+        with self.lock, self.ipc_lock:
             logger.debug("Reading token information from %s", self.path)
             total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
             logger.debug("Token state [release %d]: %d, %d", count, total, taken)
@@ -141,12 +157,8 @@ class CounterToken(Token, FileSystemEventHandler):
             if taken < 0:
                 taken = 0
                 logger.error("More tokens released that taken")
-            
-            self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
+            self._write(total, taken)            
             logger.debug("Token state [released %d]: %d, %d", count, total, taken)
             self.available = total - taken
 
-        if self.available > 0:
-            # Notify jobs
-            for dependency in self.dependents:
-                dependency.check()
+        self._check()
