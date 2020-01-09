@@ -127,6 +127,9 @@ class Type():
 
         if isinstance(key, XPMConfig):
             return key.__xpmtype__
+
+        if isinstance(key, XPMTaskFunctionCreator):
+            return key.__xpm__
         
         if inspect.isclass(key) and issubclass(key, XPMConfig):
             return key.__xpm__
@@ -190,9 +193,13 @@ class ObjectType(Type):
 
         if not isinstance(value, XPMConfig):
             raise ValueError("%s is not an experimaestro type or task", value)
+        
+        types = self.objecttype
+        if isinstance(self.objecttype, XPMTaskFunctionCreator):
+            types = tuple(self.objecttype.__bases__)
 
-        if not isinstance(value, self.objecttype):
-            raise ValueError("%s is not a subtype of %s" % (value, self.objecttype))
+        if not isinstance(value, types):
+            raise ValueError("%s is not a subtype of %s" % (value, types))
 
         if self.task and not value.__xpm__.job:
             raise ValueError("The value must be submitted before giving it")
