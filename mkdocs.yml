@@ -19,8 +19,8 @@ theme:
     feature:
         tabs: true
     palette:
-        primary: 'indigo'
-        accent: 'indigo'
+        primary: 'green'
+        accent: 'green'
     font:
         text: 'Roboto'
         code: 'Roboto Mono'
@@ -30,7 +30,7 @@ markdown_extensions:
   - markdown_include.include:
        base_path: .
   - codehilite:
-        linenums: true
+        linenums: false
   - admonition
   - pymdownx.superfences
   - pymdownx.snippets:

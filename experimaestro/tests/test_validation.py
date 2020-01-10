@@ -2,13 +2,13 @@
 
 import pytest
 from pathlib import Path
-from experimaestro import config, Typename, argument, pathargument, ConstantArgument
+from experimaestro import config, Identifier, argument, pathargument, ConstantArgument
 import experimaestro.api as api
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
 import logging
 
-valns = Typename("validation")
+valns = Identifier("validation")
 
 
 def expect_validate(value):
@@ -97,7 +97,7 @@ def test_path():
         parents = list(a.value.parents)
         assert a.value.name == "file.txt"
         assert a.value.parents[0].name == a.__xpm__.identifier.hex()
-        assert a.value.parents[1].name == str(a.__xpmtype__.typename)
+        assert a.value.parents[1].name == str(a.__xpmtype__.identifier)
         assert a.value.parents[2].name == "jobs"
         assert a.value.parents[3] == xp.workspace.path
 

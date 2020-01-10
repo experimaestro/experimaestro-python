@@ -72,7 +72,7 @@ class Job(Resource):
         assert self.launcher is not None, "No default launcher in workspace %s" % workspace
 
         self.type = parameters.__xpmtype__
-        self.name = str(self.type.typename).rsplit(".", 1)[-1]
+        self.name = str(self.type.identifier).rsplit(".", 1)[-1]
 
         self.scheduler:Optional["Scheduler"] = None
         self.parameters = parameters   
@@ -113,7 +113,7 @@ class Job(Resource):
 
     @property
     def jobpath(self):
-        return self.workspace.jobspath  / str(self.type.typename) / self.identifier
+        return self.workspace.jobspath  / str(self.type.identifier) / self.identifier
 
     @property
     def identifier(self):

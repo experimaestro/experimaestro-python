@@ -1,7 +1,7 @@
 from pathlib import Path
 
 # Annotations
-from .annotations import config, task, argument, pathargument, ConstantArgument, Typename, Array, tag
+from .annotations import config, task, argument, pathargument, ConstantArgument, Identifier, Array, tag
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment
 from .notifications import progress

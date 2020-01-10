@@ -6,13 +6,13 @@ import click
 @config("mymodel")
 class MyModel(api.XPMConfig): pass
 
-@forwardoption(MyModel.epochs, "epochs")
+@forwardoption(MyModel.epochs, "my-epochs")
 @cli.command()
-def experiment(epochs):
-    return(epochs)
+def experiment(my_epochs):
+    return(my_epochs)
 
 def test_main():
-    epochs = cli(["experiment", "--epochs", "100"], standalone_mode=False)
+    epochs = cli(["experiment", "--my-epochs", "100"], standalone_mode=False)
     assert epochs == 100
 
 

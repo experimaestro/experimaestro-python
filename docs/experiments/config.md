@@ -2,19 +2,26 @@ Defining experiments is based on *config(urations)* and *tasks*. Tasks are confi
 
 ## Configurations
 
-
-
+```python
+@config(identifier=None, description=None, parents=[])
 ```
-from experimaestro import config
+defines a configuration with identifier `identifier`, which could be any string. 
+If not given,it is the concatenation of the module full name with the class/function
+name (lowercased).
 
-@argument("gamma", type=float, required=False)
-@config("my.model")
-class MyModel: pass
-```
 
-defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
+!!! example
+    ```
+    from experimaestro import config, argument
 
-## Defining a task
+    @argument("gamma", type=float, required=False)
+    @config("my.model")
+    class MyModel: pass
+    ```
+
+    defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
+
+## Tasks
 
 A task is a special configuration that can be:
 
@@ -22,28 +29,62 @@ A task is a special configuration that can be:
 1. Executed with the method `execute` (running a specific task within the experiment)
 
 
-In most cases, it is easier to use a function
+```py3
+@task()
 ```
-from experimaestro import *
 
-@argument("epochs", type=int, default=100)
-@argument("model", type=Model, required=True)
-@task("model.learn")
-def modellearn(epochs: int, model: Model):
-    pass
-```
+
+In most cases, it is easier to use a function
+!!! example "Defining a task"
+    ```
+    from experimaestro import task, argument
+
+    @argument("epochs", type=int, default=100)
+    @argument("model", type=Model, required=True)
+    @task("model.learn")
+    def modellearn(epochs: int, model: Model):
+        pass
+    ```
 
 It is possible to use classes if variables need to be defined
 
-```
-from experimaestro import *
+!!! example
+    ```
+    from experimaestro import task, argument
 
-@argument("epochs", type=int, default=100)
-@argument("model", type=Model, required=True)
-@task("model.learn")
-class ModelLearn:
-    def execute(self):
-        """Called when this task is run"""
-        pass
+    @argument("epochs", type=int, default=100)
+    @argument("model", type=Model, required=True)
+    @task("model.learn")
+    class ModelLearn:
+        def execute(self):
+            """Called when this task is run"""
+            pass
+    ```
+
+## Types
+
+Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or *config*urations/tasks, as well as list of those (using `typing.List[T]`).
+
+## Arguments
+
+```python
+@argument(name: str, type: Any = None, default: Any = None, required: bool = None,
+          ignored = None, help = None)
 ```
 
+- `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
+- `type` is the type of the argument; if not given, it will be inferred from `default` (if defined) or be `Any`
+- `default` default value of the argument. *If the value equals to the default, the argument will not be included in the signature computation*.
+- `ignored` to ignore the argument in the signature computation.
+- `help` a string to document the option; it can be used when the argument is used in a command line or when generating a documentation (*planned*).
+
+
+
+## Path arguments
+
+```python
+@pathargument(name: str, path: str, help: Optional[str] = None)
+```
+
+- `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
+- `path` is the path within the task directory

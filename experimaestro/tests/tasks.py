@@ -1,7 +1,7 @@
 import time
 from experimaestro import *
 
-tasks = Typename("tasks")
+tasks = Identifier("tasks")
 
 @argument("word", type=str, required=True, help="Word to generate")
 @task(tasks.say)

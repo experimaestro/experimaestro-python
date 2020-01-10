@@ -8,10 +8,10 @@ import os
 import logging
 import pathlib
 from pathlib import Path, PosixPath
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 import experimaestro.api as api
-from .api import XPMConfig, Typename
+from .api import XPMConfig, Identifier
 from .utils import logger
 from .workspace import Workspace
 
@@ -20,25 +20,25 @@ from .workspace import Workspace
 class config:
 
     """Annotations for experimaestro types"""
-    def __init__(self, typename=None, description=None, register=True, parents=[]):
+    def __init__(self, identifier=None, description=None, register=True, parents=[]):
         """[summary]
         
         Keyword Arguments:
-            typename {Typename, str} -- Unique identifier of the type (default: {None} will use the module/class name)
+            identifier {Identifier, str} -- Unique identifier of the type (default: {None} will use the module/class name)
             description {str} -- Description of the config/task (default: {None})
             parents {list} -- Parent classes if annotating a method (default: {[]})
             register {bool} -- False if the type should not be registered (debug only)
         """
         super().__init__()
-        self.typename = typename
+        self.identifier = identifier
         self.description = description
         self.parents = parents
         self.register = register
 
     def __call__(self, tp, basetype=api.XPMConfig):
         # Check if conditions are fullfilled
-        if self.typename is None:
-            self.typename = Typename("%s.%s" % (tp.__module__.lower(), tp.__name__.lower()))
+        if self.identifier is None:
+            self.identifier = Identifier("%s.%s" % (tp.__module__.lower(), tp.__name__.lower()))
 
         originaltype = tp
         
@@ -60,9 +60,9 @@ class config:
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
-        logging.debug("Registering %s", self.typename)
+        logging.debug("Registering %s", self.identifier)
         
-        objecttype = api.ObjectType.create(tp, self.typename, self.description, register=self.register)
+        objecttype = api.ObjectType.create(tp, self.identifier, self.description, register=self.register)
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
         
@@ -88,10 +88,9 @@ class Choice(api.TypeProxy):
 
 class task(config):
     """Register a task"""
-    def __init__(self, typename=None, scriptpath=None, pythonpath=None, description=None, associate=None):
-        super().__init__(typename, description)
+    def __init__(self, identifier=None, pythonpath=None, description=None):
+        super().__init__(identifier, description)
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
-        self.scriptpath = scriptpath
 
     def __call__(self, objecttype):
         import experimaestro.commandline as commandline
@@ -116,7 +115,7 @@ class task(config):
             command.add(commandline.CommandString("--file"))
             command.add(commandline.CommandPath(filepath))
 
-        command.add(commandline.CommandString(str(self.typename)))
+        command.add(commandline.CommandString(str(self.identifier)))
         command.add(commandline.CommandParameters())
         commandLine = commandline.CommandLine()
         commandLine.add(command)
@@ -129,8 +128,8 @@ class task(config):
 
 class argument():
     """Defines an argument for an experimaestro type"""
-    def __init__(self, name, type=None, default=None, required=None,
-                 ignored=None, help=None):
+    def __init__(self, name, type=None, default=None, required:bool=None,
+                 ignored:Optional[bool]=None, help:Optional[str]=None):
         # Determine if required
         self.name = name                
         self.type = api.Type.fromType(type) if type else None

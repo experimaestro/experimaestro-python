@@ -24,7 +24,7 @@ from experimaestro.utils import logger
 
 modulepath = Path(__file__).parent
 
-class Typename():
+class Identifier():
     def __init__(self, name: str):
         self.name = name
 
@@ -40,16 +40,16 @@ class Typename():
         return self(key)
 
     def __call__(self, key):
-        return Typename(self.name + "." + key)
+        return Identifier(self.name + "." + key)
 
     def __str__(self):
         return self.name
 
 
-def typename(name: Union[str, Typename]):
-    if isinstance(name, Typename):
+def identifier(name: Union[str, Identifier]):
+    if isinstance(name, Identifier):
         return name
-    return Typename(str(name))
+    return Identifier(str(name))
 
 
 class Argument:
@@ -82,12 +82,12 @@ class TypeAttribute:
 class Type():
     DEFINED:Dict[type, "Type"] = {}
 
-    def __init__(self, tn: Union[str, Typename], description=None): 
+    def __init__(self, tn: Union[str, Identifier], description=None): 
         if tn is None:
             tn = None
         elif isinstance(tn, str):
-            tn = Typename(tn)
-        self.typename = tn
+            tn = Identifier(tn)
+        self.identifier = tn
         self.description = description
 
     @property
@@ -96,13 +96,13 @@ class Type():
         return False
 
     def __str__(self):
-        return "Type({})".format(self.typename)
+        return "Type({})".format(self.identifier)
 
     def __repr__(self):
-        return "Type({})".format(self.typename)
+        return "Type({})".format(self.identifier)
 
     def name(self):
-        return str(self.typename)
+        return str(self.identifier)
 
     def isArray(self):
         return False
@@ -148,8 +148,8 @@ class ObjectType(Type):
 
     REGISTERED:Dict[str, "XPMConfig"] = {}
     
-    def __init__(self, objecttype: type, typename, description):
-        super().__init__(typename, description)
+    def __init__(self, objecttype: type, identifier, description):
+        super().__init__(identifier, description)
 
         self.objecttype = objecttype
         self.task = None
@@ -169,20 +169,20 @@ class ObjectType(Type):
                 yield tp.__xpm__
         
     @staticmethod
-    def create(objecttype: "XPMConfig", typename, description, register=True):
-        if register and str(typename) in ObjectType.REGISTERED:
-            _objecttype = ObjectType.REGISTERED[typename]
+    def create(objecttype: "XPMConfig", identifier, description, register=True):
+        if register and str(identifier) in ObjectType.REGISTERED:
+            _objecttype = ObjectType.REGISTERED[identifier]
             if _objecttype.__xpm__.originaltype != objecttype:
-                # raise Exception("Experimaestro type %s is already declared" % typename)
+                # raise Exception("Experimaestro type %s is already declared" % identifier)
                 pass
 
-            logging.error("Experimaestro type %s is already declared" % typename)
+            logging.error("Experimaestro type %s is already declared" % identifier)
             return _objecttype
 
 
         if register:
-            ObjectType.REGISTERED[str(typename)] = objecttype
-        return ObjectType(objecttype, typename, description)
+            ObjectType.REGISTERED[str(identifier)] = objecttype
+        return ObjectType(objecttype, identifier, description)
 
 
     def validate(self, value):
@@ -312,7 +312,7 @@ class HashComputer():
         elif isinstance(value, XPMConfig):
             xpmtype = value.__xpmtype__ # type: ObjectType
             self.hasher.update(HashComputer.OBJECT_ID)
-            self.hasher.update(xpmtype.typename.name.encode("utf-8"))
+            self.hasher.update(xpmtype.identifier.name.encode("utf-8"))
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
                 # Hash name
@@ -412,7 +412,7 @@ class TypeInformation():
                     raise AssertionError("Property %s is read-only" % (k))
                 object.__setattr__(self.pyobject, k, argument.type.validate(v))
             elif k == "$type":
-                assert v == str(self.xpmtype.typename)
+                assert v == str(self.xpmtype.identifier)
             elif k == "$job":
                 self.job = FakeJob(v)
             else:
@@ -536,7 +536,7 @@ class TypeInformation():
             logger.warning("Simulating: not submitting job %s", self.job)
         
     def _outputjson_inner(self, objectout, context):
-        objectout.write("$type", str(self.xpmtype.typename))
+        objectout.write("$type", str(self.xpmtype.identifier))
         if self.job:
             objectout.write("$job", str(self.job.launcher.connector.resolve(self.job.jobpath / self.job.name)))
         for argument, value in self.xpmvalues():

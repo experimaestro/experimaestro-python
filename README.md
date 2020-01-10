@@ -56,7 +56,7 @@ def slowdown(N: int):
 
 # --- Define the tasks
 
-hw = Typename("helloworld")
+hw = Identifier("helloworld")
 
 @argument("word", type=str, required=True, help="Word to generate")
 @task(hw.say)
