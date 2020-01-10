@@ -12,7 +12,7 @@ def xpmdirectory(tmp_path_factory):
     
     yield workdir
 
-    if os.environ.get("XPM_KEEPWORKDIR", False) == 1:
+    if os.environ.get("XPM_KEEPWORKDIR", False) == "1":
         logging.warning("NOT Removing %s" %  workdir)
     else:
         shutil.rmtree(workdir)

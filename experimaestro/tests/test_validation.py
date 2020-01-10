@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from experimaestro import config, task, Identifier, argument, pathargument, ConstantArgument
+from experimaestro import config, task, Identifier, argument, pathargument, ConstantArgument, experiment
 import experimaestro.api as api
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
@@ -188,3 +188,22 @@ def test_seal():
     
     with pytest.raises(AttributeError):
         a.a = 1
+
+
+# --- Task as argument
+
+@config()
+class TaskParentConfig(): pass
+
+@task(None, parents=TaskParentConfig)
+def taskconfig(): pass
+
+@argument("x", type=TaskParentConfig)
+@config()
+class TaskConfigConsumer(): pass
+
+def test_taskargument():
+    x = taskconfig()
+    with experiment("fake", "/"):
+        x.submit(dryrun=True)
+        expect_validate(TaskConfigConsumer(x=x))

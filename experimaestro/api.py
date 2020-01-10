@@ -78,8 +78,9 @@ class TypeAttribute:
         self.type = type
         self.path = [key]
 
-# FIXME: most methods should be in ObjectType
 class Type():
+    """Any experimaestro type is a child class"""
+
     DEFINED:Dict[type, "Type"] = {}
 
     def __init__(self, tn: Union[str, Identifier], description=None): 
@@ -129,9 +130,6 @@ class Type():
         if isinstance(key, XPMConfig):
             return key.__xpmtype__
 
-        if isinstance(key, XPMConfigCreator):
-            return key.__xpm__
-        
         if inspect.isclass(key) and issubclass(key, XPMConfig):
             return key.__xpm__
 
@@ -144,7 +142,7 @@ class Type():
 
 
 class ObjectType(Type):
-    """The type of XPMConfig"""
+    """The XPM type of a configuration"""
 
     REGISTERED:Dict[str, "XPMConfig"] = {}
     
@@ -165,13 +163,13 @@ class ObjectType(Type):
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.objecttype.__bases__:
-            if isinstance(tp, XPMConfigCreator) or (inspect.isclass(tp) and issubclass(tp, XPMConfig) and tp not in [XPMConfig, XPMTask]):
+            if issubclass(tp, XPMConfig) and tp not in [XPMConfig, XPMTask]:
                 yield tp.__xpm__
         
     @staticmethod
     def create(objecttype: "XPMConfig", identifier, description, register=True):
         if register and str(identifier) in ObjectType.REGISTERED:
-            _objecttype = ObjectType.REGISTERED[identifier]
+            _objecttype = ObjectType.REGISTERED[str(identifier)]
             if _objecttype.__xpm__.originaltype != objecttype:
                 # raise Exception("Experimaestro type %s is already declared" % identifier)
                 pass
@@ -196,8 +194,6 @@ class ObjectType(Type):
             raise ValueError("%s is not an experimaestro type or task", value)
         
         types = self.objecttype
-        if isinstance(self.objecttype, XPMConfigCreator):
-            types = tuple(self.objecttype.__bases__)
 
         if not isinstance(value, types):
             raise ValueError("%s is not a subtype of %s" % (value, types))
@@ -578,17 +574,19 @@ class XPMConfig(metaclass=XPMConfigMetaclass):
     TASKMODE = False
     
     def __init__(self, **kwargs):
-        if not isinstance(self, XPMTaskFunction):
-            self.__xpmtype__ = self.__class__.__xpm__
-
         # Add configuration
+        self.__xpmtype__ = self.__class__.__xpm__
+        if not isinstance(self.__xpmtype__, ObjectType):
+            logging.error("%s is not an object type", self.__xpmtype__)
+            assert isinstance(self.__xpmtype__, ObjectType)
+
         xpm = TypeInformation(self)
         self.__xpm__ = xpm
 
         # Initialize with arguments
         for name, value in kwargs.items():
             if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
-                raise ValueError("%s is not an argument for %s" % (name, self.__class__))
+                raise ValueError("%s is not an argument for %s" % (name, self.__xpmtype__))
 
             if isinstance(value, TaggedValue):
                 value = value.value
@@ -640,30 +638,14 @@ class XPMTask(XPMConfig):
     def job(self):
         return self.__xpm__.job
 
+
 # XPM task as a function
+def gettaskclass(function, parents):
+    class XPMTaskFunction(XPMTask, *parents): 
+        def execute(self):
+            kwargs = {}
+            for argument, value in self.__xpm__.xpmvalues():
+                kwargs[argument.name] = value
+            function(**kwargs)
 
-class XPMTaskFunction(XPMTask):
-    def __init__(self, function, xpmtype, **kwargs):
-        self.__xpmtype__ = xpmtype
-        super().__init__(**kwargs)
-        object.__setattr__(self, "function", function)
-
-    def execute(self):
-        kwargs = {}
-        for argument, value in self.__xpm__.xpmvalues():
-            kwargs[argument.name] = value
-        self.function(**kwargs)
-
-class XPMConfigCreator: pass
-
-class XPMTaskFunctionCreator(XPMConfigCreator):
-    """A class that creates an XPMTask"""
-    def __init__(self, function, parents):
-        self.function = function
-        self.__bases__ = parents
-
-    def __call__(self, **kwargs):
-        return XPMTaskFunction(self.function, self.__xpm__, **kwargs)
-
-def gettaskcreator(function, parents):
-    return XPMTaskFunctionCreator(function, parents)
+    return XPMTaskFunction

@@ -31,6 +31,9 @@ class config:
         """
         super().__init__()
         self.identifier = identifier
+        if isinstance(self.identifier, str):
+            self.identifier = Identifier(self.identifier)
+            
         self.description = description
         self.parents = parents
         self.register = register
@@ -64,8 +67,6 @@ class config:
                     __bases__ += tp.__bases__
                 __dict__ = {key: value for key, value in tp.__dict__.items() if key not in ["__dict__"]}
                 tp = type(tp.__name__, __bases__, __dict__)
-        elif isinstance(tp, api.XPMConfigCreator):
-            pass
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
@@ -105,20 +106,20 @@ class task(config):
 
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
 
-    def __call__(self, objecttype):
+    def __call__(self, tp):
         import experimaestro.commandline as commandline
 
-        originaltype = objecttype
-        if inspect.isfunction(objecttype):
-            objecttype = api.gettaskcreator(objecttype, self.parents)
+        originaltype = tp
+        if inspect.isfunction(tp):
+            tp = api.gettaskclass(tp, self.parents)
         else:
             assert not self.parents, "parents can only be used for functions"
 
         # Register the type
-        objecttype = super().__call__(objecttype, originaltype=originaltype, basetype=api.XPMTask) 
+        tp = super().__call__(tp, originaltype=originaltype, basetype=api.XPMTask) 
 
         # Construct command  
-        _type = objecttype.__xpm__.originaltype
+        _type = tp.__xpm__.originaltype
         command = commandline.Command()
         command.add(commandline.CommandPath(self.pythonpath))
         command.add(commandline.CommandString("-m"))
@@ -139,8 +140,8 @@ class task(config):
         commandLine = commandline.CommandLine()
         commandLine.add(command)
 
-        objecttype.__xpm__.task = commandline.CommandLineTask(commandLine)
-        return objecttype
+        tp.__xpm__.task = commandline.CommandLineTask(commandLine)
+        return tp
 
 
 # --- argument related annotations
