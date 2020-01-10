@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from experimaestro import config, Identifier, argument, pathargument, ConstantArgument
+from experimaestro import config, task, Identifier, argument, pathargument, ConstantArgument
 import experimaestro.api as api
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
@@ -116,7 +116,7 @@ def test_constant():
 
 
 @argument("a", int)
-@config()
+@task()
 def notset(a, b): pass
 
 
@@ -124,7 +124,7 @@ def test_notset():
     expect_notvalidate(notset(a=1))
 
 @argument("a", int)
-@config()
+@task()
 def notdeclared(): pass
 
 def test_notdeclared():
@@ -140,6 +140,26 @@ class Child(Parent): pass
 
 def test_child():
     expect_validate(Child(x=1))
+
+
+# --- Path argument checks
+
+
+@pathargument("x", "x")
+@config()
+class PathParent: pass
+
+def test_path():
+    c = PathParent()
+    expect_validate(c)
+
+
+@task(None, PathParent)
+def PathTask(x: Path): pass
+
+def test_pathchild():
+    c = PathTask()
+    expect_validate(c)
 
 
 # --- Default value

@@ -129,7 +129,7 @@ class Type():
         if isinstance(key, XPMConfig):
             return key.__xpmtype__
 
-        if isinstance(key, XPMTaskFunctionCreator):
+        if isinstance(key, XPMConfigCreator):
             return key.__xpm__
         
         if inspect.isclass(key) and issubclass(key, XPMConfig):
@@ -165,7 +165,7 @@ class ObjectType(Type):
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.objecttype.__bases__:
-            if issubclass(tp, XPMConfig) and tp not in [XPMConfig, XPMTask]:
+            if isinstance(tp, XPMConfigCreator) or (inspect.isclass(tp) and issubclass(tp, XPMConfig) and tp not in [XPMConfig, XPMTask]):
                 yield tp.__xpm__
         
     @staticmethod
@@ -196,7 +196,7 @@ class ObjectType(Type):
             raise ValueError("%s is not an experimaestro type or task", value)
         
         types = self.objecttype
-        if isinstance(self.objecttype, XPMTaskFunctionCreator):
+        if isinstance(self.objecttype, XPMConfigCreator):
             types = tuple(self.objecttype.__bases__)
 
         if not isinstance(value, types):
@@ -446,17 +446,19 @@ class TypeInformation():
         self.pyobject._init()
 
     def validate(self):
-        """Validate values and seal the values"""
+        """Validate a value"""
         if not self._validated:
             self._validated = True
             
             # Check function
             if inspect.isfunction(self.xpmtype.originaltype):
+                # Get arguments from XPM definition
                 argnames = set()
                 for argument, value in self.xpmvalues(True):
                     argnames.add(argument.name)
-                spec = inspect.getfullargspec(self.xpmtype.originaltype)
 
+                # Get declared arguments from inspect
+                spec = inspect.getfullargspec(self.xpmtype.originaltype)
                 declaredargs = set(spec.args)
                 
                 # Arguments declared but not set
@@ -652,15 +654,16 @@ class XPMTaskFunction(XPMTask):
             kwargs[argument.name] = value
         self.function(**kwargs)
 
+class XPMConfigCreator: pass
 
-class XPMTaskFunctionCreator():
+class XPMTaskFunctionCreator(XPMConfigCreator):
     """A class that creates an XPMTask"""
-    def __init__(self, function, basetype):
+    def __init__(self, function, parents):
         self.function = function
-        self.__bases__ = [basetype]
+        self.__bases__ = parents
 
     def __call__(self, **kwargs):
         return XPMTaskFunction(self.function, self.__xpm__, **kwargs)
 
-def getfunctionpyobject(function, parents, basetype=XPMConfig):
-    return XPMTaskFunctionCreator(function, basetype)
+def gettaskcreator(function, parents):
+    return XPMTaskFunctionCreator(function, parents)

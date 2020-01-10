@@ -35,28 +35,37 @@ class config:
         self.parents = parents
         self.register = register
 
-    def __call__(self, tp, basetype=api.XPMConfig):
-        # Check if conditions are fullfilled
-        if self.identifier is None:
-            self.identifier = Identifier("%s.%s" % (tp.__module__.lower(), tp.__name__.lower()))
+    def __call__(self, tp, originaltype=None, basetype=api.XPMConfig):
+        """[summary]
+        
+        Arguments:
+            tp {[type]} -- Can be a method or a class
+        
+        Keyword Arguments:
+            basetype {[type]} -- [description] The base type of the class
+        
+        Raises:
+            ValueError: [description]
+        
+        Returns:
+            [type] -- [description]
+        """
 
-        originaltype = tp
-        
-        # --- If this is a method, encapsulate
-        if inspect.isfunction(tp):
-            tp = api.getfunctionpyobject(tp, self.parents, basetype=basetype)
-        
+        # Check if conditions are fullfilled
+        originaltype = originaltype or tp
+        if self.identifier is None:
+            self.identifier = Identifier("%s.%s" % (originaltype.__module__.lower(), originaltype.__name__.lower()))
+
         # --- Add XPMConfig as an ancestor of t if needed
-        elif inspect.isclass(tp):
-            assert not self.parents, "parents can be used only for functions"
-            if not issubclass(tp, basetype):
+        if inspect.isclass(tp):
+            if not issubclass(tp, api.XPMConfig):
                 __bases__ = (basetype, )
                 if tp.__bases__ != (object, ):
                     __bases__ += tp.__bases__
                 __dict__ = {key: value for key, value in tp.__dict__.items() if key not in ["__dict__"]}
                 tp = type(tp.__name__, __bases__, __dict__)
-
-
+        elif isinstance(tp, api.XPMConfigCreator):
+            pass
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
@@ -88,15 +97,25 @@ class Choice(api.TypeProxy):
 
 class task(config):
     """Register a task"""
-    def __init__(self, identifier=None, pythonpath=None, description=None):
+    def __init__(self, identifier=None, parents=None, pythonpath=None, description=None):
         super().__init__(identifier, description)
+        self.parents = parents or []
+        if self.parents and not isinstance(self.parents, list):
+            self.parents = [self.parents]
+
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
 
     def __call__(self, objecttype):
         import experimaestro.commandline as commandline
 
+        originaltype = objecttype
+        if inspect.isfunction(objecttype):
+            objecttype = api.gettaskcreator(objecttype, self.parents)
+        else:
+            assert not self.parents, "parents can only be used for functions"
+
         # Register the type
-        objecttype = super().__call__(objecttype, basetype=api.XPMTask) 
+        objecttype = super().__call__(objecttype, originaltype=originaltype, basetype=api.XPMTask) 
 
         # Construct command  
         _type = objecttype.__xpm__.originaltype
