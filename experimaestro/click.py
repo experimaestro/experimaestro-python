@@ -15,7 +15,7 @@ def xpm(context):
     parse_commandline(context)
 
 
-def forwardoption(argument, option_name):
+def forwardoption(argument, option_name=None):
     """Helper function
     
     Arguments:

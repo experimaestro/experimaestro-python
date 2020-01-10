@@ -14,3 +14,14 @@ def experiment(epochs):
 def test_main():
     epochs = cli(["experiment", "--epochs", "100"], standalone_mode=False)
     assert epochs == 100
+
+
+
+@forwardoption(MyModel.epochs)
+@cli.command()
+def experiment2(epochs):
+    return(epochs)
+
+def test_implicit_forward():
+    epochs = cli(["experiment2", "--epochs", "100"], standalone_mode=False)
+    assert epochs == 100

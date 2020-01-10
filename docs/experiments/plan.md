@@ -18,7 +18,8 @@ For example,
 model = MyModel(epochs=tag(100))
 ```
 
-then `model.tags()` will return `{"epochs": 100}`
+To retrieve tags, use the `tags` method().
+In the above example, `model.tags()` will return `{ "epochs": 100 }`
 
 ## Adding a tag
 
@@ -27,13 +28,16 @@ Adding a tag can be done by using a configuration instance method:
 tag(name: str, value: Union[str, int, float, bool])
 ```
 
+## Paths based on tags
+
 
 
 # Misc
 
 ## Click integration
 
-Easily define arguments with click
+You can easily define command line arguments with click
+by using the `forwardoption` command
 
 ```python
 
@@ -45,7 +49,7 @@ import click
 @type("mymodel")
 class MyModel: ...
 
-@forwardoption(MyModel, "epochs")
+@forwardoption(MyModel.epochs)
 @click.command()
 def cli(epochs):
     model = MyModel(epochs=epochs)
