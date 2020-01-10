@@ -16,6 +16,7 @@ from typing import Union, Dict, List, Set, Iterator
 import hashlib
 import struct
 from collections import ChainMap
+import typing
 
 from experimaestro.utils import logger
 
@@ -134,9 +135,9 @@ class Type():
         if inspect.isclass(key) and issubclass(key, XPMConfig):
             return key.__xpm__
 
-        import typing
         if type(key) == type(typing.List):
-            if key.__origin__ == list:
+            # Python 3.6, 3.7+ test
+            if key.__origin__ in [typing.List, list]:
                 return ArrayType(Type.fromType(*key.__args__))
 
         raise Exception("No type found for %s", key)

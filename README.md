@@ -100,4 +100,4 @@ if __name__ == "__main__":
     cli()
 ```
 
-which can be launched with `python test.py xp /tmp/helloworld-workdir`
+which can be launched with `python test.py /tmp/helloworld-workdir`
