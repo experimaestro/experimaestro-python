@@ -20,6 +20,16 @@ class Concat:
                 says.append(fp.read().strip())
         print(" ".join(says))
 
+@argument("x", type=int)
+@config()
+class ForeignClassB1: pass
+
+@argument("b", type=ForeignClassB1)
+@task()
+class ForeignTaskA(): 
+    def execute(self):
+        print(self.b.x)
+
 @pathargument("wait", "wait")
 @task(tasks.fail)
 class Fail:

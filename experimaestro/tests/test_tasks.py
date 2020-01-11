@@ -47,6 +47,17 @@ def test_fail():
 
     assert fail.__xpm__.job.wait() == JobState.ERROR
 
+def test_foreign_type():
+    """When the argument real type is in an non imported module"""
+    with TemporaryExperiment("foreign_type", maxwait=2):
+        # Submit the tasks
+        from .tasks2 import ForeignClassB2
+        b = ForeignClassB2(x=1, y=2)
+        a = ForeignTaskA(b=b).submit()
+
+        assert a.__xpm__.job.wait() == JobState.DONE
+        assert a.stdout().read_text().strip() == "1"
+    
 
 def test_fail_dep():
     """Failing task... should cancel dependent"""

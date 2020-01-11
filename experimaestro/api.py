@@ -185,10 +185,19 @@ class ObjectType(Type):
 
     def validate(self, value):
         if isinstance(value, dict):
+            # This is a unserialized object
             valuetype = value.get("$type", None)
             if valuetype is None:
                 raise ValueError("Object has no $type")
-            return ObjectType.REGISTERED[valuetype](**value)
+
+            classtype = ObjectType.REGISTERED.get(valuetype, None)
+            if classtype:
+                return classtype(**value)
+            if not XPMConfig.TASKMODE:
+                raise ValueError("Could not find type %s", valuetype)
+        
+            logger.debug("Using argument type (not real type)")
+            return self.objecttype(**value)
 
         if not isinstance(value, XPMConfig):
             raise ValueError("%s is not an experimaestro type or task", value)
@@ -408,7 +417,9 @@ class TypeInformation():
                     raise AssertionError("Property %s is read-only" % (k))
                 object.__setattr__(self.pyobject, k, argument.type.validate(v))
             elif k == "$type":
-                assert v == str(self.xpmtype.identifier)
+                if not XPMConfig.TASKMODE:
+                    # Only check type if constructing the XP
+                    assert v == str(self.xpmtype.identifier)
             elif k == "$job":
                 self.job = FakeJob(v)
             else:
@@ -586,6 +597,9 @@ class XPMConfig(metaclass=XPMConfigMetaclass):
         # Initialize with arguments
         for name, value in kwargs.items():
             if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
+                if XPMConfig.TASKMODE:
+                    # Do not set this attribute
+                    return
                 raise ValueError("%s is not an argument for %s" % (name, self.__xpmtype__))
 
             if isinstance(value, TaggedValue):
