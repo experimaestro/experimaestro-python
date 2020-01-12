@@ -127,10 +127,10 @@ class Type():
         if isinstance(key, TypeProxy):
             return key()
 
-        if isinstance(key, XPMConfig):
+        if isinstance(key, Config):
             return key.__xpmtype__
 
-        if inspect.isclass(key) and issubclass(key, XPMConfig):
+        if inspect.isclass(key) and issubclass(key, Config):
             return key.__xpm__
 
         if type(key) == type(typing.List):
@@ -144,7 +144,7 @@ class Type():
 class ObjectType(Type):
     """The XPM type of a configuration"""
 
-    REGISTERED:Dict[str, "XPMConfig"] = {}
+    REGISTERED:Dict[str, "Config"] = {}
     
     def __init__(self, objecttype: type, identifier, description):
         super().__init__(identifier, description)
@@ -163,11 +163,11 @@ class ObjectType(Type):
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.objecttype.__bases__:
-            if issubclass(tp, XPMConfig) and tp not in [XPMConfig, XPMTask]:
+            if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpm__
         
     @staticmethod
-    def create(configclass: "XPMConfig", identifier, description, register=True):
+    def create(configclass: "Config", identifier, description, register=True):
         if register and str(identifier) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[str(identifier)]
             if _objecttype.__xpm__.originaltype != configclass:
@@ -193,13 +193,13 @@ class ObjectType(Type):
             classtype = ObjectType.REGISTERED.get(valuetype, None)
             if classtype:
                 return classtype(**value)
-            if not XPMConfig.TASKMODE:
+            if not Config.TASKMODE:
                 raise ValueError("Could not find type %s", valuetype)
         
             logger.debug("Using argument type (not real type)")
             return self.objecttype(**value)
 
-        if not isinstance(value, XPMConfig):
+        if not isinstance(value, Config):
             raise ValueError("%s is not an experimaestro type or task", value)
         
         types = self.objecttype
@@ -314,7 +314,7 @@ class HashComputer():
             self.hasher.update(struct.pack('!d', len(value)))
             for x in value:
                 self.update(x)
-        elif isinstance(value, XPMConfig):
+        elif isinstance(value, Config):
             xpmtype = value.__xpmtype__ # type: ObjectType
             self.hasher.update(HashComputer.OBJECT_ID)
             self.hasher.update(xpmtype.identifier.name.encode("utf-8"))
@@ -337,7 +337,7 @@ class HashComputer():
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
 def outputjson(jsonout, context, value, key=[]):
-    if isinstance(value, XPMConfig):
+    if isinstance(value, Config):
         value.__xpm__._outputjson(jsonout, context, key)
     elif isinstance(value, list):
         with jsonout.subarray(*key) as arrayout:
@@ -356,9 +356,9 @@ def outputjson(jsonout, context, value, key=[]):
     else:
         raise NotImplementedError("Cannot serialize objects of type %s", type(value))
 
-def updatedependencies(dependencies, value: "XPMConfig"):
+def updatedependencies(dependencies, value: "Config"):
     """Search recursively jobs to add them as dependencies"""
-    if isinstance(value, XPMConfig):
+    if isinstance(value, Config):
         if value.__xpmtype__.task:
             dependencies.add(value.__xpm__.dependency())
         else:
@@ -382,7 +382,7 @@ class TaggedValue:
         self.value = value
 
 class TypeInformation():
-    """Holds experimaestro information for a XPMConfig (config or task)"""
+    """Holds experimaestro information for a Config (config or task)"""
 
     # Set to true when loading from JSON
     LOADING = False
@@ -417,7 +417,7 @@ class TypeInformation():
                     raise AssertionError("Property %s is read-only" % (k))
                 object.__setattr__(self.pyobject, k, argument.type.validate(v))
             elif k == "$type":
-                if not XPMConfig.TASKMODE:
+                if not Config.TASKMODE:
                     # Only check type if constructing the XP
                     assert v == str(self.xpmtype.identifier)
             elif k == "$job":
@@ -441,7 +441,7 @@ class TypeInformation():
     def tags(self, tags={}):
         tags.update(self._tags)
         for argument, value in self.xpmvalues():
-            if isinstance(value, XPMConfig):
+            if isinstance(value, Config):
                 value.__xpm__.tags(tags)
         return tags
 
@@ -480,7 +480,7 @@ class TypeInformation():
             for k, argument in self.xpmtype.arguments.items():
                 if hasattr(self.pyobject, k):
                     value = getattr(self.pyobject, k)
-                    if isinstance(value, XPMConfig):
+                    if isinstance(value, Config):
                         value.__xpm__.validate()
                 elif argument.required:
                     if not argument.generator:
@@ -496,7 +496,7 @@ class TypeInformation():
                 self.set(k, argument.generator(job), bypass=True)
             elif hasattr(self.pyobject, k):
                 v = getattr(self.pyobject, k)
-                if isinstance(v, XPMConfig):
+                if isinstance(v, Config):
                     v.__xpm__.seal(job)
         self._sealed = True
 
@@ -571,14 +571,14 @@ def clone(v):
         return [clone(x) for x in v]
     raise NotImplementedError("For type %s" % v)
 
-class XPMConfigMetaclass(type):
+class ConfigMetaclass(type):
     def __getattr__(cls, key):
         """Access to a class field"""
         if not key.startswith("__xpm") and key in cls.__xpm__.arguments:
             return cls.__xpm__.arguments[key]
         return type.__getattribute__(cls, key)
 
-class XPMConfig(metaclass=XPMConfigMetaclass):
+class Config(metaclass=ConfigMetaclass):
     """Base type for all objects in python interface"""
 
     # Set to true when executing a task to remove all checks
@@ -597,7 +597,7 @@ class XPMConfig(metaclass=XPMConfigMetaclass):
         # Initialize with arguments
         for name, value in kwargs.items():
             if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
-                if XPMConfig.TASKMODE:
+                if Config.TASKMODE:
                     # Do not set this attribute
                     return
                 raise ValueError("%s is not an argument for %s" % (name, self.__xpmtype__))
@@ -613,11 +613,11 @@ class XPMConfig(metaclass=XPMConfigMetaclass):
                 self.__xpm__.set(name, clone(value.default))
 
     def __setattr__(self, name, value):            
-        if not XPMConfig.TASKMODE and not name.startswith("__xpm"):
+        if not Config.TASKMODE and not name.startswith("__xpm"):
             return self.__xpm__.set(name, value)
         return super().__setattr__(name, value)
 
-    def tag(self, name, value) -> "XPMConfig":
+    def tag(self, name, value) -> "Config":
         self.__xpm__.addtag(name, value)
         return self
 
@@ -630,7 +630,7 @@ class XPMConfig(metaclass=XPMConfigMetaclass):
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-class XPMTask(XPMConfig):
+class Task(Config):
     """Base type for all tasks"""
 
     def submit(self, *, workspace=None, launcher=None, dryrun=None):
@@ -655,11 +655,11 @@ class XPMTask(XPMConfig):
 
 # XPM task as a function
 def gettaskclass(function, parents):
-    class XPMTaskFunction(XPMTask, *parents): 
+    class TaskFunction(Task, *parents): 
         def execute(self):
             kwargs = {}
             for argument, value in self.__xpm__.xpmvalues():
                 kwargs[argument.name] = value
             function(**kwargs)
 
-    return XPMTaskFunction
+    return TaskFunction

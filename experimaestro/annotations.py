@@ -11,7 +11,7 @@ from pathlib import Path, PosixPath
 from typing import Union, Dict, Optional
 
 import experimaestro.api as api
-from .api import XPMConfig, Identifier
+from .api import Config, Identifier
 from .utils import logger
 from .workspace import Workspace
 
@@ -38,7 +38,7 @@ class config:
         self.parents = parents
         self.register = register
 
-    def __call__(self, tp, originaltype=None, basetype=api.XPMConfig):
+    def __call__(self, tp, originaltype=None, basetype=api.Config):
         """[summary]
         
         Arguments:
@@ -59,9 +59,9 @@ class config:
         if self.identifier is None:
             self.identifier = Identifier("%s.%s" % (originaltype.__module__.lower(), originaltype.__name__.lower()))
 
-        # --- Add XPMConfig as an ancestor of t if needed
+        # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
-            if not issubclass(tp, api.XPMConfig):
+            if not issubclass(tp, api.Config):
                 __bases__ = (basetype, )
                 if tp.__bases__ != (object, ):
                     __bases__ += tp.__bases__
@@ -116,7 +116,7 @@ class task(config):
             assert not self.parents, "parents can only be used for functions"
 
         # Register the type
-        tp = super().__call__(tp, originaltype=originaltype, basetype=api.XPMTask) 
+        tp = super().__call__(tp, originaltype=originaltype, basetype=api.Task) 
 
         # Construct command  
         _type = tp.__xpm__.originaltype
@@ -207,7 +207,7 @@ def tags(value):
         return value.tags()
     return value.__xpm__.sv.tags()
 
-def tagspath(value: api.XPMConfig):
+def tagspath(value: api.Config):
     """Return the tags associated with a value"""
     p = Path()
     for key, value in value.__xpm__.sv.tags().items():

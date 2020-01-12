@@ -172,12 +172,13 @@ class RequestProcessor:
         if pkg_resources.resource_exists("experimaestro.server", datapath):
             code = http.HTTPStatus.OK
             headers['Cache-Control'] = 'max-age=0'
-            headers['Content-config'] = MIMETYPES[datapath.rsplit(".", 1)[1]]
-            logging.info("Reading %s", datapath)
+            mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
+            headers['Content-Type'] = mimetype
+            logging.info("Reading %s [%s]", datapath, mimetype)
             body = pkg_resources.resource_string("experimaestro.server", datapath)
             return (code, headers, body)
 
-        headers['Content-config'] = MIMETYPES["txt"]
+        headers['Content-Type'] = MIMETYPES["txt"]
         return (http.HTTPStatus.NOT_FOUND, headers, "No such path %s" % path)
 
 

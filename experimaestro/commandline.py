@@ -11,7 +11,7 @@ from experimaestro.utils import logger
 from .scheduler import Job, JobError, JobState
 from .connectors import Redirect, RedirectType, Connector
 from .scheduler import Workspace
-from .api import XPMConfig
+from .api import Config
 
 
 # 5 seconds wait for locking file
@@ -49,7 +49,7 @@ class AbstractCommandComponent(CommandPart):
 
 
 class CommandContext:
-    def __init__(self, workspace: Workspace, connector: Connector, path: Path, name: str, parameters: XPMConfig):
+    def __init__(self, workspace: Workspace, connector: Connector, path: Path, name: str, parameters: Config):
         self.workspace = workspace
         self.connector = connector
         self.path = path
