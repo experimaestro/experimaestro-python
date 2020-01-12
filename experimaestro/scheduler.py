@@ -10,7 +10,7 @@ import asyncio
 import sys
 
 from .workspace import Workspace
-from .api import XPMObject
+from .api import XPMConfig
 from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
@@ -20,15 +20,19 @@ from .locking import Lock
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
 
 class JobState(enum.Enum):
-    WAITING = 0
-    READY = 1
-    RUNNING = 2
-    DONE = 3
-    ERROR = 4
+    UNSCHEDULED = 0
+    WAITING = 1
+    READY = 2
+    RUNNING = 3
+    DONE = 4
+    ERROR = 5
 
     def notstarted(self):
         return self.value <= JobState.READY.value
 
+    def running(self):
+        return self.value == JobState.RUNNING.value
+        
     def finished(self):
         return self.value >= JobState.DONE.value
 
@@ -59,7 +63,7 @@ class JobDependency(Dependency):
 
 class Job(Resource):
     """Context of a job"""
-    def __init__(self, parameters: XPMObject, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
+    def __init__(self, parameters: XPMConfig, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
         super().__init__()
         self.workspace = workspace or Workspace.CURRENT
         assert self.workspace is not None, "No experiment has been defined"
@@ -67,12 +71,12 @@ class Job(Resource):
         self.launcher = launcher or self.workspace.launcher
         assert self.launcher is not None, "No default launcher in workspace %s" % workspace
 
-        self.type = parameters.__class__.__xpm__
-        self.name = str(self.type.typename).rsplit(".", 1)[-1]
+        self.type = parameters.__xpmtype__
+        self.name = str(self.type.identifier).rsplit(".", 1)[-1]
 
         self.scheduler:Optional["Scheduler"] = None
         self.parameters = parameters   
-        self.state:JobState = JobState.WAITING
+        self.state:JobState = JobState.UNSCHEDULED
 
         # Dependencies
         self.dependencies:Set[Dependency] = set() # as target
@@ -109,7 +113,7 @@ class Job(Resource):
 
     @property
     def jobpath(self):
-        return self.workspace.jobspath  / str(self.type.typename) / self.identifier
+        return self.workspace.jobspath  / str(self.type.identifier) / self.identifier
 
     @property
     def identifier(self):
@@ -204,6 +208,8 @@ class JobThread(threading.Thread):
         This method will lock all the dependencies before calling `self.job.run(locks)`
         where `locks` are the taken locks
         """
+
+        state = None
         with Locks() as locks:
             try:
                 with self.job.scheduler.cv:
@@ -214,8 +220,8 @@ class JobThread(threading.Thread):
                             locks.append(dependency.lock().acquire())
                         except LockError:
                             logger.warning("Could not lock %s, aborting start for job %s", dependency, self.job)
+                            # Just stop
                             dependency.check()
-                            self.job.state = JobState.READY
                             return
                     
                     logger.info("Running job %s", self.job)
@@ -260,6 +266,8 @@ class JobThread(threading.Thread):
                 state = JobState.ERROR
 
             finally:
+                # Release locks
+                locks.release()
                 if state in [JobState.DONE, JobState.ERROR]:
                     self.job.scheduler.jobfinished(self.job, state)
 
@@ -340,7 +348,10 @@ class Scheduler():
 
     def __exit__(self, exc_type, *args):
         # Wait until all tasks are completed (unless an exception was thrown)
-        if not exc_type:
+        if exc_type:
+            logger.exception("Not waiting since an exception was thrown")
+            # logger.warning("Not waiting since an exception was thrown [%s]", exc_type)
+        else:
             self.wait()
 
         # Set back the old scheduler, if any

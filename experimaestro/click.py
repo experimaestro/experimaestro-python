@@ -15,11 +15,11 @@ def xpm(context):
     parse_commandline(context)
 
 
-def forwardoption(argument, option_name):
+def forwardoption(argument, option_name=None):
     """Helper function
     
     Arguments:
-        xpmtype {class or typename} -- The experimaestro type name or a class corresponding to a type
+        xpmtype {class or identifier} -- The experimaestro type name or a class corresponding to a type
         option_name {str} -- The name of the option (or None if inferred from attribute)
     
     Raises:

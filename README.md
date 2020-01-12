@@ -29,13 +29,12 @@ pip install -e .
 This very simple example shows how to submit two tasks that concatenate two strings.
 Under the curtain, 
 
-- A directory is created for each task (in `workdir/jobs/helloworld.add`)
+- A directory is created for each task (in `workdir/jobs/helloworld.add/HASHID`)
   based on a unique ID computed from the parameters
-- Two processes are launched (there are no dependencies, so they will be run in parallel)
-- A tag `y` is created for each task - tags are experimental parameters you vary in your experiments,
-  so you can easily keep track of them
+- Two processes for `Say` are launched (there are no dependencies, so they will be run in parallel)
+- A tag `y` is created for the main task
 
-
+<!-- SNIPPET: MAIN ARGS[%WORKDIR%] ENV[XPM_EXAMPLE_WAIT=0.001] -->
 ```python
 # --- Task and types definitions
 
@@ -44,19 +43,20 @@ from pathlib import Path
 from experimaestro import *
 import click
 import time
+import os
 from typing import List
 
 # --- Just to be able to monitor the tasks
 
 def slowdown(N: int):
     for i in range(N):
-        time.sleep(2)
+        time.sleep(float(os.environ.get("XPM_EXAMPLE_WAIT", 2)))
         progress((i+1)/N)
 
 
 # --- Define the tasks
 
-hw = Typename("helloworld")
+hw = Identifier("helloworld")
 
 @argument("word", type=str, required=True, help="Word to generate")
 @task(hw.say)
@@ -93,11 +93,11 @@ def cli(port, workdir, debug):
         world = Say(word="world").submit()
 
         # Concat will depend on the two first tasks
-        Concat(strings=[hello, world]).submit()
+        Concat(strings=[hello, world]).tag("y", 1).submit()
 
 
 if __name__ == "__main__":
     cli()
 ```
 
-which can be launched with `python test.py xp /tmp/helloworld-workdir`
+which can be launched with `python test.py /tmp/helloworld-workdir`

@@ -8,10 +8,10 @@ import os
 import logging
 import pathlib
 from pathlib import Path, PosixPath
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 import experimaestro.api as api
-from .api import XPMObject, Typename
+from .api import XPMConfig, Identifier
 from .utils import logger
 from .workspace import Workspace
 
@@ -20,49 +20,59 @@ from .workspace import Workspace
 class config:
 
     """Annotations for experimaestro types"""
-    def __init__(self, typename=None, description=None, register=True, parents=[]):
+    def __init__(self, identifier=None, description=None, register=True, parents=[]):
         """[summary]
         
         Keyword Arguments:
-            typename {Typename, str} -- Unique identifier of the type (default: {None} will use the module/class name)
+            identifier {Identifier, str} -- Unique identifier of the type (default: {None} will use the module/class name)
             description {str} -- Description of the config/task (default: {None})
             parents {list} -- Parent classes if annotating a method (default: {[]})
             register {bool} -- False if the type should not be registered (debug only)
         """
         super().__init__()
-        self.typename = typename
+        self.identifier = identifier
+        if isinstance(self.identifier, str):
+            self.identifier = Identifier(self.identifier)
+            
         self.description = description
         self.parents = parents
         self.register = register
 
-    def __call__(self, tp, basetype=api.XPMObject):
-        # Check if conditions are fullfilled
-        if self.typename is None:
-            self.typename = Typename("%s.%s" % (tp.__module__.lower(), tp.__name__.lower()))
+    def __call__(self, tp, originaltype=None, basetype=api.XPMConfig):
+        """[summary]
+        
+        Arguments:
+            tp {[type]} -- Can be a method or a class
+        
+        Keyword Arguments:
+            basetype {[type]} -- [description] The base type of the class
+        
+        Raises:
+            ValueError: [description]
+        
+        Returns:
+            [type] -- [description]
+        """
 
-        originaltype = tp
-        
-        # --- If this is a method, encapsulate
-        if inspect.isfunction(tp):
-            tp = api.getfunctionpyobject(tp, self.parents, basetype=basetype)
-        
-        # --- Add XPMObject as an ancestor of t if needed
-        elif inspect.isclass(tp):
-            assert not self.parents, "parents can be used only for functions"
-            if not issubclass(tp, basetype):
+        # Check if conditions are fullfilled
+        originaltype = originaltype or tp
+        if self.identifier is None:
+            self.identifier = Identifier("%s.%s" % (originaltype.__module__.lower(), originaltype.__name__.lower()))
+
+        # --- Add XPMConfig as an ancestor of t if needed
+        if inspect.isclass(tp):
+            if not issubclass(tp, api.XPMConfig):
                 __bases__ = (basetype, )
                 if tp.__bases__ != (object, ):
                     __bases__ += tp.__bases__
                 __dict__ = {key: value for key, value in tp.__dict__.items() if key not in ["__dict__"]}
                 tp = type(tp.__name__, __bases__, __dict__)
-
-
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
-        logging.debug("Registering %s", self.typename)
+        logging.debug("Registering %s", self.identifier)
         
-        objecttype = api.ObjectType.create(tp, self.typename, self.description, register=self.register)
+        objecttype = api.ObjectType.create(tp, self.identifier, self.description, register=self.register)
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
         
@@ -88,19 +98,28 @@ class Choice(api.TypeProxy):
 
 class task(config):
     """Register a task"""
-    def __init__(self, typename=None, scriptpath=None, pythonpath=None, description=None, associate=None):
-        super().__init__(typename, description)
-        self.pythonpath = sys.executable if pythonpath is None else pythonpath
-        self.scriptpath = scriptpath
+    def __init__(self, identifier=None, parents=None, pythonpath=None, description=None):
+        super().__init__(identifier, description)
+        self.parents = parents or []
+        if self.parents and not isinstance(self.parents, list):
+            self.parents = [self.parents]
 
-    def __call__(self, objecttype):
+        self.pythonpath = sys.executable if pythonpath is None else pythonpath
+
+    def __call__(self, tp):
         import experimaestro.commandline as commandline
 
+        originaltype = tp
+        if inspect.isfunction(tp):
+            tp = api.gettaskclass(tp, self.parents)
+        else:
+            assert not self.parents, "parents can only be used for functions"
+
         # Register the type
-        objecttype = super().__call__(objecttype, basetype=api.XPMTask) 
+        tp = super().__call__(tp, originaltype=originaltype, basetype=api.XPMTask) 
 
         # Construct command  
-        _type = objecttype.__xpm__.originaltype
+        _type = tp.__xpm__.originaltype
         command = commandline.Command()
         command.add(commandline.CommandPath(self.pythonpath))
         command.add(commandline.CommandString("-m"))
@@ -116,21 +135,21 @@ class task(config):
             command.add(commandline.CommandString("--file"))
             command.add(commandline.CommandPath(filepath))
 
-        command.add(commandline.CommandString(str(self.typename)))
+        command.add(commandline.CommandString(str(self.identifier)))
         command.add(commandline.CommandParameters())
         commandLine = commandline.CommandLine()
         commandLine.add(command)
 
-        objecttype.__xpm__.task = commandline.CommandLineTask(commandLine)
-        return objecttype
+        tp.__xpm__.task = commandline.CommandLineTask(commandLine)
+        return tp
 
 
 # --- argument related annotations
 
 class argument():
     """Defines an argument for an experimaestro type"""
-    def __init__(self, name, type=None, default=None, required=None,
-                 ignored=None, help=None):
+    def __init__(self, name, type=None, default=None, required:bool=None,
+                 ignored:Optional[bool]=None, help:Optional[str]=None):
         # Determine if required
         self.name = name                
         self.type = api.Type.fromType(type) if type else None
@@ -174,14 +193,13 @@ class ConstantArgument(argument):
         super().__init__(name, type=xpmtype or api.Type.fromType(type(value)), help=help)
         self.generator = lambda jobcontext: api.clone(value)
 
-class TaggedValue:
-    def __init__(self, name: str, value):
-        self.name = name
-        self.value = value
 
-def tag(name: str, value):
+# --- Tags
+
+
+def tag(value):
     """Tag a value"""
-    return TaggedValue(name, value)
+    return api.TaggedValue(value)
 
 def tags(value):
     """Return the tags associated with a value"""
@@ -189,7 +207,7 @@ def tags(value):
         return value.tags()
     return value.__xpm__.sv.tags()
 
-def tagspath(value: api.XPMObject):
+def tagspath(value: api.XPMConfig):
     """Return the tags associated with a value"""
     p = Path()
     for key, value in value.__xpm__.sv.tags().items():

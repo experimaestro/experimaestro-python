@@ -1,7 +1,7 @@
 import time
 from experimaestro import *
 
-tasks = Typename("tasks")
+tasks = Identifier("tasks")
 
 @argument("word", type=str, required=True, help="Word to generate")
 @task(tasks.say)
@@ -19,6 +19,16 @@ class Concat:
             with open(string.stdout()) as fp:
                 says.append(fp.read().strip())
         print(" ".join(says))
+
+@argument("x", type=int)
+@config()
+class ForeignClassB1: pass
+
+@argument("b", type=ForeignClassB1)
+@task()
+class ForeignTaskA(): 
+    def execute(self):
+        print(self.b.x)
 
 @pathargument("wait", "wait")
 @task(tasks.fail)

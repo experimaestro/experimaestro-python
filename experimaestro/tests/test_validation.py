@@ -2,13 +2,13 @@
 
 import pytest
 from pathlib import Path
-from experimaestro import config, Typename, argument, pathargument, ConstantArgument
+from experimaestro import config, task, Identifier, argument, pathargument, ConstantArgument, experiment
 import experimaestro.api as api
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
 import logging
 
-valns = Typename("validation")
+valns = Identifier("validation")
 
 
 def expect_validate(value):
@@ -97,7 +97,7 @@ def test_path():
         parents = list(a.value.parents)
         assert a.value.name == "file.txt"
         assert a.value.parents[0].name == a.__xpm__.identifier.hex()
-        assert a.value.parents[1].name == str(a.__class__.__xpm__.typename)
+        assert a.value.parents[1].name == str(a.__xpmtype__.identifier)
         assert a.value.parents[2].name == "jobs"
         assert a.value.parents[3] == xp.workspace.path
 
@@ -116,7 +116,7 @@ def test_constant():
 
 
 @argument("a", int)
-@config()
+@task()
 def notset(a, b): pass
 
 
@@ -124,7 +124,7 @@ def test_notset():
     expect_notvalidate(notset(a=1))
 
 @argument("a", int)
-@config()
+@task()
 def notdeclared(): pass
 
 def test_notdeclared():
@@ -140,6 +140,26 @@ class Child(Parent): pass
 
 def test_child():
     expect_validate(Child(x=1))
+
+
+# --- Path argument checks
+
+
+@pathargument("x", "x")
+@config()
+class PathParent: pass
+
+def test_path():
+    c = PathParent()
+    expect_validate(c)
+
+
+@task(None, PathParent)
+def PathTask(x: Path): pass
+
+def test_pathchild():
+    c = PathTask()
+    expect_validate(c)
 
 
 # --- Default value
@@ -168,3 +188,22 @@ def test_seal():
     
     with pytest.raises(AttributeError):
         a.a = 1
+
+
+# --- Task as argument
+
+@config()
+class TaskParentConfig(): pass
+
+@task(None, parents=TaskParentConfig)
+def taskconfig(): pass
+
+@argument("x", type=TaskParentConfig)
+@config()
+class TaskConfigConsumer(): pass
+
+def test_taskargument():
+    x = taskconfig()
+    with experiment("fake", "/"):
+        x.submit(dryrun=True)
+        expect_validate(TaskConfigConsumer(x=x))
