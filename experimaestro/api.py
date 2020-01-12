@@ -167,10 +167,10 @@ class ObjectType(Type):
                 yield tp.__xpm__
         
     @staticmethod
-    def create(objecttype: "XPMConfig", identifier, description, register=True):
+    def create(configclass: "XPMConfig", identifier, description, register=True):
         if register and str(identifier) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[str(identifier)]
-            if _objecttype.__xpm__.originaltype != objecttype:
+            if _objecttype.__xpm__.originaltype != configclass:
                 # raise Exception("Experimaestro type %s is already declared" % identifier)
                 pass
 
@@ -179,8 +179,8 @@ class ObjectType(Type):
 
 
         if register:
-            ObjectType.REGISTERED[str(identifier)] = objecttype
-        return ObjectType(objecttype, identifier, description)
+            ObjectType.REGISTERED[str(identifier)] = configclass
+        return ObjectType(configclass, identifier, description)
 
 
     def validate(self, value):
