@@ -10,7 +10,7 @@ import asyncio
 import sys
 
 from .workspace import Workspace
-from .api import XPMConfig
+from .api import Config
 from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
@@ -63,7 +63,7 @@ class JobDependency(Dependency):
 
 class Job(Resource):
     """Context of a job"""
-    def __init__(self, parameters: XPMConfig, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
+    def __init__(self, parameters: Config, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
         super().__init__()
         self.workspace = workspace or Workspace.CURRENT
         assert self.workspace is not None, "No experiment has been defined"

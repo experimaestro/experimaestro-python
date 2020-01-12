@@ -7,12 +7,12 @@ import importlib.machinery
 import json
 
 from .utils import logger
-from experimaestro.api import ObjectType, XPMConfig, TypeInformation
+from experimaestro.api import ObjectType, Config, TypeInformation
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
 
-class Config: 
+class RunConfig: 
     def __init__(self):
         self.traceback = False
 
@@ -36,7 +36,7 @@ def cli(ctx, quiet, debug, traceback):
     elif debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    ctx.obj = Config()
+    ctx.obj = RunConfig()
     ctx.obj.traceback = traceback
 
 
@@ -58,7 +58,7 @@ def run(file, path, taskid, parameters):
     tasktype = ObjectType.REGISTERED[taskid]
 
     with open(parameters, "r") as fp:
-        XPMConfig.TASKMODE = True
+        Config.TASKMODE = True
         
         params = json.load(fp)
         TypeInformation.LOADING = True
