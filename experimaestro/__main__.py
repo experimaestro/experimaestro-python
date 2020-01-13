@@ -8,6 +8,7 @@ import json
 
 from .utils import logger
 from experimaestro.api import ObjectType, Config, TypeInformation
+import experimaestro
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +39,11 @@ def cli(ctx, quiet, debug, traceback):
 
     ctx.obj = RunConfig()
     ctx.obj.traceback = traceback
+
+
+@cli.command(help="Get version")
+def version():
+    print(experimaestro.__version__)
 
 
 @click.argument("parameters", type=Path)
