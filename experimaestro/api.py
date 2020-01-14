@@ -599,7 +599,8 @@ class Config(metaclass=ConfigMetaclass):
             if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
                 if Config.TASKMODE:
                     # Do not set this attribute
-                    return
+                    logging.debug("Do not set %s (not in attributes)", name)
+                    continue
                 raise ValueError("%s is not an argument for %s" % (name, self.__xpmtype__))
 
             if isinstance(value, TaggedValue):
