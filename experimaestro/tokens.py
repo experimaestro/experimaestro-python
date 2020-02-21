@@ -19,6 +19,7 @@ from .utils import logger
 
 class Token(Resource):
     """Base class for all token-based resources"""
+
     pass
 
 
@@ -27,10 +28,10 @@ class CounterTokenLock(Lock):
         super().__init__()
         self.dependency = dependency
 
-    def _acquire(self): 
-        self.dependency.token.acquire(self.dependency.count)                
+    def _acquire(self):
+        self.dependency.token.acquire(self.dependency.count)
 
-    def _release(self): 
+    def _release(self):
         self.dependency.token.release(self.dependency.count)
 
     def __str__(self):
@@ -56,10 +57,10 @@ class CounterTokenDependency(Dependency):
         return self._token
 
 
-class CounterToken(Token, FileSystemEventHandler): 
+class CounterToken(Token, FileSystemEventHandler):
     """File-based counter token"""
 
-    TOKENS:Dict[str, "CounterToken"] = {}
+    TOKENS: Dict[str, "CounterToken"] = {}
     """Maps paths to instances"""
     VALUES = struct.Struct("<LL")
 
@@ -82,7 +83,9 @@ class CounterToken(Token, FileSystemEventHandler):
         """
         super().__init__()
         self.path = path
-        self.ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
+        self.ipc_lock = fasteners.InterProcessLock(
+            path.with_suffix(path.suffix + ".lock")
+        )
         self.lock = threading.Lock()
         self.name = name
 
@@ -107,7 +110,7 @@ class CounterToken(Token, FileSystemEventHandler):
             if total != count:
                 logger.warning("Changing number of tokens from %d to %d", total, count)
                 total = count
-                
+
             self._write(total, taken)
 
         # Set the number of available tokens
@@ -116,24 +119,26 @@ class CounterToken(Token, FileSystemEventHandler):
     def __str__(self):
         return "token[{}]".format(self.name)
 
-    
-    def on_modified(self, event): 
+    def on_modified(self, event):
         if event.src_path == self.watchedpath:
             timestamp = os.path.getmtime(self.path)
             if timestamp <= self.timestamp:
-                logger.debug("Not reading token file [%f <= %f]", timestamp, self.timestamp) 
+                logger.debug(
+                    "Not reading token file [%f <= %f]", timestamp, self.timestamp
+                )
             else:
                 with self.lock, self.ipc_lock:
                     total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
                     available = total - taken
-                
+
                 if available != self.available:
-                    logger.info("Counter token changed: %d to %d", self.available, available)
+                    logger.info(
+                        "Counter token changed: %d to %d", self.available, available
+                    )
                     self.available = available
                     # Notify jobs
                     for dependency in self.dependents:
                         dependency.check()
-
 
     def dependency(self, count):
         return CounterTokenDependency(self, count)
@@ -143,7 +148,9 @@ class CounterToken(Token, FileSystemEventHandler):
         self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
         self.timestamp = os.path.getmtime(self.path)
 
-        logger.debug("Token: wrote %d/%d to %s [%d]", total, taken, self.path, self.timestamp)
+        logger.debug(
+            "Token: wrote %d/%d to %s [%d]", total, taken, self.path, self.timestamp
+        )
 
     def _read(self):
         # Should only be called when locked
@@ -158,7 +165,7 @@ class CounterToken(Token, FileSystemEventHandler):
         with self.lock, self.ipc_lock:
             total, taken = self._read()
             logger.debug("Token state [acquire %d]: %d, %d", count, total, taken)
-            if  count + taken > total:
+            if count + taken > total:
                 logger.warning("No more token available - cannot lock")
                 raise LockError("No token")
 
@@ -177,7 +184,7 @@ class CounterToken(Token, FileSystemEventHandler):
             if taken < 0:
                 taken = 0
                 logger.error("More tokens released that taken")
-            self._write(total, taken)            
+            self._write(total, taken)
             logger.debug("Token state [released %d]: %d, %d", count, total, taken)
             self.available = total - taken
 

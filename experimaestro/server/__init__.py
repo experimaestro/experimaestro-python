@@ -12,11 +12,12 @@ import functools
 from experimaestro.scheduler import Scheduler
 import re
 
+
 def formattime(v: Optional[float]):
     if not v:
         return ""
 
-    return time.strftime("%Y-%m-%d %H:%M:%S" , time.localtime(v))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(v))
 
 
 def job_details(job):
@@ -25,18 +26,16 @@ def job_details(job):
         "payload": {
             "jobId": job.identifier,
             "taskId": job.name,
-
             "locator": str(job.jobpath),
             "status": job.state.name.lower(),
-
             "start": formattime(job.starttime),
             "end": formattime(job.endtime),
             "submitted": formattime(job.submittime),
-
             "tags": list(job.tags.items()),
-            "progress": job.progress
-        }
+            "progress": job.progress,
+        },
     }
+
 
 def job_create(job):
     return {
@@ -44,14 +43,13 @@ def job_create(job):
         "payload": {
             "jobId": job.identifier,
             "taskId": job.name,
-
             "locator": str(job.jobpath),
             "status": job.state.name.lower(),
-
             "tags": list(job.tags.items()),
-            "progress": job.progress
-        }
+            "progress": job.progress,
+        },
     }
+
 
 class Listener:
     def __init__(self, loop, scheduler):
@@ -63,32 +61,37 @@ class Listener:
     def send_message(self, message):
         if self.websockets:
             message = json.dumps(message)
-            self.loop.call_soon_threadsafe(self.loop.create_task, 
-                asyncio.wait([user.send(message) for user in self.websockets])
+            self.loop.call_soon_threadsafe(
+                self.loop.create_task,
+                asyncio.wait([user.send(message) for user in self.websockets]),
             )
 
     def job_submitted(self, job):
         self.send_message(job_create(job))
 
     def job_state(self, job):
-        self.send_message({
-            "type": "JOB_UPDATE",
-            "payload": {
-                "jobId": job.identifier,
-                "status": job.state.name.lower(),
-                "progress": job.progress
+        self.send_message(
+            {
+                "type": "JOB_UPDATE",
+                "payload": {
+                    "jobId": job.identifier,
+                    "status": job.state.name.lower(),
+                    "progress": job.progress,
+                },
             }
-        })
+        )
         # self.loop.call_soon_threadsafe(print, "!!!! Job state changed")
 
     async def register(self, websocket):
         self.websockets.add(websocket)
-        
+
     async def unregister(self, websocket):
         self.websockets.remove(websocket)
 
+
 async def register(websocket):
     Scheduler.listeners.add(Listener(websocket))
+
 
 async def handler(websocket, path, listener):
     await listener.register(websocket)
@@ -101,25 +104,29 @@ async def handler(websocket, path, listener):
             except websockets.exceptions.ConnectionClosedOK:
                 break
             except Exception as e:
-                await websocket.send(json.dumps({
-                    "error": True,
-                    "message": "message parsing error"
-                }))
+                await websocket.send(
+                    json.dumps({"error": True, "message": "message parsing error"})
+                )
                 continue
 
-            
             if actiontype == "refresh":
                 for job in listener.scheduler.jobs.values():
                     await websocket.send(json.dumps(job_create(job)))
             elif actiontype == "quit":
                 break
             elif actiontype == "details":
-                await websocket.send(json.dumps(job_details(listener.scheduler.jobs[job.identifier])))
+                await websocket.send(
+                    json.dumps(job_details(listener.scheduler.jobs[job.identifier]))
+                )
             else:
-                await websocket.send(json.dumps({
-                    "error": True,
-                    "message": "Unknown message action %s" % actiontype
-                }))
+                await websocket.send(
+                    json.dumps(
+                        {
+                            "error": True,
+                            "message": "Unknown message action %s" % actiontype,
+                        }
+                    )
+                )
     finally:
         await listener.unregister(websocket)
 
@@ -128,18 +135,15 @@ MIMETYPES = {
     "html": "text/html",
     "map": "text/plain",
     "txt": "text/plain",
-
     "ico": "image/x-icon",
     "png": "image/png",
-
     "css": "text/css",
     "js": "application/javascript",
     "json": "application/json",
-
     "eot": "font/vnd.ms-fontobject",
     "woff": "font/woff",
     "woff2": "font/woff2",
-    "ttf": "font/ttf"
+    "ttf": "font/ttf",
 }
 
 
@@ -171,16 +175,15 @@ class RequestProcessor:
         datapath = "data%s" % path
         if pkg_resources.resource_exists("experimaestro.server", datapath):
             code = http.HTTPStatus.OK
-            headers['Cache-Control'] = 'max-age=0'
+            headers["Cache-Control"] = "max-age=0"
             mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
-            headers['Content-Type'] = mimetype
+            headers["Content-Type"] = mimetype
             logging.info("Reading %s [%s]", datapath, mimetype)
             body = pkg_resources.resource_string("experimaestro.server", datapath)
             return (code, headers, body)
 
-        headers['Content-Type'] = MIMETYPES["txt"]
+        headers["Content-Type"] = MIMETYPES["txt"]
         return (http.HTTPStatus.NOT_FOUND, headers, "No such path %s" % path)
-
 
 
 class Server:
@@ -189,7 +192,7 @@ class Server:
         self.port = port
         self.scheduler = scheduler
         self._loop = None
-        self._stop  = None
+        self._stop = None
 
     def getNotificationURL(self):
         return "http://{host}:{port}/notifications".format(**self.__dict__)
@@ -202,15 +205,16 @@ class Server:
 
     def start(self):
         """Start the websocket server in a new process process"""
+
         def run(loop, stop):
             self.listener = Listener(loop, self.scheduler)
             asyncio.set_event_loop(loop)
             loop.run_until_complete(self._serve(stop))
-            
+
         self._loop = asyncio.new_event_loop()
         self._stop = self._loop.create_future()
         threading.Thread(target=run, args=(self._loop, self._stop)).start()
-        
+
     def serve(self):
         # asyncio.ensure_future(self._serve())
         pass
@@ -219,6 +223,8 @@ class Server:
         logging.info("Webserver started on http://%s:%d", self.host, self.port)
         bound_handler = functools.partial(handler, listener=self.listener)
         process_request = RequestProcessor(self.scheduler)
-        async with websockets.serve(bound_handler, self.host, self.port, process_request=process_request):
+        async with websockets.serve(
+            bound_handler, self.host, self.port, process_request=process_request
+        ):
             await stop
         logging.info("Server stopped")

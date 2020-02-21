@@ -8,6 +8,7 @@ from .utils import logger
 
 # --- Progress and other notifications
 
+
 class NotificationThread(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -19,12 +20,12 @@ class NotificationThread(threading.Thread):
         self.stopping = False
 
         if self.url:
-            self.progress_threshold = .01
+            self.progress_threshold = 0.01
             self.cv = threading.Condition()
             self.start()
         else:
             self.cv = None
-            self.progress_threshold = .05
+            self.progress_threshold = 0.05
 
     def stop(self):
         if self.url:
@@ -37,11 +38,16 @@ class NotificationThread(threading.Thread):
 
         while not self.stopping:
             with self.cv:
-                self.cv.wait_for(lambda: self.stopping or self.progress - self.previous_progress > self.progress_threshold)
+                self.cv.wait_for(
+                    lambda: self.stopping
+                    or self.progress - self.previous_progress > self.progress_threshold
+                )
                 if not self.isAlive():
                     break
 
-                reportprogress = self.progress - self.previous_progress > self.progress_threshold
+                reportprogress = (
+                    self.progress - self.previous_progress > self.progress_threshold
+                )
 
             if reportprogress:
                 self.previous_progress = self.progress
@@ -50,8 +56,9 @@ class NotificationThread(threading.Thread):
                     with urlopen(url) as response:
                         pass
                 except:
-                    logger.info("Progress: %.2f [error while notifying %s]", self.progress, url)
-
+                    logger.info(
+                        "Progress: %.2f [error while notifying %s]", self.progress, url
+                    )
 
     def setprogress(self, progress):
         if progress - self.previous_progress > self.progress_threshold:
@@ -67,6 +74,6 @@ class NotificationThread(threading.Thread):
 
 INSTANCE = NotificationThread()
 
-def progress(value: float):
-    INSTANCE.setprogress(value)        
 
+def progress(value: float):
+    INSTANCE.setprogress(value)

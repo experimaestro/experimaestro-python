@@ -16,10 +16,12 @@ from .utils import logger
 from .workspace import Workspace
 
 # --- Annotations to define tasks and types
-        
+
+
 class config:
 
     """Annotations for experimaestro types"""
+
     def __init__(self, identifier=None, description=None, register=True, parents=[]):
         """[summary]
         
@@ -39,7 +41,7 @@ class config:
         self.identifier = identifier
         if isinstance(self.identifier, str):
             self.identifier = Identifier(self.identifier)
-            
+
         self.description = description
         self.parents = parents
         self.register = register
@@ -66,43 +68,53 @@ class config:
         # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
             if not issubclass(tp, api.Config):
-                __bases__ = (basetype, )
-                if tp.__bases__ != (object, ):
+                __bases__ = (basetype,)
+                if tp.__bases__ != (object,):
                     __bases__ += tp.__bases__
-                __dict__ = {key: value for key, value in tp.__dict__.items() if key not in ["__dict__"]}
+                __dict__ = {
+                    key: value
+                    for key, value in tp.__dict__.items()
+                    if key not in ["__dict__"]
+                }
                 tp = type(tp.__name__, __bases__, __dict__)
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
-
         # Determine the identifier
         if self.identifier is None:
             package = originaltype.__module__.lower()
-            
+
             # Use the parent identifier
             # if basetype.__xpm__.
 
-            self.identifier = Identifier("%s.%s" % (package, originaltype.__name__.lower()))
+            self.identifier = Identifier(
+                "%s.%s" % (package, originaltype.__name__.lower())
+            )
 
         logging.debug("Registering %s", self.identifier)
-        
-        objecttype = api.ObjectType.create(tp, self.identifier, self.description, register=self.register)
+
+        objecttype = api.ObjectType.create(
+            tp, self.identifier, self.description, register=self.register
+        )
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
-        
+
         return tp
 
 
 class Array(api.TypeProxy):
     """Array of object"""
+
     def __init__(self, type):
         self.type = api.Type.fromType(type)
 
     def __call__(self):
         return api.ArrayType(self.type)
 
+
 class Choice(api.TypeProxy):
     """A string with a choice among several alternative"""
+
     def __init__(self, *args):
         self.choices = args
 
@@ -112,7 +124,10 @@ class Choice(api.TypeProxy):
 
 class task(config):
     """Register a task"""
-    def __init__(self, identifier=None, parents=None, pythonpath=None, description=None):
+
+    def __init__(
+        self, identifier=None, parents=None, pythonpath=None, description=None
+    ):
         super().__init__(identifier, description)
         self.parents = parents or []
         if self.parents and not isinstance(self.parents, list):
@@ -130,9 +145,9 @@ class task(config):
             assert not self.parents, "parents can only be used for functions"
 
         # Register the type
-        tp = super().__call__(tp, originaltype=originaltype, basetype=api.Task) 
+        tp = super().__call__(tp, originaltype=originaltype, basetype=api.Task)
 
-        # Construct command  
+        # Construct command
         _type = tp.__xpm__.originaltype
         command = commandline.Command()
         command.add(commandline.CommandPath(self.pythonpath))
@@ -160,12 +175,21 @@ class task(config):
 
 # --- argument related annotations
 
-class argument():
+
+class argument:
     """Defines an argument for an experimaestro type"""
-    def __init__(self, name, type=None, default=None, required:bool=None,
-                 ignored:Optional[bool]=None, help:Optional[str]=None):
+
+    def __init__(
+        self,
+        name,
+        type=None,
+        default=None,
+        required: bool = None,
+        ignored: Optional[bool] = None,
+        help: Optional[str] = None,
+    ):
         # Determine if required
-        self.name = name                
+        self.name = name
         self.type = api.Type.fromType(type) if type else None
         self.help = help
         self.ignored = ignored
@@ -176,20 +200,30 @@ class argument():
     def __call__(self, tp):
         # Get type from default if needed
         if self.type is None:
-            if self.default is not None: 
+            if self.default is not None:
                 self.type = api.Type.fromType(type(self.default))
 
         # Type = any if no type
         if self.type is None:
             self.type = api.Any
 
-        argument = api.Argument(self.name, self.type, help=self.help, required=self.required, ignored=self.ignored, generator=self.generator, default=self.default)
+        argument = api.Argument(
+            self.name,
+            self.type,
+            help=self.help,
+            required=self.required,
+            ignored=self.ignored,
+            generator=self.generator,
+            default=self.default,
+        )
         tp.__xpm__.addArgument(argument)
         return tp
+
 
 class pathargument(argument):
     """Defines a an argument that will be a relative path (automatically
     set by experimaestro)"""
+
     def __init__(self, name, path, help=""):
         """
         :param name: The name of argument (in python)
@@ -203,8 +237,11 @@ class ConstantArgument(argument):
     """
     An constant argument (useful for versionning tasks)
     """
+
     def __init__(self, name: str, value, xpmtype=None, help=""):
-        super().__init__(name, type=xpmtype or api.Type.fromType(type(value)), help=help)
+        super().__init__(
+            name, type=xpmtype or api.Type.fromType(type(value)), help=help
+        )
         self.generator = lambda jobcontext: api.clone(value)
 
 
@@ -215,33 +252,39 @@ def tag(value):
     """Tag a value"""
     return api.TaggedValue(value)
 
+
 def tags(value):
     """Return the tags associated with a value"""
     if isinstance(value, Value):
         return value.tags()
     return value.__xpm__.sv.tags()
 
+
 def tagspath(value: api.Config):
     """Return the tags associated with a value"""
     p = Path()
     for key, value in value.__xpm__.sv.tags().items():
-        p /= "%s=%s" % (key.replace("/","-"), value)
+        p /= "%s=%s" % (key.replace("/", "-"), value)
     return p
-
 
 
 # --- Deprecated
 
+
 def deprecateClass(klass):
     import inspect
+
     def __init__(self, *args, **kwargs):
         frameinfo = inspect.stack()[1]
-        logger.warning("Class %s is deprecated: use %s in %s:%s (%s)", 
-            klass.__name__, klass.__bases__[0].__name__, 
-            frameinfo.filename, frameinfo.lineno,
-            frameinfo.code_context
+        logger.warning(
+            "Class %s is deprecated: use %s in %s:%s (%s)",
+            klass.__name__,
+            klass.__bases__[0].__name__,
+            frameinfo.filename,
+            frameinfo.lineno,
+            frameinfo.code_context,
         )
         super(klass, self).__init__(*args, **kwargs)
-        
+
     klass.__init__ = __init__
     return klass

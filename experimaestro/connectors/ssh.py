@@ -23,22 +23,24 @@ class SshPath(Path, PurePosixPath):
         child._accessor = self._accessor
         return child
 
-    def open(self, mode='r', buffering=-1, encoding=None,
-             errors=None, newline=None):
+    def open(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         """
         Open the file pointed by this path and return a file object, as
         the built-in open() function does.
         """
         if self._closed:
             self._raise_closed()
-        
-        fileobj = self._accessor.sftp.open(super().__str__(), mode, buffering)
-        if "b" in mode: 
-            return fileobj
-        
-        return io.TextIOWrapper(fileobj, encoding=encoding, newline=newline, errors=errors)
 
-class SshConnector: 
+        fileobj = self._accessor.sftp.open(super().__str__(), mode, buffering)
+        if "b" in mode:
+            return fileobj
+
+        return io.TextIOWrapper(
+            fileobj, encoding=encoding, newline=newline, errors=errors
+        )
+
+
+class SshConnector:
     def __init__(self, hostname: str):
         self.hostname = hostname
         self.port = None

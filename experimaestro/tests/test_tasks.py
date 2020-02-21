@@ -18,9 +18,10 @@ from .utils import TemporaryDirectory, TemporaryExperiment, is_posix
 from .tasks import *
 from . import restart
 
+
 def test_simple():
     with TemporaryDirectory(prefix="xpm", suffix="helloworld") as workdir:
-        assert(isinstance(workdir, Path))
+        assert isinstance(workdir, Path)
         with TemporaryExperiment("helloworld", workdir=workdir, maxwait=2):
             # Submit the tasks
             hello = Say(word="hello").submit()
@@ -31,13 +32,15 @@ def test_simple():
 
         assert concat.__xpm__.job.state == JobState.DONE
         assert Path(concat.stdout()).read_text() == "HELLO WORLD\n"
-    
+
+
 def test_not_submitted():
     """A not submitted task should not be accepted as an argument"""
     with TemporaryExperiment("helloworld", maxwait=2):
         hello = Say(word="hello")
         with pytest.raises(ValueError):
             Concat(strings=[hello])
+
 
 def test_fail():
     """Failing task... should fail"""
@@ -47,17 +50,19 @@ def test_fail():
 
     assert fail.__xpm__.job.wait() == JobState.ERROR
 
+
 def test_foreign_type():
     """When the argument real type is in an non imported module"""
     with TemporaryExperiment("foreign_type", maxwait=2):
         # Submit the tasks
         from .tasks2 import ForeignClassB2
+
         b = ForeignClassB2(x=1, y=2)
         a = ForeignTaskA(b=b).submit()
 
         assert a.__xpm__.job.wait() == JobState.DONE
         assert a.stdout().read_text().strip() == "1"
-    
+
 
 def test_fail_dep():
     """Failing task... should cancel dependent"""
@@ -84,20 +89,27 @@ def test_function():
 
     assert method.__xpm__.job.wait() == JobState.DONE
 
+
 @pytest.mark.skip()
 def test_done():
     """Checks that we do not run an already done job"""
     pass
 
 
-def terminate(p): p.terminate()
-def sigint(p): p.send_signal(signal.SIGINT)
+def terminate(p):
+    p.terminate()
+
+
+def sigint(p):
+    p.send_signal(signal.SIGINT)
+
 
 TERMINATES_FUNC = [terminate]
 if is_posix():
     TERMINATES_FUNC.append(sigint)
 
-@pytest.mark.parametrize('terminate', TERMINATES_FUNC)
+
+@pytest.mark.parametrize("terminate", TERMINATES_FUNC)
 def test_restart(terminate):
     """Restarting the experiment should take back running tasks"""
     p = None
@@ -114,10 +126,10 @@ def test_restart(terminate):
             xpmprocess = subprocess.Popen(command)
             while not task.touch.is_file():
                 time.sleep(0.1)
-            
+
             pid = int(task.__xpm__.job.pidpath.read_text())
             p = psutil.Process(pid)
-            
+
             logging.debug("Process has started [file %s, pid %d]", task.touch, pid)
             terminate(xpmprocess)
             errorcode = xpmprocess.wait(5)

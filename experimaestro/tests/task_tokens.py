@@ -4,6 +4,7 @@ import logging
 
 from experimaestro import task, argument, pathargument
 
+
 @argument("x", int)
 @argument("path", Path)
 @task()

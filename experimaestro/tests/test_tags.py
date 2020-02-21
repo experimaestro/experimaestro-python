@@ -1,8 +1,11 @@
 from experimaestro import tag, config, argument
 
+
 @argument("x", type=int)
 @config()
-class Config1: pass
+class Config1:
+    pass
+
 
 def test_tag():
     c = Config1(x=5)

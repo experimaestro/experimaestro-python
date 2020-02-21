@@ -1,7 +1,9 @@
 from .utils import logger
 
-class Lock: 
+
+class Lock:
     """A lock"""
+
     def __init__(self):
         self._level = 0
         self.detached = False
@@ -9,13 +11,13 @@ class Lock:
     def detach(self):
         self.detached = True
 
-    def acquire(self): 
+    def acquire(self):
         if self._level == 0:
             self._acquire()
             self._level += 1
         return self
 
-    def release(self): 
+    def release(self):
         if not self.detached and self._level == 1:
             self._release()
             self._level -= 1
@@ -23,18 +25,20 @@ class Lock:
     def __enter__(self):
         self.acquire()
         return self
-        
+
     def __exit__(self, *args):
         self.release()
 
     def _acquire(self):
         raise NotImplementedError()
 
-
-    def _release(self): 
+    def _release(self):
         raise NotImplementedError()
 
-class LockError(Exception): pass
+
+class LockError(Exception):
+    pass
+
 
 class Locks(Lock):
     """A set of locks"""

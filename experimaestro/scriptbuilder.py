@@ -9,7 +9,7 @@ from shlex import quote as shquote
 
 
 class ShCommandContext(CommandContext):
-    def writeRedirection(self, out, redirect, stream):  
+    def writeRedirection(self, out, redirect, stream):
         if redirect.type == RedirectType.INHERIT:
             pass
         elif redirect.type == RedirectType.FILE:
@@ -17,14 +17,22 @@ class ShCommandContext(CommandContext):
             out.write(" > {}".format(relpath))
         else:
             raise ValueError("Unsupported output redirection type %s" % redirect.type)
-    def printRedirections(self, stream: int, out, outputRedirect: Redirect, outputRedirects):
+
+    def printRedirections(
+        self, stream: int, out, outputRedirect: Redirect, outputRedirects
+    ):
         if outputRedirects:
             # Special case : just one redirection
-            if len(outputRedirects) == 1 and outputRedirect.type == RedirectType.INHERIT:             
-                self.writeRedirection(out, Redirect.file(outputRedirects[0].toString()), stream)
+            if (
+                len(outputRedirects) == 1
+                and outputRedirect.type == RedirectType.INHERIT
+            ):
+                self.writeRedirection(
+                    out, Redirect.file(outputRedirects[0].toString()), stream
+                )
             else:
                 out.write(' : {} > >(tee ")'.format(stream))
-                for file in outputRedirects:        
+                for file in outputRedirects:
                     out.write(self.relpath(file))
                 self.writeRedirection(out, outputRedirect, stream)
                 out << ")"
@@ -33,6 +41,7 @@ class ShCommandContext(CommandContext):
             # Finally, the main redirection
             self.writeRedirection(out, outputRedirect, stream)
 
+
 SH_FLOCK = """exec {0}<> {1}
 if ! flock -n {0}; then 
     echo Could not lock {1} - stopping 1>&2
@@ -40,13 +49,14 @@ if ! flock -n {0}; then
 fi
 """
 
+
 class ShScriptBuilder:
-    def __init__(self, shpath: Path="/bin/bash"):
+    def __init__(self, shpath: Path = "/bin/bash"):
         self.shpath = shpath
         self.lockfiles: List[Path] = []
         self.notificationURL: Optional[str] = None
         self.preprocessCommands: Optional[AbstractCommand] = None
-        self.command:Optional[AbstractCommand] = None
+        self.command: Optional[AbstractCommand] = None
 
     def write(self, job: CommandLineJob):
         """Write the script file
@@ -68,7 +78,9 @@ class ShScriptBuilder:
         connector = job.launcher.connector
         directorypath = connector.resolve(directory)
         ws = job.workspace
-        context = ShCommandContext(ws, job.launcher.connector, directory, job.name, job.parameters)
+        context = ShCommandContext(
+            ws, job.launcher.connector, directory, job.name, job.parameters
+        )
 
         relpath = lambda path: shquote(context.relpath(path))
 
@@ -88,7 +100,6 @@ class ShScriptBuilder:
                 out.write("%s: %s" % (key, value))
             out.write("\n\n")
 
-
             # --- Checks locks right away
 
             # change directory
@@ -97,21 +108,25 @@ class ShScriptBuilder:
             # Lock all the needed files
             FIRST_FD = 9
             for i, path in enumerate(self.lockfiles):
-                out.write(SH_FLOCK.format(i+FIRST_FD, relpath(path)))
+                out.write(SH_FLOCK.format(i + FIRST_FD, relpath(path)))
 
             # Use pipefail for fine grained analysis of errors in commands
             out.write("set -o pipefail\n\n")
 
-            out.write('''echo $$ > %s\n\n''' % pidpath)
+            out.write("""echo $$ > %s\n\n""" % pidpath)
 
             for name, value in job.launcher.environ.items():
-                out.write('''export {}={}\n'''.format(name, shquote(value)))
+                out.write("""export {}={}\n""".format(name, shquote(value)))
 
             # Adds notification URL to script
             if self.notificationURL:
-                out.write("export {}={}/{}\n".format(
-                    NOTIFICATIONURL_VARNAME, shquote(self.notificationURL), job.identifier))
-
+                out.write(
+                    "export {}={}/{}\n".format(
+                        NOTIFICATIONURL_VARNAME,
+                        shquote(self.notificationURL),
+                        job.identifier,
+                    )
+                )
 
             # Write some command
             if self.preprocessCommands:
@@ -128,7 +143,7 @@ class ShScriptBuilder:
             out.write(" trap - 0\n")
 
             # Remove PID file
-            out.write('''rm %s\n''' % pidpath)
+            out.write("""rm %s\n""" % pidpath)
 
             # Remove temporary files
 
@@ -136,15 +151,18 @@ class ShScriptBuilder:
                 namedRedirections = context.getNamedRedirections(c, False)
                 for file in namedRedirections.redirections():
                     out.write(" rm -f {}\n".format(relpath(file)))
+
             self.command.forEach(cleanup)
 
             # Notify if possible
             if self.notificationURL:
-                out.write(" wget --tries=1 --connect-timeout=1 --read-timeout=1 --quiet -O ")
-                out.write("/dev/null \"$XPM_NOTIFICATION_URL?status=eoj\"\n")
+                out.write(
+                    " wget --tries=1 --connect-timeout=1 --read-timeout=1 --quiet -O "
+                )
+                out.write('/dev/null "$XPM_NOTIFICATION_URL?status=eoj"\n')
 
             # Kills remaining processes
-            out.write(" test ! -z \"$PID\" && pkill -KILL -P $PID")
+            out.write(' test ! -z "$PID" && pkill -KILL -P $PID')
             out.write("\n")
 
             out.write("}\n")
@@ -158,10 +176,11 @@ class ShScriptBuilder:
 
             out.write("\n")
 
-            out.write("""checkerror()  { 
+            out.write(
+                """checkerror()  { 
     local e; for e in \"$@\"; do [[ \"$e\" != 0 ]] && [[ "$e" != 141 ]] && exit $e; done; 
-    return 0; }\n\n""")
-
+    return 0; }\n\n"""
+            )
 
             # Output the full command
             out.write("(\n")

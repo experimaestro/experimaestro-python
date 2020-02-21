@@ -11,19 +11,24 @@ import os
 import logging
 
 DIR = Path(__file__).parents[2]
-RE_SNIPPET_START = re.compile(r"<!-- SNIPPET: (?P<id>\S+)(?:\s+ARGS\[(?P<args>[^\]]+)\])?(?:\s+ENV\[(?P<env>[^\]]+)\])? -->")
+RE_SNIPPET_START = re.compile(
+    r"<!-- SNIPPET: (?P<id>\S+)(?:\s+ARGS\[(?P<args>[^\]]+)\])?(?:\s+ENV\[(?P<env>[^\]]+)\])? -->"
+)
 RE_SNIPPET_START2 = re.compile(r"```python")
 RE_SNIPPET_END = re.compile(r"```")
 RE_SNIPPET_VAR = re.compile(r"%([_\w\d]+)%")
 
-class Methods():
+
+class Methods:
     def __iter__(self):
         yield DIR / "README.md", "MAIN"
+
 
 @pytest.fixture(scope="session")
 def snippetpath(tmp_path_factory):
     path = tmp_path_factory.mktemp("snippets")
     return path
+
 
 def argsub(snippetpath):
     workdir = tempfile.mkdtemp(dir=snippetpath)
@@ -49,8 +54,24 @@ def get_snippet(snippetpath, path, id):
             m = RE_SNIPPET_START.match(line)
             if m and m.group(1) == id:
                 inside = 1
-                args = [RE_SNIPPET_VAR.sub(argsub(snippetpath), arg) for arg in shlex.split(m.group('args'))] if m.group(2) else []
-                env = {name: val for name, val in (nameval.split("=") for nameval in m.group('env').split(","))} if m.group('env') else {}
+                args = (
+                    [
+                        RE_SNIPPET_VAR.sub(argsub(snippetpath), arg)
+                        for arg in shlex.split(m.group("args"))
+                    ]
+                    if m.group(2)
+                    else []
+                )
+                env = (
+                    {
+                        name: val
+                        for name, val in (
+                            nameval.split("=") for nameval in m.group("env").split(",")
+                        )
+                    }
+                    if m.group("env")
+                    else {}
+                )
             if inside == 1:
                 if RE_SNIPPET_START2.match(line):
                     inside = 2
@@ -59,10 +80,11 @@ def get_snippet(snippetpath, path, id):
                     inside = False
                 else:
                     snippet += line
-        
+
         return snippet, args, env
 
-@pytest.mark.parametrize('path,id', Methods())
+
+@pytest.mark.parametrize("path,id", Methods())
 def test_snippet(snippetpath, path, id):
     snippet, args, env = get_snippet(snippetpath, path, id)
     assert snippet != ""
@@ -82,4 +104,3 @@ def test_snippet(snippetpath, path, id):
         pytest.fail("Process still runnning")
     else:
         assert p.returncode == 0
-

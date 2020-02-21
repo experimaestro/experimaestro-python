@@ -19,6 +19,7 @@ from .locking import Lock
 
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
 
+
 class JobState(enum.Enum):
     UNSCHEDULED = 0
     WAITING = 1
@@ -32,20 +33,22 @@ class JobState(enum.Enum):
 
     def running(self):
         return self.value == JobState.RUNNING.value
-        
+
     def finished(self):
         return self.value >= JobState.DONE.value
+
 
 class JobLock(Lock):
     def __init__(self, job):
         super().__init__()
         self.job = job
-    
-    def _acquire(self): 
+
+    def _acquire(self):
         return self.job.state == JobState.DONE
 
-    def _release(self): 
+    def _release(self):
         return False
+
 
 class JobDependency(Dependency):
     def __init__(self, job):
@@ -61,40 +64,49 @@ class JobDependency(Dependency):
     def lock(self):
         return JobLock(self.origin)
 
+
 class Job(Resource):
     """Context of a job"""
-    def __init__(self, parameters: Config, *, workspace:Workspace = None, launcher:"experimaestro.launchers" = None):
+
+    def __init__(
+        self,
+        parameters: Config,
+        *,
+        workspace: Workspace = None,
+        launcher: "experimaestro.launchers" = None
+    ):
         super().__init__()
         self.workspace = workspace or Workspace.CURRENT
         assert self.workspace is not None, "No experiment has been defined"
 
         self.launcher = launcher or self.workspace.launcher
-        assert self.launcher is not None, "No default launcher in workspace %s" % workspace
+        assert self.launcher is not None, (
+            "No default launcher in workspace %s" % workspace
+        )
 
         self.type = parameters.__xpmtype__
         self.name = str(self.type.identifier).rsplit(".", 1)[-1]
 
-        self.scheduler:Optional["Scheduler"] = None
-        self.parameters = parameters   
-        self.state:JobState = JobState.UNSCHEDULED
+        self.scheduler: Optional["Scheduler"] = None
+        self.parameters = parameters
+        self.state: JobState = JobState.UNSCHEDULED
 
         # Dependencies
-        self.dependencies:Set[Dependency] = set() # as target
+        self.dependencies: Set[Dependency] = set()  # as target
 
         # Process
         self._process = None
         self.unsatisfied = 0
 
         # Meta-information
-        self.starttime:Optional[float] = None
-        self.submittime:Optional[float] = None
-        self.endtime:Optional[float] = None
-        self._progress = 0.
+        self.starttime: Optional[float] = None
+        self.submittime: Optional[float] = None
+        self.endtime: Optional[float] = None
+        self._progress = 0.0
         self.tags = parameters.tags()
-        
+
     def __str__(self):
         return "Job[{}]".format(self.identifier)
-
 
     @property
     def progress(self):
@@ -113,7 +125,7 @@ class Job(Resource):
 
     @property
     def jobpath(self):
-        return self.workspace.jobspath  / str(self.type.identifier) / self.identifier
+        return self.workspace.jobspath / str(self.type.identifier) / self.identifier
 
     @property
     def identifier(self):
@@ -127,7 +139,9 @@ class Job(Resource):
         """Waiting for job to finish"""
         with self.scheduler.cv:
             logger.debug("Waiting for job %s to finish", self.jobpath)
-            self.scheduler.cv.wait_for(lambda: self.state in [JobState.ERROR, JobState.DONE])
+            self.scheduler.cv.wait_for(
+                lambda: self.state in [JobState.ERROR, JobState.DONE]
+            )
 
         logger.debug("Job %s finished with state %s", self, self.state)
         return self.state
@@ -135,7 +149,7 @@ class Job(Resource):
     @property
     def process(self):
         """Returns the process"""
-        if self._process: 
+        if self._process:
             return self._process
         raise NotImplementedError("Not implemented")
 
@@ -171,18 +185,16 @@ class Job(Resource):
         value = lambda s: 1 if s == DependencyStatus.OK else 0
         self.unsatisfied -= value(status) - value(oldstatus)
 
-
         logger.info("Job %s: unsatisfied %d", self, self.unsatisfied)
 
-        if status == DependencyStatus.FAIL:    
+        if status == DependencyStatus.FAIL:
             # Job completed
             if not self.state.finished():
                 self.scheduler.jobfinished(self, JobState.ERROR)
 
-        if self.unsatisfied == 0:    
+        if self.unsatisfied == 0:
             logger.info("Job %s is ready to run", self)
             self.scheduler.start(self)
-
 
 
 class Listener:
@@ -192,12 +204,15 @@ class Listener:
     def job_state(self, job):
         pass
 
-class JobError(Exception): 
+
+class JobError(Exception):
     def __init__(self, code):
         super.__init__("Job exited with code %d", self.code)
 
+
 class JobThread(threading.Thread):
     """Job starting and monitoring thread"""
+
     def __init__(self, job: Job):
         super().__init__()
         self.job = job
@@ -213,22 +228,30 @@ class JobThread(threading.Thread):
         with Locks() as locks:
             try:
                 with self.job.scheduler.cv:
-                    logger.info("Starting job %s with %d dependencies", self.job, len(self.job.dependencies))
+                    logger.info(
+                        "Starting job %s with %d dependencies",
+                        self.job,
+                        len(self.job.dependencies),
+                    )
 
                     for dependency in self.job.dependencies:
                         try:
                             locks.append(dependency.lock().acquire())
                         except LockError:
-                            logger.warning("Could not lock %s, aborting start for job %s", dependency, self.job)
+                            logger.warning(
+                                "Could not lock %s, aborting start for job %s",
+                                dependency,
+                                self.job,
+                            )
                             # Just stop
                             dependency.check()
                             return
-                    
+
                     logger.info("Running job %s", self.job)
                     self.job.scheduler.jobstarted(self.job)
                     self.job.starttime = time.time()
                     process = self.job.run(locks)
-                
+
                 if isinstance(process, JobState):
                     state = process
                     logger.debug("Job %s ended (state %s)", self.job, state)
@@ -236,17 +259,16 @@ class JobThread(threading.Thread):
                     logger.debug("Waiting for job %s process to end", self.job)
 
                     code = process.wait()
-                        
+
                     if code is None:
                         # Case where we cannot retrieve the code right away
-                        if self.job.donepath.is_file(): 
+                        if self.job.donepath.is_file():
                             code = 0
                         else:
                             code = int(self.job.failedpath.read_text())
 
                     logger.debug("Job %s ended with code %s", self.job, code)
                     state = JobState.DONE if code == 0 else JobState.ERROR
-
 
             except ProcessThreadError:
                 # Thrown by the child process so we can exit gracefully
@@ -262,7 +284,9 @@ class JobThread(threading.Thread):
                 state = JobState.ERROR
 
             except:
-                logger.warning("Error while running job (in experimaestro)", exc_info=True)
+                logger.warning(
+                    "Error while running job (in experimaestro)", exc_info=True
+                )
                 state = JobState.ERROR
 
             finally:
@@ -272,8 +296,7 @@ class JobThread(threading.Thread):
                     self.job.scheduler.jobfinished(self.job, state)
 
 
-
-class SignalHandler():
+class SignalHandler:
     def __init__(self):
         self.schedulers = set()
         signal.signal(signal.SIGINT, self)
@@ -292,6 +315,7 @@ class SignalHandler():
             with scheduler.cv:
                 scheduler.cv.notify_all()
 
+
 class EventLoopThread(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -302,10 +326,13 @@ class EventLoopThread(threading.Thread):
         self.loop = asyncio.new_event_loop()
         self.loop.run_forever()
 
+
 SIGNAL_HANDLER = None
 
-class Scheduler():
+
+class Scheduler:
     """Represents an experiment"""
+
     CURRENT = None
     EVENT_LOOP = None
 
@@ -323,13 +350,13 @@ class Scheduler():
         self.exitmode = False
 
         # List of all jobs
-        self.jobs: Dict[str,Job] = {}
+        self.jobs: Dict[str, Job] = {}
 
         # List of jobs
         self.waitingjobs = set()
 
         # Listeners
-        self.listeners:Set[Listener] = set()
+        self.listeners: Set[Listener] = set()
 
     def __enter__(self):
         global SIGNAL_HANDLER
@@ -364,7 +391,7 @@ class Scheduler():
         logger.info("Waiting that experiment %s finishes", self.name)
         with self.cv:
             logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
-            self.cv.wait_for(lambda : not self.waitingjobs or self.exitmode)
+            self.cv.wait_for(lambda: not self.waitingjobs or self.exitmode)
 
     def submit(self, job: Job):
         with self.cv:
@@ -403,10 +430,10 @@ class Scheduler():
             if self.exitmode:
                 logger.warning("Exit mode: not starting")
                 return
-            thread = JobThread(job)            
+            thread = JobThread(job)
             thread.daemon = True
             thread.start()
-            
+
     def jobstarted(self, job: Job):
         """Called just before a job is run"""
         for listener in self.listeners:
@@ -428,14 +455,17 @@ class Scheduler():
 
     def addlistener(self, listener: Listener):
         self.listeners.add(listener)
+
     def removelistener(self, listener: Listener):
         self.listeners.remove(listener)
 
+
 class experiment:
     """Experiment environment"""
-    def __init__(self, path: Path, name: str, *, port:int=None):
+
+    def __init__(self, path: Path, name: str, *, port: int = None):
         from experimaestro.server import Server
-    
+
         self.workspace = Workspace(Path(path))
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None

@@ -3,10 +3,12 @@ from experimaestro import parse_commandline
 
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
 
+
 @click.group()
 def cli():
     """Main entry point for CLI"""
     pass
+
 
 @cli.command(context_settings={"allow_extra_args": True})
 @click.pass_context

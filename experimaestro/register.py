@@ -4,6 +4,7 @@ import sys
 import json
 from .api import ObjectType, TypeInformation
 
+
 def parse_commandline(argv=None):
     if argv is None:
         argv = sys.argv[1:]

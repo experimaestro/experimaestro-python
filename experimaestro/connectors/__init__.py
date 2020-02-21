@@ -14,6 +14,7 @@ from pathlib import Path, PosixPath
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
 
+
 class RedirectType(enum.Enum):
     INHERIT = 0
     FILE = 1
@@ -46,33 +47,40 @@ class Redirect:
     def inherit():
         return Redirect._INHERIT
 
+
 Redirect._NONE = Redirect(RedirectType.NONE)
 Redirect._INHERIT = Redirect(RedirectType.INHERIT)
 
-class Process: pass
+
+class Process:
+    pass
+
 
 class ProcessThreadError(Exception):
-    """Exception thrown by the forked process, to exit properly""" 
+    """Exception thrown by the forked process, to exit properly"""
+
     pass
+
 
 class ProcessBuilder:
     """A process builder
     """
+
     def __init__(self):
-      self.workingDirectory = None
-      self.stdin = Redirect.inherit()
-      self.stdout = Redirect.inherit()
-      self.stderr = Redirect.inherit()
-      self.detach = True
-      self.environ = {}
-      self.command = []
+        self.workingDirectory = None
+        self.stdin = Redirect.inherit()
+        self.stdout = Redirect.inherit()
+        self.stderr = Redirect.inherit()
+        self.detach = True
+        self.environ = {}
+        self.command = []
 
     def start(self) -> Process:
         """Start the process"""
         raise NotImplementedError("Method not implemented in %s" % self.__class__)
 
 
-class Connector(): 
+class Connector:
     def __init__(self, localpath: Path):
         """Creates a new connector
         
@@ -98,7 +106,7 @@ class Connector():
         """Returns a lock on a file"""
         raise NotImplementedError()
 
-    def resolve(self, path: Path, basepath:Path=None):
+    def resolve(self, path: Path, basepath: Path = None):
         raise NotImplementedError()
 
     def setExecutable(self, path: Path, flag: bool):

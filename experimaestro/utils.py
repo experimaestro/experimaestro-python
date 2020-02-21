@@ -6,6 +6,6 @@ logger = logging.getLogger("xpm")
 
 
 def aspath(path: Union[str, Path]):
-    if isinstance(path, Path): 
+    if isinstance(path, Path):
         return path
     return Path(path)

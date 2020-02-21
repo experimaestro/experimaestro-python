@@ -28,6 +28,7 @@ class NamedPipeRedirections:
     def redirections(self):
         return itertools.chain(self.outputRedirections, self.errorRedirections)
 
+
 EMPTY_REDIRECTIONS = NamedPipeRedirections()
 
 
@@ -49,24 +50,33 @@ class AbstractCommandComponent(CommandPart):
 
 
 class CommandContext:
-    def __init__(self, workspace: Workspace, connector: Connector, path: Path, name: str, parameters: Config):
+    def __init__(
+        self,
+        workspace: Workspace,
+        connector: Connector,
+        path: Path,
+        name: str,
+        parameters: Config,
+    ):
         self.workspace = workspace
         self.connector = connector
         self.path = path
         self.name = name
         self.parameters = parameters
         self.namedPipeRedirectionsMap: Dict["CommandPart", NamedPipeRedirections] = {}
-        self.auxiliary:Dict[str,int] = {}
+        self.auxiliary: Dict[str, int] = {}
 
     def getAuxiliaryFile(self, name, suffix):
         ix = self.auxiliary.get(name, 0) + 1
         self.auxiliary[name] = ix
         return self.path / ("%s-%d%s" % (name, ix, suffix))
-        
+
     def relpath(self, path):
         return self.connector.resolve(path, self.path)
 
-    def getNamedRedirections(self, key: "CommandPart", create: bool) -> NamedPipeRedirections:
+    def getNamedRedirections(
+        self, key: "CommandPart", create: bool
+    ) -> NamedPipeRedirections:
         x = self.namedPipeRedirectionsMap.get(key, None)
         if x:
             return x
@@ -78,10 +88,12 @@ class CommandContext:
         self.namedPipeRedirectionsMap[key] = x
         return x
 
-    def writeRedirection(self, out, redirect, stream):  
+    def writeRedirection(self, out, redirect, stream):
         raise NotImplementedError()
 
-    def printRedirections(self, stream: int, out, outputRedirect: Redirect, outputRedirects):
+    def printRedirections(
+        self, stream: int, out, outputRedirect: Redirect, outputRedirects
+    ):
         raise NotImplementedError()
 
 
@@ -96,6 +108,7 @@ class CommandPath(AbstractCommandComponent):
     def __repr__(self):
         return "Path({})".format(self.path)
 
+
 class CommandString(AbstractCommandComponent):
     def __init__(self, string: str):
         super().__init__()
@@ -107,6 +120,7 @@ class CommandString(AbstractCommandComponent):
     def __repr__(self):
         return "String({})".format(self.string)
 
+
 class CommandParameters(AbstractCommandComponent):
     def output(self, context: CommandContext, out: io.TextIOBase):
         path = context.getAuxiliaryFile("params", ".json")
@@ -114,16 +128,18 @@ class CommandParameters(AbstractCommandComponent):
             context.parameters.__xpm__.outputjson(fileout, context)
         out.write(context.relpath(path))
 
+
 class AbstractCommand(CommandPart):
-    def reorder(self): raise NotImplementedError()
+    def reorder(self):
+        raise NotImplementedError()
 
     def output(self, context: CommandContext, out: io.TextIOBase):
         list = self.reorder()
         detached = 0
 
-        if len(list) > 1:    
+        if len(list) > 1:
             out.write("(\n")
-        
+
         for command in list:
             # Write files
             namedRedirections = context.getNamedRedirections(command, False)
@@ -135,25 +151,27 @@ class AbstractCommand(CommandPart):
             for file in namedRedirections.redirections():
                 mkfifo(file)
 
-            if command.inputRedirect.type == RedirectType.FILE:      
-                out.write(" cat {} | ".format(context.relpath(command.inputRedirect.path)))
+            if command.inputRedirect.type == RedirectType.FILE:
+                out.write(
+                    " cat {} | ".format(context.relpath(command.inputRedirect.path))
+                )
 
             command.output(context, out)
 
-            context.printRedirections(1, out, command.outputRedirect,
-                                namedRedirections.outputRedirections)
-            context.printRedirections(2, out, command.errorRedirect,
-                                namedRedirections.errorRedirections)
+            context.printRedirections(
+                1, out, command.outputRedirect, namedRedirections.outputRedirections
+            )
+            context.printRedirections(
+                2, out, command.errorRedirect, namedRedirections.errorRedirections
+            )
 
-
-            out.write("|| checkerror \"${PIPESTATUS[@]}\" || exit $?")
+            out.write('|| checkerror "${PIPESTATUS[@]}" || exit $?')
 
         # Monitors detached jobs
         for i in range(detached):
             out.write("wait $CHILD_{} || exit $?%\n".format(i))
 
-
-        if len(list) > 1:    
+        if len(list) > 1:
             out.write(")\n")
 
 
@@ -168,10 +186,10 @@ class Command(AbstractCommand):
     def __repr__(self):
         return "Command({})".format(",".join(str(c) for c in self.components))
 
-    def output(self, context, out):  
+    def output(self, context, out):
         first = True
         for c in self.components:
-            if first: 
+            if first:
                 first = False
             else:
                 out.write(" ")
@@ -198,29 +216,33 @@ class CommandLine(AbstractCommand):
         for command in self.commands:
             command.forEach(f)
 
-    def reorder(self): 
+    def reorder(self):
         return self.commands
 
-class PsutilProcess():
+
+class PsutilProcess:
     def __init__(self, job, process):
         self.job = job
         self.process = process
 
     def wait(self):
         self.process.wait()
-        if self.job.donepath.is_file(): 
+        if self.job.donepath.is_file():
             return 0
         return int(self.job.failedpath.read_text())
 
+
 class CommandLineJob(Job):
-    def __init__(self, commandline: CommandLine, parameters, workspace=None, launcher=None):
+    def __init__(
+        self, commandline: CommandLine, parameters, workspace=None, launcher=None
+    ):
         super().__init__(parameters, workspace=workspace, launcher=launcher)
         self.commandline = commandline
 
     @property
     def process(self):
         """Returns the process"""
-        if self._process: 
+        if self._process:
             return self._process
 
         if self.pidpath.is_file():
@@ -228,7 +250,7 @@ class CommandLineJob(Job):
             p = psutil.Process(pid)
             if p.is_running():
                 return PsutilProcess(self, p)
-            
+
         return None
 
     def run(self, locks):
@@ -275,10 +297,11 @@ class CommandLineJob(Job):
         return self._process
 
 
-
-class CommandLineTask():
+class CommandLineTask:
     def __init__(self, commandline: CommandLine):
         self.commandline = commandline
 
     def __call__(self, pyobject, *, launcher=None, workspace=None) -> Job:
-        return CommandLineJob(self.commandline, pyobject, launcher=launcher, workspace=workspace)
+        return CommandLineJob(
+            self.commandline, pyobject, launcher=launcher, workspace=workspace
+        )

@@ -13,23 +13,28 @@ import experimaestro
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
 
-class RunConfig: 
+
+class RunConfig:
     def __init__(self):
         self.traceback = False
 
 
 def pass_cfg(f):
     """Pass configuration information"""
+
     @click.pass_context
     def new_func(ctx, *args, **kwargs):
         return ctx.invoke(f, ctx.obj, *args, **kwargs)
+
     return update_wrapper(new_func, f)
 
 
 @click.group()
 @click.option("--quiet", is_flag=True, help="Be quiet")
 @click.option("--debug", is_flag=True, help="Be even more verbose (implies traceback)")
-@click.option("--traceback", is_flag=True, help="Display traceback if an exception occurs")
+@click.option(
+    "--traceback", is_flag=True, help="Display traceback if an exception occurs"
+)
 @click.pass_context
 def cli(ctx, quiet, debug, traceback):
     if quiet:
@@ -65,18 +70,18 @@ def run(file, path, taskid, parameters):
 
     with open(parameters, "r") as fp:
         Config.TASKMODE = True
-        
+
         params = json.load(fp)
         TypeInformation.LOADING = True
         task = tasktype(**params)
         TypeInformation.LOADING = False
-        
+
         task.execute()
+
 
 def main():
     cli(obj=None)
 
+
 if __name__ == "__main__":
     main()
-
-
