@@ -24,10 +24,16 @@ class config:
         """[summary]
         
         Keyword Arguments:
-            identifier {Identifier, str} -- Unique identifier of the type (default: {None} will use the module/class name)
+            identifier {Identifier, str} -- Unique identifier of the type (default: {None})
             description {str} -- Description of the config/task (default: {None})
             parents {list} -- Parent classes if annotating a method (default: {[]})
             register {bool} -- False if the type should not be registered (debug only)
+
+        
+        The identifier, if not specified, will be set to `X.CLASSNAME`(by order of priority),
+        where X is:
+            - the parent identifier
+            - the module qualified name
         """
         super().__init__()
         self.identifier = identifier
@@ -56,8 +62,6 @@ class config:
 
         # Check if conditions are fullfilled
         originaltype = originaltype or tp
-        if self.identifier is None:
-            self.identifier = Identifier("%s.%s" % (originaltype.__module__.lower(), originaltype.__name__.lower()))
 
         # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
@@ -69,6 +73,16 @@ class config:
                 tp = type(tp.__name__, __bases__, __dict__)
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
+
+
+        # Determine the identifier
+        if self.identifier is None:
+            package = originaltype.__module__.lower()
+            
+            # Use the parent identifier
+            # if basetype.__xpm__.
+
+            self.identifier = Identifier("%s.%s" % (package, originaltype.__name__.lower()))
 
         logging.debug("Registering %s", self.identifier)
         
