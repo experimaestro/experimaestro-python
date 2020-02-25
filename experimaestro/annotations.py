@@ -67,7 +67,7 @@ class config:
 
         # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
-            if not issubclass(tp, api.Config):
+            if not issubclass(tp, basetype):
                 __bases__ = (basetype,)
                 if tp.__bases__ != (object,):
                     __bases__ += tp.__bases__
