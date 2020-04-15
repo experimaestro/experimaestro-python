@@ -18,6 +18,7 @@ import struct
 from collections import ChainMap
 import typing
 
+import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 
 # --- Initialization
@@ -52,6 +53,17 @@ def identifier(name: Union[str, Identifier]):
     if isinstance(name, Identifier):
         return name
     return Identifier(str(name))
+
+
+
+class TypedArgument:
+    """A type"""
+    def __init__(self, type):
+        self.type = type
+
+class TypeHint: 
+    def __getitem__(self, type):
+        return TypedArgument(type)
 
 
 class Argument:
@@ -147,10 +159,9 @@ class Type:
         if inspect.isclass(key) and issubclass(key, Config):
             return key.__xpm__
 
-        if type(key) == type(typing.List):
-            # Python 3.6, 3.7+ test
-            if key.__origin__ in [typing.List, list]:
-                return ArrayType(Type.fromType(*key.__args__))
+        t = typingutils.get_list(key)
+        if t:
+            return ArrayType(Type.fromType(t))
 
         raise Exception("No type found for %s", key)
 

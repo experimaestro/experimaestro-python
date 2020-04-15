@@ -78,6 +78,19 @@ Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or 
 - `ignored` to ignore the argument in the signature computation.
 - `help` a string to document the option; it can be used when the argument is used in a command line or when generating a documentation (*planned*).
 
+Instead of using annotations, it is possible to use class variables
+and type hints, as follows:
+
+!!! example
+    ```python
+    from experimaestro import task, Argument
+
+    @task("model.learn")
+    class ModelLearn:
+        epochs: Argument[int] = 100
+        model: Argument[Model]
+    ```
+
 
 
 ## Path arguments

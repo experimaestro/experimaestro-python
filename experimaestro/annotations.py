@@ -14,6 +14,7 @@ import experimaestro.api as api
 from .api import Config, Identifier
 from .utils import logger
 from .workspace import Workspace
+from .typingutils import get_optional
 
 # --- Annotations to define tasks and types
 
@@ -98,6 +99,27 @@ class config:
         )
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
+
+        # Adding type-hinted arguments
+        if hasattr(originaltype, "__annotations__"):
+            for key, value in originaltype.__annotations__.items():
+                if isinstance(value, api.TypedArgument):
+                    valuetype = value.type
+                    required = None
+
+                    optionaltype = get_optional(valuetype)
+                    if optionaltype:
+                        valuetype = optionaltype
+                        required = False
+
+                    argument = api.Argument(
+                        key,
+                        api.Type.fromType(valuetype),
+                        default=getattr(originaltype, key, None),
+                        required=required
+                    )
+                    objecttype.addArgument(argument)
+
 
         return tp
 
@@ -244,6 +266,8 @@ class ConstantArgument(argument):
         )
         self.generator = lambda jobcontext: api.clone(value)
 
+
+Argument = api.TypeHint()
 
 # --- Tags
 
