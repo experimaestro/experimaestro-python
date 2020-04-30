@@ -120,8 +120,8 @@ def run_with_token(x, lockingpath, workdir, queue):
             logging.info("Reschedule with token [%d]: ready", x)
             queue.put(True)
 
-        queue.put(task.stdout())
         logging.info("Reschedule with token [%d]: finished", x)
+        queue.put(task.stdout())
     except:
         logging.exception("Got an exception while running experiment")
 
@@ -132,8 +132,8 @@ def test_token_reschedule():
     - task 1 is started
     - 
     """
-    queue1 = multiprocessing.Queue()
-    queue2 = multiprocessing.Queue()
+    queue1 = multiprocessing.Queue(3)
+    queue2 = multiprocessing.Queue(3)
 
     with TemporaryDirectory("reschedule") as workdir:
         lockingpath = workdir / "lockingpath"
@@ -157,9 +157,9 @@ def test_token_reschedule():
                 lockingpath.write_text("Let's go")
 
                 path1 = queue1.get()
-                logging.warning("Got %s from 1", path1)
+                logging.info("Got %s from 1", path1)
                 path2 = queue2.get()
-                logging.warning("Got %s from 2", path2)
+                logging.info("Got %s from 2", path2)
 
                 time1 = get_times_frompath(path1)
                 time2 = get_times_frompath(path2)

@@ -14,7 +14,10 @@ from typing import Dict
 from .ipc import ipcom
 from .locking import Lock, LockError
 from .dependencies import Dependency, DependencyStatus, Resource
-from .utils import logger
+import logging
+
+
+logger = logging.getLogger("xpm.tokens")
 
 
 class Token(Resource):
@@ -121,13 +124,16 @@ class CounterToken(Token, FileSystemEventHandler):
 
     def on_modified(self, event):
         if event.src_path == self.watchedpath:
+            logger.debug("Watched path modified [%s]", self.path)
             timestamp = os.path.getmtime(self.path)
             if timestamp <= self.timestamp:
                 logger.debug(
                     "Not reading token file [%f <= %f]", timestamp, self.timestamp
                 )
             else:
+                logger.debug("Trying to read...")
                 with self.lock, self.ipc_lock:
+                    logger.debug("Got lock...")
                     total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
                     available = total - taken
 
