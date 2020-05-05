@@ -15,6 +15,7 @@ from .api import Config, Identifier
 from .utils import logger
 from .workspace import Workspace
 from .typingutils import get_optional
+from .checkers import Checker
 
 # --- Annotations to define tasks and types
 
@@ -209,6 +210,7 @@ class argument:
         required: bool = None,
         ignored: Optional[bool] = None,
         help: Optional[str] = None,
+        checker: Optional[Checker] = None
     ):
         # Determine if required
         self.name = name
@@ -218,6 +220,7 @@ class argument:
         self.default = default
         self.required = required
         self.generator = None
+        self.checker = checker
 
     def __call__(self, tp):
         # Get type from default if needed
@@ -237,9 +240,23 @@ class argument:
             ignored=self.ignored,
             generator=self.generator,
             default=self.default,
+            checker=self.checker
         )
         tp.__xpm__.addArgument(argument)
         return tp
+
+# Just a rebind
+param = argument
+
+class option(argument):
+    """An argument which is ignored
+
+    See argument
+    """
+    def __init__(self, *args, **kwargs):
+        kwargs["ignored"] = True
+        super().__init__(*args, **kwargs)
+
 
 
 class pathargument(argument):
@@ -268,6 +285,17 @@ class ConstantArgument(argument):
 
 
 Argument = api.TypeHint()
+
+
+# --- Cache
+
+def cache(name: str):
+    """Use a cache path for a given config
+    """
+    def annotate(method):
+        return api.cache(method, name)
+    
+    return annotate
 
 # --- Tags
 

@@ -17,8 +17,10 @@ import hashlib
 import struct
 from collections import ChainMap
 import typing
+import fasteners
 
 import experimaestro.typingutils as typingutils
+from experimaestro.constants import CACHEPATH_VARNAME
 from experimaestro.utils import logger
 
 # --- Initialization
@@ -76,6 +78,7 @@ class Argument:
         generator=None,
         ignored=False,
         default=None,
+        checker=None
     ):
         required = (default is None) if required is None else required
         if default is not None and required is not None and required:
@@ -85,6 +88,7 @@ class Argument:
 
         self.name = name
         self.help = help
+        self.checker = checker
         self.type = type
         self.ignored = ignored
         if ignored is None:
@@ -171,7 +175,7 @@ class ObjectType(Type):
 
     REGISTERED: Dict[str, "Config"] = {}
 
-    def __init__(self, objecttype: type, identifier, description):
+    def __init__(self, objecttype: "Config", identifier, description):
         super().__init__(identifier, description)
 
         self.objecttype = objecttype
@@ -215,7 +219,11 @@ class ObjectType(Type):
 
             classtype = ObjectType.REGISTERED.get(valuetype, None)
             if classtype:
-                return classtype(**value)
+                try:
+                    return classtype(**value)
+                except:
+                    logger.exception("Could not build object of class %s" % (classtype))
+                    raise
             if not Config.TASKMODE:
                 raise ValueError("Could not find type %s", valuetype)
 
@@ -431,6 +439,7 @@ class TypeInformation:
 
         # Meta-informations
         self._tags = {}
+        self._initinfo = {}
 
         # State information
         self.job = None
@@ -514,8 +523,8 @@ class TypeInformation:
 
                 if notset or notdeclared:
                     raise ValueError(
-                        "Some arguments were set but not declared (%s) or declared but not set (%s)"
-                        % (",".join(notdeclared), ",".join(notset))
+                        "Some arguments were set but not declared (%s) or declared but not set (%s) at %s"
+                        % (",".join(notdeclared), ",".join(notset), self._initinfo)
                     )
 
             # Check each argument
@@ -526,7 +535,8 @@ class TypeInformation:
                         value.__xpm__.validate()
                 elif argument.required:
                     if not argument.generator:
-                        raise ValueError("Value %s is required but missing", k)
+                        raise ValueError("Value %s is required but missing when building %s at %s" 
+                            % (k, self.xpmtype, self._initinfo))
 
     def seal(self, job: "experimaestro.job.Job"):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
@@ -624,6 +634,12 @@ def clone(v):
         return v
     if isinstance(v, list):
         return [clone(x) for x in v]
+
+    if isinstance(v, Config):
+        # Create a new instance
+        kwargs = {argument.name: clone(value) for argument, value in v.__xpm__.xpmvalues()}
+        return type(v)(**kwargs)
+        
     raise NotImplementedError("For type %s" % v)
 
 
@@ -633,6 +649,31 @@ class ConfigMetaclass(type):
         if not key.startswith("__xpm") and key in cls.__xpm__.arguments:
             return cls.__xpm__.arguments[key]
         return type.__getattribute__(cls, key)
+
+
+
+def cache(fn, name: str):
+    def __call__(config: "Config"):
+        # Get path
+        hexid = config.__xpm__.identifier.hex()
+        typename = str(config.__xpmtype__.identifier.name)
+        dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
+        dir.mkdir(parents=True, exist_ok=True)
+        
+        path = dir / name
+        ipc_lock = fasteners.InterProcessLock(
+            path.with_suffix(path.suffix + ".lock")
+        )
+        with ipc_lock:
+            try:
+                return fn(config, path)
+            except:
+                # Remove path
+                if path.is_file():
+                    path.unlink()
+                raise
+    return __call__
+
 
 
 class Config(metaclass=ConfigMetaclass):
@@ -649,28 +690,44 @@ class Config(metaclass=ConfigMetaclass):
             assert isinstance(self.__xpmtype__, ObjectType)
 
         xpm = TypeInformation(self)
+        caller = inspect.getframeinfo(inspect.stack()[1][0])
+        xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
+
         self.__xpm__ = xpm
 
         # Initialize with arguments
         for name, value in kwargs.items():
             if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
                 if Config.TASKMODE:
-                    # Do not set this attribute
+                    # Do not set this attribute when running a task
                     logging.debug("Do not set %s (not in attributes)", name)
                     continue
                 raise ValueError(
                     "%s is not an argument for %s" % (name, self.__xpmtype__)
                 )
 
+            # Special case of a tagged value
             if isinstance(value, TaggedValue):
                 value = value.value
                 self.__xpm__._tags[name] = value
+
+            # Really set the value
             xpm.set(name, value, bypass=TypeInformation.LOADING)
 
         # Initialize with default arguments
         for name, value in self.__xpmtype__.arguments.items():
             if name not in kwargs and value.default is not None:
                 self.__xpm__.set(name, clone(value.default))
+
+        # call initialize
+        if Config.TASKMODE:
+            if hasattr(self, "__initialize__"):
+                try:
+                    self.__initialize__()
+                except Exception as e:
+                    logger.exception("Error while calling %s.__initialize__()", type(self).__name__)
+                    raise
+
 
     def __setattr__(self, name, value):
         if not Config.TASKMODE and not name.startswith("__xpm"):

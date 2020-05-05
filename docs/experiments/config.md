@@ -101,3 +101,26 @@ and type hints, as follows:
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `path` is the path within the task directory
+
+
+## Lightweights tasks using `@cache`
+
+Sometimes, a config can compute some output which is might be interesting to cache, but without relying on a fully-fledge task. In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
+
+```python
+
+@config()
+class Terms():
+    @cache("terms.npy")
+    def load(self, path: Path):
+        if path.is_file():
+            return pickle.load(path)
+        
+        # Value which can be long to compute
+        weights = self.compute_weights() 
+
+        np.save(path, weights)
+        return terms
+
+
+```

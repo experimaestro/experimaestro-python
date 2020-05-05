@@ -5,6 +5,9 @@ from .annotations import (
     config,
     task,
     argument,
+    param,
+    option,
+    cache,
     pathargument,
     Argument,
     ConstantArgument,
@@ -17,7 +20,7 @@ from .scheduler import Scheduler, experiment
 from .notifications import progress
 from .register import parse_commandline
 from .api import Any
-
+from .checkers import Choices
 
 def set_launcher(launcher):
     Workspace.CURRENT.launcher = launcher

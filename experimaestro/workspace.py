@@ -34,3 +34,8 @@ class Workspace:
     def jobspath(self):
         """Folder for jobs"""
         return self.path / "jobs"
+
+    @property
+    def configcachepath(self):
+        """Folder for jobs"""
+        return self.path / "config"
