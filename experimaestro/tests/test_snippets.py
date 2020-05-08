@@ -98,7 +98,7 @@ def test_snippet(snippetpath, path, id):
     cmd = [sys.executable, fp.name] + args
     logging.info("Running %s", cmd)
     p = subprocess.Popen(cmd, env=fullenv)
-    p.wait(2)
+    p.wait(5)
     if p.poll() is None:
         p.kill()
         pytest.fail("Process still runnning")

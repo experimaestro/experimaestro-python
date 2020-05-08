@@ -10,8 +10,12 @@ import pathlib
 from pathlib import Path, PosixPath
 from typing import Union, Dict, Optional
 
-import experimaestro.api as api
-from .api import Config, Identifier
+import experimaestro.core.objects as objects
+import experimaestro.core.types as types
+
+from .core.arguments import TypeHint, Argument as CoreArgument, TypedArgument
+from .core.objects import Config
+from .core.types import Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
 from .workspace import Workspace
 from .typingutils import get_optional
@@ -48,7 +52,7 @@ class config:
         self.parents = parents
         self.register = register
 
-    def __call__(self, tp, originaltype=None, basetype=api.Config):
+    def __call__(self, tp, originaltype=None, basetype=Config):
         """[summary]
         
         Arguments:
@@ -95,7 +99,7 @@ class config:
 
         logging.debug("Registering %s", self.identifier)
 
-        objecttype = api.ObjectType.create(
+        objecttype = ObjectType.create(
             tp, self.identifier, self.description, register=self.register
         )
         tp.__xpm__ = objecttype
@@ -104,7 +108,7 @@ class config:
         # Adding type-hinted arguments
         if hasattr(originaltype, "__annotations__"):
             for key, value in originaltype.__annotations__.items():
-                if isinstance(value, api.TypedArgument):
+                if isinstance(value, TypedArgument):
                     valuetype = value.type
                     required = None
 
@@ -113,9 +117,9 @@ class config:
                         valuetype = optionaltype
                         required = False
 
-                    argument = api.Argument(
+                    argument = CoreArgument(
                         key,
-                        api.Type.fromType(valuetype),
+                        Type.fromType(valuetype),
                         default=getattr(originaltype, key, None),
                         required=required
                     )
@@ -125,24 +129,24 @@ class config:
         return tp
 
 
-class Array(api.TypeProxy):
+class Array(TypeProxy):
     """Array of object"""
 
     def __init__(self, type):
-        self.type = api.Type.fromType(type)
+        self.type = Type.fromType(type)
 
     def __call__(self):
-        return api.ArrayType(self.type)
+        return types.ArrayType(self.type)
 
 
-class Choice(api.TypeProxy):
+class Choice(TypeProxy):
     """A string with a choice among several alternative"""
 
     def __init__(self, *args):
         self.choices = args
 
     def __call__(self):
-        return api.StringType
+        return types.StringType
 
 
 class task(config):
@@ -163,12 +167,12 @@ class task(config):
 
         originaltype = tp
         if inspect.isfunction(tp):
-            tp = api.gettaskclass(tp, self.parents)
+            tp = objects.gettaskclass(tp, self.parents)
         else:
             assert not self.parents, "parents can only be used for functions"
 
         # Register the type
-        tp = super().__call__(tp, originaltype=originaltype, basetype=api.Task)
+        tp = super().__call__(tp, originaltype=originaltype, basetype=objects.Task)
 
         # Construct command
         _type = tp.__xpm__.originaltype
@@ -214,7 +218,7 @@ class argument:
     ):
         # Determine if required
         self.name = name
-        self.type = api.Type.fromType(type) if type else None
+        self.type = Type.fromType(type) if type else None
         self.help = help
         self.ignored = ignored
         self.default = default
@@ -226,13 +230,13 @@ class argument:
         # Get type from default if needed
         if self.type is None:
             if self.default is not None:
-                self.type = api.Type.fromType(type(self.default))
+                self.type = Type.fromType(type(self.default))
 
         # Type = any if no type
         if self.type is None:
-            self.type = api.Any
+            self.type = types.Any
 
-        argument = api.Argument(
+        argument = CoreArgument(
             self.name,
             self.type,
             help=self.help,
@@ -279,12 +283,12 @@ class ConstantArgument(argument):
 
     def __init__(self, name: str, value, xpmtype=None, help=""):
         super().__init__(
-            name, type=xpmtype or api.Type.fromType(type(value)), help=help
+            name, type=xpmtype or Type.fromType(type(value)), help=help
         )
-        self.generator = lambda jobcontext: api.clone(value)
+        self.generator = lambda jobcontext: objects.clone(value)
 
 
-Argument = api.TypeHint()
+Argument = TypeHint()
 
 
 # --- Cache
@@ -293,7 +297,7 @@ def cache(name: str):
     """Use a cache path for a given config
     """
     def annotate(method):
-        return api.cache(method, name)
+        return objects.cache(method, name)
     
     return annotate
 
@@ -302,17 +306,15 @@ def cache(name: str):
 
 def tag(value):
     """Tag a value"""
-    return api.TaggedValue(value)
+    return objects.TaggedValue(value)
 
 
 def tags(value):
     """Return the tags associated with a value"""
-    if isinstance(value, Value):
-        return value.tags()
-    return value.__xpm__.sv.tags()
+    return value.__xpm__.tags()
 
 
-def tagspath(value: api.Config):
+def tagspath(value: Config):
     """Return the tags associated with a value"""
     p = Path()
     for key, value in value.__xpm__.sv.tags().items():

@@ -1,325 +1,15 @@
-"""Old layer between the C API and experimaestro
+"""Configuration and tasks"""
 
-TODO: re-organize
-"""
-
-import json
-import io
-import sys
-import inspect
-import os.path as op
-import os
-import logging
-from pathlib import Path, PosixPath
-import re
-from typing import Union, Dict, List, Set, Iterator
+from pathlib import Path
 import hashlib
 import struct
-from collections import ChainMap
-import typing
+import io
 import fasteners
-
-import experimaestro.typingutils as typingutils
-from experimaestro.constants import CACHEPATH_VARNAME
+import os
+import inspect
 from experimaestro.utils import logger
-
-# --- Initialization
-
-modulepath = Path(__file__).parent
-
-
-class Identifier:
-    def __init__(self, name: str):
-        self.name = name
-
-    def __hash__(self):
-        return self.name.__hash__()
-
-    def __eq__(self, other):
-        return other.name.__eq__(self.name)
-
-    def __getattr__(self, key):
-        return self(key)
-
-    def __getitem__(self, key):
-        return self(key)
-
-    def __call__(self, key):
-        return Identifier(self.name + "." + key)
-
-    def __str__(self):
-        return self.name
-
-
-def identifier(name: Union[str, Identifier]):
-    if isinstance(name, Identifier):
-        return name
-    return Identifier(str(name))
-
-
-
-class TypedArgument:
-    """A type"""
-    def __init__(self, type):
-        self.type = type
-
-class TypeHint: 
-    def __getitem__(self, type):
-        return TypedArgument(type)
-
-
-class Argument:
-    def __init__(
-        self,
-        name,
-        type: "Type",
-        required=None,
-        help=None,
-        generator=None,
-        ignored=False,
-        default=None,
-        checker=None
-    ):
-        required = (default is None) if required is None else required
-        if default is not None and required is not None and required:
-            raise Exception(
-                "argument '%s' is required but default value is given" % name
-            )
-
-        self.name = name
-        self.help = help
-        self.checker = checker
-        self.type = type
-        self.ignored = ignored
-        if ignored is None:
-            self.ignored = self.type.ignore
-        else:
-            self.ignored = False
-        self.required = required
-        self.default = default
-        self.generator = generator
-
-    def __repr__(self):
-        return "argument[{name}:{type}]".format(**self.__dict__)
-
-
-class TypeAttribute:
-    def __init__(self, type, key):
-        self.type = type
-        self.path = [key]
-
-
-class Type:
-    """Any experimaestro type is a child class"""
-
-    DEFINED: Dict[type, "Type"] = {}
-
-    def __init__(self, tn: Union[str, Identifier], description=None):
-        if tn is None:
-            tn = None
-        elif isinstance(tn, str):
-            tn = Identifier(tn)
-        self.identifier = tn
-        self.description = description
-
-    @property
-    def ignore(self):
-        """Ignore by default"""
-        return False
-
-    def __str__(self):
-        return "Type({})".format(self.identifier)
-
-    def __repr__(self):
-        return "Type({})".format(self.identifier)
-
-    def name(self):
-        return str(self.identifier)
-
-    def isArray(self):
-        return False
-
-    @staticmethod
-    def fromType(key):
-        """Returns the type object corresponding to the given type"""
-        logger.debug("Searching for type %s", key)
-
-        if key is None:
-            return Any
-
-        defined = Type.DEFINED.get(key, None)
-        if defined:
-            return defined
-
-        if isinstance(key, Type):
-            return key
-
-        if isinstance(key, TypeProxy):
-            return key()
-
-        if isinstance(key, Config):
-            return key.__xpmtype__
-
-        if inspect.isclass(key) and issubclass(key, Config):
-            return key.__xpm__
-
-        t = typingutils.get_list(key)
-        if t:
-            return ArrayType(Type.fromType(t))
-
-        raise Exception("No type found for %s", key)
-
-
-class ObjectType(Type):
-    """The XPM type of a configuration"""
-
-    REGISTERED: Dict[str, "Config"] = {}
-
-    def __init__(self, objecttype: "Config", identifier, description):
-        super().__init__(identifier, description)
-
-        self.objecttype = objecttype
-        self.task = None
-        self.originaltype = None
-
-        self.arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))
-
-    def addArgument(self, argument: Argument):
-        self.arguments[argument.name] = argument
-
-    def getArgument(self, key: str) -> Argument:
-        return self.arguments[key]
-
-    def parents(self) -> Iterator["ObjectType"]:
-        for tp in self.objecttype.__bases__:
-            if issubclass(tp, Config) and tp not in [Config, Task]:
-                yield tp.__xpm__
-
-    @staticmethod
-    def create(configclass: "Config", identifier, description, register=True):
-        if register and str(identifier) in ObjectType.REGISTERED:
-            _objecttype = ObjectType.REGISTERED[str(identifier)]
-            if _objecttype.__xpm__.originaltype != configclass:
-                # raise Exception("Experimaestro type %s is already declared" % identifier)
-                pass
-
-            logging.error("Experimaestro type %s is already declared" % identifier)
-            return _objecttype
-
-        if register:
-            ObjectType.REGISTERED[str(identifier)] = configclass
-        return ObjectType(configclass, identifier, description)
-
-    def validate(self, value):
-        if isinstance(value, dict):
-            # This is a unserialized object
-            valuetype = value.get("$type", None)
-            if valuetype is None:
-                raise ValueError("Object has no $type")
-
-            classtype = ObjectType.REGISTERED.get(valuetype, None)
-            if classtype:
-                try:
-                    return classtype(**value)
-                except:
-                    logger.exception("Could not build object of class %s" % (classtype))
-                    raise
-            if not Config.TASKMODE:
-                raise ValueError("Could not find type %s", valuetype)
-
-            logger.debug("Using argument type (not real type)")
-            return self.objecttype(**value)
-
-        if not isinstance(value, Config):
-            raise ValueError("%s is not an experimaestro type or task", value)
-
-        types = self.objecttype
-
-        if not isinstance(value, types):
-            raise ValueError("%s is not a subtype of %s" % (value, types))
-
-        if self.task and not value.__xpm__.job:
-            raise ValueError("The value must be submitted before giving it")
-        return value
-
-
-class TypeProxy:
-    def __call__(self) -> Type:
-        """Returns the real type"""
-        raise NotImplementedError()
-
-
-def definetype(*types):
-    def call(typeclass):
-        instance = typeclass(types[0].__name__)
-        for t in types:
-            Type.DEFINED[t] = instance
-        return typeclass
-
-    return call
-
-
-@definetype(int)
-class IntType(Type):
-    def validate(self, value):
-        return int(value)
-
-
-@definetype(str)
-class StrType(Type):
-    def validate(self, value):
-        return str(value)
-
-
-@definetype(float)
-class FloatType(Type):
-    def validate(self, value):
-        return float(value)
-
-
-@definetype(bool)
-class BoolType(Type):
-    def validate(self, value):
-        return bool(value)
-
-
-@definetype(Path)
-class PathType(Type):
-    def validate(self, value):
-        if isinstance(value, dict) and value.get("$type", None) == "path":
-            return Path(value.get("$value"))
-        return Path(value)
-
-    @property
-    def ignore(self):
-        """Ignore by default"""
-        return True
-
-
-class AnyType(Type):
-    def __init__(self):
-        super().__init__("any")
-
-    def validate(self, value):
-        return value
-
-
-Any = AnyType()
-
-
-class ArrayType(Type):
-    def __init__(self, type: Type):
-        self.type = type
-
-    def validate(self, value):
-        if not isinstance(value, List):
-            raise ValueError("value is not a list")
-
-        return [self.type.validate(x) for x in value]
-
-
-# --- XPM Objects
-
+from typing import Set
+from experimaestro.constants import CACHEPATH_VARNAME
 
 class HashComputer:
     OBJECT_ID = b"\x00"
@@ -339,8 +29,8 @@ class HashComputer:
 
     def update(self, value):
         if value is None:
-            self.hasher.update(NONE_ID)
-        if isinstance(value, float):
+            self.hasher.update(HashComputer.NONE_ID)
+        elif isinstance(value, float):
             self.hasher.update(HashComputer.FLOAT_ID)
             self.hasher.update(struct.pack("!d", value))
         elif isinstance(value, int):
@@ -426,8 +116,8 @@ class TaggedValue:
         self.value = value
 
 
-class TypeInformation:
-    """Holds experimaestro information for a Config (config or task)"""
+class ConfigInformation:
+    """Holds experimaestro information for a Config object (config or task)"""
 
     # Set to true when loading from JSON
     LOADING = False
@@ -538,7 +228,12 @@ class TypeInformation:
                         raise ValueError("Value %s is required but missing when building %s at %s" 
                             % (k, self.xpmtype, self._initinfo))
 
-    def seal(self, job: "experimaestro.job.Job"):
+            # Use __validate__ method
+            if hasattr(self.pyobject, "__validate__"):
+                self.pyobject.__validate__()
+
+
+    def seal(self, job: "experimaestro.scheduler.Job"):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
         if self._sealed:
             return
@@ -584,7 +279,7 @@ class TypeInformation:
         self.validate()
 
         # --- Submit the job
-        from .scheduler import Job, Scheduler
+        from experimaestro.scheduler import Job, Scheduler
 
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace
@@ -638,6 +333,8 @@ def clone(v):
     if isinstance(v, Config):
         # Create a new instance
         kwargs = {argument.name: clone(value) for argument, value in v.__xpm__.xpmvalues()}
+        
+        config = type(v).__new__(v)
         return type(v)(**kwargs)
         
     raise NotImplementedError("For type %s" % v)
@@ -684,12 +381,14 @@ class Config(metaclass=ConfigMetaclass):
 
     def __init__(self, **kwargs):
         # Add configuration
+        from .types import ObjectType
+
         self.__xpmtype__ = self.__class__.__xpm__
         if not isinstance(self.__xpmtype__, ObjectType):
-            logging.error("%s is not an object type", self.__xpmtype__)
+            logger.error("%s is not an object type", self.__xpmtype__)
             assert isinstance(self.__xpmtype__, ObjectType)
 
-        xpm = TypeInformation(self)
+        xpm = ConfigInformation(self)
         caller = inspect.getframeinfo(inspect.stack()[1][0])
         xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
 
@@ -700,7 +399,7 @@ class Config(metaclass=ConfigMetaclass):
             if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
                 if Config.TASKMODE:
                     # Do not set this attribute when running a task
-                    logging.debug("Do not set %s (not in attributes)", name)
+                    logger.debug("Do not set %s (not in attributes)", name)
                     continue
                 raise ValueError(
                     "%s is not an argument for %s" % (name, self.__xpmtype__)
@@ -712,7 +411,7 @@ class Config(metaclass=ConfigMetaclass):
                 self.__xpm__._tags[name] = value
 
             # Really set the value
-            xpm.set(name, value, bypass=TypeInformation.LOADING)
+            xpm.set(name, value, bypass=ConfigInformation.LOADING)
 
         # Initialize with default arguments
         for name, value in self.__xpmtype__.arguments.items():

@@ -10,7 +10,7 @@ import asyncio
 import sys
 
 from .workspace import Workspace
-from .api import Config
+from .core.objects import Config
 from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock

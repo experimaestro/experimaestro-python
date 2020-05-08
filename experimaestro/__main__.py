@@ -7,7 +7,8 @@ import importlib.machinery
 import json
 
 from .utils import logger
-from experimaestro.api import ObjectType, Config, TypeInformation
+from experimaestro.core.types import ObjectType
+from experimaestro.core.objects import Config, ConfigInformation
 import experimaestro
 
 # --- Command line main options
@@ -72,10 +73,10 @@ def run(file, path, taskid, parameters):
         Config.TASKMODE = True
 
         params = json.load(fp)
-        TypeInformation.LOADING = True
+        ConfigInformation.LOADING = True
         task = tasktype(**params)
-        TypeInformation.LOADING = False
-
+        ConfigInformation.LOADING = False
+        task.__taskdir__ = 
         task.execute()
 
 

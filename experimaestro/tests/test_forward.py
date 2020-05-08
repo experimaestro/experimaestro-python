@@ -1,11 +1,12 @@
-from experimaestro import argument, config, api
+from experimaestro import argument, config
+from experimaestro.core.objects import Config
 from experimaestro.click import cli, forwardoption
 import click
 
 
 @argument("epochs", type=int, default=100, help="Number of learning epochs")
 @config("mymodel")
-class MyModel(api.Config):
+class MyModel(Config):
     pass
 
 

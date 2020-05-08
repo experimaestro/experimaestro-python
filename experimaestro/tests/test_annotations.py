@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 from experimaestro import config, argument, Argument
-import experimaestro.api as api
+import experimaestro.core.types as types
 
 # --- Test manual name for configuration
 
@@ -36,22 +36,22 @@ def test_class_variable():
         
     arg_x = Config.__xpm__.getArgument("x")
     assert arg_x.name == "x"
-    assert isinstance(arg_x.type, api.IntType)
+    assert isinstance(arg_x.type, types.IntType)
     assert arg_x.required
 
     arg_y = Config.__xpm__.getArgument("y")
     assert arg_y.name == "y"
-    assert isinstance(arg_y.type, api.FloatType)
+    assert isinstance(arg_y.type, types.FloatType)
     assert arg_y.default == 2.3
     assert not arg_y.required
 
     arg_z = Config.__xpm__.getArgument("z")
     assert arg_z.name == "z"
-    assert isinstance(arg_y.type, api.FloatType)
+    assert isinstance(arg_y.type, types.FloatType)
     assert not arg_z.required
 
     arg_t = Config.__xpm__.getArgument("t")
     assert arg_t.name == "t"
-    assert isinstance(arg_t.type, api.ArrayType)
-    assert isinstance(arg_t.type.type, api.FloatType)
+    assert isinstance(arg_t.type, types.ArrayType)
+    assert isinstance(arg_t.type.type, types.FloatType)
     assert arg_t.required

@@ -2,7 +2,8 @@
 
 import sys
 import json
-from .api import ObjectType, TypeInformation
+from .core.types import ObjectType
+from .core.objects import ConfigInformation
 
 
 def parse_commandline(argv=None):
@@ -12,7 +13,7 @@ def parse_commandline(argv=None):
     tasktype = ObjectType.REGISTERED[taskid]
     with open(params, "r") as fp:
         params = json.load(fp)
-        TypeInformation.LOADING = True
+        ConfigInformation.LOADING = True
         task = tasktype(**params)
-        TypeInformation.LOADING = False
+        ConfigInformation.LOADING = False
         task.execute()

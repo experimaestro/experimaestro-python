@@ -11,7 +11,7 @@ from experimaestro.utils import logger
 from .scheduler import Job, JobError, JobState
 from .connectors import Redirect, RedirectType, Connector
 from .scheduler import Workspace
-from .api import Config
+from .core.objects import Config
 
 
 # 5 seconds wait for locking file

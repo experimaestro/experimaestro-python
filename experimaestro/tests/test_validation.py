@@ -11,7 +11,7 @@ from experimaestro import (
     ConstantArgument,
     experiment,
 )
-import experimaestro.api as api
+import experimaestro.core.types as types
 from experimaestro.scheduler import Job
 from .utils import TemporaryExperiment
 import logging
@@ -206,7 +206,7 @@ def test_pathchild():
 
 
 @pytest.mark.parametrize(
-    "value,apitype", [(1.5, api.FloatType), (1, api.IntType), (False, api.BoolType)]
+    "value,apitype", [(1.5, types.FloatType), (1, types.IntType), (False, types.BoolType)]
 )
 def test_default(value, apitype):
     @argument("default", default=value)

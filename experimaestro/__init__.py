@@ -19,7 +19,7 @@ from .workspace import Workspace
 from .scheduler import Scheduler, experiment
 from .notifications import progress
 from .register import parse_commandline
-from .api import Any
+from .core.types import Any
 from .checkers import Choices
 
 def set_launcher(launcher):
