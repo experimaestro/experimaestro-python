@@ -79,7 +79,7 @@ Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or 
 - `help` a string to document the option; it can be used when the argument is used in a command line or when generating a documentation (*planned*).
 
 Instead of using annotations, it is possible to use class variables
-and type hints, as follows:
+and type hints (**warning**: experimental syntax), as follows:
 
 !!! example
     ```python
