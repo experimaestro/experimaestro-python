@@ -65,10 +65,10 @@ It is possible to use classes if variables need to be defined
 
 Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or *config*urations/tasks, as well as list of those (using `typing.List[T]`).
 
-## Arguments
+## Parameters
 
 ```python
-@argument(name: str, type: Any = None, default: Any = None, required: bool = None,
+@param(name: str, type: Any = None, default: Any = None, required: bool = None,
           ignored = None, help = None)
 ```
 
@@ -83,12 +83,12 @@ and type hints, as follows:
 
 !!! example
     ```python
-    from experimaestro import task, Argument
+    from experimaestro import task, Param
 
     @task("model.learn")
     class ModelLearn:
-        epochs: Argument[int] = 100
-        model: Argument[Model]
+        epochs: Param[int] = 100
+        model: Param[Model]
     ```
 
 

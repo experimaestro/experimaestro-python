@@ -8,7 +8,7 @@ from experimaestro import (
     Identifier,
     argument,
     pathargument,
-    ConstantArgument,
+    ConstantParam,
     experiment,
 )
 import experimaestro.core.types as types
@@ -128,9 +128,9 @@ def test_path():
 
 
 def test_constant():
-    """Test of @ConstantArgument"""
+    """Test of @ConstantParam"""
 
-    @ConstantArgument("value", 1)
+    @ConstantParam("value", 1)
     @config(valns.constant.a)
     class A:
         pass

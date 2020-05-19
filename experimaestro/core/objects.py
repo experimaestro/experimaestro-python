@@ -344,14 +344,6 @@ def clone(v):
     raise NotImplementedError("For type %s" % v)
 
 
-class ConfigMetaclass(type):
-    def __getattr__(cls, key):
-        """Access to a class field"""
-        if not key.startswith("__xpm") and key in cls.__xpm__.arguments:
-            return cls.__xpm__.arguments[key]
-        return type.__getattribute__(cls, key)
-
-
 
 def cache(fn, name: str):
     def __call__(config: "Config"):
@@ -375,6 +367,17 @@ def cache(fn, name: str):
                 raise
     return __call__
 
+class ConfigMetaclass(type):
+    """Config meta-class
+
+    This allows to refer to a path of a class in a "python" syntax, e.g.
+    `MyConfig.ranker.optimizer.epsilon`
+    """
+    def __getattr__(cls, key):
+        """Access to a class field"""
+        if not key.startswith("__xpm") and key in cls.__xpm__.arguments:
+            return cls.__xpm__.arguments[key]
+        return type.__getattribute__(cls, key)
 
 
 class Config(metaclass=ConfigMetaclass):

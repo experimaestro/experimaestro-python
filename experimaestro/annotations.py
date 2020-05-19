@@ -53,7 +53,13 @@ class config:
         self.register = register
 
     def __call__(self, tp, originaltype=None, basetype=Config):
-        """[summary]
+        """Annotate the class
+
+        TODO: Depending on whether we are running or configuring, 
+        the behavior is different:
+
+        - when configuring, we return a proxy class
+        - when running, we return the same class/method
         
         Arguments:
             tp {[type]} -- Can be a method or a class
@@ -68,11 +74,12 @@ class config:
             [type] -- [description]
         """
 
-        # Check if conditions are fullfilled
+        # The type to annotate
         originaltype = originaltype or tp
 
         # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
+            # Manipulate the class path so that basetype is a parent
             if not issubclass(tp, basetype):
                 __bases__ = (basetype,)
                 if tp.__bases__ != (object,):
@@ -82,6 +89,11 @@ class config:
                     for key, value in tp.__dict__.items()
                     if key not in ["__dict__"]
                 }
+
+                # If configuring, override the __init__ method
+                if not Config.TASKMODE:
+                    __dict__["__init__"] = Config.__init__
+
                 tp = type(tp.__name__, __bases__, __dict__)
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
@@ -121,7 +133,8 @@ class config:
                         key,
                         Type.fromType(valuetype),
                         default=getattr(originaltype, key, None),
-                        required=required
+                        required=required,
+                        help=value.help
                     )
                     objecttype.addArgument(argument)
 
@@ -203,7 +216,7 @@ class task(config):
 # --- argument related annotations
 
 
-class argument:
+class param:
     """Defines an argument for an experimaestro type"""
 
     def __init__(
@@ -249,10 +262,10 @@ class argument:
         tp.__xpm__.addArgument(argument)
         return tp
 
-# Just a rebind
-param = argument
+# Just a rebind (back-compatibility)
+argument = param
 
-class option(argument):
+class option(param):
     """An argument which is ignored
 
     See argument
@@ -263,7 +276,7 @@ class option(argument):
 
 
 
-class pathargument(argument):
+class pathargument(param):
     """Defines a an argument that will be a relative path (automatically
     set by experimaestro)"""
 
@@ -276,7 +289,7 @@ class pathargument(argument):
         self.generator = lambda jobcontext: jobcontext.jobpath / path
 
 
-class ConstantArgument(argument):
+class ConstantParam(argument):
     """
     An constant argument (useful for versionning tasks)
     """
@@ -288,7 +301,7 @@ class ConstantArgument(argument):
         self.generator = lambda jobcontext: objects.clone(value)
 
 
-Argument = TypeHint()
+Param = TypeHint()
 
 
 # --- Cache

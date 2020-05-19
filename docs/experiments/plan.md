@@ -27,7 +27,7 @@ This allows to re-use configuration/tasks latter.
 ### Unique job identifier
 
 When a task is submitted, a unique id is computed based on the value of its arguments.
-Arguments are ignored if:
+Parameters are ignored if:
 
 - They were defined with `ignored` set to `True`
 - They have a type `Path`

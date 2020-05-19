@@ -5,8 +5,21 @@ class TypedArgument:
     """A type"""
     def __init__(self, type):
         self.type = type
+        self.help = None
+
+class TypeHintWithArgs:
+    def __init__(self, help=None):
+        self.help = help
+
+    def __getitem__(self, type):
+        typeargument = TypedArgument(type)
+        typeargument.help = self.help
+        return typeargument
 
 class TypeHint: 
+    def __call__(self, **kwargs): 
+        return TypeHintWithArgs(**kwargs)
+
     def __getitem__(self, type):
         return TypedArgument(type)
 
@@ -43,6 +56,6 @@ class Argument:
         self.generator = generator
 
     def __repr__(self):
-        return "argument[{name}:{type}]".format(**self.__dict__)
+        return "Param[{name}:{type}]".format(**self.__dict__)
 
 

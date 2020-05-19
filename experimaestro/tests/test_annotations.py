@@ -1,7 +1,12 @@
+"""test_annotations.py
+
+Test all the annotations for configurations and tasks
+"""
+
 # Annotation specific tests
 
 from typing import Optional, List
-from experimaestro import config, argument, Argument
+from experimaestro import config, argument, Param
 import experimaestro.core.types as types
 
 # --- Test manual name for configuration
@@ -26,13 +31,23 @@ def test_noname():
 
 # --- Use type annotations
 
+def ArgumentValue(default=None, *, help=""):
+    return default
+class Parama:
+    def __init__(self): pass
+    def __getitem__(self, k):
+        return Param[int]
+
 def test_class_variable():
+    """Experimental support of type annotations"""
+
     @config("annotations.class_variable.config")
     class Config:
-        x: Argument[int]
-        y: Argument[float] = 2.3
-        z: Argument[Optional[float]]
-        t: Argument[List[float]]
+        x: Param[int]
+        y: Param[float] = 2.3
+        z: Param[Optional[float]]
+        t: Param[List[float]]
+        w: Param(help="help")[int]
         
     arg_x = Config.__xpm__.getArgument("x")
     assert arg_x.name == "x"
@@ -55,3 +70,6 @@ def test_class_variable():
     assert isinstance(arg_t.type, types.ArrayType)
     assert isinstance(arg_t.type.type, types.FloatType)
     assert arg_t.required
+
+    arg_w = Config.__xpm__.getArgument("w")
+    assert arg_w.help == "help"
