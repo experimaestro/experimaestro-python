@@ -476,6 +476,9 @@ class experiment:
         """Wait until the running processes have finished"""
         self.scheduler.wait()
 
+    def setenv(self, name, value):
+        self.workspace.launcher.environ[name] = value
+
     def __enter__(self):
         if self.server:
             self.server.start()

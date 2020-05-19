@@ -50,16 +50,20 @@ class HashComputer:
             self.hasher.update(xpmtype.identifier.name.encode("utf-8"))
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
+                # Ignored argument
+                if argument.ignored or argument.generator:
+                    continue
+
+                # Argument value
+                argvalue = getattr(value, argument.name, None)
+                if argument.default and argument.default == argvalue:
+                    # No update if same value
+                    continue
+
                 # Hash name
                 self.update(argument.name)
 
                 # Hash value
-                argvalue = getattr(value, argument.name, None)
-                if argument.ignored or argument.generator:
-                    continue
-                if argument.default and argument.default == argvalue:
-                    # No update if same value
-                    continue
                 self.hasher.update(HashComputer.NAME_ID)
                 self.update(argvalue)
 
@@ -334,7 +338,7 @@ def clone(v):
         # Create a new instance
         kwargs = {argument.name: clone(value) for argument, value in v.__xpm__.xpmvalues()}
         
-        config = type(v).__new__(v)
+        config = type(v).__new__(type(v))
         return type(v)(**kwargs)
         
     raise NotImplementedError("For type %s" % v)

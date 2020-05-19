@@ -76,7 +76,7 @@ def run(file, path, taskid, parameters):
         ConfigInformation.LOADING = True
         task = tasktype(**params)
         ConfigInformation.LOADING = False
-        task.__taskdir__ = 
+        task.__taskdir__ = Path.cwd()
         task.execute()
 
 

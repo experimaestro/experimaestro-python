@@ -3,7 +3,7 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, argument
+from experimaestro import config, argument, pathargument
 
 
 @argument(name="a", type=int)
@@ -42,6 +42,8 @@ class Float:
 @config()
 class Values:
     pass
+
+
 
 
 def assert_equal(a, b):
@@ -119,3 +121,33 @@ def test_path():
     """Path should be ignored"""
     assert_equal(TypeWithPath(a=1, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
     assert_notequal(TypeWithPath(a=2, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
+
+
+# --- Test with added arguments
+
+def test_pathargument():
+    """Path arguments should be ignored"""
+    @pathargument("path", "path")
+    @argument(name="a", type=int)
+    @config("pathargument_test", register=False)
+    class A_with_path: pass
+
+    @argument(name="a", type=int)
+    @config("pathargument_test", register=False)
+    class A_without_path: pass
+
+    assert_equal(A_with_path(a=1), A_without_path(a=1))
+
+def test_defaultnew():
+    """Path arguments should be ignored"""
+    @argument("b", type=int, default=1)
+    @argument(name="a", type=int)
+    @config("defaultnew", register=False)
+    class A_with_b: pass
+
+    @argument(name="a", type=int)
+    @config("defaultnew", register=False)
+    class A: pass
+
+    assert_equal(A_with_b(a=1, b=1), A(a=1))
+    assert_equal(A_with_b(a=1), A(a=1))
