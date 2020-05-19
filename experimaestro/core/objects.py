@@ -145,6 +145,16 @@ class ConfigInformation:
         self._validated = False
         self._sealed = False
 
+
+    def objectmodules(self, modules=set()):
+        """Returns all the modules"""
+        modules.add(self.pyobject.__module__)
+        for argument, value in self.xpmvalues():
+            if isinstance(value, Config):
+                value.__xpm__.objectmodules(modules)
+        return modules
+
+
     def set(self, k, v, bypass=False):
         if self._sealed:
             raise AttributeError("Object is read-only")

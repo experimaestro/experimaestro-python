@@ -52,13 +52,16 @@ def version():
     print(experimaestro.__version__)
 
 
+@click.argument("modules", type=str)
 @click.argument("parameters", type=Path)
 @click.argument("taskid", type=str)
 @click.argument("path", type=str)
 @click.option("--file", is_flag=True, help="The path is not a module but a python file")
 @cli.command(context_settings={"allow_extra_args": True})
-def run(file, path, taskid, parameters):
+def run(file, path, taskid, parameters, modules):
     """Run a task"""
+
+    Config.TASKMODE = True
 
     if file:
         loader = importlib.machinery.SourceFileLoader(path, path)
@@ -67,10 +70,14 @@ def run(file, path, taskid, parameters):
         logging.debug("Importing module %s", path)
         importlib.import_module(path)
 
+    with open(modules, 'r') as fp:
+        for module in fp:
+            module = module.strip()
+            importlib.import_module(module, module)
+
     tasktype = ObjectType.REGISTERED[taskid]
 
     with open(parameters, "r") as fp:
-        Config.TASKMODE = True
 
         params = json.load(fp)
         ConfigInformation.LOADING = True

@@ -206,6 +206,7 @@ class task(config):
 
         command.add(commandline.CommandString(str(self.identifier)))
         command.add(commandline.CommandParameters())
+        command.add(commandline.CommandModules())
         commandLine = commandline.CommandLine()
         commandLine.add(command)
 

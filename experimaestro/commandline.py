@@ -69,6 +69,8 @@ class CommandContext:
     def getAuxiliaryFile(self, name, suffix):
         ix = self.auxiliary.get(name, 0) + 1
         self.auxiliary[name] = ix
+        if ix == 1:
+            return self.path / ("%s%s" % (name, suffix))
         return self.path / ("%s-%d%s" % (name, ix, suffix))
 
     def relpath(self, path):
@@ -127,6 +129,15 @@ class CommandParameters(AbstractCommandComponent):
         with path.open("wt") as fileout:
             context.parameters.__xpm__.outputjson(fileout, context)
         out.write(context.relpath(path))
+
+class CommandModules(AbstractCommandComponent):
+    def output(self, context: CommandContext, out: io.TextIOBase):
+        path = context.getAuxiliaryFile("modules", ".xpm")
+        with path.open("wt") as fileout:
+            for module in context.parameters.__xpm__.objectmodules():
+                fileout.write(f"{module}\n")
+        out.write(context.relpath(path))
+
 
 
 class AbstractCommand(CommandPart):
