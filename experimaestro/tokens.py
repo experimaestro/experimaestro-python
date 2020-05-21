@@ -2,6 +2,7 @@
 a computational resource (e.g. number of launched jobs, etc.)
 """
 
+import sys
 from pathlib import Path
 import fasteners
 import threading
@@ -62,10 +63,14 @@ class CounterTokenDependency(Dependency):
 
 class CounterToken(Token, FileSystemEventHandler):
     """File-based counter token"""
-
     TOKENS: Dict[str, "CounterToken"] = {}
+
     """Maps paths to instances"""
     VALUES = struct.Struct("<LL")
+
+    @staticmethod
+    def forkhandler():
+        CounterToken.TOKENS = {}
 
     @staticmethod
     def create(name: str, path: Path, count: int):
@@ -123,6 +128,7 @@ class CounterToken(Token, FileSystemEventHandler):
         return "token[{}]".format(self.name)
 
     def on_modified(self, event):
+        logger.debug("Watched path notification %s [watched %s]", event.src_path, self.watchedpath)
         if event.src_path == self.watchedpath:
             logger.debug("Watched path modified [%s]", self.path)
             timestamp = os.path.getmtime(self.path)
@@ -197,3 +203,6 @@ class CounterToken(Token, FileSystemEventHandler):
         # Now, check
         for dependency in self.dependents:
             dependency.check()
+
+if sys.version_info[0] == 3 and sys.version_info[1] >= 7:
+    os.register_at_fork(after_in_child=CounterToken.forkhandler)

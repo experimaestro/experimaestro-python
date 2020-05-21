@@ -72,6 +72,7 @@ class TemporaryExperiment:
         )
         self.timeout.__enter__()
 
+        logging.info("Created new temporary experiment (%s)", workdir)
         return self.experiment
 
     def __exit__(self, *args):
@@ -89,5 +90,3 @@ def is_posix():
     except ImportError:
         return False
 
-
-logging.basicConfig(level=logging.DEBUG)

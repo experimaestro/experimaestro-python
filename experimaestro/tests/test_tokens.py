@@ -1,12 +1,15 @@
+import sys
 import pytest
 import logging
 import time
+from pathlib import Path
 
+import subprocess
 from experimaestro.tokens import CounterToken
 from experimaestro.scheduler import JobState
 from .utils import TemporaryExperiment, TemporaryDirectory, timeout
 from .task_tokens import TokenTask
-
+from experimaestro.ipc import IPCom
 
 class TimeInterval:
     def __init__(self, start, end):
@@ -30,7 +33,9 @@ def get_times(task):
 
 
 def get_times_frompath(path):
-    return TimeInterval(*(float(t) for t in path.read_text().strip().split("\n")))
+    s = path.read_text().strip().split("\n")
+    logging.info("Read times: %s", s)
+    return TimeInterval(*(float(t) for t in s))
 
 
 def token_experiment(xp, token):
@@ -73,7 +78,7 @@ def test_token():
 
 
 def test_token_monitor():
-    """Two different schedulers
+    """Two different schedulers (within the same process)
     
     Test the ability of the token to monitor the filesystem
     """
@@ -105,32 +110,13 @@ def test_token_monitor():
 import multiprocessing
 
 
-def run_with_token(x, lockingpath, workdir, queue):
-    try:
-        with TemporaryExperiment("reschedule%d" % x, workdir=workdir) as xp:
-            logging.info("Reschedule with token [%d]: starting task in %s", x, workdir)
-            token = xp.workspace.connector.createtoken("test-token-reschedule", 1)
-            task = (
-                TokenTask(path=lockingpath, x=x)
-                .add_dependencies(token.dependency(1))
-                .submit()
-            )
-            while task.job.state == JobState.UNSCHEDULED:
-                time.sleep(0.01)
-            logging.info("Reschedule with token [%d]: ready", x)
-            queue.put(True)
-
-        logging.info("Reschedule with token [%d]: finished", x)
-        queue.put(task.stdout())
-    except:
-        logging.exception("Got an exception while running experiment")
-
 
 def test_token_reschedule():
     """Test whether a job can be re-submitted if it failed to acquire a token due to multiple schedulers concurrency
 
-    - task 1 is started
-    - 
+    - task 1 and 2 are started in two different processes, using the token
+    - we wait for both to be scheduled
+    - we write a file so that both can finish
     """
     queue1 = multiprocessing.Queue(3)
     queue2 = multiprocessing.Queue(3)
@@ -138,31 +124,34 @@ def test_token_reschedule():
     with TemporaryDirectory("reschedule") as workdir:
         lockingpath = workdir / "lockingpath"
 
-        p1 = multiprocessing.Process(
-            target=run_with_token, args=(1, lockingpath, workdir, queue1)
-        )
-        p1.start()
+        command = [sys.executable, Path(__file__).parent / "token_reschedule.py", workdir]
+        
+        ready1 = workdir / "ready.1"
+        time1 = workdir / "time.1"
+        p1 = subprocess.Popen(command + ["1", lockingpath, str(ready1), str(time1)])
 
-        p2 = multiprocessing.Process(
-            target=run_with_token, args=(2, lockingpath, workdir, queue2)
-        )
-        p2.start()
+        ready2 = workdir / "ready.1"
+        time2 = workdir / "time.2"
+        p2 = subprocess.Popen(command + ["2", lockingpath, str(ready2), str(time2)])
 
         try:
             with timeout(10):
                 # Wait that both processes are ready
-                queue1.get()
-                queue2.get()
+                while not ready1.is_file():
+                    time.sleep(0.01)
+                while not ready2.is_file():
+                    time.sleep(0.01)
                 logging.info("Both processes are ready: allowing tasks to finish")
                 lockingpath.write_text("Let's go")
 
-                path1 = queue1.get()
-                logging.info("Got %s from 1", path1)
-                path2 = queue2.get()
-                logging.info("Got %s from 2", path2)
+                # Waiting for the output
+                while not time1.is_file():
+                    time.sleep(0.01)
+                while not time2.is_file():
+                    time.sleep(0.01)
 
-                time1 = get_times_frompath(path1)
-                time2 = get_times_frompath(path2)
+                time1 = get_times_frompath(time1)
+                time2 = get_times_frompath(time2)
 
                 logging.info("%s vs %s", time1, time2)
                 assert time1 > time2 or time2 > time1

@@ -47,11 +47,13 @@ if sys.version_info[0] == 3 and sys.version_info[1] >= 7:
 
 
 def ipcom():
-    # Returns a process specific ipcom instance (in case of multiprocessing)
+    # If multiprocessing, remove the IPCom instance if this does not
+    # belong to our process
     if IPCom.INSTANCE is not None and IPCom.INSTANCE.pid != os.getpid():
         fork_childhandler()
 
     if IPCom.INSTANCE is None:
         IPCom.INSTANCE = IPCom()
+        logger.info("Started IPCom instance (%s)", id(IPCom.INSTANCE))
         # IPCom.INSTANCE.start()
     return IPCom.INSTANCE
