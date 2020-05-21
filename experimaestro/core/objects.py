@@ -192,7 +192,9 @@ class ConfigInformation:
             ):
                 yield argument, getattr(self.pyobject, argument.name, None)
 
-    def tags(self, tags={}):
+    def tags(self, tags=None):
+        if tags is None:
+            tags = {}
         tags.update(self._tags)
         for argument, value in self.xpmvalues():
             if isinstance(value, Config):
@@ -377,20 +379,8 @@ def cache(fn, name: str):
                 raise
     return __call__
 
-class ConfigMetaclass(type):
-    """Config meta-class
 
-    This allows to refer to a path of a class in a "python" syntax, e.g.
-    `MyConfig.ranker.optimizer.epsilon`
-    """
-    def __getattr__(cls, key):
-        """Access to a class field"""
-        if not key.startswith("__xpm") and key in cls.__xpm__.arguments:
-            return cls.__xpm__.arguments[key]
-        return type.__getattribute__(cls, key)
-
-
-class Config(metaclass=ConfigMetaclass):
+class Config():
     """Base type for all objects in python interface"""
 
     # Set to true when executing a task to remove all checks

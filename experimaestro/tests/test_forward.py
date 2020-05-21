@@ -10,7 +10,7 @@ class MyModel(Config):
     pass
 
 
-@forwardoption(MyModel.epochs, "my-epochs")
+@forwardoption.epochs(MyModel, "my-epochs")
 @cli.command()
 def experiment(my_epochs):
     return my_epochs
@@ -21,7 +21,7 @@ def test_main():
     assert epochs == 100
 
 
-@forwardoption(MyModel.epochs)
+@forwardoption.epochs(MyModel)
 @cli.command()
 def experiment2(epochs):
     return epochs

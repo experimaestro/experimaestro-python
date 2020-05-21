@@ -81,14 +81,14 @@ by using the `forwardoption` command
 ```python
 
 from experimaestro import argument, type
-from experimaestro.click import forwardoption
+from experimaestro.click import forwardoption, arguments
 import click
 
 @argument("epochs", type=int, default=100, help="Number of learning epochs")
 @type("mymodel")
 class MyModel: ...
 
-@forwardoption(MyModel.epochs)
+@forwardoption(arguments(MyModel).epochs)
 @click.command()
 def cli(epochs):
     model = MyModel(epochs=epochs)

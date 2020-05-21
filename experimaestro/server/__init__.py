@@ -163,7 +163,8 @@ class RequestProcessor:
                 jobid = m.group(1)
                 progress = float(m.group(2))
                 try:
-                    self.scheduler.jobs[jobid].progress = progress
+                    if progress >= 0 and progress <= 1.:
+                        self.scheduler.jobs[jobid].progress = progress
                 except KeyError:
                     # Just ignore
                     pass
