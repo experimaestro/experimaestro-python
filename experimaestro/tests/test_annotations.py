@@ -6,7 +6,7 @@ Test all the annotations for configurations and tasks
 # Annotation specific tests
 
 from typing import Optional, List
-from experimaestro import config, argument, Param
+from experimaestro import config, argument, Param, task
 import experimaestro.core.types as types
 
 # --- Test manual name for configuration
@@ -73,3 +73,21 @@ def test_class_variable():
 
     arg_w = Config.__xpm__.getArgument("w")
     assert arg_w.help == "help"
+
+
+# --- Task annotations
+
+
+def test_task_config():
+    """Experimental support of type annotations"""
+
+    @config()
+    class Output: pass
+
+    @task()
+    class Task:
+        def config(self) -> Output:
+            return Output()
+
+    output = Task().submit(dryrun=True)
+    assert type(output) == Output

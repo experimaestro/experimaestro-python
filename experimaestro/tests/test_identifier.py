@@ -3,42 +3,42 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, argument, pathargument
+from experimaestro import config, pathargument, param, task
 
 
-@argument(name="a", type=int)
+@param(name="a", type=int)
 @config()
 class A:
     pass
 
 
-@argument(name="a", type=int)
+@param(name="a", type=int)
 @config()
 class B:
     pass
 
 
-@argument(name="a", type=int, default=1)
-@argument(name="b", type=int)
+@param(name="a", type=int, default=1)
+@param(name="b", type=int)
 @config()
 class C:
     pass
 
 
-@argument("a", type=A)
+@param("a", type=A)
 @config()
 class D:
     pass
 
 
-@argument("value", type=float)
+@param("value", type=float)
 @config()
 class Float:
     pass
 
 
-@argument("value1", type=float)
-@argument("value2", type=float)
+@param("value1", type=float)
+@param("value2", type=float)
 @config()
 class Values:
     pass
@@ -88,17 +88,17 @@ def test_float2():
 def test_name():
     """Path should be ignored"""
 
-    @argument("a", int)
+    @param("a", int)
     @config("test.identifier.argumentname", register=False)
     class Config0:
         pass
 
-    @argument("b", int)
+    @param("b", int)
     @config("test.identifier.argumentname", register=False)
     class Config1:
         pass
 
-    @argument("a", int)
+    @param("a", int)
     @config("test.identifier.argumentname", register=False)
     class Config3:
         pass
@@ -110,8 +110,8 @@ def test_name():
 # --- Ignore paths
 
 
-@argument("a", int)
-@argument("path", Path)
+@param("a", int)
+@param("path", Path)
 @config()
 class TypeWithPath:
     pass
@@ -128,11 +128,11 @@ def test_path():
 def test_pathargument():
     """Path arguments should be ignored"""
     @pathargument("path", "path")
-    @argument(name="a", type=int)
+    @param(name="a", type=int)
     @config("pathargument_test", register=False)
     class A_with_path: pass
 
-    @argument(name="a", type=int)
+    @param(name="a", type=int)
     @config("pathargument_test", register=False)
     class A_without_path: pass
 
@@ -140,14 +140,31 @@ def test_pathargument():
 
 def test_defaultnew():
     """Path arguments should be ignored"""
-    @argument("b", type=int, default=1)
-    @argument(name="a", type=int)
+    @param("b", type=int, default=1)
+    @param(name="a", type=int)
     @config("defaultnew", register=False)
     class A_with_b: pass
 
-    @argument(name="a", type=int)
+    @param(name="a", type=int)
     @config("defaultnew", register=False)
     class A: pass
 
     assert_equal(A_with_b(a=1, b=1), A(a=1))
     assert_equal(A_with_b(a=1), A(a=1))
+
+
+def test_taskconfigidentifier():
+    """Test whether the embedded task arguments make the configuration different"""
+    @param("a", type=int)
+    @config()
+    class Config: pass
+
+    @param("x", type=int)
+    @task()
+    class Task:
+        def config(self) -> Config:
+            return Config(a=1)
+
+    assert_equal(Task(x=1).submit(dryrun=True),Task(x=1).submit(dryrun=True))
+    assert_notequal(Task(x=2).submit(dryrun=True),Task(x=1).submit(dryrun=True))
+

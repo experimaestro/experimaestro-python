@@ -46,16 +46,28 @@ In most cases, it is easier to use a function
         pass
     ```
 
-It is possible to use classes if variables need to be defined
+It is possible to use classes if variables need to be defined,
+or if a configuration should be returned (here, `Model`)
 
 !!! example
     ```
     from experimaestro import task, argument
 
+    @argument("parameters", type=Path)
+    @config()
+    class Model: pass
+
     @argument("epochs", type=int, default=100)
     @argument("model", type=Model, required=True)
-    @task("model.learn")
+    @pathargument("parameters", "parameters.pth")
+    @task()
     class ModelLearn:
+        def config(self) -> Model:
+            return {
+                "model": self.model,
+                "parameters": self.parameters
+            }
+
         def execute(self):
             """Called when this task is run"""
             pass
@@ -105,7 +117,7 @@ and type hints (**warning**: experimental syntax), as follows:
 
 ## Lightweights tasks using `@cache`
 
-Sometimes, a config can compute some output which is might be interesting to cache, but without relying on a fully-fledge task. In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
+Sometimes, a config can compute some output that might be interesting to cache, but without relying on a fully-fledge task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
 ```python
 

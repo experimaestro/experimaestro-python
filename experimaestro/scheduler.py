@@ -73,16 +73,19 @@ class Job(Resource):
         parameters: Config,
         *,
         workspace: Workspace = None,
-        launcher: "experimaestro.launchers" = None
+        launcher: "experimaestro.launchers" = None,
+        dryrun: bool = False
     ):
         super().__init__()
-        self.workspace = workspace or Workspace.CURRENT
-        assert self.workspace is not None, "No experiment has been defined"
 
-        self.launcher = launcher or self.workspace.launcher
-        assert self.launcher is not None, (
-            "No default launcher in workspace %s" % workspace
-        )
+        self.workspace = workspace or Workspace.CURRENT
+        self.launcher = launcher or self.workspace.launcher if self.workspace else None
+
+        if not dryrun:
+            assert self.workspace is not None, "No experiment has been defined"
+            assert self.launcher is not None, (
+                "No launcher, and no default defined for the workspace %s" % workspace
+            )
 
         self.type = parameters.__xpmtype__
         self.name = str(self.type.identifier).rsplit(".", 1)[-1]

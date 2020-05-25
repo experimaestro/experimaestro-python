@@ -20,6 +20,7 @@ class HashComputer:
     NAME_ID = b"\x05"
     NONE_ID = b"\x06"
     LIST_ID = b"\x06"
+    TASK_ID = b"\x06"
 
     def __init__(self):
         self.hasher = hashlib.sha256()
@@ -48,6 +49,13 @@ class HashComputer:
             xpmtype = value.__xpmtype__  # type: ObjectType
             self.hasher.update(HashComputer.OBJECT_ID)
             self.hasher.update(xpmtype.identifier.name.encode("utf-8"))
+
+            # Process task (if any)
+            if value.__xpm__._task:
+                self.hasher.update(HashComputer.TASK_ID)
+                self.update(value.__xpm__._task)
+
+            # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
                 # Ignored argument
@@ -134,6 +142,7 @@ class ConfigInformation:
         # Meta-informations
         self._tags = {}
         self._initinfo = {}
+        self._task = None # type: Task
 
         # State information
         self.job = None
@@ -285,7 +294,7 @@ class ConfigInformation:
         for argument, value in self.xpmvalues():
             updatedependencies(dependencies, value)
 
-    def submit(self, workspace, launcher, dryrun=None):
+    def submit(self, workspace, launcher, dryrun=False):
         # --- Prepare the object
         if self.job:
             raise Exception("task %s was already submitted" % self)
@@ -298,7 +307,7 @@ class ConfigInformation:
         from experimaestro.scheduler import Job, Scheduler
 
         self.job = self.xpmtype.task(
-            self.pyobject, launcher=launcher, workspace=workspace
+            self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
         )
         self.seal(self.job)
 
@@ -306,10 +315,18 @@ class ConfigInformation:
         self.updatedependencies(self.job.dependencies)
         self.job.dependencies.update(self.dependencies)
 
-        if dryrun == False or (Scheduler.CURRENT.submitjobs and dryrun is None):
+        if not dryrun and Scheduler.CURRENT.submitjobs:
             Scheduler.CURRENT.submit(self.job)
         else:
             logger.warning("Simulating: not submitting job %s", self.job)
+
+        # Handle an output configuration
+        if hasattr(self.pyobject, "config"):
+            config = self.pyobject.config()
+            config.__xpm__._task = self.pyobject
+            return config
+
+        return self.pyobject
 
     def _outputjson_inner(self, objectout, context):
         objectout.write("$type", str(self.xpmtype.identifier))
@@ -457,10 +474,9 @@ class Config():
 class Task(Config):
     """Base type for all tasks"""
 
-    def submit(self, *, workspace=None, launcher=None, dryrun=None):
+    def submit(self, *, workspace=None, launcher=None, dryrun=False):
         """Submit this task"""
-        self.__xpm__.submit(workspace, launcher, dryrun=dryrun)
-        return self
+        return self.__xpm__.submit(workspace, launcher, dryrun=dryrun)
 
     def init(self):
         """Prepare object after creation"""

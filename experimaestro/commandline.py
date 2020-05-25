@@ -245,9 +245,10 @@ class PsutilProcess:
 
 class CommandLineJob(Job):
     def __init__(
-        self, commandline: CommandLine, parameters, workspace=None, launcher=None
+        self, commandline: CommandLine, parameters, workspace=None, launcher=None,
+        dryrun=False
     ):
-        super().__init__(parameters, workspace=workspace, launcher=launcher)
+        super().__init__(parameters, workspace=workspace, launcher=launcher,dryrun=dryrun)
         self.commandline = commandline
 
     @property
@@ -312,7 +313,7 @@ class CommandLineTask:
     def __init__(self, commandline: CommandLine):
         self.commandline = commandline
 
-    def __call__(self, pyobject, *, launcher=None, workspace=None) -> Job:
+    def __call__(self, pyobject, *, launcher=None, workspace=None, dryrun=False) -> Job:
         return CommandLineJob(
-            self.commandline, pyobject, launcher=launcher, workspace=workspace
+            self.commandline, pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
         )
