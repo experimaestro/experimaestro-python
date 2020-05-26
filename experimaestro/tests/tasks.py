@@ -70,3 +70,19 @@ def Method(a: int):
 class SetUnknown:
     def execute(self):
         self.abc = 1
+
+
+"""Check that config works properly"""
+@config()
+class CacheConfig:
+    @cache("cached")
+    def get(self, path):
+        if not path.is_file():
+            path.write_text("hello")
+        return path.read_text()
+
+@param("data", type=CacheConfig)
+@task()
+class CacheConfigTask:
+    def execute(self):
+        assert self.data.get() == "hello"

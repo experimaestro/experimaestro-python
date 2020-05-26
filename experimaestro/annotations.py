@@ -90,17 +90,19 @@ class config:
         if inspect.isclass(tp):
             # if not in task mode,
             # manipulate the class path so that basetype is a parent
+            __bases__ = tp.__bases__
             if not issubclass(tp, basetype):
                 __bases__ = (basetype,)
                 if tp.__bases__ != (object,):
                     __bases__ += tp.__bases__
-                __dict__ = {
-                    key: value
-                    for key, value in tp.__dict__.items()
-                    if key in set(["config"]) or hasattr(value, "__xpmconfig__")
-                }
 
-                tp = type(tp.__name__, __bases__, __dict__)
+            __dict__ = {
+                key: value
+                for key, value in tp.__dict__.items()
+                if key in set(["config"]) or hasattr(value, "__xpmconfig__")
+            }
+
+            tp = type(tp.__name__, __bases__, __dict__)
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
@@ -323,6 +325,7 @@ def cache(name: str):
     """Use a cache path for a given config
     """
     def annotate(method):
+        
         return objects.cache(method, name)
     
     return annotate

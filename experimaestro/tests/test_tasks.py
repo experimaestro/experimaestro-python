@@ -162,3 +162,13 @@ def test_restart(terminate):
 def test_submitted_twice():
     """Check that a job cannot be submitted twice"""
     pass
+
+
+def test_configcache():
+    """Test a configuration cache"""
+
+    with TemporaryExperiment("configcache", maxwait=10) as xp:
+        task = CacheConfigTask(data=CacheConfig()).submit()
+
+    assert task.__xpm__.job.wait() == JobState.DONE
+

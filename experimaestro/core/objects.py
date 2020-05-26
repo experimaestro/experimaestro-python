@@ -348,6 +348,11 @@ class ConfigInformation:
                 objectout.write("file", str(self.xpmtype._file))
             objectout.write("type", self.xpmtype.originaltype.__name__)
 
+            # Serialize identifier and typename
+            # TODO: remove when not needed
+            objectout.write("typename", self.xpmtype.name())
+            objectout.write("identifier", self.identifier.hex())
+
             with objectout.subobject("fields") as jsonfields:
                 for argument, value in self.xpmvalues():
                     ConfigInformation._outputjsonvalue([argument.name], value, jsonfields, value)
@@ -416,6 +421,10 @@ class ConfigInformation:
             cls = getattr(mod, definition["type"])
             o = object.__new__(cls)
 
+            if "typename" in definition:
+                o.__xpmtypename__ = definition["typename"]
+                o.__xpmidentifier__ = definition["identifier"]
+
             istaskdef = isinstance(o, BaseTaskFunction)
             if istaskdef:
                 o.arguments = {}
@@ -456,10 +465,10 @@ def clone(v):
 
 
 def cache(fn, name: str):
-    def __call__(config: "Config"):
+    def __call__(config):
         # Get path
-        hexid = config.__xpm__.identifier.hex()
-        typename = str(config.__xpmtype__.identifier.name)
+        hexid = config.__xpmidentifier__
+        typename = config.__xpmtypename__
         dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
         dir.mkdir(parents=True, exist_ok=True)
         
