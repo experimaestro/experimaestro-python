@@ -4,7 +4,7 @@ from collections import ChainMap
 from pathlib import Path
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
-from .objects import Config, Task
+from .objects import Config, Task, BaseTaskFunction
 from .arguments import Argument
 
 class Identifier:
@@ -119,7 +119,7 @@ class ObjectType(Type):
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.objecttype.__bases__:
-            if issubclass(tp, Config) and tp not in [Config, Task]:
+            if issubclass(tp, Config) and tp not in [Config, Task, BaseTaskFunction]:
                 yield tp.__xpm__
 
     @staticmethod

@@ -14,6 +14,9 @@ from .annotations import (
     Identifier,
     Array,
     tag,
+    configmethod,
+    STDOUT,
+    STDERR
 )
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment

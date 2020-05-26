@@ -5,6 +5,7 @@ tasks = Identifier("tasks")
 
 
 @argument("word", type=str, required=True, help="Word to generate")
+@pathargument("out", STDOUT)
 @task(tasks.say)
 class Say:
     def execute(self):
@@ -18,7 +19,7 @@ class Concat:
         # We access the file where standard output was stored
         says = []
         for string in self.strings:
-            with open(string.stdout()) as fp:
+            with open(string.out) as fp:
                 says.append(fp.read().strip())
         print(" ".join(says))
 
@@ -44,6 +45,7 @@ class Fail:
             time.sleep(0.1)
         raise AssertionError("Failing")
 
+    @configmethod
     def touch(self):
         while self.__xpm__.job.state.notstarted():
             time.sleep(0.05)

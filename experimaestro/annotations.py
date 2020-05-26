@@ -23,6 +23,10 @@ from .checkers import Checker
 
 # --- Annotations to define tasks and types
 
+def configmethod(method):
+    """Annotate a method that should be kept in the configuration object"""
+    method.__xpmconfig__ = True
+    return method
 
 class config:
 
@@ -55,16 +59,17 @@ class config:
     def __call__(self, tp, originaltype=None, basetype=Config):
         """Annotate the class
 
-        TODO: Depending on whether we are running or configuring, 
+        Depending on whether we are running or configuring, 
         the behavior is different:
 
         - when configuring, we return a proxy class
-        - when running, we return the same class/method
+        - when running, we return the same class
         
         Arguments:
             tp {[type]} -- Can be a method or a class
         
         Keyword Arguments:
+            originaltype {[type]} -- The original type
             basetype {[type]} -- [description] The base type of the class
         
         Raises:
@@ -74,12 +79,17 @@ class config:
             [type] -- [description]
         """
 
+        # --- If in task mode, just return the object
+        if Config.TASKMODE:
+            return tp
+
         # The type to annotate
         originaltype = originaltype or tp
 
         # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
-            # Manipulate the class path so that basetype is a parent
+            # if not in task mode,
+            # manipulate the class path so that basetype is a parent
             if not issubclass(tp, basetype):
                 __bases__ = (basetype,)
                 if tp.__bases__ != (object,):
@@ -87,12 +97,8 @@ class config:
                 __dict__ = {
                     key: value
                     for key, value in tp.__dict__.items()
-                    if key not in ["__dict__"]
+                    if key in set(["config"]) or hasattr(value, "__xpmconfig__")
                 }
-
-                # If configuring, override the __init__ method
-                if not Config.TASKMODE:
-                    __dict__["__init__"] = Config.__init__
 
                 tp = type(tp.__name__, __bases__, __dict__)
         else:
@@ -116,6 +122,13 @@ class config:
         )
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
+        if originaltype.__module__ and originaltype.__module__ != "__main__":
+            objecttype._module = originaltype.__module__ 
+        else:
+            objecttype._module = None
+        objecttype._file = Path(inspect.getfile(originaltype)).absolute()
+
+
 
         # Adding type-hinted arguments
         if hasattr(originaltype, "__annotations__"):
@@ -138,7 +151,6 @@ class config:
                     )
                     objecttype.addArgument(argument)
 
-
         return tp
 
 
@@ -146,7 +158,7 @@ class Array(TypeProxy):
     """Array of object"""
 
     def __init__(self, type):
-        self.type = Type.fromType(type)
+        self.type = Type.fromType(type) if not Config.TASKMODE else None
 
     def __call__(self):
         return types.ArrayType(self.type)
@@ -186,6 +198,8 @@ class task(config):
 
         # Register the type
         tp = super().__call__(tp, originaltype=originaltype, basetype=objects.Task)
+        if Config.TASKMODE:
+            return tp
 
         # Construct command
         _type = tp.__xpm__.originaltype
@@ -194,19 +208,7 @@ class task(config):
         command.add(commandline.CommandString("-m"))
         command.add(commandline.CommandString("experimaestro"))
         command.add(commandline.CommandString("run"))
-
-        if _type.__module__ and _type.__module__ != "__main__":
-            logger.debug("task: using module %s [%s]", _type.__module__, _type)
-            command.add(commandline.CommandString(_type.__module__))
-        else:
-            filepath = Path(inspect.getfile(_type)).absolute()
-            logger.debug("task: using file %s [%s]", filepath, _type)
-            command.add(commandline.CommandString("--file"))
-            command.add(commandline.CommandPath(filepath))
-
-        command.add(commandline.CommandString(str(self.identifier)))
         command.add(commandline.CommandParameters())
-        command.add(commandline.CommandModules())
         commandLine = commandline.CommandLine()
         commandLine.add(command)
 
@@ -232,7 +234,7 @@ class param:
     ):
         # Determine if required
         self.name = name
-        self.type = Type.fromType(type) if type else None
+        self.type = Type.fromType(type) if type and not Config.TASKMODE else None
         self.help = help
         self.ignored = ignored
         self.default = default
@@ -241,6 +243,10 @@ class param:
         self.checker = checker
 
     def __call__(self, tp):
+        # Don't annotate in task mode
+        if Config.TASKMODE:
+            return tp
+
         # Get type from default if needed
         if self.type is None:
             if self.default is not None:
@@ -287,8 +293,13 @@ class pathargument(param):
         :param path: The relative path
         """
         super().__init__(name, type=Path, help=help)
-        self.generator = lambda jobcontext: jobcontext.jobpath / path
+        if inspect.isfunction(path):
+            self.generator = lambda jobcontext: jobcontext.jobpath / path(jobcontext)
+        else:
+            self.generator = lambda jobcontext: jobcontext.jobpath / path
 
+STDERR = lambda jobcontext: "%s.err" % jobcontext.name
+STDOUT = lambda jobcontext: "%s.out" % jobcontext.name
 
 class ConstantParam(argument):
     """

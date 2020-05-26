@@ -19,7 +19,7 @@ from .tasks import *
 from . import restart
 
 
-def test_simple():
+def test_simple_task():
     with TemporaryDirectory(prefix="xpm", suffix="helloworld") as workdir:
         assert isinstance(workdir, Path)
         with TemporaryExperiment("helloworld", workdir=workdir, maxwait=2):

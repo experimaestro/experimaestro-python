@@ -7,8 +7,9 @@ import io
 import fasteners
 import os
 import inspect
-from experimaestro.utils import logger
+import importlib
 from typing import Set
+from experimaestro.utils import logger
 from experimaestro.constants import CACHEPATH_VARNAME
 
 class HashComputer:
@@ -50,7 +51,7 @@ class HashComputer:
             self.hasher.update(HashComputer.OBJECT_ID)
             self.hasher.update(xpmtype.identifier.name.encode("utf-8"))
 
-            # Process task (if any)
+            # Add task parameters
             if value.__xpm__._task:
                 self.hasher.update(HashComputer.TASK_ID)
                 self.update(value.__xpm__._task)
@@ -79,27 +80,6 @@ class HashComputer:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
 
-def outputjson(jsonout, context, value, key=[]):
-    if isinstance(value, Config):
-        value.__xpm__._outputjson(jsonout, context, key)
-    elif isinstance(value, list):
-        with jsonout.subarray(*key) as arrayout:
-            for el in value:
-                outputjson(arrayout, context, el)
-    elif isinstance(value, dict):
-        with jsonout.subobject(*key) as objectout:
-            for name, el in value.items():
-                outputjson(objectout, context, el, [name])
-    elif isinstance(value, Path):
-        with jsonout.subobject(*key) as objectout:
-            objectout.write("$type", "path")
-            objectout.write("$value", str(value))
-    elif isinstance(value, (int, float, str)):
-        jsonout.write(*key, value)
-    else:
-        raise NotImplementedError("Cannot serialize objects of type %s", type(value))
-
-
 def updatedependencies(dependencies, value: "Config"):
     """Search recursively jobs to add them as dependencies"""
     if isinstance(value, Config):
@@ -116,20 +96,13 @@ def updatedependencies(dependencies, value: "Config"):
         raise NotImplementedError("update dependencies for type %s" % type(value))
 
 
-class FakeJob:
-    def __init__(self, path):
-        self.path = Path(path)
-        self.stdout = self.path.with_suffix(".out")
-        self.stderr = self.path.with_suffix(".err")
-
-
 class TaggedValue:
     def __init__(self, value):
         self.value = value
 
 
 class ConfigInformation:
-    """Holds experimaestro information for a Config object (config or task)"""
+    """Holds experimaestro information for a config (or task) instance"""
 
     # Set to true when loading from JSON
     LOADING = False
@@ -155,15 +128,6 @@ class ConfigInformation:
         self._sealed = False
 
 
-    def objectmodules(self, modules=set()):
-        """Returns all the modules"""
-        modules.add(self.pyobject.__module__)
-        for argument, value in self.xpmvalues():
-            if isinstance(value, Config):
-                value.__xpm__.objectmodules(modules)
-        return modules
-
-
     def set(self, k, v, bypass=False):
         if self._sealed:
             raise AttributeError("Object is read-only")
@@ -171,16 +135,9 @@ class ConfigInformation:
         try:
             argument = self.xpmtype.arguments.get(k, None)
             if argument:
-                # If argument, check the value
                 if not bypass and argument.generator:
                     raise AssertionError("Property %s is read-only" % (k))
                 object.__setattr__(self.pyobject, k, argument.type.validate(v))
-            elif k == "$type":
-                if not Config.TASKMODE:
-                    # Only check type if constructing the XP
-                    assert v == str(self.xpmtype.identifier)
-            elif k == "$job":
-                self.job = FakeJob(v)
             else:
                 raise AttributeError(
                     "Cannot set non existing attribute %s in %s" % (k, self.xpmtype)
@@ -328,29 +285,153 @@ class ConfigInformation:
 
         return self.pyobject
 
-    def _outputjson_inner(self, objectout, context):
-        objectout.write("$type", str(self.xpmtype.identifier))
-        if self.job:
-            objectout.write(
-                "$job",
-                str(
-                    self.job.launcher.connector.resolve(
-                        self.job.jobpath / self.job.name
-                    )
-                ),
-            )
+    # --- Serialization
+
+    @staticmethod
+    def _outputjsonobjects(value, jsonout, context, serialized):
+        """Output JSON objects"""
+        # objects
+        if isinstance(value, Config):
+            value.__xpm__._outputjson_inner(jsonout, context, serialized)
+        elif isinstance(value, list):
+            for el in value:
+                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
+        elif isinstance(value, dict):
+            for name, el in value.items():
+                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
+        elif isinstance(value, (Path, int, float, str)):
+            pass
+        else:
+            raise NotImplementedError("Cannot serialize objects of type %s", type(value))
+
+    @staticmethod
+    def _outputjsonvalue(key, value, jsonout, context):
+        """Output JSON value"""
+        if isinstance(value, Config):
+            with jsonout.subobject(*key) as obj:
+                obj.write("type", "python")
+                obj.write("value", id(value))
+        elif isinstance(value, list):
+            with jsonout.subarray(*key) as arrayout:
+                for el in value:
+                    ConfigInformation._outputjsonvalue([], el, arrayout, context)
+        elif isinstance(value, dict):
+            with jsonout.subobject(*key) as objectout:
+                for name, el in value.items():
+                    ConfigInformation._outputjsonvalue([name], el, objectout, context)
+        elif isinstance(value, Path):
+            with jsonout.subobject(*key) as objectout:
+                objectout.write("type", "path")
+                objectout.write("value", str(value))
+        elif isinstance(value, (int, float, str)):
+            jsonout.write(*key, value)
+        else:
+            raise NotImplementedError("Cannot serialize objects of type %s", type(value))
+
+
+    def _outputjson_inner(self, jsonstream, context, serialized: Set[int]):
+        # Already serialized (note that this prevents loops by throwing a stack overflow error)
+        if id(self.pyobject) in serialized:
+            return
+
+        # Serialize sub-objects
         for argument, value in self.xpmvalues():
-            outputjson(objectout, context, value, [argument.name])
+            ConfigInformation._outputjsonobjects(value, jsonstream, context, serialized)
+
+        with jsonstream.subobject() as objectout:
+        
+            # Serialize ourselves
+            objectout.write("id", id(self.pyobject))
+            if self.xpmtype._module:
+                objectout.write("module", self.xpmtype._module)
+            else:
+                objectout.write("file", str(self.xpmtype._file))
+            objectout.write("type", self.xpmtype.originaltype.__name__)
+
+            with objectout.subobject("fields") as jsonfields:
+                for argument, value in self.xpmvalues():
+                    ConfigInformation._outputjsonvalue([argument.name], value, jsonfields, value)
 
     def outputjson(self, out: io.TextIOBase, context):
+        """Outputs the json of this object
+
+        The format is an array of objects
+        [
+            {
+                "id": <ID of the object>,
+                "filename": <filename>, // if in a file
+                "module": <module>, // if in a module 
+                "type": <type>, // the type within the module or file
+                "fields": 
+                    { "key":  {"type": <type>, "value": <value>} }
+            }
+        ]
+
+        <type> is either a base type or a "python"
+        
+        The last object is the one that is serialized
+
+        Arguments:
+            out {io.TextIOBase} -- The output stream
+            context {[type]} -- the command context
+        """
         import jsonstreams
 
-        with jsonstreams.Stream(jsonstreams.Type.object, fd=out) as objectout:
-            self._outputjson_inner(objectout, context)
+        serialized : Set[int] = set()
+        with jsonstreams.Stream(jsonstreams.Type.array, fd=out) as arrayout:
+            self._outputjson_inner(arrayout, context, serialized)
 
     def _outputjson(self, jsonout, context, key=[]):
         with jsonout.subobject(*key) as objectout:
             self._outputjson_inner(objectout, context)
+
+    @staticmethod
+    def _objectFromParameters(value, objects):
+        if isinstance(value, list):
+            return [ConfigInformation._objectFromParameters(x, objects) for x in value]
+        if isinstance(value, dict):
+            if value["type"] == "python":
+                return objects[value["value"]]
+            if value["type"] == "path":
+                return Path(value["value"])
+            else:
+                raise Exception("Unhandled type: %s", value["type"])
+
+        return value
+
+    @staticmethod
+    def fromParameters(definitions):
+        o = None
+        objects = {}
+
+        for definition in definitions:
+            if "file" in definition:
+                path =  definition["file"]
+                loader = importlib.machinery.SourceFileLoader(path, path)
+                mod = loader.load_module()
+            else:
+                logger.debug("Importing module %s", definition["module"])
+                mod = importlib.import_module(definition["module"])
+
+            cls = getattr(mod, definition["type"])
+            o = object.__new__(cls)
+
+            istaskdef = isinstance(o, BaseTaskFunction)
+            if istaskdef:
+                o.arguments = {}
+
+            for name, value in definition["fields"].items():                    
+                v = ConfigInformation._objectFromParameters(value, objects)
+                if istaskdef:
+                    o.setvalue(name, v)
+                else:
+                    setattr(o, name, v)
+    
+            o.__init__()
+            objects[definition["id"]] = o
+
+        return o
+
 
     def add_dependencies(self, *dependencies):
         self.dependencies.extend(dependencies)
@@ -420,7 +501,7 @@ class Config():
 
         # Initialize with arguments
         for name, value in kwargs.items():
-            if name not in xpm.xpmtype.arguments and not name in ["$type", "$job"]:
+            if name not in xpm.xpmtype.arguments and not name in ["type", "$job"]:
                 if Config.TASKMODE:
                     # Do not set this attribute when running a task
                     logger.debug("Do not set %s (not in attributes)", name)
@@ -441,15 +522,6 @@ class Config():
         for name, value in self.__xpmtype__.arguments.items():
             if name not in kwargs and value.default is not None:
                 self.__xpm__.set(name, clone(value.default))
-
-        # call initialize
-        if Config.TASKMODE:
-            if hasattr(self, "__initialize__"):
-                try:
-                    self.__initialize__()
-                except Exception as e:
-                    logger.exception("Error while calling %s.__initialize__()", type(self).__name__)
-                    raise
 
 
     def __setattr__(self, name, value):
@@ -478,10 +550,6 @@ class Task(Config):
         """Submit this task"""
         return self.__xpm__.submit(workspace, launcher, dryrun=dryrun)
 
-    def init(self):
-        """Prepare object after creation"""
-        pass
-
     def stdout(self):
         return self.__xpm__.job.stdout
 
@@ -492,14 +560,20 @@ class Task(Config):
     def job(self):
         return self.__xpm__.job
 
+class BaseTaskFunction(Task): 
+    """Useful to identify a task function"""
+    def __init__(self, **kwargs):
+        if not Config.TASKMODE:
+            super().__init__(**kwargs)
+
+    def setvalue(self, key, value):
+        self.arguments[key] = value
+
+
 
 # XPM task as a function
 def gettaskclass(function, parents):
-    class TaskFunction(Task, *parents):
+    class TaskFunction(*parents, BaseTaskFunction): 
         def execute(self):
-            kwargs = {}
-            for argument, value in self.__xpm__.xpmvalues():
-                kwargs[argument.name] = value
-            function(**kwargs)
-
+            function(**self.arguments)
     return TaskFunction
