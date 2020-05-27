@@ -7,7 +7,10 @@ import time
 from rpyc.utils.server import OneShotServer
 import rpyc
 import threading
-from experimaestro.utils import logger
+import logging
+
+logger = logging.getLogger("rpyc")
+logger.setLevel(logging.WARNING)
 
 class client():
     def __init__(self, hostname: str, pythonpath: str, port: int = None):
@@ -39,7 +42,7 @@ class client():
         # Get the remote unix_path
         command = self.ssh()
         command.extend(["mktemp", "-d"])
-        logger.info("Runnning %s", command)
+        logger.debug("Runnning %s", command)
         p = run(command, capture_output=True)
         p.check_returncode()
         remote_unix_path = p.stdout.decode("utf-8").strip() + "/rpyc-server.sock"
@@ -48,7 +51,7 @@ class client():
         command = self.ssh(f"-L{local_unix_path}:{remote_unix_path}")
         command.extend([self.pythonpath, "-m", "experimaestro", "rpyc-server", "--clean", remote_unix_path])
         
-        logger.info("Runnning %s", command)
+        logger.debug("Runnning %s", command)
         process = Popen(command, stdout=PIPE)
         atexit.register(lambda process: process.kill(), process)
 
@@ -96,16 +99,16 @@ def cleanup(path):
 
 def start_server(unix_path, clean=None):
     service = ClassicService()
-    server = OneShotServer(socket_path=str(unix_path), listener_timeout=1, service=service)
+    server = OneShotServer(socket_path=str(unix_path), listener_timeout=1, service=service, logger=logger)
     def sayhello():
         while not server.active:
             time.sleep(.01)
         print("HELLO", flush=True)
-        logger.info("Server started")
+        logger.debug("Server started")
         
         time.sleep(5)
         if not service.connected:
-            logger.info("No inbound connection: stopping")
+            logger.warning("No inbound connection: stopping")
             server.close()
 
     threading.Thread(target=sayhello).start()
