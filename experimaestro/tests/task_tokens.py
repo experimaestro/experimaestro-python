@@ -2,7 +2,7 @@ from pathlib import Path
 import time
 import logging
 
-from experimaestro import task, argument, pathargument
+from experimaestro import task, argument, pathoption
 
 
 @argument("x", int)

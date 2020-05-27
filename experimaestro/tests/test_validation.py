@@ -7,7 +7,7 @@ from experimaestro import (
     task,
     Identifier,
     argument,
-    pathargument,
+    pathoption,
     ConstantParam,
     experiment,
 )
@@ -40,7 +40,7 @@ class B:
     pass
 
 
-@pathargument("path", "outdir")
+@pathoption("path", "outdir")
 @config()
 class C:
     pass
@@ -106,9 +106,9 @@ def test_subtype():
 
 
 def test_path():
-    """Test of @pathargument"""
+    """Test of @pathoption"""
 
-    @pathargument("value", "file.txt")
+    @pathoption("value", "file.txt")
     @config(valns.path.a)
     class A:
         pass
@@ -181,7 +181,7 @@ def test_child():
 # --- Path argument checks
 
 
-@pathargument("x", "x")
+@pathoption("x", "x")
 @config()
 class PathParent:
     pass

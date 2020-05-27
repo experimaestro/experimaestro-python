@@ -3,12 +3,13 @@ from pathlib import Path
 import threading
 import re
 import time
-from typing import Optional, Set
+from typing import Optional, Set, Union
 import enum
 import signal
 import asyncio
 import sys
 
+from .connectors import parsepath
 from .workspace import Workspace
 from .core.objects import Config
 from .utils import logger
@@ -231,6 +232,7 @@ class JobThread(threading.Thread):
         with Locks() as locks:
             try:
                 with self.job.scheduler.cv:
+                    self.job.scheduler.waitingjobs.add(self.job)
                     logger.info(
                         "Starting job %s with %d dependencies",
                         self.job,
@@ -276,11 +278,11 @@ class JobThread(threading.Thread):
             except ProcessThreadError:
                 # Thrown by the child process so we can exit gracefully
                 logger.debug("Graceful exit")
-                # We set state to none so nothing is done
+
+                # We set state to none so nothing is done (finally)
                 state = None
-                # We prevent locks to be unlocked
+                # We prevent locks to be unlocked (finally)
                 locks.detach()
-                return
 
             except JobError:
                 logger.warning("Error while running job")
@@ -418,7 +420,6 @@ class Scheduler:
                 dependency.check()
 
             self.jobs[job.identifier] = job
-            self.waitingjobs.add(job)
 
             for listener in self.listeners:
                 listener.job_submitted(job)
@@ -431,7 +432,7 @@ class Scheduler:
     def start(self, job: Job):
         with self.cv:
             if self.exitmode:
-                logger.warning("Exit mode: not starting")
+                logger.warning("Exit mode: not starting job")
                 return
             thread = JobThread(job)
             thread.daemon = True
@@ -448,7 +449,8 @@ class Scheduler:
             job.endtime = time.time()
             job.state = state
             logger.debug("Job %s has finished (%s)", job, job.state)
-            self.waitingjobs.remove(job)
+            if job in self.waitingjobs:
+                self.waitingjobs.remove(job)
             for dependency in job.dependents:
                 dependency.check()
             self.cv.notify_all()
@@ -466,10 +468,10 @@ class Scheduler:
 class experiment:
     """Experiment environment"""
 
-    def __init__(self, path: Path, name: str, *, port: int = None):
+    def __init__(self, path: Union[Path,str], name: str, *, port: int = None):
         from experimaestro.server import Server
 
-        self.workspace = Workspace(Path(path))
+        self.workspace = Workspace(parsepath(path))
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None
         if self.server:

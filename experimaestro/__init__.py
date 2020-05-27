@@ -4,19 +4,21 @@ from pathlib import Path
 from .annotations import (
     config,
     task,
-    argument,
     param,
     option,
+    pathoption,
+    configmethod,
     cache,
-    pathargument,
     Param,
     ConstantParam,
     Identifier,
     Array,
     tag,
-    configmethod,
     STDOUT,
-    STDERR
+    STDERR,
+
+    # deprecated
+    argument,
 )
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment

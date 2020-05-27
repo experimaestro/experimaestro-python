@@ -66,6 +66,15 @@ def run(parameters):
         task.execute()
 
 
+@click.option("--clean", is_flag=True, help="Remove the socket file and its enclosing directory")
+@click.argument("unix-path", type=Path)
+@cli.command()
+def rpyc_server(unix_path, clean):
+    """Start an rPyC server"""
+    from experimaestro.rpyc import start_server
+    start_server(unix_path, clean=clean)
+
+
 def main():
     cli(obj=None)
 

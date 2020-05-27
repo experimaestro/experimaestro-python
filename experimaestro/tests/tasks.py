@@ -5,7 +5,7 @@ tasks = Identifier("tasks")
 
 
 @argument("word", type=str, required=True, help="Word to generate")
-@pathargument("out", STDOUT)
+@pathoption("out", STDOUT)
 @task(tasks.say)
 class Say:
     def execute(self):
@@ -37,7 +37,7 @@ class ForeignTaskA:
         print(self.b.x)
 
 
-@pathargument("wait", "wait")
+@pathoption("wait", "wait")
 @task(tasks.fail)
 class Fail:
     def execute(self):

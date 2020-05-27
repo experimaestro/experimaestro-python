@@ -3,7 +3,7 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, pathargument, param, task
+from experimaestro import config, pathoption, param, task
 
 
 @param(name="a", type=int)
@@ -125,15 +125,15 @@ def test_path():
 
 # --- Test with added arguments
 
-def test_pathargument():
+def test_pathoption():
     """Path arguments should be ignored"""
-    @pathargument("path", "path")
+    @pathoption("path", "path")
     @param(name="a", type=int)
-    @config("pathargument_test", register=False)
+    @config("pathoption_test", register=False)
     class A_with_path: pass
 
     @param(name="a", type=int)
-    @config("pathargument_test", register=False)
+    @config("pathoption_test", register=False)
     class A_without_path: pass
 
     assert_equal(A_with_path(a=1), A_without_path(a=1))

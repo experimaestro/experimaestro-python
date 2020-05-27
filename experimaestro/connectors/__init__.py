@@ -9,7 +9,7 @@ This module contains :
 """
 
 import enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 from pathlib import Path, PosixPath
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
@@ -115,3 +115,22 @@ class Connector:
     def createtoken(self, name: str, total: int) -> Token:
         """Returns a token in the default path for the connector"""
         raise NotImplementedError()
+
+class Locator:
+    pass
+
+def parsepath(path: Union[str, Path]) -> Path:
+    """Parse a path
+    
+    Returns a local path or a SshPath
+    """
+    from urllib.parse import urlparse
+    
+    if isinstance(path, Path):
+        return path
+
+    if isinstance(path, str) and path.startswith("ssh:"):
+        from .ssh import SshPath
+        return SshPath(path)
+
+    return Path(path)

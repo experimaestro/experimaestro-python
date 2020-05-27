@@ -285,7 +285,7 @@ class option(param):
 
 
 
-class pathargument(param):
+class pathoption(param):
     """Defines a an argument that will be a relative path (automatically
     set by experimaestro)"""
 

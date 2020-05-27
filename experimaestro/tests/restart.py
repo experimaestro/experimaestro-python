@@ -1,6 +1,6 @@
 import time
 import sys
-from experimaestro import task, argument, pathargument, experiment
+from experimaestro import task, argument, pathoption, experiment
 
 if __name__ == "__main__":
     import logging
@@ -8,8 +8,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
 
-@pathargument("touch", "touch")
-@pathargument("wait", "wait")
+@pathoption("touch", "touch")
+@pathoption("wait", "wait")
 @task("restart")
 class Restart:
     def execute(self):

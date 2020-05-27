@@ -59,7 +59,7 @@ or if a configuration should be returned (here, `Model`)
 
     @argument("epochs", type=int, default=100)
     @argument("model", type=Model, required=True)
-    @pathargument("parameters", "parameters.pth")
+    @pathoption("parameters", "parameters.pth")
     @task()
     class ModelLearn:
         def config(self) -> Model:
@@ -87,7 +87,7 @@ Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument; if not given, it will be inferred from `default` (if defined) or be `Any`
 - `default` default value of the argument. *If the value equals to the default, the argument will not be included in the signature computation*.
-- `ignored` to ignore the argument in the signature computation.
+- `ignored` to ignore the argument in the signature computation (whatever its value).
 - `help` a string to document the option; it can be used when the argument is used in a command line or when generating a documentation (*planned*).
 
 Instead of using annotations, it is possible to use class variables
@@ -103,12 +103,14 @@ and type hints (**warning**: experimental syntax), as follows:
         model: Param[Model]
     ```
 
+### Options
 
+Options are just a simple shortcut to define a parameter with the `ignored` flag set. I
 
-## Path arguments
+### Path option
 
 ```python
-@pathargument(name: str, path: str, help: Optional[str] = None)
+@pathoption(name: str, path: str, help: Optional[str] = None)
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
