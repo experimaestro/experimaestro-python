@@ -32,8 +32,9 @@ jobs:
     - run:
         name: Upload
         command: |
+          echo "Checking version $(python setup.py --version) vs $CIRCLE_TAG"
           if [ "$(python setup.py --version)" = "$CIRCLE_TAG" ]; then
-            echo "Uploading using twine"
+            echo "Uploading using twine ($CIRCLE_TAG)"
             echo -e "[pypi]" >> ~/.pypirc
             echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
             echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
