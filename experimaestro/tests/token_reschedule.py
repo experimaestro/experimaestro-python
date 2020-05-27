@@ -4,13 +4,15 @@ if __name__ == "__main__":
     from pathlib import Path
     import time
 
+    logging.basicConfig(level=logging.DEBUG)
+
     from experimaestro.scheduler import JobState
     from experimaestro.tests.utils import TemporaryExperiment, TemporaryDirectory, timeout
     from experimaestro.tests.task_tokens import TokenTask
 
     workdir, x, lockingpath, readypath, timepath = sys.argv[1:]
     with TemporaryExperiment("reschedule%s" % x, workdir=workdir) as xp:
-        logging.info("Reschedule with token [%d]: starting task in %s", x, workdir)
+        logging.info("Reschedule with token [%s]: starting task in %s", x, workdir)
         token = xp.workspace.connector.createtoken("test-token-reschedule", 1)
         task = (
             TokenTask(path=lockingpath, x=x)
@@ -21,8 +23,11 @@ if __name__ == "__main__":
         while task.job.state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
+        # Write so that the test now we are ready
         Path(readypath).write_text("hello")
-        logging.info("Reschedule with token [%d]: ready", x)
+        logging.info("Reschedule with token [%s]: ready", x)
 
-    logging.info("Reschedule with token [%d]: finished", x)
-    Path(timepath).write_text(Path(task.stdout()).read_text())
+        # Wait until the experiment
+        task.job.wait()
+        logging.info("Reschedule with token [%s]: finished", x)
+        Path(timepath).write_text(Path(task.stdout()).read_text())

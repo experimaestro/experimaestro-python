@@ -427,14 +427,13 @@ class ConfigInformation:
 
             istaskdef = isinstance(o, BaseTaskFunction)
             if istaskdef:
-                o.arguments = {}
+                o.__arguments__ = set()
 
             for name, value in definition["fields"].items():                    
                 v = ConfigInformation._objectFromParameters(value, objects)
                 if istaskdef:
-                    o.setvalue(name, v)
-                else:
-                    setattr(o, name, v)
+                    o.__arguments__.add(name)
+                setattr(o, name, v)
     
             o.__init__()
             objects[definition["id"]] = o
@@ -492,6 +491,7 @@ class Config():
 
     # Set to true when executing a task to remove all checks
     TASKMODE = False
+    STACK_LEVEL = 1
 
     def __init__(self, **kwargs):
         # Add configuration
@@ -503,18 +503,15 @@ class Config():
             assert isinstance(self.__xpmtype__, ObjectType)
 
         xpm = ConfigInformation(self)
-        caller = inspect.getframeinfo(inspect.stack()[1][0])
+        caller = inspect.getframeinfo(inspect.stack()[self.STACK_LEVEL][0])
         xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
 
         self.__xpm__ = xpm
 
         # Initialize with arguments
         for name, value in kwargs.items():
-            if name not in xpm.xpmtype.arguments and not name in ["type", "$job"]:
-                if Config.TASKMODE:
-                    # Do not set this attribute when running a task
-                    logger.debug("Do not set %s (not in attributes)", name)
-                    continue
+            # Check if argument is OK
+            if name not in xpm.xpmtype.arguments:
                 raise ValueError(
                     "%s is not an argument for %s" % (name, self.__xpmtype__)
                 )
@@ -570,19 +567,18 @@ class Task(Config):
         return self.__xpm__.job
 
 class BaseTaskFunction(Task): 
+    STACK_LEVEL=2
+
     """Useful to identify a task function"""
     def __init__(self, **kwargs):
         if not Config.TASKMODE:
             super().__init__(**kwargs)
-
-    def setvalue(self, key, value):
-        self.arguments[key] = value
-
 
 
 # XPM task as a function
 def gettaskclass(function, parents):
     class TaskFunction(*parents, BaseTaskFunction): 
         def execute(self):
-            function(**self.arguments)
+            kwargs =  {a: getattr(self, a) for a in self.__arguments__}
+            function(**kwargs)
     return TaskFunction

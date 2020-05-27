@@ -4,7 +4,6 @@ import logging
 
 logger = logging.getLogger("xpm")
 
-
 def aspath(path: Union[str, Path]):
     if isinstance(path, Path):
         return path
