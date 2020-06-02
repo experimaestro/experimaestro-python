@@ -1,7 +1,7 @@
 from pathlib import Path, PosixPath
 from typing import Dict, Optional
 from experimaestro.connectors.local import Connector, LocalConnector
-
+from experimaestro.connectors.ssh import SshPath, SshConnector
 
 class Launcher:
     def __init__(self, connector: "experimaestro.connectors.Connector"):
@@ -22,4 +22,8 @@ class Launcher:
             from .unix import UnixLauncher
 
             return UnixLauncher(LocalConnector())
+
+        if isinstance(path, SshPath):
+            from .unix import UnixLauncher
+            return UnixLauncher(SshConnector.fromPath(path))
         raise ValueError("Cannot create a default launcher for %s", type(path))

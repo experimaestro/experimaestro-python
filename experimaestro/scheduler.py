@@ -9,6 +9,7 @@ import signal
 import asyncio
 import sys
 
+from .environment import Environment
 from .connectors import parsepath
 from .workspace import Workspace
 from .core.objects import Config
@@ -252,7 +253,6 @@ class JobThread(threading.Thread):
                             dependency.check()
                             return
 
-                    logger.info("Running job %s", self.job)
                     self.job.scheduler.jobstarted(self.job)
                     self.job.starttime = time.time()
                     process = self.job.run(locks)
@@ -466,12 +466,17 @@ class Scheduler:
 
 
 class experiment:
-    """Experiment environment"""
+    """Experiment context"""
 
-    def __init__(self, path: Union[Path,str], name: str, *, port: int = None):
+    def __init__(self, env: Union[Path,str,Environment], name: str, *, port: int = None):
         from experimaestro.server import Server
 
-        self.workspace = Workspace(parsepath(path))
+        if isinstance(env, Environment):
+            self.environment = env
+        else:
+            self.environment = Environment(workdir=env)
+
+        self.workspace = Workspace(self.environment.workdir)
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None
         if self.server:

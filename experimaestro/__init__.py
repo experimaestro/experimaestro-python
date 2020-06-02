@@ -20,6 +20,7 @@ from .annotations import (
     # deprecated
     argument,
 )
+from .environment import Environment
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment
 from .notifications import progress

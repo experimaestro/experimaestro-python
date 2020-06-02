@@ -44,7 +44,7 @@ class Dependency:
         status = self.status()
         logger.debug("Dependency check: %s", self)
         if status != self.currentstatus:
-            logger.info(
+            logger.debug(
                 "Dependency %s is %s (was: %s)", self, status, self.currentstatus
             )
             self.target.dependencychanged(self, self.currentstatus, status)

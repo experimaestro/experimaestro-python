@@ -102,7 +102,7 @@ class Connector:
     def processbuilder(self) -> ProcessBuilder:
         raise NotImplementedError()
 
-    def lock(self, path: Path) -> Lock:
+    def lock(self, path: Path, max_delay: int = -1) -> Lock:
         """Returns a lock on a file"""
         raise NotImplementedError()
 

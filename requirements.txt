@@ -6,7 +6,7 @@ fasteners
 psutil
 websockets
 jsonstreams
-
+pytools
 watchdog
 
 # SSH support (fabric is built on Paramiko, 
