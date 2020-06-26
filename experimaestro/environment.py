@@ -41,9 +41,9 @@ class Settings(JsonSettings):
 
 @schema(EnvironmentSchema)
 class Environment: 
-    def __init__(self):
+    def __init__(self, workdir=None):
         self.hostname = None
-        self._workdir = "."
+        self._workdir = workdir 
         self.pythonpath = None
         self.environ = {}
 
