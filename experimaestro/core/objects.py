@@ -6,6 +6,7 @@ import struct
 import io
 import fasteners
 import os
+import shutil
 import inspect
 import importlib
 from typing import Set
@@ -80,16 +81,16 @@ class HashComputer:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
 
-def updatedependencies(dependencies, value: "Config"):
+def updatedependencies(dependencies, value: "Config", path):
     """Search recursively jobs to add them as dependencies"""
     if isinstance(value, Config):
         if value.__xpmtype__.task:
             dependencies.add(value.__xpm__.dependency())
         else:
-            value.__xpm__.updatedependencies(dependencies)
+            value.__xpm__.updatedependencies(dependencies, path)
     elif isinstance(value, list):
         for el in value:
-            updatedependencies(dependencies, el)
+            updatedependencies(dependencies, el, path)
     elif isinstance(value, (str, int, float, Path)):
         pass
     else:
@@ -242,14 +243,18 @@ class ConfigInformation:
         """Returns a dependency"""
         from experimaestro.scheduler import JobDependency
 
-        assert self.job
+        assert self.job, f"{self.xpmtype} is a task but was not submitted"
         return JobDependency(self.job)
 
     def updatedependencies(
-        self, dependencies: Set["experimaestro.dependencies.Dependency"]
+        self, dependencies: Set["experimaestro.dependencies.Dependency"], path
     ):
         for argument, value in self.xpmvalues():
-            updatedependencies(dependencies, value)
+            try:
+                updatedependencies(dependencies, value, path + [argument.name])
+            except:
+                logger.error("While setting %s", path + [argument.name])
+                raise
 
     def submit(self, workspace, launcher, dryrun=False):
         # --- Prepare the object
@@ -269,7 +274,7 @@ class ConfigInformation:
         self.seal(self.job)
 
         # --- Search for dependencies
-        self.updatedependencies(self.job.dependencies)
+        self.updatedependencies(self.job.dependencies, [])
         self.job.dependencies.update(self.dependencies)
 
         if not dryrun and Scheduler.CURRENT.submitjobs:
@@ -464,8 +469,8 @@ def clone(v):
 
 
 def cache(fn, name: str):
-    def __call__(config):
-        # Get path
+    def __call__(config, *args, **kwargs):
+        # Get path and create directory if needed
         hexid = config.__xpmidentifier__
         typename = config.__xpmtypename__
         dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
@@ -477,11 +482,13 @@ def cache(fn, name: str):
         )
         with ipc_lock:
             try:
-                return fn(config, path)
+                return fn(config, path, *args, **kwargs)
             except:
                 # Remove path
                 if path.is_file():
                     path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path)
                 raise
     return __call__
 
