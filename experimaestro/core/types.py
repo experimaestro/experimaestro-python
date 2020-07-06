@@ -238,6 +238,9 @@ class ArrayType(Type):
     def __init__(self, type: Type):
         self.type = type
 
+    def name(self):
+        return f"Array[{self.type.name()}]"
+
     def validate(self, value):
         if not isinstance(value, List):
             raise ValueError("value is not a list")

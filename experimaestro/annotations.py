@@ -103,6 +103,7 @@ class config:
             }
 
             tp = type(tp.__name__, __bases__, __dict__)
+            tp.__module__ = originaltype.__module__
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
