@@ -9,6 +9,9 @@ jsonstreams
 pytools
 watchdog
 
+# Configuration
+marshmallow
+
 # SSH support (fabric is built on Paramiko, 
 # and allows using OpenSSH config out of the box)
 fabric
