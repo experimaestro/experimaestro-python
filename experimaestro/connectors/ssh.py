@@ -21,10 +21,10 @@ class SshPath(Path, PurePosixPath):
     """SSH path
 
     Absolute:
-    ssh://host//this/is/a/path
+    ssh://[user@]host[:port]//this/is/a/path
 
     Relative:
-    ssh://host/relative/path
+    ssh://[user@]host[:port]/relative/path
     """
     @property
     def hostpath(self):
@@ -62,9 +62,10 @@ class SshPath(Path, PurePosixPath):
 
     def _make_child(self, args):
         drv, root, parts = self._parse_args(args)
+        assert self._drv == drv or drv == "", f"{self._drv} and {drv}"
         drv, root, parts = self._flavour.join_parsed_parts(
-            self._drv, self._root, self._parts, drv, root, parts)
-        return self._from_parsed_parts(drv, root, parts)
+            "", self._root, self._parts, "", root, parts)
+        return self._from_parsed_parts(self._drv, root, parts)
 
     def open(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         # FIXME: should probably be wiser

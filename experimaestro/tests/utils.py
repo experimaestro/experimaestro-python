@@ -27,6 +27,7 @@ class TemporaryDirectory:
         if os.environ.get("XPM_KEEPWORKDIR", False) == "1":
             logging.warning("NOT Removing %s" % self.path)
         else:
+            logging.warning("CLLLLLEAEANING UP %s", self.path)
             shutil.rmtree(self.path, ignore_errors=True)
 
 

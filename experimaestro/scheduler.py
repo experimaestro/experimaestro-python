@@ -233,7 +233,6 @@ class JobThread(threading.Thread):
         with Locks() as locks:
             try:
                 with self.job.scheduler.cv:
-                    self.job.scheduler.waitingjobs.add(self.job)
                     logger.info(
                         "Starting job %s with %d dependencies",
                         self.job,
@@ -412,6 +411,9 @@ class Scheduler:
             job.submittime = time.time()
             job.scheduler = self
 
+            # Add to waiting jobs
+            self.waitingjobs.add(job)
+            
             # Add dependencies, and add to blocking resources
             job.unsatisfied = len(job.dependencies)
             for dependency in job.dependencies:
