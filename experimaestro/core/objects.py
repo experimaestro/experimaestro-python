@@ -13,6 +13,7 @@ from typing import Set
 from experimaestro.utils import logger
 from experimaestro.constants import CACHEPATH_VARNAME
 
+
 class HashComputer:
     OBJECT_ID = b"\x00"
     INT_ID = b"\x01"
@@ -116,7 +117,7 @@ class ConfigInformation:
         # Meta-informations
         self._tags = {}
         self._initinfo = {}
-        self._task = None # type: Task
+        self._task = None  # type: Task
 
         # State information
         self.job = None
@@ -127,7 +128,6 @@ class ConfigInformation:
         self._identifier = None
         self._validated = False
         self._sealed = False
-
 
     def set(self, k, v, bypass=False):
         if self._sealed:
@@ -208,13 +208,14 @@ class ConfigInformation:
                         value.__xpm__.validate()
                 elif argument.required:
                     if not argument.generator:
-                        raise ValueError("Value %s is required but missing when building %s at %s" 
-                            % (k, self.xpmtype, self._initinfo))
+                        raise ValueError(
+                            "Value %s is required but missing when building %s at %s"
+                            % (k, self.xpmtype, self._initinfo)
+                        )
 
             # Use __validate__ method
             if hasattr(self.pyobject, "__validate__"):
                 self.pyobject.__validate__()
-
 
     def seal(self, job: "experimaestro.scheduler.Job"):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
@@ -307,7 +308,9 @@ class ConfigInformation:
         elif isinstance(value, (Path, int, float, str)):
             pass
         else:
-            raise NotImplementedError("Cannot serialize objects of type %s", type(value))
+            raise NotImplementedError(
+                "Cannot serialize objects of type %s", type(value)
+            )
 
     @staticmethod
     def _outputjsonvalue(key, value, jsonout, context):
@@ -331,8 +334,9 @@ class ConfigInformation:
         elif isinstance(value, (int, float, str)):
             jsonout.write(*key, value)
         else:
-            raise NotImplementedError("Cannot serialize objects of type %s", type(value))
-
+            raise NotImplementedError(
+                "Cannot serialize objects of type %s", type(value)
+            )
 
     def _outputjson_inner(self, jsonstream, context, serialized: Set[int]):
         # Already serialized (note that this prevents loops by throwing a stack overflow error)
@@ -344,7 +348,7 @@ class ConfigInformation:
             ConfigInformation._outputjsonobjects(value, jsonstream, context, serialized)
 
         with jsonstream.subobject() as objectout:
-        
+
             # Serialize ourselves
             objectout.write("id", id(self.pyobject))
             if self.xpmtype._module:
@@ -360,7 +364,9 @@ class ConfigInformation:
 
             with objectout.subobject("fields") as jsonfields:
                 for argument, value in self.xpmvalues():
-                    ConfigInformation._outputjsonvalue([argument.name], value, jsonfields, value)
+                    ConfigInformation._outputjsonvalue(
+                        [argument.name], value, jsonfields, value
+                    )
 
     def outputjson(self, out: io.TextIOBase, context):
         """Outputs the json of this object
@@ -370,15 +376,15 @@ class ConfigInformation:
             {
                 "id": <ID of the object>,
                 "filename": <filename>, // if in a file
-                "module": <module>, // if in a module 
+                "module": <module>, // if in a module
                 "type": <type>, // the type within the module or file
-                "fields": 
+                "fields":
                     { "key":  {"type": <type>, "value": <value>} }
             }
         ]
 
         <type> is either a base type or a "python"
-        
+
         The last object is the one that is serialized
 
         Arguments:
@@ -387,7 +393,7 @@ class ConfigInformation:
         """
         import jsonstreams
 
-        serialized : Set[int] = set()
+        serialized: Set[int] = set()
         with jsonstreams.Stream(jsonstreams.Type.array, fd=out) as arrayout:
             self._outputjson_inner(arrayout, context, serialized)
 
@@ -416,7 +422,7 @@ class ConfigInformation:
 
         for definition in definitions:
             if "file" in definition:
-                path =  definition["file"]
+                path = definition["file"]
                 loader = importlib.machinery.SourceFileLoader(path, path)
                 mod = loader.load_module()
             else:
@@ -434,17 +440,16 @@ class ConfigInformation:
             if istaskdef:
                 o.__arguments__ = set()
 
-            for name, value in definition["fields"].items():                    
+            for name, value in definition["fields"].items():
                 v = ConfigInformation._objectFromParameters(value, objects)
                 if istaskdef:
                     o.__arguments__.add(name)
                 setattr(o, name, v)
-    
+
             o.__init__()
             objects[definition["id"]] = o
 
         return o
-
 
     def add_dependencies(self, *dependencies):
         self.dependencies.extend(dependencies)
@@ -459,13 +464,14 @@ def clone(v):
 
     if isinstance(v, Config):
         # Create a new instance
-        kwargs = {argument.name: clone(value) for argument, value in v.__xpm__.xpmvalues()}
-        
+        kwargs = {
+            argument.name: clone(value) for argument, value in v.__xpm__.xpmvalues()
+        }
+
         config = type(v).__new__(type(v))
         return type(v)(**kwargs)
-        
-    raise NotImplementedError("For type %s" % v)
 
+    raise NotImplementedError("For type %s" % v)
 
 
 def cache(fn, name: str):
@@ -475,11 +481,9 @@ def cache(fn, name: str):
         typename = config.__xpmtypename__
         dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
         dir.mkdir(parents=True, exist_ok=True)
-        
+
         path = dir / name
-        ipc_lock = fasteners.InterProcessLock(
-            path.with_suffix(path.suffix + ".lock")
-        )
+        ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
         with ipc_lock:
             try:
                 return fn(config, path, *args, **kwargs)
@@ -490,10 +494,11 @@ def cache(fn, name: str):
                 elif path.is_dir():
                     shutil.rmtree(path)
                 raise
+
     return __call__
 
 
-class Config():
+class Config:
     """Base type for all objects in python interface"""
 
     # Set to true when executing a task to remove all checks
@@ -536,7 +541,6 @@ class Config():
             if name not in kwargs and value.default is not None:
                 self.__xpm__.set(name, clone(value.default))
 
-
     def __setattr__(self, name, value):
         if not Config.TASKMODE and not name.startswith("__xpm"):
             return self.__xpm__.set(name, value)
@@ -545,6 +549,10 @@ class Config():
     def tag(self, name, value) -> "Config":
         self.__xpm__.addtag(name, value)
         return self
+
+    def __arguments__(self):
+        """Returns a map containing all the arguments"""
+        return {arg.name: value for arg, value in self.__xpm__.xpmvalues()}
 
     def tags(self):
         """Returns the tag associated with this object (and below)"""
@@ -573,10 +581,12 @@ class Task(Config):
     def job(self):
         return self.__xpm__.job
 
-class BaseTaskFunction(Task): 
-    STACK_LEVEL=2
+
+class BaseTaskFunction(Task):
+    STACK_LEVEL = 2
 
     """Useful to identify a task function"""
+
     def __init__(self, **kwargs):
         if not Config.TASKMODE:
             super().__init__(**kwargs)
@@ -584,8 +594,9 @@ class BaseTaskFunction(Task):
 
 # XPM task as a function
 def gettaskclass(function, parents):
-    class TaskFunction(*parents, BaseTaskFunction): 
+    class TaskFunction(*parents, BaseTaskFunction):
         def execute(self):
-            kwargs =  {a: getattr(self, a) for a in self.__arguments__}
+            kwargs = {a: getattr(self, a) for a in self.__arguments__}
             function(**kwargs)
+
     return TaskFunction
