@@ -279,7 +279,10 @@ class ConfigInformation:
         self.job.dependencies.update(self.dependencies)
 
         if not dryrun and Scheduler.CURRENT.submitjobs:
-            Scheduler.CURRENT.submit(self.job)
+            other = Scheduler.CURRENT.submit(self.job)
+            if other:
+                # Just returns the other task
+                return other.config
         else:
             logger.warning("Simulating: not submitting job %s", self.job)
 

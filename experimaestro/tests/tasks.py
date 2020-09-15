@@ -4,12 +4,21 @@ from experimaestro import *
 tasks = Identifier("tasks")
 
 
+@argument("x", type=int)
+@task()
+class SimpleTask:
+    def execute(self):
+        print(self.x)
+
+
 @argument("word", type=str, required=True, help="Word to generate")
 @pathoption("out", STDOUT)
 @task(tasks.say)
 class Say:
     def execute(self):
-        print(self.word.upper(),)
+        print(
+            self.word.upper(),
+        )
 
 
 @argument("strings", type=Array(Say), help="Strings to concat")
@@ -73,6 +82,8 @@ class SetUnknown:
 
 
 """Check that config works properly"""
+
+
 @config()
 class CacheConfig:
     @cache("cached")
@@ -80,6 +91,7 @@ class CacheConfig:
         if not path.is_file():
             path.write_text("hello")
         return path.read_text()
+
 
 @param("data", type=CacheConfig)
 @task()

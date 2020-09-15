@@ -56,13 +56,13 @@ class CommandContext:
         connector: Connector,
         path: Path,
         name: str,
-        parameters: Config,
+        config: Config,
     ):
         self.workspace = workspace
         self.connector = connector
         self.path = path
         self.name = name
-        self.parameters = parameters
+        self.config = config
         self.namedPipeRedirectionsMap: Dict["CommandPart", NamedPipeRedirections] = {}
         self.auxiliary: Dict[str, int] = {}
 
@@ -127,7 +127,7 @@ class CommandParameters(AbstractCommandComponent):
     def output(self, context: CommandContext, out: io.TextIOBase):
         path = context.getAuxiliaryFile("params", ".json")
         with path.open("wt") as fileout:
-            context.parameters.__xpm__.outputjson(fileout, context)
+            context.config.__xpm__.outputjson(fileout, context)
         out.write(context.relpath(path))
 
 
@@ -236,10 +236,16 @@ class PsutilProcess:
 
 class CommandLineJob(Job):
     def __init__(
-        self, commandline: CommandLine, parameters, workspace=None, launcher=None,
-        dryrun=False
+        self,
+        commandline: CommandLine,
+        parameters,
+        workspace=None,
+        launcher=None,
+        dryrun=False,
     ):
-        super().__init__(parameters, workspace=workspace, launcher=launcher,dryrun=dryrun)
+        super().__init__(
+            parameters, workspace=workspace, launcher=launcher, dryrun=dryrun
+        )
         self.commandline = commandline
 
     @property
@@ -306,5 +312,9 @@ class CommandLineTask:
 
     def __call__(self, pyobject, *, launcher=None, workspace=None, dryrun=False) -> Job:
         return CommandLineJob(
-            self.commandline, pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
+            self.commandline,
+            pyobject,
+            launcher=launcher,
+            workspace=workspace,
+            dryrun=dryrun,
         )

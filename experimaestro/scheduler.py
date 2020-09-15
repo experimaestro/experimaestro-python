@@ -72,7 +72,7 @@ class Job(Resource):
 
     def __init__(
         self,
-        parameters: Config,
+        config: Config,
         *,
         workspace: Workspace = None,
         launcher: "experimaestro.launchers" = None,
@@ -89,11 +89,11 @@ class Job(Resource):
                 "No launcher, and no default defined for the workspace %s" % workspace
             )
 
-        self.type = parameters.__xpmtype__
+        self.type = config.__xpmtype__
         self.name = str(self.type.identifier).rsplit(".", 1)[-1]
 
         self.scheduler: Optional["Scheduler"] = None
-        self.parameters = parameters
+        self.config = config
         self.state: JobState = JobState.UNSCHEDULED
 
         # Dependencies
@@ -108,7 +108,7 @@ class Job(Resource):
         self.submittime: Optional[float] = None
         self.endtime: Optional[float] = None
         self._progress = 0.0
-        self.tags = parameters.tags()
+        self.tags = config.tags()
 
     def __str__(self):
         return "Job[{}]".format(self.identifier)
@@ -134,7 +134,7 @@ class Job(Resource):
 
     @property
     def identifier(self):
-        return self.parameters.__xpm__.identifier.hex()
+        return self.config.__xpm__.identifier.hex()
 
     def run(self, locks):
         """Actually run the code"""
@@ -224,7 +224,7 @@ class JobThread(threading.Thread):
 
     def run(self):
         """Run a job
-        
+
         This method will lock all the dependencies before calling `self.job.run(locks)`
         where `locks` are the taken locks
         """
@@ -405,15 +405,17 @@ class Scheduler:
                 return
 
             if job.identifier in self.jobs:
-                logger.warning("Job %s already submitted", job)
-                return
+                other = self.jobs[job.identifier]
+                assert job.type == other.type
+                logger.warning("Job %s already submitted", job.identifier)
+                return other
 
             job.submittime = time.time()
             job.scheduler = self
 
             # Add to waiting jobs
             self.waitingjobs.add(job)
-            
+
             # Add dependencies, and add to blocking resources
             job.unsatisfied = len(job.dependencies)
             for dependency in job.dependencies:
@@ -470,7 +472,9 @@ class Scheduler:
 class experiment:
     """Experiment context"""
 
-    def __init__(self, env: Union[Path,str,Environment], name: str, *, port: int = None):
+    def __init__(
+        self, env: Union[Path, str, Environment], name: str, *, port: int = None
+    ):
         from experimaestro.server import Server
 
         if isinstance(env, Environment):

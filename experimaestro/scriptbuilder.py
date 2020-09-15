@@ -80,7 +80,7 @@ class ShScriptBuilder:
         directorypath = connector.resolve(directory)
         ws = job.workspace
         context = ShCommandContext(
-            ws, job.launcher.connector, directory, job.name, job.parameters
+            ws, job.launcher.connector, directory, job.name, job.config
         )
 
         relpath = lambda path: shquote(context.relpath(path))
@@ -98,7 +98,7 @@ class ShScriptBuilder:
 
             # Output tags
             out.write("# __tags__ = ")
-            for key, value in job.parameters.tags().items():
+            for key, value in job.config.tags().items():
                 out.write("%s: %s" % (key, value))
             out.write("\n\n")
 

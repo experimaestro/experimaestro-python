@@ -158,10 +158,12 @@ def test_restart(terminate):
             p.terminate()
 
 
-@pytest.mark.skip("Test to implemented")
 def test_submitted_twice():
-    """Check that a job cannot be submitted twice"""
-    pass
+    """Check that a job cannot be submitted twice within the same experiment"""
+    with TemporaryExperiment("duplicate", maxwait=10) as xp:
+        task1 = SimpleTask(x=1).submit()
+        task2 = SimpleTask(x=1).submit()
+        assert task1 is task2, f"{id(task1)} != {id(task2)}"
 
 
 def test_configcache():
@@ -171,4 +173,3 @@ def test_configcache():
         task = CacheConfigTask(data=CacheConfig()).submit()
 
     assert task.__xpm__.job.wait() == JobState.DONE
-
