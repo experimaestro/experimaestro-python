@@ -1,4 +1,4 @@
-class Checker: 
+class Checker:
     def check(self, value):
         """Check the value"""
         raise NotImplementedError()
@@ -9,7 +9,7 @@ class Choices(Checker):
         self.choices = choices
 
     def check(self, value):
-        for choice in choices:
+        for choice in self.choices:
             if value == choice:
                 return True
         return False

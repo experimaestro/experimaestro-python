@@ -4,8 +4,6 @@ from experimaestro import parse_commandline, Environment
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
 
 
-
-
 @click.group()
 def cli():
     """Main entry point for CLI"""
@@ -19,19 +17,20 @@ def xpm(context):
     parse_commandline(context)
 
 
-
-
 class forwardoptionMetaclass(type):
-  def __getattr__(self, key):
+    def __getattr__(self, key):
         """Access to a class field"""
         return forwardoption([key])
+
 
 class forwardoption(metaclass=forwardoptionMetaclass):
     """Allows to access an argument of the configuration
 
     This allows to refer to a path of a class in a "python" syntax, e.g.
-    `@forwardoption.ranker.optimizer.epsilon(MyConfig)` or `@forwardoption.ranker.optimizer.epsilon(MyConfig, "option-name")`
+    `@forwardoption.ranker.optimizer.epsilon(MyConfig)` or
+    `@forwardoption.ranker.optimizer.epsilon(MyConfig, "option-name")`
     """
+
     def __init__(self, path=[]):
         self.path = path
 
@@ -40,7 +39,6 @@ class forwardoption(metaclass=forwardoptionMetaclass):
         for c in self.path[1:]:
             argument = getattr(current, c)
 
-        xpmtype = argument.type
         name = "--%s" % (option_name or argument.name.replace("_", "-"))
         default = argument.default
         # TODO: set the type of the option when not a simple type
@@ -53,20 +51,32 @@ class forwardoption(metaclass=forwardoptionMetaclass):
 
 def environment(name: str):
     def annotate(f):
-        def callback_env(ctx, param, value):
+        def callback_env(ctx, name, value):
             if value:
-                assert not name in ctx.params, "Environment has already been set"
+                assert name not in ctx.params, "Environment has already been set"
             else:
                 return ctx.params.get(name, None)
             return Environment.get(value)
 
         def callback(ctx, param, value):
             if value:
-                if not name in ctx.params:
+                if name not in ctx.params:
                     ctx.params[name] = Environment()
                 ctx.params[name].workdir = value
 
-        f = click.option(f"--{name}-workdir", type=str, callback=callback, expose_value=False, help="Experimaestro environment")(f)
-        f = click.option(f"--{name}", type=str, callback=callback_env, help="Experimaestro environment")(f)
+        f = click.option(
+            f"--{name}-workdir",
+            type=str,
+            callback=callback,
+            expose_value=False,
+            help="Experimaestro environment",
+        )(f)
+        f = click.option(
+            f"--{name}",
+            type=str,
+            callback=callback_env,
+            help="Experimaestro environment",
+        )(f)
         return f
+
     return annotate
