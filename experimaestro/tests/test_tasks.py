@@ -8,6 +8,7 @@ import pytest
 import subprocess
 import signal
 import psutil
+import time
 
 from experimaestro import *
 from experimaestro.scheduler import JobState
@@ -120,25 +121,26 @@ def test_restart(terminate):
             task = restart.Restart()
             task.submit(dryrun=True)
 
-            # Start the experiment with another process, and kill the job
-            command = [sys.executable, restart.__file__, xp.workspace.path]
-            logging.debug("Starting other process with: %s", command)
-            xpmprocess = subprocess.Popen(command)
-            while not task.touch.is_file():
-                time.sleep(0.1)
+        # Start the experiment with another process, and kill the job
+        command = [sys.executable, restart.__file__, xp.workspace.path]
+        logging.debug("Starting other process with: %s", command)
+        xpmprocess = subprocess.Popen(command)
+        while not task.touch.is_file():
+            time.sleep(0.1)
 
-            pid = int(task.__xpm__.job.pidpath.read_text())
-            p = psutil.Process(pid)
+        pid = int(task.__xpm__.job.pidpath.read_text())
+        p = psutil.Process(pid)
 
-            logging.debug("Process has started [file %s, pid %d]", task.touch, pid)
-            terminate(xpmprocess)
-            errorcode = xpmprocess.wait(5)
-            logging.debug("Process finishing with status %d", errorcode)
+        logging.debug("Process has started [file %s, pid %d]", task.touch, pid)
+        terminate(xpmprocess)
+        errorcode = xpmprocess.wait(5)
+        logging.debug("Process finishing with status %d", errorcode)
 
-            # Check that task is still running
-            logging.info("Checking that job (PID %s) is still running", pid)
-            assert p.is_running()
+        # Check that task is still running
+        logging.info("Checking that job (PID %s) is still running", pid)
+        assert p.is_running()
 
+        with TemporaryExperiment("restart", maxwait=10) as xp:
             # Now, submit the job - it should pick up the process
             # where it was left
             logging.debug("Submitting the job")

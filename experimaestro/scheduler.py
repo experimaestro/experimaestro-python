@@ -508,6 +508,7 @@ class experiment:
         self.workspace.launcher.environ[name] = value
 
     def __enter__(self):
+        logger.debug("Locking experiment %s", self.xplockpath)
         self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
 
         if self.server:

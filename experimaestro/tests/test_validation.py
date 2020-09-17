@@ -206,7 +206,8 @@ def test_pathchild():
 
 
 @pytest.mark.parametrize(
-    "value,apitype", [(1.5, types.FloatType), (1, types.IntType), (False, types.BoolType)]
+    "value,apitype",
+    [(1.5, types.FloatType), (1, types.IntType), (False, types.BoolType)],
 )
 def test_default(value, apitype):
     @argument("default", default=value)
@@ -255,6 +256,6 @@ class TaskConfigConsumer:
 
 def test_taskargument():
     x = taskconfig()
-    with experiment("fake", "/"):
+    with TemporaryExperiment("fake"):
         x.submit(dryrun=True)
         expect_validate(TaskConfigConsumer(x=x))

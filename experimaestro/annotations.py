@@ -1,14 +1,11 @@
 # Import Python modules
 
-import json
 import sys
 import inspect
-import os.path as op
-import os
 import logging
 import pathlib
 from pathlib import Path, PosixPath
-from typing import Union, Dict, Optional
+from typing import Optional
 
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
