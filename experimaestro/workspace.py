@@ -3,8 +3,7 @@ from pathlib import Path
 
 
 class Workspace:
-    """A workspace
-    """
+    """A workspace"""
 
     CURRENT = None
 
@@ -34,6 +33,11 @@ class Workspace:
     def jobspath(self):
         """Folder for jobs"""
         return self.path / "jobs"
+
+    @property
+    def experimentspath(self):
+        """Folder for experiments"""
+        return self.path / "xp"
 
     @property
     def configcachepath(self):

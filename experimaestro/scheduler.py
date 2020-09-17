@@ -475,6 +475,11 @@ class experiment:
     def __init__(
         self, env: Union[Path, str, Environment], name: str, *, port: int = None
     ):
+        """
+        :param env: an environment -- or a working directory for a local environment
+        :param port: the port for the web server (overrides environment port if any)
+        """
+
         from experimaestro.server import Server
 
         if isinstance(env, Environment):
@@ -482,7 +487,14 @@ class experiment:
         else:
             self.environment = Environment(workdir=env)
 
+        # Creates the workspace
         self.workspace = Workspace(self.environment.workdir)
+        self.xpdir = self.workspace.experimentspath / name
+        self.xpdir.mkdir(parents=True, exist_ok=True)
+        self.xplockpath = self.xpdir / "lock"
+        self.xplock = None
+
+        # Create the scheduler
         self.scheduler = Scheduler(name)
         self.server = Server(self.scheduler, port) if port else None
         if self.server:
@@ -496,6 +508,8 @@ class experiment:
         self.workspace.launcher.environ[name] = value
 
     def __enter__(self):
+        self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
+
         if self.server:
             self.server.start()
 
@@ -506,5 +520,6 @@ class experiment:
     def __exit__(self, *args):
         self.scheduler.__exit__(*args)
         self.workspace.__exit__(*args)
+        self.xplock.__exit__(*args)
         if self.server:
             self.server.stop()

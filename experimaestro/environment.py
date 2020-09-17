@@ -1,18 +1,22 @@
 """Defines an experimental environment"""
 
 from pathlib import Path
+from typing import Dict
 import marshmallow as mm
 from .connectors import parsepath
 from .connectors.ssh import SshPath
 from experimaestro.utils.settings import JsonSettings, PathField
 from pytools import memoize
 
+
 def schema(schema_cls):
     def annotate(object_cls):
         schema_cls.OBJECT_CLS = object_cls
         object_cls.SCHEMA = schema_cls
         return object_cls
+
     return annotate
+
 
 class _Schema(mm.Schema):
     @mm.post_load
@@ -22,28 +26,35 @@ class _Schema(mm.Schema):
             setattr(settings, key, value)
         return settings
 
+
 class EnvironmentSchema(_Schema):
     hostname = mm.fields.Str()
     pythonpath = mm.fields.Str()
     workdir = mm.fields.Str()
     environ = mm.fields.Dict(keys=mm.fields.Str(), values=mm.fields.Str())
-    
+
 
 class Schema(_Schema):
-    environments = mm.fields.Dict(keys=mm.fields.Str(), values=mm.fields.Nested(EnvironmentSchema))
+    environments = mm.fields.Dict(
+        keys=mm.fields.Str(), values=mm.fields.Nested(EnvironmentSchema)
+    )
 
 
 @schema(Schema)
 class Settings(JsonSettings):
     """User settings"""
+
     def __init__(self):
         self.environments: Dict[str, str] = {}
 
+
 @schema(EnvironmentSchema)
-class Environment: 
+class Environment:
+    """This defines the environment for an experiment, which can be stored"""
+
     def __init__(self, workdir=None):
         self.hostname = None
-        self._workdir = workdir 
+        self._workdir = workdir
         self.pythonpath = None
         self.environ = {}
 
@@ -65,7 +76,9 @@ class Environment:
     @staticmethod
     @memoize()
     def _load():
-        path = Path("~").expanduser() / ".config" / "experimaestro" / "environments.json"
+        path = (
+            Path("~").expanduser() / ".config" / "experimaestro" / "environments.json"
+        )
         return Settings.load(path)
 
     @staticmethod

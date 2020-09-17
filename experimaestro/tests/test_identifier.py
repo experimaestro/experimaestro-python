@@ -3,7 +3,7 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, pathoption, param, task
+from experimaestro import config, pathoption, param, task, option
 
 
 @param(name="a", type=int)
@@ -42,8 +42,6 @@ class Float:
 @config()
 class Values:
     pass
-
-
 
 
 def assert_equal(a, b):
@@ -107,6 +105,21 @@ def test_name():
     assert_equal(Config0(a=2), Config3(a=2))
 
 
+# --- Test option
+
+
+def test_option():
+    @param("a", int)
+    @option("b", type=int, default=1)
+    @config("test.identifier.option", register=False)
+    class OptionConfig:
+        pass
+
+    assert_notequal(OptionConfig(a=2), OptionConfig(a=1))
+    assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1))
+    assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1, b=2))
+
+
 # --- Ignore paths
 
 
@@ -125,29 +138,37 @@ def test_path():
 
 # --- Test with added arguments
 
+
 def test_pathoption():
     """Path arguments should be ignored"""
+
     @pathoption("path", "path")
     @param(name="a", type=int)
     @config("pathoption_test", register=False)
-    class A_with_path: pass
+    class A_with_path:
+        pass
 
     @param(name="a", type=int)
     @config("pathoption_test", register=False)
-    class A_without_path: pass
+    class A_without_path:
+        pass
 
     assert_equal(A_with_path(a=1), A_without_path(a=1))
 
+
 def test_defaultnew():
     """Path arguments should be ignored"""
+
     @param("b", type=int, default=1)
     @param(name="a", type=int)
     @config("defaultnew", register=False)
-    class A_with_b: pass
+    class A_with_b:
+        pass
 
     @param(name="a", type=int)
     @config("defaultnew", register=False)
-    class A: pass
+    class A:
+        pass
 
     assert_equal(A_with_b(a=1, b=1), A(a=1))
     assert_equal(A_with_b(a=1), A(a=1))
@@ -155,9 +176,11 @@ def test_defaultnew():
 
 def test_taskconfigidentifier():
     """Test whether the embedded task arguments make the configuration different"""
+
     @param("a", type=int)
     @config()
-    class Config: pass
+    class Config:
+        pass
 
     @param("x", type=int)
     @task()
@@ -165,6 +188,5 @@ def test_taskconfigidentifier():
         def config(self) -> Config:
             return Config(a=1)
 
-    assert_equal(Task(x=1).submit(dryrun=True),Task(x=1).submit(dryrun=True))
-    assert_notequal(Task(x=2).submit(dryrun=True),Task(x=1).submit(dryrun=True))
-
+    assert_equal(Task(x=1).submit(dryrun=True), Task(x=1).submit(dryrun=True))
+    assert_notequal(Task(x=2).submit(dryrun=True), Task(x=1).submit(dryrun=True))
