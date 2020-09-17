@@ -134,6 +134,10 @@ class config:
             objecttype._module = None
         objecttype._file = Path(inspect.getfile(originaltype)).absolute()
 
+        # Add description
+        if objecttype.description is None:
+            objecttype.description = originaltype.__doc__
+
         # Adding type-hinted arguments
         if hasattr(originaltype, "__annotations__"):
             for key, value in originaltype.__annotations__.items():

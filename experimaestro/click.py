@@ -37,7 +37,7 @@ class forwardoption(metaclass=forwardoptionMetaclass):
     def __call__(self, cls, option_name=None):
         argument = cls.__xpm__.arguments[self.path[0]]
         for c in self.path[1:]:
-            argument = getattr(current, c)
+            argument = getattr(argument, c)
 
         name = "--%s" % (option_name or argument.name.replace("_", "-"))
         default = argument.default

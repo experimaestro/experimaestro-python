@@ -31,7 +31,7 @@ class Argument:
     def __init__(
         self,
         name,
-        type: "Type",
+        type: "experimaestro.core.types.Type",
         required=None,
         help=None,
         generator=None,
