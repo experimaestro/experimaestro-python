@@ -29,6 +29,7 @@ def configmethod(method):
 
 class config:
     KEPT_METHODS = set(["config", "__validate__"])
+    FORBIDDEN_ATTRIBUTES = set(["__module__", "__slots__", "__dict__"])
 
     """Annotations for experimaestro types"""
 
@@ -100,7 +101,7 @@ class config:
             __dict__ = {
                 key: value
                 for key, value in tp.__dict__.items()
-                if not (inspect.isfunction(value))
+                if not (inspect.isfunction(value) or key in config.FORBIDDEN_ATTRIBUTES)
                 or (key in config.KEPT_METHODS)
                 or hasattr(value, "__xpmconfig__")
             }
