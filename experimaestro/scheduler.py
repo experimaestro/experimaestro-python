@@ -125,6 +125,7 @@ class Job(Resource):
 
     @property
     def jobpath(self):
+        """Deprecated, use `path`"""
         return self.workspace.jobspath / self.relpath
 
     @property
@@ -219,7 +220,7 @@ class JobError(Exception):
 
 
 class JobThread(threading.Thread):
-    """Job starting and monitoring thread"""
+    """Manage a task: launch and monitor"""
 
     def __init__(self, job: Job):
         super().__init__()
@@ -401,6 +402,7 @@ class Scheduler:
             self.cv.wait_for(lambda: not self.waitingjobs or self.exitmode)
 
     def submit(self, job: Job):
+        """Submits a job to the scheduler"""
         with self.cv:
             logger.info("Submitting job %s", job)
             if self.exitmode:
@@ -413,11 +415,17 @@ class Scheduler:
                 logger.warning("Job %s already submitted", job.identifier)
                 return other
 
+            # Add to waiting jobs
             job.submittime = time.time()
             job.scheduler = self
-
-            # Add to waiting jobs
             self.waitingjobs.add(job)
+
+            # Creates a link into the experiment folder
+            path = experiment.CURRENT.jobspath / job.relpath
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_symlink():
+                path.unlink()
+            path.symlink_to(job.jobpath)
 
             # Add dependencies, and add to blocking resources
             job.unsatisfied = len(job.dependencies)
@@ -437,6 +445,7 @@ class Scheduler:
                 self.start(job)
 
     def start(self, job: Job):
+        """Start a job"""
         with self.cv:
             if self.exitmode:
                 logger.warning("Exit mode: not starting job")
@@ -474,6 +483,9 @@ class Scheduler:
 
 
 class experiment:
+    # Current experiment
+    CURRENT: "experiment" = None
+
     """Experiment context"""
 
     def __init__(
@@ -497,6 +509,7 @@ class experiment:
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.xplockpath = self.workdir / "lock"
         self.xplock = None
+        self.old_experiment = None
 
         # Create the scheduler
         self.scheduler = Scheduler(name)
@@ -508,6 +521,11 @@ class experiment:
     def resultspath(self):
         """Return the directory in which results can be stored for this experiment"""
         return self.workdir / "results"
+
+    @property
+    def jobspath(self):
+        """Return the directory in which results can be stored for this experiment"""
+        return self.workdir / "jobs"
 
     def wait(self):
         """Wait until the running processes have finished"""
@@ -525,11 +543,14 @@ class experiment:
 
         self.workspace.__enter__()
         self.scheduler.__enter__()
+        self.old_experiment = experiment.CURRENT
+        experiment.CURRENT = self
         return self
 
     def __exit__(self, *args):
         self.scheduler.__exit__(*args)
         self.workspace.__exit__(*args)
         self.xplock.__exit__(*args)
+        experiment.CURRENT = self.old_experiment
         if self.server:
             self.server.stop()
