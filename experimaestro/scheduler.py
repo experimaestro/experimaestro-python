@@ -1,23 +1,18 @@
-import os
 from pathlib import Path
 import threading
-import re
 import time
 from typing import Optional, Set, Union
 import enum
 import signal
 import asyncio
-import sys
 
 from .environment import Environment
-from .connectors import parsepath
 from .workspace import Workspace
 from .core.objects import Config
 from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
 from .connectors import ProcessThreadError
-from .locking import Lock
 
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
 
@@ -130,7 +125,15 @@ class Job(Resource):
 
     @property
     def jobpath(self):
-        return self.workspace.jobspath / str(self.type.identifier) / self.identifier
+        return self.workspace.jobspath / self.relpath
+
+    @property
+    def path(self):
+        return self.workspace.jobspath / self.relpath
+
+    @property
+    def relpath(self):
+        return Path(str(self.type.identifier)) / self.identifier
 
     @property
     def identifier(self):
@@ -187,7 +190,7 @@ class Job(Resource):
         return self.jobpath / ("%s.err" % self.name)
 
     def dependencychanged(self, dependency, oldstatus, status):
-        value = lambda s: 1 if s == DependencyStatus.OK else 0
+        value = lambda s: (1 if s == DependencyStatus.OK else 0)
         self.unsatisfied -= value(status) - value(oldstatus)
 
         logger.info("Job %s: unsatisfied %d", self, self.unsatisfied)
@@ -455,8 +458,9 @@ class Scheduler:
             logger.debug("Job %s has finished (%s)", job, job.state)
             if job in self.waitingjobs:
                 self.waitingjobs.remove(job)
-            for dependency in job.dependents:
-                dependency.check()
+            with job.dependents as dependents:
+                for dependency in dependents:
+                    dependency.check()
             self.cv.notify_all()
 
         for listener in self.listeners:
@@ -489,9 +493,9 @@ class experiment:
 
         # Creates the workspace
         self.workspace = Workspace(self.environment.workdir)
-        self.xpdir = self.workspace.experimentspath / name
-        self.xpdir.mkdir(parents=True, exist_ok=True)
-        self.xplockpath = self.xpdir / "lock"
+        self.workdir = self.workspace.experimentspath / name
+        self.workdir.mkdir(parents=True, exist_ok=True)
+        self.xplockpath = self.workdir / "lock"
         self.xplock = None
 
         # Create the scheduler
@@ -499,6 +503,11 @@ class experiment:
         self.server = Server(self.scheduler, port) if port else None
         if self.server:
             self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
+
+    @property
+    def resultspath(self):
+        """Return the directory in which results can be stored for this experiment"""
+        return self.workdir / "results"
 
     def wait(self):
         """Wait until the running processes have finished"""

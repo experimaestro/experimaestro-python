@@ -354,11 +354,9 @@ def tags(value):
 
 
 def tagspath(value: Config):
-    """Return the tags associated with a value"""
-    p = Path()
-    for key, value in value.__xpm__.sv.tags().items():
-        p /= "%s=%s" % (key.replace("/", "-"), value)
-    return p
+    """Return a unique path made of tags and their values"""
+    sortedtags = sorted(value.__xpm__.tags().items(), key=lambda x: x[0])
+    return "_".join(f"""{key.replace("/", "-")}={value}""" for key, value in sortedtags)
 
 
 # --- Deprecated

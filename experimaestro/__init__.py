@@ -14,9 +14,10 @@ from .annotations import (
     Identifier,
     Array,
     tag,
+    tags,
+    tagspath,
     STDOUT,
     STDERR,
-
     # deprecated
     argument,
 )
@@ -27,6 +28,7 @@ from .notifications import progress
 from .register import parse_commandline
 from .core.types import Any
 from .checkers import Choices
+
 
 def set_launcher(launcher):
     Workspace.CURRENT.launcher = launcher

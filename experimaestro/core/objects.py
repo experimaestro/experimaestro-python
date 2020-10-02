@@ -584,6 +584,12 @@ class Task(Config):
     def job(self):
         return self.__xpm__.job
 
+    @property
+    def jobpath(self):
+        if self.__xpm__.job:
+            return self.__xpm__.job.jobpath
+        raise AssertionError("Cannot ask the job path of a non submitted task")
+
 
 class BaseTaskFunction(Task):
     STACK_LEVEL = 2

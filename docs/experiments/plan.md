@@ -67,13 +67,56 @@ tag(name: str, value: Union[str, int, float, bool])
 
 ### Paths based on tags
 
+Use `tagspath(value)`
+
+
+## Summarizing experimental results
+
+For each experiment (identified by its name), a folder is created automatically. Using both
+
+
+```python3
+with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
+    model = c.Model()
+
+    # Experimental plan
+    models = {}
+    for dlen_max, n_tokens in product([50, 200], [100, 1000]):
+        data = c.Data(n_tokens=tag(n_tokens))
+        learn = c.Learn(data=data, model=model, dlen_max=tag(dlen_max))
+        learn.add_dependencies(token.dependency(1))
+        models[tagspath(learn)] = learn.submit().jobpath
+
+
+    # Build a central "runs" directory to plot easily the metrics
+    runpath = xp.resultspath / "runs"
+    runpath.mkdir(exist_ok=True, parents=True)
+    for key, learn in models.items():
+        (runpath / key).symlink_to(learn.jobpath / "runs")
+
+
+    # Wait until experiment completes
+    xp.wait()
+    for key, learn in models.items():
+        process(models)
+
+```
+
+
+## Conditional tasks
+
 *Planned*
+
+Sometimes, it can be useful to wait until a task completes - for instance, when exploring the hyperparameter
+space, one can wait to launch new tasks based on the outcome.
 
 
 
 ## Misc
 
-### Click integration
+
+
+### Command Line Arguments
 
 You can easily define command line arguments with [click](https://click.palletsprojects.com)
 by using the `forwardoption` command

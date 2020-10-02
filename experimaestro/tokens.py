@@ -63,6 +63,7 @@ class CounterTokenDependency(Dependency):
 
 class CounterToken(Token, FileSystemEventHandler):
     """File-based counter token"""
+
     TOKENS: Dict[str, "CounterToken"] = {}
 
     """Maps paths to instances"""
@@ -84,7 +85,7 @@ class CounterToken(Token, FileSystemEventHandler):
 
     def __init__(self, name: str, path: Path, count: int):
         """[summary]
-        
+
         Arguments:
             path {Path} -- The file path of the token file
             count {int} -- Number of tokens (overrides previous definitions)
@@ -95,6 +96,7 @@ class CounterToken(Token, FileSystemEventHandler):
             path.with_suffix(path.suffix + ".lock")
         )
         self.lock = threading.Lock()
+
         self.name = name
 
         # Watched path
@@ -128,7 +130,11 @@ class CounterToken(Token, FileSystemEventHandler):
         return "token[{}]".format(self.name)
 
     def on_modified(self, event):
-        logger.debug("Watched path notification %s [watched %s]", event.src_path, self.watchedpath)
+        logger.debug(
+            "Watched path notification %s [watched %s]",
+            event.src_path,
+            self.watchedpath,
+        )
         if event.src_path == self.watchedpath:
             logger.debug("Watched path modified [%s]", self.path)
             timestamp = os.path.getmtime(self.path)
@@ -149,8 +155,9 @@ class CounterToken(Token, FileSystemEventHandler):
                     )
                     self.available = available
                     # Notify jobs
-                    for dependency in self.dependents:
-                        dependency.check()
+                    with self.dependents as dependents:
+                        for dependency in dependents:
+                            dependency.check()
 
     def dependency(self, count):
         return CounterTokenDependency(self, count)
@@ -201,8 +208,10 @@ class CounterToken(Token, FileSystemEventHandler):
             self.available = total - taken
 
         # Now, check
-        for dependency in self.dependents:
-            dependency.check()
+        with self.dependents as dependents:
+            for dependency in dependents:
+                dependency.check()
+
 
 if sys.version_info[0] == 3 and sys.version_info[1] >= 7:
     os.register_at_fork(after_in_child=CounterToken.forkhandler)
