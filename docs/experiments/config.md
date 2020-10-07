@@ -138,3 +138,19 @@ class Terms():
 
 
 ```
+
+## Validation
+
+If a configuration or task has a `__validate__` method, it is called to validate 
+the values before a task is submitted. This allows to fail fast when parameters
+are not valid.
+
+```py3
+@argument("batch_size", type=int, default=100)
+@argument("micro_batch_size", type=int, default=100)
+@pathoption("parameters", "parameters.pth")
+@task()
+class ModelLearn:
+    def __validate__(self):
+        assert self.batch_size % self.micro_batch_size == 0
+```
