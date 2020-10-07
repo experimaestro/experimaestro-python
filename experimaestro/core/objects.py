@@ -454,6 +454,14 @@ class ConfigInformation:
 
         return o
 
+    def fromConfig(self):
+        self.validate()
+        o = object.__new__(self.xpmtype.originaltype)
+        for key, _ in self.xpmtype.arguments.items():
+            setattr(o, key, getattr(self.pyobject, key, None))
+        o.__init__()
+        return o
+
     def add_dependencies(self, *dependencies):
         self.dependencies.extend(dependencies)
 
@@ -565,6 +573,10 @@ class Config:
         """Adds tokens to the task"""
         self.__xpm__.add_dependencies(*dependencies)
         return self
+
+    def instance(self):
+        """Return an instance with the current values"""
+        return self.__xpm__.fromConfig()
 
 
 class Task(Config):
