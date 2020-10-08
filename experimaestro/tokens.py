@@ -183,7 +183,9 @@ class CounterToken(Token, FileSystemEventHandler):
         """Acquire"""
         with self.lock, self.ipc_lock:
             total, taken = self._read()
-            logger.debug("Token state [acquire %d]: %d, %d", count, total, taken)
+            logger.debug(
+                "Token state [acquire %d]: count %d, taken %d", count, total, taken
+            )
             if count + taken > total:
                 logger.warning("No more token available - cannot lock")
                 raise LockError("No token")
@@ -191,26 +193,33 @@ class CounterToken(Token, FileSystemEventHandler):
             taken += count
 
             self._write(total, taken)
-            logger.debug("Token state [acquired %d]: %d, %d", count, total, taken)
+            logger.debug(
+                "Token state [acquired %d]: count %d, taken %d", count, total, taken
+            )
 
     def release(self, count):
         """Release"""
         with self.lock, self.ipc_lock:
             logger.debug("Reading token information from %s", self.path)
             total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-            logger.debug("Token state [release %d]: %d, %d", count, total, taken)
+            logger.debug(
+                "Token state [release %d]: count %d, taken %d", count, total, taken
+            )
             taken -= count
             if taken < 0:
                 taken = 0
                 logger.error("More tokens released that taken")
             self._write(total, taken)
-            logger.debug("Token state [released %d]: %d, %d", count, total, taken)
+            logger.debug(
+                "Token state [released %d]: count %d, taken %d", count, total, taken
+            )
             self.available = total - taken
 
         # Now, check
         with self.dependents as dependents:
-            for dependency in dependents:
-                dependency.check()
+            dependents = list(dependents)
+        for dependency in dependents:
+            dependency.check()
 
 
 if sys.version_info[0] == 3 and sys.version_info[1] >= 7:

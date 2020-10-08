@@ -5,6 +5,7 @@ from typing import Optional, Set, Union
 import enum
 import signal
 import asyncio
+from typing import Dict
 
 from .environment import Environment
 from .workspace import Workspace
