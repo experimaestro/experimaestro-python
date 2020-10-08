@@ -10,6 +10,7 @@ from experimaestro.scheduler import JobState
 from .utils import TemporaryExperiment, TemporaryDirectory, timeout
 from .task_tokens import TokenTask
 from experimaestro.ipc import IPCom
+from . import restart
 
 
 class TimeInterval:
@@ -177,7 +178,12 @@ def test_token_process():
     raise NotImplementedError()
 
 
-@pytest.mark.skip("TODO: not implemented")
-def test_token_restart():
-    """Test that when restarting experimaestro, the job is picked up and the token released"""
-    raise NotImplementedError()
+def restart_function(xp):
+    token = CounterToken(xp.workdir / "token", 1)
+    token(1, restart.Restart()).submit()
+
+
+@pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)
+def test_restart(terminate):
+    """Restarting the experiment should take back running tasks"""
+    restart.restart(terminate, restart_function)

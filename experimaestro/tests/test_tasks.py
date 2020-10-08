@@ -7,7 +7,7 @@ import signal
 from experimaestro import *
 from experimaestro.scheduler import JobState
 
-from .utils import TemporaryDirectory, TemporaryExperiment, is_posix
+from .utils import TemporaryDirectory, TemporaryExperiment
 
 from .tasks import *
 from . import restart
@@ -90,24 +90,11 @@ def test_done():
     pass
 
 
-def terminate(p):
-    p.terminate()
-
-
-def sigint(p):
-    p.send_signal(signal.SIGINT)
-
-
-TERMINATES_FUNC = [terminate]
-if is_posix():
-    TERMINATES_FUNC.append(sigint)
-
-
 def restart_function(xp):
     restart.Restart().submit()
 
 
-@pytest.mark.parametrize("terminate", TERMINATES_FUNC)
+@pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)
 def test_restart(terminate):
     """Restarting the experiment should take back running tasks"""
     restart.restart(terminate, restart_function)

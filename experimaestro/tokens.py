@@ -4,6 +4,7 @@ a computational resource (e.g. number of launched jobs, etc.)
 
 import sys
 from pathlib import Path
+from experimaestro.core.objects import Task
 import fasteners
 import threading
 import struct
@@ -161,6 +162,9 @@ class CounterToken(Token, FileSystemEventHandler):
 
     def dependency(self, count):
         return CounterTokenDependency(self, count)
+
+    def __call__(self, count, task: Task):
+        return task.add_dependencies(self.ddependency(count))
 
     def _write(self, total, taken):
         # Should only be called when locked

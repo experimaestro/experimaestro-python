@@ -4,12 +4,23 @@ from experimaestro import task, pathoption, Scheduler
 import psutil
 import logging
 import subprocess
-from experimaestro.tests.utils import TemporaryExperiment
+import signal
+from experimaestro.tests.utils import TemporaryExperiment, is_posix
 from experimaestro.scheduler import JobState
 from . import restart_main
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
+
+def terminate(p):
+    p.terminate()
+
+
+def sigint(p):
+    p.send_signal(signal.SIGINT)
+
+
+TERMINATES_FUNC = [terminate]
+if is_posix():
+    TERMINATES_FUNC.append(sigint)
 
 
 @pathoption("touch", "touch")
@@ -46,8 +57,14 @@ def restart(terminate, experiment):
 
         logging.debug("Starting other process with: %s", command)
         xpmprocess = subprocess.Popen(command)
+
+        counter = 0
         while not task.touch.is_file():
             time.sleep(0.1)
+            counter += 1
+            if counter >= 20:
+                terminate(xpmprocess)
+                assert False, "Timeout waiting for task to be executed"
 
         pid = int(task.__xpm__.job.pidpath.read_text())
         p = psutil.Process(pid)
