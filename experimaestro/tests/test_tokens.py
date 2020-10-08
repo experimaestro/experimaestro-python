@@ -11,6 +11,7 @@ from .utils import TemporaryExperiment, TemporaryDirectory, timeout
 from .task_tokens import TokenTask
 from experimaestro.ipc import IPCom
 
+
 class TimeInterval:
     def __init__(self, start, end):
         self.start = start
@@ -79,7 +80,7 @@ def test_token():
 
 def test_token_monitor():
     """Two different schedulers (within the same process)
-    
+
     Test the ability of the token to monitor the filesystem
     """
 
@@ -110,7 +111,6 @@ def test_token_monitor():
 import multiprocessing
 
 
-
 def test_token_reschedule():
     """Test whether a job can be re-submitted if it failed to acquire a token due to multiple schedulers concurrency
 
@@ -124,8 +124,12 @@ def test_token_reschedule():
     with TemporaryDirectory("reschedule") as workdir:
         lockingpath = workdir / "lockingpath"
 
-        command = [sys.executable, Path(__file__).parent / "token_reschedule.py", workdir]
-        
+        command = [
+            sys.executable,
+            Path(__file__).parent / "token_reschedule.py",
+            workdir,
+        ]
+
         ready1 = workdir / "ready.1"
         time1 = workdir / "time.1"
         p1 = subprocess.Popen(command + ["1", lockingpath, str(ready1), str(time1)])
@@ -170,4 +174,10 @@ def test_token_reschedule():
 @pytest.mark.skip("TODO: not implemented")
 def test_token_process():
     """Test tokens with two processes"""
+    raise NotImplementedError()
+
+
+@pytest.mark.skip("TODO: not implemented")
+def test_token_restart():
+    """Test that when restarting experimaestro, the job is picked up and the token released"""
     raise NotImplementedError()

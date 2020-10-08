@@ -115,9 +115,15 @@ async def handler(websocket, path, listener):
             elif actiontype == "quit":
                 break
             elif actiontype == "details":
+                jobid = action["payload"]
                 await websocket.send(
-                    json.dumps(job_details(listener.scheduler.jobs[job.identifier]))
+                    json.dumps(job_details(listener.scheduler.jobs[jobid]))
                 )
+            elif actiontype == "kill":
+                jobid = action["payload"]
+                process = listener.scheduler.jobs[jobid].process
+                if process is not None:
+                    process.kill()
             else:
                 await websocket.send(
                     json.dumps(
@@ -163,7 +169,7 @@ class RequestProcessor:
                 jobid = m.group(1)
                 progress = float(m.group(2))
                 try:
-                    if progress >= 0 and progress <= 1.:
+                    if progress >= 0 and progress <= 1.0:
                         self.scheduler.jobs[jobid].progress = progress
                 except KeyError:
                     # Just ignore

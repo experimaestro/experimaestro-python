@@ -1,18 +1,11 @@
 # --- Task and types definitions
 
-import sys
-import os
 from pathlib import Path
-import logging
 import pytest
-import subprocess
 import signal
-import psutil
-import time
 
 from experimaestro import *
 from experimaestro.scheduler import JobState
-from experimaestro.click import cli
 
 from .utils import TemporaryDirectory, TemporaryExperiment, is_posix
 
@@ -110,54 +103,14 @@ if is_posix():
     TERMINATES_FUNC.append(sigint)
 
 
+def restart_function(xp):
+    restart.Restart().submit()
+
+
 @pytest.mark.parametrize("terminate", TERMINATES_FUNC)
 def test_restart(terminate):
     """Restarting the experiment should take back running tasks"""
-    p = None
-    xpmprocess = None
-    try:
-        with TemporaryExperiment("restart", maxwait=10) as xp:
-            # Create the task and so we can get the file paths
-            task = restart.Restart()
-            task.submit(dryrun=True)
-
-        # Start the experiment with another process, and kill the job
-        command = [sys.executable, restart.__file__, xp.workspace.path]
-        logging.debug("Starting other process with: %s", command)
-        xpmprocess = subprocess.Popen(command)
-        while not task.touch.is_file():
-            time.sleep(0.1)
-
-        pid = int(task.__xpm__.job.pidpath.read_text())
-        p = psutil.Process(pid)
-
-        logging.debug("Process has started [file %s, pid %d]", task.touch, pid)
-        terminate(xpmprocess)
-        errorcode = xpmprocess.wait(5)
-        logging.debug("Process finishing with status %d", errorcode)
-
-        # Check that task is still running
-        logging.info("Checking that job (PID %s) is still running", pid)
-        assert p.is_running()
-
-        with TemporaryExperiment("restart", maxwait=10) as xp:
-            # Now, submit the job - it should pick up the process
-            # where it was left
-            logging.debug("Submitting the job")
-            Scheduler.CURRENT.submit(task.__xpm__.job)
-            with task.wait.open("w") as fp:
-                fp.write("done")
-
-            assert task.__xpm__.job.wait() == JobState.DONE
-    finally:
-        # Force kill
-        if xpmprocess and xpmprocess.poll() is None:
-            logging.warning("Forcing to quit process %s", xpmprocess.pid)
-            xpmprocess.kill()
-
-        if p and p.is_running():
-            logging.warning("Forcing to quit process %s", p.pid)
-            p.terminate()
+    restart.restart(terminate, restart_function)
 
 
 def test_submitted_twice():

@@ -256,7 +256,10 @@ class CommandLineJob(Job):
 
         if self.pidpath.is_file():
             pid = int(self.pidpath.read_text())
-            p = psutil.Process(pid)
+            try:
+                p = psutil.Process(pid)
+            except psutil.NoSuchProcess:
+                return None
             if p.is_running():
                 return PsutilProcess(self, p)
 
