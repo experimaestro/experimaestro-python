@@ -158,10 +158,12 @@ class RequestProcessor:
         self.scheduler = scheduler
 
     async def __call__(self, path, request_headers):
-        if path == "/ws":
-            return None
-
         headers = websockets.http.Headers()
+
+        if path == "/ws":
+            # Continue HTTP upgrade
+            print(request_headers)
+            return None
 
         if path.startswith("/notifications/"):
             m = re.match(r"^/notifications/([a-z0-9]+)/progress/([0-9.]+)$", path)

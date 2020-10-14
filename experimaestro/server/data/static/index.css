@@ -12125,7 +12125,7 @@ div.error::before {
   padding: 5px; }
 
 #resources .task-id {
-  font-size: .8rem;
+  font-size: 0.8rem;
   padding: 3px;
   margin-left: 0em;
   margin-right: 0.5em;
@@ -12134,8 +12134,8 @@ div.error::before {
   border-radius: 3px; }
 
 #resources .job-id {
-  font-size: .8rem;
-  font-family: 'Courier New', Courier, monospace; }
+  font-size: 0.8rem;
+  font-family: "Courier New", Courier, monospace; }
 
 #resources > div {
   text-align: left; }
