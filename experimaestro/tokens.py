@@ -62,6 +62,13 @@ class CounterTokenDependency(Dependency):
         return self._token
 
 
+# FIXME:
+# to haver recovery, we need:
+# - a folder for the token
+# - each dependency is a file containing:
+#   - the job URI
+#   - number of tokens
+# - automatic removal when possible / periodic checking if not our scheduler / checking at startup
 class CounterToken(Token, FileSystemEventHandler):
     """File-based counter token"""
 
@@ -164,7 +171,7 @@ class CounterToken(Token, FileSystemEventHandler):
         return CounterTokenDependency(self, count)
 
     def __call__(self, count, task: Task):
-        return task.add_dependencies(self.ddependency(count))
+        return task.add_dependencies(self.dependency(count))
 
     def _write(self, total, taken):
         # Should only be called when locked
