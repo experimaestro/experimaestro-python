@@ -1,52 +1,60 @@
-$fa-font-path: "fa-webfonts";
+@import "~bootstrap/dist/css/bootstrap.min.css";
 
-@import '@fortawesome/fontawesome-free/scss/fontawesome';
-@import '@fortawesome/fontawesome-free/scss/regular';
-@import '@fortawesome/fontawesome-free/scss/brands';
-@import '@fortawesome/fontawesome-free/scss/solid';
-@import './jobs';
+$fa-font-path: "@fortawesome/fontawesome-free/webfonts";
+
+@import "@fortawesome/fontawesome-free/scss/fontawesome";
+@import "@fortawesome/fontawesome-free/scss/regular";
+@import "@fortawesome/fontawesome-free/scss/brands";
+@import "@fortawesome/fontawesome-free/scss/solid";
+@import "./jobs";
+
+$material-icons-font-path: "material-icons/iconfont/";
+@import "material-icons/iconfont/material-icons.scss";
 
 body {
-    font-size: 1rem;
+  font-size: 1rem;
 }
 
 .App {
-    text-align: center;
+  text-align: center;
+}
+
+.ws-status {
+  position: absolute;
+  right: 1rem;
+  font-size: 2rem;
+  &.ws-no-link {
+    color: red;
   }
 
-  .ws-status {
-    position: absolute;
-    right: 1rem;
-    font-size: 2rem;
-    &.ws-no-link {
-      color: red
-    }
+  &.ws-link {
+    color: green;
+  }
+}
 
-    &.ws-link {
-      color: green
-    }
-  }
-  
-  .App-header {
-    background-color: #222;
-    padding: 10px;
-    color: white;
-  }
-  
-  .App-header div {
-    display: inline-block;
-  }
-  
-  .App-title {
-    font-size: 1.5em;
-  }
+.App-header {
+  background-color: #222;
+  padding: 10px;
+  color: white;
+}
 
-  
-  @keyframes App-logo-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+.App-header div {
+  display: inline-block;
+}
+
+.App-title {
+  font-size: 1.5em;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
   }
-  
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .action {
   cursor: pointer;
   color: gray;
@@ -56,10 +64,11 @@ body {
   }
 }
 
-button.clipboard {
+span.clipboard {
   border: none;
   background: inherit;
   position: relative;
+  cursor: pointer;
   &:hover::before {
     position: absolute;
     @extend %fa-icon;
@@ -69,4 +78,26 @@ button.clipboard {
     width: 100%;
     content: fa-content($fa-var-clipboard);
   }
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: sans-serif;
+}
+
+div.error::before {
+  @extend %fa-icon;
+  @extend .fas;
+  vertical-align: 10%;
+  content: fa-content($fa-var-radiation);
+
+  padding: 0.3em;
+  margin-right: 0.3em;
+}
+
+div.error {
+  margin: 5px;
+  padding: 5px;
+  border: 1px solid red;
 }

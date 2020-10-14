@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "xpm/*": ["src/*"]
+    },
+    "target": "ES2015",
+    "moduleResolution": "Node",
+    "strictNullChecks": true,
+    "types": ["svelte"],
+    "lib": ["ES2015", "DOM"],
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "**/node_modules/*", "scripts/*"]
+}
