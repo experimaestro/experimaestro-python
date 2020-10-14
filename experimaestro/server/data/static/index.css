@@ -12253,18 +12253,18 @@ div.error::before {
 #resources span.status-done .resource-actions:hover i.fa[name="delete"] {
   display: none; }
 
-.resource .tag {
+.tag {
   display: inline-block;
   padding: 0px;
   margin: 2px;
   color: white;
   font-size: 0.8rem;
   line-height: 1.2rem; }
-  .resource .tag .name {
+  .tag .name {
     border-radius: 5px 0 0 5px;
     background: #1976d2;
     padding: 3px; }
-  .resource .tag .value {
+  .tag .value {
     border-radius: 0 5px 5px 0;
     padding: 3px;
     background: #2196f3;
@@ -12367,4 +12367,5 @@ div.error {
   border: 1px solid red; }
 
 .messagetoast.svelte-15l57wg{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:100}
+.details.svelte-cf15q7{border:1px solid black;display:grid;grid-template-columns:1fr 3fr;padding:5px;margin:5px}
 /*# sourceMappingURL=index.css.map */

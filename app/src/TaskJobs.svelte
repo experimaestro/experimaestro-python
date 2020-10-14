@@ -6,12 +6,6 @@
     import { success, error } from 'xpm/ui/notifications'
     export let job
 
-    $: jobId = job.jobId
-
-    function details() {
-
-    }
-
 </script>
 
 <div class="resource">
@@ -25,12 +19,11 @@
         <span class={`status status-${job.status}`}>{job.status}</span>
     {/if}
 
-<i class="fas fa-eye action" title="Details" on:click={() =>  { dispatch('details', job) }}/>
+<i class="fas fa-eye action" title="Details" on:click={() =>  { dispatch('show', job) }}/>
 <span class="job-id"><CopyToClipboard let:copy={onCopy} text={`${job.taskId}/${job.jobId}`} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.taskId}</span></CopyToClipboard></span>
     {#each job.tags as tag}
-     <span key={tag[0]} class="tag">
-            <span class="name">{tag[0]}</span>
-            <span class="value">{tag[1]}</span>
+     <span class="tag">
+            <span class="name">{tag[0]}</span><span class="value">{tag[1]}</span>
         </span>
     {/each}
 </div>  

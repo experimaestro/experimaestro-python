@@ -16,6 +16,7 @@ class Client {
       location.hostname +
       (location.port ? ":" + location.port : "") +
       "/ws";
+    var url = "ws://localhost:12349/ws";
 
     this.ws = new WebSocket(url);
     this.ws.addEventListener("open", this.open);

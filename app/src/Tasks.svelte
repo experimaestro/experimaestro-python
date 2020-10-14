@@ -6,6 +6,7 @@
     } from 'sveltestrap';
 
     import TaskJobs from './TaskJobs.svelte'
+    import TaskDetail from './TaskDetail.svelte'
     import client from './client';
     import { info } from './ui/notifications';
 
@@ -75,6 +76,8 @@
             client.send({ type: "kill", payload: killJob.jobId}, "cannot kill job " + killJob.jobId)
         }
     }
+
+    let showJob
 </script>
 
 <div id="resources">
@@ -107,7 +110,12 @@
 
     {#each jobs.ids as jobId (jobId)}
         {#if jobfilter(jobs.byId[jobId])}
-            <TaskJobs job={jobs.byId[jobId]} on:kill={(event) => { console.log("Kill event"); killJob = event.detail }}/>
+            <TaskJobs job={jobs.byId[jobId]} on:kill={(event) => { killJob = event.detail }} on:show={event => { 
+                showJob = showJob == event.detail ? null : event.detail
+            }}/>
+            {#if showJob && showJob.jobId == jobId}
+                <TaskDetail job={showJob}/>
+            {/if}
         {/if}
     {/each}
 </div>
