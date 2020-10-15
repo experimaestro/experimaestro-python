@@ -162,7 +162,6 @@ class RequestProcessor:
 
         if path == "/ws":
             # Continue HTTP upgrade
-            print(request_headers)
             return None
 
         if path.startswith("/notifications/"):

@@ -561,6 +561,14 @@ class Config:
         self.__xpm__.addtag(name, value)
         return self
 
+    def __eq__(self, other):
+        if self.__class__ != other.__class__:
+            return False
+        for key, value in self.__xpm__.xpmvalues():
+            if value != getattr(other.value, key, None):
+                return False
+        return True
+
     def __arguments__(self):
         """Returns a map containing all the arguments"""
         return {arg.name: value for arg, value in self.__xpm__.xpmvalues()}
