@@ -12,21 +12,6 @@
 
     export let jobs
 
-    // kill = (jobId: string) => {
-    //     confirm('Are you sure to kill this job?').then(() => {
-    //         client.send({ type: "kill", payload: jobId}, "cannot kill job " + jobId)
-    //     }, () => {
-    //         toast.info("Action cancelled");
-    //     });
-    // }
-
-    // details = (jobId: ?string) => {
-    //     if (jobId) {
-    //         client.send({ type: "details", payload: jobId}, "cannot get details for job " + jobId);
-    //     }
-    //     this.setState({ ...this.state, jobId: jobId});
-    // }
-
     let searchtask : RegExp | null = null
     let tags : any[] = []
     function _jobfilter(job) {
@@ -74,6 +59,7 @@
     function kill() {
         if (killJob !== null) {
             client.send({ type: "kill", payload: killJob.jobId}, "cannot kill job " + killJob.jobId)
+            killJob = null
         }
     }
 

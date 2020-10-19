@@ -20,7 +20,7 @@
     {/if}
 
 <i class="fas fa-eye action" title="Details" on:click={() =>  { dispatch('show', job) }}/>
-<span class="job-id"><CopyToClipboard let:copy={onCopy} text={`${job.taskId}/${job.jobId}`} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.taskId}</span></CopyToClipboard></span>
+<span class="job-id"><CopyToClipboard let:copy={onCopy} text={job.locator} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.taskId}</span></CopyToClipboard></span>
     {#each job.tags as tag}
      <span class="tag">
             <span class="name">{tag[0]}</span><span class="value">{tag[1]}</span>

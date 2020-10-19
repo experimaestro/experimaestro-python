@@ -42,7 +42,7 @@ def fork_childhandler():
         IPCom.INSTANCE = None
 
 
-if sys.version_info[0] == 3 and sys.version_info[1] >= 7:
+if sys.platform != "win32":
     os.register_at_fork(after_in_child=fork_childhandler)
 
 
