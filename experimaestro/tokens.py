@@ -34,10 +34,10 @@ class CounterTokenLock(Lock):
         self.dependency = dependency
 
     def _acquire(self):
-        self.dependency.token.acquire(self.dependency.count)
+        self.dependency.token.acquire(self.dependency)
 
     def _release(self):
-        self.dependency.token.release(self.dependency.count)
+        self.dependency.token.release(self.dependency)
 
     def __str__(self):
         return "Lock(%s)" % self.dependency
@@ -48,6 +48,10 @@ class CounterTokenDependency(Dependency):
         super().__init__(token)
         self._token = token
         self.count = count
+
+    @property
+    def name(self):
+        return f"{self.target.identifier}.token"
 
     def status(self) -> DependencyStatus:
         if self.count <= self.token.available:
@@ -62,15 +66,38 @@ class CounterTokenDependency(Dependency):
         return self._token
 
 
-# FIXME:
-# to haver recovery, we need:
-# - a folder for the token
-# - each dependency is a file containing:
-#   - the job URI
-#   - number of tokens
-# - automatic removal when possible / periodic checking if not our scheduler / checking at startup
+class TokenFile:
+    """Represents a token file"""
+
+    def __init__(self, path: Path):
+        self.path = path
+        with path.open("rt") as fp:
+            count, self.uri = fp.readlines()
+            self.count = int(count)
+
+    @staticmethod
+    def create(path: Path, count: int, uri: str):
+        self = object.__new__(TokenFile)
+        self.count = count
+        self.uri = uri
+        with path.open("wt") as fp:
+            fp.write(f"{str(count)}\n{uri}\n")
+        return self
+
+    def delete(self):
+        self.path.unlink()
+
+
 class CounterToken(Token, FileSystemEventHandler):
-    """File-based counter token"""
+    """File-based counter token
+
+    To ensure recovery (server stopped for whatever reason), we use one folder
+    per token; inside this folder:
+
+    - token.lock is used for IPC locking
+    - token.info contains the maximum number of tokens
+    - TIMESTAMP.token contains (1) the number of tokens (2) the job URI
+    """
 
     TOKENS: Dict[str, "CounterToken"] = {}
 
@@ -91,51 +118,81 @@ class CounterToken(Token, FileSystemEventHandler):
             CounterToken.TOKENS[name] = created
         return created
 
-    def __init__(self, name: str, path: Path, count: int):
+    def __init__(self, name: str, path: Path, count: int, force=True):
         """[summary]
 
         Arguments:
             path {Path} -- The file path of the token file
             count {int} -- Number of tokens (overrides previous definitions)
+            force --   If the token has already been created, force to write the maximum
+                       number of tokens
         """
         super().__init__()
+
         self.path = path
-        self.ipc_lock = fasteners.InterProcessLock(
-            path.with_suffix(path.suffix + ".lock")
-        )
+        self.path.mkdir(exist_ok=True, parents=True)
+
+        self.cache: Dict[
+            str,
+        ] = {}
+
+        self.infopath = path / "token.info"
+
+        self.ipc_lock = fasteners.InterProcessLock(path / "token.lock")
         self.lock = threading.Lock()
 
         self.name = name
 
-        # Watched path
-        self.watchedpath = str(path.absolute())
-        self.watcher = ipcom().fswatch(self, str(path.parent.absolute()))
-        logger.info("Watching %s", self.watchedpath)
-        # When writing, to avoid re-reading the file we just wrote
-        self.timestamp = 0
-
         # Set the new number of tokens
         with self.lock, self.ipc_lock:
-            bytes = self.path.read_bytes() if self.path.is_file() else None
+            # Get the maximum number of tokens
+            if force or not self.infopath.is_file():
+                self.total = count
+                self.infopath.write_text(str(count))
 
-            if bytes:
-                total, taken = CounterToken.VALUES.unpack(bytes)
-                logger.info("Read token from %s: %d/%d", self.path, total, taken)
-            else:
-                taken = 0
-                total = count
+            self.timestamp = os.path.getmtime(self.path)
+            self._update()
 
-            if total != count:
-                logger.warning("Changing number of tokens from %d to %d", total, count)
-                total = count
+        # Watched path
+        self.watchedpath = str(path.absolute())
+        self.watcher = ipcom().fswatch(self, str(path.absolute()))
+        logger.info("Watching %s", self.watchedpath)
 
-            self._write(total, taken)
+    def _update(self):
+        """Update the state by reading all the information from disk
 
-        # Set the number of available tokens
-        self.available = total - taken
+        Assumes that the IPC lock is taken
+        """
+        self.total = int(self.infopath.read_text())
+        self.cache = {}
+        self.available = self.total
+
+        for path in self.path.glob("*.token"):
+            tf = TokenFile(path)
+            self.cache[path.name] = tf
+            self.available -= tf.count
 
     def __str__(self):
         return "token[{}]".format(self.name)
+
+    def on_deleted(self, event):
+        logger.debug(
+            "Deleted path notification %s [watched %s]",
+            event.src_path,
+            self.watchedpath,
+        )
+        name = Path(event.src_path).name
+        if name in self.cache:
+            with self.lock:
+                fc = self.cache[name]
+                del self.cache[name]
+
+                self.available += fc.count
+                logger.debug("Getting back %d tokens", fc.count)
+                if self.available > 0:
+                    with self.dependents as dependents:
+                        for dependency in dependents:
+                            dependency.check()
 
     def on_modified(self, event):
         logger.debug(
@@ -143,94 +200,85 @@ class CounterToken(Token, FileSystemEventHandler):
             event.src_path,
             self.watchedpath,
         )
-        if event.src_path == self.watchedpath:
-            logger.debug("Watched path modified [%s]", self.path)
-            timestamp = os.path.getmtime(self.path)
+
+        if event.src_path == str(self.infopath):
+            logger.debug("Token information modified")
+            timestamp = os.path.getmtime(self.infopath)
             if timestamp <= self.timestamp:
                 logger.debug(
                     "Not reading token file [%f <= %f]", timestamp, self.timestamp
                 )
-            else:
-                logger.debug("Trying to read...")
-                with self.lock, self.ipc_lock:
-                    logger.debug("Got lock...")
-                    total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-                    available = total - taken
 
-                if available != self.available:
-                    logger.info(
-                        "Counter token changed: %d to %d", self.available, available
-                    )
-                    self.available = available
-                    # Notify jobs
-                    with self.dependents as dependents:
-                        for dependency in dependents:
-                            dependency.check()
+            delta = int(self.infopath.read_text()) - self.total
+            self.available += delta
+            if delta > 0 and self.available > 0:
+                with self.dependents as dependents:
+                    for dependency in dependents:
+                        dependency.check()
 
     def dependency(self, count):
+        """Create a token dependency"""
         return CounterTokenDependency(self, count)
 
     def __call__(self, count, task: Task):
+        """Create a token dependency and add it to the task"""
         return task.add_dependencies(self.dependency(count))
 
-    def _write(self, total, taken):
-        # Should only be called when locked
-        self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
-        self.timestamp = os.path.getmtime(self.path)
+    # def _write(self, total, taken):
+    #     # Should only be called when locked
+    #     self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
+    #     self.timestamp = os.path.getmtime(self.path)
 
-        logger.debug(
-            "Token: wrote %d/%d to %s [%d]", total, taken, self.path, self.timestamp
-        )
+    #     logger.debug(
+    #         "Token: wrote %d/%d to %s [%d]", total, taken, self.path, self.timestamp
+    #     )
 
-    def _read(self):
-        # Should only be called when locked
-        self.timestamp = os.path.getmtime(self.path)
-        total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-        self.available = total - taken
-        logger.debug("Read token information from %s: %d/%d", self.path, total, taken)
-        return total, taken
+    # def _read(self):
+    #     # Should only be called when locked
+    #     self.timestamp = os.path.getmtime(self.path)
+    #     total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
+    #     self.available = total - taken
+    #     logger.debug("Read token information from %s: %d/%d", self.path, total, taken)
+    #     return total, taken
 
-    def acquire(self, count):
-        """Acquire"""
+    def acquire(self, dependency: CounterTokenDependency):
+        """Acquire requested token"""
         with self.lock, self.ipc_lock:
-            total, taken = self._read()
-            logger.debug(
-                "Token state [acquire %d]: count %d, taken %d", count, total, taken
-            )
-            if count + taken > total:
-                logger.warning("No more token available - cannot lock")
+            self._update()
+            if self.available < dependency.count:
+                logger.warning(
+                    "Not enough available (%d available, %d requested)",
+                    self.available,
+                    dependency.count,
+                )
                 raise LockError("No token")
 
-            taken += count
+            self.available -= dependency.count
 
-            self._write(total, taken)
+            self.cache[dependency.name] = TokenFile.create(
+                self.path / dependency.name,
+                dependency.count,
+                str(dependency.target.jobpath),
+            )
             logger.debug(
-                "Token state [acquired %d]: count %d, taken %d", count, total, taken
+                "Token state [acquired %d]: available %d, taken %d",
+                dependency.count,
+                self.available,
+                self.total,
             )
 
-    def release(self, count):
+    def release(self, dependency: CounterTokenDependency):
         """Release"""
         with self.lock, self.ipc_lock:
-            logger.debug("Reading token information from %s", self.path)
-            total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-            logger.debug(
-                "Token state [release %d]: count %d, taken %d", count, total, taken
-            )
-            taken -= count
-            if taken < 0:
-                taken = 0
-                logger.error("More tokens released that taken")
-            self._write(total, taken)
-            logger.debug(
-                "Token state [released %d]: count %d, taken %d", count, total, taken
-            )
-            self.available = total - taken
+            self._update()
 
-        # Now, check
-        with self.dependents as dependents:
-            dependents = list(dependents)
-        for dependency in dependents:
-            dependency.check()
+            if dependency.name not in self.cache:
+                logging.error("Could not find the taken token for %s", dependency)
+                return
+
+            tf = self.cache[dependency.name]
+            self.available += tf.count
+            tf.delete()
 
 
 if sys.platform != "win32":

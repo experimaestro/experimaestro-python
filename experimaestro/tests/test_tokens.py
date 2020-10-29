@@ -1,3 +1,4 @@
+import multiprocessing
 import sys
 import pytest
 import logging
@@ -72,7 +73,7 @@ def test_token_fail():
         token_experiment(xp, token)
 
 
-def test_token():
+def test_token_ok():
     """Simple token test: should succeed without token"""
     with TemporaryExperiment("tokens", maxwait=10) as xp:
         token = xp.workspace.connector.createtoken("test-token", 1)
@@ -107,9 +108,6 @@ def test_token_monitor():
 
         logging.info("%s vs %s", time1, time2)
         assert time1 > time2 or time2 > time1
-
-
-import multiprocessing
 
 
 def test_token_reschedule():
@@ -160,12 +158,12 @@ def test_token_reschedule():
 
                 logging.info("%s vs %s", time1, time2)
                 assert time1 > time2 or time2 > time1
-        except TimeoutError as e:
+        except TimeoutError:
             p1.terminate()
             p2.terminate()
             pytest.fail("Timeout")
 
-        except Exception as e:
+        except Exception:
             logging.warning("Other exception: killing processes (just in case)")
             p1.terminate()
             p2.terminate()
@@ -179,12 +177,12 @@ def test_token_process():
 
 
 def restart_function(xp):
-    token = CounterToken(xp.workdir / "token", 1)
+    token = CounterToken("restart-token", xp.workdir / "token", 1)
     token(1, restart.Restart()).submit()
 
 
-@pytest.mark.skip("TODO: not implemented")
+# @pytest.mark.skip("TODO: not implemented")
 @pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)
-def test_restart(terminate):
+def test_token_restart(terminate):
     """Restarting the experiment should take back running tasks"""
     restart.restart(terminate, restart_function)
