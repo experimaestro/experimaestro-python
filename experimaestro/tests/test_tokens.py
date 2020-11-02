@@ -181,7 +181,6 @@ def restart_function(xp):
     token(1, restart.Restart()).submit()
 
 
-# @pytest.mark.skip("TODO: not implemented")
 @pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)
 def test_token_restart(terminate):
     """Restarting the experiment should take back running tasks"""
