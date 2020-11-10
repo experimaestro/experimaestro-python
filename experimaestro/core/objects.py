@@ -12,7 +12,8 @@ import importlib
 from typing import Set
 from experimaestro.utils import logger
 from experimaestro.constants import CACHEPATH_VARNAME
-
+import sys
+from contextlib import contextmanager
 
 class HashComputer:
     OBJECT_ID = b"\x00"
@@ -102,6 +103,17 @@ class TaggedValue:
     def __init__(self, value):
         self.value = value
 
+@contextmanager
+def add_to_path(p):
+    """Temporarily add a path to sys.path"""
+    import sys
+    old_path = sys.path
+    sys.path = sys.path[:]
+    sys.path.insert(0, p)
+    try:
+        yield
+    finally:
+        sys.path = old_path
 
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
@@ -354,10 +366,10 @@ class ConfigInformation:
 
             # Serialize ourselves
             objectout.write("id", id(self.pyobject))
-            if self.xpmtype._module:
-                objectout.write("module", self.xpmtype._module)
-            else:
+            if not self.xpmtype._package:
                 objectout.write("file", str(self.xpmtype._file))
+
+            objectout.write("module", self.xpmtype._module)
             objectout.write("type", self.xpmtype.originaltype.__name__)
 
             # Serialize identifier and typename
@@ -424,13 +436,22 @@ class ConfigInformation:
         objects = {}
 
         for definition in definitions:
+            module_name = definition["module"]
+
+            # Avoids problem when runing module
+            if module_name == "__main__":
+                module_name = "_main_"
+
             if "file" in definition:
                 path = definition["file"]
-                loader = importlib.machinery.SourceFileLoader(path, path)
-                mod = loader.load_module()
+                with add_to_path(str(Path(path).parent)):
+                    spec = importlib.util.spec_from_file_location(module_name, path)
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = mod
+                    spec.loader.exec_module(mod)
             else:
                 logger.debug("Importing module %s", definition["module"])
-                mod = importlib.import_module(definition["module"])
+                mod = importlib.import_module(module_name)
 
             cls = getattr(mod, definition["type"])
             o = object.__new__(cls)

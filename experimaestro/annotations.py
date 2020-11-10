@@ -129,11 +129,12 @@ class config:
         )
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
-        if originaltype.__module__ and originaltype.__module__ != "__main__":
-            objecttype._module = originaltype.__module__
-        else:
-            objecttype._module = None
+        
+        
+        module = inspect.getmodule(originaltype)
         objecttype._file = Path(inspect.getfile(originaltype)).absolute()
+        objecttype._module = module.__name__
+        objecttype._package = module.__package__
 
         # Add description
         if objecttype.description is None:
