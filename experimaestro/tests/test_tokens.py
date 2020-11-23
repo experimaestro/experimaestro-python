@@ -42,6 +42,12 @@ def get_times_frompath(path):
 
 
 def token_experiment(xp, token):
+    """Starts two tasks with a token
+
+    Waits that the two tasks are scheduled. Each task finishes
+    not before the tasks are scheduled (through the use
+    of a file to be created)
+    """
     path = xp.workspace.path / "test_token.file"
     task1 = TokenTask(path=path, x=1)
     task2 = TokenTask(path=path, x=2)
@@ -51,17 +57,23 @@ def token_experiment(xp, token):
         task.submit()
 
     # Wait that both tasks are scheduled
+    logging.info("Waiting that the two tasks are scheduled")
     for task in [task1, task2]:
         while task.job.state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
-    # Waiting to ensure that both jobs are launched
+    # Wait a bit (TODO: find a better way)
+    time.sleep(1)
+
+    # Now any task can finish
+    logging.info("Tasks scheduled - waiting for completion")
     path.write_text("Hello world")
 
     xp.wait()
 
     time1 = get_times(task1)
     time2 = get_times(task2)
+    logging.info("Times: %s and %s", time1, time2)
 
     assert time1 > time2 or time2 > time1
 
@@ -70,7 +82,7 @@ def token_experiment(xp, token):
 def test_token_fail():
     """Simple token test: should fail without token"""
     with TemporaryExperiment("tokens", maxwait=10) as xp:
-        token_experiment(xp, token)
+        token_experiment(xp, None)
 
 
 def test_token_ok():

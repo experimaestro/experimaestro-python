@@ -80,11 +80,14 @@ class TokenFile:
         self = object.__new__(TokenFile)
         self.count = count
         self.uri = uri
+        self.path = path
+        logging.debug("Writing token file %s", path)
         with path.open("wt") as fp:
             fp.write(f"{str(count)}\n{uri}\n")
         return self
 
     def delete(self):
+        logging.debug("Deleting token file %s", self.path)
         self.path.unlink()
 
 
@@ -155,7 +158,7 @@ class CounterToken(Token, FileSystemEventHandler):
 
         # Watched path
         self.watchedpath = str(path.absolute())
-        self.watcher = ipcom().fswatch(self, str(path.absolute()))
+        self.watcher = ipcom().fswatch(self, str(path.absolute()), recursive=True)
         logger.info("Watching %s", self.watchedpath)
 
     def _update(self):
@@ -200,6 +203,7 @@ class CounterToken(Token, FileSystemEventHandler):
             event.src_path,
             self.watchedpath,
         )
+        # logger.debug("%s", event)
 
         if event.src_path == str(self.infopath):
             logger.debug("Token information modified")

@@ -3,10 +3,11 @@
 from typing import Optional
 from pathlib import Path
 import os
+import sys
+import logging
+from .utils import logger
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-import sys
-from .utils import logger
 
 
 class IPCom:
@@ -21,11 +22,12 @@ class IPCom:
 
     def fswatch(self, watcher: FileSystemEventHandler, path: Path, recursive=False):
         if not self.observer.is_alive():
+            # Just in case...
             self.observer.start()
         return self.observer.schedule(watcher, path, recursive=recursive)
 
-    def fsuwatch(self, watcher):
-        self.observer.unschedule(watch)
+    def fsunwatch(self, watcher):
+        self.observer.unschedule(watcher)
 
     # def run(self):
     #     logger.info("Starting IPC thread")
