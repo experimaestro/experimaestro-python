@@ -41,7 +41,7 @@ def get_times_frompath(path):
     return TimeInterval(*(float(t) for t in s))
 
 
-def token_experiment(xp, token):
+def token_experiment(xp, token, ntasks=3):
     """Starts two tasks with a token
 
     Waits that the two tasks are scheduled. Each task finishes
@@ -49,16 +49,18 @@ def token_experiment(xp, token):
     of a file to be created)
     """
     path = xp.workspace.path / "test_token.file"
-    task1 = TokenTask(path=path, x=1)
-    task2 = TokenTask(path=path, x=2)
-    for task in [task1, task2]:
+
+    tasks = []
+    for it in range(ntasks):
+        task = TokenTask(path=path, x=it)
+        tasks.append(task)
         if token:
             task.add_dependencies(token.dependency(1))
         task.submit()
 
     # Wait that both tasks are scheduled
     logging.info("Waiting that the two tasks are scheduled")
-    for task in [task1, task2]:
+    for task in tasks:
         while task.job.state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
@@ -71,11 +73,11 @@ def token_experiment(xp, token):
 
     xp.wait()
 
-    time1 = get_times(task1)
-    time2 = get_times(task2)
-    logging.info("Times: %s and %s", time1, time2)
-
-    assert time1 > time2 or time2 > time1
+    times = [get_times(task) for task in tasks]
+    logging.info("Times: %s", ",".join([str(t) for t in times]))
+    times = sorted(times)
+    for i in range(1, ntasks):
+        assert (times[i - 1] > times[i]) or (times[i] > times[i - 1])
 
 
 @pytest.mark.xfail(strict=True)
@@ -86,9 +88,9 @@ def test_token_fail():
 
 
 def test_token_ok():
-    """Simple token test: should succeed without token"""
+    """Simple token test: should succeed with token"""
     with TemporaryExperiment("tokens", maxwait=10) as xp:
-        token = xp.workspace.connector.createtoken("test-token", 1)
+        token = CounterToken("token-ok", xp.workdir / "token", 1)
         token_experiment(xp, token)
 
 
