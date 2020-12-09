@@ -1,16 +1,18 @@
 import multiprocessing
 import sys
+from typing import Counter
+import fasteners
 import pytest
 import logging
 import time
 from pathlib import Path
 
 import subprocess
-from experimaestro.tokens import CounterToken
+from experimaestro import task, param
+from experimaestro.tokens import CounterToken, TokenFile
 from experimaestro.scheduler import JobState
 from .utils import TemporaryExperiment, TemporaryDirectory, timeout
 from .task_tokens import TokenTask
-from experimaestro.ipc import IPCom
 from . import restart
 
 
@@ -93,6 +95,55 @@ def test_token_ok():
         token = CounterToken("token-ok", xp.workdir / "token", 1)
         token_experiment(xp, token)
     logging.info("Finished token_ok test")
+
+
+@param("x", type=int)
+@task()
+def dummy_task(x: int):
+    pass
+
+
+def test_token_cleanup():
+    """Test that tokens are correctly cleaned up if the task finished"""
+    with TemporaryExperiment("token_cleanup", maxwait=10) as xp:
+        token = CounterToken("token-cleanup", xp.workdir / "token-cleanup", 1)
+
+        task = dummy_task(x=1)
+        dependency = token.dependency(1)
+        task.add_dependencies(dependency)
+        # Just to create the directory
+        task.submit()
+
+        xp.wait()
+
+        # Just lock directly (but without process)
+        logging.info("Lock without process")
+        TokenFile.create(dependency)
+        task2 = dummy_task(x=2)
+        task2.add_dependencies(token.dependency(1)).submit()
+        xp.wait()
+
+        # Just lock directly (with process)
+        logging.info("Lock with process")
+        job = dependency.target
+        with fasteners.InterProcessLock(job.lockpath):
+            TokenFile.create(dependency)
+            lockingpath = job.path / "testtoken.signal"
+            command = [
+                sys.executable,
+                Path(__file__).parent / "scripts" / "waitforfile.py",
+                lockingpath,
+            ]
+
+            p1 = subprocess.Popen(command)
+            job.pidpath.write_text(str(p1.pid))
+
+            task3 = dummy_task(x=3)
+            task3.add_dependencies(token.dependency(1)).submit()
+
+            lockingpath.write_text("Let's go")
+
+            xp.wait()
 
 
 def test_token_monitor():

@@ -32,12 +32,12 @@ class ThreadingCondition(threading.Condition):
     def __enter__(self) -> bool:
         import traceback
 
-        logger.debug("Trying to enter CV\n%s", "".join(traceback.format_stack()))
+        # logger.debug("Trying to enter CV\n%s", "".join(traceback.format_stack()))
 
         r = super().__enter__()
-        logger.debug("CV locked")
+        # logger.debug("CV locked")
         return r
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        logger.debug("Exiting CV")
+        # logger.debug("Exiting CV")
         return super().__exit__(exc_type, exc_val, exc_tb)

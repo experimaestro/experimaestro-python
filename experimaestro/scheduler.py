@@ -191,6 +191,10 @@ class Job(Resource):
     def stderr(self) -> Path:
         return self.jobpath / ("%s.err" % self.name)
 
+    @property
+    def basepath(self) -> Path:
+        return self.jobpath / self.name
+
     def dependencychanged(self, dependency, oldstatus, status):
         value = lambda s: (1 if s == DependencyStatus.OK else 0)
         self.unsatisfied -= value(status) - value(oldstatus)

@@ -3,12 +3,11 @@ a computational resource (e.g. number of launched jobs, etc.)
 """
 
 import sys
+import psutil
 from pathlib import Path
 from experimaestro.core.objects import Task
 import fasteners
 import threading
-import struct
-import time
 import os.path
 from watchdog.events import FileSystemEventHandler
 from typing import Dict
@@ -72,11 +71,15 @@ class TokenFile:
     def __init__(self, path: Path):
         self.path = path
         with path.open("rt") as fp:
-            count, self.uri = fp.readlines()
+            count, self.uri = [l.strip() for l in fp.readlines()]
             self.count = int(count)
 
     @staticmethod
-    def create(path: Path, count: int, uri: str):
+    def create(dependency: CounterTokenDependency):
+        path = dependency._token.path / dependency.name
+        count = dependency.count
+        uri = str(dependency.target.basepath)
+
         self = object.__new__(TokenFile)
         self.count = count
         self.uri = uri
@@ -90,6 +93,31 @@ class TokenFile:
         logging.debug("Deleting token file %s", self.path)
         self.path.unlink()
 
+    def watch(self):
+        """Watch the matching process"""
+        logger.debug(
+            "Watching process for %s (%s, taken %d)", self.path, self.uri, self.count
+        )
+        path = Path(self.uri)
+        lockpath = path.with_suffix(".lock")
+        pidpath = path.with_suffix(".pid")
+
+        # Watch for the job
+        def run():
+            logger.debug("Locking job lock path %s", lockpath)
+            with fasteners.InterProcessLock(lockpath):
+                if not pidpath.is_file():
+                    logger.debug("Job already finished (no PID file)")
+                else:
+                    pid = int(pidpath.read_text())
+                    logger.debug("Watching external job with PID %d", pid)
+                    p = psutil.Process(pid)
+                    p.wait()
+
+                self.delete()
+
+        threading.Thread(target=run).start()
+
 
 class CounterToken(Token, FileSystemEventHandler):
     """File-based counter token
@@ -102,10 +130,8 @@ class CounterToken(Token, FileSystemEventHandler):
     - TIMESTAMP.token contains (1) the number of tokens (2) the job URI
     """
 
-    TOKENS: Dict[str, "CounterToken"] = {}
-
     """Maps paths to instances"""
-    VALUES = struct.Struct("<LL")
+    TOKENS: Dict[str, "CounterToken"] = {}
 
     @staticmethod
     def forkhandler():
@@ -201,27 +227,41 @@ class CounterToken(Token, FileSystemEventHandler):
                             dependency.check()
 
     def on_modified(self, event):
-        logger.debug(
-            "Watched path notification %s [watched %s]",
-            event.src_path,
-            self.watchedpath,
-        )
-        # logger.debug("%s", event)
+        try:
+            logger.debug(
+                "Watched path notification %s [watched %s]",
+                event.src_path,
+                self.watchedpath,
+            )
+            # logger.debug("%s", event)
 
-        if event.src_path == str(self.infopath):
-            logger.debug("Token information modified")
-            timestamp = os.path.getmtime(self.infopath)
-            if timestamp <= self.timestamp:
-                logger.debug(
-                    "Not reading token file [%f <= %f]", timestamp, self.timestamp
-                )
+            path = Path(event.src_path)
 
-            delta = int(self.infopath.read_text()) - self.total
-            self.available += delta
-            if delta > 0 and self.available > 0:
-                with self.dependents as dependents:
-                    for dependency in dependents:
-                        dependency.check()
+            if event.src_path == str(self.infopath):
+                logger.debug("Token information modified")
+                timestamp = os.path.getmtime(self.infopath)
+                if timestamp <= self.timestamp:
+                    logger.debug(
+                        "Not reading token file [%f <= %f]", timestamp, self.timestamp
+                    )
+
+                delta = int(self.infopath.read_text()) - self.total
+                self.available += delta
+                if delta > 0 and self.available > 0:
+                    with self.dependents as dependents:
+                        for dependency in dependents:
+                            dependency.check()
+
+            elif path.name.endswith(".token"):
+                with self.lock:
+                    if path.name not in self.cache:
+                        logger.debug("Token file not in cache %s", path.name)
+                        tokenfile = TokenFile(path)
+                        tokenfile.watch()
+                        self.cache[path.name] = tokenfile
+        except Exception:
+            logger.exception("Uncaught exception in on_modified handler")
+            raise
 
     def dependency(self, count):
         """Create a token dependency"""
@@ -230,23 +270,6 @@ class CounterToken(Token, FileSystemEventHandler):
     def __call__(self, count, task: Task):
         """Create a token dependency and add it to the task"""
         return task.add_dependencies(self.dependency(count))
-
-    # def _write(self, total, taken):
-    #     # Should only be called when locked
-    #     self.path.write_bytes(CounterToken.VALUES.pack(total, taken))
-    #     self.timestamp = os.path.getmtime(self.path)
-
-    #     logger.debug(
-    #         "Token: wrote %d/%d to %s [%d]", total, taken, self.path, self.timestamp
-    #     )
-
-    # def _read(self):
-    #     # Should only be called when locked
-    #     self.timestamp = os.path.getmtime(self.path)
-    #     total, taken = CounterToken.VALUES.unpack(self.path.read_bytes())
-    #     self.available = total - taken
-    #     logger.debug("Read token information from %s: %d/%d", self.path, total, taken)
-    #     return total, taken
 
     def acquire(self, dependency: CounterTokenDependency):
         """Acquire requested token"""
@@ -262,11 +285,7 @@ class CounterToken(Token, FileSystemEventHandler):
 
             self.available -= dependency.count
 
-            self.cache[dependency.name] = TokenFile.create(
-                self.path / dependency.name,
-                dependency.count,
-                str(dependency.target.jobpath),
-            )
+            self.cache[dependency.name] = TokenFile.create(dependency)
             logger.debug(
                 "Token state [acquired %d]: available %d, taken %d",
                 dependency.count,
