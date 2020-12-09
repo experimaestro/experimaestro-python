@@ -10,7 +10,7 @@ from typing import Dict
 from .environment import Environment
 from .workspace import Workspace
 from .core.objects import Config
-from .utils import logger
+from .utils import ThreadingCondition, logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
 from .connectors import ProcessThreadError
@@ -233,7 +233,7 @@ class JobThread(threading.Thread):
         This method will lock all the dependencies before calling `self.job.run(locks)`
         where `locks` are the taken locks
         """
-
+        logger.debug("Job Thread: starting job %s", self.job)
         state = None
         with Locks() as locks:
             try:
@@ -353,7 +353,7 @@ class Scheduler:
         self.submitjobs = True
 
         # Condition variable for scheduler access
-        self.cv = threading.Condition()
+        self.cv = ThreadingCondition()
 
         # Exit mode activated
         self.exitmode = False

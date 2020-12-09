@@ -92,6 +92,7 @@ def test_token_ok():
     with TemporaryExperiment("tokens", maxwait=10) as xp:
         token = CounterToken("token-ok", xp.workdir / "token", 1)
         token_experiment(xp, token)
+    logging.info("Finished token_ok test")
 
 
 def test_token_monitor():

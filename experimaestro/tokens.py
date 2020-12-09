@@ -192,9 +192,12 @@ class CounterToken(Token, FileSystemEventHandler):
 
                 self.available += fc.count
                 logger.debug("Getting back %d tokens", fc.count)
-                if self.available > 0:
-                    with self.dependents as dependents:
-                        for dependency in dependents:
+
+            # Do not lock here (notify only)
+            if self.available > 0:
+                with self.dependents as dependents:
+                    for dependency in dependents:
+                        if self.available > 0:
                             dependency.check()
 
     def on_modified(self, event):
