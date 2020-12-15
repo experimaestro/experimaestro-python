@@ -97,11 +97,17 @@ class config:
                 if tp.__bases__ != (object,):
                     __bases__ += tp.__bases__
 
+            keep = getattr(tp, "__xpm_default_keep__", False)
+
             # Remove all methods but those marked by @configmethod
             __dict__ = {
                 key: value
                 for key, value in tp.__dict__.items()
-                if not (inspect.isfunction(value) or key in config.FORBIDDEN_ATTRIBUTES)
+                # Not forbidden, and not function (unless we keep everything)
+                if (
+                    (keep or not inspect.isfunction(value))
+                    and key not in config.FORBIDDEN_ATTRIBUTES
+                )
                 or (key in config.KEPT_METHODS)
                 or hasattr(value, "__xpmconfig__")
             }
@@ -129,8 +135,7 @@ class config:
         )
         tp.__xpm__ = objecttype
         objecttype.originaltype = originaltype
-        
-        
+
         module = inspect.getmodule(originaltype)
         objecttype._file = Path(inspect.getfile(originaltype)).absolute()
         objecttype._module = module.__name__
