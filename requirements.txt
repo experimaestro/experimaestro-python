@@ -5,7 +5,7 @@ click
 fasteners
 psutil
 websockets
-jsonstreams
+jsonstreams >= 0.5
 pytools
 # Avoid version 0.10.4
 watchdog < 0.10.4 
