@@ -7,7 +7,35 @@ import signal
 import pytest
 
 from experimaestro.launchers import Launcher
-from experimaestro import experiment
+from experimaestro import experiment, task
+
+
+class TimeInterval:
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    def __lt__(self, value):
+        return self.start > value.end
+
+    def __str__(self):
+        return "%.4f - %.4f" % (self.start, self.end)
+
+    def __repr__(self):
+        return str(self)
+
+
+def get_times(task: task) -> TimeInterval:
+    logging.info("Reading times from %s", task.stdout())
+    return TimeInterval(
+        *(float(t) for t in task.stdout().read_text().strip().split("\n"))
+    )
+
+
+def get_times_frompath(path) -> TimeInterval:
+    s = path.read_text().strip().split("\n")
+    logging.info("Read times: %s", s)
+    return TimeInterval(*(float(t) for t in s))
 
 
 class TemporaryDirectory:
@@ -90,4 +118,3 @@ def is_posix():
         return True
     except ImportError:
         return False
-

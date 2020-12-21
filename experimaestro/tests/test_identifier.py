@@ -45,11 +45,11 @@ class Values:
 
 
 def assert_equal(a, b):
-    assert a.__xpm__.identifier == b.__xpm__.identifier
+    assert a.__xpm__.identifier.all == b.__xpm__.identifier.all
 
 
 def assert_notequal(a, b):
-    assert a.__xpm__.identifier != b.__xpm__.identifier
+    assert a.__xpm__.identifier.all != b.__xpm__.identifier.all
 
 
 def test_int():

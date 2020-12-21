@@ -11,36 +11,15 @@ import subprocess
 from experimaestro import task, param
 from experimaestro.tokens import CounterToken, TokenFile
 from experimaestro.scheduler import JobState
-from .utils import TemporaryExperiment, TemporaryDirectory, timeout
+from .utils import (
+    TemporaryExperiment,
+    TemporaryDirectory,
+    timeout,
+    get_times,
+    get_times_frompath,
+)
 from .task_tokens import TokenTask
 from . import restart
-
-
-class TimeInterval:
-    def __init__(self, start, end):
-        self.start = start
-        self.end = end
-
-    def __lt__(self, value):
-        return self.start > value.end
-
-    def __str__(self):
-        return "%.4f - %.4f" % (self.start, self.end)
-
-    def __repr__(self):
-        return str(self)
-
-
-def get_times(task):
-    return TimeInterval(
-        *(float(t) for t in task.stdout().read_text().strip().split("\n"))
-    )
-
-
-def get_times_frompath(path):
-    s = path.read_text().strip().split("\n")
-    logging.info("Read times: %s", s)
-    return TimeInterval(*(float(t) for t in s))
 
 
 def token_experiment(xp, token, ntasks=3):
@@ -104,7 +83,7 @@ def dummy_task(x: int):
 
 
 def test_token_cleanup():
-    """Test that tokens are correctly cleaned up if the task finished"""
+    """Test that tokens are correctly cleaned up if the process finished"""
     with TemporaryExperiment("token_cleanup", maxwait=10) as xp:
         token = CounterToken("token-cleanup", xp.workdir / "token-cleanup", 1)
 
@@ -117,6 +96,7 @@ def test_token_cleanup():
         xp.wait()
 
         # Just lock directly (but without process)
+        # The absence of process should be detected right away
         logging.info("Lock without process")
         TokenFile.create(dependency)
         task2 = dummy_task(x=2)
@@ -127,6 +107,7 @@ def test_token_cleanup():
         logging.info("Lock with process")
         job = dependency.target
         with fasteners.InterProcessLock(job.lockpath):
+            logging.info("Creating dependency %s", dependency)
             TokenFile.create(dependency)
             lockingpath = job.path / "testtoken.signal"
             command = [
@@ -141,8 +122,10 @@ def test_token_cleanup():
             task3 = dummy_task(x=3)
             task3.add_dependencies(token.dependency(1)).submit()
 
+            # Ends the script "waitforfile.py"
             lockingpath.write_text("Let's go")
 
+            # task3 should start
             xp.wait()
 
 

@@ -1,3 +1,8 @@
+# Master
+
+- Sub-parameters
+- Fixes with file-based tokens
+
 # 0.7.9
 
 - Attribute `__xpm_default_keep__` can be used to avoid using `@configmethod` for configuration only-classes (e.g. datamaestro)

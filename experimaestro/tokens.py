@@ -192,14 +192,26 @@ class CounterToken(Token, FileSystemEventHandler):
 
         Assumes that the IPC lock is taken
         """
+        logging.debug("Full token state update")
         self.total = int(self.infopath.read_text())
+        old_cache = self.cache
         self.cache = {}
         self.available = self.total
 
         for path in self.path.glob("*.token"):
-            tf = TokenFile(path)
+            tf = old_cache.get(path.name)
+            if tf is None:
+                tf = TokenFile(path)
+                tf.watch()
+                logging.debug("Read token file %s (%d)", path, tf.count)
+            else:
+                logging.debug(
+                    "Token file already in cache %s (%d)", path.name, tf.count
+                )
+
             self.cache[path.name] = tf
             self.available -= tf.count
+        logging.debug("Full token state update finished (%d available)", self.available)
 
     def __str__(self):
         return "token[{}]".format(self.name)
@@ -213,11 +225,16 @@ class CounterToken(Token, FileSystemEventHandler):
         name = Path(event.src_path).name
         if name in self.cache:
             with self.lock:
-                fc = self.cache[name]
-                del self.cache[name]
+                if name in self.cache:
+                    fc = self.cache[name]
+                    del self.cache[name]
 
-                self.available += fc.count
-                logger.debug("Getting back %d tokens", fc.count)
+                    self.available += fc.count
+                    logger.debug(
+                        "Getting back %d tokens (%d available)",
+                        fc.count,
+                        self.available,
+                    )
 
             # Do not lock here (notify only)
             if self.available > 0:
@@ -225,6 +242,26 @@ class CounterToken(Token, FileSystemEventHandler):
                     for dependency in dependents:
                         if self.available > 0:
                             dependency.check()
+
+    def on_created(self, event):
+        logger.debug(
+            "Created path notification %s [watched %s]",
+            event.src_path,
+            self.watchedpath,
+        )
+
+        path = Path(event.src_path)
+
+        try:
+            if path.name.endswith(".token") and path.name not in self.cache:
+                with self.lock:
+                    if path.name not in self.cache:
+                        tokenfile = TokenFile(path)
+                        tokenfile.watch()
+                        self.cache[path.name] = tokenfile
+        except Exception:
+            logger.exception("Uncaught exception in on_modified handler")
+            raise
 
     def on_modified(self, event):
         try:
@@ -245,14 +282,22 @@ class CounterToken(Token, FileSystemEventHandler):
                         "Not reading token file [%f <= %f]", timestamp, self.timestamp
                     )
 
-                delta = int(self.infopath.read_text()) - self.total
+                total = int(self.infopath.read_text())
+                delta = total - self.total
+                self.total = total
                 self.available += delta
+                logger.debug(
+                    "Token information modified: available %d, total %d",
+                    self.available,
+                    self.total,
+                )
+
                 if delta > 0 and self.available > 0:
                     with self.dependents as dependents:
                         for dependency in dependents:
                             dependency.check()
 
-            elif path.name.endswith(".token"):
+            elif path.name.endswith(".token") and path.name not in self.cache:
                 with self.lock:
                     if path.name not in self.cache:
                         logger.debug("Token file not in cache %s", path.name)
@@ -298,13 +343,76 @@ class CounterToken(Token, FileSystemEventHandler):
         with self.lock, self.ipc_lock:
             self._update()
 
-            if dependency.name not in self.cache:
-                logging.error("Could not find the taken token for %s", dependency)
+            tf = self.cache.get(dependency.name, None)
+            if tf is None:
+                logging.error(
+                    "Could not find the taken token for %s (%s)",
+                    dependency,
+                    dependency.name,
+                )
                 return
 
-            tf = self.cache[dependency.name]
+            del self.cache[dependency.name]
             self.available += tf.count
+            logging.debug("%s: available %d", self, self.available)
             tf.delete()
+
+        if self.available > 0:
+            with self.dependents as dependents:
+                for dependency in dependents:
+                    dependency.check()
+
+
+class ProcessCounterToken(Token):
+    """Process-level token"""
+
+    def __init__(self, count: int):
+        """Creates a new
+
+        Arguments:
+            count {int} -- Number of tokens
+        """
+        super().__init__()
+
+        self.count = count
+        self.available = count
+        self.lock = threading.Lock()
+
+    def __str__(self):
+        return "process-token()"
+
+    def dependency(self, count):
+        """Create a token dependency"""
+        return CounterTokenDependency(self, count)
+
+    def __call__(self, count, task: Task):
+        """Create a token dependency and add it to the task"""
+        return task.add_dependencies(self.dependency(count))
+
+    def acquire(self, dependency: CounterTokenDependency):
+        """Acquire requested token"""
+        with self.lock:
+            if self.available < dependency.count:
+                raise LockError("No token")
+
+            self.available -= dependency.count
+
+    def release(self, dependency: CounterTokenDependency):
+        """Release"""
+        with self.lock:
+            self.available += dependency.count
+            logging.debug(
+                "%s: releasing %d (available %d)",
+                self,
+                dependency.count,
+                self.available,
+            )
+
+        if self.available > 0:
+            with self.dependents as dependents:
+                for dependency in dependents:
+                    if self.available > 0:
+                        dependency.check()
 
 
 if sys.platform != "win32":

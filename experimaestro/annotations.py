@@ -3,8 +3,7 @@
 import sys
 import inspect
 import logging
-import pathlib
-from pathlib import Path, PosixPath
+from pathlib import Path
 from typing import Optional
 
 import experimaestro.core.objects as objects
@@ -14,7 +13,6 @@ from .core.arguments import TypeHint, Argument as CoreArgument, TypedArgument
 from .core.objects import Config
 from .core.types import Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
-from .workspace import Workspace
 from .typingutils import get_optional
 from .checkers import Checker
 
@@ -256,6 +254,7 @@ class param:
         self.required = required
         self.generator = None
         self.checker = checker
+        self.subparam = False
 
     def __call__(self, tp):
         # Don't annotate in task mode
@@ -280,9 +279,18 @@ class param:
             generator=self.generator,
             default=self.default,
             checker=self.checker,
+            subparam=self.subparam,
         )
         tp.__xpm__.addArgument(argument)
         return tp
+
+
+class subparam(param):
+    """Defines an argument for an experimaestro type"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.subparam = True
 
 
 # Just a rebind (back-compatibility)

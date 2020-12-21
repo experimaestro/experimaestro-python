@@ -1,4 +1,4 @@
-from .tasks import ForeignClassB1, argument, config
+from .all import ForeignClassB1, argument, config
 
 
 @argument("y", type=int)
