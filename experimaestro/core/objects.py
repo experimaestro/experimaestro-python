@@ -15,6 +15,7 @@ from experimaestro.constants import CACHEPATH_VARNAME
 import sys
 from contextlib import contextmanager
 
+
 class HashComputer:
     OBJECT_ID = b"\x00"
     INT_ID = b"\x01"
@@ -23,8 +24,8 @@ class HashComputer:
     PATH_ID = b"\x04"
     NAME_ID = b"\x05"
     NONE_ID = b"\x06"
-    LIST_ID = b"\x06"
-    TASK_ID = b"\x06"
+    LIST_ID = b"\x07"
+    TASK_ID = b"\x08"
 
     def __init__(self):
         self.hasher = hashlib.sha256()
@@ -90,7 +91,7 @@ def updatedependencies(dependencies, value: "Config", path):
             dependencies.add(value.__xpm__.dependency())
         else:
             value.__xpm__.updatedependencies(dependencies, path)
-    elif isinstance(value, list):
+    elif isinstance(value, (list, set)):
         for el in value:
             updatedependencies(dependencies, el, path)
     elif isinstance(value, (str, int, float, Path)):
@@ -103,10 +104,12 @@ class TaggedValue:
     def __init__(self, value):
         self.value = value
 
+
 @contextmanager
 def add_to_path(p):
     """Temporarily add a path to sys.path"""
     import sys
+
     old_path = sys.path
     sys.path = sys.path[:]
     sys.path.insert(0, p)
@@ -114,6 +117,7 @@ def add_to_path(p):
         yield
     finally:
         sys.path = old_path
+
 
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
@@ -585,8 +589,8 @@ class Config:
     def __eq__(self, other):
         if self.__class__ != other.__class__:
             return False
-        for key, value in self.__xpm__.xpmvalues():
-            if value != getattr(other.value, key, None):
+        for argument, value in self.__xpm__.xpmvalues():
+            if value != getattr(other, argument.name, None):
                 return False
         return True
 

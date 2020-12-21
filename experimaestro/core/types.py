@@ -7,6 +7,7 @@ from experimaestro.utils import logger
 from .objects import Config, Task, BaseTaskFunction
 from .arguments import Argument
 
+
 class Identifier:
     def __init__(self, name: str):
         self.name = name
@@ -123,7 +124,9 @@ class ObjectType(Type):
                 yield tp.__xpm__
 
     @staticmethod
-    def create(configclass: TypingType["Config"], identifier, description, register=True):
+    def create(
+        configclass: TypingType["Config"], identifier, description, register=True
+    ):
         if register and str(identifier) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[str(identifier)]
             if _objecttype.__xpm__.originaltype != configclass:
@@ -158,7 +161,7 @@ class ObjectType(Type):
             return self.objecttype(**value)
 
         if not isinstance(value, Config):
-            raise ValueError("%s is not an experimaestro type or task", value)
+            raise ValueError(f"{value} is not an experimaestro type or task")
 
         types = self.objecttype
 

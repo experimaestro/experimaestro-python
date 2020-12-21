@@ -1,11 +1,9 @@
+from pathlib import Path
+
 from . import Launcher
-from experimaestro.connectors.local import LocalProcessBuilder
 from experimaestro.scriptbuilder import ShScriptBuilder
 
 
 class UnixLauncher(Launcher):
-    def scriptbuilder(self):
+    def scriptbuilder(self) -> Path:
         return ShScriptBuilder()
-
-    def processbuilder(self):
-        return LocalProcessBuilder()

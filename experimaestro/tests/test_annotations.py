@@ -6,14 +6,16 @@ Test all the annotations for configurations and tasks
 # Annotation specific tests
 
 from typing import Optional, List
-from experimaestro import config, argument, Param, task
+from experimaestro import config, param, Param, task
 import experimaestro.core.types as types
 
 # --- Test manual name for configuration
 
+
 @config("annotations.b")
 class B:
     pass
+
 
 def test_fullname():
     assert str(B.__xpm__.identifier) == "annotations.b"
@@ -21,9 +23,11 @@ def test_fullname():
 
 # --- Automatic name for configuration
 
+
 @config()
 class A:
     pass
+
 
 def test_noname():
     assert str(A.__xpm__.identifier) == "experimaestro.tests.test_annotations.a"
@@ -31,12 +35,18 @@ def test_noname():
 
 # --- Use type annotations
 
+
 def ArgumentValue(default=None, *, help=""):
     return default
+
+
 class Parama:
-    def __init__(self): pass
+    def __init__(self):
+        pass
+
     def __getitem__(self, k):
         return Param[int]
+
 
 def test_class_variable():
     """Experimental support of type annotations"""
@@ -48,7 +58,7 @@ def test_class_variable():
         z: Param[Optional[float]]
         t: Param[List[float]]
         w: Param(help="help")[int]
-        
+
     arg_x = Config.__xpm__.getArgument("x")
     assert arg_x.name == "x"
     assert isinstance(arg_x.type, types.IntType)
@@ -82,7 +92,8 @@ def test_task_config():
     """Experimental support of type annotations"""
 
     @config()
-    class Output: pass
+    class Output:
+        pass
 
     @task()
     class Task:

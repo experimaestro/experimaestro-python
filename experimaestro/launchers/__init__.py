@@ -1,7 +1,14 @@
 from pathlib import Path, PosixPath
 from typing import Dict, Optional
-from experimaestro.connectors.local import Connector, LocalConnector
+from experimaestro.commandline import CommandLineJob
+from experimaestro.connectors.local import ProcessBuilder, LocalConnector
 from experimaestro.connectors.ssh import SshPath, SshConnector
+
+
+class ScriptBuilder:
+    def write(self, job: CommandLineJob) -> Path:
+        raise NotImplementedError()
+
 
 class Launcher:
     def __init__(self, connector: "experimaestro.connectors.Connector"):
@@ -25,5 +32,16 @@ class Launcher:
 
         if isinstance(path, SshPath):
             from .unix import UnixLauncher
+
             return UnixLauncher(SshConnector.fromPath(path))
         raise ValueError("Cannot create a default launcher for %s", type(path))
+
+    def scriptbuilder(self) -> ScriptBuilder:
+        """Returns a script builder"""
+        raise NotImplementedError()
+
+    def processbuilder(self) -> ProcessBuilder:
+        """Returns the process builder for this launcher
+
+        By default, returns the associated connector builder"""
+        return self.connector.processbuilder()
