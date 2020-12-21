@@ -2,26 +2,21 @@
 
 ## Defining plans
 
-Once tasks and configurations are defined, experiments are defined imperatively by combining them. 
+Once tasks and configurations are defined, experiments are defined imperatively by combining them.
 In experimaestro, plans are defined imperatively which gives a lot of freedom.
 
 Configuration and task arguments can be set by using a constructor or assigning a member within
 the config/task instance, as in the example below:
 
 !!! example
-    ```py3 linenums="1"
-    model = Model1(layers=3)
-    learnedmodel = Learn(epochs=100)
-    learnedmodel.model = model
-    learnedmodel.submit()
-    ```
+`py3 linenums="1" model = Model1(layers=3) learnedmodel = Learn(epochs=100) learnedmodel.model = model learnedmodel.submit() `
 
     - line 1: the `Model1` configuration is set with argument `layers` set to `3`.
     - line 2: the `Learn` task is configured with parameter `epochs` set to 100
     - line 3: Set the parameter `model` of the `Learn` task instance to `model`
     - line 4: Submit the task to the job scheduler
 
-Once a task is submitted, the value of its arguments cannot be changed (it is **sealed**). 
+Once a task is submitted, the value of its arguments cannot be changed (it is **sealed**).
 This allows to re-use configuration/tasks latter.
 
 ### Unique job identifier
@@ -32,12 +27,17 @@ Parameters are ignored if:
 - They were defined with `ignored` set to `True`
 - They have a type `Path`
 
+## Tokens
 
+Tokens can be used to restrict the number of running jobs.
 
+```py3
+# Creates a token with 4 available slots
+token = connector.createtoken("cpu", 4)
 
-
-
-
+# Add a task that needs 2 slots from the token
+task = token(1, task)
+```
 
 ## Tags
 
@@ -46,11 +46,13 @@ Tags allow to monitor specific experimental parameters.
 ### Tagging a value
 
 Tagging a value can be done easily by using the `tag` function from `experimaestro`
+
 ```
 tag(value: Union[str, int, float, bool])
 ```
 
 For example,
+
 ```python
 model = MyModel(epochs=tag(100))
 ```
@@ -61,6 +63,7 @@ In the above example, `model.tags()` will return `{ "epochs": 100 }`
 ### Adding a tag
 
 Adding a tag can be done by using a configuration instance method:
+
 ```python
 tag(name: str, value: Union[str, int, float, bool])
 ```
@@ -69,11 +72,9 @@ tag(name: str, value: Union[str, int, float, bool])
 
 Use `tagspath(value)`
 
-
 ## Summarizing experimental results
 
 For each experiment (identified by its name), a folder is created automatically. Using both
-
 
 ```python3
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
@@ -102,19 +103,14 @@ with experiment("...main experimental folder path...", "experiment ID", port=123
 
 ```
 
-
 ## Conditional tasks
 
-*Planned*
+_Planned_
 
 Sometimes, it can be useful to wait until a task completes - for instance, when exploring the hyperparameter
 space, one can wait to launch new tasks based on the outcome.
 
-
-
 ## Misc
-
-
 
 ### Command Line Arguments
 
@@ -138,4 +134,3 @@ def cli(epochs):
 ```
 
 This will automatically use the type, help and default value of the matching option
-

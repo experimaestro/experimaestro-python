@@ -61,17 +61,22 @@ def run(parameters):
 
     with open(parameters, "r") as fp:
         params = json.load(fp)
-        task = ConfigInformation.fromParameters(params)
+        task = ConfigInformation.fromParameters(params["objects"])
         task.__taskdir__ = Path.cwd()
+        if params["has_subparam"]:
+            task.__maintaskdir__ = Path.cwd().parents[1]
         task.execute()
 
 
-@click.option("--clean", is_flag=True, help="Remove the socket file and its enclosing directory")
+@click.option(
+    "--clean", is_flag=True, help="Remove the socket file and its enclosing directory"
+)
 @click.argument("unix-path", type=Path)
 @cli.command()
 def rpyc_server(unix_path, clean):
     """Start an rPyC server"""
     from experimaestro.rpyc import start_server
+
     start_server(unix_path, clean=clean)
 
 

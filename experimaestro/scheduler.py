@@ -1,3 +1,4 @@
+from collections import defaultdict
 from pathlib import Path
 import threading
 import time
@@ -6,6 +7,8 @@ import enum
 import signal
 import asyncio
 from typing import Dict
+
+from experimaestro.tokens import ProcessCounterToken
 
 from .environment import Environment
 from .workspace import Workspace
@@ -135,11 +138,25 @@ class Job(Resource):
 
     @property
     def relpath(self):
-        return Path(str(self.type.identifier)) / self.identifier
+        identifier = self.config.__xpm__.identifier
+        base = Path(str(self.type.identifier))
+        if identifier.sub:
+            return base / identifier.main.hex() / "xpms" / identifier.sub.hex()
+        return base / identifier.all.hex()
+
+    @property
+    def relmainpath(self):
+        identifier = self.config.__xpm__.identifier
+        base = Path(str(self.type.identifier))
+        return base / identifier.main.hex()
+
+    @property
+    def hashidentifier(self):
+        return self.config.__xpm__.identifier
 
     @property
     def identifier(self):
-        return self.config.__xpm__.identifier.hex()
+        return self.config.__xpm__.identifier.all.hex()
 
     def run(self, locks):
         """Actually run the code"""
@@ -171,7 +188,7 @@ class Job(Resource):
     @property
     def lockpath(self):
         """This file is used as a lock for running the job"""
-        return self.jobpath / ("%s.lock" % self.name)
+        return self.workspace.jobspath / self.relmainpath / ("%s.lock" % self.name)
 
     @property
     def donepath(self):
@@ -368,6 +385,11 @@ class Scheduler:
         # List of jobs
         self.waitingjobs = set()
 
+        # Sub-param jobs tokens
+        self.subjobsTokens: Dict[str, ProcessCounterToken] = defaultdict(
+            lambda: ProcessCounterToken(1)
+        )
+
         # Listeners
         self.listeners: Set[Listener] = set()
 
@@ -432,6 +454,13 @@ class Scheduler:
                 path.unlink()
             path.symlink_to(job.jobpath)
 
+            # Add process dependency if job has subparameters
+            hashidentifier = job.hashidentifier
+            if hashidentifier.sub is not None:
+                token = self.subjobsTokens[hashidentifier.main.hex()]
+                dependency = token.dependency(1)
+                job.dependencies.add(dependency)
+
             # Add dependencies, and add to blocking resources
             job.unsatisfied = len(job.dependencies)
             for dependency in job.dependencies:
@@ -469,11 +498,11 @@ class Scheduler:
         with self.cv:
             job.endtime = time.time()
             job.state = state
-            logger.debug("Job %s has finished (%s)", job, job.state)
             if job in self.waitingjobs:
                 self.waitingjobs.remove(job)
             with job.dependents as dependents:
                 for dependency in dependents:
+                    logger.debug("Checking dependency %s", dependency)
                     dependency.check()
             self.cv.notify_all()
 

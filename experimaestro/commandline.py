@@ -276,8 +276,8 @@ class CommandLineJob(Job):
         pidpath = self.pidpath
 
         # Lock the job and check done again (just in case)
-        logger.debug("Making directories job %s...", self.jobpath)
-        directory = self.jobpath.parent
+        logger.debug("Making directories job %s...", self.path)
+        directory = self.path
         if not directory.is_dir():
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -285,6 +285,7 @@ class CommandLineJob(Job):
         if process:
             return process
 
+        logger.info("Locking job lock path %s", self.lockpath)
         with connector.lock(self.lockpath, LOCKFILE_WAIT_DURATION) as out:
             # Check again if done (now that we have locked)
             if donepath.is_file():
@@ -297,12 +298,12 @@ class CommandLineJob(Job):
             scriptbuilder.notificationURL = self.launcher.notificationURL
             scriptPath = scriptbuilder.write(self)
 
-            logger.info("Starting job %s", self.jobpath)
             processbuilder.environ = self.launcher.environ
             processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
             processbuilder.stderr = Redirect.file(self.stderr)
             processbuilder.stdout = Redirect.file(self.stdout)
 
+        logger.info("Starting job %s", self.jobpath)
         self._process = processbuilder.start()
         self.state = JobState.RUNNING
         logger.info("Process started (%s)", self._process)

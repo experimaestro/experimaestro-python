@@ -5,6 +5,7 @@ from .annotations import (
     config,
     task,
     param,
+    subparam,
     option,
     pathoption,
     configmethod,

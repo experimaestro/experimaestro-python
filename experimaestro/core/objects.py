@@ -15,7 +15,17 @@ from experimaestro.constants import CACHEPATH_VARNAME
 import sys
 from contextlib import contextmanager
 
+
+class Identifier:
+    def __init__(self, all, main, sub):
+        self.all = all
+        self.main = main
+        self.sub = sub
+
+
 class HashComputer:
+    """This class is in charge of computing a config/task identifier"""
+
     OBJECT_ID = b"\x00"
     INT_ID = b"\x01"
     FLOAT_ID = b"\x02"
@@ -27,41 +37,64 @@ class HashComputer:
     TASK_ID = b"\x06"
 
     def __init__(self):
-        self.hasher = hashlib.sha256()
+        # Hasher for parameters
+        self._hasher = hashlib.sha256()
+        self._subhasher = None
 
-    def digest(self):
-        return self.hasher.digest()
+    def identifier(self) -> Identifier:
+        sub = None if self._subhasher is None else self._subhasher.digest()
+        main = self._hasher.digest()
+        if sub:
+            h = hashlib.sha256()
+            h.update(main)
+            h.update(sub)
+            all = h.digest()
+        else:
+            all = main
 
-    def update(self, value):
+        return Identifier(all, main, sub)
+
+    def _hashupdate(self, bytes, subparam):
+        if subparam:
+            # If subparam, creates a specific sub-hasher
+            if self._subhasher is None:
+                self._subhasher = hashlib.sha256()
+            self._subhasher.update(bytes)
+        else:
+            self._hasher.update(bytes)
+
+    def update(self, value, subparam=False):
         if value is None:
-            self.hasher.update(HashComputer.NONE_ID)
+            self._hashupdate(HashComputer.NONE_ID, subparam=subparam)
         elif isinstance(value, float):
-            self.hasher.update(HashComputer.FLOAT_ID)
-            self.hasher.update(struct.pack("!d", value))
+            self._hashupdate(HashComputer.FLOAT_ID, subparam=subparam)
+            self._hashupdate(struct.pack("!d", value), subparam=subparam)
         elif isinstance(value, int):
-            self.hasher.update(HashComputer.INT_ID)
-            self.hasher.update(struct.pack("!q", value))
+            self._hashupdate(HashComputer.INT_ID, subparam=subparam)
+            self._hashupdate(struct.pack("!q", value), subparam=subparam)
         elif isinstance(value, str):
-            self.hasher.update(HashComputer.STR_ID)
-            self.hasher.update(value.encode("utf-8"))
+            self._hashupdate(HashComputer.STR_ID, subparam=subparam)
+            self._hashupdate(value.encode("utf-8"), subparam=subparam)
         elif isinstance(value, list):
-            self.hasher.update(HashComputer.LIST_ID)
-            self.hasher.update(struct.pack("!d", len(value)))
+            self._hashupdate(HashComputer.LIST_ID, subparam=subparam)
+            self._hashupdate(struct.pack("!d", len(value)), subparam=subparam)
             for x in value:
-                self.update(x)
+                self.update(x, subparam=subparam)
         elif isinstance(value, Config):
-            xpmtype = value.__xpmtype__  # type: ObjectType
-            self.hasher.update(HashComputer.OBJECT_ID)
-            self.hasher.update(xpmtype.identifier.name.encode("utf-8"))
+            xpmtype = value.__xpmtype__
+            self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
+            self._hashupdate(xpmtype.identifier.name.encode("utf-8"), subparam=subparam)
 
             # Add task parameters
             if value.__xpm__._task:
-                self.hasher.update(HashComputer.TASK_ID)
-                self.update(value.__xpm__._task)
+                self._hashupdate(HashComputer.TASK_ID, subparam=subparam)
+                self.update(value.__xpm__._task, subparam=subparam)
 
             # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
+                arg_subparam = subparam or argument.subparam
+
                 # Ignored argument
                 if argument.ignored or argument.generator:
                     continue
@@ -73,11 +106,11 @@ class HashComputer:
                     continue
 
                 # Hash name
-                self.update(argument.name)
+                self.update(argument.name, subparam=arg_subparam)
 
                 # Hash value
-                self.hasher.update(HashComputer.NAME_ID)
-                self.update(argvalue)
+                self._hashupdate(HashComputer.NAME_ID, subparam=arg_subparam)
+                self.update(argvalue, subparam=arg_subparam)
 
         else:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
@@ -103,10 +136,12 @@ class TaggedValue:
     def __init__(self, value):
         self.value = value
 
+
 @contextmanager
 def add_to_path(p):
     """Temporarily add a path to sys.path"""
     import sys
+
     old_path = sys.path
     sys.path = sys.path[:]
     sys.path.insert(0, p)
@@ -114,6 +149,7 @@ def add_to_path(p):
         yield
     finally:
         sys.path = old_path
+
 
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
@@ -244,12 +280,12 @@ class ConfigInformation:
         self._sealed = True
 
     @property
-    def identifier(self):
+    def identifier(self) -> Identifier:
         """Computes the unique identifier"""
         if self._identifier is None:
             hashcomputer = HashComputer()
             hashcomputer.update(self.pyobject)
-            self._identifier = hashcomputer.digest()
+            self._identifier = hashcomputer.identifier()
         return self._identifier
 
     def dependency(self):
@@ -354,7 +390,7 @@ class ConfigInformation:
             )
 
     def _outputjson_inner(self, jsonstream, context, serialized: Set[int]):
-        # Already serialized (note that this prevents loops by throwing a stack overflow error)
+        # Skip if already serialized
         if id(self.pyobject) in serialized:
             return
 
@@ -373,9 +409,9 @@ class ConfigInformation:
             objectout.write("type", self.xpmtype.originaltype.__name__)
 
             # Serialize identifier and typename
-            # TODO: remove when not needed
+            # TODO: remove when not needed (cache issues)
             objectout.write("typename", self.xpmtype.name())
-            objectout.write("identifier", self.identifier.hex())
+            objectout.write("identifier", self.identifier.all.hex())
 
             with objectout.subobject("fields") as jsonfields:
                 for argument, value in self.xpmvalues():
@@ -387,16 +423,19 @@ class ConfigInformation:
         """Outputs the json of this object
 
         The format is an array of objects
-        [
-            {
-                "id": <ID of the object>,
-                "filename": <filename>, // if in a file
-                "module": <module>, // if in a module
-                "type": <type>, // the type within the module or file
-                "fields":
-                    { "key":  {"type": <type>, "value": <value>} }
-            }
-        ]
+        {
+            "objects": [
+                {
+                    "id": <ID of the object>,
+                    "filename": <filename>, // if in a file
+                    "module": <module>, // if in a module
+                    "type": <type>, // the type within the module or file
+                    "fields":
+                        { "key":  {"type": <type>, "value": <value>} }
+                }
+            ]
+
+        }
 
         <type> is either a base type or a "python"
 
@@ -409,12 +448,14 @@ class ConfigInformation:
         import jsonstreams
 
         serialized: Set[int] = set()
-        with jsonstreams.Stream(jsonstreams.Type.array, fd=out) as arrayout:
-            self._outputjson_inner(arrayout, context, serialized)
+        with jsonstreams.Stream(jsonstreams.Type.object, fd=out, close_fd=True) as out:
+            out.write("has_subparam", self.identifier.sub is not None)
+            with out.subarray("objects") as arrayout:
+                self._outputjson_inner(arrayout, context, serialized)
 
-    def _outputjson(self, jsonout, context, key=[]):
-        with jsonout.subobject(*key) as objectout:
-            self._outputjson_inner(objectout, context)
+    # def _outputjson(self, jsonout, context, key=[]):
+    #     with jsonout.subobject(*key) as objectout:
+    #         self._outputjson_inner(objectout, context)
 
     @staticmethod
     def _objectFromParameters(value, objects):

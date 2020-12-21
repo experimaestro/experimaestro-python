@@ -106,6 +106,14 @@ class InterProcessLock(fasteners.InterProcessLock, Lock):
 
 
 class LocalConnector(Connector):
+    INSTANCE: Connector = None
+
+    @staticmethod
+    def instance():
+        if LocalConnector.INSTANCE is None:
+            LocalConnector.INSTANCE = LocalConnector()
+        return LocalConnector.INSTANCE
+
     def __init__(self, localpath: Path = None):
         localpath = localpath
         if not localpath:
@@ -116,7 +124,7 @@ class LocalConnector(Connector):
 
     def lock(self, path: Path, max_delay: int = -1) -> Lock:
         """Returns a lockable path
-        
+
         Arguments:
             path {Path} -- Path of the lockfile
             max_delay {int} -- Maximum wait duration (seconds)

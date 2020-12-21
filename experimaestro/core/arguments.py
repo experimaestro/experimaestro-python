@@ -38,6 +38,7 @@ class Argument:
         ignored=False,
         default=None,
         checker=None,
+        subparam=False,
     ):
         required = (default is None) if required is None else required
         if default is not None and required is not None and required:
@@ -53,6 +54,7 @@ class Argument:
         self.required = required
         self.default = default
         self.generator = generator
+        self.subparam = subparam
 
     def __repr__(self):
         return "Param[{name}:{type}]".format(**self.__dict__)
