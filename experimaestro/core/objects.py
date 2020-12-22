@@ -495,7 +495,7 @@ class ConfigInformation:
                 mod = importlib.import_module(module_name)
 
             cls = getattr(mod, definition["type"])
-            o = object.__new__(cls)
+            o = cls()
 
             if "typename" in definition:
                 o.__xpmtypename__ = definition["typename"]
@@ -511,7 +511,9 @@ class ConfigInformation:
                     o.__arguments__.add(name)
                 setattr(o, name, v)
 
-            o.__init__()
+            postinit = getattr(o, "__postinit__", None)
+            if postinit is not None:
+                postinit()
             objects[definition["id"]] = o
 
         return o

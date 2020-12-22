@@ -17,10 +17,20 @@ from experimaestro import config, argument
 
     @param("gamma", type=float, required=False)
     @config("my.model")
-    class MyModel: pass
+    class MyModel:
+        pass
     ```
 
     defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
+
+
+### Object life cycle
+
+During task execution,
+
+- The object is constructed using `__init__(self)`
+- The attributes are set (e.g. `gamma` in the example above)
+- `self.__postinit__()` is called
 
 ## Tasks
 
@@ -56,7 +66,10 @@ from experimaestro import task, argument
 
     @param("parameters", type=Path)
     @config()
-    class Model: pass
+    class Model:
+        def __postinit__(self):
+            # Called once the object has been set up
+            print(self.parameters)
 
     @param("epochs", type=int, default=100)
     @param("model", type=Model, required=True)
@@ -170,7 +183,7 @@ For instance, given this task definition
 @param("learning_rate", type=float, default=1e-3)
 @task()
 class ModelLearn:
-    def __execute__(self):
+    def execute(self):
         pass
 ```
 
