@@ -4,7 +4,7 @@ import sys
 import inspect
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
@@ -312,12 +312,16 @@ class pathoption(param):
     """Defines a an argument that will be a relative path (automatically
     set by experimaestro)"""
 
-    def __init__(self, name, path, help=""):
+    def __init__(self, name: str, path=None, help=""):
         """
         :param name: The name of argument (in python)
-        :param path: The relative path
+        :param path: The relative path or a function
         """
         super().__init__(name, type=Path, help=help)
+
+        if path is None:
+            path = name
+
         if inspect.isfunction(path):
             self.generator = lambda jobcontext: jobcontext.jobpath / path(jobcontext)
         else:
