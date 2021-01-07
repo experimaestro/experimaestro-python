@@ -1,3 +1,7 @@
+# 0.7.11
+
+- NPM packages update (security)
+
 # 0.7.10
 
 - Sub-parameters
