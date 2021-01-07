@@ -9,35 +9,42 @@ Configuration and task arguments can be set by using a constructor or assigning 
 the config/task instance, as in the example below:
 
 !!! example
-`py3 linenums="1" model = Model1(layers=3) learnedmodel = Learn(epochs=100) learnedmodel.model = model learnedmodel.submit() `
 
-    - line 1: the `Model1` configuration is set with argument `layers` set to `3`.
-    - line 2: the `Learn` task is configured with parameter `epochs` set to 100
-    - line 3: Set the parameter `model` of the `Learn` task instance to `model`
-    - line 4: Submit the task to the job scheduler
+    ```py3 linenums="1"
 
-Once a task is submitted, the value of its arguments cannot be changed (it is **sealed**).
-This allows to re-use configuration/tasks latter.
+        model = Model1(layers=3)
+        learnedmodel = Learn(epochs=100)
+        learnedmodel.model = model
+        learnedmodel.submit()
+        ```
 
-### Unique job identifier
+        - line 1: the `Model1` configuration is set with argument `layers` set to `3`.
+        - line 2: the `Learn` task is configured with parameter `epochs` set to 100
+        - line 3: Set the parameter `model` of the `Learn` task instance to `model`
+        - line 4: Submit the task to the job scheduler
 
-When a task is submitted, a unique id is computed based on the value of its arguments.
-Parameters are ignored if:
+    Once a task is submitted, the value of its arguments cannot be changed (it is **sealed**).
+    This allows to re-use configuration/tasks latter.
 
-- They were defined with `ignored` set to `True`
-- They have a type `Path`
+    ### Unique job identifier
 
-## Tokens
+    When a task is submitted, a unique id is computed based on the value of its arguments.
+    Parameters are ignored if:
 
-Tokens can be used to restrict the number of running jobs.
+    - They were defined with `ignored` set to `True`
+    - They have a type `Path`
 
-```py3
-# Creates a token with 4 available slots
-token = connector.createtoken("cpu", 4)
+    ## Tokens
 
-# Add a task that needs 2 slots from the token
-task = token(1, task)
-```
+    Tokens can be used to restrict the number of running jobs.
+
+    ```py3
+    # Creates a token with 4 available slots
+    token = connector.createtoken("cpu", 4)
+
+    # Add a task that needs 2 slots from the token
+    task = token(1, task)
+    ```
 
 ## Tags
 
@@ -47,13 +54,13 @@ Tags allow to monitor specific experimental parameters.
 
 Tagging a value can be done easily by using the `tag` function from `experimaestro`
 
-```
+```py3
 tag(value: Union[str, int, float, bool])
 ```
 
 For example,
 
-```python
+```py3
 model = MyModel(epochs=tag(100))
 ```
 
@@ -76,7 +83,7 @@ Use `tagspath(value)`
 
 For each experiment (identified by its name), a folder is created automatically. Using both
 
-```python3
+```py3
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
     model = c.Model()
 
@@ -117,7 +124,7 @@ space, one can wait to launch new tasks based on the outcome.
 You can easily define command line arguments with [click](https://click.palletsprojects.com)
 by using the `forwardoption` command
 
-```python
+```py3
 
 from experimaestro import argument, type
 from experimaestro.click import forwardoption, arguments

@@ -451,7 +451,14 @@ class ConfigInformation:
 
         serialized: Set[int] = set()
         with jsonstreams.Stream(jsonstreams.Type.object, fd=out, close_fd=True) as out:
+            # Write information
             out.write("has_subparam", self.identifier.sub is not None)
+
+            with out.subobject("tags") as objectout:
+                for key, value in self.tags().items():
+                    objectout.write(key, value)
+
+            # Write objects
             with out.subarray("objects") as arrayout:
                 self._outputjson_inner(arrayout, context, serialized)
 

@@ -2,7 +2,7 @@ Defining experiments is based on _config(urations)_ and _tasks_. Tasks are confi
 
 ## Configurations
 
-```python
+```py3
 @config(identifier=None, description=None, parents=[])
 ```
 
@@ -12,17 +12,16 @@ name (lowercased).
 
 !!! example
 
-````
-from experimaestro import config, argument
+    ```py3
+    from experimaestro import config, argument
 
-    @param("gamma", type=float, required=False)
-    @config("my.model")
-    class MyModel:
-        pass
+        @param("gamma", type=float, required=False)
+        @config("my.model")
+        class MyModel:
+            pass
     ```
 
-    defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
-
+defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
 
 ### Object life cycle
 
@@ -39,53 +38,52 @@ A task is a special configuration that can be:
 1. Submitted to the task scheduler using `submit` (preparation of the experiment)
 1. Executed with the method `execute` (running a specific task within the experiment)
 
-```py3
-@task()
-````
+!!! example "Defining a task as a function"
 
-In most cases, it is easier to use a function
-!!! example "Defining a task"
+    For simpler cases, it is easier to use a function
 
-````
-from experimaestro import task, argument
+    ```py3
+    from experimaestro import task, argument
 
-    @param("epochs", type=int, default=100)
-    @param("model", type=Model, required=True)
-    @task("model.learn")
-    def modellearn(epochs: int, model: Model):
-        pass
-    ```
-
-It is possible to use classes if variables need to be defined,
-or if a configuration should be returned (here, `Model`)
-
-!!! example
-````
-
-from experimaestro import task, argument
-
-    @param("parameters", type=Path)
-    @config()
-    class Model:
-        def __postinit__(self):
-            # Called once the object has been set up
-            print(self.parameters)
-
-    @param("epochs", type=int, default=100)
-    @param("model", type=Model, required=True)
-    @pathoption("parameters", "parameters.pth")
-    @task()
-    class ModelLearn:
-        def config(self) -> Model:
-            return {
-                "model": self.model,
-                "parameters": self.parameters
-            }
-
-        def execute(self):
-            """Called when this task is run"""
+        @param("epochs", type=int, default=100)
+        @param("model", type=Model, required=True)
+        @task("model.learn")
+        def modellearn(epochs: int, model: Model):
             pass
     ```
+
+!!! example "Defining a task as a class"
+
+    It is possible to use classes if variables need to be defined,
+    or if a configuration should be returned (here, `Model`)
+
+    ```py3
+    from experimaestro import task, argument
+
+        @param("parameters", type=Path)
+        @config()
+        class Model:
+            def __postinit__(self):
+                # Called once the object has been set up
+                print(self.parameters)
+
+        @param("epochs", type=int, default=100)
+        @param("model", type=Model, required=True)
+        @pathoption("parameters", "parameters.pth")
+        @task()
+        class ModelLearn:
+            def config(self) -> Model:
+                return {
+                    "model": self.model,
+                    "parameters": self.parameters
+                }
+
+            def execute(self):
+                """Called when this task is run"""
+                pass
+    ```
+
+Tags can be accessed as a dictionary using `self.__tags__`.
 
 ## Types
 
@@ -109,13 +107,13 @@ and type hints (**warning**: experimental syntax), as follows:
 
 !!! example
 
-````python
-from experimaestro import task, Param
+    ```py3
+    from experimaestro import task, Param
 
-    @task("model.learn")
-    class ModelLearn:
-        epochs: Param[int] = 100
-        model: Param[Model]
+            @task("model.learn")
+            class ModelLearn:
+                epochs: Param[int] = 100
+                model: Param[Model]
     ```
 
 ### Options
@@ -124,9 +122,9 @@ Options are just a simple shortcut to define a parameter with the `ignored` flag
 
 ### Path option
 
-```python
+```py3
 @pathoption(name: str, path: str, help: Optional[str] = None)
-````
+```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `path` is the path within the task directory
@@ -135,7 +133,7 @@ Options are just a simple shortcut to define a parameter with the `ignored` flag
 
 Sometimes, a config can compute some output that might be interesting to cache, but without relying on a fully-fledge task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
-```python
+```py3
 
 @config()
 class Terms():

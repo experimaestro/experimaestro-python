@@ -1,3 +1,7 @@
+# master
+
+- Tasks can access their tags at runtime (e.g. to log hyper-parameters with tensorboard)
+
 # 0.7.11
 
 - NPM packages update (security)

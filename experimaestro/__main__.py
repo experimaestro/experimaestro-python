@@ -63,8 +63,14 @@ def run(parameters):
         params = json.load(fp)
         task = ConfigInformation.fromParameters(params["objects"])
         task.__taskdir__ = Path.cwd()
+
+        # Set the tags
+        task.__tags__ = params["tags"]
+
+        # If we have sub-parameters, we set the __maintaskdir__ folder
         if params["has_subparam"]:
             task.__maintaskdir__ = Path.cwd().parents[1]
+
         task.execute()
 
 
