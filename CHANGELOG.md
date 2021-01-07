@@ -1,7 +1,8 @@
-# Master
+# 0.7.10
 
 - Sub-parameters
 - Fixes with file-based tokens
+- Fixes with duplicate objects
 
 # 0.7.9
 
