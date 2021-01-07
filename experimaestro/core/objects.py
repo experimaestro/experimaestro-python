@@ -394,6 +394,8 @@ class ConfigInformation:
         if id(self.pyobject) in serialized:
             return
 
+        serialized.add(id(self.pyobject))
+
         # Serialize sub-objects
         for argument, value in self.xpmvalues():
             ConfigInformation._outputjsonobjects(value, jsonstream, context, serialized)
@@ -514,6 +516,8 @@ class ConfigInformation:
             postinit = getattr(o, "__postinit__", None)
             if postinit is not None:
                 postinit()
+
+            assert definition["id"] not in objects, "Duplicate id %s" % definition["id"]
             objects[definition["id"]] = o
 
         return o
