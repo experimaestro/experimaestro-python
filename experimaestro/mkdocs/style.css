@@ -1,3 +1,7 @@
 .xpm-description {
-    color: gray
+  color: gray;
+}
+
+.xpm-error {
+  color: red;
 }
