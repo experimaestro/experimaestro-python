@@ -1,6 +1,7 @@
-# master
+# 0.7.12
 
 - Tasks can access their tags at runtime (e.g. to log hyper-parameters with tensorboard)
+- Tasks and configurations can be executed without scheduling (debugging)
 
 # 0.7.11
 
