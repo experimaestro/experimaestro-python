@@ -29,6 +29,7 @@ from .notifications import progress
 from .register import parse_commandline
 from .core.types import Any
 from .checkers import Choices
+from .xpmutils import DirectoryContext
 
 
 def set_launcher(launcher):

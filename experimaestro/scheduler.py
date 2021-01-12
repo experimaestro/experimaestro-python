@@ -12,7 +12,7 @@ from experimaestro.tokens import ProcessCounterToken
 
 from .environment import Environment
 from .workspace import Workspace
-from .core.objects import Config
+from .core.objects import Config, GenerationContext
 from .utils import ThreadingCondition, logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
@@ -66,7 +66,7 @@ class JobDependency(Dependency):
         return JobLock(self.origin)
 
 
-class Job(Resource):
+class Job(Resource, GenerationContext):
     """Context of a job"""
 
     def __init__(

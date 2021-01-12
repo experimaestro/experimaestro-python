@@ -8,6 +8,7 @@ from typing import Callable, Optional
 
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
+from experimaestro.generators import PathGenerator
 
 from .core.arguments import TypeHint, Argument as CoreArgument, TypedArgument
 from .core.objects import Config
@@ -112,6 +113,16 @@ class config:
 
             tp = type(tp.__name__, __bases__, __dict__)
             tp.__module__ = originaltype.__module__
+
+            # Modify original type __bases__ to get the real hierarchy
+            # when creating instances
+            if inspect.isclass(originaltype):
+                originaltype.__bases__ = tuple(
+                    t.__xpm__.originaltype
+                    if issubclass(t, Config) and t is not Config
+                    else t
+                    for t in originaltype.__bases__
+                )
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
@@ -322,10 +333,7 @@ class pathoption(param):
         if path is None:
             path = name
 
-        if inspect.isfunction(path):
-            self.generator = lambda jobcontext: jobcontext.jobpath / path(jobcontext)
-        else:
-            self.generator = lambda jobcontext: jobcontext.jobpath / path
+        self.generator = PathGenerator(path)
 
 
 STDERR = lambda jobcontext: "%s.err" % jobcontext.name

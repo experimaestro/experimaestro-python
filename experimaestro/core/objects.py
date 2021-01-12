@@ -9,7 +9,7 @@ import os
 import shutil
 import inspect
 import importlib
-from typing import Set
+from typing import Dict, Set
 from experimaestro.utils import logger
 from experimaestro.constants import CACHEPATH_VARNAME
 import sys
@@ -149,6 +149,15 @@ def add_to_path(p):
         yield
     finally:
         sys.path = old_path
+
+
+class GenerationContext:
+    """Context when generating values in configurations"""
+
+    @property
+    def path(self):
+        """Returns the path of the job directory"""
+        raise NotImplementedError()
 
 
 class ConfigInformation:
@@ -529,13 +538,46 @@ class ConfigInformation:
 
         return o
 
-    def fromConfig(self):
-        self.validate()
+    @staticmethod
+    def _fromPython(context: GenerationContext, param, value, objects):
+        if hasattr(param, "generator") and param.generator:
+            return param.generator(context)
+
+        if isinstance(value, Config):
+            return value.__xpm__._fromConfig(context, objects)
+
+        if isinstance(value, list):
+            return [
+                ConfigInformation._fromPython(context, param.type.type, x, objects)
+                for x in value
+            ]
+
+        return value
+
+    def _fromConfig(self, context: GenerationContext, objects: Dict[int, object]):
+        o = objects.get(id(self), None)
+        if o is not None:
+            return o
+
         o = object.__new__(self.xpmtype.originaltype)
-        for key, _ in self.xpmtype.arguments.items():
-            setattr(o, key, getattr(self.pyobject, key, None))
-        o.__init__()
+        objects[id(self)] = o
+
+        for key, param in self.xpmtype.arguments.items():
+            value = self._fromPython(
+                context, param, getattr(self.pyobject, key, None), objects
+            )
+            setattr(o, key, value)
+            postinit = getattr(o, "__postinit__", None)
+            if postinit is not None:
+                postinit()
+
         return o
+
+    def fromConfig(self, context: GenerationContext):
+        """Generate an instance given the current configuration"""
+        self.validate()
+
+        return self._fromConfig(context, {})
 
     def add_dependencies(self, *dependencies):
         self.dependencies.extend(dependencies)
@@ -657,9 +699,9 @@ class Config:
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-    def instance(self):
+    def instance(self, context: GenerationContext = None):
         """Return an instance with the current values"""
-        return self.__xpm__.fromConfig()
+        return self.__xpm__.fromConfig(context)
 
 
 class Task(Config):
