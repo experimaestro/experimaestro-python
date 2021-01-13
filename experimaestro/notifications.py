@@ -56,7 +56,7 @@ class NotificationThread(threading.Thread):
                 try:
                     with urlopen(url) as response:
                         pass
-                except:
+                except Exception:
                     logger.info(
                         "Progress: %.2f [error while notifying %s]", self.progress, url
                     )
@@ -84,22 +84,18 @@ class xpm_tqdm(std_tqdm):
     """XPM wrapper for experimaestro that automatically reports progress to the server"""
 
     def __init__(self, iterable=None, *args, **kwargs):
-        # Disable on non TTY
-        kwargs["disable"] = None
-
         # Report progress bar
         # newprogress(title=, pos=abs(self.pos))
-
         super().__init__(iterable, *args, **kwargs)
 
-    def update(self, n=1):
-        displayed = super().update(n)
-        if displayed:
-            # Get the position
-            pos = abs(self.pos)
-            # progress()
-            print("YO SOME PROGRESS", self.format_dict)
-        return displayed
+    def refresh(self, nolock=False, lock_args=None):
+        super().refresh()
+
+        pos = abs(self.pos)
+        if pos == 0:
+            d = self.format_dict
+            # Just report the innermost progress
+            progress(d["n"] / d["total"])
 
 
 tqdm = xpm_tqdm

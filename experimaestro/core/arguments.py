@@ -67,7 +67,7 @@ class TypeAnnotation:
 
 
 class _Param(TypeAnnotation):
-    """Marks a parameters"""
+    """Base annotation for types"""
 
     pass
 
