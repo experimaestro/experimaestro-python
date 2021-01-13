@@ -4,17 +4,18 @@ import sys
 import inspect
 import logging
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
 from experimaestro.generators import PathGenerator
+from typing_extensions import Annotated, get_type_hints
+import typing_extensions
 
-from .core.arguments import TypeHint, Argument as CoreArgument, TypedArgument
+from .core.arguments import Argument as CoreArgument, TypeAnnotation
 from .core.objects import Config
 from .core.types import Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
-from .typingutils import get_optional
 from .checkers import Checker
 
 # --- Annotations to define tasks and types
@@ -156,24 +157,17 @@ class config:
 
         # Adding type-hinted arguments
         if hasattr(originaltype, "__annotations__"):
-            for key, value in originaltype.__annotations__.items():
-                if isinstance(value, TypedArgument):
-                    valuetype = value.type
-                    required = None
-
-                    optionaltype = get_optional(valuetype)
-                    if optionaltype:
-                        valuetype = optionaltype
-                        required = False
-
-                    argument = CoreArgument(
-                        key,
-                        Type.fromType(valuetype),
-                        default=getattr(originaltype, key, None),
-                        required=required,
-                        help=value.help,
-                    )
-                    objecttype.addArgument(argument)
+            hints = get_type_hints(originaltype, include_extras=True)
+            for key, typehint in hints.items():
+                options = None
+                if isinstance(typehint, typing_extensions._AnnotatedAlias):
+                    for value in typehint.__metadata__:
+                        if isinstance(value, TypeAnnotation):
+                            options = value(options)
+                    if options is not None:
+                        objecttype.addArgument(
+                            options.create(key, originaltype, typehint.__args__[0])
+                        )
 
         return tp
 
@@ -348,9 +342,6 @@ class ConstantParam(argument):
     def __init__(self, name: str, value, xpmtype=None, help=""):
         super().__init__(name, type=xpmtype or Type.fromType(type(value)), help=help)
         self.generator = lambda jobcontext: objects.clone(value)
-
-
-Param = TypeHint()
 
 
 # --- Cache

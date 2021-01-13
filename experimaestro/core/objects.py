@@ -605,23 +605,26 @@ def clone(v):
 def cache(fn, name: str):
     def __call__(config, *args, **kwargs):
         # Get path and create directory if needed
-        hexid = config.__xpmidentifier__
-        typename = config.__xpmtypename__
+        hexid = config.__xpmidentifier__  # type: str
+        typename = config.__xpmtypename__  # type: str
         dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
-        dir.mkdir(parents=True, exist_ok=True)
 
-        path = dir / name
+        tmpdir = None
+        if not dir.exists():
+            tmpdir = dir.with_suffix(".tmp")
+            if tmpdir.exists():
+                logger.warning("Removing old temporary cache dir %s", tmpdir)
+                shutil.rmtree(tmpdir)
+            tmpdir.mkdir(parents=True, exist_ok=True)
+
+        path = (tmpdir or dir) / name
         ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
         with ipc_lock:
-            try:
-                return fn(config, path, *args, **kwargs)
-            except:
-                # Remove path
-                if path.is_file():
-                    path.unlink()
-                elif path.is_dir():
-                    shutil.rmtree(path)
-                raise
+            r = fn(config, path, *args, **kwargs)
+            if tmpdir:
+                # Renames to final directory since we succeeded
+                tmpdir.rename(dir)
+            return r
 
     return __call__
 

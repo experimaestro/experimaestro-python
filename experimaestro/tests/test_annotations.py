@@ -6,8 +6,9 @@ Test all the annotations for configurations and tasks
 # Annotation specific tests
 
 from typing import Optional, List
-from experimaestro import config, param, Param, task
+from experimaestro import config, Param, task, help
 import experimaestro.core.types as types
+from typing_extensions import Annotated
 
 # --- Test manual name for configuration
 
@@ -40,14 +41,6 @@ def ArgumentValue(default=None, *, help=""):
     return default
 
 
-class Parama:
-    def __init__(self):
-        pass
-
-    def __getitem__(self, k):
-        return Param[int]
-
-
 def test_class_variable():
     """Experimental support of type annotations"""
 
@@ -57,7 +50,7 @@ def test_class_variable():
         y: Param[float] = 2.3
         z: Param[Optional[float]]
         t: Param[List[float]]
-        w: Param(help="help")[int]
+        w: Annotated[int, help("help")]
 
     arg_x = Config.__xpm__.getArgument("x")
     assert arg_x.name == "x"

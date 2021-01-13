@@ -1,6 +1,9 @@
 # CLI
 click
 
+# Supports Annotated[T, ...]
+typing_extensions >= 3.7.4.3; python_version < "3.9"
+
 # Other
 fasteners
 psutil

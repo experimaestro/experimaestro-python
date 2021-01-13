@@ -1,30 +1,8 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
-
-class TypedArgument:
-    """A type"""
-
-    def __init__(self, type):
-        self.type = type
-        self.help = None
-
-
-class TypeHintWithArgs:
-    def __init__(self, help=None):
-        self.help = help
-
-    def __getitem__(self, type):
-        typeargument = TypedArgument(type)
-        typeargument.help = self.help
-        return typeargument
-
-
-class TypeHint:
-    def __call__(self, **kwargs):
-        return TypeHintWithArgs(**kwargs)
-
-    def __getitem__(self, type):
-        return TypedArgument(type)
+from typing import Optional, TypeVar
+from experimaestro.typingutils import get_optional
+from typing_extensions import Annotated
 
 
 class Argument:
@@ -58,3 +36,51 @@ class Argument:
 
     def __repr__(self):
         return "Param[{name}:{type}]".format(**self.__dict__)
+
+
+class ArgumentOptions:
+    kwargs = {}
+
+    def create(self, name, originaltype, typehint):
+        from experimaestro.core.types import Type
+
+        optionaltype = get_optional(typehint)
+        type = Type.fromType(optionaltype or typehint)
+
+        defaultvalue = getattr(originaltype, name, None)
+        self.kwargs["default"] = defaultvalue
+
+        self.kwargs["required"] = (optionaltype is None) and (defaultvalue is None)
+
+        return Argument(name, type, **self.kwargs)
+
+
+class TypeAnnotation:
+    def __call__(self, options: Optional[ArgumentOptions]):
+        if options is None:
+            options = ArgumentOptions()
+        self.annotate(options)
+        return options
+
+    def annotate(self, options: ArgumentOptions):
+        pass
+
+
+class _Param(TypeAnnotation):
+    """Marks a parameters"""
+
+    pass
+
+
+paramHint = _Param()
+
+T = TypeVar("T")
+Param = Annotated[T, paramHint]
+
+
+class help(TypeAnnotation):
+    def __init__(self, text: str):
+        self.text = text
+
+    def annotate(self, options: ArgumentOptions):
+        options.kwargs["help"] = self.text

@@ -30,6 +30,9 @@ class Identifier:
     def __str__(self):
         return self.name
 
+    def __repr__(self):
+        return self.name
+
 
 def identifier(name: Union[str, Identifier]):
     if isinstance(name, Identifier):
@@ -249,3 +252,9 @@ class ArrayType(Type):
             raise ValueError("value is not a list")
 
         return [self.type.validate(x) for x in value]
+
+    def __str__(self):
+        return f"Array({self.type})"
+
+    def __repr__(self):
+        return f"Array({self.type})"

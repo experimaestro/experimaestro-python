@@ -2,6 +2,7 @@ import os
 from urllib.request import urlopen
 import threading
 import atexit
+from tqdm.auto import tqdm as std_tqdm
 
 from .scheduler import NOTIFICATIONURL_VARNAME
 from .utils import logger
@@ -77,3 +78,28 @@ INSTANCE = NotificationThread()
 
 def progress(value: float):
     INSTANCE.setprogress(value)
+
+
+class xpm_tqdm(std_tqdm):
+    """XPM wrapper for experimaestro that automatically reports progress to the server"""
+
+    def __init__(self, iterable=None, *args, **kwargs):
+        # Disable on non TTY
+        kwargs["disable"] = None
+
+        # Report progress bar
+        # newprogress(title=, pos=abs(self.pos))
+
+        super().__init__(iterable, *args, **kwargs)
+
+    def update(self, n=1):
+        displayed = super().update(n)
+        if displayed:
+            # Get the position
+            pos = abs(self.pos)
+            # progress()
+            print("YO SOME PROGRESS", self.format_dict)
+        return displayed
+
+
+tqdm = xpm_tqdm

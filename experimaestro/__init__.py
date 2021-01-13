@@ -6,12 +6,11 @@ from .annotations import (
     task,
     param,
     subparam,
+    ConstantParam,
     option,
     pathoption,
     configmethod,
     cache,
-    Param,
-    ConstantParam,
     Identifier,
     Array,
     tag,
@@ -22,10 +21,11 @@ from .annotations import (
     # deprecated
     argument,
 )
+from .core.arguments import Param, help
 from .environment import Environment
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment
-from .notifications import progress
+from .notifications import progress, tqdm
 from .register import parse_commandline
 from .core.types import Any
 from .checkers import Choices
