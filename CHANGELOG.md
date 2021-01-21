@@ -1,3 +1,8 @@
+# master
+
+- Experimental type hints
+- Initial tqdm support
+
 # 0.7.12
 
 - Tasks can access their tags at runtime (e.g. to log hyper-parameters with tensorboard)

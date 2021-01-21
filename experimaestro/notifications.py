@@ -1,7 +1,7 @@
 import os
 from urllib.request import urlopen
 import threading
-import atexit
+import sys
 from tqdm.auto import tqdm as std_tqdm
 
 from .scheduler import NOTIFICATIONURL_VARNAME
@@ -83,19 +83,22 @@ def progress(value: float):
 class xpm_tqdm(std_tqdm):
     """XPM wrapper for experimaestro that automatically reports progress to the server"""
 
-    def __init__(self, iterable=None, *args, **kwargs):
+    def __init__(self, iterable=None, file=None, *args, **kwargs):
         # Report progress bar
         # newprogress(title=, pos=abs(self.pos))
-        super().__init__(iterable, *args, **kwargs)
+        _file = file or sys.stderr
+        self.is_tty = hasattr(_file, "isatty") or _file.isatty()
+        super().__init__(iterable, *args, file=file, **kwargs)
 
     def refresh(self, nolock=False, lock_args=None):
-        super().refresh()
-
-        pos = abs(self.pos)
-        if pos == 0:
-            d = self.format_dict
-            # Just report the innermost progress
-            progress(d["n"] / d["total"])
+        if self.is_tty:
+            super().refresh()
+        else:
+            pos = abs(self.pos)
+            if pos == 0:
+                d = self.format_dict
+                # Just report the innermost progress
+                progress(d["n"] / d["total"])
 
 
 tqdm = xpm_tqdm
