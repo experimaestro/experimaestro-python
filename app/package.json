@@ -51,7 +51,7 @@
     "axios": "^0.21.1",
     "bootstrap": "^4.5.3",
     "core-js": "^3.8.2",
-    "immer": "^8.0.0",
+    "immer": "^8.0.1",
     "luxon": "^1.25.0",
     "material-icons": "^0.5.2",
     "node-sass": "^5.0.0",
