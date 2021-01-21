@@ -10,6 +10,8 @@ psutil
 websockets
 jsonstreams >= 0.5
 pytools
+tqdm
+
 # Avoid version 0.10.4
 watchdog < 0.10.4 
 
