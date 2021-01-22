@@ -10,6 +10,7 @@ nav:
       - Plan: experiments/plan.md
   - Launchers: launchers/index.md
   - Connectors: connectors/index.md
+  - CLI: cli.md
   - FAQ: faq.md
 
 theme:
