@@ -163,6 +163,9 @@ class ObjectType(Type):
             logger.debug("Using argument type (not real type)")
             return self.objecttype(**value)
 
+        if value is None:
+            return None
+
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")
 

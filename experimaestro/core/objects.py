@@ -321,8 +321,6 @@ class ConfigInformation:
         if not self.xpmtype.task:
             raise ValueError("%s is not a task" % self.xpmtype)
 
-        self.validate()
-
         # --- Submit the job
         from experimaestro.scheduler import Job, Scheduler
 
@@ -330,6 +328,15 @@ class ConfigInformation:
             self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
         )
         self.seal(self.job)
+        try:
+            self.validate()
+        except Exception as e:
+            logger.error(
+                "Error while validating object of type %s, defined %s",
+                self.xpmtype,
+                self._initinfo,
+            )
+            raise e
 
         # --- Search for dependencies
         self.updatedependencies(self.job.dependencies, [])
@@ -609,24 +616,33 @@ def cache(fn, name: str):
         typename = config.__xpmtypename__  # type: str
         dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
 
-        tmpdir = None
         if not dir.exists():
-            tmpdir = dir.with_suffix(".tmp")
-            if tmpdir.exists():
-                logger.warning("Removing old temporary cache dir %s", tmpdir)
-                shutil.rmtree(tmpdir)
-            tmpdir.mkdir(parents=True, exist_ok=True)
+            dir.mkdir(parents=True, exist_ok=True)
 
-        path = (tmpdir or dir) / name
+        path = dir / name
         ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
         with ipc_lock:
             r = fn(config, path, *args, **kwargs)
-            if tmpdir:
-                # Renames to final directory since we succeeded
-                tmpdir.rename(dir)
             return r
 
     return __call__
+
+
+class TaskModeConfig:
+    def __getstate__(self):
+        return {
+            key: value
+            for key, value in self.__dict__.copy().items()
+            if key in self.__class__.__xpmfields__
+        }
+
+    def __setstate__(self, state):
+        for key, value in state.items():
+            setattr(self, key, value)
+
+        post = getattr(self, "__post_unpickle__", None)
+        if post is not None:
+            self.post()
 
 
 class Config:
@@ -667,10 +683,13 @@ class Config:
             # Really set the value
             xpm.set(name, value, bypass=ConfigInformation.LOADING)
 
-        # Initialize with default arguments
+        # Initialize with default arguments (or None)
         for name, value in self.__xpmtype__.arguments.items():
-            if name not in kwargs and value.default is not None:
-                self.__xpm__.set(name, clone(value.default))
+            if name not in kwargs:
+                if value.default is not None:
+                    self.__xpm__.set(name, clone(value.default))
+                elif not value.required:
+                    self.__xpm__.set(name, None)
 
     def __setattr__(self, name, value):
         if not Config.TASKMODE and not name.startswith("__xpm"):

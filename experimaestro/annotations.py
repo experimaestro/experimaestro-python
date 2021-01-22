@@ -13,7 +13,7 @@ from typing_extensions import Annotated, get_type_hints
 import typing_extensions
 
 from .core.arguments import Argument as CoreArgument, TypeAnnotation
-from .core.objects import Config
+from .core.objects import Config, TaskModeConfig
 from .core.types import Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
 from .checkers import Checker
@@ -57,6 +57,19 @@ class config:
         self.parents = parents
         self.register = register
 
+    @staticmethod
+    def annotation2params(originaltype):
+        if hasattr(originaltype, "__annotations__"):
+            hints = get_type_hints(originaltype, include_extras=True)
+            for key, typehint in hints.items():
+                options = None
+                if isinstance(typehint, typing_extensions._AnnotatedAlias):
+                    for value in typehint.__metadata__:
+                        if isinstance(value, TypeAnnotation):
+                            options = value(options)
+                    if options is not None:
+                        yield key, options, typehint
+
     def __call__(self, tp, originaltype=None, basetype=Config):
         """Annotate the class
 
@@ -80,12 +93,21 @@ class config:
             [type] -- [description]
         """
 
-        # --- If in task mode, just return the object
-        if Config.TASKMODE:
-            return tp
-
         # The type to annotate
         originaltype = originaltype or tp
+
+        # --- If in task mode, add the fields
+        if Config.TASKMODE:
+            tp.__xpmfields__ = set()
+            for key, options, typehint in self.annotation2params(originaltype):
+                tp.__xpmfields__.add(key)
+
+            # Add methods
+            if not hasattr(tp, "__getstate__"):
+                tp.__getstate__ = TaskModeConfig.__getstate__
+            if not hasattr(tp, "__setstate__"):
+                tp.__setstate__ = TaskModeConfig.__setstate__
+            return tp
 
         # --- Add Config as an ancestor of t if needed
         if inspect.isclass(tp):
@@ -156,18 +178,10 @@ class config:
             objecttype.description = originaltype.__doc__
 
         # Adding type-hinted arguments
-        if hasattr(originaltype, "__annotations__"):
-            hints = get_type_hints(originaltype, include_extras=True)
-            for key, typehint in hints.items():
-                options = None
-                if isinstance(typehint, typing_extensions._AnnotatedAlias):
-                    for value in typehint.__metadata__:
-                        if isinstance(value, TypeAnnotation):
-                            options = value(options)
-                    if options is not None:
-                        objecttype.addArgument(
-                            options.create(key, originaltype, typehint.__args__[0])
-                        )
+        for key, options, typehint in self.annotation2params(originaltype):
+            objecttype.addArgument(
+                options.create(key, originaltype, typehint.__args__[0])
+            )
 
         return tp
 
@@ -264,6 +278,7 @@ class param:
     def __call__(self, tp):
         # Don't annotate in task mode
         if Config.TASKMODE:
+            tp.__xpmfields__.add(self.name)
             return tp
 
         # Get type from default if needed
