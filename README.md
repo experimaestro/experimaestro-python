@@ -2,12 +2,12 @@
 
 Experimaestro is a computer science experiment manager whose goals are:
 
-* To decompose experiments into a set of parameterizable tasks
-* Schedule tasks and handle dependencies between tasks
-* Avoids to re-run the same task two times by computing unique task IDs dependending on the parameters
-* Handle experimental parameters through tags
+- To decompose experiments into a set of parameterizable tasks
+- Schedule tasks and handle dependencies between tasks
+- Avoids to re-run the same task two times by computing unique task IDs dependending on the parameters
+- Handle experimental parameters through tags
 
-Full documentation can be found in [https://experimaestro.github.io/experimaestro-python/](https://experimaestro.github.io/experimaestro-python/)
+The full documentation can be read by going to the following URL: [https://experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io)
 
 # Install
 
@@ -26,7 +26,7 @@ pip install -e .
 # Example
 
 This very simple example shows how to submit two tasks that concatenate two strings.
-Under the curtain, 
+Under the curtain,
 
 - A directory is created for each task (in `workdir/jobs/helloworld.add/HASHID`)
   based on a unique ID computed from the parameters
@@ -34,6 +34,7 @@ Under the curtain,
 - A tag `y` is created for the main task
 
 <!-- SNIPPET: MAIN ARGS[%WORKDIR%] ENV[XPM_EXAMPLE_WAIT=0.001] -->
+
 ```python
 # --- Task and types definitions
 
