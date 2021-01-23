@@ -33,7 +33,9 @@ class config:
 
     """Annotations for experimaestro types"""
 
-    def __init__(self, identifier=None, description=None, register=True, parents=[]):
+    def __init__(
+        self, identifier=None, description=None, register=True, help={}, parents=[]
+    ):
         """[summary]
 
         Keyword Arguments:
@@ -56,6 +58,7 @@ class config:
         self.description = description
         self.parents = parents
         self.register = register
+        self.help = help
 
     @staticmethod
     def annotation2params(originaltype):
@@ -179,6 +182,8 @@ class config:
 
         # Adding type-hinted arguments
         for key, options, typehint in self.annotation2params(originaltype):
+            if key in self.help:
+                options.help = self.help[key]
             objecttype.addArgument(
                 options.create(key, originaltype, typehint.__args__[0])
             )
