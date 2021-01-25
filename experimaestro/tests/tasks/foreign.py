@@ -1,7 +1,8 @@
-from .all import ForeignClassB1, argument, config
+from experimaestro import param, config
+from .all import ForeignClassB1
 
 
-@argument("y", type=int)
+@param("y", type=int)
 @config()
 class ForeignClassB2(ForeignClassB1):
     pass

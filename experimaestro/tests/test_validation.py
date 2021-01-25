@@ -214,7 +214,7 @@ class TaskParentConfig:
 
 
 @task()
-class taskconfig:
+class taskconfig(TaskParentConfig):
     pass
 
 

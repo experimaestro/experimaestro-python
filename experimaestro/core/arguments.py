@@ -71,7 +71,7 @@ class TypeAnnotation:
 class _Param(TypeAnnotation):
     """Base annotation for types"""
 
-    def __init__(self, ignored=False):
+    def __init__(self, ignored=None):
         self.ignored = ignored
 
     def annotate(self, options: ArgumentOptions):
