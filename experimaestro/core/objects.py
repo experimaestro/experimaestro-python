@@ -321,7 +321,8 @@ class ConfigInformation:
     ):
         for argument, value in self.xpmvalues():
             try:
-                updatedependencies(dependencies, value, path + [argument.name])
+                if value is not None:
+                    updatedependencies(dependencies, value, path + [argument.name])
             except:
                 logger.error("While setting %s", path + [argument.name])
                 raise
@@ -394,7 +395,9 @@ class ConfigInformation:
     @staticmethod
     def _outputjsonvalue(key, value, jsonout, context):
         """Output JSON value"""
-        if isinstance(value, Config):
+        if value is None:
+            jsonout.write(*key, None)
+        elif isinstance(value, Config):
             with jsonout.subobject(*key) as obj:
                 obj.write("type", "python")
                 obj.write("value", id(value))
@@ -426,7 +429,10 @@ class ConfigInformation:
 
         # Serialize sub-objects
         for argument, value in self.xpmvalues():
-            ConfigInformation._outputjsonobjects(value, jsonstream, context, serialized)
+            if value is not None:
+                ConfigInformation._outputjsonobjects(
+                    value, jsonstream, context, serialized
+                )
 
         with jsonstream.subobject() as objectout:
 
