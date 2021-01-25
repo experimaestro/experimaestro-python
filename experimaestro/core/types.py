@@ -112,7 +112,12 @@ class ObjectType(Type):
 
     REGISTERED: Dict[str, TypingType["Config"]] = {}
 
-    def __init__(self, configtype: TypingType["Config"], identifier: str = None):
+    def __init__(
+        self,
+        configtype: TypingType["Config"],
+        originaltype: type = None,
+        identifier: str = None,
+    ):
         """Creates a type"""
 
         # Get the identifier
@@ -126,18 +131,42 @@ class ObjectType(Type):
             identifier = Identifier("%s.%s" % (package, name))
 
         super().__init__(identifier, None)
+        self.configtype = configtype
+        self.originaltype = originaltype or configtype
+        self.__initialized__ = False
+        self.annotations = []
+
+    def addAnnotation(self, annotation):
+        assert not self.__initialized__
+        self.annotations.append(annotation)
+
+    def __initialize__(self):
+        """Effectively parses information"""
+
+        # Check if not initialized
+        if self.__initialized__:
+            return
+        self.__initialized__ = True
+
+        # Get the module
+        module = inspect.getmodule(self.configtype)
+        self._file = Path(inspect.getfile(self.configtype)).absolute()
+        self._module = module.__name__
+        self._package = module.__package__
 
         # The class of the object
-        self.objecttype = configtype
         self.task = None
-        self.originaltype = None
 
-        self.arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))
+        self._arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))
+
+        # Add arguments from annotations
+        for annotation in self.annotations:
+            annotation.process(self)
 
         # Get description from documentation
         paramhelp = {}
-        if "__doc__" in configtype.__dict__:
-            parseddoc = parse(configtype.__doc__)
+        if "__doc__" in self.configtype.__dict__:
+            parseddoc = parse(self.configtype.__doc__)
             self.description = parseddoc.short_description
             for param in parseddoc.params:
                 paramhelp[param.arg_name] = param.description
@@ -145,27 +174,37 @@ class ObjectType(Type):
         # Add arguments from type hints
         from .arguments import TypeAnnotation
 
-        if hasattr(configtype, "__annotations__"):
-            hints = get_type_hints(configtype, include_extras=True)
+        if hasattr(self.configtype, "__annotations__"):
+            typekeys = set(self.configtype.__dict__.get("__annotations__", {}).keys())
+            hints = get_type_hints(self.configtype, include_extras=True)
             for key, typehint in hints.items():
-                options = None
-                if isinstance(typehint, typing_extensions._AnnotatedAlias):
-                    for value in typehint.__metadata__:
-                        if isinstance(value, TypeAnnotation):
-                            options = value(options)
-                    if options is not None:
-                        if options.kwargs.get("help", None) is None:
-                            options.kwargs["help"] = paramhelp.get(key, None)
-                        self.addArgument(
-                            options.create(key, configtype, typehint.__args__[0])
-                        )
+                # Filter out hints from parent classes
+                if key in typekeys:
+                    options = None
+                    if isinstance(typehint, typing_extensions._AnnotatedAlias):
+                        for value in typehint.__metadata__:
+                            if isinstance(value, TypeAnnotation):
+                                options = value(options)
+                        if options is not None:
+                            if options.kwargs.get("help", None) is None:
+                                options.kwargs["help"] = paramhelp.get(key, None)
+                            self.addArgument(
+                                options.create(
+                                    key, self.configtype, typehint.__args__[0]
+                                )
+                            )
+
+    @property
+    def arguments(self):
+        self.__initialize__()
+        return self._arguments
 
     def addArgument(self, argument: Argument):
-        self.arguments[argument.name] = argument
+        self._arguments[argument.name] = argument
 
         name = argument.name
         setattr(
-            self.objecttype,
+            self.configtype,
             argument.name,
             property(
                 lambda _self: _self.__xpm__.get(name),
@@ -174,26 +213,27 @@ class ObjectType(Type):
         )
 
     def getArgument(self, key: str) -> Argument:
-        return self.arguments[key]
+        self.__initialize__()
+        return self._arguments[key]
 
     def parents(self) -> Iterator["ObjectType"]:
-        for tp in self.objecttype.__bases__:
+        for tp in self.configtype.__bases__:
             if issubclass(tp, Config) and tp not in [Config, Task, BaseTaskFunction]:
                 yield tp.__xpm__
 
     @staticmethod
     def create(
         configtype: TypingType["Config"],
+        originaltype: type = None,
         identifier=None,
-        description=None,
         register=True,
     ):
-        objecttype = ObjectType(configtype, identifier)
+        objecttype = ObjectType(configtype, originaltype, identifier)
         identifier = objecttype.identifier
 
         if register and str(identifier) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[str(identifier)]
-            if _objecttype.__xpm__.originaltype != configtype:
+            if _objecttype.__xpm__.configtype != configtype:
                 raise Exception(
                     "Experimaestro type %s is already declared" % identifier
                 )
@@ -207,6 +247,9 @@ class ObjectType(Type):
         return objecttype
 
     def validate(self, value):
+        """Ensures that the value is compatible with this type"""
+        self.__initialize__()
+
         if isinstance(value, dict):
             # This is a unserialized object
             valuetype = value.get("$type", None)
@@ -224,7 +267,7 @@ class ObjectType(Type):
                 raise ValueError("Could not find type %s", valuetype)
 
             logger.debug("Using argument type (not real type)")
-            return self.objecttype(**value)
+            return self.configtype(**value)
 
         if value is None:
             return None
@@ -232,7 +275,7 @@ class ObjectType(Type):
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")
 
-        types = self.objecttype
+        types = self.configtype
 
         if not isinstance(value, types):
             raise ValueError("%s is not a subtype of %s" % (value, types))

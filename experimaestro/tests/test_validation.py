@@ -24,7 +24,7 @@ def expect_validate(value):
 
 
 def expect_notvalidate(value):
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, KeyError)):
         value.__xpm__.validate()
 
 
@@ -189,16 +189,6 @@ class PathParent:
 
 def test_path():
     c = PathParent()
-    expect_validate(c)
-
-
-@task(None, PathParent)
-def PathTask(x: Path):
-    pass
-
-
-def test_pathchild():
-    c = PathTask()
     expect_validate(c)
 
 

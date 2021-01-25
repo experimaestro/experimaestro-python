@@ -105,17 +105,13 @@ class config:
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
-        # Determine the identifier
-        objecttype = ObjectType.create(
-            tp, self.identifier, self.description, register=self.register
+        # Adds to xpminfo for on demand creation of information
+        tp.__xpm__ = ObjectType.create(
+            tp,
+            identifier=self.identifier,
+            originaltype=originaltype,
+            register=self.register,
         )
-        tp.__xpm__ = objecttype
-        objecttype.originaltype = originaltype
-
-        module = inspect.getmodule(originaltype)
-        objecttype._file = Path(inspect.getfile(originaltype)).absolute()
-        objecttype._module = module.__name__
-        objecttype._package = module.__package__
 
         return tp
 
@@ -154,7 +150,6 @@ class task(config):
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
 
     def __call__(self, tp):
-        import experimaestro.commandline as commandline
 
         originaltype = tp
         if inspect.isfunction(tp):
@@ -167,8 +162,13 @@ class task(config):
         if Config.TASKMODE:
             return tp
 
+        tp.__xpm__.addAnnotation(self)
+        return tp
+
+    def process(self, xpmtype):
         # Construct command
-        _type = tp.__xpm__.originaltype
+        import experimaestro.commandline as commandline
+
         command = commandline.Command()
         command.add(commandline.CommandPath(self.pythonpath))
         command.add(commandline.CommandString("-m"))
@@ -178,8 +178,8 @@ class task(config):
         commandLine = commandline.CommandLine()
         commandLine.add(command)
 
-        tp.__xpm__.task = commandline.CommandLineTask(commandLine)
-        return tp
+        assert xpmtype.task is None
+        xpmtype.task = commandline.CommandLineTask(commandLine)
 
 
 # --- argument related annotations
@@ -214,6 +214,10 @@ class param:
         if Config.TASKMODE:
             return tp
 
+        tp.__xpm__.addAnnotation(self)
+        return tp
+
+    def process(self, xpmtype):
         # Get type from default if needed
         if self.type is None:
             if self.default is not None:
@@ -234,9 +238,7 @@ class param:
             checker=self.checker,
             subparam=self.subparam,
         )
-        tp.__xpm__.addArgument(argument)
-
-        return tp
+        xpmtype.addArgument(argument)
 
 
 class subparam(param):
@@ -283,7 +285,7 @@ STDERR = lambda jobcontext: "%s.err" % jobcontext.name
 STDOUT = lambda jobcontext: "%s.out" % jobcontext.name
 
 
-class ConstantParam(argument):
+class ConstantParam(param):
     """
     An constant argument (useful for versionning tasks)
     """

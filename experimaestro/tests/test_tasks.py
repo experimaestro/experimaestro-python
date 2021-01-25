@@ -16,7 +16,7 @@ from . import restart
 def test_simple_task():
     with TemporaryDirectory(prefix="xpm", suffix="helloworld") as workdir:
         assert isinstance(workdir, Path)
-        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=2):
+        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=1000):
             # Submit the tasks
             hello = Say(word="hello").submit()
             world = Say(word="world").submit()

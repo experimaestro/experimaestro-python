@@ -220,10 +220,8 @@ class ConfigInformation:
     def xpmvalues(self, generated=False):
         """Returns an iterarator over arguments and associated values"""
         for argument in self.xpmtype.arguments.values():
-            if hasattr(self.pyobject, argument.name) or (
-                generated and argument.generator
-            ):
-                yield argument, getattr(self.pyobject, argument.name, None)
+            if argument.name in self.values or (generated and argument.generator):
+                yield argument, self.values[argument.name]
 
     def tags(self, tags=None):
         if tags is None:
@@ -268,7 +266,7 @@ class ConfigInformation:
 
             # Check each argument
             for k, argument in self.xpmtype.arguments.items():
-                value = getattr(self.pyobject, k, None)
+                value = self.values.get(k)
                 if value is not None:
                     if value is None and argument.required:
                         raise ValueError(
@@ -704,7 +702,7 @@ class Config:
         # Initialize with arguments
         for name, value in kwargs.items():
             # Check if argument is OK
-            if name not in xpm.xpmtype.arguments:
+            if name not in self.__xpmtype__.arguments:
                 raise ValueError(
                     "%s is not an argument for %s" % (name, self.__xpmtype__)
                 )

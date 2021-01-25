@@ -38,6 +38,10 @@ def test_noname():
 # --- Use type annotations
 
 
+def gettype(t: type):
+    return t.__xpm__
+
+
 def ArgumentValue(default=None, *, help=""):
     return default
 
@@ -62,7 +66,7 @@ def test_type_hinting():
         w: Param[int]
         opt: Param[Optional[int]]
 
-    ot = MyConfig.__xpm__
+    ot = gettype(MyConfig)
 
     # Check required parameter
     arg_x = ot.getArgument("x")
@@ -93,12 +97,22 @@ def test_type_hinting():
     arg_opt = ot.getArgument("opt")
     assert not arg_opt.required
 
-    c = MyConfig()
-    with pytest.raises(KeyError):
-        assert c.x is None
 
-    assert c.y == 2.3
-    assert c.opt is None
+def test_redefined_param():
+    @config(register=False)
+    class A:
+        x: Param[int]
+
+    @config(register=False)
+    class B:
+        x: Param[int] = 3
+
+    atx = gettype(A).getArgument("x")
+    btx = gettype(B).getArgument("x")
+
+    assert atx.required
+
+    assert not btx.required
 
 
 # --- Task annotations
