@@ -58,22 +58,25 @@ def slowdown(N: int):
 
 hw = Identifier("helloworld")
 
-@argument("word", type=str, required=True, help="Word to generate")
 @task(hw.say)
-def Say(word: str):
-    slowdown(len(word))
-    print(word.upper(),)
+class Say:
+    word: Param[str]
 
-@argument("strings", type=List[Say], help="Strings to concat")
+    def __execute__(self):
+        slowdown(len(self.word))
+        print(self.word.upper(),)
+
 @task(hw.concat)
-def Concat(strings: List[Say]):
-    # We access the file where standard output was stored
-    says = []
-    slowdown(len(strings))
-    for string in strings:
-        with open(string.stdout()) as fp:
-            says.append(fp.read().strip())
-    print(" ".join(says))
+class Concat:
+    strings: Param[List[Say]]
+
+    def __execute__(self):
+        says = []
+        slowdown(len(self.strings))
+        for string in self.strings:
+            with open(string.stdout()) as fp:
+                says.append(fp.read().strip())
+        print(" ".join(says))
 
 
 # --- Defines the experiment

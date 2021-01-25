@@ -39,6 +39,8 @@ class Argument:
 
 
 class ArgumentOptions:
+    """Helper class when using type hints"""
+
     kwargs = {}
 
     def create(self, name, originaltype, typehint):

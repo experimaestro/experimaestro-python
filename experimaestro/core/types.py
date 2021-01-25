@@ -2,8 +2,12 @@ import inspect
 from typing import Union, Dict, Iterator, List, Type as TypingType
 from collections import ChainMap
 from pathlib import Path
+from docstring_parser.parser import parse
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
+from typing_extensions import get_type_hints
+from docstring_parser import parse as docstring_parse
+import typing_extensions
 from .objects import Config, Task, BaseTaskFunction
 from .arguments import Argument
 
@@ -102,21 +106,72 @@ class Type:
 
 
 class ObjectType(Type):
-    """The type of a Config or Task"""
+    """ObjectType contains class-level information about
+    experimaestro configurations and tasks
+    """
 
     REGISTERED: Dict[str, TypingType["Config"]] = {}
 
-    def __init__(self, objecttype: TypingType["Config"], identifier, description):
-        super().__init__(identifier, description)
+    def __init__(self, configtype: TypingType["Config"], identifier: str = None):
+        """Creates a type"""
 
-        self.objecttype = objecttype
+        # Get the identifier
+        if identifier is None and "__xpmid__" in configtype.__dict__:
+            identifier = Identifier(getattr(configtype, "__xpmid__", None))
+
+        if identifier is None:
+            package = configtype.__module__.lower()
+            name = configtype.__name__.lower()
+
+            identifier = Identifier("%s.%s" % (package, name))
+
+        super().__init__(identifier, None)
+
+        # The class of the object
+        self.objecttype = configtype
         self.task = None
         self.originaltype = None
 
         self.arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))
 
+        # Get description from documentation
+        paramhelp = {}
+        if "__doc__" in configtype.__dict__:
+            parseddoc = parse(configtype.__doc__)
+            self.description = parseddoc.short_description
+            for param in parseddoc.params:
+                paramhelp[param.arg_name] = param.description
+
+        # Add arguments from type hints
+        from .arguments import TypeAnnotation
+
+        if hasattr(configtype, "__annotations__"):
+            hints = get_type_hints(configtype, include_extras=True)
+            for key, typehint in hints.items():
+                options = None
+                if isinstance(typehint, typing_extensions._AnnotatedAlias):
+                    for value in typehint.__metadata__:
+                        if isinstance(value, TypeAnnotation):
+                            options = value(options)
+                    if options is not None:
+                        if options.kwargs.get("help", None) is None:
+                            options.kwargs["help"] = paramhelp.get(key, None)
+                        self.addArgument(
+                            options.create(key, configtype, typehint.__args__[0])
+                        )
+
     def addArgument(self, argument: Argument):
         self.arguments[argument.name] = argument
+
+        name = argument.name
+        setattr(
+            self.objecttype,
+            argument.name,
+            property(
+                lambda _self: _self.__xpm__.get(name),
+                lambda _self, value: _self.__xpm__.set(name, value),
+            ),
+        )
 
     def getArgument(self, key: str) -> Argument:
         return self.arguments[key]
@@ -128,20 +183,28 @@ class ObjectType(Type):
 
     @staticmethod
     def create(
-        configclass: TypingType["Config"], identifier, description, register=True
+        configtype: TypingType["Config"],
+        identifier=None,
+        description=None,
+        register=True,
     ):
+        objecttype = ObjectType(configtype, identifier)
+        identifier = objecttype.identifier
+
         if register and str(identifier) in ObjectType.REGISTERED:
             _objecttype = ObjectType.REGISTERED[str(identifier)]
-            if _objecttype.__xpm__.originaltype != configclass:
-                # raise Exception("Experimaestro type %s is already declared" % identifier)
-                pass
+            if _objecttype.__xpm__.originaltype != configtype:
+                raise Exception(
+                    "Experimaestro type %s is already declared" % identifier
+                )
 
             logger.error("Experimaestro type %s is already declared" % identifier)
             return _objecttype
 
         if register:
-            ObjectType.REGISTERED[str(identifier)] = configclass
-        return ObjectType(configclass, identifier, description)
+            ObjectType.REGISTERED[str(identifier)] = configtype
+
+        return objecttype
 
     def validate(self, value):
         if isinstance(value, dict):

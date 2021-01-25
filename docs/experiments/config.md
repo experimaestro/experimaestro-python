@@ -3,7 +3,7 @@ Defining experiments is based on _config(urations)_ and _tasks_. Tasks are confi
 ## Configurations
 
 ```py3
-@config(identifier=None, description=None, parents=[])
+@config(identifier=None)
 ```
 
 defines a configuration with identifier `identifier`, which could be any string.
@@ -13,12 +13,10 @@ name (lowercased).
 !!! example
 
     ```py3
-    from experimaestro import config, argument
-
-        @param("gamma", type=float, required=False)
+    from experimaestro import Param, config
         @config("my.model")
         class MyModel:
-            pass
+            gamma: Param[float]
     ```
 
 defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
@@ -38,40 +36,28 @@ A task is a special configuration that can be:
 1. Submitted to the task scheduler using `submit` (preparation of the experiment)
 1. Executed with the method `execute` (running a specific task within the experiment)
 
-!!! example "Defining a task as a function"
-
-    For simpler cases, it is easier to use a function
-
-    ```py3
-    from experimaestro import task, argument
-
-        @param("epochs", type=int, default=100)
-        @param("model", type=Model, required=True)
-        @task("model.learn")
-        def modellearn(epochs: int, model: Model):
-            pass
-    ```
-
 !!! example "Defining a task as a class"
 
     It is possible to use classes if variables need to be defined,
     or if a configuration should be returned (here, `Model`)
 
     ```py3
-    from experimaestro import task, argument
+    from experimaestro import Config, Task, Param
 
-        @param("parameters", type=Path)
         @config()
         class Model:
+            parameters: Param[Path]
+
             def __postinit__(self):
                 # Called once the object has been set up
                 print(self.parameters)
 
-        @param("epochs", type=int, default=100)
-        @param("model", type=Model, required=True)
-        @pathoption("parameters", "parameters.pth")
         @task()
-        class ModelLearn:
+        class ModelLearn():
+            epochs: Param[int] = 100
+            model: Param[Model]
+            parameters: PathOption = "parameters.pth"
+
             def config(self) -> Model:
                 return {
                     "model": self.model,
@@ -92,38 +78,33 @@ Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or 
 ## Parameters
 
 ```python
-@param(name: str, type: Any = None, default: Any = None, required: bool = None,
-          ignored = None, help = None)
+class MyConfig:
+    """
+    Attributes:
+        x: The parameter x
+        y: The parameter y
+    """
+    # With default value
+    x: Param[type] = default
+
+    # Without default value
+    y: Param[type]
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
-- `type` is the type of the argument; if not given, it will be inferred from `default` (if defined) or be `Any`
-- `default` default value of the argument. _If the value equals to the default, the argument will not be included in the signature computation_.
-- `ignored` to ignore the argument in the signature computation (whatever its value).
-- `help` a string to document the option; it can be used when the argument is used in a command line or when generating a documentation (_planned_).
-
-Instead of using annotations, it is possible to use class variables
-and type hints (**warning**: experimental syntax), as follows:
-
-!!! example
-
-    ```py3
-    from experimaestro import task, Param
-
-            @task("model.learn")
-            class ModelLearn:
-                epochs: Param[int] = 100
-                model: Param[Model]
-    ```
+- `type` is the type of the argument
+- `default` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_.
 
 ### Options
 
-Options are just a simple shortcut to define a parameter with the `ignored` flag set. I
+Options are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be an option.
 
 ### Path option
 
 ```py3
-@pathoption(name: str, path: str, help: Optional[str] = None)
+
+class MyTask:
+    name: PathOption = "path"
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
@@ -135,8 +116,7 @@ Sometimes, a config can compute some output that might be interesting to cache, 
 
 ```py3
 
-@config()
-class Terms():
+class Terms(Config):
     @cache("terms.npy")
     def load(self, path: Path):
         if path.is_file():
@@ -158,11 +138,11 @@ the values before a task is submitted. This allows to fail fast when parameters
 are not valid.
 
 ```py3
-@param("batch_size", type=int, default=100)
-@param("micro_batch_size", type=int, default=100)
-@pathoption("parameters", "parameters.pth")
-@task()
-class ModelLearn:
+class ModelLearn(Task):
+    batch_size: Param[int] = 100
+    micro_batch_size: Param[int] = 100
+    parameters: PathOption = "parameters.pth"
+
     def __validate__(self):
         assert self.batch_size % self.micro_batch_size == 0
 ```
@@ -177,10 +157,9 @@ but with different _sub-parameters_ are run sequentially.
 For instance, given this task definition
 
 ```py3
-@subparam("epoch", type=int, default=100)
-@param("learning_rate", type=float, default=1e-3)
-@task()
-class ModelLearn:
+class ModelLearn(Task):
+    epoch: SubParam[int] = 100
+    learning_rate: Param[float] = 1e-3
     def execute(self):
         pass
 ```

@@ -13,7 +13,7 @@ from typing_extensions import Annotated, get_type_hints
 import typing_extensions
 
 from .core.arguments import Argument as CoreArgument, TypeAnnotation
-from .core.objects import Config, TaskModeConfig
+from .core.objects import Config
 from .core.types import Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
 from .checkers import Checker
@@ -33,9 +33,7 @@ class config:
 
     """Annotations for experimaestro types"""
 
-    def __init__(
-        self, identifier=None, description=None, register=True, help={}, parents=[]
-    ):
+    def __init__(self, identifier=None, description=None, register=True, parents=[]):
         """[summary]
 
         Keyword Arguments:
@@ -58,20 +56,6 @@ class config:
         self.description = description
         self.parents = parents
         self.register = register
-        self.help = help
-
-    @staticmethod
-    def annotation2params(originaltype):
-        if hasattr(originaltype, "__annotations__"):
-            hints = get_type_hints(originaltype, include_extras=True)
-            for key, typehint in hints.items():
-                options = None
-                if isinstance(typehint, typing_extensions._AnnotatedAlias):
-                    for value in typehint.__metadata__:
-                        if isinstance(value, TypeAnnotation):
-                            options = value(options)
-                    if options is not None:
-                        yield key, options, typehint
 
     def __call__(self, tp, originaltype=None, basetype=Config):
         """Annotate the class
@@ -99,17 +83,8 @@ class config:
         # The type to annotate
         originaltype = originaltype or tp
 
-        # --- If in task mode, add the fields
+        # --- If in task mode, returns now
         if Config.TASKMODE:
-            tp.__xpmfields__ = set()
-            for key, options, typehint in self.annotation2params(originaltype):
-                tp.__xpmfields__.add(key)
-
-            # Add methods
-            if not hasattr(tp, "__getstate__"):
-                tp.__getstate__ = TaskModeConfig.__getstate__
-            if not hasattr(tp, "__setstate__"):
-                tp.__setstate__ = TaskModeConfig.__setstate__
             return tp
 
         # --- Add Config as an ancestor of t if needed
@@ -122,49 +97,15 @@ class config:
                 if tp.__bases__ != (object,):
                     __bases__ += tp.__bases__
 
-            keep = getattr(tp, "__xpm_default_keep__", False)
-
             # Remove all methods but those marked by @configmethod
-            __dict__ = {
-                key: value
-                for key, value in tp.__dict__.items()
-                # Not forbidden, and not function (unless we keep everything)
-                if (
-                    (keep or not inspect.isfunction(value))
-                    and key not in config.FORBIDDEN_ATTRIBUTES
-                )
-                or (key in config.KEPT_METHODS)
-                or hasattr(value, "__xpmconfig__")
-            }
+            __dict__ = {key: value for key, value in tp.__dict__.items()}
 
             tp = type(tp.__name__, __bases__, __dict__)
             tp.__module__ = originaltype.__module__
-
-            # Modify original type __bases__ to get the real hierarchy
-            # when creating instances
-            if inspect.isclass(originaltype):
-                originaltype.__bases__ = tuple(
-                    t.__xpm__.originaltype
-                    if issubclass(t, Config) and t is not Config
-                    else t
-                    for t in originaltype.__bases__
-                )
         else:
             raise ValueError("Cannot use type %s as a type/task" % tp)
 
         # Determine the identifier
-        if self.identifier is None:
-            package = originaltype.__module__.lower()
-
-            # Use the parent identifier
-            # if basetype.__xpm__.
-
-            self.identifier = Identifier(
-                "%s.%s" % (package, originaltype.__name__.lower())
-            )
-
-        logging.debug("Registering %s", self.identifier)
-
         objecttype = ObjectType.create(
             tp, self.identifier, self.description, register=self.register
         )
@@ -175,18 +116,6 @@ class config:
         objecttype._file = Path(inspect.getfile(originaltype)).absolute()
         objecttype._module = module.__name__
         objecttype._package = module.__package__
-
-        # Add description
-        if objecttype.description is None:
-            objecttype.description = originaltype.__doc__
-
-        # Adding type-hinted arguments
-        for key, options, typehint in self.annotation2params(originaltype):
-            if key in self.help:
-                options.help = self.help[key]
-            objecttype.addArgument(
-                options.create(key, originaltype, typehint.__args__[0])
-            )
 
         return tp
 
@@ -283,7 +212,6 @@ class param:
     def __call__(self, tp):
         # Don't annotate in task mode
         if Config.TASKMODE:
-            tp.__xpmfields__.add(self.name)
             return tp
 
         # Get type from default if needed
@@ -307,6 +235,7 @@ class param:
             subparam=self.subparam,
         )
         tp.__xpm__.addArgument(argument)
+
         return tp
 
 

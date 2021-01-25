@@ -170,6 +170,7 @@ class ConfigInformation:
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
         self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
+        self.values = {}
 
         # Meta-informations
         self._tags = {}
@@ -186,6 +187,10 @@ class ConfigInformation:
         self._validated = False
         self._sealed = False
 
+    def get(self, name):
+        """Get an XPM managed value"""
+        return self.values[name]
+
     def set(self, k, v, bypass=False):
         if self._sealed:
             raise AttributeError("Object is read-only")
@@ -195,12 +200,16 @@ class ConfigInformation:
             if argument:
                 if not bypass and argument.generator:
                     raise AssertionError("Property %s is read-only" % (k))
-                object.__setattr__(self.pyobject, k, argument.type.validate(v))
+                if v is not None:
+                    self.values[k] = argument.type.validate(v)
+                elif argument.required:
+                    raise AttributeError("Cannot set required attribute to None")
+                else:
+                    self.values[k] = None
             else:
                 raise AttributeError(
                     "Cannot set non existing attribute %s in %s" % (k, self.xpmtype)
                 )
-                # object.__setattr__(self, k, v)
         except:
             logger.error("Error while setting value %s" % k)
             raise
@@ -259,8 +268,13 @@ class ConfigInformation:
 
             # Check each argument
             for k, argument in self.xpmtype.arguments.items():
-                if hasattr(self.pyobject, k):
-                    value = getattr(self.pyobject, k)
+                value = getattr(self.pyobject, k, None)
+                if value is not None:
+                    if value is None and argument.required:
+                        raise ValueError(
+                            "Value %s is required but missing when building %s at %s"
+                            % (k, self.xpmtype, self._initinfo)
+                        )
                     if isinstance(value, Config):
                         value.__xpm__.validate()
                 elif argument.required:
@@ -594,6 +608,7 @@ def clone(v):
     """Clone a value"""
     if isinstance(v, (str, float, int)):
         return v
+
     if isinstance(v, list):
         return [clone(x) for x in v]
 
@@ -606,7 +621,7 @@ def clone(v):
         config = type(v).__new__(type(v))
         return type(v)(**kwargs)
 
-    raise NotImplementedError("For type %s" % v)
+    raise NotImplementedError("Clone not implemented for type %s" % type(v))
 
 
 def cache(fn, name: str):
@@ -628,21 +643,34 @@ def cache(fn, name: str):
     return __call__
 
 
-class TaskModeConfig:
-    def __getstate__(self):
-        return {
-            key: value
-            for key, value in self.__dict__.copy().items()
-            if key in self.__class__.__xpmfields__
-        }
+class ClassPropertyDescriptor(object):
+    def __init__(self, fget, fset=None):
+        self.fget = fget
+        self.fset = fset
 
-    def __setstate__(self, state):
-        for key, value in state.items():
-            setattr(self, key, value)
+    def __get__(self, obj, klass=None):
+        if klass is None:
+            klass = type(obj)
+        return self.fget.__get__(obj, klass)()
 
-        post = getattr(self, "__post_unpickle__", None)
-        if post is not None:
-            self.post()
+    def __set__(self, obj, value):
+        if not self.fset:
+            raise AttributeError("can't set attribute")
+        type_ = type(obj)
+        return self.fset.__get__(obj, type_)(value)
+
+    def setter(self, func):
+        if not isinstance(func, (classmethod, staticmethod)):
+            func = classmethod(func)
+        self.fset = func
+        return self
+
+
+def classproperty(func):
+    if not isinstance(func, (classmethod, staticmethod)):
+        func = classmethod(func)
+
+    return ClassPropertyDescriptor(func)
 
 
 class Config:
@@ -653,8 +681,13 @@ class Config:
     STACK_LEVEL = 1
 
     def __init__(self, **kwargs):
+        """Initialize the configuration with the given parameters"""
+
         # Add configuration
         from .types import ObjectType
+
+        if "__xpm__" not in self.__class__.__dict__:
+            self.__class__.__xpm__ = ObjectType.create(self.__class__)
 
         self.__xpmtype__ = self.__class__.__xpm__
         if not isinstance(self.__xpmtype__, ObjectType):
@@ -662,6 +695,7 @@ class Config:
             assert isinstance(self.__xpmtype__, ObjectType)
 
         xpm = ConfigInformation(self)
+
         caller = inspect.getframeinfo(inspect.stack()[self.STACK_LEVEL][0])
         xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
 
@@ -690,11 +724,6 @@ class Config:
                     self.__xpm__.set(name, clone(value.default))
                 elif not value.required:
                     self.__xpm__.set(name, None)
-
-    def __setattr__(self, name, value):
-        if not Config.TASKMODE and not name.startswith("__xpm"):
-            return self.__xpm__.set(name, value)
-        return super().__setattr__(name, value)
 
     def tag(self, name, value) -> "Config":
         self.__xpm__.addtag(name, value)
@@ -767,4 +796,5 @@ def gettaskclass(function, parents):
             kwargs = {a: getattr(self, a) for a in self.__arguments__}
             function(**kwargs)
 
+    TaskFunction.__name__ = function.__name__
     return TaskFunction

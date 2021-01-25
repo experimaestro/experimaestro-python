@@ -11,6 +11,7 @@ websockets
 jsonstreams >= 0.5
 pytools
 tqdm
+docstring_parser
 
 # Avoid version 0.10.4
 watchdog < 0.10.4 
