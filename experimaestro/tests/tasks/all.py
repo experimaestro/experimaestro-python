@@ -1,27 +1,39 @@
 import time
-from experimaestro import *
+from typing import List
+from experimaestro import (
+    param,
+    Param,
+    config,
+    task,
+    pathoption,
+    Identifier,
+    STDOUT,
+    cache,
+)
 
 tasks = Identifier("tasks")
 
 
-@argument("x", type=int)
 @task()
 class SimpleTask:
+    x: Param[int]
+
     def execute(self):
         print(self.x)
 
 
-@argument("word", type=str, required=True, help="Word to generate")
 @pathoption("out", STDOUT)
 @task(tasks.say)
 class Say:
+    word: Param[str]
+
     def execute(self):
         print(
             self.word.upper(),
         )
 
 
-@argument("strings", type=Array(Say), help="Strings to concat")
+@param("strings", type=List[Say], help="Strings to concat")
 @task(tasks.concat)
 class Concat:
     def execute(self):
@@ -33,13 +45,13 @@ class Concat:
         print(" ".join(says))
 
 
-@argument("x", type=int)
+@param("x", type=int)
 @config()
 class ForeignClassB1:
     pass
 
 
-@argument("b", type=ForeignClassB1)
+@param("b", type=ForeignClassB1)
 @task()
 class ForeignTaskA:
     def execute(self):
@@ -54,7 +66,6 @@ class Fail:
             time.sleep(0.1)
         raise AssertionError("Failing")
 
-    @configmethod
     def touch(self):
         while self.__xpm__.job.state.notstarted():
             time.sleep(0.05)
@@ -62,17 +73,18 @@ class Fail:
             out.write("hello")
 
 
-@argument("fail", Fail)
+@param("fail", Fail)
 @task(tasks.failconsumer)
 class FailConsumer:
     def execute(self):
         return True
 
 
-@argument("a", int)
+@param("a", int)
 @task(tasks.method)
-def Method(a: int):
-    assert a == 1
+class Method:
+    def execute(self):
+        assert self.a == 1
 
 
 @task(tasks.setunknown)

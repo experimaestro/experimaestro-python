@@ -93,12 +93,12 @@ class xpm_tqdm(std_tqdm):
     def refresh(self, nolock=False, lock_args=None):
         if self.is_tty:
             super().refresh()
-        else:
-            pos = abs(self.pos)
-            if pos == 0:
-                d = self.format_dict
-                # Just report the innermost progress
-                progress(d["n"] / d["total"])
+
+        pos = abs(self.pos)
+        if pos == 0:
+            d = self.format_dict
+            # Just report the innermost progress
+            progress(d["n"] / d["total"])
 
 
 tqdm = xpm_tqdm

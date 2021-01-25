@@ -143,26 +143,6 @@ def test_constant():
         assert a.value == 1
 
 
-@argument("a", int)
-@task()
-def notset(a, b):
-    pass
-
-
-def test_notset():
-    expect_notvalidate(notset(a=1))
-
-
-@argument("a", int)
-@task()
-def notdeclared():
-    pass
-
-
-def test_notdeclared():
-    expect_notvalidate(notdeclared(a=1))
-
-
 @argument("x", type=int)
 @config()
 class Parent:
@@ -233,8 +213,8 @@ class TaskParentConfig:
     pass
 
 
-@task(None, parents=TaskParentConfig)
-def taskconfig():
+@task()
+class taskconfig:
     pass
 
 

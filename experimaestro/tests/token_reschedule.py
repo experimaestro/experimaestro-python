@@ -7,7 +7,11 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
     from experimaestro.scheduler import JobState
-    from experimaestro.tests.utils import TemporaryExperiment, TemporaryDirectory, timeout
+    from experimaestro.tests.utils import (
+        TemporaryExperiment,
+        TemporaryDirectory,
+        timeout,
+    )
     from experimaestro.tests.task_tokens import TokenTask
 
     workdir, x, lockingpath, readypath, timepath = sys.argv[1:]
@@ -15,7 +19,7 @@ if __name__ == "__main__":
         logging.info("Reschedule with token [%s]: starting task in %s", x, workdir)
         token = xp.workspace.connector.createtoken("test-token-reschedule", 1)
         task = (
-            TokenTask(path=lockingpath, x=x)
+            TokenTask(path=lockingpath, x=int(x))
             .add_dependencies(token.dependency(1))
             .submit()
         )

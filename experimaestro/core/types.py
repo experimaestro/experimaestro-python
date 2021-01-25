@@ -6,9 +6,8 @@ from docstring_parser.parser import parse
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
-from docstring_parser import parse as docstring_parse
 import typing_extensions
-from .objects import Config, Task, BaseTaskFunction
+from .objects import Config, Task
 from .arguments import Argument
 
 
@@ -115,7 +114,6 @@ class ObjectType(Type):
     def __init__(
         self,
         configtype: TypingType["Config"],
-        originaltype: type = None,
         identifier: str = None,
     ):
         """Creates a type"""
@@ -132,8 +130,8 @@ class ObjectType(Type):
 
         super().__init__(identifier, None)
         self.configtype = configtype
-        self.originaltype = originaltype or configtype
         self.__initialized__ = False
+        self._runtype = None
         self.annotations = []
 
     def addAnnotation(self, annotation):
@@ -212,23 +210,46 @@ class ObjectType(Type):
             ),
         )
 
+        # Check default value
+        if argument.default is not None:
+            argument.type.validate(argument.default)
+
+    @property
+    def runtype(self):
+        if self._runtype is None:
+            __bases__ = tuple(
+                b.__xpm__.runtype if issubclass(b, Config) else b
+                for b in self.configtype.__bases__
+            )
+
+            # Remove all methods but those marked by @configmethod
+            __dict__ = {
+                key: value
+                for key, value in self.configtype.__dict__.items()
+                if key not in self.arguments
+            }
+
+            self._runtype = type(self.configtype.__name__, __bases__, __dict__)
+            self._runtype.__module__ = self.configtype.__module__
+
+        return self._runtype
+
     def getArgument(self, key: str) -> Argument:
         self.__initialize__()
         return self._arguments[key]
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.configtype.__bases__:
-            if issubclass(tp, Config) and tp not in [Config, Task, BaseTaskFunction]:
+            if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpm__
 
     @staticmethod
     def create(
         configtype: TypingType["Config"],
-        originaltype: type = None,
         identifier=None,
         register=True,
     ):
-        objecttype = ObjectType(configtype, originaltype, identifier)
+        objecttype = ObjectType(configtype, identifier)
         identifier = objecttype.identifier
 
         if register and str(identifier) in ObjectType.REGISTERED:
@@ -304,7 +325,9 @@ def definetype(*types):
 @definetype(int)
 class IntType(Type):
     def validate(self, value):
-        return int(value)
+        if not isinstance(value, int):
+            raise TypeError(f"Value of type {type(value)} is not an integer")
+        return value
 
 
 @definetype(str)

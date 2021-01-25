@@ -169,7 +169,7 @@ class ConfigInformation:
     def __init__(self, pyobject):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
-        self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
+        self.xpmtype = pyobject.__xpmtype__  # type: experimaestro.core.types.ObjectType
         self.values = {}
 
         # Meta-informations
@@ -210,8 +210,8 @@ class ConfigInformation:
                 raise AttributeError(
                     "Cannot set non existing attribute %s in %s" % (k, self.xpmtype)
                 )
-        except:
-            logger.error("Error while setting value %s" % k)
+        except Exception:
+            logger.exception("Error while setting value %s" % k)
             raise
 
     def addtag(self, name, value):
@@ -242,27 +242,6 @@ class ConfigInformation:
         """Validate a value"""
         if not self._validated:
             self._validated = True
-
-            # Check function
-            if inspect.isfunction(self.xpmtype.originaltype):
-                # Get arguments from XPM definition
-                argnames = set()
-                for argument, value in self.xpmvalues(True):
-                    argnames.add(argument.name)
-
-                # Get declared arguments from inspect
-                spec = inspect.getfullargspec(self.xpmtype.originaltype)
-                declaredargs = set(spec.args)
-
-                # Arguments declared but not set
-                notset = declaredargs.difference(argnames)
-                notdeclared = argnames.difference(declaredargs)
-
-                if notset or notdeclared:
-                    raise ValueError(
-                        "Some arguments were set but not declared (%s) or declared but not set (%s) at %s"
-                        % (",".join(notdeclared), ",".join(notset), self._initinfo)
-                    )
 
             # Check each argument
             for k, argument in self.xpmtype.arguments.items():
@@ -442,7 +421,7 @@ class ConfigInformation:
                 objectout.write("file", str(self.xpmtype._file))
 
             objectout.write("module", self.xpmtype._module)
-            objectout.write("type", self.xpmtype.originaltype.__name__)
+            objectout.write("type", self.xpmtype.configtype.__name__)
 
             # Serialize identifier and typename
             # TODO: remove when not needed (cache issues)
@@ -544,14 +523,8 @@ class ConfigInformation:
                 o.__xpmtypename__ = definition["typename"]
                 o.__xpmidentifier__ = definition["identifier"]
 
-            istaskdef = isinstance(o, BaseTaskFunction)
-            if istaskdef:
-                o.__arguments__ = set()
-
             for name, value in definition["fields"].items():
                 v = ConfigInformation._objectFromParameters(value, objects)
-                if istaskdef:
-                    o.__arguments__.add(name)
                 setattr(o, name, v)
 
             postinit = getattr(o, "__postinit__", None)
@@ -584,14 +557,12 @@ class ConfigInformation:
         if o is not None:
             return o
 
-        o = object.__new__(self.xpmtype.originaltype)
+        o = object.__new__(self.xpmtype.runtype)
         objects[id(self)] = o
 
         for key, param in self.xpmtype.arguments.items():
-            value = self._fromPython(
-                context, param, getattr(self.pyobject, key, None), objects
-            )
-            setattr(o, key, value)
+            value = self._fromPython(context, param, self.values.get(key), objects)
+            # setattr(o, key, value)
             postinit = getattr(o, "__postinit__", None)
             if postinit is not None:
                 postinit()
@@ -682,7 +653,6 @@ class Config:
 
     # Set to true when executing a task to remove all checks
     TASKMODE = False
-    STACK_LEVEL = 1
 
     def __init__(self, **kwargs):
         """Initialize the configuration with the given parameters"""
@@ -700,7 +670,7 @@ class Config:
 
         xpm = ConfigInformation(self)
 
-        caller = inspect.getframeinfo(inspect.stack()[self.STACK_LEVEL][0])
+        caller = inspect.getframeinfo(inspect.stack()[1][0])
         xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
 
         self.__xpm__ = xpm
@@ -781,24 +751,3 @@ class Task(Config):
         if self.__xpm__.job:
             return self.__xpm__.job.jobpath
         raise AssertionError("Cannot ask the job path of a non submitted task")
-
-
-class BaseTaskFunction(Task):
-    STACK_LEVEL = 2
-
-    """Useful to identify a task function"""
-
-    def __init__(self, **kwargs):
-        if not Config.TASKMODE:
-            super().__init__(**kwargs)
-
-
-# XPM task as a function
-def gettaskclass(function, parents):
-    class TaskFunction(*parents, BaseTaskFunction):
-        def execute(self):
-            kwargs = {a: getattr(self, a) for a in self.__arguments__}
-            function(**kwargs)
-
-    TaskFunction.__name__ = function.__name__
-    return TaskFunction

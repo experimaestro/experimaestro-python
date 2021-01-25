@@ -6,10 +6,15 @@ Test all the annotations for configurations and tasks
 # Annotation specific tests
 
 from typing import Optional, List
-from experimaestro import config, Param, task, help, Config
+from experimaestro import config as _config, Param, task
 import experimaestro.core.types as types
 import pytest
-from typing_extensions import Annotated
+
+
+def config(*args, **kwargs):
+    kwargs["register"] = False
+    return _config(*args, **kwargs)
+
 
 # --- Test manual name for configuration
 
@@ -99,11 +104,11 @@ def test_type_hinting():
 
 
 def test_redefined_param():
-    @config(register=False)
+    @config()
     class A:
         x: Param[int]
 
-    @config(register=False)
+    @config()
     class B:
         x: Param[int] = 3
 
@@ -130,3 +135,14 @@ def test_task_config():
 
     output = Task().submit(dryrun=True)
     assert type(output) == Output
+
+
+def test_default_mismatch():
+    """Test mismatch between default and type"""
+
+    @config()
+    class A:
+        x: Param[int] = 0.2
+
+    with pytest.raises(TypeError):
+        gettype(A).getArgument("x")

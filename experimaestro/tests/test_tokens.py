@@ -78,7 +78,7 @@ def test_token_ok():
 
 @param("x", type=int)
 @task()
-def dummy_task(x: int):
+class dummy_task:
     pass
 
 

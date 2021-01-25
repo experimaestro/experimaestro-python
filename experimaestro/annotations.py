@@ -22,8 +22,7 @@ from .checkers import Checker
 
 
 def configmethod(method):
-    """Annotate a method that should be kept in the configuration object"""
-    method.__xpmconfig__ = True
+    """(deprecated) Annotate a method that should be kept in the configuration object"""
     return method
 
 
@@ -33,13 +32,12 @@ class config:
 
     """Annotations for experimaestro types"""
 
-    def __init__(self, identifier=None, description=None, register=True, parents=[]):
+    def __init__(self, identifier=None, description=None, register=True):
         """[summary]
 
         Keyword Arguments:
             identifier {Identifier, str} -- Unique identifier of the type (default: {None})
             description {str} -- Description of the config/task (default: {None})
-            parents {list} -- Parent classes if annotating a method (default: {[]})
             register {bool} -- False if the type should not be registered (debug only)
 
 
@@ -54,10 +52,9 @@ class config:
             self.identifier = Identifier(self.identifier)
 
         self.description = description
-        self.parents = parents
         self.register = register
 
-    def __call__(self, tp, originaltype=None, basetype=Config):
+    def __call__(self, tp, basetype=Config):
         """Annotate the class
 
         Depending on whether we are running or configuring,
@@ -67,11 +64,10 @@ class config:
         - when running, we return the same class
 
         Arguments:
-            tp {[type]} -- Can be a method or a class
+            tp {type} -- The type
 
         Keyword Arguments:
-            originaltype {[type]} -- The original type
-            basetype {[type]} -- [description] The base type of the class
+            basetype {type} -- The base type of the class
 
         Raises:
             ValueError: [description]
@@ -79,41 +75,36 @@ class config:
         Returns:
             [type] -- [description]
         """
-
-        # The type to annotate
-        originaltype = originaltype or tp
+        assert inspect.isclass(tp), f"{tp} is not a class"
 
         # --- If in task mode, returns now
         if Config.TASKMODE:
             return tp
 
         # --- Add Config as an ancestor of t if needed
-        if inspect.isclass(tp):
-            # if not in task mode,
-            # manipulate the class path so that basetype is a parent
-            __bases__ = tp.__bases__
-            if not issubclass(tp, basetype):
-                __bases__ = (basetype,)
-                if tp.__bases__ != (object,):
-                    __bases__ += tp.__bases__
 
-            # Remove all methods but those marked by @configmethod
-            __dict__ = {key: value for key, value in tp.__dict__.items()}
+        # if not in task mode,
+        # manipulate the class path so that basetype is a parent
+        __bases__ = tp.__bases__
+        if not issubclass(tp, basetype):
+            __bases__ = (basetype,)
+            if tp.__bases__ != (object,):
+                __bases__ += tp.__bases__
 
-            tp = type(tp.__name__, __bases__, __dict__)
-            tp.__module__ = originaltype.__module__
-        else:
-            raise ValueError("Cannot use type %s as a type/task" % tp)
+        # Remove all methods but those marked by @configmethod
+        __dict__ = {key: value for key, value in tp.__dict__.items()}
+
+        configtype = type(tp.__name__, __bases__, __dict__)
+        configtype.__module__ = tp.__module__
 
         # Adds to xpminfo for on demand creation of information
-        tp.__xpm__ = ObjectType.create(
-            tp,
+        configtype.__xpm__ = ObjectType.create(
+            configtype,
             identifier=self.identifier,
-            originaltype=originaltype,
             register=self.register,
         )
 
-        return tp
+        return configtype
 
 
 class Array(TypeProxy):
@@ -139,26 +130,13 @@ class Choice(TypeProxy):
 class task(config):
     """Register a task"""
 
-    def __init__(
-        self, identifier=None, parents=None, pythonpath=None, description=None
-    ):
+    def __init__(self, identifier=None, pythonpath=None, description=None):
         super().__init__(identifier, description)
-        self.parents = parents or []
-        if self.parents and not isinstance(self.parents, list):
-            self.parents = [self.parents]
-
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
 
     def __call__(self, tp):
-
-        originaltype = tp
-        if inspect.isfunction(tp):
-            tp = objects.gettaskclass(tp, self.parents)
-        else:
-            assert not self.parents, "parents can only be used for functions"
-
         # Register the type
-        tp = super().__call__(tp, originaltype=originaltype, basetype=objects.Task)
+        tp = super().__call__(tp, basetype=objects.Task)
         if Config.TASKMODE:
             return tp
 

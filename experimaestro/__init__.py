@@ -21,7 +21,7 @@ from .annotations import (
     # deprecated
     argument,
 )
-from .core.arguments import Param, Annotated, help
+from .core.arguments import Param, Option, Annotated, help
 from .core.objects import Config, Task
 from .environment import Environment
 from .workspace import Workspace

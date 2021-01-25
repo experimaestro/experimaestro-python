@@ -97,14 +97,23 @@ class MyConfig:
 
 ### Options
 
-Options are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be an option.
+Options are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be an option. They are declared as parameters, but using the `Option` type hint
+
+```python
+class MyConfig:
+    """
+    Attributes:
+        x: The option x
+    """
+    x: Option[type]
+```
 
 ### Path option
 
 ```py3
 
 class MyTask:
-    name: PathOption = "path"
+    name: PathOption = Path("path")
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)

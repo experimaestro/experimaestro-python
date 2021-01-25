@@ -1,15 +1,16 @@
 from pathlib import Path
 import time
-import logging
 
-from experimaestro import task, argument, pathoption
+from experimaestro import task, Param
 
 
-@argument("x", int)
-@argument("path", Path)
 @task()
-def TokenTask(path: Path, x: int):
-    print(time.time())
-    while not path.is_file():
-        time.sleep(1)
-    print(time.time())
+class TokenTask:
+    path: Param[Path]
+    x: Param[int]
+
+    def execute(self):
+        print(time.time())
+        while not self.path.is_file():
+            time.sleep(1)
+        print(time.time())

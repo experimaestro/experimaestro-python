@@ -428,7 +428,7 @@ class Scheduler:
             logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
             self.cv.wait_for(lambda: not self.waitingjobs or self.exitmode)
 
-    def submit(self, job: Job):
+    def submit(self, job: Job, *, runnow=False):
         """Submits a job to the scheduler"""
         with self.cv:
             logger.info("Submitting job %s", job)
