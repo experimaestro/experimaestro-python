@@ -693,7 +693,7 @@ class Config(Generic[T]):
                 self.__xpm__._tags[name] = value
 
             # Really set the value
-            xpm.set(name, value, bypass=ConfigInformation.LOADING)
+            xpm.set(name, value)
 
         # Initialize with default arguments (or None)
         for name, value in xpmtype.arguments.items():

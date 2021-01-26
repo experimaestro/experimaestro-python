@@ -3,45 +3,43 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, pathoption, param, task, option
+from experimaestro import config, Param, param, task, option
+from experimaestro.core.arguments import Option, pathgenerator
+from typing_extensions import Annotated
 
 
-@param(name="a", type=int)
 @config()
 class A:
+    a: Param[int]
     pass
 
 
-@param(name="a", type=int)
 @config()
 class B:
+    a: Param[int]
     pass
 
 
-@param(name="a", type=int, default=1)
-@param(name="b", type=int)
 @config()
 class C:
-    pass
+    a: Param[int] = 1
+    b: Param[int]
 
 
-@param("a", type=A)
 @config()
 class D:
-    pass
+    a: Param[A]
 
 
-@param("value", type=float)
 @config()
 class Float:
-    pass
+    value: Param[float]
 
 
-@param("value1", type=float)
-@param("value2", type=float)
 @config()
 class Values:
-    pass
+    value1: Param[float]
+    value2: Param[float]
 
 
 def assert_equal(a, b):
@@ -84,22 +82,19 @@ def test_float2():
 
 
 def test_name():
-    """Path should be ignored"""
+    """The identifier fully determines the hash code"""
 
-    @param("a", int)
     @config("test.identifier.argumentname")
     class Config0:
-        pass
+        a: Param[int]
 
-    @param("b", int)
     @config("test.identifier.argumentname")
     class Config1:
-        pass
+        b: Param[int]
 
-    @param("a", int)
     @config("test.identifier.argumentname")
     class Config3:
-        pass
+        a: Param[int]
 
     assert_notequal(Config0(a=2), Config1(b=2))
     assert_equal(Config0(a=2), Config3(a=2))
@@ -109,11 +104,10 @@ def test_name():
 
 
 def test_option():
-    @param("a", int)
-    @option("b", type=int, default=1)
     @config("test.identifier.option")
     class OptionConfig:
-        pass
+        a: Param[int]
+        b: Option[int] = 1
 
     assert_notequal(OptionConfig(a=2), OptionConfig(a=1))
     assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1))
@@ -123,11 +117,10 @@ def test_option():
 # --- Ignore paths
 
 
-@param("a", int)
-@param("path", Path)
 @config()
 class TypeWithPath:
-    pass
+    a: Param[int]
+    path: Param[Path]
 
 
 def test_path():
@@ -142,16 +135,14 @@ def test_path():
 def test_pathoption():
     """Path arguments should be ignored"""
 
-    @pathoption("path", "path")
-    @param(name="a", type=int)
     @config("pathoption_test")
     class A_with_path:
-        pass
+        a: Param[int]
+        path: Annotated[Path, pathgenerator("path")]
 
-    @param(name="a", type=int)
     @config("pathoption_test")
     class A_without_path:
-        pass
+        a: Param[int]
 
     assert_equal(A_with_path(a=1), A_without_path(a=1))
 

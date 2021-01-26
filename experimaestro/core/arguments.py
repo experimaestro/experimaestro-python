@@ -43,7 +43,8 @@ class Argument:
 class ArgumentOptions:
     """Helper class when using type hints"""
 
-    kwargs = {}
+    def __init__(self):
+        self.kwargs = {}
 
     def create(self, name, originaltype, typehint):
         from experimaestro.core.types import Type
@@ -60,13 +61,13 @@ class ArgumentOptions:
 
 
 class TypeAnnotation:
-    def __call__(self, options: Optional[ArgumentOptions], defaultvalue: Any):
+    def __call__(self, options: Optional[ArgumentOptions]):
         if options is None:
             options = ArgumentOptions()
-        self.annotate(options, defaultvalue)
+        self.annotate(options)
         return options
 
-    def annotate(self, options: ArgumentOptions, defaultvalue: Any):
+    def annotate(self, options: ArgumentOptions):
         pass
 
 
@@ -76,13 +77,13 @@ class _Param(TypeAnnotation):
     def __init__(self, ignored=None):
         self.ignored = ignored
 
-    def annotate(self, options: ArgumentOptions, defaultvalue):
+    def annotate(self, options: ArgumentOptions):
         options.kwargs["ignored"] = self.ignored
         return options
 
 
 paramHint = _Param()
-optionHint = _Param()
+optionHint = _Param(True)
 
 T = TypeVar("T")
 Param = Annotated[T, paramHint]
@@ -93,13 +94,13 @@ class help(TypeAnnotation):
     def __init__(self, text: str):
         self.text = text
 
-    def annotate(self, options: ArgumentOptions, defaultvalue: Any):
+    def annotate(self, options: ArgumentOptions):
         options.kwargs["help"] = self.text
 
 
-class _PathOption(TypeAnnotation):
-    def annotate(self, options: ArgumentOptions, defaultvalue: Any):
-        options.kwargs["generator"] = PathGenerator(defaultvalue)
+class pathgenerator(TypeAnnotation):
+    def __init__(self, value):
+        self.value = value
 
-
-PathOption = Annotated[Path, _PathOption()]
+    def annotate(self, options: ArgumentOptions):
+        options.kwargs["generator"] = PathGenerator(self.value)

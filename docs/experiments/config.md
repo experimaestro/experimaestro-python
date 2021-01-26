@@ -56,7 +56,7 @@ A task is a special configuration that can be:
         class ModelLearn():
             epochs: Param[int] = 100
             model: Param[Model]
-            parameters: PathOption = Path("parameters.pth")
+            parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
             def config(self) -> Model:
                 return {
@@ -113,7 +113,7 @@ class MyConfig:
 ```py3
 
 class MyTask:
-    name: PathOption = Path("path")
+    name: Annotated[Path, pathgenerator("path")]
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)

@@ -7,10 +7,12 @@ Test all the annotations for configurations and tasks
 
 from pathlib import Path
 from typing import Optional, List
+from experimaestro.core.arguments import Option, pathgenerator
 import pytest
-from experimaestro import config as config, Param, task, PathOption
+from experimaestro import config as config, Param, task
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
+from typing_extensions import Annotated
 
 # --- Test manual name for configuration
 
@@ -62,7 +64,8 @@ def test_type_hinting():
         t: Param[List[float]]
         w: Param[int]
         opt: Param[Optional[int]]
-        path: PathOption = Path("world")
+        path: Annotated[Path, pathgenerator("world")]
+        option: Option[str]
 
     ot = MyConfig.xpmtype()
 
@@ -96,9 +99,13 @@ def test_type_hinting():
     assert not arg_opt.required
 
     arg_path = ot.getArgument("path")
-    assert not arg_path.required
-    assert arg_path.ignored
+    assert arg_path.generator is not None
     assert arg_path.generator(DirectoryContext(Path("hello"))) == Path("hello/world")
+
+    arg_option = ot.getArgument("option")
+    assert arg_option.name == "option"
+    assert isinstance(arg_option.type, types.StrType)
+    assert arg_option.ignored
 
 
 def test_redefined_param():
