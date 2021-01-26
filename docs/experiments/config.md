@@ -56,7 +56,7 @@ A task is a special configuration that can be:
         class ModelLearn():
             epochs: Param[int] = 100
             model: Param[Model]
-            parameters: PathOption = "parameters.pth"
+            parameters: PathOption = Path("parameters.pth")
 
             def config(self) -> Model:
                 return {

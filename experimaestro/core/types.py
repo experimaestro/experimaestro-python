@@ -249,10 +249,11 @@ class ObjectType(Type):
                 # Filter out hints from parent classes
                 if key in typekeys:
                     options = None
+                    _default = getattr(self.objecttype, key, None)
                     if isinstance(typehint, typing_extensions._AnnotatedAlias):
                         for value in typehint.__metadata__:
                             if isinstance(value, TypeAnnotation):
-                                options = value(options)
+                                options = value(options, _default)
                         if options is not None:
                             if options.kwargs.get("help", None) is None:
                                 options.kwargs["help"] = paramhelp.get(key, None)

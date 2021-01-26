@@ -9,7 +9,6 @@ from .annotations import (
     ConstantParam,
     option,
     pathoption,
-    configmethod,
     cache,
     Identifier,
     Array,
@@ -21,7 +20,7 @@ from .annotations import (
     # deprecated
     argument,
 )
-from .core.arguments import Param, Option, Annotated, help
+from .core.arguments import Param, Option, Annotated, help, PathOption
 from .core.objects import Config
 from .environment import Environment
 from .workspace import Workspace

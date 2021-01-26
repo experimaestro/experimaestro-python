@@ -1,6 +1,8 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
-from typing import Optional, TypeVar
+from pathlib import Path
+from typing import Any, Optional, TypeVar
+from experimaestro.generators import PathGenerator
 from experimaestro.typingutils import get_optional
 from typing_extensions import Annotated
 
@@ -58,13 +60,13 @@ class ArgumentOptions:
 
 
 class TypeAnnotation:
-    def __call__(self, options: Optional[ArgumentOptions]):
+    def __call__(self, options: Optional[ArgumentOptions], defaultvalue: Any):
         if options is None:
             options = ArgumentOptions()
-        self.annotate(options)
+        self.annotate(options, defaultvalue)
         return options
 
-    def annotate(self, options: ArgumentOptions):
+    def annotate(self, options: ArgumentOptions, defaultvalue: Any):
         pass
 
 
@@ -74,7 +76,7 @@ class _Param(TypeAnnotation):
     def __init__(self, ignored=None):
         self.ignored = ignored
 
-    def annotate(self, options: ArgumentOptions):
+    def annotate(self, options: ArgumentOptions, defaultvalue):
         options.kwargs["ignored"] = self.ignored
         return options
 
@@ -91,5 +93,13 @@ class help(TypeAnnotation):
     def __init__(self, text: str):
         self.text = text
 
-    def annotate(self, options: ArgumentOptions):
+    def annotate(self, options: ArgumentOptions, defaultvalue: Any):
         options.kwargs["help"] = self.text
+
+
+class _PathOption(TypeAnnotation):
+    def annotate(self, options: ArgumentOptions, defaultvalue: Any):
+        options.kwargs["generator"] = PathGenerator(defaultvalue)
+
+
+PathOption = Annotated[Path, _PathOption()]
