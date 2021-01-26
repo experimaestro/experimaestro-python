@@ -112,6 +112,10 @@ class ObjectType(Type):
 
     REGISTERED: Dict[str, TypingType["Config"]] = {}
 
+    @staticmethod
+    def removeConfig(t: Config):
+        return t.xpmtype().objecttype
+
     def __init__(
         self,
         tp: type,
@@ -146,14 +150,14 @@ class ObjectType(Type):
 
             objecttype = tp
 
-            self.configtype = type(tp.__name__, (basetype, tp), {})
+            self.configtype = type(tp.__name__, (tp, basetype), {})
 
             self.configtype.Object = tp
         else:
 
             # 1) Creates tp that gets rids of Config
             objectbases = tuple(
-                b.Object if issubclass(b, Config) else b
+                ObjectType.removeConfig(b) if issubclass(b, Config) else b
                 for b in tp.__bases__
                 if b not in [Config]
             )
@@ -161,16 +165,18 @@ class ObjectType(Type):
             objecttype.__module__ = tp.__module__
 
             # 2) Config type is based on objecttype and tp
-            self.configtype = type(tp.__name__, (objecttype,) + (tp.__bases__), {})
+            configbases = (objecttype,) + tp.__bases__
+            self.configtype = type(tp.__name__, tuple(configbases), {})
             self.configtype.Object = objecttype
 
-        objecttype.__name__ = "Object"
-        objecttype.__qualname__ = f"{tp.__qualname__}.Object"
-        objecttype.__xpmtype__ = self
         self.configtype.__module__ = tp.__module__
         self.configtype.__qualname__ = tp.__qualname__
         self.configtype.__xpmtype__ = self
         self.objecttype = objecttype
+
+        objecttype.__xpmtype__ = self
+        objecttype.__name__ = "Object"
+        objecttype.__qualname__ = f"{tp.__qualname__}.Object"
 
         self.originaltype = tp
 
