@@ -393,6 +393,9 @@ class Scheduler:
         # Listeners
         self.listeners: Set[Listener] = set()
 
+        # Number of failed jobs
+        self.failedjobs = 0
+
     def __enter__(self):
         global SIGNAL_HANDLER
         self.old_experiment = Scheduler.CURRENT
@@ -427,6 +430,8 @@ class Scheduler:
         with self.cv:
             logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
             self.cv.wait_for(lambda: not self.waitingjobs or self.exitmode)
+
+        assert self.failedjobs == 0, "Some jobs did not complete successfully"
 
     def submit(self, job: Job, *, runnow=False):
         """Submits a job to the scheduler"""
@@ -496,6 +501,9 @@ class Scheduler:
     def jobfinished(self, job: Job, state: JobState):
         """Called when the job is finished (state = error or done)"""
         with self.cv:
+            if job.state != JobState.DONE:
+                self.failedjobs += 1
+
             job.endtime = time.time()
             job.state = state
             if job in self.waitingjobs:
