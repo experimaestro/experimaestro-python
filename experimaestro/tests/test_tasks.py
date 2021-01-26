@@ -5,7 +5,7 @@ import pytest
 import signal
 
 from experimaestro import *
-from experimaestro.scheduler import JobState
+from experimaestro.scheduler import FailedExperiment, JobState
 
 from .utils import TemporaryDirectory, TemporaryExperiment, get_times
 
@@ -38,11 +38,10 @@ def test_not_submitted():
 
 def test_fail():
     """Failing task... should fail"""
-    with TemporaryExperiment("failing", maxwait=2):
-        fail = Fail().submit()
-        fail.touch()
-
-    assert fail.__xpm__.job.wait() == JobState.ERROR
+    with pytest.raises(FailedExperiment):
+        with TemporaryExperiment("failing", maxwait=2):
+            fail = Fail().submit()
+            fail.touch()
 
 
 def test_foreign_type():
@@ -60,10 +59,11 @@ def test_foreign_type():
 
 def test_fail_dep():
     """Failing task... should cancel dependent"""
-    with TemporaryExperiment("failingdep"):
-        fail = Fail().submit()
-        dep = FailConsumer(fail=fail).submit()
-        fail.touch()
+    with pytest.raises(FailedExperiment):
+        with TemporaryExperiment("failingdep"):
+            fail = Fail().submit()
+            dep = FailConsumer(fail=fail).submit()
+            fail.touch()
 
     assert fail.__xpm__.job.wait() == JobState.ERROR
     assert dep.__xpm__.job.wait() == JobState.ERROR

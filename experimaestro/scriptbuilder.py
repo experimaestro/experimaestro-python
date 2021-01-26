@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Optional, Dict, List
 
 from experimaestro.utils import logger
-from .constants import CACHEPATH_VARNAME
 from .scheduler import Workspace, NOTIFICATIONURL_VARNAME
 from .connectors import Connector, RedirectType, Redirect
 from .commandline import CommandLineJob, AbstractCommand, CommandContext, CommandPart
@@ -89,7 +88,6 @@ class ShScriptBuilder:
         donepath = relpath(job.donepath)
         lockpath = relpath(job.lockpath)
         pidpath = relpath(job.pidpath)
-        cachepath = relpath(ws.configcachepath)
 
         logger.info("Writing script %s", scriptpath)
         with scriptpath.open("wt") as out:
@@ -129,8 +127,6 @@ class ShScriptBuilder:
                         job.identifier,
                     )
                 )
-
-            out.write("export {}={}\n".format(CACHEPATH_VARNAME, shquote(cachepath)))
 
             # Write some command
             if self.preprocessCommands:

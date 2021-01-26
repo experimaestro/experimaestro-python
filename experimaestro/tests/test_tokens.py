@@ -79,7 +79,8 @@ def test_token_ok():
 @param("x", type=int)
 @task()
 class dummy_task:
-    pass
+    def execute(self):
+        pass
 
 
 def test_token_cleanup():

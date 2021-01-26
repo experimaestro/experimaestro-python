@@ -9,6 +9,7 @@ import json
 
 from experimaestro.core.objects import Config, ConfigInformation
 import experimaestro
+import experimaestro.taskglobals as taskglobals
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +59,8 @@ def run(parameters):
 
     with open(parameters, "r") as fp:
         params = json.load(fp)
+        taskglobals.wspath = Path(params["workspace"])
+
         task = ConfigInformation.fromParameters(params["objects"])
         task.__taskdir__ = Path.cwd()
 

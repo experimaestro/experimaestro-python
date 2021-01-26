@@ -21,6 +21,12 @@ from .connectors import ProcessThreadError
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
 
 
+class FailedExperiment(RuntimeError):
+    """Raised when an experiment failed"""
+
+    pass
+
+
 class JobState(enum.Enum):
     UNSCHEDULED = 0
     WAITING = 1
@@ -75,7 +81,7 @@ class Job(Resource, GenerationContext):
         *,
         workspace: Workspace = None,
         launcher: "experimaestro.launchers" = None,
-        dryrun: bool = False
+        dryrun: bool = False,
     ):
         super().__init__()
 
@@ -431,7 +437,10 @@ class Scheduler:
             logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
             self.cv.wait_for(lambda: not self.waitingjobs or self.exitmode)
 
-        assert self.failedjobs == 0, "Some jobs did not complete successfully"
+        if self.failedjobs > 0:
+            raise FailedExperiment(
+                f"{self.failedjobs} jobs did not complete successfully"
+            )
 
     def submit(self, job: Job, *, runnow=False):
         """Submits a job to the scheduler"""
@@ -501,7 +510,7 @@ class Scheduler:
     def jobfinished(self, job: Job, state: JobState):
         """Called when the job is finished (state = error or done)"""
         with self.cv:
-            if job.state != JobState.DONE:
+            if state != JobState.DONE:
                 self.failedjobs += 1
 
             job.endtime = time.time()

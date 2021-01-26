@@ -33,12 +33,13 @@ Under the curtain,
 - Two processes for `Say` are launched (there are no dependencies, so they will be run in parallel)
 - A tag `y` is created for the main task
 
-<!-- SNIPPET: MAIN ARGS[%WORKDIR%] ENV[XPM_EXAMPLE_WAIT=0.001] -->
+<!-- SNIPPET: MAIN ARGS[%WORKDIR% --port 0] ENV[XPM_EXAMPLE_WAIT=0.001] -->
 
 ```python
 # --- Task and types definitions
 
 import logging
+logging.basicConfig(level=logging.DEBUG)
 from pathlib import Path
 from experimaestro import *
 import click
@@ -62,7 +63,7 @@ hw = Identifier("helloworld")
 class Say:
     word: Param[str]
 
-    def __execute__(self):
+    def execute(self):
         slowdown(len(self.word))
         print(self.word.upper(),)
 
@@ -70,27 +71,24 @@ class Say:
 class Concat:
     strings: Param[List[Say]]
 
-    def __execute__(self):
+    def execute(self):
         says = []
         slowdown(len(self.strings))
         for string in self.strings:
-            with open(string.stdout()) as fp:
+            with open(string.__xpm_stdout__) as fp:
                 says.append(fp.read().strip())
         print(" ".join(says))
 
 
 # --- Defines the experiment
 
-@click.option("--debug", is_flag=True, help="Print debug information")
 @click.option("--port", type=int, default=12345, help="Port for monitoring")
 @click.argument("workdir", type=Path)
 @click.command()
-def cli(port, workdir, debug):
+def cli(port, workdir):
     """Runs an experiment"""
-    logging.getLogger().setLevel(logging.DEBUG if debug else logging.INFO)
-
     # Sets the working directory and the name of the xp
-    with experiment(workdir, "helloworld", port=12345) as xp:
+    with experiment(workdir, "helloworld", port=port) as xp:
         # Submit the tasks
         hello = Say(word="hello").submit()
         world = Say(word="world").submit()

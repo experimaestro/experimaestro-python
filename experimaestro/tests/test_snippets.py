@@ -91,16 +91,16 @@ def test_snippet(snippetpath, path, id):
 
     fullenv = {name: value for name, value in os.environ.items()}
     fullenv.update(env)
-
-    with tempfile.NamedTemporaryFile("wt", dir=snippetpath, delete=False) as fp:
+    with tempfile.NamedTemporaryFile(
+        "wt", suffix=".py", dir=snippetpath, delete=False
+    ) as fp:
         fp.write(snippet)
 
     cmd = [sys.executable, fp.name] + args
-    logging.info("Running %s", cmd)
+    logging.info("Running %s with env=%s", cmd, env)
     p = subprocess.Popen(cmd, env=fullenv)
     p.wait(5)
     if p.poll() is None:
         p.kill()
-        pytest.fail("Process still runnning")
     else:
         assert p.returncode == 0

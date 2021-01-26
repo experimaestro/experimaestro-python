@@ -5,13 +5,10 @@ import hashlib
 import struct
 import io
 import fasteners
-import os
-import shutil
 import inspect
 import importlib
 from typing import Dict, Generic, Optional, Set, TypeVar
 from experimaestro.utils import logger
-from experimaestro.constants import CACHEPATH_VARNAME
 import sys
 from contextlib import contextmanager
 
@@ -442,11 +439,13 @@ class ConfigInformation:
                         [argument.name], value, jsonfields, value
                     )
 
-    def outputjson(self, out: io.TextIOBase, context):
+    def outputjson(self, out: io.TextIOBase, context: "CommandContext"):
         """Outputs the json of this object
 
         The format is an array of objects
         {
+            "tags: [ LIST_OF_TAGS ],
+            "workspace": FOLDERPATH,
             "objects": [
                 {
                     "id": <ID of the object>,
@@ -474,6 +473,8 @@ class ConfigInformation:
         with jsonstreams.Stream(jsonstreams.Type.object, fd=out, close_fd=True) as out:
             # Write information
             out.write("has_subparam", self.identifier.sub is not None)
+
+            out.write("workspace", str(context.workspace.path.absolute()))
 
             with out.subobject("tags") as objectout:
                 for key, value in self.tags().items():
@@ -505,6 +506,7 @@ class ConfigInformation:
     def fromParameters(definitions):
         o = None
         objects = {}
+        import experimaestro.taskglobals as taskglobals
 
         for definition in definitions:
             module_name = definition["module"]
@@ -517,6 +519,7 @@ class ConfigInformation:
                 path = definition["file"]
                 with add_to_path(str(Path(path).parent)):
                     spec = importlib.util.spec_from_file_location(module_name, path)
+                    print(spec, module_name, path)
                     mod = importlib.util.module_from_spec(spec)
                     sys.modules[module_name] = mod
                     spec.loader.exec_module(mod)
@@ -524,13 +527,25 @@ class ConfigInformation:
                 logger.debug("Importing module %s", definition["module"])
                 mod = importlib.import_module(module_name)
 
-            cls = getattr(mod, definition["type"])
-            cls = cls.xpmtype().objecttype
+            cls = getattr(mod, definition["type"]).xpmtype().objecttype
             o = cls()
 
             if "typename" in definition:
                 o.__xpmtypename__ = definition["typename"]
                 o.__xpmidentifier__ = definition["identifier"]
+
+                if "." in o.__xpmtypename__:
+                    _, name = o.__xpmtypename__.rsplit(".", 1)
+                else:
+                    name = o.__xpmtypename__
+                basepath = (
+                    taskglobals.wspath
+                    / "jobs"
+                    / o.__xpmtypename__
+                    / o.__xpmidentifier__
+                )
+                o.__xpm_stdout__ = basepath / f"{name}.out"
+                o.__xpm_stderr__ = basepath / f"{name}.err"
 
             for name, value in definition["fields"].items():
                 v = ConfigInformation._objectFromParameters(value, objects)
@@ -612,10 +627,12 @@ def clone(v):
 
 def cache(fn, name: str):
     def __call__(config, *args, **kwargs):
+        import experimaestro.taskglobals as taskglobals
+
         # Get path and create directory if needed
         hexid = config.__xpmidentifier__  # type: str
         typename = config.__xpmtypename__  # type: str
-        dir = Path(os.environ[CACHEPATH_VARNAME]) / typename / hexid
+        dir = taskglobals.wspath / "config" / typename / hexid
 
         if not dir.exists():
             dir.mkdir(parents=True, exist_ok=True)
