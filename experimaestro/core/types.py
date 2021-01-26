@@ -1,4 +1,5 @@
 import inspect
+import logging
 import sys
 from typing import Union, Dict, Iterator, List, Type as TypingType
 from collections import ChainMap
@@ -150,7 +151,7 @@ class ObjectType(Type):
 
             objecttype = tp
 
-            self.configtype = type(tp.__name__, (tp, basetype), {})
+            self.configtype = type(tp.__name__, (basetype, tp), {})
 
             self.configtype.Object = tp
         else:
@@ -165,8 +166,25 @@ class ObjectType(Type):
             objecttype.__module__ = tp.__module__
 
             # 2) Config type is based on objecttype and tp
-            configbases = (objecttype,) + tp.__bases__
-            self.configtype = type(tp.__name__, tuple(configbases), {})
+            # Removes non config classes in the bases
+            configbases = tuple(b for b in tp.__bases__ if issubclass(b, Config)) + (
+                objecttype,
+            )
+            try:
+                self.configtype = type(tp.__name__, tuple(configbases), {})
+            except TypeError:
+
+                def print_r(bases, sep=""):
+                    for basis in bases:
+                        if basis != object:
+                            logging.error(f"{sep}{basis}")
+                            logging.error(basis.__bases__, sep + "  ")
+
+                objecttype.__name__ = "Object"
+                objecttype.__qualname__ = f"{tp.__qualname__}.Object"
+                logging.error(f" //// {tp}")
+                print_r(configbases)
+                raise
             self.configtype.Object = objecttype
 
         self.configtype.__module__ = tp.__module__
