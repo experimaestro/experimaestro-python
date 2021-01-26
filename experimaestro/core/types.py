@@ -1,4 +1,5 @@
 import inspect
+import sys
 from typing import Union, Dict, Iterator, List, Type as TypingType
 from collections import ChainMap
 from pathlib import Path
@@ -7,7 +8,7 @@ import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
 import typing_extensions
-from .objects import Config, Task
+from .objects import Config
 from .arguments import Argument
 
 
@@ -95,7 +96,7 @@ class Type:
             return key.__xpmtype__
 
         if inspect.isclass(key) and issubclass(key, Config):
-            return key.__xpm__
+            return key.xpmtype()
 
         t = typingutils.get_list(key)
         if t:
@@ -113,23 +114,67 @@ class ObjectType(Type):
 
     def __init__(
         self,
-        configtype: TypingType["Config"],
+        tp: type,
         identifier: str = None,
     ):
         """Creates a type"""
+        from .objects import Config
+
+        basetype = Config
 
         # Get the identifier
-        if identifier is None and "__xpmid__" in configtype.__dict__:
-            identifier = Identifier(getattr(configtype, "__xpmid__", None))
+        if identifier is None and "__xpmid__" in tp.__dict__:
+            identifier = Identifier(getattr(tp, "__xpmid__", None))
+
+        package = tp.__module__.lower()
+        name = tp.__qualname__.lower()
 
         if identifier is None:
-            package = configtype.__module__.lower()
-            name = configtype.__name__.lower()
-
-            identifier = Identifier("%s.%s" % (package, name))
+            qname = f"{package}.{name}"
+            assert (
+                getattr(sys, "_called_from_test", False) or "<locals>" not in qname
+            ), "Configurations should not be within functions"
+            identifier = Identifier(qname)
 
         super().__init__(identifier, None)
-        self.configtype = configtype
+
+        # --- Creates the config type and not config type
+
+        if not issubclass(tp, Config):
+            # Makes configtype a subclass of tp and basetype
+            # and makes tp an inner class of configtype (configtype.Object)
+
+            objecttype = tp
+
+            self.configtype = type(tp.__name__, (basetype, tp), {})
+
+            self.configtype.Object = tp
+        else:
+
+            # 1) Creates tp that gets rids of Config
+            objectbases = tuple(
+                b.Object if issubclass(b, Config) else b
+                for b in tp.__bases__
+                if b not in [Config]
+            )
+            objecttype = type("Object", objectbases, tp.__dict__.copy())
+            objecttype.__module__ = tp.__module__
+
+            # 2) Config type is based on objecttype and tp
+            self.configtype = type(tp.__name__, (objecttype,) + (tp.__bases__), {})
+            self.configtype.Object = objecttype
+
+        objecttype.__name__ = "Object"
+        objecttype.__qualname__ = f"{tp.__qualname__}.Object"
+        objecttype.__xpmtype__ = self
+        self.configtype.__module__ = tp.__module__
+        self.configtype.__qualname__ = tp.__qualname__
+        self.configtype.__xpmtype__ = self
+        self.objecttype = objecttype
+
+        self.originaltype = tp
+
+        # Other initializations
         self.__initialized__ = False
         self._runtype = None
         self.annotations = []
@@ -144,11 +189,12 @@ class ObjectType(Type):
         # Check if not initialized
         if self.__initialized__:
             return
+
         self.__initialized__ = True
 
         # Get the module
-        module = inspect.getmodule(self.configtype)
-        self._file = Path(inspect.getfile(self.configtype)).absolute()
+        module = inspect.getmodule(self.originaltype)
+        self._file = Path(inspect.getfile(self.originaltype)).absolute()
         self._module = module.__name__
         self._package = module.__package__
 
@@ -163,8 +209,8 @@ class ObjectType(Type):
 
         # Get description from documentation
         paramhelp = {}
-        if "__doc__" in self.configtype.__dict__:
-            parseddoc = parse(self.configtype.__doc__)
+        if "__doc__" in self.objecttype.__dict__:
+            parseddoc = parse(self.objecttype.__doc__)
             self.description = parseddoc.short_description
             for param in parseddoc.params:
                 paramhelp[param.arg_name] = param.description
@@ -172,9 +218,9 @@ class ObjectType(Type):
         # Add arguments from type hints
         from .arguments import TypeAnnotation
 
-        if hasattr(self.configtype, "__annotations__"):
-            typekeys = set(self.configtype.__dict__.get("__annotations__", {}).keys())
-            hints = get_type_hints(self.configtype, include_extras=True)
+        if hasattr(self.objecttype, "__annotations__"):
+            typekeys = set(self.objecttype.__dict__.get("__annotations__", {}).keys())
+            hints = get_type_hints(self.objecttype, include_extras=True)
             for key, typehint in hints.items():
                 # Filter out hints from parent classes
                 if key in typekeys:
@@ -200,13 +246,13 @@ class ObjectType(Type):
     def addArgument(self, argument: Argument):
         self._arguments[argument.name] = argument
 
-        name = argument.name
+        # The the attribute for the config type
         setattr(
             self.configtype,
             argument.name,
             property(
-                lambda _self: _self.__xpm__.get(name),
-                lambda _self, value: _self.__xpm__.set(name, value),
+                lambda _self: _self.__xpm__.get(argument.name),
+                lambda _self, value: _self.__xpm__.set(argument.name, value),
             ),
         )
 
@@ -214,58 +260,14 @@ class ObjectType(Type):
         if argument.default is not None:
             argument.type.validate(argument.default)
 
-    @property
-    def runtype(self):
-        if self._runtype is None:
-            __bases__ = tuple(
-                b.__xpm__.runtype if issubclass(b, Config) else b
-                for b in self.configtype.__bases__
-            )
-
-            # Remove all methods but those marked by @configmethod
-            __dict__ = {
-                key: value
-                for key, value in self.configtype.__dict__.items()
-                if key not in self.arguments
-            }
-
-            self._runtype = type(self.configtype.__name__, __bases__, __dict__)
-            self._runtype.__module__ = self.configtype.__module__
-
-        return self._runtype
-
     def getArgument(self, key: str) -> Argument:
         self.__initialize__()
         return self._arguments[key]
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.configtype.__bases__:
-            if issubclass(tp, Config) and tp not in [Config, Task]:
-                yield tp.__xpm__
-
-    @staticmethod
-    def create(
-        configtype: TypingType["Config"],
-        identifier=None,
-        register=True,
-    ):
-        objecttype = ObjectType(configtype, identifier)
-        identifier = objecttype.identifier
-
-        if register and str(identifier) in ObjectType.REGISTERED:
-            _objecttype = ObjectType.REGISTERED[str(identifier)]
-            if _objecttype.__xpm__.configtype != configtype:
-                raise Exception(
-                    "Experimaestro type %s is already declared" % identifier
-                )
-
-            logger.error("Experimaestro type %s is already declared" % identifier)
-            return _objecttype
-
-        if register:
-            ObjectType.REGISTERED[str(identifier)] = configtype
-
-        return objecttype
+            if issubclass(tp, Config) and tp not in [Config]:
+                yield tp.xpmtype()
 
     def validate(self, value):
         """Ensures that the value is compatible with this type"""
@@ -284,8 +286,6 @@ class ObjectType(Type):
                 except:
                     logger.exception("Could not build object of class %s" % (classtype))
                     raise
-            if not Config.TASKMODE:
-                raise ValueError("Could not find type %s", valuetype)
 
             logger.debug("Using argument type (not real type)")
             return self.configtype(**value)

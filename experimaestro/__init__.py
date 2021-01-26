@@ -22,7 +22,7 @@ from .annotations import (
     argument,
 )
 from .core.arguments import Param, Option, Annotated, help
-from .core.objects import Config, Task
+from .core.objects import Config
 from .environment import Environment
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment

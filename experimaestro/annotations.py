@@ -4,13 +4,11 @@ import sys
 import inspect
 import logging
 from pathlib import Path
-from typing import Callable, Optional, TypeVar
+from typing import Type as TypingType, Optional, TypeVar
 
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
 from experimaestro.generators import PathGenerator
-from typing_extensions import Annotated, get_type_hints
-import typing_extensions
 
 from .core.arguments import Argument as CoreArgument, TypeAnnotation
 from .core.objects import Config
@@ -20,6 +18,8 @@ from .checkers import Checker
 
 # --- Annotations to define tasks and types
 
+T = TypeVar("T")
+
 
 def configmethod(method):
     """(deprecated) Annotate a method that should be kept in the configuration object"""
@@ -27,19 +27,15 @@ def configmethod(method):
 
 
 class config:
-    KEPT_METHODS = set(["config", "__validate__"])
-    FORBIDDEN_ATTRIBUTES = set(["__module__", "__slots__", "__dict__"])
-
     """Annotations for experimaestro types"""
 
-    def __init__(self, identifier=None, description=None, register=True):
+    def __init__(self, identifier=None, description=None):
         """[summary]
 
         Keyword Arguments:
-            identifier {Identifier, str} -- Unique identifier of the type (default: {None})
-            description {str} -- Description of the config/task (default: {None})
+            identifier {Identifier, str} -- Unique identifier of the type, generate by default (None)
+            description {str} -- (deprecated, use comments) Description of the config/task, and use comments with (default) None
             register {bool} -- False if the type should not be registered (debug only)
-
 
         The identifier, if not specified, will be set to `X.CLASSNAME`(by order of priority),
         where X is:
@@ -52,9 +48,8 @@ class config:
             self.identifier = Identifier(self.identifier)
 
         self.description = description
-        self.register = register
 
-    def __call__(self, tp, basetype=Config):
+    def __call__(self, tp: T) -> TypingType[Config[T]]:
         """Annotate the class
 
         Depending on whether we are running or configuring,
@@ -67,51 +62,19 @@ class config:
             tp {type} -- The type
 
         Keyword Arguments:
-            basetype {type} -- The base type of the class
-
-        Raises:
-            ValueError: [description]
-
-        Returns:
-            [type] -- [description]
+            basetype {type} -- The base type of the class (Task or Config)
         """
         assert inspect.isclass(tp), f"{tp} is not a class"
 
-        # --- If in task mode, returns now
-        if Config.TASKMODE:
-            return tp
-
-        # --- Add Config as an ancestor of t if needed
-
-        # if not in task mode,
-        # manipulate the class path so that basetype is a parent
-        __bases__ = tp.__bases__
-        if not issubclass(tp, basetype):
-            __bases__ = (basetype,)
-            if tp.__bases__ != (object,):
-                __bases__ += tp.__bases__
-
-        # Remove all methods but those marked by @configmethod
-        __dict__ = {key: value for key, value in tp.__dict__.items()}
-
-        configtype = type(tp.__name__, __bases__, __dict__)
-        configtype.__module__ = tp.__module__
-
         # Adds to xpminfo for on demand creation of information
-        configtype.__xpm__ = ObjectType.create(
-            configtype,
-            identifier=self.identifier,
-            register=self.register,
-        )
-
-        return configtype
+        return ObjectType(tp, identifier=self.identifier).configtype
 
 
 class Array(TypeProxy):
     """Array of object"""
 
     def __init__(self, type):
-        self.type = Type.fromType(type) if not Config.TASKMODE else None
+        self.type = Type.fromType(type)
 
     def __call__(self):
         return types.ArrayType(self.type)
@@ -134,13 +97,11 @@ class task(config):
         super().__init__(identifier, description)
         self.pythonpath = sys.executable if pythonpath is None else pythonpath
 
-    def __call__(self, tp):
+    def __call__(self, tp) -> type:
         # Register the type
-        tp = super().__call__(tp, basetype=objects.Task)
-        if Config.TASKMODE:
-            return tp
+        tp = super().__call__(tp)
 
-        tp.__xpm__.addAnnotation(self)
+        tp.xpmtype().addAnnotation(self)
         return tp
 
     def process(self, xpmtype):
@@ -178,7 +139,7 @@ class param:
     ):
         # Determine if required
         self.name = name
-        self.type = Type.fromType(type) if type and not Config.TASKMODE else None
+        self.type = Type.fromType(type) if type else None
         self.help = help
         self.ignored = ignored
         self.default = default
@@ -189,10 +150,7 @@ class param:
 
     def __call__(self, tp):
         # Don't annotate in task mode
-        if Config.TASKMODE:
-            return tp
-
-        tp.__xpm__.addAnnotation(self)
+        tp.xpmtype().addAnnotation(self)
         return tp
 
     def process(self, xpmtype):

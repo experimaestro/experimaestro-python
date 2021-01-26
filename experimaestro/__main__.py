@@ -56,8 +56,6 @@ def version():
 def run(parameters):
     """Run a task"""
 
-    Config.TASKMODE = True
-
     with open(parameters, "r") as fp:
         params = json.load(fp)
         task = ConfigInformation.fromParameters(params["objects"])

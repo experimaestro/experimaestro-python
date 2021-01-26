@@ -6,14 +6,9 @@ Test all the annotations for configurations and tasks
 # Annotation specific tests
 
 from typing import Optional, List
-from experimaestro import config as _config, Param, task
+from experimaestro import config as config, Param, task
 import experimaestro.core.types as types
 import pytest
-
-
-def config(*args, **kwargs):
-    kwargs["register"] = False
-    return _config(*args, **kwargs)
 
 
 # --- Test manual name for configuration
@@ -25,7 +20,7 @@ class B:
 
 
 def test_fullname():
-    assert str(B.__xpm__.identifier) == "annotations.b"
+    assert str(B.xpmtype().identifier) == "annotations.b"
 
 
 # --- Automatic name for configuration
@@ -37,14 +32,10 @@ class A:
 
 
 def test_noname():
-    assert str(A.__xpm__.identifier) == "experimaestro.tests.test_annotations.a"
+    assert str(A.xpmtype().identifier) == "experimaestro.tests.test_annotations.a"
 
 
 # --- Use type annotations
-
-
-def gettype(t: type):
-    return t.__xpm__
 
 
 def ArgumentValue(default=None, *, help=""):
@@ -71,7 +62,7 @@ def test_type_hinting():
         w: Param[int]
         opt: Param[Optional[int]]
 
-    ot = gettype(MyConfig)
+    ot = MyConfig.xpmtype()
 
     # Check required parameter
     arg_x = ot.getArgument("x")
@@ -112,8 +103,8 @@ def test_redefined_param():
     class B:
         x: Param[int] = 3
 
-    atx = gettype(A).getArgument("x")
-    btx = gettype(B).getArgument("x")
+    atx = A.xpmtype().getArgument("x")
+    btx = B.xpmtype().getArgument("x")
 
     assert atx.required
 
@@ -145,4 +136,4 @@ def test_default_mismatch():
         x: Param[int] = 0.2
 
     with pytest.raises(TypeError):
-        gettype(A).getArgument("x")
+        A.xpmtype().getArgument("x")

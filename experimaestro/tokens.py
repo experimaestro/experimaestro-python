@@ -5,7 +5,7 @@ a computational resource (e.g. number of launched jobs, etc.)
 import sys
 import psutil
 from pathlib import Path
-from experimaestro.core.objects import Task
+from experimaestro.core.objects import Config
 import fasteners
 import threading
 import os.path
@@ -312,7 +312,7 @@ class CounterToken(Token, FileSystemEventHandler):
         """Create a token dependency"""
         return CounterTokenDependency(self, count)
 
-    def __call__(self, count, task: Task):
+    def __call__(self, count, task: Config):
         """Create a token dependency and add it to the task"""
         return task.add_dependencies(self.dependency(count))
 
@@ -385,7 +385,7 @@ class ProcessCounterToken(Token):
         """Create a token dependency"""
         return CounterTokenDependency(self, count)
 
-    def __call__(self, count, task: Task):
+    def __call__(self, count, task: Config):
         """Create a token dependency and add it to the task"""
         return task.add_dependencies(self.dependency(count))
 

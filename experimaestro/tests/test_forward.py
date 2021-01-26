@@ -6,7 +6,7 @@ import click
 
 @argument("epochs", type=int, default=100, help="Number of learning epochs")
 @config("mymodel")
-class MyModel(Config):
+class MyModel:
     pass
 
 

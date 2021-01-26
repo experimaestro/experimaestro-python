@@ -87,17 +87,17 @@ def test_name():
     """Path should be ignored"""
 
     @param("a", int)
-    @config("test.identifier.argumentname", register=False)
+    @config("test.identifier.argumentname")
     class Config0:
         pass
 
     @param("b", int)
-    @config("test.identifier.argumentname", register=False)
+    @config("test.identifier.argumentname")
     class Config1:
         pass
 
     @param("a", int)
-    @config("test.identifier.argumentname", register=False)
+    @config("test.identifier.argumentname")
     class Config3:
         pass
 
@@ -111,7 +111,7 @@ def test_name():
 def test_option():
     @param("a", int)
     @option("b", type=int, default=1)
-    @config("test.identifier.option", register=False)
+    @config("test.identifier.option")
     class OptionConfig:
         pass
 
@@ -144,12 +144,12 @@ def test_pathoption():
 
     @pathoption("path", "path")
     @param(name="a", type=int)
-    @config("pathoption_test", register=False)
+    @config("pathoption_test")
     class A_with_path:
         pass
 
     @param(name="a", type=int)
-    @config("pathoption_test", register=False)
+    @config("pathoption_test")
     class A_without_path:
         pass
 
@@ -161,12 +161,12 @@ def test_defaultnew():
 
     @param("b", type=int, default=1)
     @param(name="a", type=int)
-    @config("defaultnew", register=False)
+    @config("defaultnew")
     class A_with_b:
         pass
 
     @param(name="a", type=int)
-    @config("defaultnew", register=False)
+    @config("defaultnew")
     class A:
         pass
 

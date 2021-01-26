@@ -9,7 +9,7 @@ import os
 import shutil
 import inspect
 import importlib
-from typing import Dict, Set
+from typing import Dict, Generic, Optional, Set, TypeVar
 from experimaestro.utils import logger
 from experimaestro.constants import CACHEPATH_VARNAME
 import sys
@@ -189,9 +189,17 @@ class ConfigInformation:
 
     def get(self, name):
         """Get an XPM managed value"""
-        return self.values[name]
+        if name in self.xpmtype.arguments:
+            return self.values[name]
+
+        # Not an argument, bypass
+        return object.__getattribute__(self, self.pyobject, name)
 
     def set(self, k, v, bypass=False):
+        # Not an argument, bypass
+        if k not in self.xpmtype.arguments:
+            return object.__getattribute__(self, self.pyobject, k)
+
         if self._sealed:
             raise AttributeError("Object is read-only")
 
@@ -517,6 +525,7 @@ class ConfigInformation:
                 mod = importlib.import_module(module_name)
 
             cls = getattr(mod, definition["type"])
+            cls = cls.xpmtype().objecttype
             o = cls()
 
             if "typename" in definition:
@@ -537,7 +546,7 @@ class ConfigInformation:
         return o
 
     @staticmethod
-    def _fromPython(context: GenerationContext, param, value, objects):
+    def _fromPython(context: Optional[GenerationContext], param, value, objects):
         if hasattr(param, "generator") and param.generator:
             return param.generator(context)
 
@@ -552,24 +561,26 @@ class ConfigInformation:
 
         return value
 
-    def _fromConfig(self, context: GenerationContext, objects: Dict[int, object]):
+    def _fromConfig(
+        self, context: Optional[GenerationContext], objects: Dict[int, object]
+    ):
         o = objects.get(id(self), None)
         if o is not None:
             return o
 
-        o = object.__new__(self.xpmtype.runtype)
+        o = self.xpmtype.objecttype()
         objects[id(self)] = o
 
         for key, param in self.xpmtype.arguments.items():
             value = self._fromPython(context, param, self.values.get(key), objects)
-            # setattr(o, key, value)
+            setattr(o, key, value)
             postinit = getattr(o, "__postinit__", None)
             if postinit is not None:
                 postinit()
 
         return o
 
-    def fromConfig(self, context: GenerationContext):
+    def fromConfig(self, context: Optional[GenerationContext]):
         """Generate an instance given the current configuration"""
         self.validate()
 
@@ -618,56 +629,34 @@ def cache(fn, name: str):
     return __call__
 
 
-class ClassPropertyDescriptor(object):
-    def __init__(self, fget, fset=None):
-        self.fget = fget
-        self.fset = fset
-
-    def __get__(self, obj, klass=None):
-        if klass is None:
-            klass = type(obj)
-        return self.fget.__get__(obj, klass)()
-
-    def __set__(self, obj, value):
-        if not self.fset:
-            raise AttributeError("can't set attribute")
-        type_ = type(obj)
-        return self.fset.__get__(obj, type_)(value)
-
-    def setter(self, func):
-        if not isinstance(func, (classmethod, staticmethod)):
-            func = classmethod(func)
-        self.fset = func
-        return self
+T = TypeVar("T")
 
 
-def classproperty(func):
-    if not isinstance(func, (classmethod, staticmethod)):
-        func = classmethod(func)
-
-    return ClassPropertyDescriptor(func)
-
-
-class Config:
+class Config(Generic[T]):
     """Base type for all objects in python interface"""
 
-    # Set to true when executing a task to remove all checks
-    TASKMODE = False
+    @classmethod
+    def xpmtype(cls):
+        """Returns the experimaestro Type object associated with this class"""
+        from .types import ObjectType
+
+        if "__xpmtype__" not in cls.__dict__:
+            cls.__xpmtype__ = ObjectType(cls)
+
+        if not isinstance(cls.__xpmtype__, ObjectType):
+            assert isinstance(
+                cls, ObjectType
+            ), f"{cls.__xpmtype__} is not an object type"
+
+        return cls.__xpmtype__
 
     def __init__(self, **kwargs):
         """Initialize the configuration with the given parameters"""
 
         # Add configuration
-        from .types import ObjectType
+        xpmtype = self.xpmtype()
 
-        if "__xpm__" not in self.__class__.__dict__:
-            self.__class__.__xpm__ = ObjectType.create(self.__class__)
-
-        self.__xpmtype__ = self.__class__.__xpm__
-        if not isinstance(self.__xpmtype__, ObjectType):
-            logger.error("%s is not an object type", self.__xpmtype__)
-            assert isinstance(self.__xpmtype__, ObjectType)
-
+        # Create the config information object
         xpm = ConfigInformation(self)
 
         caller = inspect.getframeinfo(inspect.stack()[1][0])
@@ -678,10 +667,8 @@ class Config:
         # Initialize with arguments
         for name, value in kwargs.items():
             # Check if argument is OK
-            if name not in self.__xpmtype__.arguments:
-                raise ValueError(
-                    "%s is not an argument for %s" % (name, self.__xpmtype__)
-                )
+            if name not in xpmtype.arguments:
+                raise ValueError("%s is not an argument for %s" % (name, xpmtype))
 
             # Special case of a tagged value
             if isinstance(value, TaggedValue):
@@ -692,7 +679,7 @@ class Config:
             xpm.set(name, value, bypass=ConfigInformation.LOADING)
 
         # Initialize with default arguments (or None)
-        for name, value in self.__xpmtype__.arguments.items():
+        for name, value in xpmtype.arguments.items():
             if name not in kwargs:
                 if value.default is not None:
                     self.__xpm__.set(name, clone(value.default))
@@ -724,13 +711,9 @@ class Config:
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-    def instance(self, context: GenerationContext = None):
+    def instance(self, context: GenerationContext = None) -> T:
         """Return an instance with the current values"""
         return self.__xpm__.fromConfig(context)
-
-
-class Task(Config):
-    """Base type for all tasks"""
 
     def submit(self, *, workspace=None, launcher=None, dryrun=False):
         """Submit this task"""
