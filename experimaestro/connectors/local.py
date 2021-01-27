@@ -7,6 +7,7 @@ import os
 import subprocess
 import threading
 import sys
+from time import sleep, time
 import fasteners
 import psutil
 from experimaestro.locking import Lock
@@ -46,49 +47,26 @@ def getstream(redirect: Redirect, write: bool):
 
 class LocalProcessBuilder(ProcessBuilder):
     def start(self):
-        if self.detach:
-            return self.unix_daemon()
-        else:
-            return self.start_nodetach()
-
-    def start_nodetach(self):
+        """Start the process"""
         stdin = getstream(self.stdin, False)
         stdout = getstream(self.stdout, True)
         stderr = getstream(self.stderr, True)
 
-        # Valid values are PIPE, DEVNULL, an existing file descriptor (a positive integer), an existing file object, and None
         logger.debug("Popen process")
-        return LocalProcess(
-            subprocess.Popen(self.command, stdin=stdin, stderr=stderr, stdout=stdout)
-        )
-
-    def unix_daemon(self):
-        # From https://stackoverflow.com/questions/6011235/run-a-program-from-python-and-have-it-continue-to-run-after-the-script-is-kille
-        # do the UNIX double-fork magic, see Stevens' "Advanced
-        # Programming in the UNIX Environment" for details (ISBN 0201563177)
-
-        readpipe, writepipe = os.pipe()
-
-        # First fork
-        try:
-            pid = os.fork()
-            if pid > 0:
-                # parent process, return and keep running
-                pid = int(os.read(readpipe, 100).decode("utf-8"))
-                return psutil.Process(pid)
-        except OSError as e:
-            logger.error("Fork #1 failed: %d (%s)" % (e.errno, e.strerror))
-            raise
-
-        os.chdir("/")
-        os.setsid()
-
-        # The second fork is done with Popen
-        logger.info("(forked process) starting process")
-        p = self.start_nodetach()
-        os.write(writepipe, str(p._process.pid).encode("utf-8"))
-        # Exit now - this will leave the process running
-        raise ProcessThreadError()
+        if self.detach:
+            p = subprocess.Popen(
+                self.command,
+                stdin=stdin,
+                stderr=stderr,
+                stdout=stdout,
+                close_fds=True,
+                cwd="/",
+            )
+        else:
+            p = subprocess.Popen(
+                self.command, stdin=stdin, stderr=stderr, stdout=stdout
+            )
+        return LocalProcess(p)
 
 
 class InterProcessLock(fasteners.InterProcessLock, Lock):

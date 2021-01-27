@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import threading
 from typing import Union
@@ -27,17 +28,22 @@ def cleanupdir(path: Path):
 
 
 class ThreadingCondition(threading.Condition):
+    # Useful to debug lock problems
+    TIMEOUT = float(os.environ.get("XPM_LOCK_TIMEOUT", "-1"))
+
     """Wrapper of threading.condition allowing to debug"""
 
     def __enter__(self) -> bool:
-        import traceback
+        self._acquired = self.acquire(timeout=ThreadingCondition.TIMEOUT)
 
-        # logger.debug("Trying to enter CV\n%s", "".join(traceback.format_stack()))
+        if self._acquired:
+            return True
 
-        r = super().__enter__()
-        # logger.debug("CV locked")
-        return r
+        logger.error("Failed to acquire CV (timeout %f)", ThreadingCondition.TIMEOUT)
+        import faulthandler
+
+        faulthandler.dump_traceback(all_threads=True)
+        raise RuntimeError("Failed to acquire CV")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # logger.debug("Exiting CV")
         return super().__exit__(exc_type, exc_val, exc_tb)

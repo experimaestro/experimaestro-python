@@ -1,4 +1,5 @@
 from collections import defaultdict
+import os
 from pathlib import Path
 import threading
 import time
@@ -442,7 +443,7 @@ class Scheduler:
                 f"{self.failedjobs} jobs did not complete successfully"
             )
 
-    def submit(self, job: Job, *, runnow=False):
+    def submit(self, job: Job):
         """Submits a job to the scheduler"""
         with self.cv:
             logger.info("Submitting job %s", job)
@@ -567,6 +568,12 @@ class experiment:
         self.server = Server(self.scheduler, port) if port else None
         if self.server:
             self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
+
+        if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
+            import faulthandler
+
+            logger.info("Enabling fault handler")
+            faulthandler.enable(all_threads=True)
 
     @property
     def resultspath(self):

@@ -89,7 +89,12 @@ def test_snippet(snippetpath, path, id):
     snippet, args, env = get_snippet(snippetpath, path, id)
     assert snippet != ""
 
+    WAIT_TIME = 10
+
     fullenv = {name: value for name, value in os.environ.items()}
+    fullenv.update(
+        {"XPM_ENABLEFAULTHANDLER": "1", "XPM_LOCK_TIMEOUT": str(WAIT_TIME / 2)}
+    )
     fullenv.update(env)
     with tempfile.NamedTemporaryFile(
         "wt", suffix=".py", dir=snippetpath, delete=False
@@ -99,8 +104,12 @@ def test_snippet(snippetpath, path, id):
     cmd = [sys.executable, fp.name] + args
     logging.info("Running %s with env=%s", cmd, env)
     p = subprocess.Popen(cmd, env=fullenv)
-    p.wait(5)
-    if p.poll() is None:
-        p.kill()
-    else:
-        assert p.returncode == 0
+
+    try:
+        p.wait(WAIT_TIME)
+    finally:
+        if p.poll() is None:
+            logging.error("Killing process PID %s", p.pid)
+            p.kill()
+
+    assert p.returncode == 0
