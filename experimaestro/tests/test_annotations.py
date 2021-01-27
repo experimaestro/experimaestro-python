@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, List
 from experimaestro.core.arguments import Option, pathgenerator
 import pytest
-from experimaestro import config as config, Param, task
+from experimaestro import config, Config, Param, task
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 from typing_extensions import Annotated

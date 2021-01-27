@@ -1,11 +1,12 @@
-from experimaestro import task, param, subparam
+from experimaestro import task, Param, SubParam
 import time
 
 
-@param("x", type=int)
-@subparam("epoch", type=int)
 @task()
 class Task:
+    epoch: SubParam[int]
+    x: Param[int]
+
     def execute(self):
         (self.__maintaskdir__ / f"{self.epoch}").write_text(str(self.x))
         print(time.time())

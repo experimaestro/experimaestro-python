@@ -74,20 +74,24 @@ class TypeAnnotation:
 class _Param(TypeAnnotation):
     """Base annotation for types"""
 
-    def __init__(self, ignored=None):
-        self.ignored = ignored
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
 
     def annotate(self, options: ArgumentOptions):
-        options.kwargs["ignored"] = self.ignored
+        options.kwargs.update(**self.kwargs)
         return options
 
 
-paramHint = _Param()
-optionHint = _Param(True)
-
 T = TypeVar("T")
+
+paramHint = _Param()
 Param = Annotated[T, paramHint]
+
+optionHint = _Param(ignored=True)
 Option = Annotated[T, optionHint]
+
+subparamHint = _Param(subparam=True)
+SubParam = Annotated[T, subparamHint]
 
 
 class help(TypeAnnotation):

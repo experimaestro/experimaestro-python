@@ -20,7 +20,7 @@ from .annotations import (
     # deprecated
     argument,
 )
-from .core.arguments import Param, Option, Annotated, help, pathgenerator
+from .core.arguments import Param, SubParam, Option, Annotated, help, pathgenerator
 from .core.objects import Config
 from .environment import Environment
 from .workspace import Workspace

@@ -15,11 +15,24 @@ name (lowercased).
     ```py3
     from experimaestro import Param, config
         @config("my.model")
-        class MyModel:
+        class MyModel():
             gamma: Param[float]
     ```
 
 defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
+
+When an identifier is not given, it is computed as `__module__.__qualname__`. In that case,
+it is possible to shorten the definition as:
+
+!!! example
+
+    ```py3
+    from experimaestro import Param, Config
+
+    @config()
+    class MyModel():
+        gamma: Param[float]
+    ```
 
 ### Object life cycle
 
@@ -78,6 +91,7 @@ Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or 
 ## Parameters
 
 ```python
+@config()
 class MyConfig:
     """
     Attributes:
@@ -100,6 +114,7 @@ class MyConfig:
 Options are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be an option. They are declared as parameters, but using the `Option` type hint
 
 ```python
+@config()
 class MyConfig:
     """
     Attributes:
@@ -111,7 +126,7 @@ class MyConfig:
 ### Path option
 
 ```py3
-
+@config()
 class MyTask:
     name: Annotated[Path, pathgenerator("path")]
 ```
@@ -124,8 +139,8 @@ class MyTask:
 Sometimes, a config can compute some output that might be interesting to cache, but without relying on a fully-fledge task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
 ```py3
-
-class Terms(Config):
+@config()
+class Terms():
     @cache("terms.npy")
     def load(self, path: Path):
         if path.is_file():
@@ -147,7 +162,8 @@ the values before a task is submitted. This allows to fail fast when parameters
 are not valid.
 
 ```py3
-class ModelLearn(Task):
+@task()
+class ModelLearn():
     batch_size: Param[int] = 100
     micro_batch_size: Param[int] = 100
     parameters: PathOption = "parameters.pth"
@@ -166,7 +182,8 @@ but with different _sub-parameters_ are run sequentially.
 For instance, given this task definition
 
 ```py3
-class ModelLearn(Task):
+@task()
+class ModelLearn():
     epoch: SubParam[int] = 100
     learning_rate: Param[float] = 1e-3
     def execute(self):
