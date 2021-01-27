@@ -15,7 +15,7 @@ class Argument:
         required=None,
         help=None,
         generator=None,
-        ignored=False,
+        ignored=None,
         default=None,
         checker=None,
         subparam=False,
@@ -78,7 +78,7 @@ class _Param(TypeAnnotation):
         self.kwargs = kwargs
 
     def annotate(self, options: ArgumentOptions):
-        options.kwargs.update(**self.kwargs)
+        options.kwargs.update(self.kwargs)
         return options
 
 
