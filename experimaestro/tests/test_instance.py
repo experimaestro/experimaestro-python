@@ -1,4 +1,5 @@
 from experimaestro import config, Param, Config
+from experimaestro.core.objects import TypeConfig
 
 
 @config()
@@ -20,9 +21,31 @@ def test_simple_instance():
     a = A1(x=1)
     b = B(a=a)
     b = b.instance()
-    assert not isinstance(b, Config)
+
+    assert not isinstance(b, TypeConfig)
     assert isinstance(b, B.__xpmtype__.objecttype)
 
-    assert not isinstance(b.a, Config)
-    assert isinstance(b.a, A.__xpmtype__.objecttype)
+    assert not isinstance(b.a, TypeConfig)
     assert isinstance(b.a, A1.__xpmtype__.objecttype)
+    assert isinstance(b.a, A.__xpmtype__.basetype)
+
+
+class TestSerialization:
+    """Test that a config can be serialized during execution"""
+
+    @config()
+    class SerializedConfig:
+        x: Param[int] = 1
+        pass
+
+    def test_instance(self):
+        import pickle
+
+        a = TestSerialization.SerializedConfig(x=2).instance()
+        assert not isinstance(a, TypeConfig)
+
+        s_a = pickle.dumps(a)
+
+        deserialized = pickle.loads(s_a)
+        assert not isinstance(deserialized, TypeConfig)
+        assert deserialized.x == 2

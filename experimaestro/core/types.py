@@ -9,7 +9,7 @@ import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
 import typing_extensions
-from .objects import Config
+from .objects import Config, TypeConfig, TypeObject
 from .arguments import Argument
 
 
@@ -109,6 +109,11 @@ class Type:
 class ObjectType(Type):
     """ObjectType contains class-level information about
     experimaestro configurations and tasks
+
+    Attributes:
+
+    objecttype: The python Type of the associated object
+    configtype: The python Type of the configuration object that uses property for arguments
     """
 
     REGISTERED: Dict[str, TypingType["Config"]] = {}
@@ -124,8 +129,6 @@ class ObjectType(Type):
     ):
         """Creates a type"""
         from .objects import Config
-
-        basetype = Config
 
         # Get the identifier
         if identifier is None and "__xpmid__" in tp.__dict__:
@@ -145,58 +148,31 @@ class ObjectType(Type):
 
         # --- Creates the config type and not config type
 
-        if not issubclass(tp, Config):
-            # Makes configtype a subclass of tp and basetype
-            # and makes tp an inner class of configtype (configtype.Object)
-
-            objecttype = tp
-
-            self.configtype = type(tp.__name__, (basetype, tp), {})
-
-            self.configtype.Object = tp
-        else:
-
-            # 1) Creates tp that gets rids of Config
-            objectbases = tuple(
-                ObjectType.removeConfig(b) if issubclass(b, Config) else b
-                for b in tp.__bases__
-                if b not in [Config]
-            )
-            objecttype = type("Object", objectbases, tp.__dict__.copy())
-            objecttype.__module__ = tp.__module__
-
-            # 2) Config type is based on objecttype and tp
-            # Removes non config classes in the bases
-            configbases = tuple(b for b in tp.__bases__ if issubclass(b, Config)) + (
-                objecttype,
-            )
-            try:
-                self.configtype = type(tp.__name__, tuple(configbases), {})
-            except TypeError:
-
-                def print_r(bases, sep=""):
-                    for basis in bases:
-                        if basis != object:
-                            logging.error(f"{sep}{basis}")
-                            logging.error(basis.__bases__, sep + "  ")
-
-                objecttype.__name__ = "Object"
-                objecttype.__qualname__ = f"{tp.__qualname__}.Object"
-                logging.error(f" //// {tp}")
-                print_r(configbases)
-                raise
-            self.configtype.Object = objecttype
-
-        self.configtype.__module__ = tp.__module__
-        self.configtype.__qualname__ = tp.__qualname__
-        self.configtype.__xpmtype__ = self
-        self.objecttype = objecttype
-
-        objecttype.__xpmtype__ = self
-        objecttype.__name__ = "Object"
-        objecttype.__qualname__ = f"{tp.__qualname__}.Object"
-
         self.originaltype = tp
+        if not issubclass(tp, Config):
+            __bases__ = () if tp.__bases__ == (object,) else tp.__bases__
+            self.basetype = type(tp.__name__, (Config,) + __bases__, tp.__dict__.copy())
+            self.basetype.__module__ = tp.__module__
+            self.basetype.__qualname__ = tp.__qualname__
+        else:
+            self.basetype = tp
+
+        # Registers ourselves
+        self.basetype.__xpmtype__ = self
+
+        # Create the type-specific configuration class
+        __configbases__ = tuple(
+            s.xpmtype().configtype for s in tp.__bases__ if issubclass(s, Config)
+        ) or (TypeConfig,)
+
+        self.configtype = type("TypeConfig", __configbases__ + (self.basetype,), {})
+        self.configtype.__qualname__ = f"{self.basetype.__qualname__}.TypeConfig"
+        self.configtype.__module__ = tp.__module__
+
+        # Create the type-specific object class
+        self.objecttype = type("TypeObject", (TypeObject, self.basetype), {})
+        self.objecttype.__qualname__ = f"{self.basetype.__qualname__}.Object"
+        self.objecttype.__module__ = tp.__module__
 
         # Other initializations
         self.__initialized__ = False
@@ -233,8 +209,8 @@ class ObjectType(Type):
 
         # Get description from documentation
         paramhelp = {}
-        if "__doc__" in self.objecttype.__dict__:
-            parseddoc = parse(self.objecttype.__doc__)
+        if "__doc__" in self.basetype.__dict__:
+            parseddoc = parse(self.basetype.__doc__)
             self.description = parseddoc.short_description
             for param in parseddoc.params:
                 paramhelp[param.arg_name] = param.description
@@ -242,9 +218,9 @@ class ObjectType(Type):
         # Add arguments from type hints
         from .arguments import TypeAnnotation
 
-        if hasattr(self.objecttype, "__annotations__"):
-            typekeys = set(self.objecttype.__dict__.get("__annotations__", {}).keys())
-            hints = get_type_hints(self.objecttype, include_extras=True)
+        if hasattr(self.basetype, "__annotations__"):
+            typekeys = set(self.basetype.__dict__.get("__annotations__", {}).keys())
+            hints = get_type_hints(self.basetype, include_extras=True)
             for key, typehint in hints.items():
                 # Filter out hints from parent classes
                 if key in typekeys:
@@ -258,7 +234,7 @@ class ObjectType(Type):
                                 options.kwargs["help"] = paramhelp.get(key, None)
                             self.addArgument(
                                 options.create(
-                                    key, self.configtype, typehint.__args__[0]
+                                    key, self.objecttype, typehint.__args__[0]
                                 )
                             )
 
@@ -289,7 +265,7 @@ class ObjectType(Type):
         return self._arguments[key]
 
     def parents(self) -> Iterator["ObjectType"]:
-        for tp in self.configtype.__bases__:
+        for tp in self.basetype.__bases__:
             if issubclass(tp, Config) and tp not in [Config]:
                 yield tp.xpmtype()
 
@@ -312,7 +288,7 @@ class ObjectType(Type):
                     raise
 
             logger.debug("Using argument type (not real type)")
-            return self.configtype(**value)
+            return self.objecttype(**value)
 
         if value is None:
             return None
@@ -320,7 +296,7 @@ class ObjectType(Type):
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")
 
-        types = self.configtype
+        types = self.basetype
 
         if not isinstance(value, types):
             raise ValueError("%s is not a subtype of %s" % (value, types))

@@ -1,6 +1,6 @@
 from experimaestro import config
 from experimaestro.core.arguments import Param
-from experimaestro.core.objects import Config
+from experimaestro.core.objects import Config, TypeConfig, TypeObject
 
 
 @config()
@@ -47,16 +47,12 @@ def test_hierarchy():
     assert issubclass(B, Config)
     assert issubclass(C, Config)
 
-    assert not issubclass(OA, Config)
-    assert not issubclass(OB, Config)
-    assert not issubclass(OC, Config)
+    assert not issubclass(OA, TypeConfig)
+    assert not issubclass(OB, TypeConfig)
+    assert not issubclass(OC, TypeConfig)
 
     assert issubclass(C, B)
 
-    assert OA.__bases__ == (object,)
-    assert OB.__bases__ == (object,)
-    assert OC.__bases__ == (OB,)
-
-    assert OA.__mro__ == (OA, object)
-    assert OB.__mro__ == (OB, object)
-    assert OC.__mro__ == (OC, OB, object)
+    assert OA.__bases__ == (TypeObject, A)
+    assert OB.__bases__ == (TypeObject, B)
+    assert OC.__bases__ == (TypeObject, C)

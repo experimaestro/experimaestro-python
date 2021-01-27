@@ -2,17 +2,10 @@
 
 import logging
 from experimaestro import Config, config
+from experimaestro.core.objects import TypeConfig
 
 from .utils import TemporaryExperiment
 from experimaestro.scheduler import JobState
-
-from .definitions_types import *
-
-
-def test_simple():
-    with TemporaryExperiment("simple") as xp:
-        assert IntegerTask(value=5).submit().__xpm__.job.wait() == JobState.DONE
-        assert FloatTask(value=5.1).submit().__xpm__.job.wait() == JobState.DONE
 
 
 def test_multiple_inheritance():
@@ -43,12 +36,12 @@ def test_multiple_inheritance():
         assert issubclass(C, B)
         assert issubclass(C, B1)
 
-        assert ctype.objecttype == C.Object
+        assert ctype.objecttype == C.xpmtype().objecttype
 
-        assert issubclass(C.Object, B1.Object)
-        assert issubclass(C.Object, B.Object)
-        assert issubclass(C.Object, A.Object)
-        assert not issubclass(C.Object, Config)
+        assert issubclass(C.xpmtype().objecttype, B1.xpmtype().basetype)
+        assert issubclass(C.xpmtype().objecttype, B.xpmtype().basetype)
+        assert issubclass(C.xpmtype().objecttype, A.xpmtype().basetype)
+        assert not issubclass(C.xpmtype().objecttype, TypeConfig)
 
 
 def test_missing_hierarchy():
@@ -66,5 +59,4 @@ def test_missing_hierarchy():
     B.xpmtype()
 
     assert issubclass(B, A)
-    assert issubclass(B.Object, A1.Object)
-    assert issubclass(B.Object, A.Object)
+    assert issubclass(B, A1)

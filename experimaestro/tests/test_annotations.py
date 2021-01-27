@@ -108,6 +108,21 @@ def test_type_hinting():
     assert arg_option.ignored
 
 
+def test_inheritance():
+    @config()
+    class A:
+        x: Param[int]
+
+    @config()
+    class B(A):
+        y: Param[int] = 3
+
+    b = B()
+    b.x = 2
+    assert b.__xpm__.values["y"] == 3
+    assert b.__xpm__.values["x"] == 2
+
+
 def test_redefined_param():
     @config()
     class A:
@@ -139,7 +154,7 @@ def test_task_config():
             return Output()
 
     output = Task().submit(dryrun=True)
-    assert type(output) == Output
+    assert type(output) == Output.__xpmtype__.configtype
 
 
 def test_default_mismatch():

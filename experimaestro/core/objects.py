@@ -7,8 +7,8 @@ import io
 import fasteners
 import inspect
 import importlib
-from typing import Dict, Generic, Optional, Set, TypeVar
-from experimaestro.utils import logger
+from typing import Dict, Generic, Optional, Set, Type, TypeVar, Union
+from experimaestro.utils import classproperty, logger
 import sys
 from contextlib import contextmanager
 
@@ -426,7 +426,7 @@ class ConfigInformation:
                 objectout.write("file", str(self.xpmtype._file))
 
             objectout.write("module", self.xpmtype._module)
-            objectout.write("type", self.xpmtype.configtype.__name__)
+            objectout.write("type", self.xpmtype.objecttype.__qualname__)
 
             # Serialize identifier and typename
             # TODO: remove when not needed (cache issues)
@@ -527,7 +527,9 @@ class ConfigInformation:
                 logger.debug("Importing module %s", definition["module"])
                 mod = importlib.import_module(module_name)
 
-            cls = getattr(mod, definition["type"]).xpmtype().objecttype
+            cls = mod
+            for part in definition["type"].split("."):
+                cls = getattr(cls, part)
             o = cls()
 
             if "typename" in definition:
@@ -565,7 +567,7 @@ class ConfigInformation:
         if hasattr(param, "generator") and param.generator:
             return param.generator(context)
 
-        if isinstance(value, Config):
+        if isinstance(value, TypeConfig):
             return value.__xpm__._fromConfig(context, objects)
 
         if isinstance(value, list):
@@ -649,23 +651,8 @@ def cache(fn, name: str):
 T = TypeVar("T")
 
 
-class Config(Generic[T]):
-    """Base type for all objects in python interface"""
-
-    @classmethod
-    def xpmtype(cls):
-        """Returns the experimaestro Type object associated with this class"""
-        from .types import ObjectType
-
-        if "__xpmtype__" not in cls.__dict__:
-            cls.__xpmtype__ = ObjectType(cls)
-
-        if not isinstance(cls.__xpmtype__, ObjectType):
-            assert isinstance(
-                cls, ObjectType
-            ), f"{cls.__xpmtype__} is not an object type"
-
-        return cls.__xpmtype__
+class TypeConfig(Generic[T]):
+    """Class of configuration objects"""
 
     def __init__(self, **kwargs):
         """Initialize the configuration with the given parameters"""
@@ -751,3 +738,44 @@ class Config(Generic[T]):
         if self.__xpm__.job:
             return self.__xpm__.job.jobpath
         raise AssertionError("Cannot ask the job path of a non submitted task")
+
+
+class TypeObject:
+    """Class of real instanciated objects"""
+
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(cls, *args, **kwargs)
+
+
+class Config:
+    """Base type for all objects in python interface"""
+
+    @classproperty
+    def Object(cls):
+        return cls.xpmtype().objecttype
+
+    @classmethod
+    def xpmtype(cls):
+        """Returns the experimaestro Type object associated with this class"""
+        from .types import ObjectType
+
+        if "__xpmtype__" not in cls.__dict__:
+            if issubclass(cls, TypeConfig):
+                # See ObjectType for __bases__ ordering
+                return cls.__bases__[1].xpmtype()
+            else:
+                cls.__xpmtype__ = ObjectType(cls)
+
+        if not isinstance(cls.__xpmtype__, ObjectType):
+            assert isinstance(
+                cls, ObjectType
+            ), f"{cls.__xpmtype__} is not an object type"
+
+        return cls.__xpmtype__
+
+    def __new__(cls: Type[T], *args, **kwargs) -> Union[TypeConfig[T], T]:
+        # Within an experiment, uses the TypeConfig subclass
+        config = object.__new__(cls.xpmtype().configtype)
+        # Calling init since not the same type
+        config.__init__(*args, **kwargs)
+        return config

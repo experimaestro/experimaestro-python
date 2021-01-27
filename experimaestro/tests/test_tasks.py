@@ -11,6 +11,13 @@ from .utils import TemporaryDirectory, TemporaryExperiment, get_times
 
 from .tasks.all import *
 from . import restart
+from .definitions_types import IntegerTask, FloatTask
+
+
+def test_task_types():
+    with TemporaryExperiment("simple") as xp:
+        assert IntegerTask(value=5).submit().__xpm__.job.wait() == JobState.DONE
+        assert FloatTask(value=5.1).submit().__xpm__.job.wait() == JobState.DONE
 
 
 def test_simple_task():

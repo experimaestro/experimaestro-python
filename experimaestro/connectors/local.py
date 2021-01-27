@@ -25,8 +25,11 @@ from experimaestro.utils import logger
 
 
 class LocalProcess(Process):
-    def __init__(self, process):
+    def __init__(self, process: subprocess.Popen):
         self._process = process
+
+    def __repr__(self):
+        return f"Process({self._process.pid})"
 
     def wait(self):
         self._process.wait()

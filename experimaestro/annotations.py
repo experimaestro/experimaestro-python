@@ -10,7 +10,7 @@ import experimaestro.core.objects as objects
 import experimaestro.core.types as types
 from experimaestro.generators import PathGenerator
 
-from .core.arguments import Argument as CoreArgument, TypeAnnotation
+from .core.arguments import Argument as CoreArgument
 from .core.objects import Config
 from .core.types import Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
@@ -49,7 +49,7 @@ class config:
 
         self.description = description
 
-    def __call__(self, tp: T) -> TypingType[Config[T]]:
+    def __call__(self, tp: T) -> T:
         """Annotate the class
 
         Depending on whether we are running or configuring,
@@ -67,7 +67,7 @@ class config:
         assert inspect.isclass(tp), f"{tp} is not a class"
 
         # Adds to xpminfo for on demand creation of information
-        return ObjectType(tp, identifier=self.identifier).configtype
+        return ObjectType(tp, identifier=self.identifier).basetype
 
 
 class Array(TypeProxy):
