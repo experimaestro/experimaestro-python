@@ -760,9 +760,9 @@ class Config:
         from .types import ObjectType
 
         if "__xpmtype__" not in cls.__dict__:
-            if issubclass(cls, TypeConfig):
+            if issubclass(cls, (TypeConfig, TypeObject)):
                 # See ObjectType for __bases__ ordering
-                return cls.__bases__[1].xpmtype()
+                return cls.__bases__[-1].xpmtype()
             else:
                 cls.__xpmtype__ = ObjectType(cls)
 
