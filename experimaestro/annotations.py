@@ -101,7 +101,7 @@ class task(config):
         # Register the type
         tp = super().__call__(tp)
 
-        tp.xpmtype().addAnnotation(self)
+        tp.__xpmtype__.addAnnotation(self)
         return tp
 
     def process(self, xpmtype):
@@ -150,7 +150,7 @@ class param:
 
     def __call__(self, tp):
         # Don't annotate in task mode
-        tp.xpmtype().addAnnotation(self)
+        tp.__xpmtype__.addAnnotation(self)
         return tp
 
     def process(self, xpmtype):

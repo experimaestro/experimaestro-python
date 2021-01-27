@@ -31,17 +31,17 @@ def test_multiple_inheritance():
 
     for C in (C1, C2):
         logging.info("Testing %s", C)
-        ctype = C.xpmtype()
+        ctype = C.__xpmtype__
         assert issubclass(C, A)
         assert issubclass(C, B)
         assert issubclass(C, B1)
 
-        assert ctype.objecttype == C.xpmtype().objecttype
+        assert ctype.objecttype == C.__xpmtype__.objecttype
 
-        assert issubclass(C.xpmtype().objecttype, B1.xpmtype().basetype)
-        assert issubclass(C.xpmtype().objecttype, B.xpmtype().basetype)
-        assert issubclass(C.xpmtype().objecttype, A.xpmtype().basetype)
-        assert not issubclass(C.xpmtype().objecttype, TypeConfig)
+        assert issubclass(C.__xpmtype__.objecttype, B1.__xpmtype__.basetype)
+        assert issubclass(C.__xpmtype__.objecttype, B.__xpmtype__.basetype)
+        assert issubclass(C.__xpmtype__.objecttype, A.__xpmtype__.basetype)
+        assert not issubclass(C.__xpmtype__.objecttype, TypeConfig)
 
 
 def test_missing_hierarchy():
@@ -56,7 +56,7 @@ def test_missing_hierarchy():
     class B(A1):
         pass
 
-    B.xpmtype()
+    B.__xpmtype__
 
     assert issubclass(B, A)
     assert issubclass(B, A1)

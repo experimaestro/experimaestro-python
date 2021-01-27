@@ -7,7 +7,7 @@ import io
 import fasteners
 import inspect
 import importlib
-from typing import Dict, Generic, Optional, Set, Type, TypeVar, Union
+from typing import Dict, Generic, Optional, Set, Type, TypeVar, Union, get_type_hints
 from experimaestro.utils import classproperty, logger
 import sys
 from contextlib import contextmanager
@@ -350,6 +350,9 @@ class ConfigInformation:
         # Handle an output configuration
         if hasattr(self.pyobject, "config"):
             config = self.pyobject.config()
+            if isinstance(config, dict):
+                hints = get_type_hints(self.pyobject.config)
+                config = hints["return"]._(**config)
             config.__xpm__._task = self.pyobject
             return config
 
@@ -658,7 +661,7 @@ class TypeConfig(Generic[T]):
         """Initialize the configuration with the given parameters"""
 
         # Add configuration
-        xpmtype = self.xpmtype()
+        xpmtype = self.__xpmtype__
 
         # Create the config information object
         xpm = ConfigInformation(self)
@@ -740,42 +743,7 @@ class TypeConfig(Generic[T]):
         raise AssertionError("Cannot ask the job path of a non submitted task")
 
 
-class TypeObject:
-    """Class of real instanciated objects"""
-
-    def __new__(cls, *args, **kwargs):
-        return object.__new__(cls, *args, **kwargs)
-
-
 class Config:
     """Base type for all objects in python interface"""
 
-    @classproperty
-    def Object(cls):
-        return cls.xpmtype().objecttype
-
-    @classmethod
-    def xpmtype(cls):
-        """Returns the experimaestro Type object associated with this class"""
-        from .types import ObjectType
-
-        if "__xpmtype__" not in cls.__dict__:
-            if issubclass(cls, (TypeConfig, TypeObject)):
-                # See ObjectType for __bases__ ordering
-                return cls.__bases__[-1].xpmtype()
-            else:
-                cls.__xpmtype__ = ObjectType(cls)
-
-        if not isinstance(cls.__xpmtype__, ObjectType):
-            assert isinstance(
-                cls, ObjectType
-            ), f"{cls.__xpmtype__} is not an object type"
-
-        return cls.__xpmtype__
-
-    def __new__(cls: Type[T], *args, **kwargs) -> Union[TypeConfig[T], T]:
-        # Within an experiment, uses the TypeConfig subclass
-        config = object.__new__(cls.xpmtype().configtype)
-        # Calling init since not the same type
-        config.__init__(*args, **kwargs)
-        return config
+    pass

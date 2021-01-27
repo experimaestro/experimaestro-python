@@ -1,6 +1,7 @@
 # master
 
-- Experimental type hints
+- Breaking change : configuration are accessed through \_
+- Type hints
 - Initial tqdm support
 
 # 0.7.12

@@ -1,6 +1,6 @@
 from experimaestro import config
 from experimaestro.core.arguments import Param
-from experimaestro.core.objects import Config, TypeConfig, TypeObject
+from experimaestro.core.objects import Config, TypeConfig
 
 
 @config()
@@ -16,7 +16,7 @@ def test_object_default():
 
 @config()
 class B:
-    a: Param[A] = A(x=3)
+    a: Param[A] = A._(x=3)
 
 
 @config()
@@ -35,13 +35,9 @@ def test_object_config_default():
 
 def test_hierarchy():
     """Test if the object hierarchy is OK"""
-    A()
-    B()
-    C()
-
-    OA = A.xpmtype().objecttype
-    OB = B.xpmtype().objecttype
-    OC = C.xpmtype().objecttype
+    OA = A.__xpmtype__.objecttype
+    OB = B.__xpmtype__.objecttype
+    OC = C.__xpmtype__.objecttype
 
     assert issubclass(A, Config)
     assert issubclass(B, Config)
@@ -53,6 +49,6 @@ def test_hierarchy():
 
     assert issubclass(C, B)
 
-    assert OA.__bases__ == (TypeObject, A)
-    assert OB.__bases__ == (TypeObject, B)
-    assert OC.__bases__ == (TypeObject, C)
+    assert OA.__bases__ == (Config,)
+    assert OB.__bases__ == (Config,)
+    assert OC.__bases__ == (B,)

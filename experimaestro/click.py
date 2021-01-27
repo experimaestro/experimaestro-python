@@ -35,7 +35,7 @@ class forwardoption(metaclass=forwardoptionMetaclass):
         self.path = path
 
     def __call__(self, cls, option_name=None):
-        argument = cls.xpmtype().arguments[self.path[0]]
+        argument = cls.__xpmtype__.arguments[self.path[0]]
         for c in self.path[1:]:
             argument = getattr(argument, c)
 

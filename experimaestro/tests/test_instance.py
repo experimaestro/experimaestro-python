@@ -18,8 +18,8 @@ class B:
 
 
 def test_simple_instance():
-    a = A1(x=1)
-    b = B(a=a)
+    a = A1._(x=1)
+    b = B._(a=a)
     b = b.instance()
 
     assert not isinstance(b, TypeConfig)
@@ -30,19 +30,21 @@ def test_simple_instance():
     assert isinstance(b.a, A.__xpmtype__.basetype)
 
 
+@config()
+class SerializedConfig:
+    x: Param[int] = 1
+    pass
+
+
 class TestSerialization:
     """Test that a config can be serialized during execution"""
-
-    @config()
-    class SerializedConfig:
-        x: Param[int] = 1
-        pass
 
     def test_instance(self):
         import pickle
 
-        a = TestSerialization.SerializedConfig(x=2).instance()
+        a = SerializedConfig._(x=2).instance()
         assert not isinstance(a, TypeConfig)
+        assert isinstance(a, SerializedConfig)
 
         s_a = pickle.dumps(a)
 

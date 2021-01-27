@@ -9,7 +9,7 @@ import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
 import typing_extensions
-from .objects import Config, TypeConfig, TypeObject
+from .objects import Config, TypeConfig
 from .arguments import Argument
 
 
@@ -97,7 +97,7 @@ class Type:
             return key.__xpmtype__
 
         if inspect.isclass(key) and issubclass(key, Config):
-            return key.xpmtype()
+            return key.__xpmtype__
 
         t = typingutils.get_list(key)
         if t:
@@ -116,11 +116,14 @@ class ObjectType(Type):
     configtype: The python Type of the configuration object that uses property for arguments
     """
 
+    # Those entries should not be copied in the __dict__
+    FORBIDDEN_KEYS = set(("__dict__", "__weakref__"))
+
     REGISTERED: Dict[str, TypingType["Config"]] = {}
 
     @staticmethod
     def removeConfig(t: Config):
-        return t.xpmtype().objecttype
+        return t.__xpmtype__.objecttype
 
     def __init__(
         self,
@@ -150,19 +153,24 @@ class ObjectType(Type):
 
         self.originaltype = tp
         if not issubclass(tp, Config):
+            # Adds Config as a base class if not present
             __bases__ = () if tp.__bases__ == (object,) else tp.__bases__
-            self.basetype = type(tp.__name__, (Config,) + __bases__, tp.__dict__.copy())
+            __dict__ = dict(tp.__dict__)
+
+            __dict__ = {
+                key: value
+                for key, value in tp.__dict__.items()
+                if key not in ObjectType.FORBIDDEN_KEYS
+            }
+            self.basetype = type(tp.__name__, (Config,) + __bases__, __dict__)
             self.basetype.__module__ = tp.__module__
             self.basetype.__qualname__ = tp.__qualname__
         else:
             self.basetype = tp
 
-        # Registers ourselves
-        self.basetype.__xpmtype__ = self
-
         # Create the type-specific configuration class
         __configbases__ = tuple(
-            s.xpmtype().configtype for s in tp.__bases__ if issubclass(s, Config)
+            s.__xpmtype__.configtype for s in tp.__bases__ if issubclass(s, Config)
         ) or (TypeConfig,)
 
         self.configtype = type("TypeConfig", __configbases__ + (self.basetype,), {})
@@ -170,9 +178,13 @@ class ObjectType(Type):
         self.configtype.__module__ = tp.__module__
 
         # Create the type-specific object class
-        self.objecttype = type("TypeObject", (TypeObject, self.basetype), {})
-        self.objecttype.__qualname__ = f"{self.basetype.__qualname__}.Object"
-        self.objecttype.__module__ = tp.__module__
+        # (now, the same as basetype - TODO: remove references)
+        self.objecttype = self.basetype
+        self.basetype._ = self.configtype
+
+        # Registers ourselves
+        self.basetype.__xpmtype__ = self
+        self.configtype.__xpmtype__ = self
 
         # Other initializations
         self.__initialized__ = False
@@ -267,7 +279,7 @@ class ObjectType(Type):
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.basetype.__bases__:
             if issubclass(tp, Config) and tp not in [Config]:
-                yield tp.xpmtype()
+                yield tp.__xpmtype__
 
     def validate(self, value):
         """Ensures that the value is compatible with this type"""

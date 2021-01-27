@@ -43,7 +43,7 @@ def restart(terminate, experiment):
     try:
         with TemporaryExperiment("restart", maxwait=10) as xp:
             # Create the task and so we can get the file paths
-            task = Restart()
+            task = Restart._()
             task.submit(dryrun=True)
 
         # Start the experiment with another process, and kill the job

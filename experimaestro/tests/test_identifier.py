@@ -51,31 +51,31 @@ def assert_notequal(a, b):
 
 
 def test_int():
-    assert_equal(A(a=1), A(a=1))
+    assert_equal(A._(a=1), A._(a=1))
 
 
 def test_different_type():
-    assert_notequal(A(a=1), B(a=1))
+    assert_notequal(A._(a=1), B._(a=1))
 
 
 def test_order():
-    assert_equal(Values(value1=1, value2=2), Values(value2=2, value1=1))
+    assert_equal(Values._(value1=1, value2=2), Values._(value2=2, value1=1))
 
 
 def test_default():
-    assert_equal(C(a=1, b=2), C(b=2))
+    assert_equal(C._(a=1, b=2), C._(b=2))
 
 
 def test_inner_eq():
-    assert_equal(D(a=A(a=1)), D(a=A(a=1)))
+    assert_equal(D._(a=A._(a=1)), D._(a=A._(a=1)))
 
 
 def test_float():
-    assert_equal(Float(value=1), Float(value=1))
+    assert_equal(Float._(value=1), Float._(value=1))
 
 
 def test_float2():
-    assert_equal(Float(value=1.0), Float(value=1))
+    assert_equal(Float._(value=1.0), Float._(value=1))
 
 
 # --- Argument name
@@ -96,8 +96,8 @@ def test_name():
     class Config3:
         a: Param[int]
 
-    assert_notequal(Config0(a=2), Config1(b=2))
-    assert_equal(Config0(a=2), Config3(a=2))
+    assert_notequal(Config0._(a=2), Config1._(b=2))
+    assert_equal(Config0._(a=2), Config3._(a=2))
 
 
 # --- Test option
@@ -109,9 +109,9 @@ def test_option():
         a: Param[int]
         b: Option[int] = 1
 
-    assert_notequal(OptionConfig(a=2), OptionConfig(a=1))
-    assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1))
-    assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1, b=2))
+    assert_notequal(OptionConfig._(a=2), OptionConfig._(a=1))
+    assert_equal(OptionConfig._(a=1, b=2), OptionConfig._(a=1))
+    assert_equal(OptionConfig._(a=1, b=2), OptionConfig._(a=1, b=2))
 
 
 # --- Ignore paths
@@ -125,8 +125,8 @@ class TypeWithPath:
 
 def test_path():
     """Path should be ignored"""
-    assert_equal(TypeWithPath(a=1, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
-    assert_notequal(TypeWithPath(a=2, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
+    assert_equal(TypeWithPath._(a=1, path="/a/b"), TypeWithPath._(a=1, path="/c/d"))
+    assert_notequal(TypeWithPath._(a=2, path="/a/b"), TypeWithPath._(a=1, path="/c/d"))
 
 
 # --- Test with added arguments
@@ -144,7 +144,7 @@ def test_pathoption():
     class A_without_path:
         a: Param[int]
 
-    assert_equal(A_with_path(a=1), A_without_path(a=1))
+    assert_equal(A_with_path._(a=1), A_without_path._(a=1))
 
 
 def test_defaultnew():
@@ -161,8 +161,8 @@ def test_defaultnew():
     class A:
         pass
 
-    assert_equal(A_with_b(a=1, b=1), A(a=1))
-    assert_equal(A_with_b(a=1), A(a=1))
+    assert_equal(A_with_b._(a=1, b=1), A._(a=1))
+    assert_equal(A_with_b._(a=1), A._(a=1))
 
 
 def test_taskconfigidentifier():
@@ -177,7 +177,7 @@ def test_taskconfigidentifier():
     @task()
     class Task:
         def config(self) -> Config:
-            return Config(a=1)
+            return Config._(a=1)
 
-    assert_equal(Task(x=1).submit(dryrun=True), Task(x=1).submit(dryrun=True))
-    assert_notequal(Task(x=2).submit(dryrun=True), Task(x=1).submit(dryrun=True))
+    assert_equal(Task._(x=1).submit(dryrun=True), Task._(x=1).submit(dryrun=True))
+    assert_notequal(Task._(x=2).submit(dryrun=True), Task._(x=1).submit(dryrun=True))

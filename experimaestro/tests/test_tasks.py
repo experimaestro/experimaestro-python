@@ -16,8 +16,8 @@ from .definitions_types import IntegerTask, FloatTask
 
 def test_task_types():
     with TemporaryExperiment("simple") as xp:
-        assert IntegerTask(value=5).submit().__xpm__.job.wait() == JobState.DONE
-        assert FloatTask(value=5.1).submit().__xpm__.job.wait() == JobState.DONE
+        assert IntegerTask._(value=5).submit().__xpm__.job.wait() == JobState.DONE
+        assert FloatTask._(value=5.1).submit().__xpm__.job.wait() == JobState.DONE
 
 
 def test_simple_task():
@@ -25,11 +25,11 @@ def test_simple_task():
         assert isinstance(workdir, Path)
         with TemporaryExperiment("helloworld", workdir=workdir, maxwait=1000):
             # Submit the tasks
-            hello = Say(word="hello").submit()
-            world = Say(word="world").submit()
+            hello = Say._(word="hello").submit()
+            world = Say._(word="world").submit()
 
             # Concat will depend on the two first tasks
-            concat = Concat(strings=[hello, world]).submit()
+            concat = Concat._(strings=[hello, world]).submit()
 
         assert concat.__xpm__.job.state == JobState.DONE
         assert Path(concat.stdout()).read_text() == "HELLO WORLD\n"
@@ -38,16 +38,16 @@ def test_simple_task():
 def test_not_submitted():
     """A not submitted task should not be accepted as an argument"""
     with TemporaryExperiment("helloworld", maxwait=2):
-        hello = Say(word="hello")
+        hello = Say._(word="hello")
         with pytest.raises(ValueError):
-            Concat(strings=[hello])
+            Concat._(strings=[hello])
 
 
 def test_fail():
     """Failing task... should fail"""
     with pytest.raises(FailedExperiment):
         with TemporaryExperiment("failing", maxwait=2):
-            fail = Fail().submit()
+            fail = Fail._().submit()
             fail.touch()
 
 
@@ -57,8 +57,8 @@ def test_foreign_type():
         # Submit the tasks
         from .tasks.foreign import ForeignClassB2
 
-        b = ForeignClassB2(x=1, y=2)
-        a = ForeignTaskA(b=b).submit()
+        b = ForeignClassB2._(x=1, y=2)
+        a = ForeignTaskA._(b=b).submit()
 
         assert a.__xpm__.job.wait() == JobState.DONE
         assert a.stdout().read_text().strip() == "1"
@@ -68,8 +68,8 @@ def test_fail_dep():
     """Failing task... should cancel dependent"""
     with pytest.raises(FailedExperiment):
         with TemporaryExperiment("failingdep"):
-            fail = Fail().submit()
-            dep = FailConsumer(fail=fail).submit()
+            fail = Fail._().submit()
+            dep = FailConsumer._(fail=fail).submit()
             fail.touch()
 
     assert fail.__xpm__.job.wait() == JobState.ERROR
@@ -79,14 +79,14 @@ def test_fail_dep():
 def test_unknown_attribute():
     """No check when setting attributes while executing"""
     with TemporaryExperiment("unknown"):
-        method = SetUnknown().submit()
+        method = SetUnknown._().submit()
 
     assert method.__xpm__.job.wait() == JobState.DONE
 
 
 def test_function():
     with TemporaryExperiment("function"):
-        method = Method(a=1).submit()
+        method = Method._(a=1).submit()
 
     assert method.__xpm__.job.wait() == JobState.DONE
 
@@ -98,7 +98,7 @@ def test_done():
 
 
 def restart_function(xp):
-    restart.Restart().submit()
+    restart.Restart._().submit()
 
 
 @pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)
@@ -110,8 +110,8 @@ def test_restart(terminate):
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
     with TemporaryExperiment("duplicate", maxwait=10) as xp:
-        task1 = SimpleTask(x=1).submit()
-        task2 = SimpleTask(x=1).submit()
+        task1 = SimpleTask._(x=1).submit()
+        task2 = SimpleTask._(x=1).submit()
         assert task1 is task2, f"{id(task1)} != {id(task2)}"
 
 
@@ -119,7 +119,7 @@ def test_configcache():
     """Test a configuration cache"""
 
     with TemporaryExperiment("configcache", maxwait=10) as xp:
-        task = CacheConfigTask(data=CacheConfig()).submit()
+        task = CacheConfigTask._(data=CacheConfig._()).submit()
 
     assert task.__xpm__.job.wait() == JobState.DONE
 
@@ -132,8 +132,8 @@ def test_subparams():
     from .tasks.subparams import Task
 
     with TemporaryExperiment("subparam", maxwait=10) as xp:
-        task100 = Task(epoch=100, x=1).submit()
-        task200 = Task(epoch=200, x=1).submit()
+        task100 = Task._(epoch=100, x=1).submit()
+        task200 = Task._(epoch=200, x=1).submit()
 
         xp.wait()
 

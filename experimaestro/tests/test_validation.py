@@ -47,22 +47,22 @@ class C:
 
 
 def test_simple():
-    expect_validate(A(value=1))
+    expect_validate(A._(value=1))
 
 
 def test_missing():
-    expect_notvalidate(A())
+    expect_notvalidate(A._())
 
 
 def test_simple_nested():
-    b = B()
-    b.a = A(value=1)
+    b = B._()
+    b.a = A._(value=1)
     expect_validate(b)
 
 
 def test_missing_nested():
-    b = B()
-    b.a = A()
+    b = B._()
+    b.a = A._()
     expect_notvalidate(b)
 
 
@@ -81,11 +81,11 @@ def test_type():
         pass
 
     with pytest.raises(ValueError):
-        C(a=B())
+        C._(a=B._())
 
     with pytest.raises(ValueError):
-        c = C()
-        c.a = B()
+        c = C._()
+        c.a = B._()
 
 
 def test_subtype():
@@ -102,7 +102,7 @@ def test_subtype():
     class B:
         pass
 
-    expect_validate(B(a=A1()))
+    expect_validate(B._(a=A1._()))
 
 
 def test_path():
@@ -113,7 +113,7 @@ def test_path():
     class A:
         pass
 
-    a = A()
+    a = A._()
     a.__xpm__.validate()
     with TemporaryExperiment("constant") as xp:
         jobcontext = Job(a)
@@ -135,7 +135,7 @@ def test_constant():
     class A:
         pass
 
-    a = A()
+    a = A._()
     a.__xpm__.validate()
     with TemporaryExperiment("constant") as ws:
         jobcontext = Job(a)
@@ -155,7 +155,7 @@ class Child(Parent):
 
 
 def test_child():
-    expect_validate(Child(x=1))
+    expect_validate(Child._(x=1))
 
 
 # --- Path argument checks
@@ -168,7 +168,7 @@ class PathParent:
 
 
 def test_path():
-    c = PathParent()
+    c = PathParent._()
     expect_validate(c)
 
 
@@ -185,9 +185,9 @@ def test_default(value, apitype):
     class Default:
         pass
 
-    value = Default()
+    value = Default._()
     expect_validate(value)
-    assert Default.xpmtype().arguments["default"].type.__class__ == apitype
+    assert Default.__xpmtype__.arguments["default"].type.__class__ == apitype
 
 
 def test_seal():
@@ -198,7 +198,7 @@ def test_seal():
     class A:
         pass
 
-    a = A(a=2)
+    a = A._(a=2)
     a.__xpm__.seal(None)
 
     with pytest.raises(AttributeError):
@@ -225,7 +225,7 @@ class TaskConfigConsumer:
 
 
 def test_taskargument():
-    x = taskconfig()
+    x = taskconfig._()
     with TemporaryExperiment("fake"):
         x.submit(dryrun=True)
-        expect_validate(TaskConfigConsumer(x=x))
+        expect_validate(TaskConfigConsumer._(x=x))

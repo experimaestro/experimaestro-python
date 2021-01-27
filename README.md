@@ -57,9 +57,7 @@ def slowdown(N: int):
 
 # --- Define the tasks
 
-hw = Identifier("helloworld")
-
-@task(hw.say)
+@task()
 class Say:
     word: Param[str]
 
@@ -67,7 +65,7 @@ class Say:
         slowdown(len(self.word))
         print(self.word.upper(),)
 
-@task(hw.concat)
+@task()
 class Concat:
     strings: Param[List[Say]]
 
@@ -90,11 +88,11 @@ def cli(port, workdir):
     # Sets the working directory and the name of the xp
     with experiment(workdir, "helloworld", port=port) as xp:
         # Submit the tasks
-        hello = Say(word="hello").submit()
-        world = Say(word="world").submit()
+        hello = Say._(word="hello").submit()
+        world = Say._(word="world").submit()
 
         # Concat will depend on the two first tasks
-        Concat(strings=[hello, world]).tag("y", 1).submit()
+        Concat._(strings=[hello, world]).tag("y", 1).submit()
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ class B:
 
 
 def test_fullname():
-    assert str(B.xpmtype().identifier) == "annotations.b"
+    assert str(B.__xpmtype__.identifier) == "annotations.b"
 
 
 # --- Automatic name for configuration
@@ -35,7 +35,7 @@ class A:
 
 
 def test_noname():
-    assert str(A.xpmtype().identifier) == "experimaestro.tests.test_annotations.a"
+    assert str(A.__xpmtype__.identifier) == "experimaestro.tests.test_annotations.a"
 
 
 # --- Use type annotations
@@ -67,7 +67,7 @@ def test_type_hinting():
         path: Annotated[Path, pathgenerator("world")]
         option: Option[str]
 
-    ot = MyConfig.xpmtype()
+    ot = MyConfig.__xpmtype__
 
     # Check required parameter
     arg_x = ot.getArgument("x")
@@ -117,7 +117,7 @@ def test_inheritance():
     class B(A):
         y: Param[int] = 3
 
-    b = B()
+    b = B._()
     b.x = 2
     assert b.__xpm__.values["y"] == 3
     assert b.__xpm__.values["x"] == 2
@@ -132,8 +132,8 @@ def test_redefined_param():
     class B:
         x: Param[int] = 3
 
-    atx = A.xpmtype().getArgument("x")
-    btx = B.xpmtype().getArgument("x")
+    atx = A._.__xpmtype__.getArgument("x")
+    btx = B._.__xpmtype__.getArgument("x")
 
     assert atx.required
 
@@ -151,9 +151,9 @@ def test_task_config():
     @task()
     class Task:
         def config(self) -> Output:
-            return Output()
+            return {}
 
-    output = Task().submit(dryrun=True)
+    output = Task._().submit(dryrun=True)
     assert type(output) == Output.__xpmtype__.configtype
 
 
@@ -165,4 +165,4 @@ def test_default_mismatch():
         x: Param[int] = 0.2
 
     with pytest.raises(TypeError):
-        A.xpmtype().getArgument("x")
+        A.__xpmtype__.getArgument("x")
