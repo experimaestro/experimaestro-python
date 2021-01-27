@@ -1,4 +1,4 @@
-# master
+# 0.8
 
 - Breaking change : configuration are accessed through \_
 - Type hints
