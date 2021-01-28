@@ -18,8 +18,8 @@ class B:
 
 
 def test_simple_instance():
-    a = A1._(x=1)
-    b = B._(a=a)
+    a = A1(x=1)
+    b = B(a=a)
     b = b.instance()
 
     assert not isinstance(b, TypeConfig)
@@ -42,7 +42,7 @@ class TestSerialization:
     def test_instance(self):
         import pickle
 
-        a = SerializedConfig._(x=2).instance()
+        a = SerializedConfig(x=2).instance()
         assert not isinstance(a, TypeConfig)
         assert isinstance(a, SerializedConfig)
 

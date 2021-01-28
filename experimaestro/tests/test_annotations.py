@@ -117,7 +117,7 @@ def test_inheritance():
     class B(A):
         y: Param[int] = 3
 
-    b = B._()
+    b = B()
     b.x = 2
     assert b.__xpm__.values["y"] == 3
     assert b.__xpm__.values["x"] == 2
@@ -153,7 +153,7 @@ def test_task_config():
         def config(self) -> Output:
             return {}
 
-    output = Task._().submit(dryrun=True)
+    output = Task().submit(dryrun=True)
     assert type(output) == Output.__xpmtype__.configtype
 
 

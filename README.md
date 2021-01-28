@@ -88,11 +88,11 @@ def cli(port, workdir):
     # Sets the working directory and the name of the xp
     with experiment(workdir, "helloworld", port=port) as xp:
         # Submit the tasks
-        hello = Say._(word="hello").submit()
-        world = Say._(word="world").submit()
+        hello = Say(word="hello").submit()
+        world = Say(word="world").submit()
 
         # Concat will depend on the two first tasks
-        Concat._(strings=[hello, world]).tag("y", 1).submit()
+        Concat(strings=[hello, world]).tag("y", 1).submit()
 
 
 if __name__ == "__main__":

@@ -352,7 +352,7 @@ class ConfigInformation:
             config = self.pyobject.config()
             if isinstance(config, dict):
                 hints = get_type_hints(self.pyobject.config)
-                config = hints["return"]._(**config)
+                config = hints["return"](**config)
             config.__xpm__._task = self.pyobject
             return config
 
@@ -533,7 +533,8 @@ class ConfigInformation:
             cls = mod
             for part in definition["type"].split("."):
                 cls = getattr(cls, part)
-            o = cls()
+
+            o = cls.__new__(cls, __xpmobject__=True)
 
             if "typename" in definition:
                 o.__xpmtypename__ = definition["typename"]
@@ -588,7 +589,7 @@ class ConfigInformation:
         if o is not None:
             return o
 
-        o = self.xpmtype.objecttype()
+        o = self.xpmtype.objecttype.__new__(self.xpmtype.objecttype, __xpmobject__=True)
         objects[id(self)] = o
 
         for key, param in self.xpmtype.arguments.items():
@@ -746,4 +747,16 @@ class TypeConfig(Generic[T]):
 class Config:
     """Base type for all objects in python interface"""
 
-    pass
+    def __getnewargs_ex__(self):
+        # __new__ will be called with those arguments when unserializing
+        return ((), {"__xpmobject__": True})
+
+    def __new__(cls, *args, __xpmobject__=False, **kwargs):
+        """Returns an instance of a TypeConfig when called __xpmobject__ set"""
+
+        if __xpmobject__:
+            return object.__new__(cls)
+
+        o = object.__new__(cls.__xpmtype__.configtype)
+        o.__init__(*args, **kwargs)
+        return o

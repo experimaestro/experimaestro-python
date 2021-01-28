@@ -12,8 +12,8 @@ the config/task instance, as in the example below:
 
     ```py3 linenums="1"
 
-        model = Model1._(layers=3)
-        learnedmodel = Learn._(epochs=100)
+        model = Model1(layers=3)
+        learnedmodel = Learn(epochs=100)
         learnedmodel.model = model
         learnedmodel.submit()
         ```
@@ -61,7 +61,7 @@ tag(value: Union[str, int, float, bool])
 For example,
 
 ```py3
-model = MyModel._(epochs=tag(100))
+model = MyModel(epochs=tag(100))
 ```
 
 To retrieve tags, use the `tags` method().
@@ -85,13 +85,13 @@ For each experiment (identified by its name), a folder is created automatically.
 
 ```py3
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
-    model = c.Model._()
+    model = c.Model()
 
     # Experimental plan
     models = {}
     for dlen_max, n_tokens in product([50, 200], [100, 1000]):
-        data = c.Data._(n_tokens=tag(n_tokens))
-        learn = c.Learn._(data=data, model=model, dlen_max=tag(dlen_max))
+        data = c.Data(n_tokens=tag(n_tokens))
+        learn = c.Learn(data=data, model=model, dlen_max=tag(dlen_max))
         learn.add_dependencies(token.dependency(1))
         models[tagspath(learn)] = learn.submit().jobpath
 

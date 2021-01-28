@@ -16,7 +16,7 @@ def test_object_default():
 
 @config()
 class B:
-    a: Param[A] = A._(x=3)
+    a: Param[A] = A(x=3)
 
 
 @config()
