@@ -1,7 +1,7 @@
-# 0.8
+# 0.8.1
 
-- Breaking change : configuration are accessed through \_
-- Type hints
+- Fixes for (un)serialization (through pickle \_\_getnewargs_ex\_\_)
+- Full type hint support
 - Initial tqdm support
 
 # 0.7.12
