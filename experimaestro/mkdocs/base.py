@@ -16,7 +16,7 @@ import mkdocs.config.config_options as config_options
 from mkdocs.structure.files import File as MkdocFile
 from mkdocs.structure.pages import Page as MkdocPage
 from mkdocs.structure.nav import Navigation as MkdocNavigation
-from experimaestro.core.objects import Config, Task
+from experimaestro.core.objects import Config
 
 MODULEPATH = Path(__file__).parent
 
@@ -48,6 +48,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
         ("name", config_options.Type(str, default="Tasks and configurations")),
         ("path", config_options.Type(str, default="xpm.md")),
         ("modules", config_options.Type(list)),
+        ("init", config_options.Type(list)),
     )
 
     def __init__(self, *args, **kwargs):
@@ -56,6 +57,10 @@ class Documentation(mkdocs.plugins.BasePlugin):
         self.tasks = set()
 
     def on_config(self, config, **kwargs):
+        # Import modules in init
+        for module_name in self.config["init"]:
+            importlib.import_module(module_name)
+
         # Include documentation pages in config
         self.xpmpath = self.config["path"]
         for name_packagename in (names for names in self.config["modules"]):
@@ -80,8 +85,12 @@ class Documentation(mkdocs.plugins.BasePlugin):
                     for _, member in inspect.getmembers(
                         module, lambda t: inspect.isclass(t) and issubclass(t, Config)
                     ):
-                        d = self.tasks if issubclass(member, Task) else self.configs
-                        d.add(member.__xpm__)
+                        d = (
+                            self.tasks
+                            if hasattr(member.__xpmtype__, "task")
+                            else self.configs
+                        )
+                        d.add(member.__xpmtype__)
                 except Exception as e:
                     logging.exception(
                         "Error while reading definitions file %s: %s", path, e

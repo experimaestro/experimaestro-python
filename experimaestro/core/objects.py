@@ -534,7 +534,11 @@ class ConfigInformation:
             for part in definition["type"].split("."):
                 cls = getattr(cls, part)
 
+            # Creates an object (and not a config)
             o = cls.__new__(cls, __xpmobject__=True)
+
+            # And calls the parameter-less initialization
+            o.__init__()
 
             if "typename" in definition:
                 o.__xpmtypename__ = definition["typename"]
@@ -557,6 +561,7 @@ class ConfigInformation:
                 v = ConfigInformation._objectFromParameters(value, objects)
                 setattr(o, name, v)
 
+            # Calls post-init
             postinit = getattr(o, "__postinit__", None)
             if postinit is not None:
                 postinit()
@@ -589,7 +594,11 @@ class ConfigInformation:
         if o is not None:
             return o
 
+        # Creates an object (and not a config)
         o = self.xpmtype.objecttype.__new__(self.xpmtype.objecttype, __xpmobject__=True)
+        # And calls the parameter-less initialization
+        o.__init__()
+
         objects[id(self)] = o
 
         for key, param in self.xpmtype.arguments.items():
