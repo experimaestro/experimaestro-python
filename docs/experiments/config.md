@@ -99,7 +99,10 @@ class MyConfig:
         y: The parameter y
     """
     # With default value
-    x: Param[type] = default
+    x: Param[type] = value
+
+    # Alternative syntax, useful to avoid class properties
+    x: Annotated[type, default(value)]
 
     # Without default value
     y: Param[type]
@@ -107,7 +110,7 @@ class MyConfig:
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument
-- `default` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_.
+- `value` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_. This allows to add new parameters without changing the signature of past experiments (if the configuration is equivalent with the default value of course, otherwise do not use a default value!).
 
 ### Options
 

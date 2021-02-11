@@ -560,6 +560,9 @@ class ConfigInformation:
             for name, value in definition["fields"].items():
                 v = ConfigInformation._objectFromParameters(value, objects)
                 setattr(o, name, v)
+                assert (
+                    getattr(o, name) is v
+                ), f"Problem with deserialization {name} of {o.__class__}"
 
             # Calls post-init
             postinit = getattr(o, "__postinit__", None)

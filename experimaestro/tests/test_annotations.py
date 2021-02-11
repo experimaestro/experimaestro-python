@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, List
 from experimaestro.core.arguments import Option, pathgenerator
 import pytest
-from experimaestro import config, Config, Param, task
+from experimaestro import config, Config, Param, task, default
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 from typing_extensions import Annotated
@@ -60,6 +60,7 @@ def test_type_hinting():
 
         x: Param[int]
         y: Param[float] = 2.3
+        y2: Annotated[float, default(2.3)]
         z: Param[Optional[float]]
         t: Param[List[float]]
         w: Param[int]
@@ -80,6 +81,11 @@ def test_type_hinting():
     assert isinstance(arg_y.type, types.FloatType)
     assert arg_y.default == 2.3
     assert not arg_y.required
+    arg_y2 = ot.getArgument("y2")
+    assert arg_y2.name == "y2"
+    assert isinstance(arg_y2.type, types.FloatType)
+    assert arg_y2.default == 2.3
+    assert not arg_y2.required
 
     arg_z = ot.getArgument("z")
     assert arg_z.name == "z"

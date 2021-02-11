@@ -52,10 +52,13 @@ class ArgumentOptions:
         optionaltype = get_optional(typehint)
         type = Type.fromType(optionaltype or typehint)
 
-        defaultvalue = getattr(originaltype, name, None)
-        self.kwargs["default"] = defaultvalue
+        if "default" not in self.kwargs or self.kwargs["default"] is None:
+            defaultvalue = getattr(originaltype, name, None)
+            self.kwargs["default"] = defaultvalue
 
-        self.kwargs["required"] = (optionaltype is None) and (defaultvalue is None)
+        self.kwargs["required"] = (optionaltype is None) and (
+            self.kwargs["default"] is None
+        )
 
         return Argument(name, type, **self.kwargs)
 
@@ -100,6 +103,16 @@ class help(TypeAnnotation):
 
     def annotate(self, options: ArgumentOptions):
         options.kwargs["help"] = self.text
+
+
+class default(TypeAnnotation):
+    """Adds a default value (useful when we have problems with setattr and class properties)"""
+
+    def __init__(self, value):
+        self.value = value
+
+    def annotate(self, options: ArgumentOptions):
+        options.kwargs["default"] = self.value
 
 
 class pathgenerator(TypeAnnotation):
