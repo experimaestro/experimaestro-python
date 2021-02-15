@@ -39,6 +39,13 @@ class Argument:
     def __repr__(self):
         return "Param[{name}:{type}]".format(**self.__dict__)
 
+    def validate(self, value):
+        value = self.type.validate(value)
+        if self.checker:
+            if not self.checker.check(value):
+                raise ValueError("Value %s is not valid", value)
+        return value
+
 
 class ArgumentOptions:
     """Helper class when using type hints"""

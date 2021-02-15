@@ -1,7 +1,14 @@
-class Checker:
+from experimaestro.core.arguments import TypeAnnotation, ArgumentOptions
+
+
+class Checker(TypeAnnotation):
     def check(self, value):
         """Check the value"""
         raise NotImplementedError()
+
+    def annotate(self, options: ArgumentOptions):
+        assert options.kwargs.get("checker", None) is None
+        options.kwargs["checker"] = self
 
 
 class Choices(Checker):

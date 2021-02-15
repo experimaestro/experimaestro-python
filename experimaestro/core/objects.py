@@ -195,7 +195,8 @@ class ConfigInformation:
     def set(self, k, v, bypass=False):
         # Not an argument, bypass
         if k not in self.xpmtype.arguments:
-            return object.__getattribute__(self, self.pyobject, k)
+            setattr(self.pyobject, k, v)
+            return
 
         if self._sealed:
             raise AttributeError("Object is read-only")
@@ -206,7 +207,7 @@ class ConfigInformation:
                 if not bypass and argument.generator:
                     raise AssertionError("Property %s is read-only" % (k))
                 if v is not None:
-                    self.values[k] = argument.type.validate(v)
+                    self.values[k] = argument.validate(v)
                 elif argument.required:
                     raise AttributeError("Cannot set required attribute to None")
                 else:
