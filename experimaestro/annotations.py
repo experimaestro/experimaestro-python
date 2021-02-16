@@ -136,6 +136,7 @@ class param:
         ignored: Optional[bool] = None,
         help: Optional[str] = None,
         checker: Optional[Checker] = None,
+        constant: bool = False,
     ):
         # Determine if required
         self.name = name
@@ -147,6 +148,7 @@ class param:
         self.generator = None
         self.checker = checker
         self.subparam = False
+        self.constant = constant
 
     def __call__(self, tp):
         # Don't annotate in task mode
@@ -173,6 +175,7 @@ class param:
             default=self.default,
             checker=self.checker,
             subparam=self.subparam,
+            constant=self.constant,
         )
         xpmtype.addArgument(argument)
 
@@ -221,15 +224,16 @@ STDERR = lambda jobcontext: "%s.err" % jobcontext.name
 STDOUT = lambda jobcontext: "%s.out" % jobcontext.name
 
 
-class ConstantParam(param):
+class constant(param):
     """
     An constant argument (useful for versionning tasks)
     """
 
-    def __init__(self, name: str, value, xpmtype=None, help=""):
-        super().__init__(name, type=xpmtype or Type.fromType(type(value)), help=help)
-        self.generator = lambda jobcontext: objects.clone(value)
+    def __init__(self, name: str, value, type=None, help=""):
+        super().__init__(name, default=value, constant=True, type=type, help=help)
 
+
+ConstantParam = constant
 
 # --- Cache
 

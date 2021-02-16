@@ -36,11 +36,12 @@ it is possible to shorten the definition as:
 
 ### Object life cycle
 
-During task execution,
+During task execution, the objects are constructed following
+this algorithm:
 
-- The object is constructed using `__init__(self)`
+- The object is constructed using `self.__init__()`
 - The attributes are set (e.g. `gamma` in the example above)
-- `self.__postinit__()` is called
+- `self.__postinit__()` is called (if the method exists)
 
 ## Tasks
 
@@ -111,6 +112,19 @@ class MyConfig:
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument
 - `value` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_. This allows to add new parameters without changing the signature of past experiments (if the configuration is equivalent with the default value of course, otherwise do not use a default value!).
+
+### Constants
+
+Constants are special parameters that cannot be modified. They are useful to note that the
+behavior of a configuration/task has changed, and thus that the signature should not be the
+same (as the result of the processing will differ).
+
+```py3
+@config()
+class MyConfig:
+    # Constant
+    version: Constant[str] = "2.1"
+```
 
 ### Options
 

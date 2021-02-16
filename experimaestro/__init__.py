@@ -7,6 +7,7 @@ from .annotations import (
     param,
     subparam,
     ConstantParam,
+    constant,
     option,
     pathoption,
     cache,
@@ -26,6 +27,7 @@ from .core.arguments import (
     SubParam,
     Option,
     Annotated,
+    Constant,
     # Annotations helpers
     help,
     pathgenerator,

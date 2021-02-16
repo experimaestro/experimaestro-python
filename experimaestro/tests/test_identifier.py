@@ -3,7 +3,7 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, Param, param, task, option
+from experimaestro import config, Param, param, task, option, Constant
 from experimaestro.core.arguments import Option, pathgenerator
 from typing_extensions import Annotated
 
@@ -181,3 +181,23 @@ def test_taskconfigidentifier():
 
     assert_equal(Task(x=1).submit(dryrun=True), Task(x=1).submit(dryrun=True))
     assert_notequal(Task(x=2).submit(dryrun=True), Task(x=1).submit(dryrun=True))
+
+
+def test_constant():
+    """Test if constants are taken into account for signature computation"""
+
+    @config("test.constant")
+    class A1:
+        version: Constant[int] = 1
+
+    @config("test.constant")
+    class A1bis:
+        version: Constant[int] = 1
+
+    assert_equal(A1(), A1bis())
+
+    @config("test.constant")
+    class A2:
+        version: Constant[int] = 2
+
+    assert_notequal(A1(), A2())

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, List
 from experimaestro.core.arguments import Option, pathgenerator
 import pytest
-from experimaestro import config, Config, Param, task, default
+from experimaestro import config, Constant, Param, task, default
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 from typing_extensions import Annotated
@@ -112,6 +112,19 @@ def test_type_hinting():
     assert arg_option.name == "option"
     assert isinstance(arg_option.type, types.StrType)
     assert arg_option.ignored
+
+
+def test_constant():
+    @config()
+    class A:
+        x: Constant[int] = 2
+
+    a = A()
+    assert a.x == 2, "Constant value not set"
+
+    # We should not be able to change the value
+    with pytest.raises(AttributeError):
+        a.x = 3
 
 
 def test_inheritance():

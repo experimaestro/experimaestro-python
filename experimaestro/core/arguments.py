@@ -18,6 +18,7 @@ class Argument:
         ignored=None,
         default=None,
         checker=None,
+        constant=False,
         subparam=False,
     ):
         required = (default is None) if required is None else required
@@ -30,11 +31,16 @@ class Argument:
         self.help = help
         self.checker = checker
         self.type = type
+        self.constant = constant
         self.ignored = self.type.ignore if ignored is None else ignored
         self.required = required
         self.default = default
         self.generator = generator
         self.subparam = subparam
+
+        assert (
+            not self.constant or self.default is not None
+        ), "Cannot be constant without default"
 
     def __repr__(self):
         return "Param[{name}:{type}]".format(**self.__dict__)
@@ -52,9 +58,11 @@ class ArgumentOptions:
 
     def __init__(self):
         self.kwargs = {}
+        self.constant = False
 
     def create(self, name, originaltype, typehint):
         from experimaestro.core.types import Type
+        import experimaestro.core.objects as objects
 
         optionaltype = get_optional(typehint)
         type = Type.fromType(optionaltype or typehint)
@@ -128,3 +136,12 @@ class pathgenerator(TypeAnnotation):
 
     def annotate(self, options: ArgumentOptions):
         options.kwargs["generator"] = PathGenerator(self.value)
+
+
+class ConstantHint(TypeAnnotation):
+    def annotate(self, options: ArgumentOptions):
+        options.kwargs["constant"] = True
+
+
+constantHint = ConstantHint()
+Constant = Annotated[T, constantHint]

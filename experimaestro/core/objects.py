@@ -98,8 +98,10 @@ class HashComputer:
 
                 # Argument value
                 argvalue = getattr(value, argument.name, None)
-                if argument.default and argument.default == argvalue:
-                    # No update if same value
+                if not argument.constant and (
+                    argument.default and argument.default == argvalue
+                ):
+                    # No update if same value (and not constant)
                     continue
 
                 # Hash name
@@ -204,8 +206,8 @@ class ConfigInformation:
         try:
             argument = self.xpmtype.arguments.get(k, None)
             if argument:
-                if not bypass and argument.generator:
-                    raise AssertionError("Property %s is read-only" % (k))
+                if not bypass and (argument.generator or argument.constant):
+                    raise AttributeError("Property %s is read-only" % (k))
                 if v is not None:
                     self.values[k] = argument.validate(v)
                 elif argument.required:
@@ -703,9 +705,9 @@ class TypeConfig(Generic[T]):
         for name, value in xpmtype.arguments.items():
             if name not in kwargs:
                 if value.default is not None:
-                    self.__xpm__.set(name, clone(value.default))
+                    self.__xpm__.set(name, clone(value.default), bypass=True)
                 elif not value.required:
-                    self.__xpm__.set(name, None)
+                    self.__xpm__.set(name, None, bypass=True)
 
     def tag(self, name, value) -> "Config":
         self.__xpm__.addtag(name, value)
