@@ -762,6 +762,15 @@ class TypeConfig(Generic[T]):
 class Config:
     """Base type for all objects in python interface"""
 
+    @classmethod
+    def __getxpmtype__(cls):
+        xpmtype = cls.__dict__.get("__xpmtype__", None)
+        if xpmtype is None:
+            from experimaestro.core.types import ObjectType
+
+            return ObjectType(cls)
+        return xpmtype
+
     def __getnewargs_ex__(self):
         # __new__ will be called with those arguments when unserializing
         return ((), {"__xpmobject__": True})
@@ -772,6 +781,6 @@ class Config:
         if __xpmobject__:
             return object.__new__(cls)
 
-        o = object.__new__(cls.__xpmtype__.configtype)
+        o = object.__new__(cls.__getxpmtype__().configtype)
         o.__init__(*args, **kwargs)
         return o

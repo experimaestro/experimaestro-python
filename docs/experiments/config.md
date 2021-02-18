@@ -7,7 +7,7 @@ Defining experiments is based on _config(urations)_ and _tasks_. Tasks are confi
 ```
 
 defines a configuration with identifier `identifier`, which could be any string.
-If not given,it is the concatenation of the module full name with the class/function
+If not given, it is the concatenation of the module full name with the class/function
 name (lowercased).
 
 !!! example
@@ -22,15 +22,14 @@ name (lowercased).
 defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
 
 When an identifier is not given, it is computed as `__module__.__qualname__`. In that case,
-it is possible to shorten the definition as:
+it is possible to shorten the definition using the `Config` class as a base class.
 
 !!! example
 
     ```py3
     from experimaestro import Param, Config
 
-    @config()
-    class MyModel():
+    class MyModel(Config):
         gamma: Param[float]
     ```
 

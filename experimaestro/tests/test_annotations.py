@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, List
 from experimaestro.core.arguments import Option, pathgenerator
 import pytest
-from experimaestro import config, Constant, Param, task, default
+from experimaestro import config, Constant, Param, task, default, Config
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 from typing_extensions import Annotated
@@ -112,6 +112,32 @@ def test_type_hinting():
     assert arg_option.name == "option"
     assert isinstance(arg_option.type, types.StrType)
     assert arg_option.ignored
+
+
+def test_config_class():
+    """Test configuration declared as a class"""
+
+    class A(Config):
+        x: Param[int]
+
+    a = A(x=1)
+    assert a.x == 1
+
+    class B(A):
+        y: Param[int]
+
+    b = B(x=1, y=2)
+    assert b.x == 1
+    assert b.y == 2
+
+    class D(Config):
+        x: Param[int]
+
+    class C(Config):
+        d: Param[D]
+
+    c = C(d=D(x=1))
+    assert c.d.x == 1
 
 
 def test_constant():

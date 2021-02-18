@@ -94,10 +94,10 @@ class Type:
             return key()
 
         if isinstance(key, Config):
-            return key.__xpmtype__
+            return key.__getxpmtype__()
 
         if inspect.isclass(key) and issubclass(key, Config):
-            return key.__xpmtype__
+            return key.__getxpmtype__()
 
         t = typingutils.get_list(key)
         if t:
@@ -170,7 +170,9 @@ class ObjectType(Type):
 
         # Create the type-specific configuration class
         __configbases__ = tuple(
-            s.__xpmtype__.configtype for s in tp.__bases__ if issubclass(s, Config)
+            s.__getxpmtype__().configtype
+            for s in tp.__bases__
+            if issubclass(s, Config) and (s is not Config)
         ) or (TypeConfig,)
 
         self.configtype = type("TypeConfig", __configbases__ + (self.basetype,), {})
