@@ -139,7 +139,7 @@ class param:
 
     def __call__(self, tp):
         # Don't annotate in task mode
-        tp.__xpmtype__.addAnnotation(self)
+        tp.__getxpmtype__().addAnnotation(self)
         return tp
 
     def process(self, xpmtype):
