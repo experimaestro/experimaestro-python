@@ -1,3 +1,5 @@
+- Use `Task` as base class instead of `@task`
+
 # 0.8.3
 
 - Possible to use `Config` as base class instead of `@config`

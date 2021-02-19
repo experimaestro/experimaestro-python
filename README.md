@@ -41,7 +41,7 @@ Under the curtain,
 import logging
 logging.basicConfig(level=logging.DEBUG)
 from pathlib import Path
-from experimaestro import *
+from experimaestro import Task, Param, experiment, progress
 import click
 import time
 import os
@@ -57,16 +57,14 @@ def slowdown(N: int):
 
 # --- Define the tasks
 
-@task()
-class Say:
+class Say(Task):
     word: Param[str]
 
     def execute(self):
         slowdown(len(self.word))
         print(self.word.upper(),)
 
-@task()
-class Concat:
+class Concat(Task):
     strings: Param[List[Say]]
 
     def execute(self):

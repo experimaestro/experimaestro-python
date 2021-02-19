@@ -784,3 +784,9 @@ class Config:
         o = object.__new__(cls.__getxpmtype__().configtype)
         o.__init__(*args, **kwargs)
         return o
+
+
+class Task(Config):
+    """base class for tasks"""
+
+    pass

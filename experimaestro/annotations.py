@@ -95,30 +95,17 @@ class task(config):
 
     def __init__(self, identifier=None, pythonpath=None, description=None):
         super().__init__(identifier, description)
-        self.pythonpath = sys.executable if pythonpath is None else pythonpath
+        self.pythonpath = pythonpath
 
     def __call__(self, tp) -> type:
         # Register the type
         tp = super().__call__(tp)
 
-        tp.__xpmtype__.addAnnotation(self)
+        def factory(xpmtype):
+            return xpmtype.getpythontaskcommand(self.pythonpath)
+
+        tp.__getxpmtype__().taskcommandfactory = factory
         return tp
-
-    def process(self, xpmtype):
-        # Construct command
-        import experimaestro.commandline as commandline
-
-        command = commandline.Command()
-        command.add(commandline.CommandPath(self.pythonpath))
-        command.add(commandline.CommandString("-m"))
-        command.add(commandline.CommandString("experimaestro"))
-        command.add(commandline.CommandString("run"))
-        command.add(commandline.CommandParameters())
-        commandLine = commandline.CommandLine()
-        commandLine.add(command)
-
-        assert xpmtype.task is None
-        xpmtype.task = commandline.CommandLineTask(commandLine)
 
 
 # --- argument related annotations

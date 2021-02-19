@@ -133,6 +133,9 @@ class ObjectType(Type):
         """Creates a type"""
         from .objects import Config
 
+        self.taskcommandfactory = None
+        self.task = None
+
         # Get the identifier
         if identifier is None and "__xpmid__" in tp.__dict__:
             identifier = Identifier(getattr(tp, "__xpmid__", None))
@@ -197,14 +200,28 @@ class ObjectType(Type):
         assert not self.__initialized__
         self.annotations.append(annotation)
 
+    def getpythontaskcommand(self, pythonpath=None):
+        import experimaestro.commandline as commandline
+
+        command = commandline.Command()
+        command.add(commandline.CommandPath(pythonpath or sys.executable))
+        command.add(commandline.CommandString("-m"))
+        command.add(commandline.CommandString("experimaestro"))
+        command.add(commandline.CommandString("run"))
+        command.add(commandline.CommandParameters())
+        commandLine = commandline.CommandLine()
+        commandLine.add(command)
+
+        return commandline.CommandLineTask(commandLine)
+
     def __initialize__(self):
         """Effectively parses information"""
-
         # Check if not initialized
         if self.__initialized__:
             return
-
         self.__initialized__ = True
+
+        from .objects import Task
 
         # Get the module
         module = inspect.getmodule(self.originaltype)
@@ -213,13 +230,18 @@ class ObjectType(Type):
         self._package = module.__package__
 
         # The class of the object
-        self.task = None
 
         self._arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))
 
         # Add arguments from annotations
         for annotation in self.annotations:
             annotation.process(self)
+
+        # Add task
+        if self.taskcommandfactory is not None:
+            self.task = self.taskcommandfactory(self)
+        elif issubclass(self.basetype, Task):
+            self.task = self.getpythontaskcommand()
 
         # Get description from documentation
         paramhelp = {}
