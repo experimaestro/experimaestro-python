@@ -1,3 +1,13 @@
+# 0.8.3
+
+- Possible to use `Config` as base class instead of `@config`
+- Value checkers annotations
+- Constant values are now properly handled
+
+# 0.8.2
+
+- Alternative annotation for default values (to avoid a bug in e.g. Torch)
+
 # 0.8.1
 
 - Fixes for (un)serialization (through pickle \_\_getnewargs_ex\_\_)
