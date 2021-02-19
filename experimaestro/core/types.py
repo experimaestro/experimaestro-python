@@ -1,5 +1,4 @@
 import inspect
-import logging
 import sys
 from typing import Union, Dict, Iterator, List, Type as TypingType
 from collections import ChainMap
@@ -9,7 +8,7 @@ import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
 import typing_extensions
-from .objects import Config, TypeConfig
+from .objects import Config, Task, TypeConfig
 from .arguments import Argument
 
 
@@ -133,6 +132,7 @@ class ObjectType(Type):
         """Creates a type"""
         from .objects import Config
 
+        # Task related attributes
         self.taskcommandfactory = None
         self.task = None
 
@@ -302,7 +302,7 @@ class ObjectType(Type):
 
     def parents(self) -> Iterator["ObjectType"]:
         for tp in self.basetype.__bases__:
-            if issubclass(tp, Config) and tp not in [Config]:
+            if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpmtype__
 
     def validate(self, value):

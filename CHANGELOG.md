@@ -1,3 +1,4 @@
+- Improvement to documentation
 - Use `Task` as base class instead of `@task`
 
 # 0.8.3
