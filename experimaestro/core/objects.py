@@ -667,10 +667,7 @@ def cache(fn, name: str):
     return __call__
 
 
-T = TypeVar("T")
-
-
-class TypeConfig(Generic[T]):
+class TypeConfig:
     """Class of configuration objects"""
 
     def __init__(self, **kwargs):
@@ -734,7 +731,7 @@ class TypeConfig(Generic[T]):
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-    def instance(self, context: GenerationContext = None) -> T:
+    def instance(self, context: GenerationContext = None):
         """Return an instance with the current values"""
         return self.__xpm__.fromConfig(context)
 
@@ -759,6 +756,9 @@ class TypeConfig(Generic[T]):
         raise AssertionError("Cannot ask the job path of a non submitted task")
 
 
+T = TypeVar("T")
+
+
 class Config:
     """Base type for all objects in python interface"""
 
@@ -775,7 +775,9 @@ class Config:
         # __new__ will be called with those arguments when unserializing
         return ((), {"__xpmobject__": True})
 
-    def __new__(cls, *args, __xpmobject__=False, **kwargs):
+    def __new__(
+        cls: Type[T], *args, __xpmobject__=False, **kwargs
+    ) -> Union[TypeConfig, T]:
         """Returns an instance of a TypeConfig when called __xpmobject__ set"""
 
         if __xpmobject__:
