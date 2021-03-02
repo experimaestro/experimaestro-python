@@ -14,15 +14,7 @@ nav:
   - FAQ: faq.md
 
 theme:
-  name: material
-  feature:
-    tabs: true
-  palette:
-    primary: "green"
-    accent: "green"
-  font:
-    text: "Roboto"
-    code: "Roboto Mono"
+  name: readthedocs
 
 markdown_extensions:
   # https://pypi.org/project/markdown-include
