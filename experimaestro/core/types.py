@@ -268,11 +268,19 @@ class ObjectType(Type):
                         if options is not None:
                             if options.kwargs.get("help", None) is None:
                                 options.kwargs["help"] = paramhelp.get(key, None)
-                            self.addArgument(
-                                options.create(
-                                    key, self.objecttype, typehint.__args__[0]
+                            try:
+                                self.addArgument(
+                                    options.create(
+                                        key, self.objecttype, typehint.__args__[0]
+                                    )
                                 )
-                            )
+                            except Exception:
+                                logger.error(
+                                    "while adding argument %s of %s",
+                                    key,
+                                    self.objecttype,
+                                )
+                                raise
 
     @property
     def arguments(self):

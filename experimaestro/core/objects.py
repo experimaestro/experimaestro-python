@@ -118,7 +118,9 @@ class HashComputer:
 def updatedependencies(dependencies, value: "Config", path):
     """Search recursively jobs to add them as dependencies"""
     if isinstance(value, Config):
-        if value.__xpmtype__.task:
+        if value.__xpm__._task is not None:
+            dependencies.add(value.__xpm__._task.__xpm__.dependency())
+        elif value.__xpmtype__.task:
             dependencies.add(value.__xpm__.dependency())
         else:
             value.__xpm__.updatedependencies(dependencies, path)
@@ -278,13 +280,18 @@ class ConfigInformation:
         if self._sealed:
             return
 
+        # First, process all non-generated attributes
         for k, argument in self.xpmtype.arguments.items():
-            if argument.generator:
-                self.set(k, argument.generator(job), bypass=True)
-            elif hasattr(self.pyobject, k):
+            if not argument.generator and k in self.values:
                 v = getattr(self.pyobject, k)
                 if isinstance(v, Config):
                     v.__xpm__.seal(job)
+
+        # Second, process generated ones
+        for k, argument in self.xpmtype.arguments.items():
+            if argument.generator:
+                self.set(k, argument.generator(job), bypass=True)
+
         self._sealed = True
 
     @property
@@ -327,7 +334,8 @@ class ConfigInformation:
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
         )
-        self.seal(self.job)
+
+        # Validate the object
         try:
             self.validate()
         except Exception as e:
@@ -337,6 +345,9 @@ class ConfigInformation:
                 self._initinfo,
             )
             raise e
+
+        # Now, seal the object
+        self.seal(self.job)
 
         # --- Search for dependencies
         self.updatedependencies(self.job.dependencies, [])

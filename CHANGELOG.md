@@ -1,3 +1,7 @@
+- Validate before sealing
+- Generate values when validation is done
+- Fixed bug with dependencies of task returning configurations
+
 # 0.8.4
 
 - Improvement to documentation
