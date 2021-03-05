@@ -14,7 +14,7 @@ tqdm
 docstring_parser
 
 # Avoid version 0.10.4
-watchdog < 0.10.4 
+watchdog > 2.0.0
 
 # Configuration
 marshmallow

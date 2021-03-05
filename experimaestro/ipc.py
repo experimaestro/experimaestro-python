@@ -24,7 +24,9 @@ class IPCom:
         if not self.observer.is_alive():
             # Just in case...
             self.observer.start()
-        return self.observer.schedule(watcher, path, recursive=recursive)
+        return self.observer.schedule(
+            watcher, str(path.absolute()), recursive=recursive
+        )
 
     def fsunwatch(self, watcher):
         self.observer.unschedule(watcher)

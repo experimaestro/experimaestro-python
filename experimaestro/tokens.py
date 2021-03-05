@@ -184,7 +184,7 @@ class CounterToken(Token, FileSystemEventHandler):
 
         # Watched path
         self.watchedpath = str(path.absolute())
-        self.watcher = ipcom().fswatch(self, str(path.absolute()), recursive=True)
+        self.watcher = ipcom().fswatch(self, self.path, recursive=True)
         logger.info("Watching %s", self.watchedpath)
 
     def _update(self):
