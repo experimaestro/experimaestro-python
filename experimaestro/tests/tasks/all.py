@@ -28,9 +28,8 @@ class Say:
     word: Param[str]
 
     def execute(self):
-        print(
-            self.word.upper(),
-        )
+        self.out.parent.mkdir()
+        self.out.write_text(self.word.upper())
 
 
 @param("strings", type=List[Say], help="Strings to concat")
@@ -69,6 +68,8 @@ class Fail:
     def touch(self):
         while self.__xpm__.job.state.notstarted():
             time.sleep(0.05)
+
+        self.wait.parent.mkdir()
         with open(self.wait, "w") as out:
             out.write("hello")
 

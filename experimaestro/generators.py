@@ -1,7 +1,7 @@
 import inspect
 from pathlib import Path
 from typing import Callable, Union
-
+from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
 from experimaestro.core.objects import GenerationContext
 
 
@@ -13,18 +13,16 @@ class PathGenerator:
 
     def __call__(self, context: GenerationContext):
         if inspect.isfunction(self.path):
-            path = context.path / self.path(context)  # type: Path
+            path = context.currentpath() / self.path(context)  # type: Path
         else:
-            path = context.path / self.path  # type: Path
-
-        if not context.registerpath(path):
-            i = 0
-            while True:
-                i += 1
-                newpath = path.with_suffix(f".{i}{path.suffix}")
-                if context.registerpath(newpath):
-                    break
-
-            path = newpath
+            path = context.currentpath() / Path(self.path)
 
         return path
+
+
+class pathgenerator(TypeAnnotation):
+    def __init__(self, value):
+        self.value = value
+
+    def annotate(self, options: ArgumentOptions):
+        options.kwargs["generator"] = PathGenerator(self.value)

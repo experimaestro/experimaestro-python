@@ -7,10 +7,11 @@ import io
 import fasteners
 import inspect
 import importlib
-from typing import Dict, Generic, Optional, Set, Type, TypeVar, Union, get_type_hints
-from experimaestro.utils import classproperty, logger
+from typing import Any, Dict, Optional, Set, Type, TypeVar, Union, get_type_hints
+from experimaestro.utils import logger
 import sys
 from contextlib import contextmanager
+from experimaestro.core.types import ObjectType
 
 
 class Identifier:
@@ -161,13 +162,68 @@ class GenerationContext:
         raise NotImplementedError()
 
     def __init__(self):
-        self.paths: Set[Path] = set()
+        self._configpath = Path("out")
 
-    def registerpath(self, path: Path):
-        if path in self.paths:
-            return False
-        self.paths.add(path)
-        return True
+    def currentpath(self) -> Path:
+        """Returns the configuration folder"""
+        return self.path / self._configpath
+
+    @contextmanager
+    def push(self, key: str):
+        """Push a new key to contextualize paths"""
+        p = self._configpath
+        try:
+            self._configpath = p / key
+            yield key
+        finally:
+            self._configpath = p
+
+
+class ConfigProcessing:
+    """Allows to perform an operation on all nested configurations"""
+
+    def __init__(self):
+        pass
+
+    def preprocess(self, config: "Config"):
+        return True, None
+
+    def postprocess(self, config: "Config", values: Dict[str, Any]):
+        return config
+
+    @contextmanager
+    def list(self, i: int):
+        yield i
+
+    @contextmanager
+    def map(self, k: str):
+        yield k
+
+    def __call__(self, x):
+        if isinstance(x, Config):
+            info = x.__xpm__  # type: ConfigInformation
+
+            flag, value = self.preprocess(x)
+
+            if not flag:
+                # Stop processing and returns value
+                return value
+
+            result = {}
+            for arg, v in info.xpmvalues():
+                if v is not None:
+                    with self.map(arg.name):
+                        result[arg.name] = self(v)
+            return self.postprocess(x, result)
+
+        if isinstance(x, list):
+            result = []
+            for i, sv in enumerate(x):
+                with self.list(i):
+                    result.append(self(sv))
+            return result
+
+        return x
 
 
 class ConfigInformation:
@@ -179,13 +235,13 @@ class ConfigInformation:
     def __init__(self, pyobject):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
-        self.xpmtype = pyobject.__xpmtype__  # type: experimaestro.core.types.ObjectType
+        self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
         self.values = {}
 
         # Meta-informations
         self._tags = {}
         self._initinfo = {}
-        self._task = None  # type: Task
+        self._task = None  # type: Optional[Task]
 
         # State information
         self.job = None
@@ -203,7 +259,7 @@ class ConfigInformation:
             return self.values[name]
 
         # Not an argument, bypass
-        return object.__getattribute__(self, self.pyobject, name)
+        return object.__getattribute__(self.pyobject, name)
 
     def set(self, k, v, bypass=False):
         # Not an argument, bypass
@@ -284,24 +340,35 @@ class ConfigInformation:
             if hasattr(self.pyobject, "__validate__"):
                 self.pyobject.__validate__()
 
-    def seal(self, job: "experimaestro.scheduler.Job"):
+    def seal(self, context: GenerationContext):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
-        if self._sealed:
-            return
 
-        # First, process all non-generated attributes
-        for k, argument in self.xpmtype.arguments.items():
-            if not argument.generator and k in self.values:
-                v = getattr(self.pyobject, k)
-                if isinstance(v, Config):
-                    v.__xpm__.seal(job)
+        class Sealer(ConfigProcessing):
+            def preprocess(self, config: Config):
+                return not config.__xpm__._sealed, config
 
-        # Second, process generated ones
-        for k, argument in self.xpmtype.arguments.items():
-            if argument.generator:
-                self.set(k, argument.generator(job), bypass=True)
+            def postprocess(self, config: Config, values):
+                # Generate values
+                for k, argument in config.__xpmtype__.arguments.items():
+                    if argument.generator:
+                        config.__xpm__.set(k, argument.generator(context), bypass=True)
 
-        self._sealed = True
+                config.__xpm__._sealed = True
+
+        Sealer()(self.pyobject)
+
+        # # First, process all non-generated attributes
+        # for k, argument in self.xpmtype.arguments.items():
+        #     if not argument.generator and k in self.values:
+        #         v = getattr(self.pyobject, k)
+        #         if isinstance(v, Config):
+        #             with context.push(k):
+        #                 v.__xpm__.seal(context)
+
+        # # Second, process generated ones
+        # for k, argument in self.xpmtype.arguments.items():
+        #     if argument.generator:
+        #         self.set(k, argument.generator(context), bypass=True)
 
     @property
     def identifier(self) -> Identifier:
@@ -338,7 +405,7 @@ class ConfigInformation:
             raise ValueError("%s is not a task" % self.xpmtype)
 
         # --- Submit the job
-        from experimaestro.scheduler import Job, Scheduler
+        from experimaestro.scheduler import Job, Scheduler, JobContext
 
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
@@ -356,7 +423,7 @@ class ConfigInformation:
             raise e
 
         # Now, seal the object
-        self.seal(self.job)
+        self.seal(JobContext(self.job))
 
         # --- Search for dependencies
         self.updatedependencies(self.job.dependencies, [])
@@ -597,50 +664,50 @@ class ConfigInformation:
 
         return o
 
-    @staticmethod
-    def _fromPython(context: Optional[GenerationContext], param, value, objects):
-        if hasattr(param, "generator") and param.generator:
-            return param.generator(context)
+    class FromPython(ConfigProcessing):
+        def __init__(self, context: GenerationContext):
+            self.context = context
+            self.objects = {}
 
-        if isinstance(value, TypeConfig):
-            return value.__xpm__._fromConfig(context, objects)
+        def preprocess(self, config: "Config"):
+            v = self.objects.get(id(config))
+            return v is None, v
 
-        if isinstance(value, list):
-            return [
-                ConfigInformation._fromPython(context, param.type.type, x, objects)
-                for x in value
-            ]
+        def postprocess(self, config: "Config", values: Dict[str, Any]):
+            # Creates an object (and not a config)
+            o = config.__xpmtype__.objecttype.__new__(
+                config.__xpmtype__.objecttype, __xpmobject__=True
+            )
+            # And calls the parameter-less initialization
+            o.__init__()
 
-        return value
+            self.objects[id(self)] = o
 
-    def _fromConfig(
-        self, context: Optional[GenerationContext], objects: Dict[int, object]
-    ):
-        o = objects.get(id(self), None)
-        if o is not None:
+            # Set values
+            for key, value in values.items():
+                setattr(o, key, value)
+                postinit = getattr(o, "__postinit__", None)
+                if postinit is not None:
+                    postinit()
+
+            # Generate values
+            for arg in config.__xpmtype__.arguments.values():
+                if arg.generator is not None:
+                    setattr(o, arg.name, arg.generator(self.context))
+
             return o
 
-        # Creates an object (and not a config)
-        o = self.xpmtype.objecttype.__new__(self.xpmtype.objecttype, __xpmobject__=True)
-        # And calls the parameter-less initialization
-        o.__init__()
+        def list(self, i: int):
+            return self.context.push(str(i))
 
-        objects[id(self)] = o
+        def map(self, k: str):
+            return self.context.push(k)
 
-        for key, param in self.xpmtype.arguments.items():
-            value = self._fromPython(context, param, self.values.get(key), objects)
-            setattr(o, key, value)
-            postinit = getattr(o, "__postinit__", None)
-            if postinit is not None:
-                postinit()
-
-        return o
-
-    def fromConfig(self, context: Optional[GenerationContext]):
+    def fromConfig(self, context: GenerationContext):
         """Generate an instance given the current configuration"""
         self.validate()
-
-        return self._fromConfig(context, {})
+        processor = ConfigInformation.FromPython(context)
+        return processor(self.pyobject)
 
     def add_dependencies(self, *dependencies):
         self.dependencies.extend(dependencies)
@@ -753,6 +820,10 @@ class TypeConfig:
 
     def instance(self, context: GenerationContext = None):
         """Return an instance with the current values"""
+        if context is None:
+            from experimaestro.xpmutils import EmptyContext
+
+            context = EmptyContext()
         return self.__xpm__.fromConfig(context)
 
     def submit(self, *, workspace=None, launcher=None, dryrun=False):
@@ -781,6 +852,9 @@ T = TypeVar("T")
 
 class Config:
     """Base type for all objects in python interface"""
+
+    __xpmtype__: ObjectType
+    __xpm__: ConfigInformation
 
     @classmethod
     def __getxpmtype__(cls):

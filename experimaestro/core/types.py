@@ -8,7 +8,6 @@ import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
 import typing_extensions
-from .objects import Config, Task, TypeConfig
 from .arguments import Argument
 
 
@@ -78,6 +77,7 @@ class Type:
     def fromType(key):
         """Returns the type object corresponding to the given type"""
         logger.debug("Searching for type %s", key)
+        from .objects import Config
 
         if key is None:
             return Any
@@ -118,19 +118,13 @@ class ObjectType(Type):
     # Those entries should not be copied in the __dict__
     FORBIDDEN_KEYS = set(("__dict__", "__weakref__"))
 
-    REGISTERED: Dict[str, TypingType["Config"]] = {}
-
-    @staticmethod
-    def removeConfig(t: Config):
-        return t.__xpmtype__.objecttype
-
     def __init__(
         self,
         tp: type,
-        identifier: str = None,
+        identifier: Union[str, Identifier] = None,
     ):
         """Creates a type"""
-        from .objects import Config
+        from .objects import Config, TypeConfig
 
         # Task related attributes
         self.taskcommandfactory = None
@@ -231,7 +225,9 @@ class ObjectType(Type):
 
         # The class of the object
 
-        self._arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))
+        self._arguments = ChainMap(
+            {}, *(tp.arguments for tp in self.parents())
+        )  # type: ChainMap[Argument, Any]
 
         # Add arguments from annotations
         for annotation in self.annotations:
@@ -283,7 +279,7 @@ class ObjectType(Type):
                                 raise
 
     @property
-    def arguments(self):
+    def arguments(self) -> Dict[str, Argument]:
         self.__initialize__()
         return self._arguments
 
@@ -309,30 +305,17 @@ class ObjectType(Type):
         return self._arguments[key]
 
     def parents(self) -> Iterator["ObjectType"]:
+        from .objects import Config, Task
+
         for tp in self.basetype.__bases__:
             if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpmtype__
 
     def validate(self, value):
         """Ensures that the value is compatible with this type"""
+        from .objects import Config
+
         self.__initialize__()
-
-        if isinstance(value, dict):
-            # This is a unserialized object
-            valuetype = value.get("$type", None)
-            if valuetype is None:
-                raise ValueError("Object has no $type")
-
-            classtype = ObjectType.REGISTERED.get(valuetype, None)
-            if classtype:
-                try:
-                    return classtype(**value)
-                except:
-                    logger.exception("Could not build object of class %s" % (classtype))
-                    raise
-
-            logger.debug("Using argument type (not real type)")
-            return self.objecttype(**value)
 
         if value is None:
             return None

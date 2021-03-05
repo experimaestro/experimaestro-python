@@ -14,3 +14,11 @@ class DirectoryContext(GenerationContext):
     @property
     def path(self):
         return self._path
+
+
+class EmptyContext(GenerationContext):
+    """Special generation context used for debugging and testing"""
+
+    @property
+    def path(self):
+        raise AssertionError("Empty context has no path")

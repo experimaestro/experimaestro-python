@@ -3,8 +3,16 @@
 from pathlib import Path
 import unittest
 import logging
-from experimaestro import config, Param, param, task, option, Constant
-from experimaestro.core.arguments import Option, pathgenerator
+from experimaestro import (
+    config,
+    Param,
+    param,
+    task,
+    option,
+    Constant,
+    Option,
+    pathgenerator,
+)
 from typing_extensions import Annotated
 
 

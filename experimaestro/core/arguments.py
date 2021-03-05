@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Any, Optional, TypeVar
-from experimaestro.generators import PathGenerator
 from experimaestro.typingutils import get_optional
 from typing_extensions import Annotated
 
@@ -128,14 +127,6 @@ class default(TypeAnnotation):
 
     def annotate(self, options: ArgumentOptions):
         options.kwargs["default"] = self.value
-
-
-class pathgenerator(TypeAnnotation):
-    def __init__(self, value):
-        self.value = value
-
-    def annotate(self, options: ArgumentOptions):
-        options.kwargs["generator"] = PathGenerator(self.value)
 
 
 class ConstantHint(TypeAnnotation):

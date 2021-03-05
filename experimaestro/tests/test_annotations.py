@@ -9,8 +9,17 @@ from pathlib import Path
 from typing import Optional, List
 from experimaestro.core.objects import GenerationContext
 import pytest
-from experimaestro import config, Option, Constant, Param, task, Task, default, Config
-from experimaestro.core.arguments import pathgenerator
+from experimaestro import (
+    config,
+    Option,
+    Constant,
+    Param,
+    task,
+    Task,
+    default,
+    Config,
+    pathgenerator,
+)
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 from typing_extensions import Annotated
@@ -107,7 +116,9 @@ def test_type_hinting():
 
     arg_path = ot.getArgument("path")
     assert arg_path.generator is not None
-    assert arg_path.generator(DirectoryContext(Path("hello"))) == Path("hello/world")
+    assert arg_path.generator(DirectoryContext(Path("hello"))) == Path(
+        "hello/out/world"
+    )
 
     arg_option = ot.getArgument("option")
     assert arg_option.name == "option"
@@ -115,19 +126,19 @@ def test_type_hinting():
     assert arg_option.ignored
 
 
-def test_path_conflict():
+def test_generatedpath():
     class A(Config):
         path: Annotated[Path, pathgenerator("test.txt")]
 
     class B(Config):
-        path: Annotated[Path, pathgenerator("test.txt")]
+        a: Param[A]
 
     class C(Task):
-        a: Param[A]
         b: Param[B]
 
-    c = C(a=A(), b=B()).instance(DirectoryContext(Path("/tmp/testconflict")))
-    assert c.a.path != c.b.path
+    basepath = Path("/tmp/testconflict")
+    c = C(b=B(a=A())).instance(DirectoryContext(basepath))
+    assert c.b.a.path.relative_to(basepath) == Path("out/b/a/test.txt")
 
 
 def test_config_class():

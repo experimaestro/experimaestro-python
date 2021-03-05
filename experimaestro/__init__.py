@@ -30,9 +30,9 @@ from .core.arguments import (
     Constant,
     # Annotations helpers
     help,
-    pathgenerator,
     default,
 )
+from .generators import pathgenerator
 from .core.objects import Config, Task
 from .environment import Environment
 from .workspace import Workspace

@@ -29,6 +29,7 @@ if is_posix():
 class Restart:
     def execute(self):
         # Write the file "touch" to notify that we started
+        self.touch.parent.mkdir()
         with open(self.touch, "w") as out:
             out.write("hello")
 

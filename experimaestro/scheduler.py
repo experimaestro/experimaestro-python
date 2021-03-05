@@ -73,7 +73,7 @@ class JobDependency(Dependency):
         return JobLock(self.origin)
 
 
-class Job(Resource, GenerationContext):
+class Job(Resource):
     """Context of a job"""
 
     def __init__(
@@ -233,6 +233,20 @@ class Job(Resource, GenerationContext):
         if self.unsatisfied == 0:
             logger.info("Job %s is ready to run", self)
             self.scheduler.start(self)
+
+
+class JobContext(GenerationContext):
+    def __init__(self, job: Job):
+        super().__init__()
+        self.job = job
+
+    @property
+    def name(self):
+        return self.job.name
+
+    @property
+    def path(self):
+        return self.job.path
 
 
 class Listener:
