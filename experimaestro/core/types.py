@@ -6,13 +6,12 @@ from pathlib import Path
 from docstring_parser.parser import parse
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
-from typing_extensions import get_type_hints
 from .arguments import Argument
 
 if sys.version_info.major == 3 and sys.version_info.minor < 9:
-    from typing_extensions import _AnnotatedAlias
+    from typing_extensions import _AnnotatedAlias, get_type_hints
 else:
-    from typing import _AnnotatedAlias
+    from typing import _AnnotatedAlias, get_type_hints
 
 
 class Identifier:
