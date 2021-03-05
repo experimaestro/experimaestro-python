@@ -111,7 +111,7 @@ the task directory. To ensure there are no conflicts, paths
 are defined by following the config/task path, i.e. if the executed
 task has a parameter `model`, `model` has a parameter `optimization`,
 and optimization a path parameter `loss.txt`, then the file will be
-`./out/model/optimization/loss.txt`
+`./out/model/optimization/loss.txt`.
 
 ## Validation
 

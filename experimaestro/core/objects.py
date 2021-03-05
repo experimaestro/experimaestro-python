@@ -162,18 +162,20 @@ class GenerationContext:
         raise NotImplementedError()
 
     def __init__(self):
-        self._configpath = Path("out")
+        self._configpath = None
 
     def currentpath(self) -> Path:
         """Returns the configuration folder"""
-        return self.path / self._configpath
+        if self._configpath:
+            return self.path / self._configpath
+        return self.path
 
     @contextmanager
     def push(self, key: str):
         """Push a new key to contextualize paths"""
         p = self._configpath
         try:
-            self._configpath = p / key
+            self._configpath = (Path("out") if p is None else p) / key
             yield key
         finally:
             self._configpath = p
@@ -224,6 +226,17 @@ class ConfigProcessing:
             return result
 
         return x
+
+
+class GenerationConfigProcessing(ConfigProcessing):
+    def __init__(self, context: GenerationContext):
+        self.context = context
+
+    def list(self, i: int):
+        return self.context.push(str(i))
+
+    def map(self, k: str):
+        return self.context.push(k)
 
 
 class ConfigInformation:
@@ -343,7 +356,7 @@ class ConfigInformation:
     def seal(self, context: GenerationContext):
         """Seal the object, generating values when needed, before scheduling the associated job(s)"""
 
-        class Sealer(ConfigProcessing):
+        class Sealer(GenerationConfigProcessing):
             def preprocess(self, config: Config):
                 return not config.__xpm__._sealed, config
 
@@ -351,24 +364,13 @@ class ConfigInformation:
                 # Generate values
                 for k, argument in config.__xpmtype__.arguments.items():
                     if argument.generator:
-                        config.__xpm__.set(k, argument.generator(context), bypass=True)
+                        config.__xpm__.set(
+                            k, argument.generator(self.context), bypass=True
+                        )
 
                 config.__xpm__._sealed = True
 
-        Sealer()(self.pyobject)
-
-        # # First, process all non-generated attributes
-        # for k, argument in self.xpmtype.arguments.items():
-        #     if not argument.generator and k in self.values:
-        #         v = getattr(self.pyobject, k)
-        #         if isinstance(v, Config):
-        #             with context.push(k):
-        #                 v.__xpm__.seal(context)
-
-        # # Second, process generated ones
-        # for k, argument in self.xpmtype.arguments.items():
-        #     if argument.generator:
-        #         self.set(k, argument.generator(context), bypass=True)
+        Sealer(context)(self.pyobject)
 
     @property
     def identifier(self) -> Identifier:
@@ -664,9 +666,9 @@ class ConfigInformation:
 
         return o
 
-    class FromPython(ConfigProcessing):
+    class FromPython(GenerationConfigProcessing):
         def __init__(self, context: GenerationContext):
-            self.context = context
+            super().__init__(context)
             self.objects = {}
 
         def preprocess(self, config: "Config"):
@@ -696,12 +698,6 @@ class ConfigInformation:
                     setattr(o, arg.name, arg.generator(self.context))
 
             return o
-
-        def list(self, i: int):
-            return self.context.push(str(i))
-
-        def map(self, k: str):
-            return self.context.push(k)
 
     def fromConfig(self, context: GenerationContext):
         """Generate an instance given the current configuration"""

@@ -28,7 +28,6 @@ class Say:
     word: Param[str]
 
     def execute(self):
-        self.out.parent.mkdir()
         self.out.write_text(self.word.upper())
 
 
@@ -69,7 +68,6 @@ class Fail:
         while self.__xpm__.job.state.notstarted():
             time.sleep(0.05)
 
-        self.wait.parent.mkdir()
         with open(self.wait, "w") as out:
             out.write("hello")
 

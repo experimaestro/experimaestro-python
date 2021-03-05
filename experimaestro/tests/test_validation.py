@@ -12,8 +12,9 @@ from experimaestro import (
     experiment,
 )
 import experimaestro.core.types as types
-from experimaestro.scheduler import Job
+from experimaestro.scheduler import Job, JobContext
 from .utils import TemporaryExperiment
+from experimaestro.xpmutils import EmptyContext
 import logging
 
 valns = Identifier("validation")
@@ -138,8 +139,8 @@ def test_constant():
     a = A()
     a.__xpm__.validate()
     with TemporaryExperiment("constant") as ws:
-        jobcontext = Job(a)
-        a.__xpm__.seal(jobcontext)
+        joba = Job(a)
+        a.__xpm__.seal(JobContext(joba))
         assert a.value == 1
 
 
@@ -199,7 +200,7 @@ def test_seal():
         pass
 
     a = A(a=2)
-    a.__xpm__.seal(None)
+    a.__xpm__.seal(EmptyContext())
 
     with pytest.raises(AttributeError):
         a.a = 1
