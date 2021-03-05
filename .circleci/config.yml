@@ -2,51 +2,52 @@ version: 2
 jobs:
   build:
     docker:
-    - image: quay.io/pypa/manylinux2010_x86_64
+      - image: quay.io/pypa/manylinux2010_x86_64
     steps:
-    - checkout
-    - run:
-        name: Setup basic environment
-        command: |
-          echo "export PATH=/opt/python/cp37-cp37m/bin:/opt/python/cp38-cp38/bin:$PATH" >> $BASH_ENV
-          /opt/python/cp37-cp37m/bin/pip install tox twine
-    - restore_cache:
-        key: v1-dependency-cache-{{ checksum "setup.cfg" }}-{{ checksum "tox.ini" }}-{{ checksum "requirements.txt"}}
-    - run:
-        name: install python dependencies
-        command: |
-          tox --notest -e ALL
-    - save_cache:
-        key: v1-dependency-cache-{{ checksum "setup.cfg" }}-{{ checksum "tox.ini" }}-{{ checksum "requirements.txt"}}
-        paths:
-        - .tox/py37
-        - .tox/py38
-    - run:
-        name: run tests
-        command: |
-          tox -e ALL
-    
-    - store_test_results:
-        path: test-reports
+      - checkout
+      - run:
+          name: Setup basic environment
+          command: |
+            echo "export PATH=/opt/python/cp37-cp37m/bin:/opt/python/cp38-cp38/bin:/opt/python/cp39-cp39/bin:$PATH" >> $BASH_ENV
+            /opt/python/cp37-cp37m/bin/pip install tox twine
+      - restore_cache:
+          key: v1-dependency-cache-{{ checksum "setup.cfg" }}-{{ checksum "tox.ini" }}-{{ checksum "requirements.txt"}}
+      - run:
+          name: install python dependencies
+          command: |
+            tox --notest -e ALL
+      - save_cache:
+          key: v1-dependency-cache-{{ checksum "setup.cfg" }}-{{ checksum "tox.ini" }}-{{ checksum "requirements.txt"}}
+          paths:
+            - .tox/py37
+            - .tox/py38
+            - .tox/py39
+      - run:
+          name: run tests
+          command: |
+            tox -e ALL
 
-    - run:
-        name: Upload
-        command: |
-          echo "Checking version $(python setup.py --version) vs $CIRCLE_TAG"
-          if [ "$(python setup.py --version)" = "$CIRCLE_TAG" ]; then
-            echo "Uploading using twine ($CIRCLE_TAG)"
-            echo -e "[pypi]" >> ~/.pypirc
-            echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
-            echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
-            python setup.py bdist_wheel
-            twine upload dist/experimaestro-*-none-any.whl
-          fi
+      - store_test_results:
+          path: test-reports
+
+      - run:
+          name: Upload
+          command: |
+            echo "Checking version $(python setup.py --version) vs $CIRCLE_TAG"
+            if [ "$(python setup.py --version)" = "$CIRCLE_TAG" ]; then
+              echo "Uploading using twine ($CIRCLE_TAG)"
+              echo -e "[pypi]" >> ~/.pypirc
+              echo -e "username = $PYPI_USERNAME" >> ~/.pypirc
+              echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
+              python setup.py bdist_wheel
+              twine upload dist/experimaestro-*-none-any.whl
+            fi
 workflows:
   build_and_deploy:
     jobs:
-    - build:
-        filters:
-          tags:
-            only: /.*/
-        context: PyPI
+      - build:
+          filters:
+            tags:
+              only: /.*/
+          context: PyPI
   version: 2
