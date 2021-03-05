@@ -114,7 +114,7 @@ class LocalConnector(Connector):
 
     def createtoken(self, name: str, total: int) -> Token:
         tokendir = self.localpath / "tokens"
-        tokendir.mkdir(exist_ok=True)
+        tokendir.mkdir(exist_ok=True, parents=True)
         return CounterToken.create(name, tokendir / ("%s.counter" % name), total)
 
     def processbuilder(self) -> ProcessBuilder:
