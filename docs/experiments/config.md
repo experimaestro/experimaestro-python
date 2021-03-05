@@ -1,6 +1,8 @@
+# Configurations
+
 Defining experiments is based on _config(urations)_ and _tasks_. Tasks are configurations that can be executed.
 
-## Configurations
+## Defining a configuration
 
 ```py3
 @config(identifier=None)
@@ -35,54 +37,12 @@ it is possible to shorten the definition using the `Config` class as a base clas
 
 ### Object life cycle
 
-During task execution, the objects are constructed following
+During [task](../task) execution, the objects are constructed following
 this algorithm:
 
 - The object is constructed using `self.__init__()`
 - The attributes are set (e.g. `gamma` in the example above)
 - `self.__postinit__()` is called (if the method exists)
-
-## Tasks
-
-A task is a special configuration that can be:
-
-1. Submitted to the task scheduler using `submit` (preparation of the experiment)
-1. Executed with the method `execute` (running a specific task within the experiment)
-
-!!! example "Defining a task as a class"
-
-    It is possible to use classes if variables need to be defined,
-    or if a configuration should be returned (here, `Model`)
-
-    ```py3
-    from experimaestro import Config, Task, Param
-
-        @config()
-        class Model:
-            parameters: Param[Path]
-
-            def __postinit__(self):
-                # Called once the object has been set up
-                print(self.parameters)
-
-        @task()
-        class ModelLearn():
-            epochs: Param[int] = 100
-            model: Param[Model]
-            parameters: Annotated[Path, pathgenerator("parameters.pth")]
-
-            def config(self) -> Model:
-                return {
-                    "model": self.model,
-                    "parameters": self.parameters
-                }
-
-            def execute(self):
-                """Called when this task is run"""
-                pass
-    ```
-
-Tags can be accessed as a dictionary using `self.__tags__`.
 
 ## Types
 
@@ -149,27 +109,6 @@ class MyTask:
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `path` is the path within the task directory
-
-## Lightweights tasks using `@cache`
-
-Sometimes, a config can compute some output that might be interesting to cache, but without relying on a fully-fledge task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
-
-```py3
-@config()
-class Terms():
-    @cache("terms.npy")
-    def load(self, path: Path):
-        if path.is_file():
-            return pickle.load(path)
-
-        # Value which can be long to compute
-        weights = self.compute_weights()
-
-        np.save(path, weights)
-        return terms
-
-
-```
 
 ## Validation
 

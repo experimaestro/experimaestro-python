@@ -6,7 +6,9 @@ nav:
   - Tutorial: tutorial.md
   - Concepts: concepts.md
   - Experiments:
+      - Overview: experiments/overview.md
       - Configuration: experiments/config.md
+      - Task: experiments/task.md
       - Plan: experiments/plan.md
   - Launchers: launchers/index.md
   - Connectors: connectors/index.md
