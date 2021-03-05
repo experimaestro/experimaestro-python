@@ -160,6 +160,15 @@ class GenerationContext:
         """Returns the path of the job directory"""
         raise NotImplementedError()
 
+    def __init__(self):
+        self.paths: Set[Path] = set()
+
+    def registerpath(self, path: Path):
+        if path in self.paths:
+            return False
+        self.paths.add(path)
+        return True
+
 
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""

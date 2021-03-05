@@ -51,8 +51,7 @@ Types can be any simple type `int`, `float`, `str`, `bool` or `pathlib.Path` or 
 ## Parameters
 
 ```python
-@config()
-class MyConfig:
+class MyConfig(Config):
     """
     Attributes:
         x: The parameter x
@@ -79,8 +78,7 @@ behavior of a configuration/task has changed, and thus that the signature should
 same (as the result of the processing will differ).
 
 ```py3
-@config()
-class MyConfig:
+class MyConfig(Config):
     # Constant
     version: Constant[str] = "2.1"
 ```
@@ -89,9 +87,8 @@ class MyConfig:
 
 Options are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be an option. They are declared as parameters, but using the `Option` type hint
 
-```python
-@config()
-class MyConfig:
+```py3
+class MyConfig(Config):
     """
     Attributes:
         x: The option x
@@ -101,27 +98,33 @@ class MyConfig:
 
 ### Path option
 
+It is possible to define special options that will be set
+to paths relative to the task directory. For instance,
+
 ```py3
-@config()
-class MyTask:
-    name: Annotated[Path, pathgenerator("path")]
+class MyConfig(Config):
+    output: Annotated[Path, pathgenerator("output.txt")]
 ```
 
-- `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
-- `path` is the path within the task directory
+defines the instance variable `path` as a path `./output.txt` within
+the task directory.
+
+!!! warning
+In case of conflicts (two configuration defining
+the same path), the name of the file is changed using a suffix such as
+`output.1.txt`.
 
 ## Validation
 
-If a configuration or task has a `__validate__` method, it is called to validate
+If a configuration has a `__validate__` method, it is called to validate
 the values before a task is submitted. This allows to fail fast when parameters
 are not valid.
 
 ```py3
-@task()
-class ModelLearn():
+class ModelLearn(Config):
     batch_size: Param[int] = 100
     micro_batch_size: Param[int] = 100
-    parameters: PathOption = "parameters.pth"
+    parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
     def __validate__(self):
         assert self.batch_size % self.micro_batch_size == 0
@@ -137,8 +140,7 @@ but with different _sub-parameters_ are run sequentially.
 For instance, given this task definition
 
 ```py3
-@task()
-class ModelLearn():
+class ModelLearn(Task):
     epoch: SubParam[int] = 100
     learning_rate: Param[float] = 1e-3
     def execute(self):

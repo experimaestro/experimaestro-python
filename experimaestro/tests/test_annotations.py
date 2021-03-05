@@ -7,9 +7,10 @@ Test all the annotations for configurations and tasks
 
 from pathlib import Path
 from typing import Optional, List
-from experimaestro.core.arguments import Option, pathgenerator
+from experimaestro.core.objects import GenerationContext
 import pytest
-from experimaestro import config, Constant, Param, task, default, Config
+from experimaestro import config, Option, Constant, Param, task, Task, default, Config
+from experimaestro.core.arguments import pathgenerator
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 from typing_extensions import Annotated
@@ -112,6 +113,21 @@ def test_type_hinting():
     assert arg_option.name == "option"
     assert isinstance(arg_option.type, types.StrType)
     assert arg_option.ignored
+
+
+def test_path_conflict():
+    class A(Config):
+        path: Annotated[Path, pathgenerator("test.txt")]
+
+    class B(Config):
+        path: Annotated[Path, pathgenerator("test.txt")]
+
+    class C(Task):
+        a: Param[A]
+        b: Param[B]
+
+    c = C(a=A(), b=B()).instance(DirectoryContext(Path("/tmp/testconflict")))
+    assert c.a.path != c.b.path
 
 
 def test_config_class():

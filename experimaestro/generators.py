@@ -13,6 +13,18 @@ class PathGenerator:
 
     def __call__(self, context: GenerationContext):
         if inspect.isfunction(self.path):
-            return context.path / self.path(context)
+            path = context.path / self.path(context)  # type: Path
+        else:
+            path = context.path / self.path  # type: Path
 
-        return context.path / self.path
+        if not context.registerpath(path):
+            i = 0
+            while True:
+                i += 1
+                newpath = path.with_suffix(f".{i}{path.suffix}")
+                if context.registerpath(newpath):
+                    break
+
+            path = newpath
+
+        return path

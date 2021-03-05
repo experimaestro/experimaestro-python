@@ -5,7 +5,10 @@ from experimaestro.core.objects import GenerationContext
 
 
 class DirectoryContext(GenerationContext):
+    """Special generation context used for debugging and testing"""
+
     def __init__(self, path: Path):
+        super().__init__()
         self._path = Path(path)
 
     @property
