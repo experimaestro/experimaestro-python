@@ -711,7 +711,7 @@ class ConfigInformation:
 
 def clone(v):
     """Clone a value"""
-    if isinstance(v, (str, float, int)):
+    if isinstance(v, (str, float, int, Path)):
         return v
 
     if isinstance(v, list):
@@ -720,11 +720,13 @@ def clone(v):
     if isinstance(v, Config):
         # Create a new instance
         kwargs = {
-            argument.name: clone(value) for argument, value in v.__xpm__.xpmvalues()
+            argument.name: clone(value)
+            for argument, value in v.__xpm__.xpmvalues()
+            if argument.generator is None and not argument.constant
         }
 
-        config = type(v).__new__(type(v))
-        return type(v)(**kwargs)
+        config = type(v)(**kwargs)
+        return config
 
     raise NotImplementedError("Clone not implemented for type %s" % type(v))
 
@@ -841,6 +843,10 @@ class TypeConfig:
         if self.__xpm__.job:
             return self.__xpm__.job.jobpath
         raise AssertionError("Cannot ask the job path of a non submitted task")
+
+    def copy(self):
+        """Returns a copy of this configuration (ignores other non parameters attributes)"""
+        return clone(self)
 
 
 T = TypeVar("T")
