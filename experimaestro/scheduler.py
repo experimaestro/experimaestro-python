@@ -606,6 +606,10 @@ class experiment:
     def setenv(self, name, value):
         self.workspace.launcher.environ[name] = value
 
+    def token(self, name: str, count: int):
+        """Returns a token for this experiment depending on the host"""
+        return self.workspace.connector.createtoken(name, count)
+
     def __enter__(self):
         logger.debug("Locking experiment %s", self.xplockpath)
         self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
