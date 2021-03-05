@@ -7,8 +7,12 @@ from docstring_parser.parser import parse
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from typing_extensions import get_type_hints
-import typing_extensions
 from .arguments import Argument
+
+if sys.version_info.major == 3 and sys.version_info.minor < 9:
+    from typing_extensions import _AnnotatedAlias
+else:
+    from typing import _AnnotatedAlias
 
 
 class Identifier:
@@ -257,7 +261,7 @@ class ObjectType(Type):
                 # Filter out hints from parent classes
                 if key in typekeys:
                     options = None
-                    if isinstance(typehint, typing_extensions._AnnotatedAlias):
+                    if isinstance(typehint, _AnnotatedAlias):
                         for value in typehint.__metadata__:
                             if isinstance(value, TypeAnnotation):
                                 options = value(options)

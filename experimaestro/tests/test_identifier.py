@@ -12,8 +12,8 @@ from experimaestro import (
     Constant,
     Option,
     pathgenerator,
+    Annotated,
 )
-from typing_extensions import Annotated
 
 
 @config()

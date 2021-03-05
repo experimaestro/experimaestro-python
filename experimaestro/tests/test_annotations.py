@@ -19,10 +19,10 @@ from experimaestro import (
     default,
     Config,
     pathgenerator,
+    Annotated,
 )
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
-from typing_extensions import Annotated
 
 # --- Test manual name for configuration
 
