@@ -76,6 +76,9 @@ class Type:
     def isArray(self):
         return False
 
+    def validate(self):
+        raise NotImplementedError(f"validate ({self.__class__})")
+
     @staticmethod
     def fromType(key):
         """Returns the type object corresponding to the given type"""
@@ -104,6 +107,10 @@ class Type:
         t = typingutils.get_list(key)
         if t:
             return ArrayType(Type.fromType(t))
+
+        t = typingutils.get_dict(key)
+        if t:
+            return DictType(Type.fromType(t[0]), Type.fromType(t[1]))
 
         raise Exception("No type found for %s", key)
 
@@ -355,6 +362,14 @@ def definetype(*types):
 @definetype(int)
 class IntType(Type):
     def validate(self, value):
+        if isinstance(value, float):
+            import math
+
+            rest, intvalue = math.modf(value)
+            if rest != 0:
+                raise TypeError(f"Value {value} is not an integer but a float")
+            return int(intvalue)
+
         if not isinstance(value, int):
             raise TypeError(f"Value of type {type(value)} is not an integer")
         return value
@@ -363,12 +378,16 @@ class IntType(Type):
 @definetype(str)
 class StrType(Type):
     def validate(self, value):
+        if not isinstance(value, str):
+            raise TypeError("value is not a string")
         return str(value)
 
 
 @definetype(float)
 class FloatType(Type):
     def validate(self, value):
+        if not isinstance(value, (float, int)):
+            raise TypeError("value is not a float")
         return float(value)
 
 
@@ -383,6 +402,9 @@ class PathType(Type):
     def validate(self, value):
         if isinstance(value, dict) and value.get("$type", None) == "path":
             return Path(value.get("$value"))
+
+        if not isinstance(value, (str, Path)):
+            raise TypeError("value is not a pathlike value")
         return Path(value)
 
     @property
@@ -420,3 +442,27 @@ class ArrayType(Type):
 
     def __repr__(self):
         return f"Array({self.type})"
+
+
+class DictType(Type):
+    def __init__(self, keytype: Type, valuetype: Type):
+        self.keytype = keytype
+        self.valuetype = valuetype
+
+    def name(self):
+        return f"Dict[{self.keytype.name()},{self.valuetype.name()}]"
+
+    def validate(self, value):
+        if not isinstance(value, dict):
+            raise ValueError("value is not a dict")
+
+        return {
+            self.keytype.validate(key): self.valuetype.validate(value)
+            for key, value in value.items()
+        }
+
+    def __str__(self):
+        return f"Dict({self.keytype.name()},{self.valuetype.name()})"
+
+    def __repr__(self):
+        return str(self)

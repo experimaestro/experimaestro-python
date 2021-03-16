@@ -33,6 +33,7 @@ class HashComputer:
     NONE_ID = b"\x06"
     LIST_ID = b"\x07"
     TASK_ID = b"\x08"
+    DICT_ID = b"\x09"
 
     def __init__(self):
         # Hasher for parameters
@@ -78,6 +79,13 @@ class HashComputer:
             self._hashupdate(struct.pack("!d", len(value)), subparam=subparam)
             for x in value:
                 self.update(x, subparam=subparam)
+        elif isinstance(value, dict):
+            self._hashupdate(HashComputer.DICT_ID, subparam=subparam)
+            items = list(value.items())
+            items.sort(key=lambda x: x[0])
+            for key, value in items:
+                self.update(key, subparam=subparam)
+                self.update(value, subparam=subparam)
         elif isinstance(value, Config):
             xpmtype = value.__xpmtype__
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)

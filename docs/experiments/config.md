@@ -68,8 +68,17 @@ class MyConfig(Config):
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
-- `type` is the type of the argument
+- `type` is the type of the argument (more details below)
 - `value` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_. This allows to add new parameters without changing the signature of past experiments (if the configuration is equivalent with the default value of course, otherwise do not use a default value!).
+
+### Types
+
+Possible types are:
+
+- basic Python types (`str`, `int`, `float`, `bool`)
+- lists
+- dictionaries (support for basic types in keys only)
+- Other configurations
 
 ### Constants
 

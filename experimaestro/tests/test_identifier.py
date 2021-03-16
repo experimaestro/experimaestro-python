@@ -3,12 +3,14 @@
 from pathlib import Path
 import unittest
 import logging
+from typing import Dict
 from experimaestro import (
     config,
     Param,
     param,
     task,
     option,
+    Config,
     Constant,
     Option,
     pathgenerator,
@@ -120,6 +122,25 @@ def test_option():
     assert_notequal(OptionConfig(a=2), OptionConfig(a=1))
     assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1))
     assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1, b=2))
+
+
+# --- Dictionnary
+
+
+def test_identifier_dict():
+    """Test identifiers of dictionary structures"""
+
+    class B(Config):
+        x: Param[int]
+
+    class A(Config):
+        bs: Param[Dict[str, B]]
+
+    assert_equal(A(bs={"b1": B(x=1)}), A(bs={"b1": B(x=1)}))
+    assert_equal(A(bs={"b1": B(x=1), "b2": B(x=2)}), A(bs={"b2": B(x=2), "b1": B(x=1)}))
+
+    assert_notequal(A(bs={"b1": B(x=1)}), A(bs={"b1": B(x=2)}))
+    assert_notequal(A(bs={"b1": B(x=1)}), A(bs={"b2": B(x=1)}))
 
 
 # --- Ignore paths

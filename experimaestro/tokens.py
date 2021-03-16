@@ -109,7 +109,11 @@ class TokenFile:
                 if not pidpath.is_file():
                     logger.debug("Job already finished (no PID file)")
                 else:
-                    pid = int(pidpath.read_text())
+                    s = ""
+                    while s == "":
+                        s = pidpath.read_text()
+
+                    pid = int(s)
                     logger.debug("Watching external job with PID %d", pid)
                     p = psutil.Process(pid)
                     p.wait()
