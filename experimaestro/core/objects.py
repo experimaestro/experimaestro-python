@@ -656,7 +656,15 @@ class ConfigInformation:
         if isinstance(value, list):
             return [ConfigInformation._objectFromParameters(x, objects) for x in value]
         if isinstance(value, dict):
-            if value["type"] == "python":
+            if "type" not in value:
+                # Just a plain dictionary
+                return {
+                    ConfigInformation._objectFromParameters(
+                        key, objects
+                    ): ConfigInformation._objectFromParameters(value, objects)
+                    for key, value in value.items()
+                }
+            elif value["type"] == "python":
                 return objects[value["value"]]
             if value["type"] == "path":
                 return Path(value["value"])
