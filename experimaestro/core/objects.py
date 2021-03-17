@@ -7,7 +7,7 @@ import io
 import fasteners
 import inspect
 import importlib
-from typing import Any, Dict, Optional, Set, Type, TypeVar, Union, get_type_hints
+from typing import Any, Dict, List, Optional, Set, Type, TypeVar, Union, get_type_hints
 from experimaestro.utils import logger
 import sys
 from contextlib import contextmanager
@@ -39,6 +39,7 @@ class HashComputer:
         # Hasher for parameters
         self._hasher = hashlib.sha256()
         self._subhasher = None
+        self._tasks = set()
 
     def identifier(self) -> Identifier:
         sub = None if self._subhasher is None else self._subhasher.digest()
@@ -93,8 +94,12 @@ class HashComputer:
 
             # Add task parameters
             if value.__xpm__._task:
-                self._hashupdate(HashComputer.TASK_ID, subparam=subparam)
-                self.update(value.__xpm__._task, subparam=subparam)
+                task = value.__xpm__._task
+                # Avoid recursion
+                if id(task) not in self._tasks:
+                    self._tasks.add(id(task))
+                    self._hashupdate(HashComputer.TASK_ID, subparam=subparam)
+                    self.update(task, subparam=subparam)
 
             # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
@@ -124,18 +129,38 @@ class HashComputer:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
 
-def updatedependencies(dependencies, value: "Config", path):
-    """Search recursively jobs to add them as dependencies"""
+def updatedependencies(
+    dependencies, value: "Config", path: List[str], taskids: Set[int]
+):
+    """Search recursively jobs to add them as dependencies
+
+    Arguments:
+        dependencies: The current set of dependencies
+        value: The current inspected configuration
+        path: The current path (for error tracing)
+        taskids: Sets of added tasks (ids) to avoid repeated depencies
+    """
+
+    def add(task):
+        if id(task) not in taskids:
+            taskids.add(id(task))
+            dependencies.add(task.__xpm__.dependency())
+
     if isinstance(value, Config):
         if value.__xpm__._task is not None:
-            dependencies.add(value.__xpm__._task.__xpm__.dependency())
+            # Value that depends on a task
+            add(value.__xpm__._task)
         elif value.__xpmtype__.task:
-            dependencies.add(value.__xpm__.dependency())
+            add(value)
         else:
-            value.__xpm__.updatedependencies(dependencies, path)
+            value.__xpm__.updatedependencies(dependencies, path, taskids)
     elif isinstance(value, (list, set)):
         for el in value:
-            updatedependencies(dependencies, el, path)
+            updatedependencies(dependencies, el, path, taskids)
+    elif isinstance(value, (dict,)):
+        for key, val in value.items():
+            updatedependencies(dependencies, key, path, taskids)
+            updatedependencies(dependencies, val, path, taskids)
     elif isinstance(value, (str, int, float, Path)):
         pass
     else:
@@ -171,6 +196,10 @@ class GenerationContext:
 
     def __init__(self):
         self._configpath = None
+
+    @property
+    def task(self):
+        return None
 
     def currentpath(self) -> Path:
         """Returns the configuration folder"""
@@ -233,7 +262,18 @@ class ConfigProcessing:
                     result.append(self(sv))
             return result
 
-        return x
+        if isinstance(x, dict):
+            result = {}
+            for key, value in x.items():
+                assert isinstance(key, (str, float, int))
+                with self.map(key):
+                    result[key] = self(value)
+            return result
+
+        if isinstance(x, (float, int, str, Path)):
+            return x
+
+        raise NotImplementedError(f"Cannot handle a value of type {type(x)}")
 
 
 class GenerationConfigProcessing(ConfigProcessing):
@@ -253,7 +293,7 @@ class ConfigInformation:
     # Set to true when loading from JSON
     LOADING = False
 
-    def __init__(self, pyobject):
+    def __init__(self, pyobject: "Config"):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
         self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
@@ -262,12 +302,15 @@ class ConfigInformation:
         # Meta-informations
         self._tags = {}
         self._initinfo = {}
+
+        # Generated task
         self._task = None  # type: Optional[Task]
 
         # State information
         self.job = None
+
+        # Explicitely added dependencies
         self.dependencies = []
-        self.setting = False
 
         # Cached information
         self._identifier = None
@@ -362,7 +405,12 @@ class ConfigInformation:
                 self.pyobject.__validate__()
 
     def seal(self, context: GenerationContext):
-        """Seal the object, generating values when needed, before scheduling the associated job(s)"""
+        """Seal the object, generating values when needed,
+        before scheduling the associated job(s)
+
+        Arguments:
+            - context: the generation context
+        """
 
         class Sealer(GenerationConfigProcessing):
             def preprocess(self, config: Config):
@@ -375,6 +423,11 @@ class ConfigInformation:
                         config.__xpm__.set(
                             k, argument.generator(self.context), bypass=True
                         )
+
+                # Set task
+                if context.task is not None and config.istaskoutput():
+                    assert not config.__xpm__._sealed, "Object with output is sealed"
+                    config.__xpm__._task = context.task
 
                 config.__xpm__._sealed = True
 
@@ -397,13 +450,18 @@ class ConfigInformation:
         return JobDependency(self.job)
 
     def updatedependencies(
-        self, dependencies: Set["experimaestro.dependencies.Dependency"], path
+        self,
+        dependencies: Set["experimaestro.dependencies.Dependency"],
+        path: List[str],
+        taskids: Set[int],
     ):
         for argument, value in self.xpmvalues():
             try:
                 if value is not None:
-                    updatedependencies(dependencies, value, path + [argument.name])
-            except:
+                    updatedependencies(
+                        dependencies, value, path + [argument.name], taskids
+                    )
+            except Exception:
                 logger.error("While setting %s", path + [argument.name])
                 raise
 
@@ -436,7 +494,9 @@ class ConfigInformation:
         self.seal(JobContext(self.job))
 
         # --- Search for dependencies
-        self.updatedependencies(self.job.dependencies, [])
+        self.updatedependencies(self.job.dependencies, [], set([id(self.pyobject)]))
+
+        # Add predefined dependencies
         self.job.dependencies.update(self.dependencies)
 
         if not dryrun and Scheduler.CURRENT.submitjobs:
@@ -855,6 +915,13 @@ class TypeConfig:
     def copy(self):
         """Returns a copy of this configuration (ignores other non parameters attributes)"""
         return clone(self)
+
+    def istaskoutput(self):
+        """Returns whether this configuration is a task output"""
+        for arg, value in self.__xpm__.xpmvalues(generated=True):
+            if arg.isoutput():
+                return True
+        return False
 
 
 T = TypeVar("T")

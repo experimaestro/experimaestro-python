@@ -5,7 +5,15 @@ from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
 from experimaestro.core.objects import GenerationContext
 
 
-class PathGenerator:
+class Generator:
+    """Base class for all generators"""
+
+    def isoutput(self):
+        """Returns True if this generator is a task output (e.g. generates a path with the job folder)"""
+        return False
+
+
+class PathGenerator(Generator):
     """Generates a path"""
 
     def __init__(self, path: Union[str, Path, Callable[[GenerationContext], Path]]):
@@ -18,6 +26,9 @@ class PathGenerator:
             path = context.currentpath() / Path(self.path)
 
         return path
+
+    def isoutput(self):
+        return True
 
 
 class pathgenerator(TypeAnnotation):

@@ -56,6 +56,11 @@ class Argument:
                 raise ValueError("Value %s is not valid", value)
         return value
 
+    def isoutput(self):
+        if self.generator:
+            return self.generator.isoutput()
+        return False
+
 
 class ArgumentOptions:
     """Helper class when using type hints"""

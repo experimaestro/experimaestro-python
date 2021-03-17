@@ -248,6 +248,10 @@ class JobContext(GenerationContext):
     def path(self):
         return self.job.path
 
+    @property
+    def task(self):
+        return self.job.config
+
 
 class Listener:
     def job_submitted(self, job):
