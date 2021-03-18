@@ -1,3 +1,7 @@
+# 0.8.6
+
+- (Enhancement) Python 3.9 support
+
 # 0.8.5
 
 - (Enhancement) Dict(ionaries) parameters (keys should be simple types)
