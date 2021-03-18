@@ -111,22 +111,24 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool):
         else:
             print(prefix, key, sep=None)
 
-    xpjobs = set(
-        key
-        for key, value in chain(
-            *[getjobs(p) for p in (path / "xp").glob("*/jobs") if p.is_dir()]
-        )
-    )
+    # Retrieve the jobs within expedriments (jobs and jobs.bak folder within experiments)
+    xpjobs = set()
+    for p in chain((path / "xp").glob("*/jobs"), (path / "xp").glob("*/jobs.bak")):
+        if p.is_dir():
+            for relpath, path in getjobs(p):
+                xpjobs.add(relpath)
 
+    # Now, look at stored jobs
     found = 0
-    for key, job in getjobs(jobspath):
+    for key, jobpath in getjobs(jobspath):
         if key not in xpjobs:
-            show(jobspath, key)
+            show(key)
             if clean:
-                rmtree(job)
+                logging.info("Removing data in %s", jobpath)
+                rmtree(jobpath)
         else:
             if show_all:
-                show(key, "[not orphan] ")
+                show(key, prefix="[not orphan] ")
             found += 1
 
     print(f"{found} jobs are not orphans")
