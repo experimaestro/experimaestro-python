@@ -1,6 +1,7 @@
 from collections import defaultdict
 import os
 from pathlib import Path
+from shutil import rmtree
 import threading
 import time
 from typing import Optional, Set, Union
@@ -553,10 +554,10 @@ class Scheduler:
 
 
 class experiment:
-    # Current experiment
-    CURRENT: "experiment" = None
-
     """Experiment context"""
+
+    # Current experiment
+    CURRENT: Optional["experiment"] = None
 
     def __init__(
         self, env: Union[Path, str, Environment], name: str, *, port: int = None
@@ -603,6 +604,11 @@ class experiment:
         """Return the directory in which results can be stored for this experiment"""
         return self.workdir / "jobs"
 
+    @property
+    def jobsbakpath(self):
+        """Return the directory in which results can be stored for this experiment"""
+        return self.workdir / "jobs.bak"
+
     def wait(self):
         """Wait until the running processes have finished"""
         self.scheduler.wait()
@@ -618,6 +624,19 @@ class experiment:
         logger.debug("Locking experiment %s", self.xplockpath)
         self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
 
+        # Move old jobs into "jobs.bak"
+        self.jobsbakpath.mkdir(exist_ok=True)
+        for p in self.jobspath.glob("*/*"):
+            if p.is_symlink():
+                target = self.jobsbakpath / p.relative_to(self.jobspath)
+                if target.is_symlink():
+                    # Remove if duplicate
+                    p.unlink()
+                else:
+                    # Rename otherwise
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    p.rename(target)
+
         if self.server:
             self.server.start()
 
@@ -627,10 +646,17 @@ class experiment:
         experiment.CURRENT = self
         return self
 
-    def __exit__(self, *args):
-        self.scheduler.__exit__(*args)
-        self.workspace.__exit__(*args)
-        self.xplock.__exit__(*args)
+    def __exit__(self, exc_type, exc_value, traceback):
+        # If no exception, remove old "jobs"
+        if exc_type is None and self.jobsbakpath.is_dir():
+            rmtree(self.jobsbakpath)
+
+        # Close the different locks
+        self.scheduler.__exit__(exc_type, exc_value, traceback)
+        self.workspace.__exit__(exc_type, exc_value, traceback)
+        self.xplock.__exit__(exc_type, exc_value, traceback)
+
+        # Put back old experiment as current one
         experiment.CURRENT = self.old_experiment
         if self.server:
             self.server.stop()

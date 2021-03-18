@@ -34,13 +34,13 @@ class forwardoption(metaclass=forwardoptionMetaclass):
     def __init__(self, path=[]):
         self.path = path
 
-    def __call__(self, cls, option_name=None):
+    def __call__(self, cls, option_name=None, default=None):
         argument = cls.__xpmtype__.arguments[self.path[0]]
         for c in self.path[1:]:
             argument = getattr(argument, c)
 
         name = "--%s" % (option_name or argument.name.replace("_", "-"))
-        default = argument.default
+        default = default or argument.default
         # TODO: set the type of the option when not a simple type
         return click.option(name, help=argument.help or "", default=default)
 

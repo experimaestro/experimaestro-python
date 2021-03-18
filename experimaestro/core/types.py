@@ -139,6 +139,7 @@ class ObjectType(Type):
         # Task related attributes
         self.taskcommandfactory = None
         self.task = None
+        self._title = None
 
         # Get the identifier
         if identifier is None and "__xpmid__" in tp.__dict__:
@@ -188,7 +189,7 @@ class ObjectType(Type):
 
         # Create the type-specific object class
         # (now, the same as basetype - TODO: remove references)
-        self.objecttype = self.basetype
+        self.objecttype = self.basetype  # type: type
         self.basetype._ = self.configtype
 
         # Registers ourselves
@@ -253,7 +254,8 @@ class ObjectType(Type):
         paramhelp = {}
         if "__doc__" in self.basetype.__dict__:
             parseddoc = parse(self.basetype.__doc__)
-            self.description = parseddoc.short_description
+            self._title = parseddoc.short_description
+            self.description = parseddoc.long_description
             for param in parseddoc.params:
                 paramhelp[param.arg_name] = param.description
 
@@ -287,6 +289,11 @@ class ObjectType(Type):
                                     self.objecttype,
                                 )
                                 raise
+
+    @property
+    def title(self) -> Dict[str, Argument]:
+        self.__initialize__()
+        return self._title or str(self.identifier)
 
     @property
     def arguments(self) -> Dict[str, Argument]:
@@ -341,6 +348,10 @@ class ObjectType(Type):
         if self.task and not value.__xpm__.job:
             raise ValueError("The value must be submitted before giving it")
         return value
+
+    def fullyqualifiedname(self) -> str:
+        """Returns the fully qualified (Python) name"""
+        return f"{self.basetype.__module__}.{self.basetype.__qualname__}"
 
 
 class TypeProxy:

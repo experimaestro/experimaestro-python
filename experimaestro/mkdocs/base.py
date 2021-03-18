@@ -39,7 +39,6 @@ class Documentation(mkdocs.plugins.BasePlugin):
         super().__init__(*args, **kwargs)
         # path to sets of XPM types
         self.configurations = defaultdict(lambda: Configurations())
-        self.tasks = {}
 
         # Maps XPM types to markdown paths
         self.type2path = {}
@@ -97,6 +96,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
                             f"{member.__module__}.{member.__qualname__}"
                         ] = md_path
 
+                        member.__xpmtype__.__initialize__()
                         d.add(member.__xpmtype__)
                 except Exception as e:
                     logging.error(
@@ -119,20 +119,34 @@ class Documentation(mkdocs.plugins.BasePlugin):
             return qualname
         return f"[{qualname}](/{md_path}#{qualname})"
 
-    def build_doc(self, lines: List[str], configs: Dict[str, Config]):
+    def build_doc(self, lines: List[str], configs: List[ObjectType]):
         """Build the documentation for a list of configurations"""
         configs = sorted(configs, key=lambda x: str(x.identifier))
         for xpminfo in configs:
+            fullqname = (
+                f"{xpminfo.objecttype.__module__}.{xpminfo.objecttype.__qualname__}"
+            )
             lines.extend(
                 (
-                    f"""### {xpminfo.identifier} <span id="{xpminfo.objecttype.__module__}.{xpminfo.objecttype.__qualname__}"> </span>\n\n""",
-                    f"""```py3\nfrom {xpminfo.objecttype.__module__} import {xpminfo.objecttype.__name__}\n```\n\n""",
+                    f"""### {xpminfo.title} <span id="{fullqname}"> </span>\n\n""",
+                    f"""`from {xpminfo.objecttype.__module__} import {xpminfo.objecttype.__name__}`\n\n""",
                 )
             )
+
             if xpminfo.description:
-                lines.extend(
-                    f"""<div class="xpm-description">{xpminfo.description}</div>\n\n"""
+                lines.extend((xpminfo.description, "\n\n"))
+
+            # Add parents
+            parents = list(xpminfo.parents())
+            if parents:
+                lines.append("*Parents*: ")
+                lines.append(
+                    ", ".join(
+                        self.getlink(parent.fullyqualifiedname()) for parent in parents
+                    )
                 )
+                lines.append("\n\n")
+
             for name, argument in xpminfo.arguments.items():
 
                 if isinstance(argument.type, ObjectType):
