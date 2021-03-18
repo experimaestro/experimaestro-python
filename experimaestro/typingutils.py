@@ -1,11 +1,14 @@
 import typing
 
-# HACK: Should be a typing._GenericAlias
-TYPING_ALIAS = type(typing.List)
+
+def isgenericalias(typehint):
+    """Returns True if it is a generic type alias"""
+    # Works with Python 3.7, 3.8 and 3.9
+    return isinstance(typehint, typing._GenericAlias)
 
 
 def get_optional(typehint):
-    if type(typehint) == TYPING_ALIAS and typehint.__origin__ == typing.Union:
+    if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
         if len(typehint.__args__) == 2:
             for ix in (0, 1):
                 if typehint.__args__[ix] == type(None):
@@ -14,7 +17,7 @@ def get_optional(typehint):
 
 
 def get_list(typehint):
-    if type(typehint) == TYPING_ALIAS:
+    if isgenericalias(typehint):
         # Python 3.6, 3.7+ test
         if typehint.__origin__ in [typing.List, list]:
             assert len(typehint.__args__) == 1
@@ -23,7 +26,7 @@ def get_list(typehint):
 
 
 def get_dict(typehint):
-    if type(typehint) == TYPING_ALIAS:
+    if isgenericalias(typehint):
         # Python 3.6, 3.7+ test
         if typehint.__origin__ in [typing.Dict, dict]:
             assert len(typehint.__args__) == 2
