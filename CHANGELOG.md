@@ -1,9 +1,11 @@
-# Development
+# 0.8.5
 
-- Generated path conflicts are handled
-- Validate before sealing
-- Generate values when validation is done
-- Fixed bug with dependencies of task returning configurations
+- (Enhancement) Dict(ionaries) parameters (keys should be simple types)
+- (Fix) Nested configurations dependencies
+- (Enhancement) Generated path conflicts are handled
+- (Fix) Validate before sealing
+- (Fix) Generate values when validation is done
+- (Fix) Fixed bug with dependencies of task returning configurations
 
 # 0.8.4
 
