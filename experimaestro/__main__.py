@@ -111,6 +111,9 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool):
         else:
             print(prefix, key, sep=None)
 
+    for p in (path / "xp").glob("*/jobs.bak"):
+        logging.warning("Experiment %s have not completed successfully", p.parent.name)
+
     # Retrieve the jobs within expedriments (jobs and jobs.bak folder within experiments)
     xpjobs = set()
     for p in chain((path / "xp").glob("*/jobs"), (path / "xp").glob("*/jobs.bak")):
