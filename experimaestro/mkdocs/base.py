@@ -157,7 +157,12 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 else:
                     typestr = argument.type.name()
 
-                lines.append(f"- **{name}** ({typestr})")
+                lines.append("- ")
+                if argument.generator:
+                    lines.append(" [*generated*] ")
+                elif argument.constant:
+                    lines.append(" [*constant*] ")
+                lines.append(f"**{name}** ({typestr})")
                 if argument.help:
                     lines.append(f"\n  {argument.help}")
                 lines.append("\n")
