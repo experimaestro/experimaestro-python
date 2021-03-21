@@ -1,6 +1,9 @@
-from experimaestro import config
+from pathlib import Path
+from experimaestro import Config, config, tag, Annotated
 from experimaestro.core.arguments import Param
-from experimaestro.core.objects import Config, TypeConfig
+from experimaestro.core.objects import TypeConfig
+from experimaestro.generators import pathgenerator
+from experimaestro.xpmutils import DirectoryContext
 
 
 @config()
@@ -52,3 +55,38 @@ def test_hierarchy():
     assert OA.__bases__ == (Config,)
     assert OB.__bases__ == (Config,)
     assert OC.__bases__ == (B,)
+
+
+# Test tags
+
+
+def test_objects_tags():
+    """Test tags"""
+
+    class A(Config):
+        x: Param[int]
+
+    context = DirectoryContext(Path("/__fakepath__"))
+    a = A(x=tag(1))
+    a.__xpm__.seal(context)
+    assert a.__xpm__.tags() == {"x": 1}
+
+
+def test_objects_nested_tags():
+    """Tags should be propagated to nested output configurations"""
+
+    class B(Config):
+        p: Annotated[Path, c("p.txt")]
+
+    class A(Config):
+        x: Param[int]
+        b: Param[B]
+
+    context = DirectoryContext(Path("/__fakepath__"))
+    a = A(x=tag(1), b=B())
+    a.__xpm__.seal(context)
+
+    # Tags of main object
+    assert a.__xpm__.tags() == {"x": 1}
+    # should be propagated to output configurations
+    assert a.b.__xpm__.tags() == {"x": 1}

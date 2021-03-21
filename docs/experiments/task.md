@@ -60,9 +60,27 @@ It is possible to generate a configuration when submitting a task.
 
     ```
 
+## Output configurations
+
+Sometimes it is convenient to use a configuration object as one of the output of
+a task. In this case, it is possible to use _output configurations_ nested
+within tasks
+
+```py3
+class TaskValidation(Config):
+    modelpath: Annotated[Path, pathgenerator("model.pth")]
+
+class MyTask(Task):
+    val: Param[TaskValidation]
+```
+
+When submitting a `MyTask` instance `mytask`, the `val` parameter is recognized as
+an output configuration (because of the path generator), which means
+that `mytask.val` can be used as a dependency and inherits the tags of `mytask`.
+
 ## Lightweights tasks using `@cache`
 
-Sometimes, a config can compute some output that might be interesting to cache, but without relying on a fully-fledge task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
+Sometimes, a configuration might need to compute some output that might be interesting to cache, but without relying on a fully-fledged task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
 ```py3
 @config()
