@@ -22,7 +22,7 @@ def slurmlauncher(tmp_path_factory):
     yield launcher
 
 
-@pytest.mark.timeout(3)
+@pytest.mark.timeout(5)
 def test_slurm_ok(slurmlauncher):
     builder = slurmlauncher.processbuilder()
     builder.command = [sys.executable, binpath / "test.py"]
@@ -30,7 +30,7 @@ def test_slurm_ok(slurmlauncher):
     assert p.wait() == 0
 
 
-@pytest.mark.timeout(3)
+@pytest.mark.timeout(5)
 def test_slurm_failed(slurmlauncher):
     builder = slurmlauncher.processbuilder()
     builder.command = [sys.executable, binpath / "test.py", "--fail"]
@@ -38,7 +38,7 @@ def test_slurm_failed(slurmlauncher):
     assert p.wait() == 1
 
 
-@pytest.mark.timeout(3)
+@pytest.mark.timeout(5)
 def test_slurm_config(tmp_path, slurmlauncher):
     """Test that sbatch is called properly"""
     options = {
