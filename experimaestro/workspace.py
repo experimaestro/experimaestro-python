@@ -8,13 +8,13 @@ class Workspace:
 
     """Creates a workspace for experiments"""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, launcher=None):
         if isinstance(path, Path):
             path = path.absolute()
         self.path = path
         from .launchers import Launcher
 
-        self.launcher = Launcher.get(path)
+        self.launcher = launcher or Launcher.get(path)
 
     def __enter__(self):
         self.old_workspace = Workspace.CURRENT

@@ -170,6 +170,11 @@ class Job(Resource):
         """Actually run the code"""
         raise NotImplementedError()
 
+    @property
+    def process(self):
+        """Returns the process"""
+        raise NotImplementedError("Not implemented")
+
     def wait(self):
         """Waiting for job to finish"""
         with self.scheduler.cv:
@@ -180,13 +185,6 @@ class Job(Resource):
 
         logger.debug("Job %s finished with state %s", self, self.state)
         return self.state
-
-    @property
-    def process(self):
-        """Returns the process"""
-        if self._process:
-            return self._process
-        raise NotImplementedError("Not implemented")
 
     @property
     def pidpath(self):
@@ -221,6 +219,7 @@ class Job(Resource):
         return self.jobpath / self.name
 
     def dependencychanged(self, dependency, oldstatus, status):
+        """Called when a dependency has changed"""
         value = lambda s: (1 if s == DependencyStatus.OK else 0)
         self.unsatisfied -= value(status) - value(oldstatus)
 
@@ -280,6 +279,11 @@ class JobThread(threading.Thread):
         This method will lock all the dependencies before calling `self.job.run(locks)`
         where `locks` are the taken locks
         """
+        # Check if we have a PID
+        if self.job.process is not None:
+            self.job.process.wait()
+
+        # OK, not done; let's start the job for real
         logger.debug("Job Thread: starting job %s", self.job)
         state = None
         with Locks() as locks:
@@ -339,7 +343,7 @@ class JobThread(threading.Thread):
                 logger.warning("Error while running job")
                 state = JobState.ERROR
 
-            except:
+            except Exception:
                 logger.warning(
                     "Error while running job (in experimaestro)", exc_info=True
                 )
@@ -513,11 +517,13 @@ class Scheduler:
                 self.start(job)
 
     def start(self, job: Job):
-        """Start a job"""
+        """Starts a job"""
         with self.cv:
             if self.exitmode:
                 logger.warning("Exit mode: not starting job")
                 return
+
+            # This thread will monitor the job
             thread = JobThread(job)
             thread.daemon = True
             thread.start()
@@ -560,11 +566,18 @@ class experiment:
     CURRENT: Optional["experiment"] = None
 
     def __init__(
-        self, env: Union[Path, str, Environment], name: str, *, port: int = None
+        self,
+        env: Union[Path, str, Environment],
+        name: str,
+        *,
+        host: str = None,
+        port: int = None,
+        launcher=None,
     ):
         """
         :param env: an environment -- or a working directory for a local environment
         :param port: the port for the web server (overrides environment port if any)
+        :param launcher: The launcher (if not provided, inferred from path)
         """
 
         from experimaestro.server import Server
@@ -575,7 +588,7 @@ class experiment:
             self.environment = Environment(workdir=env)
 
         # Creates the workspace
-        self.workspace = Workspace(self.environment.workdir)
+        self.workspace = Workspace(self.environment.workdir, launcher=launcher)
         self.workdir = self.workspace.experimentspath / name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.xplockpath = self.workdir / "lock"
@@ -584,7 +597,7 @@ class experiment:
 
         # Create the scheduler
         self.scheduler = Scheduler(name)
-        self.server = Server(self.scheduler, port) if port else None
+        self.server = Server(self.scheduler, host=host, port=port) if port else None
         if self.server:
             self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
 

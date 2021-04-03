@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# slurm test suite
+
+# Where we store the jobs
+test -z "$XPM_SLURM_DIR" && exit 1
+find "$XPM_SLURM_DIR/jobs" -name "*.start" | while read name; do
+    jobid=${name%.start}
+    sf="$jobid.status"
+    if test -f "$sf"; then
+        exitcode="$(cat $sf)"
+        if test "$exitcode" == 0; then
+            status=COMPLETED
+        else
+            status=FAILED
+        fi
+    else
+        status=RUNNING
+    fi
+
+    echo "$(basename $jobid)|${status}|$(cat ${jobid}.start)|$(cat ${jobid}.start)|"
+done

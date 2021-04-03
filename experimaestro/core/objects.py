@@ -362,20 +362,19 @@ class ConfigInformation:
             if argument.name in self.values or (generated and argument.generator):
                 yield argument, self.values[argument.name]
 
-    def tags(self, tags=None):
-        if tags is None:
-            tags = {}
+    def tags(self, tags=None, taskmode=False):
+        tags = tags or {}
+
+        # If nested within a task, returns the task tags
+        if self._task and not taskmode:
+            return self._task.__xpm__.tags(tags=tags, taskmode=True)
+
+        # Recursion within configurations
         tags.update(self._tags)
         for argument, value in self.xpmvalues():
             if isinstance(value, Config):
-                value.__xpm__.tags(tags)
+                value.__xpm__.tags(tags, taskmode=taskmode)
         return tags
-
-    def run(self):
-        self.pyobject.execute()
-
-    def init(self):
-        self.pyobject._init()
 
     def validate(self):
         """Validate a value"""

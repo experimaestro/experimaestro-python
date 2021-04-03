@@ -4,12 +4,10 @@
 import subprocess
 from pathlib import Path, WindowsPath, PosixPath
 import os
-import subprocess
 import threading
-import sys
-from time import sleep, time
 import fasteners
 import psutil
+
 from experimaestro.locking import Lock
 
 from . import (
@@ -18,7 +16,6 @@ from . import (
     ProcessBuilder,
     RedirectType,
     Redirect,
-    ProcessThreadError,
 )
 from experimaestro.tokens import Token, CounterToken
 from experimaestro.utils import logger
@@ -31,8 +28,18 @@ class LocalProcess(Process):
     def __repr__(self):
         return f"Process({self._process.pid})"
 
-    def wait(self):
-        self._process.wait()
+    def wait(self) -> int:
+        return self._process.wait()
+
+    @staticmethod
+    def fromspec(spec):
+        pid = spec["pid"]
+        try:
+            return psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            pass
+
+        return None
 
 
 def getstream(redirect: Redirect, write: bool):
@@ -40,7 +47,7 @@ def getstream(redirect: Redirect, write: bool):
         return redirect.path.open("w" if write else "r")
 
     if redirect.type == RedirectType.PIPE:
-        raise NotImplementedError()
+        return subprocess.PIPE
 
     if redirect.type == RedirectType.INHERIT:
         return None
@@ -62,14 +69,27 @@ class LocalProcessBuilder(ProcessBuilder):
                 stdin=stdin,
                 stderr=stderr,
                 stdout=stdout,
+                env=self.environ,
                 close_fds=True,
                 cwd="/",
             )
         else:
             p = subprocess.Popen(
-                self.command, stdin=stdin, stderr=stderr, stdout=stdout
+                self.command,
+                stdin=stdin,
+                stderr=stderr,
+                stdout=stdout,
+                env=self.environ,
             )
-        return LocalProcess(p)
+
+        process = LocalProcess(p)
+
+        if self.stdout and self.stdout.type == RedirectType.PIPE:
+            self.stdout.function(p.stdout)
+        if self.stderr and self.stderr.type == RedirectType.PIPE:
+            self.stderr.function(p.stderr)
+
+        return process
 
 
 class InterProcessLock(fasteners.InterProcessLock, Lock):

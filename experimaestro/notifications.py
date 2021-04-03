@@ -43,7 +43,7 @@ class NotificationThread(threading.Thread):
                     lambda: self.stopping
                     or self.progress - self.previous_progress > self.progress_threshold
                 )
-                if not self.isAlive():
+                if not self.is_alive():
                     break
 
                 reportprogress = (

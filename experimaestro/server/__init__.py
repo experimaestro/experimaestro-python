@@ -195,15 +195,18 @@ class RequestProcessor:
 
 
 class Server:
-    def __init__(self, scheduler: Scheduler, port: int):
-        self.host = "127.0.0.1"
+    def __init__(self, scheduler: Scheduler, port: int, *, host=None):
+        self.bindinghost = (
+            "127.0.0.1" if host is None or host == "127.0.0.1" else "0.0.0.0"
+        )
+        self.host = host or "127.0.0.1"
         self.port = port
         self.scheduler = scheduler
         self._loop = None
         self._stop = None
 
     def getNotificationURL(self):
-        return "http://{host}:{port}/notifications".format(**self.__dict__)
+        return f"""http://{self.host}:{self.port}/notifications"""
 
     def stop(self):
         if self._stop:
@@ -232,7 +235,7 @@ class Server:
         bound_handler = functools.partial(handler, listener=self.listener)
         process_request = RequestProcessor(self.scheduler)
         async with websockets.serve(
-            bound_handler, self.host, self.port, process_request=process_request
+            bound_handler, self.bindinghost, self.port, process_request=process_request
         ):
             await stop
         logging.info("Server stopped")

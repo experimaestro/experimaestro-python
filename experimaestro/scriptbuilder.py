@@ -57,6 +57,7 @@ class ShScriptBuilder:
         self.notificationURL: Optional[str] = None
         self.preprocessCommands: Optional[AbstractCommand] = None
         self.command: Optional[AbstractCommand] = None
+        self.processtype = "local"
 
     def write(self, job: CommandLineJob):
         """Write the script file
@@ -94,16 +95,10 @@ class ShScriptBuilder:
             out.write("#!{}\n".format(self.shpath))
             out.write("# Experimaestro generated task\n")
 
-            # Output tags
-            out.write("# __tags__ = ")
-            for key, value in job.config.tags().items():
-                out.write("%s: %s" % (key, value))
-            out.write("\n\n")
-
             # --- Checks locks right away
 
             # change directory
-            out.write("""cd "$(dirname "$0")"\n""")
+            out.write(f"""cd {shquote(directorypath)}\n""")
 
             # Lock all the needed files
             FIRST_FD = 9
@@ -113,7 +108,10 @@ class ShScriptBuilder:
             # Use pipefail for fine grained analysis of errors in commands
             out.write("set -o pipefail\n\n")
 
-            out.write("""echo $$ > %s\n\n""" % pidpath)
+            out.write(
+                """echo "{ \\"type\\": \\"%s\\", \\"pid\\": $$ }" > %s\n\n"""
+                % (self.processtype, pidpath)
+            )
 
             for name, value in job.launcher.environ.items():
                 out.write("""export {}={}\n""".format(name, shquote(value)))

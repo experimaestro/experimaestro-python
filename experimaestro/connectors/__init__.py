@@ -9,17 +9,18 @@ This module contains :
 """
 
 import enum
-from typing import Dict, Optional, Union
-from pathlib import Path, PosixPath
+from typing import Optional, Union
+from pathlib import Path
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
+import pkg_resources
 
 
 class RedirectType(enum.Enum):
     INHERIT = 0
     FILE = 1
-    PIPE = 1
-    NONE = 2
+    PIPE = 2
+    NONE = 3
 
 
 class Redirect:
@@ -53,7 +54,21 @@ Redirect._INHERIT = Redirect(RedirectType.INHERIT)
 
 
 class Process:
-    pass
+    HANDLERS = None
+
+    @staticmethod
+    def handler(key: str):
+        """Get a handler"""
+        if Process.HANDLERS is None:
+            Process.HANDLERS = {}
+            for ep in pkg_resources.iter_entry_points(group="experimaestro.process"):
+                Process.HANDLERS[ep.name] = ep.load()
+
+        return Process.HANDLERS.get(key, None)
+
+    def wait(self):
+        """Wait until the process finishes"""
+        raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
 
 
 class ProcessThreadError(Exception):
@@ -63,11 +78,10 @@ class ProcessThreadError(Exception):
 
 
 class ProcessBuilder:
-    """A process builder
-    """
+    """A process builder"""
 
     def __init__(self):
-        self.workingDirectory = None
+        self.workingDirectory = None  # type: Optional[Path]
         self.stdin = Redirect.inherit()
         self.stdout = Redirect.inherit()
         self.stderr = Redirect.inherit()
@@ -83,7 +97,7 @@ class ProcessBuilder:
 class Connector:
     def __init__(self, localpath: Path):
         """Creates a new connector
-        
+
         Arguments:
             localpath {Path} -- The working directory
         """
@@ -116,21 +130,24 @@ class Connector:
         """Returns a token in the default path for the connector"""
         raise NotImplementedError()
 
+
 class Locator:
     pass
 
+
 def parsepath(path: Union[str, Path]) -> Path:
     """Parse a path
-    
+
     Returns a local path or a SshPath
     """
     from urllib.parse import urlparse
-    
+
     if isinstance(path, Path):
         return path
 
     if isinstance(path, str) and path.startswith("ssh:"):
         from .ssh import SshPath
+
         return SshPath(path)
 
     return Path(path)

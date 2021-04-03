@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# slurm test suite
+
+# Where we store the jobs
+test -z "$XPM_SLURM_DIR" && exit 1
+mkdir -p "$XPM_SLURM_DIR/jobs"
+
+echo "Slurm directory: $XPM_SLURM_DIR" >&2 
+
+lockpath() {
+    fid="$1"
+    path="$2"
+
+    echo "Locking $path..." 1>&2
+    eval exec "$fid<>" $path
+    if ! flock --timeout 2 $fid; then 
+        echo Could not lock "$path" - stopping 1>&2
+        exit 017
+    fi
+}
+
+lockpath 9 "$XPM_SLURM_DIR/slurm.lock"
+
+echo "Command line: $@" >&2
+args=()
+stdout="/dev/stdout"
+while true; do
+    case "$1" in
+        -o) shift; stdout="$1"; shift;;
+        --*) args+=("$1"); shift;;
+        *) break 2;;    
+    esac
+done
+
+echo "Starting $@ ${args[@]} > $stdout" >&2
+(eval "$@" "${args[@]}" > $stdout; echo $? > "$XPM_SLURM_DIR/jobs/$$.status") & 
+JOBID="$$"
+date > "$XPM_SLURM_DIR/jobs/$JOBID.start"
+disown
+
+
+echo "Submitted batch job ${JOBID}"

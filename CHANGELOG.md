@@ -1,3 +1,7 @@
+# 0.8.7
+
+- (Enhancement) Slurm support
+
 # 0.8.6
 
 - (Enhancement) Python 3.9 support

@@ -1,5 +1,6 @@
 """Command line jobs"""
 
+import json
 import os
 import io
 from pathlib import Path
@@ -222,7 +223,7 @@ class CommandLine(AbstractCommand):
         return self.commands
 
 
-class PsutilProcess:
+class JobProcess:
     def __init__(self, job, process):
         self.job = job
         self.process = process
@@ -255,14 +256,18 @@ class CommandLineJob(Job):
             return self._process
 
         if self.pidpath.is_file():
-            pid = int(self.pidpath.read_text())
-            try:
-                p = psutil.Process(pid)
-            except psutil.NoSuchProcess:
-                return None
-            if p.is_running():
-                return PsutilProcess(self, p)
+            # Get from pidpath file
+            from experimaestro.connectors import Process
 
+            pinfo = json.loads(self.pidpath.read_text())
+            handler = Process.handler(pinfo["type"])
+            if handler is not None:
+                p = handler.fromspec(pinfo)
+                if p.is_running():
+                    return JobProcess(self, p)
+
+            else:
+                logger.error(f"Type {pinfo['type']} is not handled")
         return None
 
     def run(self, locks):
@@ -273,7 +278,6 @@ class CommandLineJob(Job):
         processbuilder = self.launcher.processbuilder()
         connector = self.launcher.connector
         donepath = self.donepath
-        pidpath = self.pidpath
 
         # Lock the job and check done again (just in case)
         logger.debug("Making directories job %s...", self.path)
