@@ -14,7 +14,10 @@ def slurmlauncher(tmp_path_factory):
     tmpdir = tmp_path_factory.mktemp("slurm-launcher")
     env = {"XPM_SLURM_DIR": str(tmpdir)}
     launcher = SlurmLauncher(
-        LocalConnector.instance(), binpath=binpath, launcherenv=env, interval=0.1
+        connector=LocalConnector.instance(),
+        binpath=binpath,
+        launcherenv=env,
+        interval=0.1,
     )
     yield launcher
 

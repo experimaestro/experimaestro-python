@@ -33,7 +33,7 @@ Under the curtain,
 - Two processes for `Say` are launched (there are no dependencies, so they will be run in parallel)
 - A tag `y` is created for the main task
 
-<!-- SNIPPET: MAIN ARGS[%WORKDIR% --port 0] ENV[XPM_EXAMPLE_WAIT=0.001] -->
+<!-- SNIPPET: MAIN ARGS[%WORKDIR% --port 0 --sleeptime=0.0001] -->
 
 ```python
 # --- Task and types definitions
@@ -49,9 +49,10 @@ from typing import List
 
 # --- Just to be able to monitor the tasks
 
-def slowdown(N: int):
+def slowdown(sleeptime: int, N: int):
+    logging.info("Sleeping %ds after each step", sleeptime)
     for i in range(N):
-        time.sleep(float(os.environ.get("XPM_EXAMPLE_WAIT", 2)))
+        time.sleep(sleeptime)
         progress((i+1)/N)
 
 
@@ -59,17 +60,19 @@ def slowdown(N: int):
 
 class Say(Task):
     word: Param[str]
+    sleeptime: Param[float]
 
     def execute(self):
-        slowdown(len(self.word))
+        slowdown(self.sleeptime, len(self.word))
         print(self.word.upper(),)
 
 class Concat(Task):
     strings: Param[List[Say]]
+    sleeptime: Param[float]
 
     def execute(self):
         says = []
-        slowdown(len(self.strings))
+        slowdown(self.sleeptime, len(self.strings))
         for string in self.strings:
             with open(string.__xpm_stdout__) as fp:
                 says.append(fp.read().strip())
@@ -79,18 +82,19 @@ class Concat(Task):
 # --- Defines the experiment
 
 @click.option("--port", type=int, default=12345, help="Port for monitoring")
+@click.option("--sleeptime", type=float, default=2, help="Sleep time")
 @click.argument("workdir", type=Path)
 @click.command()
-def cli(port, workdir):
+def cli(port, workdir, sleeptime):
     """Runs an experiment"""
     # Sets the working directory and the name of the xp
     with experiment(workdir, "helloworld", port=port) as xp:
         # Submit the tasks
-        hello = Say(word="hello").submit()
-        world = Say(word="world").submit()
+        hello = Say(word="hello", sleeptime=sleeptime).submit()
+        world = Say(word="world", sleeptime=sleeptime).submit()
 
         # Concat will depend on the two first tasks
-        Concat(strings=[hello, world]).tag("y", 1).submit()
+        Concat(strings=[hello, world], sleeptime=sleeptime).tag("y", 1).submit()
 
 
 if __name__ == "__main__":

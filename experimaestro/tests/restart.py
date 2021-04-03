@@ -4,6 +4,7 @@ from experimaestro import task, pathoption, Scheduler
 import psutil
 import logging
 import subprocess
+import json
 import signal
 from experimaestro.tests.utils import TemporaryExperiment, is_posix
 from experimaestro.scheduler import JobState
@@ -66,7 +67,8 @@ def restart(terminate, experiment):
                 terminate(xpmprocess)
                 assert False, "Timeout waiting for task to be executed"
 
-        pid = int(task.__xpm__.job.pidpath.read_text())
+        jobinfo = json.loads(task.__xpm__.job.pidpath.read_text())
+        pid = int(jobinfo["pid"])
         p = psutil.Process(pid)
 
         logging.debug("Process has started [file %s, pid %d]", task.touch, pid)

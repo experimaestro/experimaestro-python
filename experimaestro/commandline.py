@@ -263,7 +263,7 @@ class CommandLineJob(Job):
             handler = Process.handler(pinfo["type"])
             if handler is not None:
                 p = handler.fromspec(pinfo)
-                if p.is_running():
+                if p and p.is_running():
                     return JobProcess(self, p)
 
             else:

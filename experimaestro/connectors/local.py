@@ -29,7 +29,8 @@ class LocalProcess(Process):
         return f"Process({self._process.pid})"
 
     def wait(self) -> int:
-        return self._process.wait()
+        code = self._process.wait()
+        return code
 
     @staticmethod
     def fromspec(spec):
