@@ -1,7 +1,7 @@
 import threading
 from typing import Dict, List, Optional, get_type_hints
 from experimaestro.connectors.local import LocalConnector
-import regex
+import re
 from contextlib import contextmanager
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
@@ -168,7 +168,7 @@ class SlurmProcessBuilder(ProcessBuilder):
             raise RuntimeError("Error while submitting job")
 
         output = handler.output.decode("utf-8").strip()
-        RE_SUBMITTED_JOB = regex.Regex(r"""Submitted batch job (\d+)""")
+        RE_SUBMITTED_JOB = re.compile(r"""Submitted batch job (\d+)""")
         m = RE_SUBMITTED_JOB.match(output)
         if m is None:
             raise RuntimeError("Could not get the submitted job")
