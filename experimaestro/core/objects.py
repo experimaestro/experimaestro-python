@@ -221,8 +221,14 @@ class GenerationContext:
 class ConfigProcessing:
     """Allows to perform an operation on all nested configurations"""
 
-    def __init__(self):
-        pass
+    def __init__(self, recursetask=False):
+        """
+
+        Parameters:
+            recursetask: Recurse into linked tasks
+        """
+        self.recursetask = recursetask
+        self.visited = set()
 
     def preprocess(self, config: "Config"):
         return True, None
@@ -242,6 +248,13 @@ class ConfigProcessing:
         if isinstance(x, Config):
             info = x.__xpm__  # type: ConfigInformation
 
+            # Avoid loops
+            xid = id(x)
+            if xid in self.visited:
+                return
+            self.visited.add(xid)
+
+            # Pre-process
             flag, value = self.preprocess(x)
 
             if not flag:
@@ -253,6 +266,11 @@ class ConfigProcessing:
                 if v is not None:
                     with self.map(arg.name):
                         result[arg.name] = self(v)
+
+            if self.recursetask and info._task:
+                # We won't do anything here
+                self(info._task)
+
             return self.postprocess(x, result)
 
         if isinstance(x, list):
@@ -278,6 +296,7 @@ class ConfigProcessing:
 
 class GenerationConfigProcessing(ConfigProcessing):
     def __init__(self, context: GenerationContext):
+        super().__init__()
         self.context = context
 
     def list(self, i: int):
@@ -362,19 +381,17 @@ class ConfigInformation:
             if argument.name in self.values or (generated and argument.generator):
                 yield argument, self.values[argument.name]
 
-    def tags(self, tags=None, taskmode=False):
-        tags = tags or {}
+    def tags(self):
+        class TagFinder(ConfigProcessing):
+            def __init__(self):
+                super().__init__(recursetask=True)
+                self.tags = {}
 
-        # If nested within a task, returns the task tags
-        if self._task and not taskmode:
-            return self._task.__xpm__.tags(tags=tags, taskmode=True)
+            def postprocess(self, config: Config, values):
+                self.tags.update(config.__xpm__._tags)
+                return self.tags
 
-        # Recursion within configurations
-        tags.update(self._tags)
-        for argument, value in self.xpmvalues():
-            if isinstance(value, Config):
-                value.__xpm__.tags(tags, taskmode=taskmode)
-        return tags
+        return TagFinder()(self.pyobject)
 
     def validate(self):
         """Validate a value"""

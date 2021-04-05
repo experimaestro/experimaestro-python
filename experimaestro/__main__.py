@@ -98,6 +98,7 @@ def job_status(path: Path, experiment: str):
         print(f"* Experiment {p.name}")
         if (p / "jobs.bak").is_dir():
             cprint("  Experiment has not completed successfully", "red")
+        print()
 
         for job in p.glob("jobs/*/*"):
             p = job.resolve()
@@ -106,13 +107,13 @@ def job_status(path: Path, experiment: str):
                 if (p / f"{scriptname}.pid").is_file():
                     print(colored(f"RUNNING {job.parent.name}/{job.name}", "yellow"))
                 elif (p / f"{scriptname}.done").is_file():
-                    print(colored(f"DONE {job.parent.name}/{job.name}", "green"))
+                    print(colored(f"DONE    {job.parent.name}/{job.name}", "green"))
                 elif (p / f"{scriptname}.failed").is_file():
-                    print(colored(f"FAIL {job.parent.name}/{job.name}", "red"))
+                    print(colored(f"FAIL    {job.parent.name}/{job.name}", "red"))
                 else:
-                    print(colored(f"???? {job.parent.name}/{job.name}", "red"))
+                    print(colored(f"????    {job.parent.name}/{job.name}", "red"))
             else:
-                print(colored(f"NOT RUN - {job.parent.name}/{job.name}", "yellow"))
+                print(colored(f"NOT RUN {job.parent.name}/{job.name}", "yellow"))
         print()
 
 
