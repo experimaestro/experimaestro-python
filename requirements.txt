@@ -12,6 +12,7 @@ jsonstreams >= 0.5
 pytools
 tqdm
 docstring_parser
+termcolor
 
 # Avoid version 0.10.4
 watchdog > 2.0.0

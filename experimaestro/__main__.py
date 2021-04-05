@@ -6,6 +6,7 @@ from functools import update_wrapper
 from pathlib import Path
 import subprocess
 import json
+from termcolor import colored, cprint
 
 from experimaestro.core.objects import Config, ConfigInformation
 import experimaestro
@@ -84,6 +85,35 @@ def rpyc_server(unix_path, clean):
     from experimaestro.rpyc import start_server
 
     start_server(unix_path, clean=clean)
+
+
+@click.argument("path", type=Path)
+@click.option("--experiment", default=None, help="Restrict to this experiment")
+@cli.command()
+def job_status(path: Path, experiment: str):
+    for p in (path / "xp").glob("*"):
+        if experiment and p.name != experiment:
+            continue
+
+        print(f"* Experiment {p.name}")
+        if (p / "jobs.bak").is_dir():
+            cprint("  Experiment has not completed successfully", "red")
+
+        for job in p.glob("jobs/*/*"):
+            p = job.resolve()
+            if p.is_dir():
+                *_, scriptname = p.parent.name.rsplit(".", 1)
+                if (p / f"{scriptname}.pid").is_file():
+                    print(colored(f"RUNNING {job.parent.name}/{job.name}", "yellow"))
+                elif (p / f"{scriptname}.done").is_file():
+                    print(colored(f"DONE {job.parent.name}/{job.name}", "green"))
+                elif (p / f"{scriptname}.failed").is_file():
+                    print(colored(f"FAIL {job.parent.name}/{job.name}", "red"))
+                else:
+                    print(colored(f"???? {job.parent.name}/{job.name}", "red"))
+            else:
+                print(colored(f"NOT RUN - {job.parent.name}/{job.name}", "yellow"))
+        print()
 
 
 @click.option("--show-all", is_flag=True, help="Show even not orphans")
