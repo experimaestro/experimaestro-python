@@ -40,7 +40,8 @@ class forwardoption(metaclass=forwardoptionMetaclass):
             argument = getattr(argument, c)
 
         name = "--%s" % (option_name or argument.name.replace("_", "-"))
-        default = default or argument.default
+        default = default if default is not None else argument.default
+
         # TODO: set the type of the option when not a simple type
         return click.option(name, help=argument.help or "", default=default)
 
