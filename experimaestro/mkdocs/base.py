@@ -50,6 +50,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
 
         # Include documentation pages in config
         self.parsed = {}
+        self.baseurl = config["site_url"]
 
         for name_packagename in self.config["modules"]:
             module_name, md_path = next(iter(name_packagename.items()))
@@ -117,7 +118,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
         md_path = self.type2path.get(qualname, None)
         if md_path is None:
             return qualname
-        return f"[{qualname}](/{md_path}#{qualname})"
+        return f"[{qualname}]({self.baseurl}/{md_path}#{qualname})"
 
     def build_doc(self, lines: List[str], configs: List[ObjectType]):
         """Build the documentation for a list of configurations"""

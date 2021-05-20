@@ -223,7 +223,7 @@ class Job(Resource):
         value = lambda s: (1 if s == DependencyStatus.OK else 0)
         self.unsatisfied -= value(status) - value(oldstatus)
 
-        logger.info("Job %s: unsatisfied %d", self, self.unsatisfied)
+        logger.debug("Job %s: unsatisfied %d", self, self.unsatisfied)
 
         if status == DependencyStatus.FAIL:
             # Job completed

@@ -982,6 +982,9 @@ class Config:
         o.__init__(*args, **kwargs)
         return o
 
+    def __validate__(self):
+        pass
+
 
 class Task(Config):
     """base class for tasks"""
