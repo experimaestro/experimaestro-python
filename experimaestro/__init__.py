@@ -1,3 +1,5 @@
+# flake8: noqa: F401
+
 from pathlib import Path
 
 # Annotations
@@ -42,6 +44,7 @@ from .register import parse_commandline
 from .core.types import Any
 from .checkers import Choices
 from .xpmutils import DirectoryContext
+from .mkdocs.annotations import documentation
 
 
 def set_launcher(launcher):

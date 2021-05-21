@@ -5,6 +5,7 @@ See https://www.mkdocs.org/user-guide/plugins/ for plugin API documentation
 
 from collections import defaultdict
 import re
+from experimaestro.mkdocs.annotations import shoulddocument
 import requests
 from urllib.parse import urljoin
 from experimaestro.core.types import ObjectType
@@ -18,8 +19,13 @@ import mkdocs.config.config_options as config_options
 from mkdocs.structure.pages import Page as MkdocPage
 from experimaestro.core.objects import Config
 import json
+from docstring_parser.parser import parse as docstringparse
 
 MODULEPATH = Path(__file__).parent
+
+
+def md_protect(s):
+    return re.sub(r"""([*`_{}[\]])""", r"""\\\1""", s)
 
 
 class Configurations:
@@ -56,7 +62,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
         self.external = {}
         self.baseurl = config["site_url"]
 
-        for item in self.config["external"]:
+        for item in self.config.get("external") or []:
             module_name, url = next(iter(item.items()))
             logging.info("Loading external mappings from %s", url)
             baseurl = str(urljoin(url, "."))
@@ -183,7 +189,24 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 lines.append(f"**{name}** ({typestr})")
                 if argument.help:
                     lines.append(f"\n  {argument.help}")
-                lines.append("\n")
+                lines.append("\n\n")
+
+            methods = [
+                member
+                for key, member in inspect.getmembers(
+                    xpminfo.objecttype,
+                    predicate=lambda member: inspect.isfunction(member)
+                    and shoulddocument(member),
+                )
+            ]
+
+            if methods:
+                lines.append("**Methods**\n\n")
+                for method in methods:
+                    parseddoc = docstringparse(method.__doc__)
+                    lines.append(
+                        f"""- {md_protect(method.__name__)}() *{parseddoc.short_description}*\n"""
+                    )
 
     def on_page_markdown(self, markdown, page: MkdocPage, **kwargs):
         """Generate markdown pages"""
