@@ -5,10 +5,12 @@ See https://www.mkdocs.org/user-guide/plugins/ for plugin API documentation
 
 from collections import defaultdict
 import re
+import requests
+from urllib.parse import urljoin
 from experimaestro.core.types import ObjectType
 import mkdocs
 from pathlib import Path
-from typing import List, Dict
+from typing import List
 import importlib
 import logging
 import inspect
@@ -32,6 +34,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
     config_scheme = (
         ("name", config_options.Type(str, default="Tasks and configurations")),
         ("modules", config_options.Type(list)),
+        ("external", config_options.Type(list)),
         ("init", config_options.Type(list)),
     )
 
@@ -50,7 +53,16 @@ class Documentation(mkdocs.plugins.BasePlugin):
 
         # Include documentation pages in config
         self.parsed = {}
+        self.external = {}
         self.baseurl = config["site_url"]
+
+        for item in self.config["external"]:
+            module_name, url = next(iter(item.items()))
+            logging.info("Loading external mappings from %s", url)
+            baseurl = str(urljoin(url, "."))
+            mappings = requests.get(url).json()
+            for module, path in mappings.items():
+                self.external[module] = f"{baseurl}{path}"
 
         for name_packagename in self.config["modules"]:
             module_name, md_path = next(iter(name_packagename.items()))
@@ -116,9 +128,14 @@ class Documentation(mkdocs.plugins.BasePlugin):
 
     def getlink(self, qualname: str):
         md_path = self.type2path.get(qualname, None)
-        if md_path is None:
-            return qualname
-        return f"[{qualname}]({self.baseurl}/{md_path}#{qualname})"
+        if md_path:
+            return f"[{qualname}]({self.baseurl}{md_path}#{qualname})"
+
+        module_name = qualname[: qualname.rfind(".")]
+        baseurl = self.external.get(module_name, None)
+        if baseurl:
+            return f"[{qualname}]({baseurl}#{qualname})"
+        return qualname
 
     def build_doc(self, lines: List[str], configs: List[ObjectType]):
         """Build the documentation for a list of configurations"""
