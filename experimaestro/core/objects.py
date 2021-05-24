@@ -906,6 +906,8 @@ def cache(fn, name: str):
 class TypeConfig:
     """Class of configuration objects"""
 
+    __xpmtype__: ObjectType
+
     def __init__(self, **kwargs):
         """Initialize the configuration with the given parameters"""
 
@@ -942,6 +944,19 @@ class TypeConfig:
                     self.__xpm__.set(name, clone(value.default), bypass=True)
                 elif not value.required:
                     self.__xpm__.set(name, None, bypass=True)
+
+    def __repr__(self):
+        lines = [
+            f"Experimaestro configuration object of type {self.__xpmtype__.identifier}",
+            "",
+            "Parameters",
+        ]
+        for argument in self.__xpmtype__.arguments.values():
+            lines.append(
+                f""" - {argument.name} ({argument.type.identifier}) {argument.help or ""}"""
+            )
+
+        return "\n".join(lines)
 
     def tag(self, name, value) -> "Config":
         self.__xpm__.addtag(name, value)
