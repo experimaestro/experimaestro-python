@@ -220,7 +220,7 @@ class ObjectType(Type):
         return commandline.CommandLineTask(commandLine)
 
     def __initialize__(self):
-        """Effectively parses information"""
+        """Effectively gather configuration information"""
         # Check if not initialized
         if self.__initialized__:
             return
@@ -330,12 +330,23 @@ class ObjectType(Type):
 
     def validate(self, value):
         """Ensures that the value is compatible with this type"""
-        from .objects import Config
+        from .objects import Config, Proxy
 
         self.__initialize__()
 
         if value is None:
             return None
+
+        if isinstance(value, Proxy):
+            _value = value.get()
+            _value = self.validate(_value)
+
+            # If this is a simple type, OK
+            if isinstance(_value, (int, float, str, bool, Path)):
+                return _value
+
+            # Returns the proxy
+            return value
 
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")

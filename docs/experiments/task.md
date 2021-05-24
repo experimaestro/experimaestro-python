@@ -10,14 +10,14 @@ A task is a special configuration that can be:
     ```py3
     from experimaestro import Config, Task, Param
 
-        class ModelLearn(Task):
-            epochs: Param[int] = 100
-            model: Param[Model]
-            parameters: Annotated[Path, pathgenerator("parameters.pth")]
+    class ModelLearn(Task):
+        epochs: Param[int] = 100
+        model: Param[Model]
+        parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
-            def execute(self):
-                """Called when this task is run"""
-                pass
+        def execute(self):
+            """Called when this task is run"""
+            pass
     ```
 
 ## Task lifecycle
@@ -30,33 +30,40 @@ some special variables are defined:
 - task directory can is `self.__taskdir__`
 - when using [sub-parameters](../config#sub-parameters), `self.__maintaskdir__` is the directory of the main task
 
-## Generating new configurations
+## Tasks outputs
 
 It is possible to generate a configuration when submitting a task.
 
-!!! example "Defining a task as a class"
+!!! example "Task outputs"
 
     It is possible to use classes if variables need to be defined,
     or if a configuration should be returned (here, `Model`)
 
     ```py3
-        class ModelLearn(Task):
-            epochs: Param[int] = 100
-            model: Param[Model]
-            parameters: Annotated[Path, pathgenerator("parameters.pth")]
+    from experimaestro import Serialized, Task, Param
 
-            def config(self) -> Model:
-                return self.model
+    class ModelLoader(Serialized):
+        @staticmethod
+        def fromJSON(path):
+            return unserialize(path)
 
-            def execute(self):
-                """Called when this task is run"""
-                pass
+    class ModelLearn(Task):
+        epochs: Param[int] = 100
+        model: Param[Model]
+        parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
-        # Building
-        learn = ModelLearn(model=model)
+        def taskoutputs(self) -> Model:
+            return SerializedConfig(self.model, ModelLoader(str(self.parameters)))
 
-        # learnedmodel is a Model configuration
-        learnedmodel = learn.submit()
+        def execute(self):
+            """Called when this task is run"""
+            pass
+
+    # Building
+    learn = ModelLearn(model=model)
+
+    # learnedmodel is a Model configuration
+    learnedmodel = learn.submit()
 
     ```
 

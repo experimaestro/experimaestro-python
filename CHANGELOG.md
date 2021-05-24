@@ -1,3 +1,7 @@
+# 0.9.0
+
+- Task outputs are now handled properly
+
 # 0.8.7
 
 - (Enhancement) Slurm support

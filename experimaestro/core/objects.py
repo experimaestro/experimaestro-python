@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib
 import struct
 import io
+from experimaestro.core.arguments import Param
 import fasteners
 import inspect
 import importlib
@@ -87,6 +88,9 @@ class HashComputer:
             for key, value in items:
                 self.update(key, subparam=subparam)
                 self.update(value, subparam=subparam)
+        elif isinstance(value, TaskProxy):
+            # Use the configuration of the task proxy
+            self.update(value.config, subparam=subparam)
         elif isinstance(value, Config):
             xpmtype = value.__xpmtype__
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
@@ -157,6 +161,8 @@ def updatedependencies(
     elif isinstance(value, (list, set)):
         for el in value:
             updatedependencies(dependencies, el, path, taskids)
+    elif isinstance(value, TaskProxy):
+        dependencies.add(value.config.__xpm__.dependency())
     elif isinstance(value, (dict,)):
         for key, val in value.items():
             updatedependencies(dependencies, key, path, taskids)
@@ -221,13 +227,14 @@ class GenerationContext:
 class ConfigProcessing:
     """Allows to perform an operation on all nested configurations"""
 
-    def __init__(self, recursetask=False):
+    def __init__(self, recursetask=False, recursetaskproxy=False):
         """
 
         Parameters:
             recursetask: Recurse into linked tasks
         """
         self.recursetask = recursetask
+        self.recursetaskproxy = recursetaskproxy
         self.visited = set()
 
     def preprocess(self, config: "Config"):
@@ -287,6 +294,12 @@ class ConfigProcessing:
                 with self.map(key):
                     result[key] = self(value)
             return result
+
+        if isinstance(x, TaskProxy):
+            if self.recursetaskproxy:
+                self(x.config)
+
+            return x
 
         if isinstance(x, (float, int, str, Path)):
             return x
@@ -384,7 +397,7 @@ class ConfigInformation:
     def tags(self):
         class TagFinder(ConfigProcessing):
             def __init__(self):
-                super().__init__(recursetask=True)
+                super().__init__(recursetask=True, recursetaskproxy=True)
                 self.tags = {}
 
             def postprocess(self, config: Config, values):
@@ -532,32 +545,18 @@ class ConfigInformation:
             config.__xpm__._task = self.pyobject
             return config
 
+        # New way to handle outputs
+        if hasattr(self.pyobject, "taskoutputs"):
+            value = self.pyobject.taskoutputs()
+            return TaskProxy(value, self.pyobject)
+
         return self.pyobject
 
     # --- Serialization
 
     @staticmethod
-    def _outputjsonobjects(value, jsonout, context, serialized):
-        """Output JSON objects"""
-        # objects
-        if isinstance(value, Config):
-            value.__xpm__._outputjson_inner(jsonout, context, serialized)
-        elif isinstance(value, list):
-            for el in value:
-                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
-        elif isinstance(value, dict):
-            for name, el in value.items():
-                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
-        elif isinstance(value, (Path, int, float, str)):
-            pass
-        else:
-            raise NotImplementedError(
-                "Cannot serialize objects of type %s", type(value)
-            )
-
-    @staticmethod
     def _outputjsonvalue(key, value, jsonout, context):
-        """Output JSON value"""
+        """Serialize a value"""
         if value is None:
             jsonout.write(*key, None)
         elif isinstance(value, Config):
@@ -578,12 +577,21 @@ class ConfigInformation:
                 objectout.write("value", str(value))
         elif isinstance(value, (int, float, str)):
             jsonout.write(*key, value)
+        elif isinstance(value, SerializedTaskProxy):
+            # Reference to a serialized object
+            with jsonout.subobject(*key) as objectout:
+                objectout.write("type", "serialized")
+                objectout.write("value", id(value.serialized.loader))
+                with objectout.subarray("path") as out:
+                    for c in value.path:
+                        out.write(c.toJSON())
         else:
             raise NotImplementedError(
                 "Cannot serialize objects of type %s", type(value)
             )
 
     def _outputjson_inner(self, jsonstream, context, serialized: Set[int]):
+        """Serialize the configuration"""
         # Skip if already serialized
         if id(self.pyobject) in serialized:
             return
@@ -598,7 +606,6 @@ class ConfigInformation:
                 )
 
         with jsonstream.subobject() as objectout:
-
             # Serialize ourselves
             objectout.write("id", id(self.pyobject))
             if not self.xpmtype._package:
@@ -617,6 +624,39 @@ class ConfigInformation:
                     ConfigInformation._outputjsonvalue(
                         [argument.name], value, jsonfields, value
                     )
+
+    @staticmethod
+    def _outputjsonobjects(value, jsonout, context, serialized):
+        """Serialize all configuration objects present within the value"""
+        # objects
+        if isinstance(value, SerializedTaskProxy):
+            with jsonout.subobject() as objectout:
+                loader = value.serialized.loader
+                objectout.write("id", id(loader))
+                objectout.write("serialized", True)
+                objectout.write("module", loader.__class__.__module__)
+                objectout.write("type", loader.__class__.__qualname__)
+                objectout.write("value", value.serialized.loader.toJSON())
+            return
+
+        # Unwrap if needed
+        if isinstance(value, TaskProxy):
+            value = value.get()
+
+        if isinstance(value, Config):
+            value.__xpm__._outputjson_inner(jsonout, context, serialized)
+        elif isinstance(value, list):
+            for el in value:
+                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
+        elif isinstance(value, dict):
+            for name, el in value.items():
+                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
+        elif isinstance(value, (Path, int, float, str)):
+            pass
+        else:
+            raise NotImplementedError(
+                "Cannot serialize objects of type %s", type(value)
+            )
 
     def outputjson(self, out: io.TextIOBase, context: "CommandContext"):
         """Outputs the json of this object
@@ -680,8 +720,21 @@ class ConfigInformation:
                     ): ConfigInformation._objectFromParameters(value, objects)
                     for key, value in value.items()
                 }
-            elif value["type"] == "python":
+
+            if value["type"] == "python":
                 return objects[value["value"]]
+
+            if value["type"] == "serialized":
+                o = objects[value["value"]]
+                for c in value["path"]:
+                    if c["type"] == "item":
+                        o = o[c["name"]]
+                    elif c["type"] == "attr":
+                        o = getattr(o, c["name"])
+                    else:
+                        raise TypeError(f"Cannot handle type {c['type']}")
+                return o
+
             if value["type"] == "path":
                 return Path(value["value"])
             else:
@@ -718,42 +771,48 @@ class ConfigInformation:
             for part in definition["type"].split("."):
                 cls = getattr(cls, part)
 
-            # Creates an object (and not a config)
-            o = cls.__new__(cls, __xpmobject__=True)
+            if definition.get("serialized", False):
+                o = cls.fromJSON(definition["value"])
+            else:
+                # Creates an object (and not a config)
+                o = cls.__new__(cls, __xpmobject__=True)
 
-            # And calls the parameter-less initialization
-            o.__init__()
+                # And calls the parameter-less initialization
+                o.__init__()
 
-            if "typename" in definition:
-                o.__xpmtypename__ = definition["typename"]
-                o.__xpmidentifier__ = definition["identifier"]
+                if "typename" in definition:
+                    o.__xpmtypename__ = definition["typename"]
+                    o.__xpmidentifier__ = definition["identifier"]
 
-                if "." in o.__xpmtypename__:
-                    _, name = o.__xpmtypename__.rsplit(".", 1)
-                else:
-                    name = o.__xpmtypename__
-                basepath = (
-                    taskglobals.wspath
-                    / "jobs"
-                    / o.__xpmtypename__
-                    / o.__xpmidentifier__
+                    if "." in o.__xpmtypename__:
+                        _, name = o.__xpmtypename__.rsplit(".", 1)
+                    else:
+                        name = o.__xpmtypename__
+                    basepath = (
+                        taskglobals.wspath
+                        / "jobs"
+                        / o.__xpmtypename__
+                        / o.__xpmidentifier__
+                    )
+                    o.__xpm_stdout__ = basepath / f"{name}.out"
+                    o.__xpm_stderr__ = basepath / f"{name}.err"
+
+                for name, value in definition["fields"].items():
+                    v = ConfigInformation._objectFromParameters(value, objects)
+                    setattr(o, name, v)
+                    assert (
+                        getattr(o, name) is v
+                    ), f"Problem with deserialization {name} of {o.__class__}"
+
+                # Calls post-init
+                postinit = getattr(o, "__postinit__", None)
+                if postinit is not None:
+                    postinit()
+
+                assert definition["id"] not in objects, (
+                    "Duplicate id %s" % definition["id"]
                 )
-                o.__xpm_stdout__ = basepath / f"{name}.out"
-                o.__xpm_stderr__ = basepath / f"{name}.err"
 
-            for name, value in definition["fields"].items():
-                v = ConfigInformation._objectFromParameters(value, objects)
-                setattr(o, name, v)
-                assert (
-                    getattr(o, name) is v
-                ), f"Problem with deserialization {name} of {o.__class__}"
-
-            # Calls post-init
-            postinit = getattr(o, "__postinit__", None)
-            if postinit is not None:
-                postinit()
-
-            assert definition["id"] not in objects, "Duplicate id %s" % definition["id"]
             objects[definition["id"]] = o
 
         return o
@@ -856,6 +915,7 @@ class TypeConfig:
         # Create the config information object
         xpm = ConfigInformation(self)
 
+        # Get the line where the object was created (error reporting)
         caller = inspect.getframeinfo(inspect.stack()[1][0])
         xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
 
@@ -990,3 +1050,111 @@ class Task(Config):
     """base class for tasks"""
 
     pass
+
+
+# --- Output proxy
+
+
+class Proxy:
+    """A proxy for a value"""
+
+    def get(self) -> Any:
+        raise NotImplementedError()
+
+
+class ItemAccessor:
+    def __init__(self, key: Any):
+        self.key = key
+
+    def toJSON(self):
+        return {"type": "item", "name": self.key}
+
+    def get(self, value):
+        return value.__getitem__(self.key)
+
+
+class AttrAccessor:
+    def __init__(self, key: Any, default: Any):
+        self.key = key
+        self.default = default
+
+    def get(self, value):
+        return getattr(value, self.key, self.default)
+
+    def toJSON(self):
+        return {"type": "attr", "name": self.key}
+
+
+class Serialized:
+    """Simple serialization object"""
+
+    def __init__(self, value):
+        self.value = value
+
+    def toJSON(self):
+        return self.value
+
+
+class SerializedConfig:
+    def __init__(self, pyobject: Config, loader):
+        self.pyobject = pyobject
+        self.loader = loader
+
+
+class TaskProxy(Proxy):
+    """Task proxy
+
+    This is used when accessing properties *after* having submitted a task,
+    to keep track of the dependencies
+    """
+
+    def __init__(self, value: Any, config: Config):
+        self.value = value
+        self.config = config
+
+    def wrap(self, value):
+        if isinstance(value, SerializedConfig):
+            return SerializedTaskProxy(value.pyobject, value, self.config, [])
+
+        return TaskProxy(value, self.config)
+
+    def __getitem__(self, key: Any):
+        return self.wrap(self.value.__getitem__(key))
+
+    def __getattr__(self, key: str, default=None) -> Any:
+        return self.wrap(getattr(self.value, key, default))
+
+    def get(self):
+        return self.value
+
+
+class SerializedTaskProxy(TaskProxy):
+    """Used when serializing a configuration
+
+    Here, we need to keep track of the path to the value we need
+    """
+
+    def __init__(
+        self, value, serialized: SerializedConfig, config: Config, path: List[Any]
+    ):
+        super().__init__(value, config)
+        self.serialized = serialized
+        self.path = path
+
+    def get(self):
+        return self.value
+
+    def __getitem__(self, key: Any):
+        value = self.value.__getitem__(key)
+        return SerializedTaskProxy(
+            value, self.serialized, self.config, self.path + [ItemAccessor(key)]
+        )
+
+    def __getattr__(self, key: str, default=None) -> Any:
+        value = getattr(self.value, key, default)
+        return SerializedTaskProxy(
+            value,
+            self.serialized,
+            self.config,
+            self.path + [AttrAccessor(key, default)],
+        )

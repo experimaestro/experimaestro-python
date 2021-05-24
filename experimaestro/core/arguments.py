@@ -1,14 +1,17 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
 from pathlib import Path
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional, TypeVar, TYPE_CHECKING
 from experimaestro.typingutils import get_optional
 import sys
 
-if sys.version_info.major == 3 and sys.version_info.minor < 9:
+if TYPE_CHECKING:
     from typing_extensions import Annotated
 else:
-    from typing import Annotated
+    if sys.version_info.major == 3 and sys.version_info.minor < 9:
+        from typing_extensions import Annotated
+    else:
+        from typing import Annotated
 
 
 class Argument:

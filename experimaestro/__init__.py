@@ -35,7 +35,7 @@ from .core.arguments import (
     default,
 )
 from .generators import pathgenerator
-from .core.objects import Config, Task
+from .core.objects import Config, Task, SerializedConfig
 from .environment import Environment
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment
