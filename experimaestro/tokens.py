@@ -69,10 +69,14 @@ class TokenFile:
     """Represents a token file"""
 
     def __init__(self, path: Path):
-        self.path = path
-        with path.open("rt") as fp:
-            count, self.uri = [l.strip() for l in fp.readlines()]
-            self.count = int(count)
+        try:
+            self.path = path
+            with path.open("rt") as fp:
+                count, self.uri = [l.strip() for l in fp.readlines()]
+                self.count = int(count)
+        except Exception:
+            logging.exception("Error while reading %s", self.path)
+            raise
 
     @staticmethod
     def create(dependency: CounterTokenDependency):
