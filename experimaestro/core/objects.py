@@ -337,6 +337,7 @@ class ConfigInformation:
 
         # Generated task
         self._task = None  # type: Optional[Task]
+        self._taskoutput = None
 
         # State information
         self.job = None
@@ -532,7 +533,7 @@ class ConfigInformation:
             other = Scheduler.CURRENT.submit(self.job)
             if other:
                 # Just returns the other task
-                return other.config
+                return other.config.__xpm__._taskoutput
         else:
             logger.warning("Simulating: not submitting job %s", self.job)
 
@@ -543,14 +544,18 @@ class ConfigInformation:
                 hints = get_type_hints(self.pyobject.config)
                 config = hints["return"](**config)
             config.__xpm__._task = self.pyobject
-            return config
+            self._taskoutput = config
 
         # New way to handle outputs
-        if hasattr(self.pyobject, "taskoutputs"):
+        elif hasattr(self.pyobject, "taskoutputs"):
             value = self.pyobject.taskoutputs()
-            return TaskProxy(value, self.pyobject)
+            self._taskoutput = TaskProxy(value, self.pyobject)
 
-        return self.pyobject
+        # Otherwise, the output is just the config
+        else:
+            self._taskoutput = self.pyobject
+
+        return self._taskoutput
 
     # --- Serialization
 
@@ -953,7 +958,7 @@ class TypeConfig:
         ]
         for argument in self.__xpmtype__.arguments.values():
             lines.append(
-                f""" - {argument.name} ({argument.type.identifier}) {argument.help or ""}"""
+                f""" - {argument.name} ({argument.type.name()}) {argument.help or ""}"""
             )
 
         return "\n".join(lines)
