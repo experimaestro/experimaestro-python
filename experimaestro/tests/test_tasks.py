@@ -32,7 +32,7 @@ def test_simple_task():
             concat = Concat(strings=[hello, world]).submit()
 
         assert concat.__xpm__.job.state == JobState.DONE
-        assert Path(concat.stdout()).read_text() == "HELLO WORLD\n"
+        assert Path(concat.__xpm__.stdout()).read_text() == "HELLO WORLD\n"
 
 
 def test_not_submitted():
@@ -48,7 +48,7 @@ def test_fail():
     with pytest.raises(FailedExperiment):
         with TemporaryExperiment("failing", maxwait=2):
             fail = Fail().submit()
-            fail.touch()
+            fail.__unwrap__().touch()
 
 
 def test_foreign_type():
@@ -61,7 +61,7 @@ def test_foreign_type():
         a = ForeignTaskA(b=b).submit()
 
         assert a.__xpm__.job.wait() == JobState.DONE
-        assert a.stdout().read_text().strip() == "1"
+        assert a.__xpm__.stdout().read_text().strip() == "1"
 
 
 def test_fail_dep():
@@ -70,7 +70,7 @@ def test_fail_dep():
         with TemporaryExperiment("failingdep"):
             fail = Fail().submit()
             dep = FailConsumer(fail=fail).submit()
-            fail.touch()
+            fail.__unwrap__().touch()
 
     assert fail.__xpm__.job.wait() == JobState.ERROR
     assert dep.__xpm__.job.wait() == JobState.ERROR

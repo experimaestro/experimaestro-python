@@ -240,7 +240,7 @@ def test_task_config():
             return {}
 
     output = Task().submit(dryrun=True)
-    assert type(output) == Output.__xpmtype__.configtype
+    assert Output.__xpmtype__.configtype == type(output.__unwrap__())
 
 
 def test_default_mismatch():

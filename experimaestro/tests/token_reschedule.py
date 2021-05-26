@@ -32,6 +32,6 @@ if __name__ == "__main__":
         logging.info("Reschedule with token [%s]: ready", x)
 
         # Wait until the experiment
-        task.job.wait()
+        task.__xpm__.task.job.wait()
         logging.info("Reschedule with token [%s]: finished", x)
-        Path(timepath).write_text(Path(task.stdout()).read_text())
+        Path(timepath).write_text(Path(task.__xpm__.stdout()).read_text())

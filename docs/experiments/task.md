@@ -62,28 +62,26 @@ It is possible to generate a configuration when submitting a task.
     # Building
     learn = ModelLearn(model=model)
 
-    # learnedmodel is a Model configuration
+    # learnedmodel can be used as a model
     learnedmodel = learn.submit()
 
     ```
 
-## Output configurations
+## Task output object
 
-Sometimes it is convenient to use a configuration object as one of the output of
-a task. In this case, it is possible to use _output configurations_ nested
-within tasks
+Calling submit returns a `TaskOutput` object, which is necessary to keep track
+of dependencies. This task output is a proxy for the returned object, i.e.
+accessing an attribute wraps it into another `TaskOutput` object.
 
-```py3
-class TaskValidation(Config):
-    modelpath: Annotated[Path, pathgenerator("model.pth")]
+`TaskOutput` objects have two specific methods and variables:
 
-class MyTask(Task):
-    val: Param[TaskValidation]
-```
+- `__xpm__` that is a `TaskOutputInformation` containing the `task` that was submitted
+- `__unwrap__` that returns the wrapped value (warning: unwrapping might prevent dependency tracking from working)
 
-When submitting a `MyTask` instance `mytask`, the `val` parameter is recognized as
-an output configuration (because of the path generator), which means
-that `mytask.val` can be used as a dependency and inherits the tags of `mytask`.
+For `TaskOutputInformation`, we have:
+
+- `stdout()` that returns a `Path` to the file that contains the standard output
+- `tags()` that returns the tags of the wrapped variable
 
 ## Lightweights tasks using `@cache`
 

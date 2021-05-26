@@ -1,7 +1,7 @@
 """Test for task outputs"""
 
 from experimaestro import Config, Task, Param
-from experimaestro.core.objects import SerializedConfig, Serialized, TaskProxy
+from experimaestro.core.objects import SerializedConfig, Serialized, TaskOutput
 from experimaestro.tests.utils import TemporaryExperiment
 
 
@@ -39,12 +39,12 @@ class MainB(Task):
         pass
 
 
-def test_taskproxy():
+def test_taskoutput():
     a = A(b=B())
     output, ioutput = Main(a=a).submit(dryrun=True)
 
-    assert isinstance(ioutput["serialized"], TaskProxy)
-    assert isinstance(output, TaskProxy), "outputs should be task proxies"
+    assert isinstance(ioutput["serialized"], TaskOutput)
+    assert isinstance(output, TaskOutput), "outputs should be task proxies"
 
     # Direct
     Main(a=output)

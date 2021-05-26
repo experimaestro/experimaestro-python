@@ -11,6 +11,7 @@ from experimaestro import (
     Param,
 )
 from experimaestro.xpmutils import DirectoryContext
+from experimaestro.tests.utils import TemporaryExperiment
 
 
 @argument("x", type=int)
@@ -67,7 +68,7 @@ def test_inneroutput():
     assert output.tags() == {"hello": "world"}
 
     evaluate = Evaluate(task=task).submit(dryrun=True)
-    assert evaluate.tags() == {"hello": "world"}
+    assert evaluate.__xpm__.tags() == {"hello": "world"}
 
 
 class TaskDirectoryContext(DirectoryContext):
@@ -86,19 +87,20 @@ def test_objects_nested_tags():
     class B(Config):
         p: Annotated[Path, pathgenerator("p.txt")]
 
-    class A(Config):
+    class A(Task):
         x: Param[int]
         b: Param[B]
 
     a = A(x=tag(1), b=B())
-    context = TaskDirectoryContext(a, Path("/__fakepath__"))
-    a.__xpm__.seal(context)
+    with TemporaryExperiment("nested_tags"):
+        # context = TaskDirectoryContext(a, Path("/__fakepath__"))
+        output = a.submit(dryrun=True)
 
     # Tags of main object...
     assert a.__xpm__.tags() == {"x": 1}
 
     # ...should be propagated to output configurations
-    assert a.b.__xpm__.tags() == {"x": 1}
+    assert output.b.__xpm__.tags() == {"x": 1}
 
 
 def test_objects_tags():

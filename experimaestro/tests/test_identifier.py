@@ -1,8 +1,6 @@
 # Tests for identifier computation
 
 from pathlib import Path
-import unittest
-import logging
 from typing import Dict
 from experimaestro import (
     config,
@@ -16,6 +14,7 @@ from experimaestro import (
     pathgenerator,
     Annotated,
 )
+from experimaestro.core.objects import TaskOutput
 
 
 @config()
@@ -52,12 +51,18 @@ class Values:
     value2: Param[float]
 
 
+def getidentifier(x):
+    if isinstance(x, TaskOutput):
+        return x.__xpm__.identifier.all
+    return x.__xpm__.identifier.all
+
+
 def assert_equal(a, b):
-    assert a.__xpm__.identifier.all == b.__xpm__.identifier.all
+    assert getidentifier(a) == getidentifier(b)
 
 
 def assert_notequal(a, b):
-    assert a.__xpm__.identifier.all != b.__xpm__.identifier.all
+    assert getidentifier(a) != getidentifier(b)
 
 
 def test_int():
@@ -205,7 +210,7 @@ def test_taskconfigidentifier():
     @param("x", type=int)
     @task()
     class Task:
-        def config(self) -> Config:
+        def config(self):
             return Config(a=1)
 
     assert_equal(Task(x=1).submit(dryrun=True), Task(x=1).submit(dryrun=True))

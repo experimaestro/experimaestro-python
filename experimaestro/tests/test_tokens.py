@@ -34,15 +34,14 @@ def token_experiment(xp, token, ntasks=3):
     tasks = []
     for it in range(ntasks):
         task = TokenTask(path=path, x=it)
-        tasks.append(task)
         if token:
             task.add_dependencies(token.dependency(1))
-        task.submit()
+        tasks.append(task.submit())
 
     # Wait that both tasks are scheduled
     logging.info("Waiting that the two tasks are scheduled")
     for task in tasks:
-        while task.job.state == JobState.UNSCHEDULED:
+        while task.__xpm__.job.state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
     # Wait a bit (TODO: find a better way)

@@ -338,7 +338,7 @@ class ObjectType(Type):
             return None
 
         if isinstance(value, Proxy):
-            _value = value.get()
+            _value = value.__unwrap__()
             _value = self.validate(_value)
 
             # If this is a simple type, OK

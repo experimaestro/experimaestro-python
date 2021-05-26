@@ -88,22 +88,13 @@ class HashComputer:
             for key, value in items:
                 self.update(key, subparam=subparam)
                 self.update(value, subparam=subparam)
-        elif isinstance(value, TaskProxy):
+        elif isinstance(value, TaskOutput):
             # Use the configuration of the task proxy
-            self.update(value.config, subparam=subparam)
+            self.update(value.__xpm__.task, subparam=subparam)
         elif isinstance(value, Config):
             xpmtype = value.__xpmtype__
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
             self._hashupdate(xpmtype.identifier.name.encode("utf-8"), subparam=subparam)
-
-            # Add task parameters
-            if value.__xpm__._task:
-                task = value.__xpm__._task
-                # Avoid recursion
-                if id(task) not in self._tasks:
-                    self._tasks.add(id(task))
-                    self._hashupdate(HashComputer.TASK_ID, subparam=subparam)
-                    self.update(task, subparam=subparam)
 
             # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
@@ -151,18 +142,15 @@ def updatedependencies(
             dependencies.add(task.__xpm__.dependency())
 
     if isinstance(value, Config):
-        if value.__xpm__._task is not None:
-            # Value that depends on a task
-            add(value.__xpm__._task)
-        elif value.__xpmtype__.task:
+        if value.__xpmtype__.task:
             add(value)
         else:
             value.__xpm__.updatedependencies(dependencies, path, taskids)
     elif isinstance(value, (list, set)):
         for el in value:
             updatedependencies(dependencies, el, path, taskids)
-    elif isinstance(value, TaskProxy):
-        dependencies.add(value.config.__xpm__.dependency())
+    elif isinstance(value, TaskOutput):
+        dependencies.add(value.__xpm__.task.__xpm__.dependency())
     elif isinstance(value, (dict,)):
         for key, val in value.items():
             updatedependencies(dependencies, key, path, taskids)
@@ -227,14 +215,13 @@ class GenerationContext:
 class ConfigProcessing:
     """Allows to perform an operation on all nested configurations"""
 
-    def __init__(self, recursetask=False, recursetaskproxy=False):
+    def __init__(self, recursetask=False):
         """
 
         Parameters:
             recursetask: Recurse into linked tasks
         """
         self.recursetask = recursetask
-        self.recursetaskproxy = recursetaskproxy
         self.visited = set()
 
     def preprocess(self, config: "Config"):
@@ -274,10 +261,6 @@ class ConfigProcessing:
                     with self.map(arg.name):
                         result[arg.name] = self(v)
 
-            if self.recursetask and info._task:
-                # We won't do anything here
-                self(info._task)
-
             return self.postprocess(x, result)
 
         if isinstance(x, list):
@@ -295,9 +278,9 @@ class ConfigProcessing:
                     result[key] = self(value)
             return result
 
-        if isinstance(x, TaskProxy):
-            if self.recursetaskproxy:
-                self(x.config)
+        if isinstance(x, TaskOutput):
+            if self.recursetask:
+                self(x.__xpm__.task)
 
             return x
 
@@ -336,7 +319,6 @@ class ConfigInformation:
         self._initinfo = {}
 
         # Generated task
-        self._task = None  # type: Optional[Task]
         self._taskoutput = None
 
         # State information
@@ -398,7 +380,7 @@ class ConfigInformation:
     def tags(self):
         class TagFinder(ConfigProcessing):
             def __init__(self):
-                super().__init__(recursetask=True, recursetaskproxy=True)
+                super().__init__(recursetask=True)
                 self.tags = {}
 
             def postprocess(self, config: Config, values):
@@ -453,11 +435,6 @@ class ConfigInformation:
                         config.__xpm__.set(
                             k, argument.generator(self.context), bypass=True
                         )
-
-                # Set task
-                if context.task is not None and config.istaskoutput():
-                    assert not config.__xpm__._sealed, "Object with output is sealed"
-                    config.__xpm__._task = context.task
 
                 config.__xpm__._sealed = True
 
@@ -541,19 +518,19 @@ class ConfigInformation:
         if hasattr(self.pyobject, "config"):
             config = self.pyobject.config()
             if isinstance(config, dict):
+                # Converts to the specified configuration
                 hints = get_type_hints(self.pyobject.config)
                 config = hints["return"](**config)
-            config.__xpm__._task = self.pyobject
-            self._taskoutput = config
+            self._taskoutput = TaskOutput(config, self.pyobject)
 
         # New way to handle outputs
         elif hasattr(self.pyobject, "taskoutputs"):
             value = self.pyobject.taskoutputs()
-            self._taskoutput = TaskProxy(value, self.pyobject)
+            self._taskoutput = TaskOutput(value, self.pyobject)
 
         # Otherwise, the output is just the config
         else:
-            self._taskoutput = self.pyobject
+            self._taskoutput = TaskOutput(self.pyobject, self.pyobject)
 
         return self._taskoutput
 
@@ -582,14 +559,18 @@ class ConfigInformation:
                 objectout.write("value", str(value))
         elif isinstance(value, (int, float, str)):
             jsonout.write(*key, value)
-        elif isinstance(value, SerializedTaskProxy):
+        elif isinstance(value, SerializedTaskOutput):
             # Reference to a serialized object
             with jsonout.subobject(*key) as objectout:
                 objectout.write("type", "serialized")
-                objectout.write("value", id(value.serialized.loader))
+                objectout.write("value", id(value.__xpm__.serialized.loader))
                 with objectout.subarray("path") as out:
-                    for c in value.path:
+                    for c in value.__xpm__.path:
                         out.write(c.toJSON())
+        elif isinstance(value, TaskOutput):
+            ConfigInformation._outputjsonvalue(
+                key, value.__unwrap__(), jsonout, context
+            )
         else:
             raise NotImplementedError(
                 "Cannot serialize objects of type %s", type(value)
@@ -634,19 +615,20 @@ class ConfigInformation:
     def _outputjsonobjects(value, jsonout, context, serialized):
         """Serialize all configuration objects present within the value"""
         # objects
-        if isinstance(value, SerializedTaskProxy):
+        if isinstance(value, SerializedTaskOutput):
             with jsonout.subobject() as objectout:
-                loader = value.serialized.loader
+                serialized = value.__xpm__.serialized
+                loader = serialized.loader
                 objectout.write("id", id(loader))
                 objectout.write("serialized", True)
                 objectout.write("module", loader.__class__.__module__)
                 objectout.write("type", loader.__class__.__qualname__)
-                objectout.write("value", value.serialized.loader.toJSON())
+                objectout.write("value", serialized.loader.toJSON())
             return
 
         # Unwrap if needed
-        if isinstance(value, TaskProxy):
-            value = value.get()
+        if isinstance(value, TaskOutput):
+            value = value.__unwrap__()
 
         if isinstance(value, Config):
             value.__xpm__._outputjson_inner(jsonout, context, serialized)
@@ -1078,7 +1060,7 @@ class Task(Config):
 class Proxy:
     """A proxy for a value"""
 
-    def get(self) -> Any:
+    def __unwrap__(self) -> Any:
         raise NotImplementedError()
 
 
@@ -1121,60 +1103,80 @@ class SerializedConfig:
         self.loader = loader
 
 
-class TaskProxy(Proxy):
+class TaskOutputInfo:
+    def __init__(self, task: Task):
+        self.task = task
+        self.value = None
+        self.path = None
+        self.serialized = None
+
+    @property
+    def identifier(self):
+        return self.task.__xpm__.identifier
+
+    @property
+    def job(self):
+        return self.task.__xpm__.job
+
+    def tags(self):
+        tags = self.task.__xpm__.tags()
+        return tags
+
+    def stdout(self):
+        return self.task.__xpm__.job.stdout
+
+
+class TaskOutput(Proxy):
     """Task proxy
 
     This is used when accessing properties *after* having submitted a task,
     to keep track of the dependencies
     """
 
-    def __init__(self, value: Any, config: Config):
-        self.value = value
-        self.config = config
+    def __init__(self, value: Any, task: Task):
+        self.__xpm__ = TaskOutputInfo(task)
+        self.__xpm__.value = value
 
-    def wrap(self, value):
+    def _wrap(self, value):
         if isinstance(value, SerializedConfig):
-            return SerializedTaskProxy(value.pyobject, value, self.config, [])
+            return SerializedTaskOutput(value.pyobject, value, self.__xpm__.task, [])
 
-        return TaskProxy(value, self.config)
+        return TaskOutput(value, self.__xpm__.task)
 
     def __getitem__(self, key: Any):
-        return self.wrap(self.value.__getitem__(key))
+        return self._wrap(self.__xpm__.value.__getitem__(key))
 
     def __getattr__(self, key: str, default=None) -> Any:
-        return self.wrap(getattr(self.value, key, default))
+        return self._wrap(getattr(self.__xpm__.value, key, default))
 
-    def get(self):
-        return self.value
+    def __unwrap__(self):
+        return self.__xpm__.value
 
 
-class SerializedTaskProxy(TaskProxy):
+class SerializedTaskOutput(TaskOutput):
     """Used when serializing a configuration
 
     Here, we need to keep track of the path to the value we need
     """
 
     def __init__(
-        self, value, serialized: SerializedConfig, config: Config, path: List[Any]
+        self, value, serialized: SerializedConfig, task: Task, path: List[Any]
     ):
-        super().__init__(value, config)
-        self.serialized = serialized
-        self.path = path
-
-    def get(self):
-        return self.value
+        super().__init__(value, task)
+        self.__xpm__.serialized = serialized
+        self.__xpm__.path = path
 
     def __getitem__(self, key: Any):
-        value = self.value.__getitem__(key)
-        return SerializedTaskProxy(
-            value, self.serialized, self.config, self.path + [ItemAccessor(key)]
+        value = self.__xpm__.value.__getitem__(key)
+        return SerializedTaskOutput(
+            value, self.serialized, self.__xpm__.task, self.path + [ItemAccessor(key)]
         )
 
     def __getattr__(self, key: str, default=None) -> Any:
-        value = getattr(self.value, key, default)
-        return SerializedTaskProxy(
+        value = getattr(self.__xpm__.value, key, default)
+        return SerializedTaskOutput(
             value,
-            self.serialized,
-            self.config,
-            self.path + [AttrAccessor(key, default)],
+            self.__xpm__.serialized,
+            self.__xpm__.task,
+            self.__xpm__.path + [AttrAccessor(key, default)],
         )
