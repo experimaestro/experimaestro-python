@@ -1,3 +1,15 @@
+## Controlling tasks
+
+### Wait a for a task to complete
+
+```py3
+# Submit the task
+output = mytask.submit()
+
+# Wait until it completes, and returns a boolean (success flag)
+output.__xpm__.wait()
+```
+
 ## Debugging
 
 ### How to run a task without scheduling it?
@@ -10,3 +22,5 @@ is used.
 context = DirectoryContext("/tmp/taskfolder")
 task.instance(context).execute()
 ```
+
+The main problem with this approach is that resources are shared between experimaestro and the task

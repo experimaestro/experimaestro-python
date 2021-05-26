@@ -1129,7 +1129,9 @@ class TaskOutputInfo:
         return self.task.__xpm__.job.stderr
 
     def wait(self):
-        return self.task.__xpm__.job.wait()
+        from experimaestro.scheduler import JobState
+
+        return self.task.__xpm__.job.wait() == JobState.DONE
 
 
 class TaskOutput(Proxy):

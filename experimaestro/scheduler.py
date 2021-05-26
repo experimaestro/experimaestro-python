@@ -1,5 +1,4 @@
 from collections import defaultdict
-from logging import ERROR
 import os
 from pathlib import Path
 from shutil import rmtree
@@ -31,11 +30,22 @@ class FailedExperiment(RuntimeError):
 
 
 class JobState(enum.Enum):
+    # Job is not yet scheduled
     UNSCHEDULED = 0
+
+    # Job is waiting for dependencies to be done
     WAITING = 1
+
+    # Job is ready to run
     READY = 2
+
+    # Job is running
     RUNNING = 3
+
+    # Job is done (finished)
     DONE = 4
+
+    # Job failed (finished)
     ERROR = 5
 
     def notstarted(self):
