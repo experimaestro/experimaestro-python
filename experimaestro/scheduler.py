@@ -1,4 +1,5 @@
 from collections import defaultdict
+from logging import ERROR
 import os
 from pathlib import Path
 from shutil import rmtree
@@ -477,8 +478,11 @@ class Scheduler:
             if job.identifier in self.jobs:
                 other = self.jobs[job.identifier]
                 assert job.type == other.type
-                logger.warning("Job %s already submitted", job.identifier)
-                return other
+                if other.state == JobState.ERROR:
+                    logger.info("Re-submitting job")
+                else:
+                    logger.warning("Job %s already submitted", job.identifier)
+                    return other
 
             # Add to waiting jobs
             job.submittime = time.time()

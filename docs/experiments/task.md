@@ -80,8 +80,9 @@ accessing an attribute wraps it into another `TaskOutput` object.
 
 For `TaskOutputInformation`, we have:
 
-- `stdout()` that returns a `Path` to the file that contains the standard output
+- `stdout()` and `stderr()` that return a `Path` to the file that contains the standard output/error
 - `tags()` that returns the tags of the wrapped variable
+- `wait()` that waits until the task is finished
 
 ## Lightweights tasks using `@cache`
 

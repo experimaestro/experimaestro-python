@@ -1,6 +1,7 @@
-# 0.9.0
+# 0.9.3
 
-- Task outputs are now handled properly
+- Task outputs objets to wrap task outputs
+- Re-submitting a failed job now works
 
 # 0.8.7
 

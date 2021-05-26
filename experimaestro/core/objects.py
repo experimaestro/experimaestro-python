@@ -1125,6 +1125,12 @@ class TaskOutputInfo:
     def stdout(self):
         return self.task.__xpm__.job.stdout
 
+    def stderr(self):
+        return self.task.__xpm__.job.stderr
+
+    def wait(self):
+        return self.task.__xpm__.job.wait()
+
 
 class TaskOutput(Proxy):
     """Task proxy
@@ -1140,6 +1146,10 @@ class TaskOutput(Proxy):
     def _wrap(self, value):
         if isinstance(value, SerializedConfig):
             return SerializedTaskOutput(value.pyobject, value, self.__xpm__.task, [])
+
+        if isinstance(value, (str, int, float, Path, bool)):
+            # No need to wrap if direct
+            return value
 
         return TaskOutput(value, self.__xpm__.task)
 
