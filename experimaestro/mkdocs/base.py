@@ -34,6 +34,28 @@ class Configurations:
         self.configs = set()
 
 
+def relativepath(source: str, target: str):
+    """Computes a relative path from source to target"""
+
+    if source[-1] == "/":
+        source = source[:-1]
+
+    if target[-1] == "/":
+        target = target[:-1]
+
+    source_seq = source.split("/")
+    target_seq = target.split("/")
+    maxlen = min(len(source_seq), len(target_seq))
+
+    i = 0
+    while i < maxlen and target_seq[i] == source_seq[i]:
+        i += 1
+
+    path = [".."] * (len(source_seq) - i) + target_seq[i:]
+
+    return "/".join(path)
+
+
 class Documentation(mkdocs.plugins.BasePlugin):
     RE_SHOWCLASS = re.compile(r"::xpm::([^ \n]+)")
 
@@ -129,13 +151,13 @@ class Documentation(mkdocs.plugins.BasePlugin):
         with mapping_path.open("wt") as fp:
             json.dump(self.parsed, fp)
 
-    def showclass(self, m: re.Match):
-        return self.getlink(m.group(1).strip())
+    def showclass(self, location, m: re.Match):
+        return self.getlink(location, m.group(1).strip())
 
-    def getlink(self, qualname: str):
+    def getlink(self, url, qualname: str):
         md_path = self.type2path.get(qualname, None)
         if md_path:
-            return f"[{qualname}]({self.baseurl}{md_path}#{qualname})"
+            return f"[{qualname}]({relativepath(url, md_path)}#{qualname})"
 
         module_name = qualname[: qualname.rfind(".")]
         baseurl = self.external.get(module_name, None)
@@ -143,7 +165,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
             return f"[{qualname}]({baseurl}#{qualname})"
         return qualname
 
-    def build_doc(self, lines: List[str], configs: List[ObjectType]):
+    def build_doc(self, page: MkdocPage, lines: List[str], configs: List[ObjectType]):
         """Build the documentation for a list of configurations"""
         configs = sorted(configs, key=lambda x: str(x.identifier))
         for xpminfo in configs:
@@ -166,7 +188,8 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 lines.append("*Parents*: ")
                 lines.append(
                     ", ".join(
-                        self.getlink(parent.fullyqualifiedname()) for parent in parents
+                        self.getlink(page.url, parent.fullyqualifiedname())
+                        for parent in parents
                     )
                 )
                 lines.append("\n\n")
@@ -176,7 +199,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 if isinstance(argument.type, ObjectType):
                     basetype = argument.type.basetype
                     typestr = self.getlink(
-                        f"{basetype.__module__}.{basetype.__qualname__}"
+                        page.url, f"{basetype.__module__}.{basetype.__qualname__}"
                     )
                 else:
                     typestr = argument.type.name()
@@ -212,7 +235,9 @@ class Documentation(mkdocs.plugins.BasePlugin):
         """Generate markdown pages"""
         path = page.file.src_path
 
-        markdown = Documentation.RE_SHOWCLASS.sub(self.showclass, markdown)
+        markdown = Documentation.RE_SHOWCLASS.sub(
+            lambda c: self.showclass(page.url, c), markdown
+        )
 
         cfgs = self.configurations.get(path, None)
         if cfgs is None:
@@ -229,10 +254,10 @@ class Documentation(mkdocs.plugins.BasePlugin):
 
         if cfgs.configs:
             lines.extend(["## Configurations\n\n"])
-            self.build_doc(lines, cfgs.configs)
+            self.build_doc(page, lines, cfgs.configs)
 
         if cfgs.tasks:
             lines.extend(["## Tasks\n\n"])
-            self.build_doc(lines, cfgs.tasks)
+            self.build_doc(page, lines, cfgs.tasks)
 
         return "".join(lines)
