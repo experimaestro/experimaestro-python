@@ -1,3 +1,7 @@
+# 0.9.4
+
+- Generated documentation uses relative links (so it can be moved to any directory)
+
 # 0.9.3
 
 - Task outputs objets to wrap task outputs
