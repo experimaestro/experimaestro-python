@@ -1,3 +1,5 @@
+- Jupyter support with `jobmonitor` and `serverwidget`
+
 # 0.9.4
 
 - Generated documentation uses relative links (so it can be moved to any directory)
