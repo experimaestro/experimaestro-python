@@ -480,7 +480,7 @@ class ConfigInformation:
             raise ValueError("%s is not a task" % self.xpmtype)
 
         # --- Submit the job
-        from experimaestro.scheduler import Job, Scheduler, JobContext
+        from experimaestro.scheduler import Job, experiment, JobContext
 
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
@@ -506,8 +506,8 @@ class ConfigInformation:
         # Add predefined dependencies
         self.job.dependencies.update(self.dependencies)
 
-        if not dryrun and Scheduler.CURRENT.submitjobs:
-            other = Scheduler.CURRENT.submit(self.job)
+        if not dryrun:
+            other = experiment.CURRENT.submit(self.job)
             if other:
                 # Just returns the other task
                 return other.config.__xpm__._taskoutput
@@ -849,6 +849,9 @@ class ConfigInformation:
 
 def clone(v):
     """Clone a value"""
+    if v is None:
+        return v
+
     if isinstance(v, (str, float, int, Path)):
         return v
 

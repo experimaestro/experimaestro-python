@@ -22,7 +22,7 @@ class Launcher:
     def setenv(self, key: str, value: str):
         self.environ[key] = value
 
-    def setNotificationURL(self, url: str):
+    def setNotificationURL(self, url: Optional[str]):
         self.notificationURL = url
 
     def scriptbuilder(self) -> ScriptBuilder:

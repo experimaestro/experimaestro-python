@@ -388,6 +388,8 @@ class SignalHandler:
 
 
 class EventLoopThread(threading.Thread):
+    """The event loop thread used by the scheduler"""
+
     def __init__(self):
         super().__init__(daemon=True)
         self.loop = None
@@ -402,17 +404,11 @@ SIGNAL_HANDLER = None
 
 
 class Scheduler:
-    """Represents an experiment"""
-
-    CURRENT = None
-    EVENT_LOOP = None
+    """A job scheduler"""
 
     def __init__(self, name):
         # Name of the experiment
         self.name = name
-
-        # Whether jobs are submitted
-        self.submitjobs = True
 
         # Condition variable for scheduler access
         self.cv = ThreadingCondition()
@@ -443,9 +439,8 @@ class Scheduler:
         Scheduler.CURRENT = self
 
         # Create an event loop for checking things
-        if Scheduler.EVENT_LOOP is None:
-            Scheduler.EVENT_LOOP = EventLoopThread()
-            Scheduler.EVENT_LOOP.start()
+        self.event_loop = EventLoopThread()
+        self.event_loop.start()
 
         if not SIGNAL_HANDLER:
             SIGNAL_HANDLER = SignalHandler()
@@ -456,13 +451,13 @@ class Scheduler:
         # Wait until all tasks are completed (unless an exception was thrown)
         if exc_type:
             logger.exception("Not waiting since an exception was thrown")
-            # logger.warning("Not waiting since an exception was thrown [%s]", exc_type)
         else:
             self.wait()
 
         # Set back the old scheduler, if any
         logger.info("Exiting experiment %s", self.name)
         Scheduler.CURRENT = self.old_experiment
+        self.event_loop.loop.stop()
         SIGNAL_HANDLER.remove(self)
 
     def wait(self):
@@ -620,6 +615,9 @@ class experiment:
 
             logger.info("Enabling fault handler")
             faulthandler.enable(all_threads=True)
+
+    def submit(self, job: Job):
+        return self.scheduler.submit(job)
 
     @property
     def resultspath(self):
