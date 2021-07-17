@@ -4,24 +4,7 @@ Defining experiments is based on _config(urations)_ and _tasks_. Tasks are confi
 
 ## Defining a configuration
 
-```py3
-@config(identifier=None)
-```
-
-defines a configuration with identifier `identifier`, which could be any string.
-If not given, it is the concatenation of the module full name with the class/function
-name (lowercased).
-
-!!! example
-
-    ```py3
-    from experimaestro import Param, config
-        @config("my.model")
-        class MyModel():
-            gamma: Param[float]
-    ```
-
-defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
+A configuration is defined whenever an object derives from `Config`.
 
 When an identifier is not given, it is computed as `__module__.__qualname__`. In that case,
 it is possible to shorten the definition using the `Config` class as a base class.
@@ -32,8 +15,15 @@ it is possible to shorten the definition using the `Config` class as a base clas
     from experimaestro import Param, Config
 
     class MyModel(Config):
+        __xpmid__ = "my.model"
+
         gamma: Param[float]
     ```
+
+defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
+
+`__xpmid__` can also be a class method to generate dynamic ids for all descendant configurations
+When `__xpmid__` is missing, the qualified name is used.
 
 ### Object life cycle
 
@@ -88,17 +78,17 @@ class MyConfig(Config):
     version: Constant[str] = "2.1"
 ```
 
-### Options
+### Metadata
 
-Options are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be an option. They are declared as parameters, but using the `Option` type hint
+Metadata are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be a metadata. They are declared as parameters, but using the `Meta` type hint
 
 ```py3
 class MyConfig(Config):
     """
     Attributes:
-        x: The option x
+        count: The number of documents in the collection
     """
-    x: Option[type]
+    count: Meta[type]
 ```
 
 ### Path option
