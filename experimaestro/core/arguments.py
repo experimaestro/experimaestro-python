@@ -119,6 +119,7 @@ Param = Annotated[T, paramHint]
 
 optionHint = _Param(ignored=True)
 Option = Annotated[T, optionHint]
+Meta = Annotated[T, optionHint]
 
 subparamHint = _Param(subparam=True)
 SubParam = Annotated[T, subparamHint]
