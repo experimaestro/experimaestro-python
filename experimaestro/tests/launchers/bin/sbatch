@@ -24,9 +24,11 @@ lockpath 9 "$XPM_SLURM_DIR/slurm.lock"
 
 echo "Command line: $@" >&2
 args=()
+parsable=0
 stdout="/dev/stdout"
 while true; do
     case "$1" in
+        --parsable) shift; parsable=1;;
         -o) shift; stdout="$1"; shift;;
         --*) args+=("$1"); shift;;
         *) break 2;;    
@@ -39,5 +41,8 @@ JOBID="$$"
 date > "$XPM_SLURM_DIR/jobs/$JOBID.start"
 disown
 
-
-echo "Submitted batch job ${JOBID}"
+if test "$parsable" == 0; then
+    echo "Submitted batch job ${JOBID}"
+else
+    echo "${JOBID};cluster"
+fi

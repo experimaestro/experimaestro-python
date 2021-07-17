@@ -93,7 +93,7 @@ class SlurmProcessWatcher(threading.Thread):
                     line = line.strip()
                     if line:
                         try:
-                            jobid, state, start, end, *rest = line.split("|")
+                            jobid, state, start, end, *_ = line.split("|")
                             self.jobs[jobid] = SlurmJobState(state, start, end)
                             logger.debug("Parsed line: %s", line)
                         except ValueError as e:
@@ -153,11 +153,11 @@ class SlurmProcessBuilder(ProcessBuilder):
             builder.detach = False
             return builder.start()
 
-        builder.command = [f"{self.launcher.binpath}/sbatch"]
+        builder.command = [f"{self.launcher.binpath}/sbatch", "--parsable"]
         builder.command.extend(self.launcher.options.args())
 
-        addstream(builder.command, "-e", self.stderr),
-        addstream(builder.command, "-o", self.stdout),
+        addstream(builder.command, "-e", self.stderr)
+        addstream(builder.command, "-o", self.stdout)
         addstream(builder.command, "-i", self.stdin)
 
         builder.command.extend(self.command)
@@ -167,11 +167,11 @@ class SlurmProcessBuilder(ProcessBuilder):
         if p.wait() != 0:
             raise RuntimeError("Error while submitting job")
 
-        output = handler.output.decode("utf-8").strip()
-        RE_SUBMITTED_JOB = re.compile(r"""Submitted batch job (\d+)""")
+        output = handler.output.decode("utf-8").strip(" \n")
+        RE_SUBMITTED_JOB = re.compile(r"""^(\d+)(?:;.*)?$""", re.MULTILINE)
         m = RE_SUBMITTED_JOB.match(output)
         if m is None:
-            raise RuntimeError("Could not get the submitted job")
+            raise RuntimeError(f"Could not get the submitted job ID from {output}")
 
         return BatchSlurmProcess(self.launcher, m.group(1))
 
@@ -245,6 +245,7 @@ class SlurmLauncher(Launcher):
         self.main = main or self
 
     def config(self, **kwargs):
+        """Returns a new Slurm launcher with the given configuration"""
         return SlurmLauncher(
             connector=self.connector,
             binpath=self.binpath,
