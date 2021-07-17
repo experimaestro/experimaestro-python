@@ -435,8 +435,6 @@ class Scheduler:
 
     def __enter__(self):
         global SIGNAL_HANDLER
-        self.old_experiment = Scheduler.CURRENT
-        Scheduler.CURRENT = self
 
         # Create an event loop for checking things
         self.event_loop = EventLoopThread()
@@ -455,8 +453,6 @@ class Scheduler:
             self.wait()
 
         # Set back the old scheduler, if any
-        logger.info("Exiting experiment %s", self.name)
-        Scheduler.CURRENT = self.old_experiment
         self.event_loop.loop.stop()
         SIGNAL_HANDLER.remove(self)
 

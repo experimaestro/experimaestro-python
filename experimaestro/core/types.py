@@ -53,7 +53,7 @@ class Type:
 
     def __init__(self, tn: Union[str, Identifier], description=None):
         if tn is None:
-            tn = None
+            pass
         elif isinstance(tn, str):
             tn = Identifier(tn)
         self.identifier = tn
@@ -142,8 +142,12 @@ class ObjectType(Type):
         self._title = None
 
         # Get the identifier
-        if identifier is None and "__xpmid__" in tp.__dict__:
-            identifier = Identifier(getattr(tp, "__xpmid__", None))
+        if identifier is None and hasattr(tp, "__xpmid__"):
+            __xpmid__ = getattr(tp, "__xpmid__")
+            if inspect.ismethod(__xpmid__):
+                identifier = Identifier(__xpmid__())
+            elif "__xpmid__" in tp.__dict__:
+                identifier = Identifier(__xpmid__)
 
         package = tp.__module__.lower()
         name = tp.__qualname__.lower()

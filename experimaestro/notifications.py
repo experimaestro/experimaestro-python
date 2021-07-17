@@ -98,7 +98,8 @@ class xpm_tqdm(std_tqdm):
         if pos == 0:
             d = self.format_dict
             # Just report the innermost progress
-            progress(d["n"] / d["total"])
+            if d["total"]:
+                progress(d["n"] / d["total"])
 
 
 tqdm = xpm_tqdm

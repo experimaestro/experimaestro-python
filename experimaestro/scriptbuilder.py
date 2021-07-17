@@ -86,8 +86,6 @@ class ShScriptBuilder:
         relpath = lambda path: shquote(context.relpath(path))
 
         scriptpath = job.jobpath / ("%s.sh" % job.name)
-        donepath = relpath(job.donepath)
-        lockpath = relpath(job.lockpath)
         pidpath = relpath(job.pidpath)
 
         logger.info("Writing script %s", scriptpath)
@@ -108,6 +106,7 @@ class ShScriptBuilder:
             # Use pipefail for fine grained analysis of errors in commands
             out.write("set -o pipefail\n\n")
 
+            # FIXME: should be set by the launcher
             out.write(
                 """echo "{ \\"type\\": \\"%s\\", \\"pid\\": $$ }" > %s\n\n"""
                 % (self.processtype, pidpath)
