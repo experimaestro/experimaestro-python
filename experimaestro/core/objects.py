@@ -8,7 +8,18 @@ from experimaestro.core.arguments import Param
 import fasteners
 import inspect
 import importlib
-from typing import Any, Dict, List, Optional, Set, Type, TypeVar, Union, get_type_hints
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Type,
+    TypeVar,
+    Union,
+    get_type_hints,
+)
 from experimaestro.utils import logger
 import sys
 from contextlib import contextmanager
@@ -433,7 +444,7 @@ class ConfigInformation:
                 for k, argument in config.__xpmtype__.arguments.items():
                     if argument.generator:
                         config.__xpm__.set(
-                            k, argument.generator(self.context), bypass=True
+                            k, argument.generator(self.context, config), bypass=True
                         )
 
                 config.__xpm__._sealed = True
@@ -833,7 +844,7 @@ class ConfigInformation:
             # Generate values
             for arg in config.__xpmtype__.arguments.values():
                 if arg.generator is not None:
-                    setattr(o, arg.name, arg.generator(self.context))
+                    setattr(o, arg.name, arg.generator(self.context, o))
 
             return o
 
@@ -1019,8 +1030,11 @@ T = TypeVar("T")
 class Config:
     """Base type for all objects in python interface"""
 
-    __xpmtype__: ObjectType
+    __xpmtype__: ClassVar[ObjectType]
     __xpm__: ConfigInformation
+
+    def __init__(self, *args, **kwargs):
+        pass
 
     @classmethod
     def __getxpmtype__(cls):
@@ -1038,11 +1052,13 @@ class Config:
     def __new__(
         cls: Type[T], *args, __xpmobject__=False, **kwargs
     ) -> Union[TypeConfig, T]:
-        """Returns an instance of a TypeConfig when called __xpmobject__ set"""
+        """Returns an instance of a TypeConfig when called __xpmobject__ is False"""
 
         if __xpmobject__:
+            # __init__ will be  called directly
             return object.__new__(cls)
 
+        # We use the configuration type
         o = object.__new__(cls.__getxpmtype__().configtype)
         o.__init__(*args, **kwargs)
         return o

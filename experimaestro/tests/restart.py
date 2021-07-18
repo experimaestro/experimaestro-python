@@ -84,7 +84,7 @@ def restart(terminate, experiment):
             # Now, submit the job - it should pick up the process
             # where it was left
             logging.debug("Submitting the job")
-            Scheduler.CURRENT.submit(task.__xpm__.job)
+            xp.CURRENT.scheduler.submit(task.__xpm__.job)
             with task.wait.open("w") as fp:
                 fp.write("done")
 

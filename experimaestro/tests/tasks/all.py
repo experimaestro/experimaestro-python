@@ -31,9 +31,10 @@ class Say:
         self.out.write_text(self.word.upper())
 
 
-@param("strings", type=List[Say], help="Strings to concat")
 @task(tasks.concat)
 class Concat:
+    strings: Param[List[Say]]
+
     def execute(self):
         # We access the file where standard output was stored
         says = []

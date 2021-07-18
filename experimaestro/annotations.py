@@ -207,8 +207,8 @@ class pathoption(param):
         self.generator = PathGenerator(path)
 
 
-STDERR = lambda jobcontext: "%s.err" % jobcontext.name
-STDOUT = lambda jobcontext: "%s.out" % jobcontext.name
+STDERR = lambda jobcontext, config: "%s.err" % jobcontext.name
+STDOUT = lambda jobcontext, config: "%s.out" % jobcontext.name
 
 
 class constant(param):

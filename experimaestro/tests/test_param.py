@@ -116,7 +116,9 @@ def test_type_hinting():
 
     arg_path = ot.getArgument("path")
     assert arg_path.generator is not None
-    assert arg_path.generator(DirectoryContext(Path("hello"))) == Path("hello/world")
+    assert arg_path.generator(DirectoryContext(Path("hello")), None) == Path(
+        "hello/world"
+    )
 
     arg_option = ot.getArgument("option")
     assert arg_option.name == "option"
