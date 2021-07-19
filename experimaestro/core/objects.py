@@ -1033,15 +1033,14 @@ class Config:
     __xpmtype__: ClassVar[ObjectType]
     __xpm__: ConfigInformation
 
-    def __init__(self, *args, **kwargs):
-        pass
-
     @classmethod
     def __getxpmtype__(cls):
+        """Get (and create if necessary) the Object type of this"""
         xpmtype = cls.__dict__.get("__xpmtype__", None)
         if xpmtype is None:
             from experimaestro.core.types import ObjectType
 
+            # Will set __xpmtype__
             return ObjectType(cls)
         return xpmtype
 
@@ -1052,10 +1051,12 @@ class Config:
     def __new__(
         cls: Type[T], *args, __xpmobject__=False, **kwargs
     ) -> Union[TypeConfig, T]:
-        """Returns an instance of a TypeConfig when called __xpmobject__ is False"""
+        """Returns an instance of a TypeConfig when called __xpmobject__ is False,
+        and otherwise the real object
+        """
 
         if __xpmobject__:
-            # __init__ will be  called directly
+            # __init__ is  called directly
             return object.__new__(cls)
 
         # We use the configuration type
@@ -1064,6 +1065,7 @@ class Config:
         return o
 
     def __validate__(self):
+        """Validate the values"""
         pass
 
 

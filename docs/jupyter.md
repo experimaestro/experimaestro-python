@@ -13,7 +13,7 @@ def settoken(xp):
     # Set some useful variables
     xp.token = xp.current.token("main", 1)
 
-xp = serverwidget("ri/intro", environment={"JAVA_HOME": "/usr/lib/jvm/java-11-openjdk-amd64"}, port=12500, hook=hook)
+xp = serverwidget("ri/intro", port=12500)
 ```
 
 ## Monitoring a job

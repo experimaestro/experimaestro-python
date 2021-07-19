@@ -12,6 +12,8 @@ nav:
       - Plan: experiments/plan.md
   - Launchers: launchers/index.md
   - Connectors: connectors/index.md
+  - Integration:
+      - Jupyter: jupyter.md
   - CLI: cli.md
   - Changelog: changelog.md
   - FAQ: faq.md

@@ -8,10 +8,10 @@ import re
 from experimaestro.mkdocs.annotations import shoulddocument
 import requests
 from urllib.parse import urljoin
-from experimaestro.core.types import ObjectType
+from experimaestro.core.types import ObjectType, Type
 import mkdocs
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple, Type as TypingType
 import importlib
 import logging
 import inspect
@@ -154,16 +154,28 @@ class Documentation(mkdocs.plugins.BasePlugin):
     def showclass(self, location, m: re.Match):
         return self.getlink(location, m.group(1).strip())
 
-    def getlink(self, url, qualname: str):
+    def _getlink(self, url, qualname: str) -> Tuple[str, Optional[str]]:
+        """Get a link given a qualified name"""
+
+        # Use an internal reference
         md_path = self.type2path.get(qualname, None)
         if md_path:
-            return f"[{qualname}]({relativepath(url, md_path)}#{qualname})"
+            return qualname, f"{relativepath(url, md_path)}.html#{qualname}"
 
+        # Try to get an external reference
         module_name = qualname[: qualname.rfind(".")]
         baseurl = self.external.get(module_name, None)
-        if baseurl:
-            return f"[{qualname}]({baseurl}#{qualname})"
+        return qualname, f"{baseurl}.html#{qualname}" if baseurl else None
+
+    def getlink(self, url, qualname: str):
+        """Get a link given a qualified name"""
+        qualname, href = self._getlink(url, qualname)
+        if href:
+            return f"[{qualname}]({href})"
         return qualname
+
+    def getConfigLink(self, pageURL: str, config: TypingType):
+        return self._getlink(pageURL, f"{config.__module__}.{config.__qualname__}")
 
     def build_doc(self, page: MkdocPage, lines: List[str], configs: List[ObjectType]):
         """Build the documentation for a list of configurations"""
