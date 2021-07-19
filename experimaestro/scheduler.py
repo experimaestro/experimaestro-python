@@ -453,7 +453,12 @@ class Scheduler:
             self.wait()
 
         # Set back the old scheduler, if any
-        self.event_loop.loop.stop()
+        while True:
+            if self.event_loop.loop:
+                self.event_loop.loop.stop()
+                break
+            time.sleep(0.1)
+
         SIGNAL_HANDLER.remove(self)
 
     def wait(self):

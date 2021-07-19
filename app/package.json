@@ -54,7 +54,7 @@
     "immer": "^9.0.1",
     "luxon": "^1.26.0",
     "material-icons": "^0.5.4",
-    "node-sass": "^5.0.0",
+    "node-sass": "^6.0.1",
     "sirv-cli": "^1.0.11",
     "svelte-calendar": "^2.0.4",
     "svelte-copy-to-clipboard": "^0.2.5",
