@@ -167,7 +167,6 @@ class Documentation(mkdocs.plugins.BasePlugin):
         # Try to get an external reference
         module_name = qualname[: qualname.rfind(".")]
         baseurl = self.external.get(module_name, None)
-        print("EXTERRTTTTERRNNALLLL", md_path, url, " -> ", relativepath(url, baseurl))
 
         return qualname, f"{baseurl}#{qualname}" if baseurl else None
 
