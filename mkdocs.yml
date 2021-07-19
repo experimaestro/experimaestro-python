@@ -14,6 +14,7 @@ nav:
   - Connectors: connectors/index.md
   - Integration:
       - Jupyter: jupyter.md
+      - mkdocs: mkdocs.md
   - CLI: cli.md
   - Changelog: changelog.md
   - FAQ: faq.md

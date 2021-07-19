@@ -36,6 +36,8 @@ class Configurations:
 
 def relativepath(source: str, target: str):
     """Computes a relative path from source to target"""
+    if source == target:
+        return ""
 
     if source[-1] == "/":
         source = source[:-1]
@@ -115,7 +117,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 # Avoid to re-parse
                 if fullname in self.parsed:
                     continue
-                self.parsed[fullname] = md_path
+                self.parsed[fullname] = f"{md_path}.html"
 
                 try:
                     module = importlib.import_module(fullname)
@@ -135,7 +137,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
 
                         self.type2path[
                             f"{member.__module__}.{member.__qualname__}"
-                        ] = md_path
+                        ] = f"{md_path}.html"
 
                         member.__xpmtype__.__initialize__()
                         d.add(member.__xpmtype__)
@@ -160,12 +162,14 @@ class Documentation(mkdocs.plugins.BasePlugin):
         # Use an internal reference
         md_path = self.type2path.get(qualname, None)
         if md_path:
-            return qualname, f"{relativepath(url, md_path)}.html#{qualname}"
+            return qualname, f"{relativepath(url, md_path)}#{qualname}"
 
         # Try to get an external reference
         module_name = qualname[: qualname.rfind(".")]
         baseurl = self.external.get(module_name, None)
-        return qualname, f"{baseurl}.html#{qualname}" if baseurl else None
+        print("EXTERRTTTTERRNNALLLL", md_path, url, " -> ", relativepath(url, baseurl))
+
+        return qualname, f"{baseurl}#{qualname}" if baseurl else None
 
     def getlink(self, url, qualname: str):
         """Get a link given a qualified name"""
