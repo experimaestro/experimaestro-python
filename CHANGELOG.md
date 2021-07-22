@@ -1,3 +1,6 @@
+# 0.9.8
+
+- Improved documentation generation
 - Jupyter support with `jobmonitor` and `serverwidget`
 
 # 0.9.4
