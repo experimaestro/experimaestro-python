@@ -147,7 +147,6 @@ class ObjectLattice:
         node = self.node.find(objecttype)
         if node is None:
             node = ObjectLatticeNode(objecttype)
-            print(f"[ADDING] {node}")
             self.node.add(node)
         return node
 

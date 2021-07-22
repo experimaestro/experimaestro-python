@@ -187,7 +187,7 @@ def test_token_reschedule():
         p2 = subprocess.Popen(command + ["2", lockingpath, str(ready2), str(time2)])
 
         try:
-            with timeout(10):
+            with timeout(20):
                 # Wait that both processes are ready
                 while not ready1.is_file():
                     time.sleep(0.01)
