@@ -78,6 +78,14 @@ class ObjectLatticeNode:
     def isAncestor(self, other):
         return issubclass(self.objecttype.configtype, other.objecttype.configtype)
 
+    def _addChild(self, child: "ObjectLatticeNode"):
+        child.parents.add(self)
+        self.children.add(child)
+
+    def _removeChild(self, child: "ObjectLatticeNode"):
+        child.parents.remove(self)
+        self.children.remove(child)
+
     def add(self, node: "ObjectLatticeNode"):
         if self.objecttype == node.objecttype:
             assert id(self) == id(node)
@@ -95,21 +103,18 @@ class ObjectLatticeNode:
                 replace.add(child)
 
         # Replace children
-        for child in replace:
-            # Remove child
-            child.parents.remove(self)
-            self.children.remove(child)
 
-            # Insert node
-            self.children.add(node)
-            child.parents.add(node)
-            node.parents.add(self)
+        for child in replace:
+            self._removeChild(child)
+            node._addChild(child)
+            self._addChild(node)
+
             added = True
 
-        # No suitable parent found
+        # No suitable parent found: add to ourself
+
         if not added:
-            node.parents.add(self)
-            self.children.add(node)
+            self._addChild(node)
 
         return node
 
@@ -142,6 +147,7 @@ class ObjectLattice:
         node = self.node.find(objecttype)
         if node is None:
             node = ObjectLatticeNode(objecttype)
+            print(f"[ADDING] {node}")
             self.node.add(node)
         return node
 

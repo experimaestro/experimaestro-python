@@ -1,4 +1,4 @@
-# 0.9.8
+# 0.9.9
 
 - Improved documentation generation
 - Jupyter support with `jobmonitor` and `serverwidget`
