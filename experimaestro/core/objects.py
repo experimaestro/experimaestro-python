@@ -990,6 +990,10 @@ class TypeConfig:
             from experimaestro.xpmutils import EmptyContext
 
             context = EmptyContext()
+        else:
+            assert isinstance(
+                context, GenerationContext
+            ), f"{context.__class__} is not an instance of GenerationContext"
         return self.__xpm__.fromConfig(context)
 
     def submit(self, *, workspace=None, launcher=None, dryrun=False):

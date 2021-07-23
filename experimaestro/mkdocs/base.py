@@ -288,21 +288,20 @@ class Documentation(mkdocs.plugins.BasePlugin):
         """Show a class and its descendants"""
 
         # Search for the class
-        classname = m.group(1)
-        node = None
-        for _node in cfgs:
-            basetype = _node.objecttype.basetype
-            if f"{basetype.__module__}.{basetype.__qualname__}" == classname:
-                node = _node
-                break
 
-        if node is None:
-            return f"<div class='error'>Cannot find {classname}</div>"
+        modulename, classname = m.group(1).rsplit(":", 2)
+        t = getattr(importlib.import_module(modulename), classname, None)
+        if t is None:
+            return f"<div class='error'>Cannot find {modulename}:{classname}</div>"
+        if not issubclass(t, Config):
+            return f"<div class='error'>{modulename}:{classname} is not an experimaestro Config(uration)</div>"
+
+        xpmtype = t.__getxpmtype__()
 
         # Now, sort according to descendant/ascendant relationship or name
         nodes = set()
         for _node in cfgs:
-            if issubclass(_node.objecttype.configtype, node.objecttype.configtype):
+            if issubclass(_node.objecttype.configtype, xpmtype.configtype):
                 nodes.add(_node)
 
         # Removes so they are not generated twice
