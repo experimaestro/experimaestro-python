@@ -29,18 +29,21 @@ class forwardoption(metaclass=forwardoptionMetaclass):
     This allows to refer to a path of a class in a "python" syntax, e.g.
     `@forwardoption.ranker.optimizer.epsilon(MyConfig)` or
     `@forwardoption.ranker.optimizer.epsilon(MyConfig, "option-name")`
+
+    default can be changed by setting the option
     """
 
     def __init__(self, path=[]):
         self.path = path
 
-    def __call__(self, cls, option_name=None, default=None):
+    def __call__(self, cls, option_name=None, **kwargs):
+        """ """
         argument = cls.__getxpmtype__().arguments[self.path[0]]
         for c in self.path[1:]:
             argument = getattr(argument, c)
 
         name = "--%s" % (option_name or argument.name.replace("_", "-"))
-        default = default if default is not None else argument.default
+        default = kwargs["default"] if "default" in kwargs else argument.default
 
         # TODO: set the type of the option when not a simple type
         return click.option(name, help=argument.help or "", default=default)
