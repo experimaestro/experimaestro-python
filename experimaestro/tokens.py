@@ -16,6 +16,7 @@ from .ipc import ipcom
 from .locking import Lock, LockError
 from .dependencies import Dependency, DependencyStatus, Resource
 import logging
+import json
 
 
 logger = logging.getLogger("xpm.tokens")
@@ -116,11 +117,15 @@ class TokenFile:
                     s = ""
                     while s == "":
                         s = pidpath.read_text()
+                    output = json.loads(s)
 
-                    pid = int(s)
-                    logger.debug("Watching external job with PID %d", pid)
-                    p = psutil.Process(pid)
-                    p.wait()
+                    if output["type"] == "local":
+                        pid = output["pid"]
+                        logger.debug("Watching external job with PID %d", pid)
+                        p = psutil.Process(pid)
+                        p.wait()
+                    else:
+                        raise Exception(f"Cannot watch {output}")
 
                 self.delete()
 
