@@ -1076,7 +1076,7 @@ class Config:
 class Task(Config):
     """base class for tasks"""
 
-    pass
+    __tags__: Dict[str, str]
 
 
 # --- Output proxy

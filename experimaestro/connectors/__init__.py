@@ -9,7 +9,7 @@ This module contains :
 """
 
 import enum
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 from pathlib import Path
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
@@ -56,8 +56,19 @@ Redirect._INHERIT = Redirect(RedirectType.INHERIT)
 class Process:
     HANDLERS = None
 
+    @classmethod
+    def fromspec(cls, definition: Dict[str, Any]) -> "Process":
+        """Should be defined in subclasses"""
+        raise NotImplementedError("fromspec for %s", cls)
+
     @staticmethod
-    def handler(key: str):
+    def fromDefinition(definition: Dict[str, Any]) -> "Process":
+        """Retrieves a process from a serialized definition"""
+        handler = Process.handler(definition["type"])
+        return handler.fromspec(definition)
+
+    @staticmethod
+    def handler(key: str) -> type["Process"]:
         """Get a handler"""
         if Process.HANDLERS is None:
             Process.HANDLERS = {}

@@ -117,15 +117,12 @@ class TokenFile:
                     s = ""
                     while s == "":
                         s = pidpath.read_text()
-                    output = json.loads(s)
 
-                    if output["type"] == "local":
-                        pid = output["pid"]
-                        logger.debug("Watching external job with PID %d", pid)
-                        p = psutil.Process(pid)
-                        p.wait()
-                    else:
-                        raise Exception(f"Cannot watch {output}")
+                    logger.info("Loading job watcher from definition")
+                    from experimaestro.connectors import Process
+
+                    process = Process.fromDefinition(json.loads(s))
+                    process.wait()
 
                 self.delete()
 
