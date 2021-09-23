@@ -15,10 +15,11 @@ from experimaestro.tokens import ProcessCounterToken
 from .environment import Environment
 from .workspace import Workspace
 from .core.objects import Config, GenerationContext
-from .utils import ThreadingCondition, logger
+from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
 from .connectors import ProcessThreadError
+import concurrent.futures
 
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
 
@@ -88,6 +89,10 @@ class JobDependency(Dependency):
 class Job(Resource):
     """Context of a job"""
 
+    # Set by the scheduler
+    _readyEvent: Optional[asyncio.Event]
+    _future: Optional[concurrent.futures.Future]
+
     def __init__(
         self,
         config: Config,
@@ -130,6 +135,10 @@ class Job(Resource):
 
     def __str__(self):
         return "Job[{}]".format(self.identifier)
+
+    def wait(self) -> JobState:
+        assert self._future, "Cannot wait a not submitted job"
+        return self._future.result()
 
     @property
     def progress(self):
@@ -186,17 +195,6 @@ class Job(Resource):
         """Returns the process"""
         raise NotImplementedError("Not implemented")
 
-    def wait(self):
-        """Waiting for job to finish"""
-        with self.scheduler.cv:
-            logger.debug("Waiting for job %s to finish", self.jobpath)
-            self.scheduler.cv.wait_for(
-                lambda: self.state in [JobState.ERROR, JobState.DONE]
-            )
-
-        logger.debug("Job %s finished with state %s", self, self.state)
-        return self.state
-
     @property
     def pidpath(self):
         """This file contains the file PID"""
@@ -239,11 +237,14 @@ class Job(Resource):
         if status == DependencyStatus.FAIL:
             # Job completed
             if not self.state.finished():
-                self.scheduler.jobfinished(self, JobState.ERROR)
+                self.state = JobState.ERROR
+                self._readyEvent.set()
 
         if self.unsatisfied == 0:
             logger.info("Job %s is ready to run", self)
-            self.scheduler.start(self)
+            # We are ready
+            self.state = JobState.READY
+            self._readyEvent.set()
 
 
 class JobContext(GenerationContext):
@@ -277,141 +278,68 @@ class JobError(Exception):
         super.__init__("Job exited with code %d", self.code)
 
 
-class JobThread(threading.Thread):
-    """Manage a task: launch and monitor"""
-
-    def __init__(self, job: Job):
-        super().__init__()
-        self.job = job
-
-    def run(self):
-        """Run a job
-
-        This method will lock all the dependencies before calling `self.job.run(locks)`
-        where `locks` are the taken locks
-        """
-        # Check if we have a PID
-        if self.job.process is not None:
-            self.job.process.wait()
-
-        # OK, not done; let's start the job for real
-        logger.debug("Job Thread: starting job %s", self.job)
-        state = None
-        with Locks() as locks:
-            try:
-                with self.job.scheduler.cv:
-                    logger.info(
-                        "Starting job %s with %d dependencies",
-                        self.job,
-                        len(self.job.dependencies),
-                    )
-
-                    for dependency in self.job.dependencies:
-                        try:
-                            locks.append(dependency.lock().acquire())
-                        except LockError:
-                            logger.warning(
-                                "Could not lock %s, aborting start for job %s",
-                                dependency,
-                                self.job,
-                            )
-                            # Just stop
-                            dependency.check()
-                            return
-
-                    self.job.scheduler.jobstarted(self.job)
-                    self.job.starttime = time.time()
-                    process = self.job.run(locks)
-
-                if isinstance(process, JobState):
-                    state = process
-                    logger.debug("Job %s ended (state %s)", self.job, state)
-                else:
-                    logger.debug("Waiting for job %s process to end", self.job)
-
-                    code = process.wait()
-
-                    if code is None:
-                        # Case where we cannot retrieve the code right away
-                        if self.job.donepath.is_file():
-                            code = 0
-                        else:
-                            code = int(self.job.failedpath.read_text())
-
-                    logger.debug("Job %s ended with code %s", self.job, code)
-                    state = JobState.DONE if code == 0 else JobState.ERROR
-
-            except ProcessThreadError:
-                # Thrown by the child process so we can exit gracefully
-                logger.debug("Graceful exit")
-
-                # We set state to none so nothing is done (finally)
-                state = None
-                # We prevent locks to be unlocked (finally)
-                locks.detach()
-
-            except JobError:
-                logger.warning("Error while running job")
-                state = JobState.ERROR
-
-            except Exception:
-                logger.warning(
-                    "Error while running job (in experimaestro)", exc_info=True
-                )
-                state = JobState.ERROR
-
-            finally:
-                # Release locks
-                locks.release()
-                if state in [JobState.DONE, JobState.ERROR]:
-                    self.job.scheduler.jobfinished(self.job, state)
-
-
 class SignalHandler:
     def __init__(self):
-        self.schedulers = set()
+        self.experiments: Set["experiment"] = set()
         signal.signal(signal.SIGINT, self)
 
-    def add(self, scheduler):
-        self.schedulers.add(scheduler)
+    def add(self, xp: "experiment"):
+        self.experiments.add(xp)
 
-    def remove(self, scheduler):
-        self.schedulers.remove(scheduler)
+    def remove(self, xp):
+        self.experiments.remove(xp)
 
     def __call__(self, signum, frame):
         """SIGINT signal handler"""
         logger.warning("Signal received")
-        for scheduler in self.schedulers:
-            scheduler.exitmode = True
-            with scheduler.cv:
-                scheduler.cv.notify_all()
+        for xp in self.experiments:
+            xp.stop()
 
 
-class EventLoopThread(threading.Thread):
+SIGNAL_HANDLER = SignalHandler()
+
+
+class SchedulerCentral(threading.Thread):
+    loop: asyncio.AbstractEventLoop
+
     """The event loop thread used by the scheduler"""
 
     def __init__(self):
-        super().__init__(daemon=True)
-        self.loop = None
+        # Daemon thread so it is non blocking
+        super().__init__(name="Scheduler EL", daemon=True)
+
+        self._ready = threading.Event()
 
     def run(self):
         logger.debug("Starting event loop thread")
         self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+
+        # Set loop-dependent variables
+        self.exitCondition = asyncio.Condition()
+
+        # Start the event loop
+        self._ready.set()
         self.loop.run_forever()
 
-
-SIGNAL_HANDLER = None
+    @staticmethod
+    def create():
+        instance = SchedulerCentral()
+        instance.start()
+        instance._ready.wait()
+        return instance
 
 
 class Scheduler:
-    """A job scheduler"""
+    """A job scheduler
 
-    def __init__(self, name):
+    The scheduler is based on asyncio for easy concurrency handling
+    """
+
+    def __init__(self, xp: "experiment", name):
         # Name of the experiment
         self.name = name
-
-        # Condition variable for scheduler access
-        self.cv = ThreadingCondition()
+        self.xp = xp
 
         # Exit mode activated
         self.exitmode = False
@@ -430,143 +358,201 @@ class Scheduler:
         # Listeners
         self.listeners: Set[Listener] = set()
 
-        # Number of failed jobs
-        self.failedjobs = 0
-
-    def __enter__(self):
-        global SIGNAL_HANDLER
-
-        # Create an event loop for checking things
-        self.event_loop = EventLoopThread()
-        self.event_loop.start()
-
-        if not SIGNAL_HANDLER:
-            SIGNAL_HANDLER = SignalHandler()
-
-        SIGNAL_HANDLER.add(self)
-
-    def __exit__(self, exc_type, *args):
-        # Wait until all tasks are completed (unless an exception was thrown)
-        if exc_type:
-            logger.exception("Not waiting since an exception was thrown")
-        else:
-            self.wait()
-
-        # Set back the old scheduler, if any
-        while True:
-            if self.event_loop.loop:
-                self.event_loop.loop.stop()
-                break
-            time.sleep(0.1)
-
-        SIGNAL_HANDLER.remove(self)
-
-    def wait(self):
-        # Wait until all tasks are completed
-        logger.info("Waiting that experiment %s finishes", self.name)
-        with self.cv:
-            logger.debug("Waiting for %d jobs to complete", len(self.waitingjobs))
-            self.cv.wait_for(lambda: not self.waitingjobs or self.exitmode)
-
-        if self.failedjobs > 0:
-            raise FailedExperiment(
-                f"{self.failedjobs} jobs did not complete successfully"
-            )
-
-    def submit(self, job: Job):
-        """Submits a job to the scheduler"""
-        with self.cv:
-            logger.info("Submitting job %s", job)
-            if self.exitmode:
-                logger.warning("Exit mode: not submitting")
-                return
-
-            if job.identifier in self.jobs:
-                other = self.jobs[job.identifier]
-                assert job.type == other.type
-                if other.state == JobState.ERROR:
-                    logger.info("Re-submitting job")
-                else:
-                    logger.warning("Job %s already submitted", job.identifier)
-                    return other
-
-            # Add to waiting jobs
-            job.submittime = time.time()
-            job.scheduler = self
-            self.waitingjobs.add(job)
-
-            # Creates a link into the experiment folder
-            path = experiment.CURRENT.jobspath / job.relpath
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if path.is_symlink():
-                path.unlink()
-            path.symlink_to(job.jobpath)
-
-            # Add process dependency if job has subparameters
-            hashidentifier = job.hashidentifier
-            if hashidentifier.sub is not None:
-                token = self.subjobsTokens[hashidentifier.main.hex()]
-                dependency = token.dependency(1)
-                job.dependencies.add(dependency)
-
-            # Add dependencies, and add to blocking resources
-            job.unsatisfied = len(job.dependencies)
-            for dependency in job.dependencies:
-                dependency.target = job
-                dependency.origin.dependents.add(dependency)
-                dependency.check()
-
-            self.jobs[job.identifier] = job
-
-            for listener in self.listeners:
-                listener.job_submitted(job)
-
-            job.state = JobState.WAITING if job.dependencies else JobState.READY
-
-            if job.ready:
-                self.start(job)
-
-    def start(self, job: Job):
-        """Starts a job"""
-        with self.cv:
-            if self.exitmode:
-                logger.warning("Exit mode: not starting job")
-                return
-
-            # This thread will monitor the job
-            thread = JobThread(job)
-            thread.daemon = True
-            thread.start()
-
-    def jobstarted(self, job: Job):
-        """Called just before a job is run"""
-        for listener in self.listeners:
-            listener.job_state(job)
-
-    def jobfinished(self, job: Job, state: JobState):
-        """Called when the job is finished (state = error or done)"""
-        with self.cv:
-            if state != JobState.DONE:
-                self.failedjobs += 1
-
-            job.endtime = time.time()
-            job.state = state
-            if job in self.waitingjobs:
-                self.waitingjobs.remove(job)
-            with job.dependents as dependents:
-                for dependency in dependents:
-                    logger.debug("Checking dependency %s", dependency)
-                    dependency.check()
-            self.cv.notify_all()
-
-        for listener in self.listeners:
-            listener.job_state(job)
+    @property
+    def loop(self):
+        return self.xp.loop
 
     def addlistener(self, listener: Listener):
         self.listeners.add(listener)
 
     def removelistener(self, listener: Listener):
         self.listeners.remove(listener)
+
+    def submit(self, job: Job):
+        # Wait for the future containing the submitted job
+        otherFuture = asyncio.run_coroutine_threadsafe(
+            self.aio_registerJob(job), self.loop
+        )
+        other = otherFuture.result()
+        if other:
+            return other
+
+        job._future = asyncio.run_coroutine_threadsafe(self.aio_submit(job), self.loop)
+
+    async def aio_registerJob(self, job: Job):
+        logger.info("Registering job %s", job)
+
+        if self.exitmode:
+            logger.warning("Exit mode: not submitting")
+
+        elif job.identifier in self.jobs:
+            other = self.jobs[job.identifier]
+            assert job.type == other.type
+            if other.state == JobState.ERROR:
+                logger.info("Re-submitting job")
+            else:
+                logger.warning("Job %s already submitted", job.identifier)
+                return other
+
+        else:
+            # Register this job
+            self.xp.unfinishedJobs += 1
+            self.jobs[job.identifier] = job
+
+        return None
+
+    async def aio_submit(self, job: Job) -> JobState:
+        """Main scheduler function: submit a job, run it (if needed), and returns
+        the status code
+        """
+        logger.info("Submitting job %s", job)
+
+        job._readyEvent = asyncio.Event()
+        job.submittime = time.time()
+        job.scheduler = self
+        self.waitingjobs.add(job)
+
+        # Creates a link into the experiment folder
+        path = experiment.CURRENT.jobspath / job.relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink():
+            path.unlink()
+        path.symlink_to(job.jobpath)
+
+        # Add process dependency if job has subparameters
+        hashidentifier = job.hashidentifier
+        if hashidentifier.sub is not None:
+            token = self.subjobsTokens[hashidentifier.main.hex()]
+            dependency = token.dependency(1)
+            job.dependencies.add(dependency)
+
+        for listener in self.listeners:
+            listener.job_submitted(job)
+
+        # Add dependencies, and add to blocking resources
+
+        # Set in waiting mode
+        if job.dependencies:
+            job.state = JobState.WAITING
+            job.unsatisfied = len(job.dependencies)
+
+            for dependency in job.dependencies:
+                dependency.target = job
+                dependency.loop = self.loop
+                dependency.origin.dependents.add(dependency)
+                dependency.check()
+        else:
+            job._readyEvent.set()
+            job.state = JobState.READY
+
+        # Check if we have a PID
+        if job.process is not None:
+            code = await job.process.aio_code
+            job.state = JobState.DONE if code == 0 else JobState.ERROR
+
+        # OK, not done; let's start the job for real
+        while not job.state.finished():
+            # Wait that the job is ready
+            await job._readyEvent.wait()
+            job._readyEvent.clear()
+
+            if job.state == JobState.READY:
+                job.state = await self.aio_start(job)
+
+        # Job is finished
+        if job.state != JobState.DONE:
+            self.xp.failedJobs += 1
+
+        # Decrement the number of unfinished jobs and notify
+        self.xp.unfinishedJobs -= 1
+        async with self.xp.central.exitCondition:
+            self.xp.central.exitCondition.notify_all()
+
+        job.endtime = time.time()
+        if job in self.waitingjobs:
+            self.waitingjobs.remove(job)
+
+        with job.dependents as dependents:
+            logger.info("Processing %d dependent jobs", len(dependents))
+            for dependency in dependents:
+                logger.debug("Checking dependency %s", dependency)
+                self.loop.call_soon(dependency.check)
+
+        return job.state
+
+    async def aio_start(self, job) -> JobState:
+        """Start a job
+
+        Returns None if the dependencies could not be locked after all
+        Returns DONE/ERROR depending on the process outcome
+        """
+        with Locks() as locks:
+            state = None
+            try:
+                logger.info(
+                    "Starting job %s with %d dependencies",
+                    job,
+                    len(job.dependencies),
+                )
+
+                for dependency in job.dependencies:
+                    try:
+                        locks.append(dependency.lock().acquire())
+                    except LockError:
+                        logger.warning(
+                            "Could not lock %s, aborting start for job %s",
+                            dependency,
+                            job,
+                        )
+                        dependency.check()
+                        return JobState.WAITING
+
+                for listener in self.listeners:
+                    listener.job_state(job)
+
+                job.starttime = time.time()
+                process = job.run(locks)
+
+                if isinstance(process, JobState):
+                    state = process
+                    logger.debug("Job %s ended (state %s)", job, state)
+                else:
+                    logger.debug("Waiting for job %s process to end", job)
+
+                    code = await process.aio_code
+                    logger.debug("Got return code %s for %s", code, job)
+
+                    if code is None:
+                        # Case where we cannot retrieve the code right away
+                        if job.donepath.is_file():
+                            code = 0
+                        else:
+                            code = int(job.failedpath.read_text())
+
+                    logger.debug("Job %s ended with code %s", job, code)
+                    state = JobState.DONE if code == 0 else JobState.ERROR
+
+            except ProcessThreadError:
+                # Thrown by the child process so we can exit gracefully
+                logger.debug("Graceful exit")
+
+                # We set state to none so nothing is done (finally)
+                state = None
+
+                # We prevent locks to be unlocked (finally)
+                locks.detach()
+
+            except JobError:
+                logger.warning("Error while running job")
+                state = JobState.ERROR
+
+            except Exception:
+                logger.warning(
+                    "Error while running job (in experimaestro)", exc_info=True
+                )
+                state = JobState.ERROR
+
+        return state
 
 
 class experiment:
@@ -606,7 +592,7 @@ class experiment:
         self.old_experiment = None
 
         # Create the scheduler
-        self.scheduler = Scheduler(name)
+        self.scheduler = Scheduler(self, name)
         self.server = Server(self.scheduler, host=host, port=port) if port else None
         if self.server:
             self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
@@ -619,6 +605,11 @@ class experiment:
 
     def submit(self, job: Job):
         return self.scheduler.submit(job)
+
+    @property
+    def loop(self):
+        assert self.central is not None
+        return self.central.loop
 
     @property
     def resultspath(self):
@@ -635,9 +626,33 @@ class experiment:
         """Return the directory in which results can be stored for this experiment"""
         return self.workdir / "jobs.bak"
 
+    def stop(self):
+        """Stop the experiment as soon as possible"""
+
+        async def doStop():
+            async with self.central.exitCondition:
+                self.exitMode = True
+                self.central.exitCondition.notify_all()
+
+        assert self.central.loop is not None
+        asyncio.run_coroutine_threadsafe(doStop(), self.central.loop)
+
     def wait(self):
         """Wait until the running processes have finished"""
-        self.scheduler.wait()
+
+        async def awaitcompletion():
+            async with self.central.exitCondition:
+                while True:
+                    if self.unfinishedJobs == 0 or self.exitMode:
+                        break
+                    await self.central.exitCondition.wait()
+
+                if self.failedJobs:
+                    raise FailedExperiment("%d failed jobs", self.failedJobs)
+
+        future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
+
+        return future.result()
 
     def setenv(self, name, value):
         self.workspace.launcher.environ[name] = value
@@ -667,7 +682,24 @@ class experiment:
             self.server.start()
 
         self.workspace.__enter__()
-        self.scheduler.__enter__()
+
+        global SIGNAL_HANDLER
+        # Number of unfinished jobs
+        self.unfinishedJobs = 0
+
+        # Number of failed jobs
+        self.failedJobs = 0
+
+        # Exit mode when catching signals
+        self.exitMode = False
+
+        self.central = SchedulerCentral.create()
+
+        if not SIGNAL_HANDLER:
+            SIGNAL_HANDLER = SignalHandler()
+
+        SIGNAL_HANDLER.add(self)
+
         self.old_experiment = experiment.CURRENT
         experiment.CURRENT = self
         return self
@@ -678,7 +710,17 @@ class experiment:
             rmtree(self.jobsbakpath)
 
         # Close the different locks
-        self.scheduler.__exit__(exc_type, exc_value, traceback)
+        if exc_type:
+            logger.exception("Not waiting since an exception was thrown")
+        else:
+            self.wait()
+
+        SIGNAL_HANDLER.remove(self)
+
+        if self.central is not None:
+            self.central.loop.stop()
+
+        self.central = None
         self.workspace.__exit__(exc_type, exc_value, traceback)
         self.xplock.__exit__(exc_type, exc_value, traceback)
 

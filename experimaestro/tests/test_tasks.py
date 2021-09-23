@@ -72,8 +72,8 @@ def test_fail_dep():
             dep = FailConsumer(fail=fail).submit()
             fail.__unwrap__().touch()
 
-    assert fail.__xpm__.job.wait() == JobState.ERROR
-    assert dep.__xpm__.job.wait() == JobState.ERROR
+    assert fail.__xpm__.job.state == JobState.ERROR
+    assert dep.__xpm__.job.state == JobState.ERROR
 
 
 def test_unknown_attribute():

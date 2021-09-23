@@ -1,3 +1,7 @@
+# Master
+
+- More stability in scheduler (asyncio to avoid race conditions)
+
 # 0.9.9
 
 - Improved documentation generation

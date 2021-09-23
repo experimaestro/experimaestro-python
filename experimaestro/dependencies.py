@@ -1,10 +1,14 @@
 """Dependency between tasks and tokens"""
 
+import threading
+from typing import Optional, Set, TYPE_CHECKING
+import asyncio
 from enum import Enum
 from .utils import logger
-from typing import Set
 from .locking import Lock
-import threading
+
+if TYPE_CHECKING:
+    from .scheduler import Job
 
 
 class Dependents:
@@ -45,11 +49,12 @@ class DependencyStatus(Enum):
 
 class Dependency:
     # Dependency status
+    loop: asyncio.AbstractEventLoop
 
     def __init__(self, origin):
         # Origin and target are two resources
         self.origin = origin
-        self.target = None
+        self.target: Optional["Job"] = None
         self.currentstatus = DependencyStatus.WAIT
 
     def status(self) -> DependencyStatus:
@@ -62,6 +67,7 @@ class Dependency:
         return "Dep[{origin}->{target}]/{currentstatus}".format(**self.__dict__)
 
     def check(self):
+        assert self.target is not None
         status = self.status()
         logger.debug("Dependency check: %s", self)
         if status != self.currentstatus:

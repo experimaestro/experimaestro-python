@@ -9,6 +9,8 @@ This module contains :
 """
 
 import enum
+import asyncio
+from functools import cached_property
 from typing import Any, Dict, Optional, Union
 from pathlib import Path
 from experimaestro.locking import Lock
@@ -80,6 +82,22 @@ class Process:
     def wait(self):
         """Wait until the process finishes"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
+
+    @cached_property
+    def aio_code(self):
+        """Returns a future containing the returned code"""
+        from threading import Thread
+
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        def dowait():
+            code = self.wait()
+            loop.call_soon_threadsafe(future.set_result, code)
+
+        # Start thread
+        Thread(name="Process async wait", target=dowait).start()
+        return future
 
 
 class ProcessThreadError(Exception):

@@ -10,7 +10,7 @@ import psutil
 
 from experimaestro.utils import logger
 from .scheduler import Job, JobError, JobState
-from .connectors import Redirect, RedirectType, Connector
+from .connectors import Process, Redirect, RedirectType, Connector
 from .scheduler import Workspace
 from .core.objects import Config
 
@@ -223,7 +223,7 @@ class CommandLine(AbstractCommand):
         return self.commands
 
 
-class JobProcess:
+class JobProcess(Process):
     def __init__(self, job, process):
         self.job = job
         self.process = process

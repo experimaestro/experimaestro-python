@@ -1,6 +1,6 @@
 import multiprocessing
 import sys
-from typing import Counter
+import json
 import fasteners
 import pytest
 import logging
@@ -48,7 +48,7 @@ def token_experiment(xp, token, ntasks=3):
     time.sleep(1)
 
     # Now any task can finish
-    logging.info("Tasks scheduled - waiting for completion")
+    logging.info("%d tasks scheduled - waiting for completion", ntasks)
     path.write_text("Hello world")
 
     xp.wait()
@@ -117,7 +117,7 @@ def test_token_cleanup():
             ]
 
             p1 = subprocess.Popen(command)
-            job.pidpath.write_text(str(p1.pid))
+            job.pidpath.write_text(json.dumps({"pid": p1.pid, "type": "local"}))
 
             task3 = dummy_task(x=3)
             task3.add_dependencies(token.dependency(1)).submit()

@@ -2,8 +2,8 @@
 a computational resource (e.g. number of launched jobs, etc.)
 """
 
+import asyncio
 import sys
-import psutil
 from pathlib import Path
 from experimaestro.core.objects import Config
 import fasteners
@@ -25,7 +25,17 @@ logger = logging.getLogger("xpm.tokens")
 class Token(Resource):
     """Base class for all token-based resources"""
 
-    pass
+    available: int
+
+    def aio_notify(self):
+        # Notifying
+        def check(dependency: Dependency):
+            if self.available > 0:
+                dependency.check()
+
+        with self.dependents as dependents:
+            for _dependency in dependents:
+                _dependency.loop.call_soon_threadsafe(check, _dependency)
 
 
 class CounterTokenLock(Lock):
@@ -171,9 +181,7 @@ class CounterToken(Token, FileSystemEventHandler):
         self.path = path
         self.path.mkdir(exist_ok=True, parents=True)
 
-        self.cache: Dict[
-            str,
-        ] = {}
+        self.cache: Dict[str, TokenFile] = {}
 
         self.infopath = path / "token.info"
 
@@ -233,9 +241,11 @@ class CounterToken(Token, FileSystemEventHandler):
             self.watchedpath,
         )
         name = Path(event.src_path).name
+        # Name is in cache if we did not release the token ourselves
         if name in self.cache:
             with self.lock:
                 if name in self.cache:
+                    logging.debug("Deleting %s from token cache (event)", name)
                     fc = self.cache[name]
                     del self.cache[name]
 
@@ -248,10 +258,7 @@ class CounterToken(Token, FileSystemEventHandler):
 
             # Do not lock here (notify only)
             if self.available > 0:
-                with self.dependents as dependents:
-                    for dependency in dependents:
-                        if self.available > 0:
-                            dependency.check()
+                self.aio_notify()
 
     def on_created(self, event):
         logger.debug(
@@ -362,15 +369,13 @@ class CounterToken(Token, FileSystemEventHandler):
                 )
                 return
 
+            logging.debug("Deleting %s from token cache", dependency.name)
             del self.cache[dependency.name]
             self.available += tf.count
             logging.debug("%s: available %d", self, self.available)
             tf.delete()
 
-        if self.available > 0:
-            with self.dependents as dependents:
-                for dependency in dependents:
-                    dependency.check()
+        self.aio_notify()
 
 
 class ProcessCounterToken(Token):
@@ -418,11 +423,7 @@ class ProcessCounterToken(Token):
                 self.available,
             )
 
-        if self.available > 0:
-            with self.dependents as dependents:
-                for dependency in dependents:
-                    if self.available > 0:
-                        dependency.check()
+        self.aio_notify()
 
 
 if sys.platform != "win32":

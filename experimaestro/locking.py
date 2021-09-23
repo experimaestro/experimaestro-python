@@ -13,14 +13,14 @@ class Lock:
 
     def acquire(self):
         if self._level == 0:
-            self._acquire()
             self._level += 1
+            self._acquire()
         return self
 
     def release(self):
         if not self.detached and self._level == 1:
-            self._release()
             self._level -= 1
+            self._release()
 
     def __enter__(self):
         self.acquire()
@@ -55,6 +55,7 @@ class Locks(Lock):
             lock.acquire()
 
     def _release(self):
+        logger.debug("Releasing %d locks", len(self.locks))
         for lock in self.locks:
-            logger.debug("Releasing %s", lock)
+            logger.debug("[locks] Releasing %s", lock)
             lock.release()
