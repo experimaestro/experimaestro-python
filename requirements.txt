@@ -5,6 +5,7 @@ click
 typing_extensions >= 3.7.4.3; python_version < "3.9"
 
 # Other
+cached_property
 fasteners
 psutil
 websockets
