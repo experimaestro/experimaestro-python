@@ -11,7 +11,7 @@ This module contains :
 import enum
 import asyncio
 from cached_property import cached_property
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Type, Union
 from pathlib import Path
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
@@ -70,7 +70,7 @@ class Process:
         return handler.fromspec(definition)
 
     @staticmethod
-    def handler(key: str) -> type["Process"]:
+    def handler(key: str) -> Type["Process"]:
         """Get a handler"""
         if Process.HANDLERS is None:
             Process.HANDLERS = {}
