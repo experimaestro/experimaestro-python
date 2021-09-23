@@ -10,7 +10,7 @@ This module contains :
 
 import enum
 import asyncio
-from functools import cached_property
+from cached_property import cached_property
 from typing import Any, Dict, Optional, Union
 from pathlib import Path
 from experimaestro.locking import Lock
