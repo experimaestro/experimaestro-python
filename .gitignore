@@ -11,3 +11,6 @@ test-reports/
 .eggs
 site/
 build/
+
+# Generated
+experimaestro/version.py

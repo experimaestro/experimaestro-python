@@ -1,0 +1,5 @@
+[tool.setuptools_scm]
+write_to = "experimaestro/version.py"
+
+[build-system]
+requires = ["setuptools", "setuptools-scm", "wheel"]  # PEP 508 specifications.
