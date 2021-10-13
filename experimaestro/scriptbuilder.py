@@ -106,12 +106,6 @@ class ShScriptBuilder:
             # Use pipefail for fine grained analysis of errors in commands
             out.write("set -o pipefail\n\n")
 
-            # FIXME: should be set by the launcher
-            out.write(
-                """echo "{ \\"type\\": \\"%s\\", \\"pid\\": $$ }" > %s\n\n"""
-                % (self.processtype, pidpath)
-            )
-
             for name, value in job.launcher.environ.items():
                 out.write("""export {}={}\n""".format(name, shquote(value)))
 

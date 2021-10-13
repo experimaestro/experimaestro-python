@@ -634,7 +634,7 @@ class ConfigInformation:
                 objectout.write("serialized", True)
                 objectout.write("module", loader.__class__.__module__)
                 objectout.write("type", loader.__class__.__qualname__)
-                objectout.write("value", serialized.loader.toJSON())
+                objectout.write("value", loader.toJSON())
             return
 
         # Unwrap if needed
@@ -947,17 +947,7 @@ class TypeConfig:
                     self.__xpm__.set(name, None, bypass=True)
 
     def __repr__(self):
-        lines = [
-            f"Experimaestro configuration object of type {self.__xpmtype__.identifier}",
-            "",
-            "Parameters",
-        ]
-        for argument in self.__xpmtype__.arguments.values():
-            lines.append(
-                f""" - {argument.name} ({argument.type.name()}) {argument.help or ""}"""
-            )
-
-        return "\n".join(lines)
+        return f"Config[{self.__xpmtype__.identifier}]"
 
     def tag(self, name, value) -> "Config":
         self.__xpm__.addtag(name, value)

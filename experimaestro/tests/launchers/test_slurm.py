@@ -1,10 +1,18 @@
 from pathlib import Path
 import sys
-from experimaestro.connectors import Redirect
+import time
+from experimaestro.connectors import Process, Redirect
 from experimaestro.connectors.local import LocalConnector
-from experimaestro.launchers.slurm import SlurmLauncher
+import logging
+from experimaestro.launchers import slurm
+from experimaestro.launchers.slurm import (
+    SlurmLauncher,
+    BatchSlurmProcess,
+    SlurmProcessBuilder,
+)
 from experimaestro.tests.utils import TemporaryDirectory
 import pytest
+from .common import waitFromSpec
 
 binpath = Path(__file__).parent / "bin"
 
@@ -23,7 +31,7 @@ def slurmlauncher(tmp_path_factory):
 
 
 @pytest.mark.timeout(10)
-def test_slurm_ok(slurmlauncher):
+def test_slurm_ok(slurmlauncher: SlurmLauncher):
     builder = slurmlauncher.processbuilder()
     builder.command = [sys.executable, binpath / "test.py"]
     p = builder.start()
@@ -31,7 +39,7 @@ def test_slurm_ok(slurmlauncher):
 
 
 @pytest.mark.timeout(10)
-def test_slurm_failed(slurmlauncher):
+def test_slurm_failed(slurmlauncher: SlurmLauncher):
     builder = slurmlauncher.processbuilder()
     builder.command = [sys.executable, binpath / "test.py", "--fail"]
     p = builder.start()
@@ -39,7 +47,7 @@ def test_slurm_failed(slurmlauncher):
 
 
 @pytest.mark.timeout(10)
-def test_slurm_config(tmp_path, slurmlauncher):
+def test_slurm_config(tmp_path, slurmlauncher: SlurmLauncher):
     """Test that sbatch is called properly"""
     options = {
         "nodes": 2,
@@ -62,3 +70,8 @@ def test_slurm_config(tmp_path, slurmlauncher):
             gotoptions[key] = value
 
     assert gotoptions == {key: str(value) for key, value in options.items()}
+
+
+@pytest.mark.timeout(timeout=3)
+def test_slurm_batchprocess(tmp_path: Path, slurmlauncher: SlurmLauncher):
+    waitFromSpec(tmp_path, slurmlauncher)

@@ -131,7 +131,11 @@ class TokenFile:
                     logger.info("Loading job watcher from definition")
                     from experimaestro.connectors import Process
 
-                    process = Process.fromDefinition(json.loads(s))
+                    # FIXME: not always localhost...
+                    from experimaestro.connectors.local import LocalConnector
+
+                    connector = LocalConnector.instance()
+                    process = Process.fromDefinition(connector, json.loads(s))
                     process.wait()
 
                 self.delete()

@@ -206,7 +206,7 @@ class Job(Resource):
         return self.workspace.jobspath / self.relmainpath / ("%s.lock" % self.name)
 
     @property
-    def donepath(self):
+    def donepath(self) -> Path:
         """When a job has been successful, this file is written"""
         return self.jobpath / ("%s.done" % self.name)
 
@@ -380,6 +380,9 @@ class Scheduler:
         job._future = asyncio.run_coroutine_threadsafe(self.aio_submit(job), self.loop)
 
     async def aio_registerJob(self, job: Job):
+        """Register a job by adding it to the list, and checks
+        whether the job has already been submitted
+        """
         logger.info("Registering job %s", job)
 
         if self.exitmode:
@@ -413,7 +416,7 @@ class Scheduler:
         self.waitingjobs.add(job)
 
         # Creates a link into the experiment folder
-        path = experiment.CURRENT.jobspath / job.relpath
+        path = experiment.current().jobspath / job.relpath
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_symlink():
             path.unlink()
@@ -426,14 +429,12 @@ class Scheduler:
             dependency = token.dependency(1)
             job.dependencies.add(dependency)
 
+        job.state = JobState.WAITING
         for listener in self.listeners:
             listener.job_submitted(job)
 
         # Add dependencies, and add to blocking resources
-
-        # Set in waiting mode
         if job.dependencies:
-            job.state = JobState.WAITING
             job.unsatisfied = len(job.dependencies)
 
             for dependency in job.dependencies:
@@ -445,8 +446,19 @@ class Scheduler:
             job._readyEvent.set()
             job.state = JobState.READY
 
+        # Check if done
+        if job.donepath.exists():
+            job.state = JobState.DONE
+
         # Check if we have a PID
         if job.process is not None:
+            # Notify and wait
+            logger.info("Retrieved a process for job %s", job)
+
+            job.state = JobState.RUNNING
+            for listener in self.listeners:
+                listener.job_state(job)
+
             code = await job.process.aio_code
             job.state = JobState.DONE if code == 0 else JobState.ERROR
 
@@ -457,7 +469,15 @@ class Scheduler:
             job._readyEvent.clear()
 
             if job.state == JobState.READY:
-                job.state = await self.aio_start(job)
+                state = await self.aio_start(job)
+                if state is None:
+                    # State is None if this is not the main thread
+                    return JobState.ERROR
+
+                job.state = state
+
+        for listener in self.listeners:
+            listener.job_state(job)
 
         # Job is finished
         if job.state != JobState.DONE:
@@ -480,7 +500,7 @@ class Scheduler:
 
         return job.state
 
-    async def aio_start(self, job) -> JobState:
+    async def aio_start(self, job) -> Optional[JobState]:
         """Start a job
 
         Returns None if the dependencies could not be locked after all
@@ -561,6 +581,12 @@ class experiment:
     # Current experiment
     CURRENT: Optional["experiment"] = None
 
+    @staticmethod
+    def current() -> "experiment":
+        """Returns the current experiment, but checking first if set"""
+        assert experiment.CURRENT is not None, "No current experiment defined"
+        return experiment.CURRENT
+
     def __init__(
         self,
         env: Union[Path, str, Environment],
@@ -630,17 +656,19 @@ class experiment:
         """Stop the experiment as soon as possible"""
 
         async def doStop():
+            assert self.central is not None
             async with self.central.exitCondition:
                 self.exitMode = True
                 self.central.exitCondition.notify_all()
 
-        assert self.central.loop is not None
+        assert self.central is not None and self.central.loop is not None
         asyncio.run_coroutine_threadsafe(doStop(), self.central.loop)
 
     def wait(self):
         """Wait until the running processes have finished"""
 
         async def awaitcompletion():
+            assert self.central is not None
             async with self.central.exitCondition:
                 while True:
                     if self.unfinishedJobs == 0 or self.exitMode:
@@ -722,7 +750,8 @@ class experiment:
 
         self.central = None
         self.workspace.__exit__(exc_type, exc_value, traceback)
-        self.xplock.__exit__(exc_type, exc_value, traceback)
+        if self.xplock:
+            self.xplock.__exit__(exc_type, exc_value, traceback)
 
         # Put back old experiment as current one
         experiment.CURRENT = self.old_experiment

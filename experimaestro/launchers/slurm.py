@@ -1,5 +1,5 @@
 import threading
-from typing import Dict, List, Optional, get_type_hints
+from typing import Any, Dict, List, Optional, get_type_hints
 from experimaestro.connectors.local import LocalConnector
 import re
 from contextlib import contextmanager
@@ -119,6 +119,13 @@ class BatchSlurmProcess(Process):
     def __repr__(self):
         return f"slurm:{self.jobid}"
 
+    def tospec(self):
+        return {"type": "slurm", "pid": self.jobid}
+
+    @classmethod
+    def fromspec(cls, launcher, spec: Dict[str, Any]):
+        return BatchSlurmProcess(launcher, spec["pid"])
+
 
 def addstream(command: List[str], option: str, redirect: Redirect):
     if redirect.type == RedirectType.FILE:
@@ -134,7 +141,7 @@ class SlurmProcessBuilder(ProcessBuilder):
         super().__init__()
         self.launcher = launcher
 
-    def start(self) -> Process:
+    def start(self) -> BatchSlurmProcess:
         """Start the process"""
         builder = self.launcher.connector.processbuilder()
         builder.workingDirectory = self.workingDirectory
@@ -179,7 +186,8 @@ class SlurmProcessBuilder(ProcessBuilder):
 class SlurmOptions:
     # Options
     nodes: Optional[int] = 1
-    time: Optional[int] = None
+    time: Optional[str] = None
+
     # GPU-related
     gpus: Optional[int] = None
     gpus_per_node: Optional[int] = None
@@ -264,7 +272,7 @@ class SlurmLauncher(Launcher):
         builder.processtype = "slurm"
         return builder
 
-    def processbuilder(self) -> ProcessBuilder:
+    def processbuilder(self) -> SlurmProcessBuilder:
         """Returns the process builder for this launcher
 
         By default, returns the associated connector builder"""

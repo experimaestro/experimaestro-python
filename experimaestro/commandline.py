@@ -262,7 +262,7 @@ class CommandLineJob(Job):
             pinfo = json.loads(self.pidpath.read_text())
             handler = Process.handler(pinfo["type"])
             if handler is not None:
-                p = handler.fromspec(pinfo)
+                p = handler.fromspec(self.launcher, pinfo)
                 if p and p.is_running():
                     return JobProcess(self, p)
 
@@ -309,6 +309,10 @@ class CommandLineJob(Job):
 
         logger.info("Starting job %s", self.jobpath)
         self._process = processbuilder.start()
+
+        with self.pidpath.open("w") as fp:
+            json.dump(self._process.tospec(), fp)
+
         self.state = JobState.RUNNING
         logger.info("Process started (%s)", self._process)
         return self._process

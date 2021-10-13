@@ -26,17 +26,19 @@ echo "Command line: $@" >&2
 args=()
 parsable=0
 stdout="/dev/stdout"
+stderr="/dev/stdout"
 while true; do
     case "$1" in
         --parsable) shift; parsable=1;;
         -o) shift; stdout="$1"; shift;;
+        -e) shift; stderr="$1"; shift;;
         --*) args+=("$1"); shift;;
         *) break 2;;    
     esac
 done
 
 echo "Starting $@ ${args[@]} > $stdout" >&2
-(eval "$@" "${args[@]}" > $stdout; echo $? > "$XPM_SLURM_DIR/jobs/$$.status") & 
+(eval "$@" "${args[@]}"; echo $? > "$XPM_SLURM_DIR/jobs/$$.status") > $stdout 2> $stderr & 
 JOBID="$$"
 date > "$XPM_SLURM_DIR/jobs/$JOBID.start"
 disown

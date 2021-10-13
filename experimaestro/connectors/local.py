@@ -32,8 +32,11 @@ class LocalProcess(Process):
         code = self._process.wait()
         return code
 
+    def tospec(self):
+        return {"type": "local", "pid": self._process.pid}
+
     @staticmethod
-    def fromspec(spec):
+    def fromspec(launcher, spec):
         pid = spec["pid"]
         try:
             return psutil.Process(pid)
