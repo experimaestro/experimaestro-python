@@ -190,8 +190,7 @@ class Job(Resource):
         """Actually run the code"""
         raise NotImplementedError()
 
-    @property
-    def process(self):
+    async def aio_process(self) -> "JobProcess":
         """Returns the process"""
         raise NotImplementedError("Not implemented")
 
@@ -456,21 +455,25 @@ class Scheduler:
             job._readyEvent.set()
             job.state = JobState.READY
 
-        # Check if done
         if job.donepath.exists():
             job.state = JobState.DONE
 
         # Check if we have a PID
-        if job.process is not None:
+        process = await job.aio_process()
+        if process is not None:
             # Notify and wait
-            logger.info("Retrieved a process for job %s", job)
-
             job.state = JobState.RUNNING
             for listener in self.listeners:
                 listener.job_state(job)
 
-            code = await job.process.aio_code
+            logger.debug("Got a process for job %s - waiting to complete", job)
+            code = await process.aio_code
+            logger.debug("Job %s completed with code %d", job, code)
             job.state = JobState.DONE if code == 0 else JobState.ERROR
+
+        # Check if done
+        if job.donepath.exists():
+            job.state = JobState.DONE
 
         # OK, not done; let's start the job for real
         while not job.state.finished():

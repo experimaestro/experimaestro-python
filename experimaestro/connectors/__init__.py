@@ -9,12 +9,12 @@ This module contains :
 """
 
 import enum
-import asyncio
 from cached_property import cached_property
 from typing import Any, Dict, Optional, Type, Union
 from pathlib import Path
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
+from experimaestro.utils.asyncio import asyncThreadcheck
 import pkg_resources
 
 
@@ -87,21 +87,14 @@ class Process:
         """Wait until the process finishes"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
 
+    async def aio_isrunning(self):
+        """True is the process is truly running (I/O)"""
+        raise NotImplementedError(f"Not implemented: {self.__class__}.aio_isrunning")
+
     @cached_property
-    def aio_code(self):
+    async def aio_code(self):
         """Returns a future containing the returned code"""
-        from threading import Thread
-
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-
-        def dowait():
-            code = self.wait()
-            loop.call_soon_threadsafe(future.set_result, code)
-
-        # Start thread
-        Thread(name="Process async wait", target=dowait).start()
-        return future
+        return await asyncThreadcheck("aio_code", self.wait)
 
 
 class ProcessThreadError(Exception):

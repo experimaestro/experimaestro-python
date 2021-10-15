@@ -21,6 +21,23 @@ from experimaestro.tokens import Token, CounterToken
 from experimaestro.utils import logger
 
 
+class PsutilProcess(Process):
+    """Wrapper for psutil process"""
+
+    def __init__(self, pid: int):
+        self._process = psutil.Process(pid)
+
+    def wait(self) -> int:
+        code = self._process.wait()
+        return code
+
+    async def aio_isrunning(self):
+        return self._process.is_running()
+
+    def __repr__(self):
+        return f"PsUtil({self._process})"
+
+
 class LocalProcess(Process):
     def __init__(self, process: subprocess.Popen):
         self._process = process
@@ -32,6 +49,9 @@ class LocalProcess(Process):
         code = self._process.wait()
         return code
 
+    async def aio_isrunning(self):
+        return self._process.poll() is None
+
     def tospec(self):
         return {"type": "local", "pid": self._process.pid}
 
@@ -39,7 +59,7 @@ class LocalProcess(Process):
     def fromspec(launcher, spec):
         pid = spec["pid"]
         try:
-            return psutil.Process(pid)
+            return PsutilProcess(pid)
         except psutil.NoSuchProcess:
             pass
 

@@ -249,9 +249,8 @@ class CommandLineJob(Job):
         )
         self.commandline = commandline
 
-    @property
-    def process(self):
-        """Returns the process"""
+    async def aio_process(self):
+        """Returns the process if there is one"""
         if self._process:
             return self._process
 
@@ -260,17 +259,21 @@ class CommandLineJob(Job):
             from experimaestro.connectors import Process
 
             pinfo = json.loads(self.pidpath.read_text())
-            handler = Process.handler(pinfo["type"])
-            if handler is not None:
-                p = handler.fromspec(self.launcher, pinfo)
-                if p and p.is_running():
-                    return JobProcess(self, p)
+            p = Process.fromDefinition(self.launcher, pinfo)
+            if p is None:
+                return None
 
-            else:
-                logger.error(f"Type {pinfo['type']} is not handled")
+            if await p.aio_isrunning():
+                return JobProcess(self, p)
+
+            return None
+
         return None
 
     def run(self, locks):
+        if self._process:
+            return self._process
+
         # Use the lock during preparation
         logger.info("Running job %s...", self)
 
@@ -284,10 +287,6 @@ class CommandLineJob(Job):
         directory = self.path
         if not directory.is_dir():
             directory.mkdir(parents=True, exist_ok=True)
-
-        process = self.process
-        if process:
-            return process
 
         logger.info("Locking job lock path %s", self.lockpath)
         with connector.lock(self.lockpath, LOCKFILE_WAIT_DURATION) as out:

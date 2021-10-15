@@ -1,17 +1,12 @@
 from pathlib import Path
 import sys
-import time
-from experimaestro.connectors import Process, Redirect
+from experimaestro.connectors import Redirect
 from experimaestro.connectors.local import LocalConnector
-import logging
-from experimaestro.launchers import slurm
 from experimaestro.launchers.slurm import (
     SlurmLauncher,
-    BatchSlurmProcess,
-    SlurmProcessBuilder,
 )
-from experimaestro.tests.utils import TemporaryDirectory
 import pytest
+import asyncio
 from .common import waitFromSpec
 
 binpath = Path(__file__).parent / "bin"

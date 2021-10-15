@@ -1,4 +1,5 @@
 - Various fixes
+- Asynchronous process checking
 - Configurations can use `Enum` values
 
 # 0.9.10

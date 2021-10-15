@@ -4,6 +4,7 @@ import time
 from experimaestro.connectors import Process, Redirect
 from experimaestro.launchers import Launcher
 import logging
+import asyncio
 
 
 def waitFromSpec(tmp_path: Path, launcher: Launcher):
@@ -35,6 +36,14 @@ def waitFromSpec(tmp_path: Path, launcher: Launcher):
     logging.info("Job started")
 
     restored = Process.fromDefinition(launcher, spec)
+
+    assert asyncio.run(restored.aio_isrunning()), "Process is not running"
+
     logging.info("Waiting for job to end")
     semaphore.touch()
     restored.wait()
+
+    # Should not be running anymore
+    assert not asyncio.run(restored.aio_isrunning()), "Process is running"
+
+    return restored

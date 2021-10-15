@@ -173,7 +173,7 @@ def updatedependencies(
         for key, val in value.items():
             updatedependencies(dependencies, key, path, taskids)
             updatedependencies(dependencies, val, path, taskids)
-    elif isinstance(value, (str, int, float, Path)):
+    elif isinstance(value, (str, int, float, Path, Enum)):
         pass
     else:
         raise NotImplementedError("update dependencies for type %s" % type(value))
@@ -892,6 +892,9 @@ def clone(v):
 
     if isinstance(v, list):
         return [clone(x) for x in v]
+
+    if isinstance(v, Enum):
+        return v
 
     if isinstance(v, Config):
         # Create a new instance

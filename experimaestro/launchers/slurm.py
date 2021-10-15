@@ -5,6 +5,7 @@ import re
 from contextlib import contextmanager
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
+from experimaestro.utils.asyncio import asyncThreadcheck
 from . import Launcher
 from experimaestro.scriptbuilder import ShScriptBuilder
 from experimaestro.connectors import (
@@ -41,7 +42,7 @@ class SlurmProcessWatcher(threading.Thread):
         super().__init__()
         self.launcher = launcher
         self.count = 1
-        self.jobs = {}
+        self.jobs: Dict[str, SlurmJobState] = {}
 
         self.cv = ThreadingCondition()
         self.start()
@@ -58,6 +59,8 @@ class SlurmProcessWatcher(threading.Thread):
                 watcher.count += 1
         yield watcher
         watcher.count -= 1
+        with watcher.cv:
+            watcher.cv.notify()
 
     def getjob(self, jobid):
         with self.cv:
@@ -119,6 +122,14 @@ class BatchSlurmProcess(Process):
                 state = watcher.getjob(self.jobid)
                 if state and state.finished():
                     return 0 if state.status == "COMPLETED" else 1
+
+    async def aio_isrunning(self):
+        def check():
+            with SlurmProcessWatcher.get(self.launcher) as watcher:
+                jobinfo = watcher.getjob(self.jobid)
+                return jobinfo is not None and jobinfo.status == "RUNNING"
+
+        return await asyncThreadcheck("slurm.aio_isrunning", check)
 
     def __repr__(self):
         return f"slurm:{self.jobid}"
