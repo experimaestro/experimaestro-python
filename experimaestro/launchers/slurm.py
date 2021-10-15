@@ -71,8 +71,11 @@ class SlurmProcessWatcher(threading.Thread):
                     lambda: self.count == 0, timeout=self.launcher.interval
                 )
                 if self.count == 0:
+                    logger.debug("Stopping SLURM watcher process")
+                    del SlurmProcessWatcher.WATCHERS[self.launcher.main]
                     break
 
+            logger.debug("Checking SLURM state with sacct")
             builder = self.launcher.connector.processbuilder()
             builder.command = [
                 f"{self.launcher.binpath}/sacct",
@@ -84,6 +87,7 @@ class SlurmProcessWatcher(threading.Thread):
             builder.detach = False
             builder.stdout = Redirect.pipe(handler)
             builder.environ = self.launcher.launcherenv
+            logger.debug("Checking SLURM state with sacct")
             builder.start()
 
             with self.cv:

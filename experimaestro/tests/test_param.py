@@ -6,8 +6,9 @@ Test all the annotations for configurations and tasks
 # Annotation specific tests
 
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Set
 from experimaestro.core.types import DictType, IntType, StrType
+from experimaestro.workspace import Workspace
 import pytest
 from experimaestro import (
     config,
@@ -178,6 +179,48 @@ def test_constant():
     # We should not be able to change the value
     with pytest.raises(AttributeError):
         a.x = 3
+
+
+from enum import Enum
+
+
+class EnumParam(Enum):
+    NONE = 0
+    OTHER = 1
+
+
+class EnumConfig(Config):
+    x: Param[EnumParam]
+
+
+def test_param_enum():
+    """Test for enum values"""
+
+    a = EnumConfig(x=EnumParam.OTHER)
+
+    from io import StringIO
+    import jsonstreams
+    from experimaestro.core.objects import ConfigInformation
+    import sys
+    import json
+
+    stringOut = StringIO()
+
+    serialized: Set[int] = set()
+    with jsonstreams.Stream(
+        jsonstreams.Type.ARRAY, fd=stringOut, close_fd=False
+    ) as out:
+        a.__xpm__._outputjson_inner(out, None, serialized)
+
+    objects = json.loads(stringOut.getvalue())
+
+    import experimaestro.taskglobals as taskglobals
+
+    taskglobals.wspath = Path("/tmp-xpm1234")
+
+    _a = ConfigInformation.fromParameters(objects)
+    assert isinstance(_a, EnumConfig)
+    assert _a.x == EnumParam.OTHER
 
 
 def test_inheritance():

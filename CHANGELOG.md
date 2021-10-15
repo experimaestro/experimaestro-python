@@ -1,3 +1,5 @@
+- Configurations can use `Enum` values
+
 # 0.9.10
 
 - More stability in scheduler (asyncio to avoid race conditions)

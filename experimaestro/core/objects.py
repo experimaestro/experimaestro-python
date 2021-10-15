@@ -4,8 +4,8 @@ from pathlib import Path
 import hashlib
 import struct
 import io
-from experimaestro.core.arguments import Param
 import fasteners
+from enum import Enum
 import inspect
 import importlib
 from typing import (
@@ -13,7 +13,6 @@ from typing import (
     ClassVar,
     Dict,
     List,
-    Optional,
     Set,
     Type,
     TypeVar,
@@ -46,6 +45,7 @@ class HashComputer:
     LIST_ID = b"\x07"
     TASK_ID = b"\x08"
     DICT_ID = b"\x09"
+    ENUM_ID = b"\x0a"
 
     def __init__(self):
         # Hasher for parameters
@@ -92,6 +92,13 @@ class HashComputer:
             self._hashupdate(struct.pack("!d", len(value)), subparam=subparam)
             for x in value:
                 self.update(x, subparam=subparam)
+        elif isinstance(value, Enum):
+            self._hashupdate(HashComputer.ENUM_ID, subparam=subparam)
+            k = value.__class__
+            self._hashupdate(
+                f"{k.__module__}.{k.__qualname__ }:{value.name}".encode("utf-8"),
+                subparam=subparam,
+            )
         elif isinstance(value, dict):
             self._hashupdate(HashComputer.DICT_ID, subparam=subparam)
             items = list(value.items())
@@ -295,7 +302,7 @@ class ConfigProcessing:
 
             return x
 
-        if isinstance(x, (float, int, str, Path)):
+        if isinstance(x, (float, int, str, Path, Enum)):
             return x
 
         raise NotImplementedError(f"Cannot handle a value of type {type(x)}")
@@ -311,6 +318,14 @@ class GenerationConfigProcessing(ConfigProcessing):
 
     def map(self, k: str):
         return self.context.push(k)
+
+
+def getqualattr(module, qualname):
+    """Get a qualified attributed value"""
+    cls = module
+    for part in qualname.split("."):
+        cls = getattr(cls, part)
+    return cls
 
 
 class ConfigInformation:
@@ -570,6 +585,12 @@ class ConfigInformation:
                 objectout.write("value", str(value))
         elif isinstance(value, (int, float, str)):
             jsonout.write(*key, value)
+        elif isinstance(value, Enum):
+            with jsonout.subobject(*key) as objectout:
+                objectout.write("type", "enum")
+                objectout.write("module", value.__class__.__module__)
+                objectout.write("enum", value.__class__.__qualname__)
+                objectout.write("value", value.name)
         elif isinstance(value, SerializedTaskOutput):
             # Reference to a serialized object
             with jsonout.subobject(*key) as objectout:
@@ -649,7 +670,7 @@ class ConfigInformation:
         elif isinstance(value, dict):
             for name, el in value.items():
                 ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
-        elif isinstance(value, (Path, int, float, str)):
+        elif isinstance(value, (Path, int, float, str, Enum)):
             pass
         else:
             raise NotImplementedError(
@@ -687,7 +708,7 @@ class ConfigInformation:
         import jsonstreams
 
         serialized: Set[int] = set()
-        with jsonstreams.Stream(jsonstreams.Type.object, fd=out, close_fd=True) as out:
+        with jsonstreams.Stream(jsonstreams.Type.OBJECT, fd=out, close_fd=True) as out:
             # Write information
             out.write("has_subparam", self.identifier.sub is not None)
 
@@ -735,8 +756,13 @@ class ConfigInformation:
 
             if value["type"] == "path":
                 return Path(value["value"])
-            else:
-                raise Exception("Unhandled type: %s", value["type"])
+
+            if value["type"] == "enum":
+                module = importlib.import_module(value["module"])
+                enumClass = getqualattr(module, value["enum"])
+                return enumClass[value["value"]]
+
+            raise Exception("Unhandled type: %s", value["type"])
 
         return value
 
@@ -765,9 +791,7 @@ class ConfigInformation:
                 logger.debug("Importing module %s", definition["module"])
                 mod = importlib.import_module(module_name)
 
-            cls = mod
-            for part in definition["type"].split("."):
-                cls = getattr(cls, part)
+            cls = getqualattr(mod, definition["type"])
 
             if definition.get("serialized", False):
                 o = cls.fromJSON(definition["value"])

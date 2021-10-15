@@ -25,7 +25,7 @@ def slurmlauncher(tmp_path_factory):
         connector=LocalConnector.instance(),
         binpath=binpath,
         launcherenv=env,
-        interval=0.1,
+        interval=0.01,
     )
     yield launcher
 

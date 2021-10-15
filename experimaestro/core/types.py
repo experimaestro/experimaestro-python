@@ -3,10 +3,12 @@ import sys
 from typing import Union, Dict, Iterator, List, Type as TypingType
 from collections import ChainMap
 from pathlib import Path
+import typing
 from docstring_parser.parser import parse
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from .arguments import Argument
+from enum import Enum
 
 if sys.version_info.major == 3 and sys.version_info.minor < 9:
     from typing_extensions import _AnnotatedAlias, get_type_hints
@@ -101,8 +103,12 @@ class Type:
         if isinstance(key, Config):
             return key.__getxpmtype__()
 
-        if inspect.isclass(key) and issubclass(key, Config):
-            return key.__getxpmtype__()
+        if inspect.isclass(key):
+            if issubclass(key, Enum):
+                return EnumType(key)
+
+            if issubclass(key, Config):
+                return key.__getxpmtype__()
 
         t = typingutils.get_list(key)
         if t:
@@ -468,6 +474,21 @@ class ArrayType(Type):
 
     def __repr__(self):
         return f"Array({self.type})"
+
+
+class EnumType(Type):
+    def __init__(self, type: typing.Type[Enum]):
+        self.type = type
+
+    def validate(self, value):
+        assert isinstance(value, self.type)
+        return value
+
+    def __str__(self):
+        return f"Enum({self.type})"
+
+    def __repr__(self):
+        return f"Enum({self.type})"
 
 
 class DictType(Type):

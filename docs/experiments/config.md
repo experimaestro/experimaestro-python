@@ -40,6 +40,7 @@ Possible types are:
 
 - basic Python types (`str`, `int`, `float`, `bool`) and paths `pathlib.Path`
 - lists, using `typing.List[T]`
+- enumerations, using `Enum` from the `enum` package
 - dictionaries (support for basic types in keys only) with `typing.Dict[U, V]`
 - Other configurations
 
