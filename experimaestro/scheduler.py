@@ -91,7 +91,7 @@ class Job(Resource):
 
     # Set by the scheduler
     _readyEvent: Optional[asyncio.Event]
-    _future: Optional[concurrent.futures.Future]
+    _future: Optional["concurrent.futures.Future"]
 
     def __init__(
         self,
@@ -246,7 +246,7 @@ class Job(Resource):
             self.state = JobState.READY
             self._readyEvent.set()
 
-    def finalState(self) -> concurrent.futures.Future[JobState]:
+    def finalState(self) -> "concurrent.futures.Future[JobState]":
         assert self._future is not None
         return self._future
 
@@ -372,7 +372,7 @@ class Scheduler:
     def removelistener(self, listener: Listener):
         self.listeners.remove(listener)
 
-    def getJobState(self, job: Job) -> concurrent.futures.Future[JobState]:
+    def getJobState(self, job: Job) -> "concurrent.futures.Future[JobState]":
         return asyncio.run_coroutine_threadsafe(self.aio_getjobstate(job), self.loop)
 
     async def aio_getjobstate(self, job: Job):
