@@ -8,7 +8,7 @@ Test all the annotations for configurations and tasks
 from pathlib import Path
 from typing import Dict, Optional, List, Set
 from experimaestro.core.types import DictType, IntType, StrType
-from experimaestro.workspace import Workspace
+from enum import Enum
 import pytest
 from experimaestro import (
     config,
@@ -49,7 +49,27 @@ def test_noname():
     assert str(A.__xpmtype__.identifier) == "experimaestro.tests.test_param.a"
 
 
-# --- Use type annotations
+def serializeCycle(config: Config):
+    """Serialize and deserialize a configuration"""
+    from io import StringIO
+    import jsonstreams
+    from experimaestro.core.objects import ConfigInformation
+    import json
+    import experimaestro.taskglobals as taskglobals
+
+    taskglobals.wspath = Path("/tmp-xpm1234")
+
+    stringOut = StringIO()
+
+    serialized: Set[int] = set()
+    with jsonstreams.Stream(
+        jsonstreams.Type.ARRAY, fd=stringOut, close_fd=False
+    ) as out:
+        config.__xpm__._outputjson_inner(out, None, serialized)
+
+    objects = json.loads(stringOut.getvalue())
+
+    return ConfigInformation.fromParameters(objects)
 
 
 def ArgumentValue(default=None, *, help=""):
@@ -181,9 +201,6 @@ def test_constant():
         a.x = 3
 
 
-from enum import Enum
-
-
 class EnumParam(Enum):
     NONE = 0
     OTHER = 1
@@ -197,28 +214,8 @@ def test_param_enum():
     """Test for enum values"""
 
     a = EnumConfig(x=EnumParam.OTHER)
+    _a = serializeCycle(a)
 
-    from io import StringIO
-    import jsonstreams
-    from experimaestro.core.objects import ConfigInformation
-    import sys
-    import json
-
-    stringOut = StringIO()
-
-    serialized: Set[int] = set()
-    with jsonstreams.Stream(
-        jsonstreams.Type.ARRAY, fd=stringOut, close_fd=False
-    ) as out:
-        a.__xpm__._outputjson_inner(out, None, serialized)
-
-    objects = json.loads(stringOut.getvalue())
-
-    import experimaestro.taskglobals as taskglobals
-
-    taskglobals.wspath = Path("/tmp-xpm1234")
-
-    _a = ConfigInformation.fromParameters(objects)
     assert isinstance(_a, EnumConfig)
     assert _a.x == EnumParam.OTHER
 
