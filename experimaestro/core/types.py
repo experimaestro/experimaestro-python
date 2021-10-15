@@ -481,7 +481,7 @@ class EnumType(Type):
         self.type = type
 
     def validate(self, value):
-        assert isinstance(value, self.type)
+        assert isinstance(value, self.type), f"{value} is not of type {self.type}"
         return value
 
     def __str__(self):

@@ -181,6 +181,21 @@ def test_pathoption():
     assert_equal(A_with_path(a=1), A_without_path(a=1))
 
 
+def test_identifier_enum():
+    """Path arguments should be ignored"""
+    from enum import Enum
+
+    class EnumParam(Enum):
+        FIRST = 0
+        SECOND = 1
+
+    class EnumConfig(Config):
+        a: Param[EnumParam]
+
+    assert_notequal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.SECOND))
+    assert_equal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.FIRST))
+
+
 def test_defaultnew():
     """Path arguments should be ignored"""
 

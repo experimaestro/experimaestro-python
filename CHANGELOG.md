@@ -1,3 +1,4 @@
+- Various fixes
 - Configurations can use `Enum` values
 
 # 0.9.10

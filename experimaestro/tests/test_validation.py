@@ -9,8 +9,10 @@ from experimaestro import (
     argument,
     pathoption,
     ConstantParam,
-    experiment,
+    Param,
+    Config,
 )
+from enum import Enum
 import experimaestro.core.types as types
 from experimaestro.scheduler import Job, JobContext
 from .utils import TemporaryExperiment
@@ -204,6 +206,25 @@ def test_seal():
 
     with pytest.raises(AttributeError):
         a.a = 1
+
+
+def test_validation_enum():
+    """Path arguments should be ignored"""
+
+    class EnumParam(Enum):
+        FIRST = 0
+        SECOND = 1
+
+    class EnumConfig(Config):
+        a: Param[EnumParam]
+
+    expect_validate(EnumConfig(a=EnumParam.FIRST))
+
+    try:
+        EnumConfig(a=1)
+        assert False, "Enum value should be rejected"
+    except AssertionError as e:
+        pass
 
 
 # --- Task as argument
