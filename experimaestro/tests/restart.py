@@ -1,5 +1,6 @@
 import time
 import sys
+from typing import Callable
 from experimaestro import task, pathoption, Scheduler
 import psutil
 import logging
@@ -38,12 +39,26 @@ class Restart:
             time.sleep(0.1)
 
 
-def restart(terminate, experiment):
+def restart(terminate: Callable, experiment):
+    """Check if a new experimaestro process is able to take back
+    a running job
+
+    1. Runs an experiment and kills it using "terminate" while keeping the job active
+    2. Runs the same experiment
+        2.1 Submit the same job
+        2.2 Asserts that the job is running
+        2.3 Signals to the job to end
+        2.4 Asserts that the job is done
+
+    Args:
+        terminate (Callable): How to terminate the process (SIGINT / terminate)
+        experiment ([type]): [description]
+    """
     p = None
     xpmprocess = None
     try:
         with TemporaryExperiment("restart", maxwait=10) as xp:
-            # Create the task and so we can get the file paths
+            # Create the task with dryrun and so we can get the file paths
             task = Restart()
             task.submit(dryrun=True)
 
@@ -71,6 +86,7 @@ def restart(terminate, experiment):
         pid = int(jobinfo["pid"])
         p = psutil.Process(pid)
 
+        # Now, kills experimaestro
         logging.debug("Process has started [file %s, pid %d]", task.touch, pid)
         terminate(xpmprocess)
         errorcode = xpmprocess.wait(5)
@@ -83,12 +99,20 @@ def restart(terminate, experiment):
         with TemporaryExperiment("restart", maxwait=10) as xp:
             # Now, submit the job - it should pick up the process
             # where it was left
-            logging.debug("Submitting the job")
-            xp.CURRENT.scheduler.submit(task.__xpm__.job)
+            logging.debug("Submitting the job (continues the submit)")
+            job = task.__xpm__.job
+            scheduler = xp.current().scheduler
+
+            assert scheduler.submit(job) is None
+
+            currentState = scheduler.getJobState(job)
+            assert currentState.result() == JobState.RUNNING
+
+            # Notify the task
             with task.wait.open("w") as fp:
                 fp.write("done")
 
-            assert task.__xpm__.job.wait() == JobState.DONE
+            assert job.finalState().result() == JobState.DONE
     finally:
         # Force kill
         if xpmprocess and xpmprocess.poll() is None:

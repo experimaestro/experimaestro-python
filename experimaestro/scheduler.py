@@ -246,6 +246,10 @@ class Job(Resource):
             self.state = JobState.READY
             self._readyEvent.set()
 
+    def finalState(self) -> concurrent.futures.Future[JobState]:
+        assert self._future is not None
+        return self._future
+
 
 class JobContext(GenerationContext):
     def __init__(self, job: Job):
@@ -368,7 +372,13 @@ class Scheduler:
     def removelistener(self, listener: Listener):
         self.listeners.remove(listener)
 
-    def submit(self, job: Job):
+    def getJobState(self, job: Job) -> concurrent.futures.Future[JobState]:
+        return asyncio.run_coroutine_threadsafe(self.aio_getjobstate(job), self.loop)
+
+    async def aio_getjobstate(self, job: Job):
+        return job.state
+
+    def submit(self, job: Job) -> Optional[Job]:
         # Wait for the future containing the submitted job
         otherFuture = asyncio.run_coroutine_threadsafe(
             self.aio_registerJob(job), self.loop
