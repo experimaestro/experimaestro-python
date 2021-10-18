@@ -1,5 +1,6 @@
 from itertools import chain
 from shutil import rmtree
+from typing import List, Tuple
 import click
 import logging
 from functools import update_wrapper
@@ -89,11 +90,21 @@ def rpyc_server(unix_path, clean):
 
 @click.argument("path", type=Path)
 @click.option("--experiment", default=None, help="Restrict to this experiment")
+@click.option("--tags", is_flag=True, help="Show tags")
+@click.option("--kill", is_flag=True, help="Kill filtered tasks")
+@click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
+@click.option("--filter", default="", help="Filter expression")
 @cli.command()
-def job_status(path: Path, experiment: str):
+def jobs(path: Path, experiment: str, filter: str, tags: bool, ready: bool, kill: bool):
     for p in (path / "xp").glob("*"):
         if experiment and p.name != experiment:
             continue
+
+        from .filter import createFilter, JobInformation
+        from experimaestro.scheduler import JobState
+        from experimaestro.connectors import Process
+
+        _filter = createFilter(filter) if filter else lambda x: True
 
         print(f"* Experiment {p.name}")
         if (p / "jobs.bak").is_dir():
@@ -104,16 +115,47 @@ def job_status(path: Path, experiment: str):
             p = job.resolve()
             if p.is_dir():
                 *_, scriptname = p.parent.name.rsplit(".", 1)
-                if (p / f"{scriptname}.pid").is_file():
-                    print(colored(f"RUNNING {job.parent.name}/{job.name}", "yellow"))
-                elif (p / f"{scriptname}.done").is_file():
-                    print(colored(f"DONE    {job.parent.name}/{job.name}", "green"))
-                elif (p / f"{scriptname}.failed").is_file():
-                    print(colored(f"FAIL    {job.parent.name}/{job.name}", "red"))
+
+                info = JobInformation(p, scriptname)
+                if filter:
+                    if not _filter(info):
+                        continue
+
+                if info.state is None:
+                    print(
+                        colored(f"????    {job.parent.name}/{job.name}", "red"), end=""
+                    )
+                elif info.state == JobState.RUNNING:
+                    if kill:
+                        process = info.getprocess()
+                        print("KILLING", process)
+                        process.kill()
+                    print(
+                        colored(f"RUNNING {job.parent.name}/{job.name}", "yellow"),
+                        end="",
+                    )
+                elif info.state == JobState.DONE:
+                    print(
+                        colored(f"DONE    {job.parent.name}/{job.name}", "green"),
+                        end="",
+                    )
+                elif info.state == JobState.ERROR:
+                    print(
+                        colored(f"FAIL    {job.parent.name}/{job.name}", "red"), end=""
+                    )
                 else:
-                    print(colored(f"????    {job.parent.name}/{job.name}", "red"))
+                    print(
+                        colored(f"????    {job.parent.name}/{job.name}", "red"), end=""
+                    )
             else:
-                print(colored(f"NOT RUN {job.parent.name}/{job.name}", "yellow"))
+                if not ready:
+                    continue
+                print(colored(f"READY {job.parent.name}/{job.name}", "yellow"), end="")
+
+            if tags:
+                print(f""" {" ".join(f"{k}={v}" for k, v in info.tags.items())}""")
+            else:
+                print()
         print()
 
 

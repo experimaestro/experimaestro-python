@@ -96,6 +96,9 @@ class Process:
         """Returns a future containing the returned code"""
         return await asyncThreadcheck("aio_code", self.wait)
 
+    def kill(self):
+        raise NotImplementedError(f"Not implemented: {self.__class__}.kill")
+
 
 class ProcessThreadError(Exception):
     """Exception thrown by the forked process, to exit properly"""

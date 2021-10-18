@@ -131,6 +131,11 @@ class BatchSlurmProcess(Process):
 
         return await asyncThreadcheck("slurm.aio_isrunning", check)
 
+    def kill(self):
+        builder = self.launcher.connector.processbuilder()
+        builder.command = [f"{self.launcher.binpath}/scancel", f"{self.jobid}"]
+        builder.start()
+
     def __repr__(self):
         return f"slurm:{self.jobid}"
 
@@ -138,7 +143,8 @@ class BatchSlurmProcess(Process):
         return {"type": "slurm", "pid": self.jobid}
 
     @classmethod
-    def fromspec(cls, launcher, spec: Dict[str, Any]):
+    def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
+        launcher = SlurmLauncher(connector=connector)
         return BatchSlurmProcess(launcher, spec["pid"])
 
 

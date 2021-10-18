@@ -124,9 +124,17 @@ class HashComputer:
                     continue
 
                 # Argument value
+                # Skip if the argument is not a constant, and
+                # - optional argument: both value and default are None
+                # - the argument value is equal to the default value
                 argvalue = getattr(value, argument.name, None)
                 if not argument.constant and (
-                    argument.default and argument.default == argvalue
+                    (
+                        not argument.required
+                        and argument.default is None
+                        and argvalue is None
+                    )
+                    or (argument.default is not None and argument.default == argvalue)
                 ):
                     # No update if same value (and not constant)
                     continue

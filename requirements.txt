@@ -16,6 +16,7 @@ docstring_parser
 termcolor
 requests
 mkdocs
+pyparsing
 
 # Avoid version 0.10.4
 watchdog > 2.0.0

@@ -1,7 +1,7 @@
 # Tests for identifier computation
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 from experimaestro import (
     config,
     Param,
@@ -194,6 +194,23 @@ def test_identifier_enum():
 
     assert_notequal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.SECOND))
     assert_equal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.FIRST))
+
+
+def test_identifier_addnone():
+    """Test the case of new parameter (with None default)"""
+
+    class B(Config):
+        x: Param[int]
+
+    class A_with_b(Config):
+        __xpmid__ = "defaultnone"
+        b: Param[Optional[B]] = None
+
+    class A(Config):
+        __xpmid__ = "defaultnone"
+
+    assert_equal(A_with_b(), A())
+    assert_notequal(A_with_b(b=B(x=1)), A())
 
 
 def test_defaultnew():
