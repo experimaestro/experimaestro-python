@@ -9,7 +9,7 @@ This module contains :
 """
 
 import enum
-from cached_property import cached_property
+from experimaestro.compat import cached_property
 from typing import Any, Dict, Optional, Type, Union
 from pathlib import Path
 from experimaestro.locking import Lock
@@ -83,8 +83,8 @@ class Process:
 
         return Process.HANDLERS.get(key, None)
 
-    def wait(self):
-        """Wait until the process finishes"""
+    def wait(self) -> int:
+        """Wait until the process finishes and returns the error code"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
 
     async def aio_isrunning(self):

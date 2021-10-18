@@ -1,11 +1,12 @@
 import threading
-from typing import Any, Dict, List, Optional, get_type_hints
+from typing import Any, Dict, List, Optional, Tuple, get_type_hints
 from experimaestro.connectors.local import LocalConnector
 import re
 from contextlib import contextmanager
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from experimaestro.utils.asyncio import asyncThreadcheck
+from experimaestro.compat import cached_property
 from . import Launcher
 from experimaestro.scriptbuilder import ShScriptBuilder
 from experimaestro.connectors import (
@@ -36,7 +37,7 @@ class SlurmJobState:
 
 
 class SlurmProcessWatcher(threading.Thread):
-    WATCHERS: Dict["SlurmLauncher", "SlurmProcessWatcher"] = {}
+    WATCHERS: Dict[Tuple[Tuple[str, Any]], "SlurmProcessWatcher"] = {}
 
     def __init__(self, launcher: "SlurmLauncher"):
         super().__init__()
@@ -50,10 +51,10 @@ class SlurmProcessWatcher(threading.Thread):
     @staticmethod
     @contextmanager
     def get(launcher: "SlurmLauncher"):
-        watcher = SlurmProcessWatcher.WATCHERS.get(launcher.main, None)
+        watcher = SlurmProcessWatcher.WATCHERS.get(launcher.key, None)
         if watcher is None:
             watcher = SlurmProcessWatcher(launcher)
-            SlurmProcessWatcher.WATCHERS[launcher.main] = watcher
+            SlurmProcessWatcher.WATCHERS[launcher.key] = watcher
         else:
             with watcher.cv:
                 watcher.count += 1
@@ -63,6 +64,7 @@ class SlurmProcessWatcher(threading.Thread):
             watcher.cv.notify()
 
     def getjob(self, jobid):
+        """Allows to share the calls to sacct"""
         with self.cv:
             self.cv.wait()
             return self.jobs.get(jobid)
@@ -75,7 +77,7 @@ class SlurmProcessWatcher(threading.Thread):
                 )
                 if self.count == 0:
                     logger.debug("Stopping SLURM watcher process")
-                    del SlurmProcessWatcher.WATCHERS[self.launcher.main]
+                    del SlurmProcessWatcher.WATCHERS[self.launcher.key]
                     break
 
             builder = self.launcher.connector.processbuilder()
@@ -139,19 +141,13 @@ class BatchSlurmProcess(Process):
         return f"slurm:{self.jobid}"
 
     def tospec(self):
-        return {
-            "type": "slurm",
-            "pid": self.jobid,
-            "options": {
-                "binpath": self.launcher.binpath,
-                "interval": self.launcher.interval,
-                "launcherenv": self.launcher.launcherenv,
-            },
-        }
+        return {"type": "slurm", "pid": self.jobid, "options": self.launcher.key}
 
     @classmethod
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
-        launcher = SlurmLauncher(connector=connector, **spec["options"])
+        options = {k: v for k, v in spec["options"]}
+        options["launcherenv"] = {k: v for k, v in options["launcherenv"]}
+        launcher = SlurmLauncher(connector=connector, **options)
         return BatchSlurmProcess(launcher, spec["pid"])
 
 
@@ -278,7 +274,15 @@ class SlurmLauncher(Launcher):
         self.interval = interval
         self.launcherenv = launcherenv
         self.options = options or SlurmOptions()
-        self.main = main or self
+
+    @cached_property
+    def key(self):
+        """Returns a dictionary characterizing this launcher when calling sacct/etc"""
+        return (
+            ("binpath", self.binpath),
+            ("interval", self.interval),
+            ("launcherenv", tuple((k, v) for k, v in sorted(self.launcherenv.items()))),
+        )
 
     def config(self, **kwargs):
         """Returns a new Slurm launcher with the given configuration"""
@@ -287,7 +291,6 @@ class SlurmLauncher(Launcher):
             binpath=self.binpath,
             launcherenv=self.launcherenv,
             options=self.options.merge(SlurmOptions(**kwargs)),
-            main=self.main,
             interval=self.interval,
         )
 

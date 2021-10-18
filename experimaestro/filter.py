@@ -2,7 +2,7 @@ from typing import Any, Callable, Dict, List, Optional
 import pyparsing as pp
 from pathlib import Path
 import json
-from cached_property import cached_property
+from experimaestro.compat import cached_property
 import regex
 from experimaestro.scheduler import JobState
 
