@@ -6,7 +6,6 @@ from experimaestro.launchers.slurm import (
     SlurmLauncher,
 )
 import pytest
-import asyncio
 from .common import waitFromSpec
 
 binpath = Path(__file__).parent / "bin"

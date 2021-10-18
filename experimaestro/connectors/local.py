@@ -56,7 +56,7 @@ class LocalProcess(Process):
         return {"type": "local", "pid": self._process.pid}
 
     @staticmethod
-    def fromspec(launcher, spec):
+    def fromspec(connector, spec):
         pid = spec["pid"]
         try:
             return PsutilProcess(pid)

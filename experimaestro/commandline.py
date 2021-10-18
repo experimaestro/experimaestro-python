@@ -259,7 +259,7 @@ class CommandLineJob(Job):
             from experimaestro.connectors import Process
 
             pinfo = json.loads(self.pidpath.read_text())
-            p = Process.fromDefinition(self.launcher, pinfo)
+            p = Process.fromDefinition(self.launcher.connector, pinfo)
             if p is None:
                 return None
 

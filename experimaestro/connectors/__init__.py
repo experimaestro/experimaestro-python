@@ -59,19 +59,19 @@ class Process:
     HANDLERS = None
 
     @classmethod
-    def fromspec(cls, launcher: "Launcher", definition: Dict[str, Any]) -> "Process":
+    def fromspec(cls, connector: "Connector", definition: Dict[str, Any]) -> "Process":
         """Rebuild a process from a specification"""
-        raise NotImplementedError("fromspec for %s", cls)
+        raise NotImplementedError(f"fromspec for {cls}")
 
     def tospec(self) -> Dict[str, Any]:
         """Outputs a process specification"""
-        raise NotImplementedError("tospec for %s", cls)
+        raise NotImplementedError(f"tospec for {self.__class__}")
 
     @staticmethod
-    def fromDefinition(launcher, definition: Dict[str, Any]) -> "Process":
+    def fromDefinition(connector: "Connector", definition: Dict[str, Any]) -> "Process":
         """Retrieves a process from a serialized definition"""
         handler = Process.handler(definition["type"])
-        return handler.fromspec(launcher, definition)
+        return handler.fromspec(connector, definition)
 
     @staticmethod
     def handler(key: str) -> Type["Process"]:

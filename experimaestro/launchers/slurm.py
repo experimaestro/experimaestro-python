@@ -78,7 +78,6 @@ class SlurmProcessWatcher(threading.Thread):
                     del SlurmProcessWatcher.WATCHERS[self.launcher.main]
                     break
 
-            logger.debug("Checking SLURM state with sacct")
             builder = self.launcher.connector.processbuilder()
             builder.command = [
                 f"{self.launcher.binpath}/sacct",
@@ -140,11 +139,19 @@ class BatchSlurmProcess(Process):
         return f"slurm:{self.jobid}"
 
     def tospec(self):
-        return {"type": "slurm", "pid": self.jobid}
+        return {
+            "type": "slurm",
+            "pid": self.jobid,
+            "options": {
+                "binpath": self.launcher.binpath,
+                "interval": self.launcher.interval,
+                "launcherenv": self.launcher.launcherenv,
+            },
+        }
 
     @classmethod
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
-        launcher = SlurmLauncher(connector=connector)
+        launcher = SlurmLauncher(connector=connector, **spec["options"])
         return BatchSlurmProcess(launcher, spec["pid"])
 
 
@@ -256,7 +263,7 @@ class SlurmLauncher(Launcher):
         *,
         connector: Connector = None,
         options: SlurmOptions = None,
-        interval: int = 60,
+        interval: float = 60,
         main=None,
         launcherenv: Dict[str, str] = None,
         binpath="/usr/bin",

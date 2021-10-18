@@ -35,7 +35,7 @@ def waitFromSpec(tmp_path: Path, launcher: Launcher):
 
     logging.info("Job started")
 
-    restored = Process.fromDefinition(launcher, spec)
+    restored = Process.fromDefinition(launcher.connector, spec)
 
     assert asyncio.run(restored.aio_isrunning()), "Process is not running"
 
