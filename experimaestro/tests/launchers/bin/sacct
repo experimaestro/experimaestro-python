@@ -3,7 +3,13 @@
 # slurm test suite
 
 # Where we store the jobs
-test -z "$XPM_SLURM_DIR" && exit 1
+XPM_SLURM_DIR="$(realpath "$(dirname "$0")"/..)/slurm"
+if ! test -d "$XPM_SLURM_DIR"; then
+    echo "Directory $XPM_SLURM_DIR does not exist" 1>&2
+    exit 1
+fi
+
+
 find "$XPM_SLURM_DIR/jobs" -name "*.start" | while read name; do
     jobid=${name%.start}
     sf="$jobid.status"

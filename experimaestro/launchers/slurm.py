@@ -30,7 +30,10 @@ class SlurmJobState:
         self.end = end
 
     def finished(self):
-        return self.status in ["COMPLETED", "FAILED"]
+        # Finished state
+        return self.status in ["COMPLETED", "FAILED"] or self.status.startswith(
+            "CANCELLED"
+        )
 
     def __repr__(self):
         return f"{self.status} ({self.start}-{self.end})"
@@ -146,7 +149,6 @@ class BatchSlurmProcess(Process):
     @classmethod
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
         options = {k: v for k, v in spec["options"]}
-        options["launcherenv"] = {k: v for k, v in options["launcherenv"]}
         launcher = SlurmLauncher(connector=connector, **options)
         return BatchSlurmProcess(launcher, spec["pid"])
 
@@ -281,7 +283,6 @@ class SlurmLauncher(Launcher):
         return (
             ("binpath", self.binpath),
             ("interval", self.interval),
-            ("launcherenv", tuple((k, v) for k, v in sorted(self.launcherenv.items()))),
         )
 
     def config(self, **kwargs):

@@ -3,9 +3,13 @@
 # slurm test suite
 
 # Where we store the jobs
-test -z "$XPM_SLURM_DIR" && exit 1
-mkdir -p "$XPM_SLURM_DIR/jobs"
+XPM_SLURM_DIR="$(realpath "$(dirname "$0")"/..)/slurm"
+if ! test -d "$XPM_SLURM_DIR"; then
+    echo "Directory $XPM_SLURM_DIR does not exist" 1>&2
+    exit 1
+fi
 
+mkdir -p "$XPM_SLURM_DIR/jobs"
 echo "Slurm directory: $XPM_SLURM_DIR" >&2 
 
 lockpath() {

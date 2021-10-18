@@ -5,20 +5,25 @@ from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.slurm import (
     SlurmLauncher,
 )
+import shutil
 import pytest
 from .common import waitFromSpec
 
-binpath = Path(__file__).parent / "bin"
+BINPATH = Path(__file__).parent / "bin"
 
 
 @pytest.fixture(scope="session")
 def slurmlauncher(tmp_path_factory):
     tmpdir = tmp_path_factory.mktemp("slurm-launcher")
-    env = {"XPM_SLURM_DIR": str(tmpdir)}
+    assert tmpdir.is_dir()
+
+    binpath = tmpdir / "bin"
+    (tmpdir / "slurm").mkdir()
+    shutil.copytree(BINPATH, binpath)
+
     launcher = SlurmLauncher(
         connector=LocalConnector.instance(),
         binpath=binpath,
-        launcherenv=env,
         interval=0.01,
     )
     yield launcher
@@ -27,7 +32,7 @@ def slurmlauncher(tmp_path_factory):
 @pytest.mark.timeout(10)
 def test_slurm_ok(slurmlauncher: SlurmLauncher):
     builder = slurmlauncher.processbuilder()
-    builder.command = [sys.executable, binpath / "test.py"]
+    builder.command = [sys.executable, slurmlauncher.binpath / "test.py"]
     p = builder.start()
     assert p.wait() == 0
 
@@ -35,7 +40,7 @@ def test_slurm_ok(slurmlauncher: SlurmLauncher):
 @pytest.mark.timeout(10)
 def test_slurm_failed(slurmlauncher: SlurmLauncher):
     builder = slurmlauncher.processbuilder()
-    builder.command = [sys.executable, binpath / "test.py", "--fail"]
+    builder.command = [sys.executable, slurmlauncher.binpath / "test.py", "--fail"]
     p = builder.start()
     assert p.wait() == 1
 
@@ -53,7 +58,7 @@ def test_slurm_config(tmp_path, slurmlauncher: SlurmLauncher):
 
     outpath = tmp_path / "out.txt"
     builder.stdout = Redirect.file(outpath)
-    builder.command = [sys.executable, binpath / "test.py"]
+    builder.command = [sys.executable, slurmlauncher.binpath / "test.py"]
     p = builder.start()
     assert p.wait() == 0
 
