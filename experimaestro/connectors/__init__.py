@@ -71,7 +71,13 @@ class Process:
     def fromDefinition(connector: "Connector", definition: Dict[str, Any]) -> "Process":
         """Retrieves a process from a serialized definition"""
         handler = Process.handler(definition["type"])
-        return handler.fromspec(connector, definition)
+        try:
+            return handler.fromspec(connector, definition)
+        except Exception as e:
+            from experimaestro import logger
+
+            logger.exception("Could not retrieve job from specification")
+            raise e
 
     @staticmethod
     def handler(key: str) -> Type["Process"]:

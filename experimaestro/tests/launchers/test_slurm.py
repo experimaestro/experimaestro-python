@@ -1,13 +1,14 @@
 from pathlib import Path
 import sys
 from experimaestro.connectors import Redirect
+from experimaestro.tests.utils import TemporaryExperiment
 from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.slurm import (
     SlurmLauncher,
 )
 import shutil
 import pytest
-from .common import waitFromSpec
+from .common import waitFromSpec, takeback
 
 BINPATH = Path(__file__).parent / "bin"
 
@@ -74,3 +75,12 @@ def test_slurm_config(tmp_path, slurmlauncher: SlurmLauncher):
 @pytest.mark.timeout(timeout=3)
 def test_slurm_batchprocess(tmp_path: Path, slurmlauncher: SlurmLauncher):
     waitFromSpec(tmp_path, slurmlauncher)
+
+
+def test_slurm_takeback(slurmlauncher, tmp_path):
+    """Test whether a task can be taken back when running"""
+    txp1 = TemporaryExperiment("slurm-takeback-1", workdir=tmp_path / "xp")
+    txp2 = TemporaryExperiment("slurm-takeback-2", workdir=tmp_path / "xp")
+    datapath = tmp_path / "data"
+
+    takeback(slurmlauncher, datapath, txp1, txp2)

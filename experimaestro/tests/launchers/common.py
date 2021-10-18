@@ -1,10 +1,12 @@
 from pathlib import Path
 import sys
 import time
-from experimaestro.connectors import Process, Redirect
-from experimaestro.launchers import Launcher
 import logging
 import asyncio
+from experimaestro.scheduler import JobState
+from experimaestro.connectors import Process, Redirect
+from experimaestro.launchers import Launcher
+from experimaestro import Task, Param
 
 
 def waitFromSpec(tmp_path: Path, launcher: Launcher):
@@ -47,3 +49,38 @@ def waitFromSpec(tmp_path: Path, launcher: Launcher):
     assert not asyncio.run(restored.aio_isrunning()), "Process is running"
 
     return restored
+
+
+# --- Take back code
+
+
+class WaitUntilTouched(Task):
+    touching: Param[Path]
+    waiting: Param[Path]
+
+    def execute(self):
+        self.touching.touch()
+
+        while not self.waiting.exists():
+            time.sleep(0.01)
+
+
+def takeback(launcher, datapath, txp1, txp2):
+    datapath.mkdir()
+    touching = datapath / "touching"
+    waiting = datapath / "waiting"
+
+    with txp1 as xp1:  # flake8: noqa: F841
+        WaitUntilTouched(touching=touching, waiting=waiting).submit(launcher=launcher)
+        while not touching.is_file():
+            time.sleep(0.01)
+
+        with txp2 as xp2:  # flake8: noqa: F841
+            job = WaitUntilTouched(touching=touching, waiting=waiting).submit(
+                launcher=launcher
+            )
+
+            while job.__xpm__.job.state != JobState.RUNNING:
+                time.sleep(0.1)
+
+            waiting.touch()

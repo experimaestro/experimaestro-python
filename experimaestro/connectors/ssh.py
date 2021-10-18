@@ -17,6 +17,9 @@ from . import (
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token, CounterToken
 
+# Might be wise to switch to https://github.com/marian-code/ssh-utilities
+
+
 class SshPath(Path, PurePosixPath):
     """SSH path
 
@@ -26,6 +29,7 @@ class SshPath(Path, PurePosixPath):
     Relative:
     ssh://[user@]host[:port]/relative/path
     """
+
     @property
     def hostpath(self):
         # path = "/" if self._parts[:0]  + "/".join(self._parts[1:])
@@ -46,7 +50,7 @@ class SshPath(Path, PurePosixPath):
         if args[0].startswith("ssh:"):
             url = urlparse(args[0])
             assert not url.fragment and not url.query
-            
+
             path = url.path
 
             if path.startswith("//"):
@@ -58,18 +62,22 @@ class SshPath(Path, PurePosixPath):
             drv = url.hostname
         _, root, parts = super()._parse_args(args)
         return (drv, root, parts)
-        
 
     def _make_child(self, args):
         drv, root, parts = self._parse_args(args)
         assert self._drv == drv or drv == "", f"{self._drv} and {drv}"
         drv, root, parts = self._flavour.join_parsed_parts(
-            "", self._root, self._parts, "", root, parts)
+            "", self._root, self._parts, "", root, parts
+        )
         return self._from_parsed_parts(self._drv, root, parts)
 
     def open(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         # FIXME: should probably be wiser
-        fileobj = SshConnector.get(self.host).connection.sftp().open(self.hostpath, mode, buffering)
+        fileobj = (
+            SshConnector.get(self.host)
+            .connection.sftp()
+            .open(self.hostpath, mode, buffering)
+        )
         if "b" in mode:
             return fileobj
 
@@ -114,7 +122,7 @@ class SshConnector(Connector):
         #     config.parse(fp)
 
         # lookup = config.lookup(hostname)
-        
+
         # self.client = paramiko.SSHClient()
 
         # if "proxycommand" in lookup:

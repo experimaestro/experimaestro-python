@@ -1,4 +1,5 @@
 import threading
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, get_type_hints
 from experimaestro.connectors.local import LocalConnector
 import re
@@ -148,7 +149,7 @@ class BatchSlurmProcess(Process):
 
     @classmethod
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
-        options = {k: v for k, v in spec["options"]}
+        options = {k: v for k, v in spec.get("options", {})}
         launcher = SlurmLauncher(connector=connector, **options)
         return BatchSlurmProcess(launcher, spec["pid"])
 
@@ -198,6 +199,7 @@ class SlurmProcessBuilder(ProcessBuilder):
         builder.stdout = Redirect.pipe(handler)
         p = builder.start()
         if p.wait() != 0:
+            logger.error("Error while running sbatch command")
             raise RuntimeError("Error while submitting job")
 
         output = handler.output.decode("utf-8").strip(" \n")
@@ -272,7 +274,7 @@ class SlurmLauncher(Launcher):
             interval: seconds between polling job statuses
         """
         super().__init__(connector or LocalConnector.instance())
-        self.binpath = binpath
+        self.binpath = Path(binpath)
         self.interval = interval
         self.launcherenv = launcherenv
         self.options = options or SlurmOptions()
@@ -281,7 +283,7 @@ class SlurmLauncher(Launcher):
     def key(self):
         """Returns a dictionary characterizing this launcher when calling sacct/etc"""
         return (
-            ("binpath", self.binpath),
+            ("binpath", str(self.binpath)),
             ("interval", self.interval),
         )
 
