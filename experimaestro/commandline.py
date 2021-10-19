@@ -270,7 +270,7 @@ class CommandLineJob(Job):
 
         return None
 
-    def run(self, locks):
+    async def aio_run(self):
         if self._process:
             return self._process
 
@@ -289,22 +289,22 @@ class CommandLineJob(Job):
             directory.mkdir(parents=True, exist_ok=True)
 
         logger.info("Locking job lock path %s", self.lockpath)
-        with connector.lock(self.lockpath, LOCKFILE_WAIT_DURATION) as out:
-            # Check again if done (now that we have locked)
-            if donepath.is_file():
-                logger.info("Job %s is already done", self)
-                return JobState.DONE
 
-            # Now we can write the script
-            scriptbuilder.lockfiles.append(self.lockpath)
-            scriptbuilder.command = self.commandline
-            scriptbuilder.notificationURL = self.launcher.notificationURL
-            scriptPath = scriptbuilder.write(self)
+        # Check again if done (now that we have locked)
+        if donepath.is_file():
+            logger.info("Job %s is already done", self)
+            return JobState.DONE
 
-            processbuilder.environ = self.launcher.environ
-            processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
-            processbuilder.stderr = Redirect.file(self.stderr)
-            processbuilder.stdout = Redirect.file(self.stdout)
+        # Now we can write the script
+        scriptbuilder.lockfiles.append(self.lockpath)
+        scriptbuilder.command = self.commandline
+        scriptbuilder.notificationURL = self.launcher.notificationURL
+        scriptPath = scriptbuilder.write(self)
+
+        processbuilder.environ = self.launcher.environ
+        processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
+        processbuilder.stderr = Redirect.file(self.stderr)
+        processbuilder.stdout = Redirect.file(self.stdout)
 
         logger.info("Starting job %s", self.jobpath)
         self._process = processbuilder.start()

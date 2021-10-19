@@ -40,20 +40,26 @@ class JobState(enum.Enum):
     # Job is ready to run
     READY = 2
 
+    # Job is scheduled (e.g. slurm)
+    SCHEDULED = 3
+
     # Job is running
-    RUNNING = 3
+    RUNNING = 4
 
     # Job is done (finished)
-    DONE = 4
+    DONE = 5
 
     # Job failed (finished)
-    ERROR = 5
+    ERROR = 6
 
     def notstarted(self):
         return self.value <= JobState.READY.value
 
     def running(self):
-        return self.value == JobState.RUNNING.value
+        return (
+            self.value == JobState.RUNNING.value
+            or self.value == JobState.SCHEDULED.value
+        )
 
     def finished(self):
         return self.value >= JobState.DONE.value
@@ -186,12 +192,12 @@ class Job(Resource):
     def identifier(self):
         return self.config.__xpm__.identifier.all.hex()
 
-    def run(self, locks):
+    async def aio_run(self):
         """Actually run the code"""
-        raise NotImplementedError()
+        raise NotImplementedError(f"Method aio_run not implemented in {self.__class__}")
 
-    async def aio_process(self) -> "JobProcess":
-        """Returns the process"""
+    async def aio_process(self) -> Optional["JobProcess"]:
+        """Returns the process if it exists"""
         raise NotImplementedError("Not implemented")
 
     @property
@@ -278,7 +284,7 @@ class Listener:
 
 class JobError(Exception):
     def __init__(self, code):
-        super.__init__("Job exited with code %d", self.code)
+        super().__init__(f"Job exited with code {code}")
 
 
 class SignalHandler:
@@ -320,6 +326,7 @@ class SchedulerCentral(threading.Thread):
 
         # Set loop-dependent variables
         self.exitCondition = asyncio.Condition()
+        self.dependencyLock = asyncio.Lock()
 
         # Start the event loop
         self._ready.set()
@@ -466,9 +473,9 @@ class Scheduler:
             for listener in self.listeners:
                 listener.job_state(job)
 
-            logger.debug("Got a process for job %s - waiting to complete", job)
+            logger.info("Got a process for job %s - waiting to complete", job)
             code = await process.aio_code
-            logger.debug("Job %s completed with code %d", job, code)
+            logger.info("Job %s completed with code %d", job, code)
             job.state = JobState.DONE if code == 0 else JobState.ERROR
 
         # Check if done
@@ -482,7 +489,12 @@ class Scheduler:
             job._readyEvent.clear()
 
             if job.state == JobState.READY:
-                state = await self.aio_start(job)
+                try:
+                    state = await self.aio_start(job)
+                except Exception:
+                    logger.exception("Got an exception while starting the job")
+                    raise
+
                 if state is None:
                     # State is None if this is not the main thread
                     return JobState.ERROR
@@ -519,33 +531,46 @@ class Scheduler:
         Returns None if the dependencies could not be locked after all
         Returns DONE/ERROR depending on the process outcome
         """
+
+        # We first lock the job before proceeding
         with Locks() as locks:
-            state = None
+            logger.debug("[starting] Locking job %s", job)
+            async with job.launcher.connector.lock(job.lockpath) as joblock:
+                logger.debug("[starting] Locked job %s", job)
+
+                state = None
+                try:
+                    logger.info(
+                        "Starting job %s with %d dependencies",
+                        job,
+                        len(job.dependencies),
+                    )
+
+                    async with self.xp.central.dependencyLock:
+                        for dependency in job.dependencies:
+                            try:
+                                locks.append(dependency.lock().acquire())
+                            except LockError:
+                                logger.warning(
+                                    "Could not lock %s, aborting start for job %s",
+                                    dependency,
+                                    job,
+                                )
+                                dependency.check()
+                                return JobState.WAITING
+
+                    for listener in self.listeners:
+                        listener.job_state(job)
+
+                    job.starttime = time.time()
+
+                    process = await job.aio_run()
+
+                except Exception:
+                    logger.warning("Error while locking job", exc_info=True)
+                    return JobState.WAITING
+
             try:
-                logger.info(
-                    "Starting job %s with %d dependencies",
-                    job,
-                    len(job.dependencies),
-                )
-
-                for dependency in job.dependencies:
-                    try:
-                        locks.append(dependency.lock().acquire())
-                    except LockError:
-                        logger.warning(
-                            "Could not lock %s, aborting start for job %s",
-                            dependency,
-                            job,
-                        )
-                        dependency.check()
-                        return JobState.WAITING
-
-                for listener in self.listeners:
-                    listener.job_state(job)
-
-                job.starttime = time.time()
-                process = job.run(locks)
-
                 if isinstance(process, JobState):
                     state = process
                     logger.debug("Job %s ended (state %s)", job, state)
@@ -564,16 +589,6 @@ class Scheduler:
 
                     logger.debug("Job %s ended with code %s", job, code)
                     state = JobState.DONE if code == 0 else JobState.ERROR
-
-            except ProcessThreadError:
-                # Thrown by the child process so we can exit gracefully
-                logger.debug("Graceful exit")
-
-                # We set state to none so nothing is done (finally)
-                state = None
-
-                # We prevent locks to be unlocked (finally)
-                locks.detach()
 
             except JobError:
                 logger.warning("Error while running job")

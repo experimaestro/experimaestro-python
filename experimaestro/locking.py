@@ -1,3 +1,4 @@
+from experimaestro.utils.asyncio import asyncThreadcheck
 from .utils import logger
 
 
@@ -28,6 +29,12 @@ class Lock:
 
     def __exit__(self, *args):
         self.release()
+
+    async def __aenter__(self):
+        return await asyncThreadcheck("lock (aenter)", self.__enter__)
+
+    async def __aexit__(self, *args):
+        return await asyncThreadcheck("lock (aexit)", self.release)
 
     def _acquire(self):
         raise NotImplementedError()

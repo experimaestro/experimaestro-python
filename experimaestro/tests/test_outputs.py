@@ -39,7 +39,7 @@ class MainB(Task):
         pass
 
 
-def test_taskoutput():
+def test_output_taskoutput():
     a = A(b=B())
     output, ioutput = Main(a=a).submit(dryrun=True)
 
@@ -59,7 +59,7 @@ def test_taskoutput():
     Main(a=output).submit(dryrun=True)
 
 
-def test_serialization():
+def test_output_serialiation():
     """Test output serialization"""
 
     with TemporaryExperiment("output_serialization", maxwait=5) as xp:

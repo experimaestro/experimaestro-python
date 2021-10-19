@@ -8,6 +8,8 @@ from experimaestro.connectors import Process, Redirect
 from experimaestro.launchers import Launcher
 from experimaestro import Task, Param
 
+logger = logging.getLogger("xpm.tests.launchers")
+
 
 def waitFromSpec(tmp_path: Path, launcher: Launcher):
     builder = launcher.processbuilder()
@@ -72,15 +74,18 @@ def takeback(launcher, datapath, txp1, txp2):
 
     with txp1 as xp1:  # flake8: noqa: F841
         WaitUntilTouched(touching=touching, waiting=waiting).submit(launcher=launcher)
+
+        logger.debug("Waiting for task to create 'touching' file")
         while not touching.is_file():
             time.sleep(0.01)
 
         with txp2 as xp2:  # flake8: noqa: F841
-            job = WaitUntilTouched(touching=touching, waiting=waiting).submit(
+            result = WaitUntilTouched(touching=touching, waiting=waiting).submit(
                 launcher=launcher
             )
 
-            while job.__xpm__.job.state != JobState.RUNNING:
+            logger.debug("Waiting for job to be in running mode")
+            while result.__xpm__.job.state != JobState.RUNNING:
                 time.sleep(0.1)
 
             waiting.touch()

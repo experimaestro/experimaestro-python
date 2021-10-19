@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, get_type_hints
 from experimaestro.connectors.local import LocalConnector
 import re
+import logging
 from contextlib import contextmanager
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
@@ -17,7 +18,8 @@ from experimaestro.connectors import (
     Redirect,
     RedirectType,
 )
-from experimaestro.utils import logger
+
+logger = logging.getLogger("xpm.slurm")
 
 
 class SlurmJobState:
@@ -31,9 +33,19 @@ class SlurmJobState:
         self.end = end
 
     def finished(self):
-        # Finished state
-        return self.status in ["COMPLETED", "FAILED"] or self.status.startswith(
-            "CANCELLED"
+        """Returns true if the job has finished"""
+        return (
+            self.status
+            in [
+                "COMPLETED",
+                "FAILED",
+                "DEADLINE",
+                "NODE_FAIL",
+                "REVOKED",
+                "TIMEOUT",
+                "BOOT_FAIL",
+            ]
+            or self.status.startswith("CANCELLED")
         )
 
     def __repr__(self):
@@ -75,15 +87,6 @@ class SlurmProcessWatcher(threading.Thread):
 
     def run(self):
         while self.count > 0:
-            with self.cv:
-                self.cv.wait_for(
-                    lambda: self.count == 0, timeout=self.launcher.interval
-                )
-                if self.count == 0:
-                    logger.debug("Stopping SLURM watcher process")
-                    del SlurmProcessWatcher.WATCHERS[self.launcher.key]
-                    break
-
             builder = self.launcher.connector.processbuilder()
             builder.command = [
                 f"{self.launcher.binpath}/sacct",
@@ -113,6 +116,14 @@ class SlurmProcessWatcher(threading.Thread):
                 logger.debug("Jobs %s", self.jobs)
                 self.cv.notify_all()
 
+                self.cv.wait_for(
+                    lambda: self.count == 0, timeout=self.launcher.interval
+                )
+                if self.count == 0:
+                    logger.debug("Stopping SLURM watcher process")
+                    del SlurmProcessWatcher.WATCHERS[self.launcher.key]
+                    break
+
 
 class BatchSlurmProcess(Process):
     """A batch slurm process"""
@@ -132,7 +143,7 @@ class BatchSlurmProcess(Process):
         def check():
             with SlurmProcessWatcher.get(self.launcher) as watcher:
                 jobinfo = watcher.getjob(self.jobid)
-                return jobinfo is not None and jobinfo.status == "RUNNING"
+                return jobinfo is not None and not jobinfo.finished()
 
         return await asyncThreadcheck("slurm.aio_isrunning", check)
 
@@ -149,7 +160,7 @@ class BatchSlurmProcess(Process):
 
     @classmethod
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
-        options = {k: v for k, v in spec.get("options", {})}
+        options = {k: v for k, v in spec.get("options", ())}
         launcher = SlurmLauncher(connector=connector, **options)
         return BatchSlurmProcess(launcher, spec["pid"])
 

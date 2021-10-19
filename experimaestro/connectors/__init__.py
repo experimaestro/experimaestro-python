@@ -74,9 +74,9 @@ class Process:
         try:
             return handler.fromspec(connector, definition)
         except Exception as e:
-            from experimaestro import logger
+            import logging
 
-            logger.exception("Could not retrieve job from specification")
+            logging.exception("Could not retrieve job from specification")
             raise e
 
     @staticmethod
