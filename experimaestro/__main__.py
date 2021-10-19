@@ -91,27 +91,46 @@ def rpyc_server(unix_path, clean):
 @click.argument("path", type=Path)
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
-@click.option("--kill", is_flag=True, help="Kill filtered tasks")
 @click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
 @click.option("--filter", default="", help="Filter expression")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Force operation even if experiment has not been completed yet",
+)
+@click.option("--kill", is_flag=True, help="Kill filtered tasks (when/before running)")
+@click.option("--clean", is_flag=True, help="Remove finished tasks directories")
 @cli.command()
-def jobs(path: Path, experiment: str, filter: str, tags: bool, ready: bool, kill: bool):
+def jobs(
+    path: Path,
+    experiment: str,
+    filter: str,
+    tags: bool,
+    ready: bool,
+    kill: bool,
+    clean: bool,
+    force: bool,
+):
     for p in (path / "xp").glob("*"):
         if experiment and p.name != experiment:
             continue
 
         from .filter import createFilter, JobInformation
         from experimaestro.scheduler import JobState
-        from experimaestro.connectors import Process
 
         _filter = createFilter(filter) if filter else lambda x: True
 
         print(f"* Experiment {p.name}")
         if (p / "jobs.bak").is_dir():
-            cprint("  Experiment has not completed successfully", "red")
+            cprint("  Experiment has not finished yet", "red")
+            if not force and (kill or clean):
+                cprint("  Preventing kill/clean (use --force if you want to)", "yellow")
+                kill = False
+                clean = False
         print()
 
         for job in p.glob("jobs/*/*"):
+            info = None
             p = job.resolve()
             if p.is_dir():
                 *_, scriptname = p.parent.name.rsplit(".", 1)
@@ -123,15 +142,17 @@ def jobs(path: Path, experiment: str, filter: str, tags: bool, ready: bool, kill
 
                 if info.state is None:
                     print(
-                        colored(f"????    {job.parent.name}/{job.name}", "red"), end=""
+                        colored(f"NODIR   {job.parent.name}/{job.name}", "red"), end=""
                     )
-                elif info.state == JobState.RUNNING:
+                elif info.state.running():
                     if kill:
                         process = info.getprocess()
                         print("KILLING", process)
                         process.kill()
                     print(
-                        colored(f"RUNNING {job.parent.name}/{job.name}", "yellow"),
+                        colored(
+                            f"{info.state.name:8}{job.parent.name}/{job.name}", "yellow"
+                        ),
                         end="",
                     )
                 elif info.state == JobState.DONE:
@@ -145,8 +166,12 @@ def jobs(path: Path, experiment: str, filter: str, tags: bool, ready: bool, kill
                     )
                 else:
                     print(
-                        colored(f"????    {job.parent.name}/{job.name}", "red"), end=""
+                        colored(
+                            f"{info.state.name:8}{job.parent.name}/{job.name}", "red"
+                        ),
+                        end="",
                     )
+
             else:
                 if not ready:
                     continue
@@ -156,6 +181,10 @@ def jobs(path: Path, experiment: str, filter: str, tags: bool, ready: bool, kill
                 print(f""" {" ".join(f"{k}={v}" for k, v in info.tags.items())}""")
             else:
                 print()
+
+            if clean and info.state and info.state.finished():
+                cprint("Cleaning...", "red")
+                rmtree(p)
         print()
 
 

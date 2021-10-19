@@ -49,7 +49,7 @@ class VarExpr:
 
     def get(self, info: JobInformation):
         if self.varname == "@state":
-            return info.state.name
+            return info.state.name if info.state else None
 
         return info.tags.get(self.varname, None)
 
