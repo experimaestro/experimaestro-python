@@ -1,4 +1,5 @@
 {
+  "extends": "@tsconfig/svelte/tsconfig.json",
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
@@ -8,7 +9,7 @@
     "moduleResolution": "Node",
     "strictNullChecks": true,
     "types": ["svelte"],
-    "lib": ["ES2015", "DOM"],
+    "lib": ["es2020", "DOM"],
     "sourceMap": true
   },
   "include": ["src/**/*"],

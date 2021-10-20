@@ -1,18 +1,19 @@
 <script>
   import {DateTime} from 'luxon'
   export let job
-  import CopyToClipboard from "svelte-copy-to-clipboard";
   import { success, error } from 'xpm/ui/notifications'
+import { copyToClibpoard } from './clipboard'
 
   function formatms(t) {
     DateTime.fromMillis(1000 * t).toLocaleString(DateTime.DATETIME_FULL_WITH_SECONDS)
   }
+
 </script>    
 
 <div class="details">
 <span class="what">Status</span><div>{job.status}</div>
-<span class="what">Path</span><div>
-  <CopyToClipboard let:copy={onCopy} text={job.locator} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.locator}</span></CopyToClipboard> 
+<span class="what">Path</span><div>  
+  <span class="clipboard" on:click={event => copyToClibpoard(event.target)}>{job.locator}</span>
 </div>
 <span class="what">Submitted</span><div>{formatms(job.submitted)} </div>
 <span class="what">Start</span><div>{formatms(job.start)}</div>

@@ -160,7 +160,7 @@ class RequestProcessor:
     async def __call__(self, path, request_headers):
         headers = websockets.http.Headers()
 
-        if path == "/ws":
+        if path == "/api" or path == "/ws":
             # Continue HTTP upgrade
             return None
 

@@ -2,10 +2,12 @@
     import { createEventDispatcher } from 'svelte'
     
     const dispatch = createEventDispatcher()
-    import CopyToClipboard from "svelte-copy-to-clipboard";
+    // import CopyToClipboard from "svelte-copy-to-clipboard";
     import { success, error } from 'xpm/ui/notifications'
     export let job
+    import { copyToClibpoard } from './clipboard'
 
+    let locator
 </script>
 
 <div class="resource">
@@ -20,7 +22,10 @@
     {/if}
 
 <i class="fas fa-eye action" title="Details" on:click={() =>  { dispatch('show', job) }}/>
-<span class="job-id"><CopyToClipboard let:copy={onCopy} text={job.locator} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.taskId}</span></CopyToClipboard></span>
+<span class="job-id">
+    <!-- <CopyToClipboard let:copy={onCopy} text={job.locator} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.taskId}</span></CopyToClipboard></span> -->
+    <span class="clipboard" on:click={event => copyToClibpoard(locator)}>{job.taskId}</span>
+    <div style='width: 0px; overflow: hidden; height: 0px;' bind:this={locator}>{job.locator}</div>
     {#each job.tags as tag}
      <span class="tag">
             <span class="name">{tag[0]}</span><span class="value">{tag[1]}</span>

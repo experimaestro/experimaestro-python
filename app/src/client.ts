@@ -15,7 +15,7 @@ class Client {
       "ws://" +
       location.hostname +
       (location.port ? ":" + location.port : "") +
-      "/ws";
+      "/api";
 
     this.ws = new WebSocket(url);
     this.ws.addEventListener("open", this.open);
