@@ -24,8 +24,7 @@
 <i class="fas fa-eye action" title="Details" on:click={() =>  { dispatch('show', job) }}/>
 <span class="job-id">
     <!-- <CopyToClipboard let:copy={onCopy} text={job.locator} on:copy={() => success(`Job path copied`)} on:fail={() => error(`Error copying job path`)}><span class="clipboard" on:click={onCopy}>{job.taskId}</span></CopyToClipboard></span> -->
-    <span class="clipboard" on:click={event => copyToClibpoard(locator)}>{job.taskId}</span>
-    <div style='width: 0px; overflow: hidden; height: 0px;' bind:this={locator}>{job.locator}</div>
+    <span class="clipboard" on:click={event => copyToClibpoard(job.locator).then(() => success("Job path copied")).catch((e) => error("Error when copying job path: " + e))}>{job.taskId}</span>
     {#each job.tags as tag}
      <span class="tag">
             <span class="name">{tag[0]}</span><span class="value">{tag[1]}</span>

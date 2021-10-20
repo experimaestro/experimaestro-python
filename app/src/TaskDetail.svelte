@@ -1,8 +1,8 @@
 <script>
   import {DateTime} from 'luxon'
   export let job
-  import { success, error } from 'xpm/ui/notifications'
-import { copyToClibpoard } from './clipboard'
+  import { copyToClibpoard } from './clipboard'
+import { error, success } from './ui/notifications';
 
   function formatms(t) {
     DateTime.fromMillis(1000 * t).toLocaleString(DateTime.DATETIME_FULL_WITH_SECONDS)
@@ -13,7 +13,7 @@ import { copyToClibpoard } from './clipboard'
 <div class="details">
 <span class="what">Status</span><div>{job.status}</div>
 <span class="what">Path</span><div>  
-  <span class="clipboard" on:click={event => copyToClibpoard(event.target)}>{job.locator}</span>
+  <span class="clipboard" on:click={event => copyToClibpoard(job.locator).then(() => success("Job path copied")).catch(() => error("Error when copying job path"))}>{job.locator}</span>
 </div>
 <span class="what">Submitted</span><div>{formatms(job.submitted)} </div>
 <span class="what">Start</span><div>{formatms(job.start)}</div>

@@ -61,7 +61,7 @@ const config: Configuration = {
   },
   output: {
     path: path.resolve(__dirname, "../experimaestro/server/data/static"),
-    publicPath: "/static",
+    publicPath: "/static/",
     filename: "[name].js",
     chunkFilename: "[name].[id].js",
   },

@@ -6,6 +6,7 @@
     import client from './client'
 </script>
 <div>
+    <div id="clipboard-holder" style="overflow: hidden; width:0; height: 0"></div>
     <header class="App-header">
       <h1 class="App-title">Experimaestro {$experiment ? " – " + $experiment : ""}  <i class={`fab fa-staylinked ws-status ${$connected ? "ws-link" : "ws-no-link" }`} /> </h1>
     </header>

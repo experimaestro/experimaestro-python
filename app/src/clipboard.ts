@@ -1,17 +1,17 @@
-import { success } from "./ui/notifications";
+export async function copyToClibpoard(content: string): Promise<void> {
+  let clipboardElement = document.getElementById("clipboard-holder");
+  if (!clipboardElement) throw "no clipboard element";
 
-export function copyToClibpoard(element: HTMLElement) {
+  clipboardElement.textContent = content;
+
   let range = document.createRange();
   let sel = window.getSelection()!;
 
-  range.selectNode(element);
+  range.selectNode(clipboardElement);
   sel.removeAllRanges();
   sel.addRange(range);
 
   document.execCommand("copy");
 
-  success(`Information copied`);
   sel.removeAllRanges();
-
-  // error(`Error copying job path`)
 }
