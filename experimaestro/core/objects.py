@@ -10,6 +10,7 @@ import inspect
 import importlib
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     List,
@@ -835,9 +836,7 @@ class ConfigInformation:
                     ), f"Problem with deserialization {name} of {o.__class__}"
 
                 # Calls post-init
-                postinit = getattr(o, "__postinit__", None)
-                if postinit is not None:
-                    postinit()
+                o.__postinit__()
 
                 assert definition["id"] not in objects, (
                     "Duplicate id %s" % definition["id"]
@@ -869,9 +868,9 @@ class ConfigInformation:
             # Set values
             for key, value in values.items():
                 setattr(o, key, value)
-                postinit = getattr(o, "__postinit__", None)
-                if postinit is not None:
-                    postinit()
+
+            # Call __postinit__
+            o.__postinit__()
 
             # Generate values
             for arg in config.__xpmtype__.arguments.values():
@@ -1095,6 +1094,10 @@ class Config:
 
     def __validate__(self):
         """Validate the values"""
+        pass
+
+    def __postinit__(self):
+        """Called after the object  __init__() and with properties set"""
         pass
 
 

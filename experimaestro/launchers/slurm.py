@@ -227,6 +227,12 @@ class SlurmOptions:
     nodes: Optional[int] = 1
     time: Optional[str] = None
 
+    account: Optional[str] = None
+    """The account for launching the job"""
+
+    qos: Optional[str] = None
+    """The requested Quality of Service"""
+
     # GPU-related
     gpus: Optional[int] = None
     gpus_per_node: Optional[int] = None
