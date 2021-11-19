@@ -5,12 +5,8 @@
     "paths": {
       "xpm/*": ["src/*"]
     },
-    "target": "ES2015",
-    "moduleResolution": "Node",
     "strictNullChecks": true,
-    "types": ["svelte"],
-    "lib": ["es2020", "DOM"],
-    "sourceMap": true
+    "lib": ["es2020", "DOM"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "**/node_modules/*", "scripts/*"]
