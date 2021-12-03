@@ -869,13 +869,15 @@ class ConfigInformation:
             for key, value in values.items():
                 setattr(o, key, value)
 
-            # Call __postinit__
-            o.__postinit__()
-
             # Generate values
             for arg in config.__xpmtype__.arguments.values():
                 if arg.generator is not None:
                     setattr(o, arg.name, arg.generator(self.context, o))
+                if not arg.required and not hasattr(o, arg.name):
+                    setattr(o, arg.name, None)
+
+            # Call __postinit__
+            o.__postinit__()
 
             return o
 

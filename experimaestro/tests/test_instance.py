@@ -1,3 +1,4 @@
+from typing import Optional
 from experimaestro import config, Param, Config
 from experimaestro.core.objects import TypeConfig
 
@@ -51,3 +52,15 @@ class TestSerialization:
         deserialized = pickle.loads(s_a)
         assert not isinstance(deserialized, TypeConfig)
         assert deserialized.x == 2
+
+
+class ConfigWithOptional(Config):
+    x: Param[int] = 1
+    y: Param[Optional[int]]
+
+
+def test_instance_optional():
+    """Test that optional parameters are set to None when calling instance"""
+    c = ConfigWithOptional().instance()
+    assert c.x == 1
+    assert c.y is None
