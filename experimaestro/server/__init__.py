@@ -2,6 +2,7 @@ import logging
 import asyncio
 import pkg_resources
 import websockets
+import websockets.exceptions
 import websockets.http
 import http
 import json
@@ -9,7 +10,7 @@ import threading
 from typing import Optional
 import time
 import functools
-from experimaestro.scheduler import Scheduler
+from experimaestro.scheduler import Scheduler, Listener as BaseListener
 import re
 
 
@@ -51,8 +52,8 @@ def job_create(job):
     }
 
 
-class Listener:
-    def __init__(self, loop, scheduler):
+class Listener(BaseListener):
+    def __init__(self, loop, scheduler: Scheduler):
         self.loop = loop
         self.scheduler = scheduler
         self.scheduler.addlistener(self)
@@ -89,11 +90,7 @@ class Listener:
         self.websockets.remove(websocket)
 
 
-async def register(websocket):
-    Scheduler.listeners.add(Listener(websocket))
-
-
-async def handler(websocket, path, listener):
+async def handler(websocket, path, listener: Listener):
     await listener.register(websocket)
     try:
         while True:
@@ -121,7 +118,8 @@ async def handler(websocket, path, listener):
                 )
             elif actiontype == "kill":
                 jobid = action["payload"]
-                process = listener.scheduler.jobs[jobid].process
+                job = listener.scheduler.jobs[jobid]
+                process = await job.aio_process()
                 if process is not None:
                     process.kill()
             else:

@@ -55,6 +55,9 @@ class LocalProcess(Process):
     def tospec(self):
         return {"type": "local", "pid": self._process.pid}
 
+    def kill(self):
+        self._process.kill()
+
     @staticmethod
     def fromspec(connector, spec):
         pid = spec["pid"]
