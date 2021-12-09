@@ -251,7 +251,10 @@ def tags(value):
 def tagspath(value: Config):
     """Return a unique path made of tags and their values"""
     sortedtags = sorted(value.__xpm__.tags().items(), key=lambda x: x[0])
-    return "_".join(f"""{key.replace("/", "-")}={value}""" for key, value in sortedtags)
+    return "_".join(
+        f"""{key.replace("/", "-")}={value.replace("/", "-")}"""
+        for key, value in sortedtags
+    )
 
 
 # --- Deprecated
