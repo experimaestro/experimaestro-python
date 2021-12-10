@@ -12,7 +12,7 @@ from experimaestro.generators import PathGenerator
 
 from .core.arguments import Argument as CoreArgument
 from .core.objects import Config
-from .core.types import Identifier, TypeProxy, Type, ObjectType
+from .core.types import Any, Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
 from .checkers import Checker
 
@@ -248,11 +248,17 @@ def tags(value):
     return value.__xpm__.tags()
 
 
+def _normalizepathcomponent(v: Any):
+    if isinstance(v, str):
+        return v.replace("/", "-")
+    return v
+
+
 def tagspath(value: Config):
     """Return a unique path made of tags and their values"""
     sortedtags = sorted(value.__xpm__.tags().items(), key=lambda x: x[0])
     return "_".join(
-        f"""{key.replace("/", "-")}={value.replace("/", "-")}"""
+        f"""{_normalizepathcomponent(key)}={_normalizepathcomponent(value)}"""
         for key, value in sortedtags
     )
 
