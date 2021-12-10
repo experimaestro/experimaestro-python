@@ -1,6 +1,6 @@
 """test_annotations.py
 
-Test all the annotations for configurations and tasks
+Test annotation handling for configurations and tasks
 """
 
 # Annotation specific tests
@@ -294,3 +294,31 @@ def test_default_mismatch():
 
     with pytest.raises(TypeError):
         A.__xpmtype__.getArgument("x")
+
+
+# --- Handling help annotations
+
+
+def test_help():
+    class A(Config):
+        """Description of A
+
+        Long description of A.
+
+        Arguments:
+
+            y: Parameter y
+        """
+
+        x: Param[int]
+        """Parameter x"""
+
+        y: Param[int]
+
+    xpmtype = A.__getxpmtype__()
+    xpmtype.__initialize__()
+
+    assert xpmtype.title == "Description of A"
+    assert xpmtype.description.strip() == "Long description of A."
+    assert xpmtype.arguments["x"].help == "Parameter x"
+    assert xpmtype.arguments["y"].help == "Parameter y"

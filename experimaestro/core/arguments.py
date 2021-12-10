@@ -16,6 +16,11 @@ else:
 
 
 class Argument:
+    """Represents an argument of a configuration or task"""
+
+    objecttype: Optional["experimaestro.core.types.ObjectType"]
+    """The object for which this argument was declared"""
+
     def __init__(
         self,
         name,
@@ -36,7 +41,7 @@ class Argument:
             )
 
         self.name = name
-        self.help = help
+        self._help = help
         self.checker = checker
         self.type = type
         self.constant = constant
@@ -45,6 +50,7 @@ class Argument:
         self.default = default
         self.generator = generator
         self.subparam = subparam
+        self.objecttype = None
 
         assert (
             not self.constant or self.default is not None
@@ -64,6 +70,16 @@ class Argument:
         if self.generator:
             return self.generator.isoutput()
         return False
+
+    @property
+    def help(self):
+        if self._help is None and self.objecttype is not None:
+            self.objecttype.__parsedoc__()
+        return self._help
+
+    @help.setter
+    def help(self, help: str):
+        self._help = help
 
 
 class ArgumentOptions:

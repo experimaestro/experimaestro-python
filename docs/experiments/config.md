@@ -48,7 +48,10 @@ Possible types are:
 
 ```python
 class MyConfig(Config):
-    """
+    """My configuration
+
+    Long description of the configuration.
+
     Attributes:
         x: The parameter x
         y: The parameter y
@@ -61,6 +64,10 @@ class MyConfig(Config):
 
     # Without default value
     y: Param[type]
+
+    # Using a docstring
+    z: Param[int]
+    """Most important parameter of the model"""
 ```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)

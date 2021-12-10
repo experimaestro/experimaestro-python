@@ -1,3 +1,7 @@
+- Document arguments with a docstring
+
+# 0.9.11
+
 - Various fixes
 - Asynchronous process checking
 - Configurations can use `Enum` values

@@ -9,6 +9,8 @@ import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
 from .arguments import Argument
 from enum import Enum
+import ast
+import textwrap
 
 if sys.version_info.major == 3 and sys.version_info.minor < 9:
     from typing_extensions import _AnnotatedAlias, get_type_hints
@@ -59,7 +61,7 @@ class Type:
         elif isinstance(tn, str):
             tn = Identifier(tn)
         self.identifier = tn
-        self.description = description
+        self._description = description
 
     @property
     def ignore(self):
@@ -260,15 +262,6 @@ class ObjectType(Type):
         elif issubclass(self.basetype, Task):
             self.task = self.getpythontaskcommand()
 
-        # Get description from documentation
-        paramhelp = {}
-        if "__doc__" in self.basetype.__dict__:
-            parseddoc = parse(self.basetype.__doc__)
-            self._title = parseddoc.short_description
-            self.description = parseddoc.long_description
-            for param in parseddoc.params:
-                paramhelp[param.arg_name] = param.description
-
         # Add arguments from type hints
         from .arguments import TypeAnnotation
 
@@ -284,8 +277,6 @@ class ObjectType(Type):
                             if isinstance(value, TypeAnnotation):
                                 options = value(options)
                         if options is not None:
-                            if options.kwargs.get("help", None) is None:
-                                options.kwargs["help"] = paramhelp.get(key, None)
                             try:
                                 self.addArgument(
                                     options.create(
@@ -300,9 +291,51 @@ class ObjectType(Type):
                                 )
                                 raise
 
+    def __parsedoc__(self):
+        """Parse the documentation"""
+        # Initialize the object if needed
+        if self._title is not None:
+            return
+        self.__initialize__()
+
+        # Get description from documentation
+        __doc__ = self.basetype.__dict__.get("__doc__", None)
+        if __doc__:
+            parseddoc = parse(__doc__)
+            self._title = parseddoc.short_description
+            self._description = parseddoc.long_description
+            for param in parseddoc.params:
+                argument = self._arguments.get(param.arg_name, None)
+                if argument is None:
+                    logger.warning(
+                        "Found documentation for undeclared argument %s", param.arg_name
+                    )
+                else:
+                    argument.help = param.description
+
+        # Get argument help from annotations (PEP 257)
+        parsed = ast.parse(textwrap.dedent(inspect.getsource(self.originaltype)))
+
+        argname = None  # Current argument name
+        for node in parsed.body[0].body:
+            if isinstance(node, ast.AnnAssign):
+                argname = node.target.id
+            else:
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                    argument = self._arguments.get(argname, None)
+                    if argument is not None:
+                        argument.help = node.value.value
+
+                argname = None
+
+    @property
+    def description(self) -> str:
+        self.__parsedoc__()
+        return self._description
+
     @property
     def title(self) -> Dict[str, Argument]:
-        self.__initialize__()
+        self.__parsedoc__()
         return self._title or str(self.identifier)
 
     @property
@@ -312,6 +345,7 @@ class ObjectType(Type):
 
     def addArgument(self, argument: Argument):
         self._arguments[argument.name] = argument
+        argument.objecttype = self
 
         # The the attribute for the config type
         setattr(
