@@ -5,6 +5,7 @@ Test annotation handling for configurations and tasks
 
 # Annotation specific tests
 
+import sys
 from pathlib import Path
 from typing import Dict, Optional, List, Set
 from experimaestro.core.types import DictType, IntType, StrType
@@ -320,5 +321,8 @@ def test_help():
 
     assert xpmtype.title == "Description of A"
     assert xpmtype.description.strip() == "Long description of A."
-    assert xpmtype.arguments["x"].help == "Parameter x"
     assert xpmtype.arguments["y"].help == "Parameter y"
+
+    # Only python >= 3.8
+    if sys.version_info.major == 3 and sys.version_info.minor > 7:
+        assert xpmtype.arguments["x"].help == "Parameter x"
