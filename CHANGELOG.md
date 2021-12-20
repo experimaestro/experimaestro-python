@@ -1,4 +1,4 @@
-- Document arguments with a docstring (python 3.8+)
+- Document arguments with a docstring (python 3.9+)
 - `@deprecate` configurations allows to transparently change their location (or ID)
 - A job can now notify multiple experimaestro servers
 
