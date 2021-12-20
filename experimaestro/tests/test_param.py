@@ -323,6 +323,6 @@ def test_help():
     assert xpmtype.description.strip() == "Long description of A."
     assert xpmtype.arguments["y"].help == "Parameter y"
 
-    # Only python >= 3.8
-    if sys.version_info.major == 3 and sys.version_info.minor > 7:
+    # Only python >= 3.9
+    if sys.version_info.major == 3 and sys.version_info.minor > 8:
         assert xpmtype.arguments["x"].help == "Parameter x"
