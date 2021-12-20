@@ -8,6 +8,7 @@ from typing import Optional, Set, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
+from experimaestro.notifications import NotificationThread
 from typing import Dict
 
 from experimaestro.tokens import ProcessCounterToken
@@ -20,7 +21,6 @@ from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
 import concurrent.futures
 
-NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
 
 if TYPE_CHECKING:
     from experimaestro.connectors import Process
@@ -160,6 +160,13 @@ class Job(Resource):
         for listener in self.scheduler.listeners:
             listener.job_state(self)
 
+    def add_notification_server(self, server):
+        """Adds a notification server"""
+        key, baseurl = server.getNotificationSpec()
+        dirpath = self.path / NotificationThread.NOTIFICATION_FOLDER
+        dirpath.mkdir(exist_ok=True)
+        (dirpath / key).write_text(f"{baseurl}/{self.identifier}")
+
     @property
     def ready(self):
         return self.state == JobState.READY
@@ -170,7 +177,7 @@ class Job(Resource):
         return self.workspace.jobspath / self.relpath
 
     @property
-    def path(self):
+    def path(self) -> Path:
         return self.workspace.jobspath / self.relpath
 
     @property
@@ -468,14 +475,19 @@ class Scheduler:
         if job.donepath.exists():
             job.state = JobState.DONE
 
-        # Check if we have a PID
+        # Check if we have a running process
         process = await job.aio_process()
         if process is not None:
-            # Notify and wait
+            # Yep! First we notify the listeners
             job.state = JobState.RUNNING
             for listener in self.listeners:
                 listener.job_state(job)
 
+            # Adds to the listeners
+            if self.xp.server is not None:
+                job.add_notification_server(self.xp.server)
+
+            # And now, we wait...
             logger.info("Got a process for job %s - waiting to complete", job)
             code = await process.aio_code
             logger.info("Job %s completed with code %d", job, code)
@@ -567,6 +579,17 @@ class Scheduler:
 
                     job.starttime = time.time()
 
+                    # Creates the main directory
+                    directory = job.path
+                    logger.debug("Making directories job %s...", directory)
+                    if not directory.is_dir():
+                        directory.mkdir(parents=True, exist_ok=True)
+
+                    # Sets up the notification URL
+                    if self.xp.server is not None:
+                        job.add_notification_server(self.xp.server)
+
+                    # Runs the job
                     process = await job.aio_run()
 
                 except Exception:
@@ -650,9 +673,9 @@ class experiment:
 
         # Create the scheduler
         self.scheduler = Scheduler(self, name)
-        self.server = Server(self.scheduler, host=host, port=port) if port else None
-        if self.server:
-            self.workspace.launcher.setNotificationURL(self.server.getNotificationURL())
+        self.server = (
+            Server(self.scheduler, host=host, port=port) if port is not None else None
+        )
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
             import faulthandler

@@ -198,13 +198,16 @@ class Server:
             "127.0.0.1" if host is None or host == "127.0.0.1" else "0.0.0.0"
         )
         self.host = host or "127.0.0.1"
-        self.port = port
+        self._port = port
         self.scheduler = scheduler
         self._loop = None
         self._stop = None
 
-    def getNotificationURL(self):
-        return f"""http://{self.host}:{self.port}/notifications"""
+    def getNotificationSpec(self):
+        return (
+            f"""{self.host}_{self.port}.url""",
+            f"""http://{self.host}:{self.port}/notifications""",
+        )
 
     def stop(self):
         if self._stop:
@@ -222,18 +225,28 @@ class Server:
 
         self._loop = asyncio.new_event_loop()
         self._stop = self._loop.create_future()
+        self._port_future: asyncio.futures.Future[int] = self._loop.create_future()
         threading.Thread(target=run, args=(self._loop, self._stop)).start()
 
     def serve(self):
         # asyncio.ensure_future(self._serve())
         pass
 
+    async def aio_port(self):
+        return await self._port_future
+
+    @property
+    def port(self):
+        """Returns the running server port"""
+        return asyncio.run_coroutine_threadsafe(self.aio_port(), self._loop).result()
+
     async def _serve(self, stop):
-        logging.info("Webserver started on http://%s:%d", self.host, self.port)
         bound_handler = functools.partial(handler, listener=self.listener)
         process_request = RequestProcessor(self.scheduler)
         async with websockets.serve(
-            bound_handler, self.bindinghost, self.port, process_request=process_request
-        ):
+            bound_handler, self.bindinghost, self._port, process_request=process_request
+        ) as server:
+            self._port_future.set_result(server.sockets[0].getsockname()[1])
+            logging.info("Webserver started on http://%s:%d", self.host, self._port)
             await stop
         logging.info("Server stopped")

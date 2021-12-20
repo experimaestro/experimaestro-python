@@ -1,5 +1,6 @@
-- `@deprecate` configurations allows to transparently change their location (or ID)
 - Document arguments with a docstring
+- `@deprecate` configurations allows to transparently change their location (or ID)
+- A job can now notify multiple experimaestro servers
 
 # 0.9.11
 

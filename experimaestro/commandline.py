@@ -267,14 +267,7 @@ class CommandLineJob(Job):
 
         scriptbuilder = self.launcher.scriptbuilder()
         processbuilder = self.launcher.processbuilder()
-        connector = self.launcher.connector
         donepath = self.donepath
-
-        # Lock the job and check done again (just in case)
-        logger.debug("Making directories job %s...", self.path)
-        directory = self.path
-        if not directory.is_dir():
-            directory.mkdir(parents=True, exist_ok=True)
 
         logger.info("Locking job lock path %s", self.lockpath)
 

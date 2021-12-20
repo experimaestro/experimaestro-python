@@ -80,20 +80,21 @@ class timeout:
 
 
 class TemporaryExperiment:
-    def __init__(self, name, workdir=None, maxwait=10):
+    def __init__(self, name, workdir=None, maxwait=10, port=None):
         self.name = name
         self.workdir = workdir
         self.clean_workdir = workdir is None
         self.timeout = timeout(maxwait)
+        self.port = port
 
-    def __enter__(self):
+    def __enter__(self) -> experiment:
         if self.clean_workdir:
             self.workdir = TemporaryDirectory(prefix="xpm", suffix=self.name)
             workdir = self.workdir.__enter__()
         else:
             workdir = self.workdir
 
-        self.experiment = experiment(workdir, self.name)
+        self.experiment = experiment(workdir, self.name, port=self.port)
         self.experiment.__enter__()
 
         # Set some useful environment variables

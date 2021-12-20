@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 
 from experimaestro.utils import logger
-from .scheduler import Workspace, NOTIFICATIONURL_VARNAME
+from .scheduler import Workspace
 from .connectors import Connector, RedirectType, Redirect
 from .commandline import CommandLineJob, AbstractCommand, CommandContext, CommandPart
 from shlex import quote as shquote
@@ -108,16 +108,6 @@ class ShScriptBuilder:
 
             for name, value in job.launcher.environ.items():
                 out.write("""export {}={}\n""".format(name, shquote(value)))
-
-            # Adds notification URL to script
-            if self.notificationURL:
-                out.write(
-                    "export {}={}/{}\n".format(
-                        NOTIFICATIONURL_VARNAME,
-                        shquote(self.notificationURL),
-                        job.identifier,
-                    )
-                )
 
             # Write some command
             if self.preprocessCommands:

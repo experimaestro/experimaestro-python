@@ -1,38 +1,58 @@
-import os
+from pathlib import Path
+from typing import ClassVar, Dict, Optional
+import os.path
 from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
 import threading
 import sys
+import socket
 from tqdm.auto import tqdm as std_tqdm
 
-from .scheduler import NOTIFICATIONURL_VARNAME
 from .utils import logger
 
 # --- Progress and other notifications
 
 
 class NotificationThread(threading.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.url = os.environ.get(NOTIFICATIONURL_VARNAME, None)
+    NOTIFICATION_FOLDER = ".notifications"
 
+    def __init__(self, path: Path):
+        """Starts a notification thread
+
+        Arguments:
+            path: The path where notification URLs will be put (one file per URL)
+        """
+        super().__init__(daemon=True)
+        self.path = path / NotificationThread.NOTIFICATION_FOLDER
+        self.path.mkdir(exist_ok=True)
+        self.lastcheck = 0
+        self.urls: Dict[str, str] = {}
         self.progress = 0
         self.previous_progress = -1
 
         self.stopping = False
 
-        if self.url:
-            self.progress_threshold = 0.01
-            self.cv = threading.Condition()
-            self.start()
-        else:
-            self.cv = None
-            self.progress_threshold = 0.05
+        self.progress_threshold = 0.01
+        self.cv = threading.Condition()
+        self.start()
 
     def stop(self):
-        if self.url:
-            self.stopping = True
-            with self.cv:
-                self.cv.notifyAll()
+        self.stopping = True
+        with self.cv:
+            self.cv.notifyAll()
+
+    @staticmethod
+    def isfatal_httperror(e: Exception) -> bool:
+        if isinstance(e, HTTPError):
+            if e.code >= 400 and e.code < 500:
+                return True
+        elif isinstance(e, URLError):
+            if isinstance(e.reason, ConnectionRefusedError):
+                return True
+            if isinstance(e.reason, socket.gaierror) and e.reason.errno == -2:
+                return True
+
+        return False
 
     def run(self):
         logger.info("Running notification thread")
@@ -52,32 +72,68 @@ class NotificationThread(threading.Thread):
 
             if reportprogress:
                 self.previous_progress = self.progress
-                url = "{}/progress/{}".format(self.url, self.progress)
-                try:
-                    with urlopen(url) as response:
-                        pass
-                except Exception:
-                    logger.info(
-                        "Progress: %.2f [error while notifying %s]", self.progress, url
-                    )
+                toremove = []
+
+                # Check files
+                mtime = os.path.getmtime(self.path)
+                if mtime > self.lastcheck:
+                    for f in self.path.iterdir():
+                        self.urls[f.name] = f.read_text().strip()
+                        logger.info("Added new notification URL: %s", self.urls[f.name])
+                        f.unlink()
+
+                    self.lastcheck = os.path.getmtime(self.path)
+
+                if self.urls:
+                    # OK, let's go
+                    for key, baseurl in self.urls.items():
+                        url = "{}/progress/{}".format(baseurl, self.progress)
+                        try:
+                            with urlopen(url) as _:
+                                logger.info(
+                                    "Notification send for %s [%s]",
+                                    baseurl,
+                                    self.progress,
+                                )
+                        except Exception as e:
+                            logger.info(
+                                "Progress: %.2f [error while notifying %s]: %s",
+                                self.progress,
+                                url,
+                                e,
+                            )
+                            if NotificationThread.isfatal_httperror(e):
+                                toremove.append(key)
+
+                    # Removes unvalid URLs
+                    for key in toremove:
+                        logger.info("Removing notification URL %s", self.urls[key])
+                        del self.urls[key]
+                else:
+                    logger.info("Progress: %.2f", self.progress)
 
     def setprogress(self, progress):
         if progress - self.previous_progress > self.progress_threshold:
-            if self.url:
-                with self.cv:
-                    self.progress = progress
-                    self.cv.notify_all()
-            else:
+            with self.cv:
                 self.progress = progress
-                self.previous_progress = progress
-                logger.info("Progress: %.2f", self.progress)
+                self.cv.notify_all()
 
+    INSTANCE: ClassVar[Optional["NotificationThread"]] = None
 
-INSTANCE = NotificationThread()
+    @staticmethod
+    def instance():
+        if NotificationThread.INSTANCE is None:
+            from experimaestro.taskglobals import taskpath
+
+            assert taskpath is not None, "Task path is not defined"
+            NotificationThread.INSTANCE = NotificationThread(taskpath)
+        return NotificationThread.INSTANCE
 
 
 def progress(value: float):
-    INSTANCE.setprogress(value)
+    """When called from a running task, report the progress"""
+
+    NotificationThread.instance().setprogress(value)
 
 
 class xpm_tqdm(std_tqdm):
