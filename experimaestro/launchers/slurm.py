@@ -148,6 +148,7 @@ class BatchSlurmProcess(Process):
         return await asyncThreadcheck("slurm.aio_isrunning", check)
 
     def kill(self):
+        logger.warning("Killing slurm job %s", self.jobid)
         builder = self.launcher.connector.processbuilder()
         builder.command = [f"{self.launcher.binpath}/scancel", f"{self.jobid}"]
         builder.start()

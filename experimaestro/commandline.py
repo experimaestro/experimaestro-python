@@ -4,7 +4,7 @@ import json
 import os
 import io
 from pathlib import Path
-from typing import Union, Callable, Dict
+from typing import Optional, Union, Callable, Dict
 import itertools
 import psutil
 
@@ -223,18 +223,6 @@ class CommandLine(AbstractCommand):
         return self.commands
 
 
-class JobProcess(Process):
-    def __init__(self, job, process):
-        self.job = job
-        self.process = process
-
-    def wait(self):
-        self.process.wait()
-        if self.job.donepath.is_file():
-            return 0
-        return int(self.job.failedpath.read_text())
-
-
 class CommandLineJob(Job):
     def __init__(
         self,
@@ -249,7 +237,7 @@ class CommandLineJob(Job):
         )
         self.commandline = commandline
 
-    async def aio_process(self):
+    async def aio_process(self) -> Optional[Process]:
         """Returns the process if there is one"""
         if self._process:
             return self._process
@@ -264,7 +252,7 @@ class CommandLineJob(Job):
                 return None
 
             if await p.aio_isrunning():
-                return JobProcess(self, p)
+                return p
 
             return None
 

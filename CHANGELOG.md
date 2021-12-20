@@ -1,3 +1,4 @@
+- `@deprecate` configurations allows to transparently change their location (or ID)
 - Document arguments with a docstring
 
 # 0.9.11

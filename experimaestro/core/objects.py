@@ -19,6 +19,7 @@ from typing import (
     TypeVar,
     Union,
     get_type_hints,
+    overload,
 )
 from experimaestro.utils import logger
 import sys
@@ -110,8 +111,11 @@ class HashComputer:
         elif isinstance(value, TaskOutput):
             # Use the configuration of the task proxy
             self.update(value.__xpm__.task, subparam=subparam)
+        # Handles configurations
         elif isinstance(value, Config):
             xpmtype = value.__xpmtype__
+
+            # Encodes the identifier
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
             self._hashupdate(xpmtype.identifier.name.encode("utf-8"), subparam=subparam)
 
@@ -343,7 +347,7 @@ class ConfigInformation:
     # Set to true when loading from JSON
     LOADING = False
 
-    def __init__(self, pyobject: "Config"):
+    def __init__(self, pyobject: "TypeConfig"):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
         self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
@@ -351,7 +355,7 @@ class ConfigInformation:
 
         # Meta-informations
         self._tags = {}
-        self._initinfo = {}
+        self._initinfo = ""
 
         # Generated task
         self._taskoutput = None
@@ -736,7 +740,7 @@ class ConfigInformation:
     #         self._outputjson_inner(objectout, context)
 
     @staticmethod
-    def _objectFromParameters(value, objects):
+    def _objectFromParameters(value: Any, objects: Dict[str, Any]):
         if isinstance(value, list):
             return [ConfigInformation._objectFromParameters(x, objects) for x in value]
         if isinstance(value, dict):
@@ -775,8 +779,19 @@ class ConfigInformation:
 
         return value
 
+    @overload
     @staticmethod
-    def fromParameters(definitions):
+    def fromParameters(definitions: Dict, as_instance=True) -> "TypeConfig":
+        ...
+
+    @overload
+    @staticmethod
+    def fromParameters(definitions: Dict, as_instance=False) -> "Config":
+        ...
+
+    @staticmethod
+    def fromParameters(definitions: Dict, as_instance=True):
+        """Builds config (instances) from a dictionary"""
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
@@ -806,28 +821,32 @@ class ConfigInformation:
                 o = cls.fromJSON(definition["value"])
             else:
                 # Creates an object (and not a config)
-                o = cls.__new__(cls, __xpmobject__=True)
+                o = cls.__new__(cls, __xpmobject__=as_instance)
 
-                # And calls the parameter-less initialization
-                o.__init__()
+                # If instance...
+                if as_instance:
+                    # ... calls the parameter-less initialization
+                    o.__init__()
 
-                if "typename" in definition:
-                    o.__xpmtypename__ = definition["typename"]
-                    o.__xpmidentifier__ = definition["identifier"]
+                    # ... sets potentially useful properties
+                    if "typename" in definition:
+                        o.__xpmtypename__ = definition["typename"]
+                        o.__xpmidentifier__ = definition["identifier"]
 
-                    if "." in o.__xpmtypename__:
-                        _, name = o.__xpmtypename__.rsplit(".", 1)
-                    else:
-                        name = o.__xpmtypename__
-                    basepath = (
-                        taskglobals.wspath
-                        / "jobs"
-                        / o.__xpmtypename__
-                        / o.__xpmidentifier__
-                    )
-                    o.__xpm_stdout__ = basepath / f"{name}.out"
-                    o.__xpm_stderr__ = basepath / f"{name}.err"
+                        if "." in o.__xpmtypename__:
+                            _, name = o.__xpmtypename__.rsplit(".", 1)
+                        else:
+                            name = o.__xpmtypename__
+                        basepath = (
+                            taskglobals.wspath
+                            / "jobs"
+                            / o.__xpmtypename__
+                            / o.__xpmidentifier__
+                        )
+                        o.__xpm_stdout__ = basepath / f"{name}.out"
+                        o.__xpm_stderr__ = basepath / f"{name}.err"
 
+                # Set the fields
                 for name, value in definition["fields"].items():
                     v = ConfigInformation._objectFromParameters(value, objects)
                     setattr(o, name, v)
@@ -835,8 +854,9 @@ class ConfigInformation:
                         getattr(o, name) is v
                     ), f"Problem with deserialization {name} of {o.__class__}"
 
-                # Calls post-init
-                o.__postinit__()
+                if as_instance:
+                    # Calls post-init
+                    o.__postinit__()
 
                 assert definition["id"] not in objects, (
                     "Duplicate id %s" % definition["id"]
@@ -1054,7 +1074,7 @@ class TypeConfig:
         return False
 
 
-T = TypeVar("T")
+T = TypeVar("T", bound="Config")
 
 
 class Config:
@@ -1077,6 +1097,14 @@ class Config:
     def __getnewargs_ex__(self):
         # __new__ will be called with those arguments when unserializing
         return ((), {"__xpmobject__": True})
+
+    @overload
+    def __new__(cls: Type[T], *args, __xpmobject__=True, **kwargs) -> T:
+        ...
+
+    @overload
+    def __new__(cls: Type[T], *args, **kwargs) -> TypeConfig:
+        ...
 
     def __new__(
         cls: Type[T], *args, __xpmobject__=False, **kwargs
@@ -1196,8 +1224,10 @@ class TaskOutput(Proxy):
     to keep track of the dependencies
     """
 
-    def __init__(self, value: Any, task: Task):
-        self.__xpm__ = TaskOutputInfo(task)
+    def __init__(self, value: Any, task: Union[Task, TaskOutputInfo]):
+        self.__xpm__ = (
+            task if isinstance(task, TaskOutputInfo) else TaskOutputInfo(task)
+        )
         self.__xpm__.value = value
 
     def _wrap(self, value):
@@ -1247,3 +1277,34 @@ class SerializedTaskOutput(TaskOutput):
             self.__xpm__.task,
             self.__xpm__.path + [AttrAccessor(key, default)],
         )
+
+
+def copyconfig(config_or_output: Union[Config, TaskOutput], **kwargs):
+    """Copy a configuration or task output
+
+    Useful to modify a configuration that can be potentially
+    wrapped into a task output (i.e., the configuration can be
+    a task output).
+    """
+
+    if isinstance(config_or_output, TaskOutput):
+        output = config_or_output
+        config = config_or_output.__unwrap__()
+        assert isinstance(config, Config)
+    else:
+        config = config_or_output
+        output = None
+
+    # Builds a new configuration object
+    copy = config.__class__()
+
+    fullkwargs = {name: value for name, value in config.__xpm__.values.items()}
+    fullkwargs.update(kwargs)
+    for name, value in fullkwargs.items():
+        copy.__xpm__.set(name, value, True)
+
+    if output is None:
+        return copy
+
+    # wrap in Task output
+    return TaskOutput(copy, output.__xpm__)

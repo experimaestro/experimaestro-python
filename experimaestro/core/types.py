@@ -212,6 +212,7 @@ class ObjectType(Type):
         self.__initialized__ = False
         self._runtype = None
         self.annotations = []
+        self._deprecated = False
 
     def addAnnotation(self, annotation):
         assert not self.__initialized__
@@ -327,6 +328,18 @@ class ObjectType(Type):
                         argument.help = node.value.value
 
                 argname = None
+
+    def deprecate(self):
+        if len(self.basetype.__bases__) != 1:
+            raise RuntimeError(
+                "Deprecated configurations must have only one parent (the new configuration)"
+            )
+        assert not self._deprecated, "Already deprecated"
+
+        # Uses the parent identifier (and saves the deprecated one for path updates)
+        self._deprecated_identifier = self.identifier
+        self.identifier = self.basetype.__bases__[0].__getxpmtype__().identifier
+        self._deprecated = True
 
     @property
     def description(self) -> str:

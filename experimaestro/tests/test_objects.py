@@ -1,5 +1,6 @@
 from pathlib import Path
 from experimaestro import Config, config, tag, Annotated
+from experimaestro.annotations import deprecate
 from experimaestro.core.arguments import Param
 from experimaestro.core.objects import TypeConfig
 from experimaestro.generators import pathgenerator

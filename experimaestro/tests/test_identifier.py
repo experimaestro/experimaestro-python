@@ -7,7 +7,7 @@ from experimaestro import (
     Param,
     param,
     task,
-    option,
+    deprecate,
     Config,
     Constant,
     Option,
@@ -57,12 +57,12 @@ def getidentifier(x):
     return x.__xpm__.identifier.all
 
 
-def assert_equal(a, b):
-    assert getidentifier(a) == getidentifier(b)
+def assert_equal(a, b, message=""):
+    assert getidentifier(a) == getidentifier(b), message
 
 
-def assert_notequal(a, b):
-    assert getidentifier(a) != getidentifier(b)
+def assert_notequal(a, b, message=""):
+    assert getidentifier(a) != getidentifier(b), message
 
 
 def test_int():
@@ -267,3 +267,24 @@ def test_constant():
         version: Constant[int] = 2
 
     assert_notequal(A1(), A2())
+
+
+def test_identifier_deprecated():
+    """Test that when submitting the task, the computed idenfitier is the one of the new class"""
+
+    class NewConfig(Config):
+        __xpmid__ = "new"
+
+    @deprecate
+    class OldConfig(NewConfig):
+        __xpmid__ = "old"
+
+    class DerivedConfig(NewConfig):
+        __xpmid__ = "derived"
+
+    assert_notequal(
+        NewConfig(), DerivedConfig(), "A derived configuration has another ID"
+    )
+    assert_equal(
+        NewConfig(), OldConfig(), "Deprecated and new configuration have the same ID"
+    )

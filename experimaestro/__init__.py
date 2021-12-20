@@ -20,6 +20,7 @@ from .annotations import (
     tagspath,
     STDOUT,
     STDERR,
+    deprecate,
     # deprecated
     argument,
 )
@@ -36,7 +37,7 @@ from .core.arguments import (
     default,
 )
 from .generators import pathgenerator
-from .core.objects import Config, Task, SerializedConfig, Serialized
+from .core.objects import Config, copyconfig, Task, SerializedConfig, Serialized
 from .environment import Environment
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment

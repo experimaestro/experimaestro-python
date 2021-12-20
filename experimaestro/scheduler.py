@@ -4,7 +4,7 @@ from pathlib import Path
 from shutil import rmtree
 import threading
 import time
-from typing import Optional, Set, Union
+from typing import Optional, Set, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
@@ -18,10 +18,13 @@ from .core.objects import Config, GenerationContext
 from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
 from .locking import Locks, LockError, Lock
-from .connectors import ProcessThreadError
 import concurrent.futures
 
 NOTIFICATIONURL_VARNAME = "XPM_NOTIFICATION_URL"
+
+if TYPE_CHECKING:
+    from experimaestro.connectors import Process
+    from experimaestro.launchers import Launcher
 
 
 class FailedExperiment(RuntimeError):
@@ -104,7 +107,7 @@ class Job(Resource):
         config: Config,
         *,
         workspace: Workspace = None,
-        launcher: "experimaestro.launchers" = None,
+        launcher: "Launcher" = None,
         dryrun: bool = False,
     ):
         super().__init__()
@@ -196,7 +199,7 @@ class Job(Resource):
         """Actually run the code"""
         raise NotImplementedError(f"Method aio_run not implemented in {self.__class__}")
 
-    async def aio_process(self) -> Optional["JobProcess"]:
+    async def aio_process(self) -> Optional["Process"]:
         """Returns the process if it exists"""
         raise NotImplementedError("Not implemented")
 

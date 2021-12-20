@@ -25,6 +25,26 @@ defines a configuration with name `my.model` and one argument `gamma` that has t
 `__xpmid__` can also be a class method to generate dynamic ids for all descendant configurations
 When `__xpmid__` is missing, the qualified name is used.
 
+## Deprecating a configuration
+
+When a configuration is moved (or equivalently its `__xpmid__` changed), its signature
+changes, and thus the same tasks can be run twice. To avoid this, use the `@deprecate`
+annotation.
+
+!!! example
+
+````py3
+from experimaestro import Param, Config
+
+        class NewConfiguration(Config):
+            pass
+
+        @deprecate
+        class OldConfiguration(NewConfiguration):
+            # Only pass is allowed here
+            pass
+    ```
+
 ### Object life cycle
 
 During [task](../task) execution, the objects are constructed following
@@ -68,7 +88,7 @@ class MyConfig(Config):
     # Using a docstring
     z: Param[int]
     """Most important parameter of the model"""
-```
+````
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument (more details below)

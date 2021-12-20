@@ -89,6 +89,15 @@ def rpyc_server(unix_path, clean):
 
 
 @click.argument("path", type=Path)
+@click.option("--fix", is_flag=True, help="Do fix deprecated jobs")
+def deprecated(path: Path, fix: bool):
+    """List deprecated jobs and allows fixing (i.e. linking) them"""
+    from experimaestro.tools.jobs import fix_deprecated
+
+    fix_deprecated(path, fix)
+
+
+@click.argument("path", type=Path)
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
 @click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")

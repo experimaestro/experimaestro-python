@@ -34,7 +34,7 @@ class config:
 
         Keyword Arguments:
             identifier {Identifier, str} -- Unique identifier of the type, generate by default (None)
-            description {str} -- (deprecated, use comments) Description of the config/task, and use comments with (default) None
+            description {str} -- (deprecated, use comments) Description of the config/task, use comments with (default) None
             register {bool} -- False if the type should not be registered (debug only)
 
         The identifier, if not specified, will be set to `X.CLASSNAME`(by order of priority),
@@ -264,6 +264,19 @@ def tagspath(value: Config):
 
 
 # --- Deprecated
+
+
+def deprecate(config: TypingType[Config]):
+    """Deprecate a configuration / task
+
+    Usage:
+
+        @deprecate
+        class OldConfig(NewConfig):
+            pass
+    """
+    config.__getxpmtype__().deprecate()
+    return config
 
 
 def deprecateClass(klass):

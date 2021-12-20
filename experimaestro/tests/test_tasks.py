@@ -2,9 +2,9 @@
 
 from pathlib import Path
 import pytest
-import signal
 
 from experimaestro import *
+from experimaestro.tools.jobs import fix_deprecated
 from experimaestro.scheduler import FailedExperiment, JobState
 
 from .utils import TemporaryDirectory, TemporaryExperiment, get_times
@@ -139,3 +139,105 @@ def test_subparams():
 
         t100, t200 = get_times(task100), get_times(task200)
         assert t100 > t200 or t200 > t100
+
+
+# ---- Deprecation
+
+
+class NewConfig(Config):
+    __xpmid__ = "new"
+
+
+@deprecate
+class DeprecatedConfig(NewConfig):
+    __xpmid__ = "deprecated"
+
+
+class OldConfig(NewConfig):
+    __xpmid__ = "deprecated"
+
+
+class TaskWithDeprecated(Task):
+    p: Param[NewConfig]
+
+    def execute(self):
+        pass
+
+
+def checknewpaths(task_new, task_old_path):
+    task_new_path = task_new.__xpm__.job.path  # type: Path
+
+    assert task_new_path.exists(), f"New path {task_new_path} should exist"
+    assert task_new_path.is_symlink(), f"New path {task_new_path} should be a symlink"
+
+    assert task_new_path.resolve() == task_old_path
+
+
+def test_tasks_deprecated_inner():
+    """Test that when submitting the task, the computed idenfitier is the one of the new class"""
+    with TemporaryExperiment("deprecated") as xp:
+        # Check that paths are really different first
+        task_new = TaskWithDeprecated(p=NewConfig()).submit(dryrun=True)
+        task_old = TaskWithDeprecated(p=OldConfig()).submit(dryrun=True)
+        task_deprecated = TaskWithDeprecated(p=DeprecatedConfig()).submit(dryrun=True)
+
+        assert (
+            task_new.__xpm__.stdout() != task_old.__xpm__.stdout()
+        ), "Old and new path should be different"
+        assert (
+            task_new.__xpm__.stdout() == task_deprecated.__xpm__.stdout()
+        ), "Deprecated path should be the same as non deprecated"
+
+        # OK, now check that automatic linking is performed
+        task_old = TaskWithDeprecated(p=OldConfig()).submit()
+        task_old.__xpm__.wait()
+        task_old_path = task_old.__xpm__.stdout().parent
+
+        # Fix deprecated
+        OldConfig.__xpmtype__.deprecate()
+        fix_deprecated(xp.workspace.path, True)
+
+        checknewpaths(task_new, task_old_path)
+
+
+class NewTask(Task):
+    x: Param[int]
+
+    def execute(self):
+        pass
+
+
+class OldTask(NewTask):
+    __xpmid__ = "deprecated"
+
+
+@deprecate
+class DeprecatedTask(NewTask):
+    __xpmid__ = "deprecated"
+
+
+def test_tasks_deprecated():
+    """Test that when submitting the task, the computed idenfitier is the one of the new class"""
+    with TemporaryExperiment("deprecated", maxwait=100) as xp:
+        # Check that paths are really different first
+        task_new = NewTask(x=1).submit(dryrun=True)
+        task_old = OldTask(x=1).submit(dryrun=True)
+        task_deprecated = DeprecatedTask(x=1).submit(dryrun=True)
+
+        assert (
+            task_new.__xpm__.stdout() != task_old.__xpm__.stdout()
+        ), "Old and new path should be different"
+        assert (
+            task_new.__xpm__.stdout() == task_deprecated.__xpm__.stdout()
+        ), "Deprecated path should be the same as non deprecated"
+
+        # OK, now check that automatic linking is performed
+        task_old = OldTask(x=1).submit()
+        task_old.__xpm__.wait()
+        task_old_path = task_old.__xpm__.stdout().parent
+
+        # Fix deprecated
+        OldTask.__xpmtype__.deprecate()
+        fix_deprecated(xp.workspace.path, True)
+
+        checknewpaths(task_new, task_old_path)
