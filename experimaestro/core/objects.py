@@ -24,7 +24,7 @@ from typing import (
 from experimaestro.utils import logger
 import sys
 from contextlib import contextmanager
-from experimaestro.core.types import ObjectType
+from experimaestro.core.types import DeprecatedAttribute, ObjectType
 
 
 class Identifier:
@@ -980,10 +980,22 @@ class TypeConfig:
 
         self.__xpm__ = xpm
 
+        # Initialize with default arguments (or None)
+        for name, value in xpmtype.arguments.items():
+            if name not in kwargs:
+                if value.default is not None:
+                    self.__xpm__.set(name, clone(value.default), bypass=True)
+                elif not value.required:
+                    self.__xpm__.set(name, None, bypass=True)
+
         # Initialize with arguments
         for name, value in kwargs.items():
             # Check if argument is OK
             if name not in xpmtype.arguments:
+                attribute = getattr(self.__class__, name, None)
+                if isinstance(attribute, DeprecatedAttribute):
+                    attribute.__set__(self, value)
+                    continue
                 raise ValueError("%s is not an argument for %s" % (name, xpmtype))
 
             # Special case of a tagged value
@@ -993,14 +1005,6 @@ class TypeConfig:
 
             # Really set the value
             xpm.set(name, value)
-
-        # Initialize with default arguments (or None)
-        for name, value in xpmtype.arguments.items():
-            if name not in kwargs:
-                if value.default is not None:
-                    self.__xpm__.set(name, clone(value.default), bypass=True)
-                elif not value.required:
-                    self.__xpm__.set(name, None, bypass=True)
 
     def __repr__(self):
         return f"Config[{self.__xpmtype__.identifier}]"

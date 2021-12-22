@@ -1,7 +1,7 @@
 # Tests for identifier computation
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from experimaestro import (
     config,
     Param,
@@ -269,7 +269,7 @@ def test_constant():
     assert_notequal(A1(), A2())
 
 
-def test_identifier_deprecated():
+def test_identifier_deprecated_class():
     """Test that when submitting the task, the computed idenfitier is the one of the new class"""
 
     class NewConfig(Config):
@@ -288,3 +288,14 @@ def test_identifier_deprecated():
     assert_equal(
         NewConfig(), OldConfig(), "Deprecated and new configuration have the same ID"
     )
+
+
+def test_identifier_deprecated_attribute():
+    class Values(Config):
+        values: Param[List[int]] = []
+
+        @deprecate
+        def value(self, x):
+            self.values = [x]
+
+    assert_equal(Values(values=[1]), Values(value=1))

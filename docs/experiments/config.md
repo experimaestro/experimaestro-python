@@ -25,7 +25,7 @@ defines a configuration with name `my.model` and one argument `gamma` that has t
 `__xpmid__` can also be a class method to generate dynamic ids for all descendant configurations
 When `__xpmid__` is missing, the qualified name is used.
 
-## Deprecating a configuration
+## Deprecating a configuration or attributes
 
 When a configuration is moved (or equivalently its `__xpmid__` changed), its signature
 changes, and thus the same tasks can be run twice. To avoid this, use the `@deprecate`
@@ -33,16 +33,35 @@ annotation.
 
 !!! example
 
-````py3
-from experimaestro import Param, Config
+    ```py3
+    from experimaestro import Param, Config, deprecate
 
-        class NewConfiguration(Config):
-            pass
+    class NewConfiguration(Config):
+        pass
+
+    @deprecate
+    class OldConfiguration(NewConfiguration):
+        # Only pass is allowed here
+        pass
+    ```
+
+It is possible to deprecate a parameter or option:
+
+!!! example
+
+    ```py3
+    from experimaestro import Param, Config, deprecate
+
+    class Learning(Config):
+        losses: Param[List[Loss]] = []
 
         @deprecate
-        class OldConfiguration(NewConfiguration):
-            # Only pass is allowed here
-            pass
+        def loss(self, value):
+            # Checking that the new param is not used
+            assert len(self.losses) == 0
+            # We allow several losses to be defined now
+            self.losses.append(value)
+
     ```
 
 ### Object life cycle
@@ -66,7 +85,7 @@ Possible types are:
 
 ## Parameters
 
-```python
+```py3
 class MyConfig(Config):
     """My configuration
 
@@ -88,7 +107,7 @@ class MyConfig(Config):
     # Using a docstring
     z: Param[int]
     """Most important parameter of the model"""
-````
+```
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument (more details below)

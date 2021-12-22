@@ -4,7 +4,7 @@ import sys
 import inspect
 import logging
 from pathlib import Path
-from typing import Type as TypingType, Optional, TypeVar
+from typing import Callable, Type as TypingType, Optional, TypeVar, Union
 
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
@@ -266,17 +266,33 @@ def tagspath(value: Config):
 # --- Deprecated
 
 
-def deprecate(config: TypingType[Config]):
-    """Deprecate a configuration / task
+def deprecate(config: Union[TypingType[Config], Callable]):
+    """Deprecate a configuration / task or
+    an attribute (via a method)
 
     Usage:
 
         @deprecate
         class OldConfig(NewConfig):
             pass
+
+        # Or only a parameter
+        class MyConfig():
+            @deprecate
+            def oldattribute(self, value):
+                # Do something with the value
+                pass
     """
-    config.__getxpmtype__().deprecate()
-    return config
+    if inspect.isclass(config):
+        config.__getxpmtype__().deprecate()
+        return config
+
+    if inspect.isfunction(config):
+        from experimaestro.core.types import DeprecatedAttribute
+
+        return DeprecatedAttribute(config)
+
+    raise NotImplementedError("Cannot deprecate %s", config)
 
 
 def deprecateClass(klass):

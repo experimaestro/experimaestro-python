@@ -123,6 +123,26 @@ class Type:
         raise Exception("No type found for %s", key)
 
 
+class DeprecatedAttribute:
+    def __init__(self, fn):
+        self.fn = fn
+        self.key = fn.__name__
+        self.warned = False
+
+    def __set_name__(self, owner, name):
+        self.key = name
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        raise NotImplementedError(f"{instance} {owner}")
+
+    def __set__(self, instance, value):
+        if not self.warned:
+            logger.warning(f"Parameter {self.key} is deprecated")
+        self.fn(instance, value)
+
+
 class ObjectType(Type):
     """ObjectType contains class-level information about
     experimaestro configurations and tasks
