@@ -1076,13 +1076,6 @@ class TypeConfig:
         """Returns a copy of this configuration (ignores other non parameters attributes)"""
         return clone(self)
 
-    def istaskoutput(self):
-        """Returns whether this configuration is a task output"""
-        for arg, value in self.__xpm__.xpmvalues(generated=True):
-            if arg.isoutput():
-                return True
-        return False
-
 
 T = TypeVar("T", bound="Config")
 

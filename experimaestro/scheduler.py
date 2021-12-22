@@ -409,7 +409,7 @@ class Scheduler:
         """Register a job by adding it to the list, and checks
         whether the job has already been submitted
         """
-        logger.info("Registering job %s", job)
+        logger.debug("Registering job %s", job)
 
         if self.exitmode:
             logger.warning("Exit mode: not submitting")
