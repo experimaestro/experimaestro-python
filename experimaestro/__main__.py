@@ -91,6 +91,7 @@ def rpyc_server(unix_path, clean):
 
 @click.argument("path", type=Path)
 @click.option("--fix", is_flag=True, help="Do fix deprecated jobs")
+@cli.command()
 def deprecated(path: Path, fix: bool):
     """List deprecated jobs and allows fixing (i.e. linking) them"""
     from experimaestro.tools.jobs import fix_deprecated
@@ -121,6 +122,7 @@ def jobs(
     clean: bool,
     force: bool,
 ):
+    """Job control: list, kill and clean"""
     for p in (path / "xp").glob("*"):
         if experiment and p.name != experiment:
             continue

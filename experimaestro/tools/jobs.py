@@ -21,7 +21,12 @@ def fix_deprecated(workpath: Path, fix: bool):
         logger.debug("Loading configuration %s", job.parent)
         params = json.loads(job.resolve().read_text())
         taskglobals.wspath = Path(params["workspace"])
-        object = ConfigInformation.fromParameters(params["objects"], False)
+
+        try:
+            object = ConfigInformation.fromParameters(params["objects"], False)
+        except:
+            logger.exception("Error while loading the parameters from %s", job)
+            continue
 
         # Now, computes the signature
         old_identifier = job.parent.name
@@ -52,4 +57,5 @@ def fix_deprecated(workpath: Path, fix: bool):
                             oldjobpath.resolve(),
                         )
                 else:
+                    logger.info("Fixing %s", job.parents[1].name, old_identifier)
                     newjobpath.symlink_to(oldjobpath)

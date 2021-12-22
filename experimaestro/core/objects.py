@@ -849,10 +849,13 @@ class ConfigInformation:
                 # Set the fields
                 for name, value in definition["fields"].items():
                     v = ConfigInformation._objectFromParameters(value, objects)
-                    setattr(o, name, v)
-                    assert (
-                        getattr(o, name) is v
-                    ), f"Problem with deserialization {name} of {o.__class__}"
+                    if as_instance:
+                        setattr(o, name, v)
+                        assert (
+                            getattr(o, name) is v
+                        ), f"Problem with deserialization {name} of {o.__class__}"
+                    else:
+                        o.__xpm__.set(name, v, bypass=True)
 
                 if as_instance:
                     # Calls post-init
@@ -921,6 +924,9 @@ def clone(v):
 
     if isinstance(v, list):
         return [clone(x) for x in v]
+
+    if isinstance(v, dict):
+        return {clone(key): clone(value) for key, value in v.items()}
 
     if isinstance(v, Enum):
         return v
