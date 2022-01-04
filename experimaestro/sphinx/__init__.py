@@ -25,13 +25,11 @@ class ConfigDocumenter(ClassDocumenter):
     priority = 10 + ClassDocumenter.priority
 
     option_spec = dict(ClassDocumenter.option_spec)
-    option_spec["hex"] = bool_option
 
     @classmethod
     def can_document_member(
         cls, member: Any, membername: str, isattr: bool, parent: Any
     ) -> bool:
-
         return isinstance(member, Config)
 
     def format_signature(self, **kwargs: Any) -> str:
@@ -53,6 +51,7 @@ class ConfigDocumenter(ClassDocumenter):
                     if matched:
                         args = matched.group(1)
                         retann = matched.group(2)
+                args = None
             except Exception as exc:
                 logger.warning(
                     __("error while formatting arguments for %s: %s"),
@@ -87,6 +86,7 @@ class ConfigDocumenter(ClassDocumenter):
     ) -> None:
 
         super().add_content(more_content, no_docstring)
+        source_name = self.get_sourcename()
 
         config: Config = self.object
         xpminfo = config.__getxpmtype__()
@@ -95,23 +95,31 @@ class ConfigDocumenter(ClassDocumenter):
 
             if isinstance(argument.type, ObjectType):
                 basetype = argument.type.basetype
-                typestr = f"{basetype.__module__}.{basetype.__qualname__}"
-                # typestr = self.getlink(
-                #     page.url, f"{basetype.__module__}.{basetype.__qualname__}"
-                # )
+                typestr = f":ref:`{basetype.__module__}.{basetype.__qualname__}"
             else:
                 typestr = argument.type.name()
 
             s = ""
             if argument.generator:
-                s += " [*generated*] "
+                s += f" [*generated*]"
             elif argument.constant:
-                s += " [*constant*] "
+                s += f" [*constant*] "
 
-            # self.add_line(f"**{name}** ({typestr})", source_name)
-            # if argument.help:
-            #     self.add_line(argument.help, source_name)
-            # self.add_line("", source_name)
+            self.add_line(f"**{name}** ({typestr})", source_name)
+            if argument.help:
+                self.add_line(argument.help, source_name)
+            self.add_line("", source_name)
+
+
+def skip_non_undoc(app, what, name, obj, skip, options):
+    assert False
+    return True
+    # if undoc-members is set, show only undocumented members
+    if "undoc-members" in options and obj.__doc__ is not None:
+        # skip member that have a __doc__
+        return True
+    else:
+        return None
 
 
 def setup(app: Sphinx) -> Dict[str, Any]:
@@ -121,4 +129,6 @@ def setup(app: Sphinx) -> Dict[str, Any]:
     app.setup_extension("sphinx.ext.autodoc")
 
     app.add_autodocumenter(ConfigDocumenter)
+    app.connect("autodoc-skip-member", skip_non_undoc)
+
     return {"version": experimaestro.__version__, "parallel_read_safe": True}

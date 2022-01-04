@@ -74,6 +74,9 @@ def run(parameters):
         if params["has_subparam"]:
             task.__maintaskdir__ = Path.cwd().parents[1]
 
+        from experimaestro import progress
+
+        progress(0)
         task.execute()
 
 

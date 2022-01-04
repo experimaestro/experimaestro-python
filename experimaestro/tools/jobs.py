@@ -57,5 +57,5 @@ def fix_deprecated(workpath: Path, fix: bool):
                             oldjobpath.resolve(),
                         )
                 else:
-                    logger.info("Fixing %s", job.parents[1].name, old_identifier)
+                    logger.info("Fixing %s/%s", job.parents[1].name, old_identifier)
                     newjobpath.symlink_to(oldjobpath)

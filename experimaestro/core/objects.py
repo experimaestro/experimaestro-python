@@ -13,7 +13,10 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
+    Generic,
     List,
+    Literal,
+    Protocol,
     Set,
     Type,
     TypeVar,
@@ -1015,7 +1018,7 @@ class TypeConfig:
     def __repr__(self):
         return f"Config[{self.__xpmtype__.identifier}]"
 
-    def tag(self, name, value) -> "Config":
+    def tag(self, name, value):
         self.__xpm__.addtag(name, value)
         return self
 
@@ -1078,6 +1081,11 @@ class TypeConfig:
 
 
 T = TypeVar("T", bound="Config")
+MixinType = TypeVar("MixinType", bound="Config", covariant=True)
+
+
+class TypeConfigMixin(Generic[MixinType], TypeConfig):
+    pass
 
 
 class Config:
@@ -1101,17 +1109,14 @@ class Config:
         # __new__ will be called with those arguments when unserializing
         return ((), {"__xpmobject__": True})
 
-    @overload
-    def __new__(cls: Type[T], *args, __xpmobject__=True, **kwargs) -> T:
-        ...
-
-    @overload
-    def __new__(cls: Type[T], *args, **kwargs) -> TypeConfig:
-        ...
+    @classmethod
+    def c(cls: Type[T], **kwargs) -> TypeConfigMixin[T]:
+        """Allows typing to process easily"""
+        return cls.__new__(cls, **kwargs)
 
     def __new__(
         cls: Type[T], *args, __xpmobject__=False, **kwargs
-    ) -> Union[TypeConfig, T]:
+    ) -> TypeConfigMixin[T]:
         """Returns an instance of a TypeConfig when called __xpmobject__ is False,
         and otherwise the real object
         """
