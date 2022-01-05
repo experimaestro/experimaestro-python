@@ -204,11 +204,14 @@ def jobs(
 
 
 @click.option("--show-all", is_flag=True, help="Show even not orphans")
+@click.option(
+    "--ignore-old", is_flag=True, help="Ignore old jobs for unfinished experiments"
+)
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")
 @click.option("--size", is_flag=True, help="Show size of each folder")
 @click.argument("path", type=Path)
 @cli.command()
-def orphans(path: Path, clean: bool, size: bool, show_all: bool):
+def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: bool):
     """Check for tasks that are not part of an experimental plan"""
 
     jobspath = path / "jobs"
@@ -229,11 +232,16 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool):
             print(prefix, key, sep=None)
 
     for p in (path / "xp").glob("*/jobs.bak"):
-        logging.warning("Experiment %s have not completed successfully", p.parent.name)
+        logging.warning("Experiment %s has not completed successfully", p.parent.name)
 
     # Retrieve the jobs within expedriments (jobs and jobs.bak folder within experiments)
     xpjobs = set()
-    for p in chain((path / "xp").glob("*/jobs"), (path / "xp").glob("*/jobs.bak")):
+    if ignore_old:
+        paths = (path / "xp").glob("*/jobs")
+    else:
+        paths = chain((path / "xp").glob("*/jobs"), (path / "xp").glob("*/jobs.bak"))
+
+    for p in paths:
         if p.is_dir():
             for relpath, path in getjobs(p):
                 xpjobs.add(relpath)
