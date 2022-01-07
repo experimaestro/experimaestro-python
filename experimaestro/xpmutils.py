@@ -21,4 +21,4 @@ class EmptyContext(GenerationContext):
 
     @property
     def path(self):
-        raise AssertionError("Empty context has no path")
+        raise AssertionError("Empty experimaestro context does not define a path")

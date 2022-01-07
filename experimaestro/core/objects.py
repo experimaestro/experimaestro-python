@@ -29,6 +29,8 @@ import sys
 from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
 
+T = TypeVar("T", bound="Config")
+
 
 class Identifier:
     def __init__(self, all, main, sub):
@@ -246,6 +248,9 @@ class GenerationContext:
             self._configpath = p
 
 
+NOT_SET = object()
+
+
 class ConfigProcessing:
     """Allows to perform an operation on all nested configurations"""
 
@@ -256,7 +261,9 @@ class ConfigProcessing:
             recursetask: Recurse into linked tasks
         """
         self.recursetask = recursetask
-        self.visited = set()
+
+        # Stores already visited nodes
+        self.visited = {}
 
     def preprocess(self, config: "Config"):
         return True, None
@@ -279,8 +286,8 @@ class ConfigProcessing:
             # Avoid loops
             xid = id(x)
             if xid in self.visited:
-                return
-            self.visited.add(xid)
+                return self.visited[xid]
+            self.visited[xid] = NOT_SET
 
             # Pre-process
             flag, value = self.preprocess(x)
@@ -295,7 +302,9 @@ class ConfigProcessing:
                     with self.map(arg.name):
                         result[arg.name] = self(v)
 
-            return self.postprocess(x, result)
+            processed = self.postprocess(x, result)
+            self.visited[xid] = processed
+            return processed
 
         if isinstance(x, list):
             result = []
@@ -456,7 +465,13 @@ class ConfigInformation:
 
             # Use __validate__ method
             if hasattr(self.pyobject, "__validate__"):
-                self.pyobject.__validate__()
+                try:
+                    self.pyobject.__validate__()
+                except:
+                    logger.error(
+                        "Error while validating %s at %s", self.xpmtype, self._initinfo
+                    )
+                    raise
 
     def seal(self, context: GenerationContext):
         """Seal the object, generating values when needed,
@@ -886,21 +901,24 @@ class ConfigInformation:
             o = config.__xpmtype__.objecttype.__new__(
                 config.__xpmtype__.objecttype, __xpmobject__=True
             )
+
             # And calls the parameter-less initialization
             o.__init__()
 
             self.objects[id(self)] = o
 
-            # Set values
-            for key, value in values.items():
-                setattr(o, key, value)
-
             # Generate values
             for arg in config.__xpmtype__.arguments.values():
                 if arg.generator is not None:
-                    setattr(o, arg.name, arg.generator(self.context, o))
+                    config.__xpm__.set(
+                        arg.name, arg.generator(self.context, o), bypass=True
+                    )
                 if not arg.required and not hasattr(o, arg.name):
-                    setattr(o, arg.name, None)
+                    config.__xpm__.set(arg.name, None)
+
+            # Set values
+            for key, value in config.__xpm__.values.items():
+                setattr(o, key, values.get(key, value))
 
             # Call __postinit__
             o.__postinit__()
@@ -1043,7 +1061,7 @@ class TypeConfig:
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-    def instance(self, context: GenerationContext = None):
+    def instance(self, context: GenerationContext = None) -> T:
         """Return an instance with the current values"""
         if context is None:
             from experimaestro.xpmutils import EmptyContext
@@ -1053,7 +1071,7 @@ class TypeConfig:
             assert isinstance(
                 context, GenerationContext
             ), f"{context.__class__} is not an instance of GenerationContext"
-        return self.__xpm__.fromConfig(context)
+        return self.__xpm__.fromConfig(context)  # type: ignore
 
     def submit(self, *, workspace=None, launcher=None, dryrun=False):
         """Submit this task"""
@@ -1080,7 +1098,6 @@ class TypeConfig:
         return clone(self)
 
 
-T = TypeVar("T", bound="Config")
 MixinType = TypeVar("MixinType", bound="Config", covariant=True)
 
 
@@ -1102,7 +1119,11 @@ class Config:
             from experimaestro.core.types import ObjectType
 
             # Will set __xpmtype__
-            return ObjectType(cls)
+            try:
+                return ObjectType(cls)
+            except:
+                logger.error("Error while creating object type for %s", cls)
+                raise
         return xpmtype
 
     def __getnewargs_ex__(self):

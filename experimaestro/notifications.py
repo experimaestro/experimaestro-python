@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import ClassVar, Dict, Optional
+from typing import ClassVar, Dict, Iterator, Optional, TypeVar, overload
 import os.path
 from urllib.request import urlopen
 from urllib.error import HTTPError, URLError
@@ -11,6 +11,8 @@ from tqdm.auto import tqdm as std_tqdm
 from .utils import logger
 
 # --- Progress and other notifications
+
+T = TypeVar("T")
 
 
 class NotificationThread(threading.Thread):
@@ -61,20 +63,22 @@ class NotificationThread(threading.Thread):
             with self.cv:
                 self.cv.wait_for(
                     lambda: self.stopping
-                    or self.progress - self.previous_progress > self.progress_threshold
+                    or abs(self.progress - self.previous_progress)
+                    > self.progress_threshold
                 )
                 if not self.is_alive():
                     break
 
                 reportprogress = (
-                    self.progress - self.previous_progress > self.progress_threshold
+                    abs(self.progress - self.previous_progress)
+                    > self.progress_threshold
                 )
 
             if reportprogress:
                 self.previous_progress = self.progress
                 toremove = []
 
-                # Check files
+                # Check if new notification servers are on
                 mtime = os.path.getmtime(self.path)
                 if mtime > self.lastcheck:
                     for f in self.path.iterdir():
@@ -113,7 +117,8 @@ class NotificationThread(threading.Thread):
                     logger.info("Progress: %.2f", self.progress)
 
     def setprogress(self, progress):
-        if progress - self.previous_progress > self.progress_threshold:
+        """Sets the new progress if sufficiently different"""
+        if abs(progress - self.previous_progress) > self.progress_threshold:
             with self.cv:
                 self.progress = progress
                 self.cv.notify_all()
@@ -158,4 +163,5 @@ class xpm_tqdm(std_tqdm):
                 progress(d["n"] / d["total"])
 
 
-tqdm = xpm_tqdm
+def tqdm(iterable: Optional[Iterator[T]] = None, **kwargs) -> Iterator[T]:
+    return xpm_tqdm(iterable, **kwargs)  # type: ignore
