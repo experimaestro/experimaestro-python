@@ -163,5 +163,15 @@ class xpm_tqdm(std_tqdm):
                 progress(d["n"] / d["total"])
 
 
+@overload
+def tqdm(**kwargs) -> xpm_tqdm:
+    ...
+
+
+@overload
 def tqdm(iterable: Optional[Iterator[T]] = None, **kwargs) -> Iterator[T]:
-    return xpm_tqdm(iterable, **kwargs)  # type: ignore
+    ...
+
+
+def tqdm(*args, **kwargs):
+    return xpm_tqdm(*args, **kwargs)  # type: ignore
