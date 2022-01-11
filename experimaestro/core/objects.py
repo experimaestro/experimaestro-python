@@ -10,13 +10,10 @@ import inspect
 import importlib
 from typing import (
     Any,
-    Callable,
     ClassVar,
     Dict,
     Generic,
     List,
-    Literal,
-    Protocol,
     Set,
     Type,
     TypeVar,
