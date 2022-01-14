@@ -80,6 +80,14 @@ class HashComputer:
         else:
             self._hasher.update(bytes)
 
+    def ignore(self, value):
+        # Returns True if the value should be ignored by itself
+        return (
+            value is not None
+            and isinstance(value, Config)
+            and (value.__xpm__.meta == True)
+        )
+
     def update(self, value, subparam=False):
         if value is None:
             self._hashupdate(HashComputer.NONE_ID, subparam=subparam)
@@ -93,9 +101,10 @@ class HashComputer:
             self._hashupdate(HashComputer.STR_ID, subparam=subparam)
             self._hashupdate(value.encode("utf-8"), subparam=subparam)
         elif isinstance(value, list):
+            values = [el for el in value if not self.ignore(el)]
             self._hashupdate(HashComputer.LIST_ID, subparam=subparam)
-            self._hashupdate(struct.pack("!d", len(value)), subparam=subparam)
-            for x in value:
+            self._hashupdate(struct.pack("!d", len(values)), subparam=subparam)
+            for x in values:
                 self.update(x, subparam=subparam)
         elif isinstance(value, Enum):
             self._hashupdate(HashComputer.ENUM_ID, subparam=subparam)
@@ -106,7 +115,9 @@ class HashComputer:
             )
         elif isinstance(value, dict):
             self._hashupdate(HashComputer.DICT_ID, subparam=subparam)
-            items = list(value.items())
+            items = [
+                (key, value) for key, value in value.items() if not self.ignore(value)
+            ]
             items.sort(key=lambda x: x[0])
             for key, value in items:
                 self.update(key, subparam=subparam)

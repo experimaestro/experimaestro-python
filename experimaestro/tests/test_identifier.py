@@ -314,6 +314,12 @@ def test_identifier_meta():
     class C(Config):
         a: Meta[A]
 
+    class ArrayConfig(Config):
+        array: Param[List[A]]
+
+    class DictConfig(Config):
+        params: Param[Dict[str, A]]
+
     # As meta
     assert_notequal(B(a=A(x=1)), B(a=A(x=2)))
     assert_equal(B(a=setmeta(A(x=1), True)), B(a=setmeta(A(x=2), True)))
@@ -321,3 +327,14 @@ def test_identifier_meta():
     # As parameter
     assert_equal(C(a=A(x=1)), C(a=A(x=2)))
     assert_notequal(C(a=setmeta(A(x=1), False)), C(a=setmeta(A(x=2), False)))
+
+    # Array with mixed
+    assert_equal(
+        ArrayConfig(array=[A(x=1)]), ArrayConfig(array=[A(x=1), setmeta(A(x=2), True)])
+    )
+
+    # Dict with mixed
+    assert_equal(
+        DictConfig(params={"a": A(x=1)}),
+        DictConfig(params={"a": A(x=1), "b": setmeta(A(x=2), True)}),
+    )

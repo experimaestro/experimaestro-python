@@ -103,7 +103,7 @@ class ConfigDocumenter(ClassDocumenter):
 
             if isinstance(argument.type, ObjectType):
                 basetype = argument.type.basetype
-                typestr = f":ref:`{basetype.__module__}.{basetype.__qualname__}`"
+                typestr = f":class:`{basetype.__module__}.{basetype.__qualname__}`"
             else:
                 typestr = argument.type.name()
 
