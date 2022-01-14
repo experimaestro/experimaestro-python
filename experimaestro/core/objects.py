@@ -575,6 +575,7 @@ class ConfigInformation:
                 # Converts to the specified configuration
                 hints = get_type_hints(self.pyobject.config)
                 config = hints["return"](**config)
+            config.__xpm__.validate()
             self._taskoutput = TaskOutput(config, self.pyobject)
 
         # New way to handle outputs
@@ -1118,7 +1119,7 @@ class Config:
             # Will set __xpmtype__
             try:
                 return ObjectType(cls)
-            except:
+            except Exception:
                 logger.error("Error while creating object type for %s", cls)
                 raise
         return xpmtype
