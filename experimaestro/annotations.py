@@ -312,3 +312,13 @@ def deprecateClass(klass):
 
     klass.__init__ = __init__
     return klass
+
+
+def initializer(method):
+    """Defines a method as an initializer that can only be called once"""
+
+    def wrapper(self, *args, **kwargs):
+        value = method(self, *args, **kwargs)
+        setattr(self, method.__name__, lambda *args, **kwargs: value)
+
+    return wrapper

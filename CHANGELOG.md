@@ -1,3 +1,5 @@
+- Forces a configuration to be a meta-parameter or a parameter
+
 # 0.9.12
 
 - Document arguments with a docstring (python 3.9+)

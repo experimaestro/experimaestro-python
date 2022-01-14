@@ -10,11 +10,12 @@ from experimaestro import (
     deprecate,
     Config,
     Constant,
+    Meta,
     Option,
     pathgenerator,
     Annotated,
 )
-from experimaestro.core.objects import TaskOutput
+from experimaestro.core.objects import TaskOutput, setmeta
 
 
 @config()
@@ -299,3 +300,24 @@ def test_identifier_deprecated_attribute():
             self.values = [x]
 
     assert_equal(Values(values=[1]), Values(value=1))
+
+
+def test_identifier_meta():
+    """Test forced meta-parameter"""
+
+    class A(Config):
+        x: Param[int]
+
+    class B(Config):
+        a: Param[A]
+
+    class C(Config):
+        a: Meta[A]
+
+    # As meta
+    assert_notequal(B(a=A(x=1)), B(a=A(x=2)))
+    assert_equal(B(a=setmeta(A(x=1), True)), B(a=setmeta(A(x=2), True)))
+
+    # As parameter
+    assert_equal(C(a=A(x=1)), C(a=A(x=2)))
+    assert_notequal(C(a=setmeta(A(x=1), False)), C(a=setmeta(A(x=2), False)))

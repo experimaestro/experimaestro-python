@@ -1,9 +1,12 @@
 import experimaestro
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from docutils import nodes
 from sphinx.application import Sphinx
 from sphinx.ext.autodoc import ClassDocumenter, bool_option
 from sphinx.locale import _, __
 from sphinx.util import inspect, logging
+from sphinx.util.docutils import SphinxDirective
+from sphinx.domains.python import PyClasslike
 from docutils.statemachine import StringList
 import logging
 import re
@@ -17,10 +20,15 @@ from experimaestro.core.types import ObjectType
 logger = logging.getLogger(__name__)
 
 
+class XPMConfigDirective(PyClasslike):
+    pass
+
+
 class ConfigDocumenter(ClassDocumenter):
     objtype = "xpmconfig"
 
-    directivetype = "class"
+    directivetype = "xpmconfig"
+    # directivetype = ClassDocumenter.objtype
 
     priority = 10 + ClassDocumenter.priority
 
@@ -95,7 +103,7 @@ class ConfigDocumenter(ClassDocumenter):
 
             if isinstance(argument.type, ObjectType):
                 basetype = argument.type.basetype
-                typestr = f":ref:`{basetype.__module__}.{basetype.__qualname__}"
+                typestr = f":ref:`{basetype.__module__}.{basetype.__qualname__}`"
             else:
                 typestr = argument.type.name()
 
@@ -111,17 +119,6 @@ class ConfigDocumenter(ClassDocumenter):
             self.add_line("", source_name)
 
 
-def skip_non_undoc(app, what, name, obj, skip, options):
-    assert False
-    return True
-    # if undoc-members is set, show only undocumented members
-    if "undoc-members" in options and obj.__doc__ is not None:
-        # skip member that have a __doc__
-        return True
-    else:
-        return None
-
-
 def setup(app: Sphinx) -> Dict[str, Any]:
     """Setup experimaestro for Sphinx documentation"""
 
@@ -129,6 +126,7 @@ def setup(app: Sphinx) -> Dict[str, Any]:
     app.setup_extension("sphinx.ext.autodoc")
 
     app.add_autodocumenter(ConfigDocumenter)
-    app.connect("autodoc-skip-member", skip_non_undoc)
+
+    app.add_directive("py:xpmconfig", XPMConfigDirective)
 
     return {"version": experimaestro.__version__, "parallel_read_safe": True}

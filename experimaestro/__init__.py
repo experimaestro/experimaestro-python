@@ -23,6 +23,7 @@ from .annotations import (
     deprecate,
     # deprecated
     argument,
+    initializer,
 )
 from .core.arguments import (
     # Types
@@ -37,7 +38,14 @@ from .core.arguments import (
     default,
 )
 from .generators import pathgenerator
-from .core.objects import Config, copyconfig, Task, SerializedConfig, Serialized
+from .core.objects import (
+    Config,
+    copyconfig,
+    setmeta,
+    Task,
+    SerializedConfig,
+    Serialized,
+)
 from .environment import Environment
 from .workspace import Workspace
 from .scheduler import Scheduler, experiment

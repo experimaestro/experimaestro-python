@@ -67,11 +67,29 @@ It is possible to deprecate a parameter or option:
 ### Object life cycle
 
 During [task](../task) execution, the objects are constructed following
-this algorithm:
+these steps:
 
 - The object is constructed using `self.__init__()`
 - The attributes are set (e.g. `gamma` in the example above)
 - `self.__postinit__()` is called (if the method exists)
+
+Sometimes, it is necessary to postpone a part of the initialization of a configuration
+object because it depends on an external processing. In this case, the `initializer` decorator can
+be used:
+
+```py3
+from experimaestro import Config, initializer
+
+class MyConfig(Config):
+    # The decorator ensures the initializer can only be called once
+    @initializer
+    def initialize(self, ...):
+        # Do whatever is needed
+        passs
+
+```
+
+`
 
 ## Types
 
@@ -136,6 +154,19 @@ class MyConfig(Config):
         count: The number of documents in the collection
     """
     count: Meta[type]
+```
+
+It is also possible to dynamically change the type of an argument using the `setmeta` method:
+
+```py3
+from experimaestro import setmeta
+
+# Forces the parameter to be a meta-parameter
+a = setmeta(A(), True)
+
+# Forces the parameter to be a meta-parameter
+a = setmeta(A(), False)
+
 ```
 
 ### Path option

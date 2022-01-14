@@ -116,7 +116,7 @@ class NotificationThread(threading.Thread):
                 else:
                     logger.info("Progress: %.2f", self.progress)
 
-    def setprogress(self, progress):
+    def setprogress(self, progress, level: int, desc: Optional[str]):
         """Sets the new progress if sufficiently different"""
         if abs(progress - self.previous_progress) > self.progress_threshold:
             with self.cv:
@@ -135,21 +135,33 @@ class NotificationThread(threading.Thread):
         return NotificationThread.INSTANCE
 
 
-def progress(value: float):
+def progress(value: float, level=0, desc: Optional[str] = None):
     """When called from a running task, report the progress"""
 
-    NotificationThread.instance().setprogress(value)
+    NotificationThread.instance().setprogress(value, level, desc)
 
 
 class xpm_tqdm(std_tqdm):
     """XPM wrapper for experimaestro that automatically reports progress to the server"""
 
+    __XPM_CURRENT_LEVEL__ = 0
+
     def __init__(self, iterable=None, file=None, *args, **kwargs):
         # Report progress bar
         # newprogress(title=, pos=abs(self.pos))
+        self.__xpm_level__ = xpm_tqdm.__XPM_CURRENT_LEVEL__
         _file = file or sys.stderr
         self.is_tty = hasattr(_file, "isatty") or _file.isatty()
         super().__init__(iterable, *args, file=file, **kwargs)
+        progress(0.0, level=self.__xpm_level__, desc=kwargs.get("desc", None))
+
+    def __enter__(self):
+        xpm_tqdm.__XPM_CURRENT_LEVEL__ += 1
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        xpm_tqdm.__XPM_CURRENT_LEVEL__ += -1
+        return super().__exit__(exc_type, exc_value, traceback)
 
     def refresh(self, nolock=False, lock_args=None):
         if self.is_tty:
@@ -160,7 +172,7 @@ class xpm_tqdm(std_tqdm):
             d = self.format_dict
             # Just report the innermost progress
             if d["total"]:
-                progress(d["n"] / d["total"])
+                progress(d["n"] / d["total"], level=self.__xpm_level__)
 
 
 @overload

@@ -14,6 +14,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Optional,
     Set,
     Type,
     TypeVar,
@@ -127,7 +128,18 @@ class HashComputer:
                 arg_subparam = subparam or argument.subparam
 
                 # Ignored argument
-                if argument.ignored or argument.generator:
+                if argument.ignored:
+                    argvalue = value.__xpm__.values.get(argument.name, None)
+
+                    # ... unless meta is set to false
+                    if (
+                        argvalue is None
+                        or not isinstance(argvalue, Config)
+                        or (argvalue.__xpm__.meta != False)
+                    ):
+                        continue
+
+                if argument.generator:
                     continue
 
                 # Argument value
@@ -144,6 +156,13 @@ class HashComputer:
                     or (argument.default is not None and argument.default == argvalue)
                 ):
                     # No update if same value (and not constant)
+                    continue
+
+                if (
+                    argvalue is not None
+                    and isinstance(argvalue, Config)
+                    and argvalue.__xpm__.meta
+                ):
                     continue
 
                 # Hash name
@@ -353,6 +372,9 @@ def getqualattr(module, qualname):
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
+    _meta: Optional[bool]
+    """Forces this configuration to be a meta-parameter"""
+
     # Set to true when loading from JSON
     LOADING = False
 
@@ -379,6 +401,15 @@ class ConfigInformation:
         self._identifier = None
         self._validated = False
         self._sealed = False
+        self._meta = None
+
+    def set_meta(self, value: Optional[bool]):
+        assert not self._sealed, "Configuration is sealed"
+        self._meta = value
+
+    @property
+    def meta(self):
+        return self._meta
 
     def get(self, name):
         """Get an XPM managed value"""
@@ -1306,6 +1337,9 @@ class SerializedTaskOutput(TaskOutput):
         )
 
 
+# --- Utility functions
+
+
 def copyconfig(config_or_output: Union[Config, TaskOutput], **kwargs):
     """Copy a configuration or task output
 
@@ -1335,3 +1369,9 @@ def copyconfig(config_or_output: Union[Config, TaskOutput], **kwargs):
 
     # wrap in Task output
     return TaskOutput(copy, output.__xpm__)
+
+
+def setmeta(config: Config, flag: bool):
+    """Flags the configuration as a meta-parameter"""
+    config.__xpm__.set_meta(flag)
+    return config
