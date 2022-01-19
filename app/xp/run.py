@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 import click
 import os
+import time
 import sys
 from experimaestro import experiment, Task, progress
 from experimaestro.core.arguments import Param
@@ -24,7 +25,10 @@ class ControlledTask(Task):
                     if command == "exit":
                         sys.exit(int(args[0]))
                     elif command == "progress":
-                        progress(float(args[0]))
+                        value = float(args[0])
+                        level = int(args[1]) if len(args) >= 2 else 0
+                        desc = "".join(args[2:]) if len(args) >= 3 else None
+                        progress(value, level=level, desc=desc)
                 except Exception:
                     logging.exception("Error while intrepreting command: %s", line)
 
@@ -45,8 +49,20 @@ def cli(keep: bool, debug: bool, port: int):
         xpdir = maindir / "xpm"
         logging.info("Running in %s", xpdir)
         with experiment(Path(xpdir) / "", "web-interface", port=port) as xp:
-            logging.info("Controlled task with %s", maindir / "socket1")
-            ControlledTask(path=maindir / "socket1").submit()
+            socketpath = maindir / "socket1"
+            logging.info("Controlled task with %s", socketpath)
+            ControlledTask(path=socketpath).submit()
+
+            while not socketpath.exists():
+                time.sleep(0.1)
+
+            print("\n\n --- Ready to take commands ---")
+            with (socketpath).open("w") as fp:
+                while True:
+                    command = input("Command: ")
+                    fp.write(command)
+                    fp.write("\n")
+                    fp.flush()
 
 
 if __name__ == "__main__":

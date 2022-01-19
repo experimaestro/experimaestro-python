@@ -61,9 +61,11 @@ def run(parameters):
 
     with open(parameters, "r") as fp:
         params = json.load(fp)
-        taskglobals.wspath = Path(params["workspace"])
+        env = taskglobals.Env.instance()
 
-        taskglobals.taskpath = parameters.parent
+        env.wspath = Path(params["workspace"])
+        env.taskpath = parameters.parent
+
         task = ConfigInformation.fromParameters(params["objects"])
         task.__taskdir__ = Path.cwd()
 

@@ -1,3 +1,5 @@
+import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Dict, Iterator, Optional, TypeVar, overload
 import os.path
@@ -9,13 +11,40 @@ import socket
 from tqdm.auto import tqdm as std_tqdm
 
 from .utils import logger
+from experimaestro.taskglobals import Env as TaskEnv
 
 # --- Progress and other notifications
 
 T = TypeVar("T")
 
 
-class NotificationThread(threading.Thread):
+@dataclass
+class LevelInformation:
+    level: int
+    desc: Optional[str]
+    progress: float
+
+    previous_progress: float = -1
+    previous_desc: Optional[str] = None
+
+    def shouldreportprogress(self, reporter: "Reporter"):
+        return (
+            abs(self.progress - self.previous_progress) > reporter.progress_threshold
+        ) or (self.previous_desc != self.desc)
+
+    def report(self):
+        self.previous_progress = self.progress
+        result = {"level": self.level, "progress": self.progress}
+        if self.previous_desc != self.desc:
+            self.previous_desc = self.desc
+            result["desc"] = self.desc
+        return result
+
+    def __repr__(self) -> str:
+        return f"[{self.level}] {self.desc} {int(self.progress*1000)/10}%"
+
+
+class Reporter(threading.Thread):
     NOTIFICATION_FOLDER = ".notifications"
 
     def __init__(self, path: Path):
@@ -25,12 +54,12 @@ class NotificationThread(threading.Thread):
             path: The path where notification URLs will be put (one file per URL)
         """
         super().__init__(daemon=True)
-        self.path = path / NotificationThread.NOTIFICATION_FOLDER
+        self.path = path / Reporter.NOTIFICATION_FOLDER
         self.path.mkdir(exist_ok=True)
         self.lastcheck = 0
         self.urls: Dict[str, str] = {}
-        self.progress = 0
-        self.previous_progress = -1
+
+        self.levels = [LevelInformation(0, None, 0.0)]
 
         self.stopping = False
 
@@ -56,123 +85,132 @@ class NotificationThread(threading.Thread):
 
         return False
 
+    def shouldreportprogress(self):
+        return any(level.shouldreportprogress(self) for level in self.levels)
+
     def run(self):
         logger.info("Running notification thread")
 
-        while not self.stopping:
+        while True:
             with self.cv:
-                self.cv.wait_for(
-                    lambda: self.stopping
-                    or abs(self.progress - self.previous_progress)
-                    > self.progress_threshold
-                )
-                if not self.is_alive():
+                self.cv.wait_for(lambda: self.stopping or self.shouldreportprogress())
+                if self.stopping:
                     break
 
-                reportprogress = (
-                    abs(self.progress - self.previous_progress)
-                    > self.progress_threshold
-                )
+            # Notify (out of the CV locking)
+            toremove = []
 
-            if reportprogress:
-                self.previous_progress = self.progress
-                toremove = []
+            # Check if new notification servers are on
+            mtime = os.path.getmtime(self.path)
+            if mtime > self.lastcheck:
+                for f in self.path.iterdir():
+                    self.urls[f.name] = f.read_text().strip()
+                    logger.info("Added new notification URL: %s", self.urls[f.name])
+                    f.unlink()
 
-                # Check if new notification servers are on
-                mtime = os.path.getmtime(self.path)
-                if mtime > self.lastcheck:
-                    for f in self.path.iterdir():
-                        self.urls[f.name] = f.read_text().strip()
-                        logger.info("Added new notification URL: %s", self.urls[f.name])
-                        f.unlink()
+                self.lastcheck = os.path.getmtime(self.path)
 
-                    self.lastcheck = os.path.getmtime(self.path)
+            if self.urls:
+                # OK, let's go
+                for level in self.levels:
+                    if level.shouldreportprogress(self):
+                        params = level.report()
 
-                if self.urls:
-                    # OK, let's go
-                    for key, baseurl in self.urls.items():
-                        url = "{}/progress/{}".format(baseurl, self.progress)
-                        try:
-                            with urlopen(url) as _:
-                                logger.info(
-                                    "Notification send for %s [%s]",
-                                    baseurl,
-                                    self.progress,
-                                )
-                        except Exception as e:
-                            logger.info(
-                                "Progress: %.2f [error while notifying %s]: %s",
-                                self.progress,
-                                url,
-                                e,
+                        # Go over all URLs
+                        for key, baseurl in self.urls.items():
+                            url = "{}/progress?{}".format(
+                                baseurl, urllib.parse.urlencode(params)
                             )
-                            if NotificationThread.isfatal_httperror(e):
-                                toremove.append(key)
+                            logger.warning("Reporting progress %s", params)
+                            try:
+                                with urlopen(url) as _:
+                                    logger.info(
+                                        "Notification send for %s [%s]",
+                                        baseurl,
+                                        level,
+                                    )
+                            except Exception as e:
+                                logger.info(
+                                    "Progress: %s [error while notifying %s]: %s",
+                                    level,
+                                    url,
+                                    e,
+                                )
+                                if Reporter.isfatal_httperror(e):
+                                    toremove.append(key)
 
-                    # Removes unvalid URLs
-                    for key in toremove:
-                        logger.info("Removing notification URL %s", self.urls[key])
-                        del self.urls[key]
-                else:
-                    logger.info("Progress: %.2f", self.progress)
+                # Removes unvalid URLs
+                for key in toremove:
+                    logger.info("Removing notification URL %s", self.urls[key])
+                    del self.urls[key]
+            else:
+                for level in self.levels:
+                    if level.shouldreportprogress(self):
+                        params = level.report()
+                        logger.info("Progress: %s", level)
 
-    def setprogress(self, progress, level: int, desc: Optional[str]):
+    def setprogress(self, progress: float, level: int, desc: Optional[str]):
         """Sets the new progress if sufficiently different"""
-        if abs(progress - self.previous_progress) > self.progress_threshold:
+        if (
+            (level + 1) != len(self.levels)
+            or (progress != self.levels[level].progress)
+            or (desc is not None and desc != self.levels[level].desc)
+        ):
             with self.cv:
-                self.progress = progress
+                self.levels = self.levels[: (level + 1)]
+                while level >= len(self.levels):
+                    self.levels.append(LevelInformation(level, None, 0.0))
+                if desc:
+                    self.levels[level].desc = desc
+                self.levels[level].progress = progress
+
                 self.cv.notify_all()
 
-    INSTANCE: ClassVar[Optional["NotificationThread"]] = None
+    INSTANCE: ClassVar[Optional["Reporter"]] = None
 
     @staticmethod
     def instance():
-        if NotificationThread.INSTANCE is None:
-            from experimaestro.taskglobals import taskpath
-
+        if Reporter.INSTANCE is None:
+            taskpath = TaskEnv.instance().taskpath
             assert taskpath is not None, "Task path is not defined"
-            NotificationThread.INSTANCE = NotificationThread(taskpath)
-        return NotificationThread.INSTANCE
+            Reporter.INSTANCE = Reporter(taskpath)
+        return Reporter.INSTANCE
 
 
 def progress(value: float, level=0, desc: Optional[str] = None):
-    """When called from a running task, report the progress"""
+    """When called from a running task, report the progress
 
-    NotificationThread.instance().setprogress(value, level, desc)
+    Args:
+        level: The level (starting from 0)
+        value: The current value
+        desc: An optional description of the current task
+    """
+    if TaskEnv.instance().slave:
+        # Skip if in a slave process
+        return
+    Reporter.instance().setprogress(value, level, desc)
 
 
 class xpm_tqdm(std_tqdm):
     """XPM wrapper for experimaestro that automatically reports progress to the server"""
 
-    __XPM_CURRENT_LEVEL__ = 0
-
     def __init__(self, iterable=None, file=None, *args, **kwargs):
         # Report progress bar
         # newprogress(title=, pos=abs(self.pos))
-        self.__xpm_level__ = xpm_tqdm.__XPM_CURRENT_LEVEL__
         _file = file or sys.stderr
         self.is_tty = hasattr(_file, "isatty") or _file.isatty()
-        super().__init__(iterable, *args, file=file, **kwargs)
-        progress(0.0, level=self.__xpm_level__, desc=kwargs.get("desc", None))
 
-    def __enter__(self):
-        xpm_tqdm.__XPM_CURRENT_LEVEL__ += 1
-        return super().__enter__()
+        super().__init__(iterable, disable=False, file=file, *args, **kwargs)
+        progress(0.0, level=self.pos, desc=kwargs.get("desc", None))
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        xpm_tqdm.__XPM_CURRENT_LEVEL__ += -1
-        return super().__exit__(exc_type, exc_value, traceback)
+    def update(self, n=1):
+        result = super().update(n)
+        progress(self.n / self.total, level=self.pos)
+        return result
 
     def refresh(self, nolock=False, lock_args=None):
         if self.is_tty:
-            super().refresh()
-
-        pos = abs(self.pos)
-        if pos == 0:
-            d = self.format_dict
-            # Just report the innermost progress
-            if d["total"]:
-                progress(d["n"] / d["total"], level=self.__xpm_level__)
+            super().refresh(nolock=nolock, lock_args=lock_args)
 
 
 @overload
