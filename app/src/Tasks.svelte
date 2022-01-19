@@ -100,7 +100,7 @@
                 showJob = showJob == event.detail ? null : event.detail
             }}/>
             {#if showJob && showJob.jobId == jobId}
-                <TaskDetail job={showJob}/>
+                <TaskDetail job={jobs.byId[jobId]}/>
             {/if}
         {/if}
     {/each}

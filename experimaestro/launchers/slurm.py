@@ -207,6 +207,7 @@ class SlurmProcessBuilder(ProcessBuilder):
         addstream(builder.command, "-i", self.stdin)
 
         builder.command.extend(self.command)
+        logger.info("slurm sbatch command: %s", builder.command)
         handler = OutputCaptureHandler()
         builder.stdout = Redirect.pipe(handler)
         p = builder.start()
@@ -233,6 +234,9 @@ class SlurmOptions:
 
     qos: Optional[str] = None
     """The requested Quality of Service"""
+
+    mem: Optional[str] = None
+    """Requested memory on the node (in megabytes by default)"""
 
     # GPU-related
     gpus: Optional[int] = None

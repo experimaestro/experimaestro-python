@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import urllib
 import pkg_resources
 import websockets
 import websockets.exceptions
@@ -10,8 +11,23 @@ import threading
 from typing import Optional
 import time
 import functools
-from experimaestro.scheduler import Scheduler, Listener as BaseListener
+from json import JSONEncoder
 import re
+from experimaestro.scheduler import Scheduler, Listener as BaseListener
+from experimaestro.notifications import LevelInformation
+
+
+class XPMJsonEncoder(JSONEncoder):
+    """Handles simple serialization cases"""
+
+    def default(self, o):
+        if isinstance(o, LevelInformation):
+            return {"level": o.level, "progress": o.progress, "desc": o.desc}
+        super().default(o)
+
+
+def json_dumps(o):
+    return XPMJsonEncoder().encode(o)
 
 
 def formattime(v: Optional[float]):
@@ -61,7 +77,7 @@ class Listener(BaseListener):
 
     def send_message(self, message):
         if self.websockets:
-            message = json.dumps(message)
+            message = json_dumps(message)
             self.loop.call_soon_threadsafe(
                 self.loop.create_task,
                 asyncio.wait([user.send(message) for user in self.websockets]),
@@ -102,19 +118,19 @@ async def handler(websocket, path, listener: Listener):
                 break
             except Exception as e:
                 await websocket.send(
-                    json.dumps({"error": True, "message": "message parsing error"})
+                    json_dumps({"error": True, "message": "message parsing error"})
                 )
                 continue
 
             if actiontype == "refresh":
                 for job in listener.scheduler.jobs.values():
-                    await websocket.send(json.dumps(job_create(job)))
+                    await websocket.send(json_dumps(job_create(job)))
             elif actiontype == "quit":
                 break
             elif actiontype == "details":
                 jobid = action["payload"]
                 await websocket.send(
-                    json.dumps(job_details(listener.scheduler.jobs[jobid]))
+                    json_dumps(job_details(listener.scheduler.jobs[jobid]))
                 )
             elif actiontype == "kill":
                 jobid = action["payload"]
@@ -124,7 +140,7 @@ async def handler(websocket, path, listener: Listener):
                     process.kill()
             else:
                 await websocket.send(
-                    json.dumps(
+                    json_dumps(
                         {
                             "error": True,
                             "message": "Unknown message action %s" % actiontype,
@@ -163,13 +179,16 @@ class RequestProcessor:
             return None
 
         if path.startswith("/notifications/"):
-            m = re.match(r"^/notifications/([a-z0-9]+)/progress/([0-9.]+)$", path)
+            m = re.match(r"^/notifications/([a-z0-9]+)/progress\?(.*)$", path)
             if m:
                 jobid = m.group(1)
-                progress = float(m.group(2))
+                params = urllib.parse.parse_qs(m.group(2))
                 try:
-                    if progress >= 0 and progress <= 1.0:
-                        self.scheduler.jobs[jobid].progress = progress
+                    self.scheduler.jobs[jobid].set_progress(
+                        int(params["level"][0]),
+                        float(params["progress"][0]),
+                        params.get("desc", [None])[0],
+                    )
                 except KeyError:
                     # Just ignore
                     pass

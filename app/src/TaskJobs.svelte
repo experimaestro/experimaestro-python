@@ -7,14 +7,13 @@
     export let job
     import { copyToClibpoard } from './clipboard'
 
-    let locator
+    $: progress = job.progress[0].progress
 </script>
 
 <div class="resource">
-                    
     {#if job.status === "running"}
-        <span class="status progressbar-container" title={`${job.progress*100}%`}>
-            <span style={`right: ${(1-job.progress)*100}%`} class="progressbar"></span><div class="status-running">{job.status}</div>
+        <span class="status progressbar-container" title={`${progress*100}%`}>
+            <span style={`right: ${(1-progress)*100}%`} class="progressbar"></span><div class="status-running">{job.status}</div>
         </span> 
         <i class="fa fa-skull-crossbones action" on:click={() => { dispatch('kill', job) } }/>
     {:else}

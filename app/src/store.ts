@@ -21,7 +21,11 @@ export type Job = {
 
   tags: Array<[string, number | string | boolean]>;
 
-  progress: number;
+  progress: Array<{
+    level: number;
+    desc: string | null;
+    progress: number;
+  }>;
 };
 
 export type Jobs = {
@@ -96,9 +100,18 @@ export function process(action: any) {
     case "JOB_UPDATE":
       jobs.update((current) =>
         produce(current, (draft) => {
-          if (draft.byId[action.payload.jobId] === undefined) {
+          const jobUpdate = <Job>action.payload;
+
+          if (draft.byId[jobUpdate.jobId] === undefined) {
           } else {
-            _.merge(draft.byId[action.payload.jobId], action.payload);
+            let job = draft.byId[jobUpdate.jobId];
+            _.merge(job, jobUpdate);
+            if (job.progress.length > jobUpdate.progress.length) {
+              job.progress = jobUpdate.progress.slice(
+                0,
+                jobUpdate.progress.length
+              );
+            }
           }
           draft.ids.sort(jobComparator(draft.byId));
         })

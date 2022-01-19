@@ -4,11 +4,11 @@ from pathlib import Path
 from shutil import rmtree
 import threading
 import time
-from typing import Optional, Set, Union, TYPE_CHECKING
+from typing import List, Optional, Set, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
-from experimaestro.notifications import NotificationThread
+from experimaestro.notifications import LevelInformation, Reporter
 from typing import Dict
 
 from experimaestro.tokens import ProcessCounterToken
@@ -139,7 +139,7 @@ class Job(Resource):
         self.starttime: Optional[float] = None
         self.submittime: Optional[float] = None
         self.endtime: Optional[float] = None
-        self._progress = 0.0
+        self._progress: List[LevelInformation] = []
         self.tags = config.tags()
 
     def __str__(self):
@@ -153,17 +153,25 @@ class Job(Resource):
     def progress(self):
         return self._progress
 
-    @progress.setter
-    def progress(self, progress: float):
-        assert progress >= 0 and progress <= 1
-        self._progress = progress
+    def set_progress(self, level: int, value: float, desc: Optional[str]):
+        assert value >= 0 and value <= 1
+
+        # Adjust the length of the array
+        self._progress = self._progress[: (level + 1)]
+        while len(self._progress) <= level:
+            self._progress.append(LevelInformation(len(self._progress), None, 0.0))
+
+        if desc:
+            self._progress[-1].desc = desc
+        self._progress[-1].progress = value
+
         for listener in self.scheduler.listeners:
             listener.job_state(self)
 
     def add_notification_server(self, server):
         """Adds a notification server"""
         key, baseurl = server.getNotificationSpec()
-        dirpath = self.path / NotificationThread.NOTIFICATION_FOLDER
+        dirpath = self.path / Reporter.NOTIFICATION_FOLDER
         dirpath.mkdir(exist_ok=True)
         (dirpath / key).write_text(f"{baseurl}/{self.identifier}")
 
@@ -457,7 +465,10 @@ class Scheduler:
 
         job.state = JobState.WAITING
         for listener in self.listeners:
-            listener.job_submitted(job)
+            try:
+                listener.job_submitted(job)
+            except Exception as e:
+                logger.exception("Got an error with listener %s", listener)
 
         # Add dependencies, and add to blocking resources
         if job.dependencies:
@@ -481,7 +492,10 @@ class Scheduler:
             # Yep! First we notify the listeners
             job.state = JobState.RUNNING
             for listener in self.listeners:
-                listener.job_state(job)
+                try:
+                    listener.job_state(job)
+                except Exception as e:
+                    logger.exception("Got an error with listener %s", listener)
 
             # Adds to the listeners
             if self.xp.server is not None:
@@ -517,7 +531,10 @@ class Scheduler:
                 job.state = state
 
         for listener in self.listeners:
-            listener.job_state(job)
+            try:
+                listener.job_state(job)
+            except Exception as e:
+                logger.exception("Listener %s did raise an exception", e)
 
         # Job is finished
         if job.state != JobState.DONE:

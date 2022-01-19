@@ -20,7 +20,7 @@ def fix_deprecated(workpath: Path, fix: bool):
         # Unserialize
         logger.debug("Loading configuration %s", job.parent)
         params = json.loads(job.resolve().read_text())
-        taskglobals.wspath = Path(params["workspace"])
+        taskglobals.Env.instance().wspath = Path(params["workspace"])
 
         try:
             object = ConfigInformation.fromParameters(params["objects"], False)

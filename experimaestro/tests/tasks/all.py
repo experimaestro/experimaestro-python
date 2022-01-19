@@ -62,12 +62,12 @@ class ForeignTaskA:
 class Fail:
     def execute(self):
         while not self.wait.is_file():
-            time.sleep(0.1)
+            time.sleep(0.01)
         raise AssertionError("Failing")
 
     def touch(self):
         while self.__xpm__.job.state.notstarted():
-            time.sleep(0.05)
+            time.sleep(0.01)
 
         with open(self.wait, "w") as out:
             out.write("hello")

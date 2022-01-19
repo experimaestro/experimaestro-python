@@ -58,7 +58,7 @@ def serializeCycle(config: Config):
     import json
     import experimaestro.taskglobals as taskglobals
 
-    taskglobals.wspath = Path("/tmp-xpm1234")
+    taskglobals.Env.instance().wspath = Path("/tmp-xpm1234")
 
     stringOut = StringIO()
 

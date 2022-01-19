@@ -43,10 +43,10 @@ def test_not_submitted():
             Concat(strings=[hello])
 
 
-def test_fail():
+def test_fail_simple():
     """Failing task... should fail"""
     with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("failing", maxwait=2):
+        with TemporaryExperiment("failing", maxwait=1000):  # FIXME: should wait less!
             fail = Fail().submit()
             fail.__unwrap__().touch()
 

@@ -64,8 +64,11 @@
 }
 
 .status.progressbar-container {
-  position: relative;
   background: lightgreen;
+}
+
+.progressbar-container {
+  position: relative;
   z-index: -2;
 }
 

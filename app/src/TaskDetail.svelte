@@ -1,13 +1,14 @@
 <script>
   import {DateTime} from 'luxon'
-  export let job
   import { copyToClibpoard } from './clipboard'
-import { error, success } from './ui/notifications';
+  import { error, success } from './ui/notifications';
+  import {Progress} from 'sveltestrap';
 
   function formatms(t) {
     DateTime.fromMillis(1000 * t).toLocaleString(DateTime.DATETIME_FULL_WITH_SECONDS)
   }
 
+  export let job
 </script>    
 
 <div class="details">
@@ -25,9 +26,29 @@ import { error, success } from './ui/notifications';
   </span>
   {/each}
   </div>
+
+  {#if job.progress}
+    <span class="what">Progress</span>
+    <div class="progress-details">
+      {#each job.progress as level (level.level)}
+        <div class="level-desc">{level.desc || ""}</div>
+        <div>
+          <Progress striped color="success" value={level.progress*100}>{Math.trunc(level.progress * 1000) / 10}%</Progress>
+        </div>
+      {/each}
+
+    </div>
+  {/if}
 </div>
 
 <style>
+  .level-desc {
+    font-weight: bold;
+  }
+  .progress-details {
+    max-width: 300px;
+  }
+
   .details {
     border: 1px solid black;
     display: grid;

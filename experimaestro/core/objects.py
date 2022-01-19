@@ -896,7 +896,7 @@ class ConfigInformation:
                         else:
                             name = o.__xpmtypename__
                         basepath = (
-                            taskglobals.wspath
+                            taskglobals.Env.instance().wspath
                             / "jobs"
                             / o.__xpmtypename__
                             / o.__xpmidentifier__
@@ -1013,7 +1013,7 @@ def cache(fn, name: str):
         # Get path and create directory if needed
         hexid = config.__xpmidentifier__  # type: str
         typename = config.__xpmtypename__  # type: str
-        dir = taskglobals.wspath / "config" / typename / hexid
+        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid
 
         if not dir.exists():
             dir.mkdir(parents=True, exist_ok=True)
