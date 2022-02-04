@@ -898,11 +898,11 @@ class ConfigInformation:
                         basepath = (
                             taskglobals.Env.instance().wspath
                             / "jobs"
-                            / o.__xpmtypename__
-                            / o.__xpmidentifier__
+                            / o.__xpmtypename__.lower()
+                            / o.__xpmidentifier__.lower()
                         )
-                        o.__xpm_stdout__ = basepath / f"{name}.out"
-                        o.__xpm_stderr__ = basepath / f"{name}.err"
+                        o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
+                        o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
 
                 # Set the fields
                 for name, value in definition["fields"].items():
