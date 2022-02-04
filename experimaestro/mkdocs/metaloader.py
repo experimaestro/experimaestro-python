@@ -1,9 +1,15 @@
-# Utility class that
+# Utility class that allow to avoid installing modules
+# when building documentation
 
 import sys
 import re
 import importlib.abc
 import importlib.machinery
+
+
+class Spec:
+    def __init__(self, name):
+        self.name = name
 
 
 class Module:
@@ -15,7 +21,10 @@ class Module:
         _, self.__name__ = f".{spec.name}".rsplit(".", 1)
 
     def __getattr__(self, key):
-        return type(key, (object,), {})
+        return Module(self.__loader__, Spec(f"{self.__package__}.{key}"))
+
+    def __repr__(self):
+        return f"Fake module ({self.__package__})"
 
 
 class DependencyInjectorLoader(importlib.abc.Loader):
