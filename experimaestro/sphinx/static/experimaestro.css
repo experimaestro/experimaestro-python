@@ -1,0 +1,12 @@
+html.writer-html4
+  .rst-content
+  dl:not(.docutils)
+  dl:not(.field-list).py.xpmparam
+  > dt,
+html.writer-html5
+  .rst-content
+  dl[class]:not(.option-list):not(.field-list):not(.footnote):not(.glossary):not(.simple)
+  dl:not(.field-list).py.xpmparam
+  > dt {
+  border-left: 3px solid #c00;
+}

@@ -1,4 +1,15 @@
-There is a mkdocs plugin that is available with `experimaestro`
+There are two documentation plugins, one for for Sphinx (recommended) and mkdocs (deprecated).
+
+## Sphinx
+
+Just configure Sphinx to use the `experimaestro.sphinx` extension.
+
+Sphinx allows to link documentations (through the extension `sphinx.ext.intersphinx`).
+
+You can then use the directive `::autoxpmconfig QUALITIFIED_CLASSNAME` (which extends
+`autoclass`) to build the documentation of a configuration or class.
+
+## mkdocs
 
 An example configuration
 
@@ -18,19 +29,6 @@ plugins:
     external:
       # Maps datatype
       - datamaestro: "https://datamaestro.rtfd.io/en/latest/experimaestro-mapping.json"
-```
-
-## Avoiding to load some modules
-
-With files `mymodule.mkdocs_init`
-
-```py3
-import re
-from experimaestro.mkdocs.metaloader import DependencyInjectorFinder
-
-DependencyInjectorFinder.install(
-    re.compile(r"^(torch|pandas|bs4|pytorch_transformers|pytrec_eval|apex)($|\.)")
-)
 ```
 
 ## Including methods
@@ -75,4 +73,20 @@ Trainers are responsible for defining the loss (given a learnable scorer)
 How to sample learning batches.
 
 ::xpm::xpmir.letor.samplers:Sampler
+```
+
+## Some tricks
+
+### Avoiding to load some modules
+
+When building the documentation, it might be useful not to have to install
+all the dependencies.
+
+```py3
+import re
+from experimaestro.mkdocs.metaloader import DependencyInjectorFinder
+
+DependencyInjectorFinder.install(
+    re.compile(r"^(torch|pandas|bs4|pytorch_transformers|pytrec_eval|apex)($|\.)")
+)
 ```

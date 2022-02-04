@@ -312,6 +312,9 @@ class ObjectType(Type):
                                 )
                                 raise
 
+    def name(self):
+        return f"{self.basetype.__module__}.{self.basetype.__qualname__}"
+
     def __parsedoc__(self):
         """Parse the documentation"""
         # Initialize the object if needed
@@ -528,7 +531,7 @@ class ArrayType(Type):
         self.type = type
 
     def name(self):
-        return f"Array[{self.type.name()}]"
+        return f"List[{self.type.name()}]"
 
     def validate(self, value):
         if not isinstance(value, List):

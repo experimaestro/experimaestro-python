@@ -1,4 +1,7 @@
+# 0.10.0
+
 - Forces a configuration to be a meta-parameter or a parameter
+- Sphinx documentation extension
 
 # 0.9.12
 
