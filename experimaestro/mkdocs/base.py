@@ -136,6 +136,16 @@ class ObjectLatticeNode:
         for child in self.children:
             child.topologicalOrder(current, cover)
 
+    def iter_all(self):
+        return self._iter_all(set())
+
+    def _iter_all(self, processed: Set):
+        if id(self) not in processed:
+            yield self
+            processed.add(id(self))
+            for node in self.children:
+                yield from node._iter_all(processed)
+
 
 class ObjectLattice:
     """Lattice of objects"""
@@ -154,6 +164,9 @@ class ObjectLattice:
         current = []
         self.node.topologicalOrder(current, set())
         return current
+
+    def iter_all(self) -> Iterator[ObjectLatticeNode]:
+        return self.node.iter_all()
 
 
 class Configurations:
@@ -275,10 +288,50 @@ class Documentation(mkdocs.plugins.BasePlugin):
         return config
 
     def on_post_build(self, config):
+        # Custom format export (FIXME: replace by sphinx)
         mapping_path = Path(config["site_dir"]) / "experimaestro-mapping.json"
         logging.info("Writing mapping file %s", mapping_path)
         with mapping_path.open("wt") as fp:
             json.dump(self.parsed, fp)
+
+        # Sphinx export
+        import zlib
+
+        """Fron Sphinx source code"""
+
+        def escape(string: str) -> str:
+            return re.sub("\\s+", " ", string)
+
+        path = Path(config["site_dir"]) / "objects.inv"
+
+        with path.open("wb") as f:
+            # header
+            f.write(
+                (
+                    "# Sphinx inventory version 2\n"
+                    "# Project: %s\n"
+                    "# Version: %s\n"
+                    "# The remainder of this file is compressed using zlib.\n"
+                    % (escape("site_name"), escape("0.0.0"))
+                ).encode()
+            )
+
+            # body
+            compressor = zlib.compressobj(9)
+
+            for node in self.lattice.iter_all():
+                if node.objecttype is not None:
+                    member = node.objecttype.basetype
+                    qname = f"{member.__module__}.{member.__qualname__}"
+                    path = self.type2path[qname]
+
+                    f.write(
+                        compressor.compress(
+                            f"""{qname} py:xpmconfig 1 {path}#$ -\n""".encode("utf-8")
+                        )
+                    )
+
+            f.write(compressor.flush())
 
     def showlink(self, location, m: re.Match):
         """Show a link to the documentation"""
