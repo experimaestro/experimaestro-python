@@ -224,6 +224,14 @@ class ObjectType(Type):
         self.objecttype = self.basetype  # type: type
         self.basetype._ = self.configtype
 
+        # Return type is used by tasks to change the output
+        if hasattr(self.basetype, "taskoutputs") or False:
+            self.returntype = get_type_hints(getattr(self.basetype, "taskoutputs")).get(
+                "return", typing.Any
+            )
+        else:
+            self.returntype = self.objecttype
+
         # Registers ourselves
         self.basetype.__xpmtype__ = self
         self.configtype.__xpmtype__ = self

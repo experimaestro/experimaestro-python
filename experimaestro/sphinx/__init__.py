@@ -12,7 +12,13 @@ from sphinx import addnodes
 from sphinx.ext.autodoc import ClassDocumenter
 from sphinx.locale import _, __
 from sphinx.util import inspect, logging
-from sphinx.domains.python import PyClasslike, PyAttribute, directives, desc_signature
+from sphinx.domains.python import (
+    PyClasslike,
+    PyAttribute,
+    directives,
+    desc_signature,
+    _parse_annotation,
+)
 from sphinx.util.typing import OptionSpec
 from docutils.statemachine import StringList
 import logging
@@ -28,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 class XPMConfigDirective(PyClasslike):
+    """Directive for XPM configurations/tasks"""
+
     pass
 
 
@@ -51,12 +59,19 @@ class XPMParamDirective(PyAttribute):
         return fullname, prefix
 
 
+def getxpminfo(obj):
+    """Returns the XPM type information for a configuration object"""
+    config: Config = obj
+    return config.__getxpmtype__()
+
+
 class ConfigDocumenter(ClassDocumenter):
+    """Documenter for experimaestro configurations and tasks"""
+
     objtype = "xpmconfig"
-
     directivetype = "xpmconfig"
-    # directivetype = ClassDocumenter.objtype
 
+    # We need to have a higher priority than class documenter to get called
     priority = 10 + ClassDocumenter.priority
 
     option_spec = dict(ClassDocumenter.option_spec)
@@ -79,8 +94,7 @@ class ConfigDocumenter(ClassDocumenter):
     ) -> Tuple[Optional[Any], Optional[str], Optional[Signature]]:
         r = super()._get_signature()
 
-        config: Config = self.object
-        xpminfo = config.__getxpmtype__()
+        xpminfo = getxpminfo(self.object)
 
         p = []
         for name, argument in xpminfo.arguments.items():
@@ -118,21 +132,21 @@ class ConfigDocumenter(ClassDocumenter):
                 self.add_line(argument.help, source_name)
             self.add_line("", source_name)
 
+        if xpminfo.returntype != xpminfo.objecttype:
+            self.add_line(f"    :rtype: {xpminfo.returntype}", source_name)
+
 
 RE_ATTRIBUTE = re.compile(r"""^.. attribute:: (.*)""")
-
-
-def getxpminfo(obj):
-    config: Config = obj
-    return config.__getxpmtype__()
 
 
 def _process_docstring(
     app: Sphinx, what: str, name: str, obj: Any, options: Any, lines: List[str]
 ) -> None:
-    # Removes attributes from docstring
-    # Comes after napoleon (lesser priority) so benefit from a standardized
-    # output
+    """Removes already documented (by XPM) attributes from docstring
+
+    Comes after napoleon (lesser priority) so benefit from a standardized
+    output
+    """
     if obj is not None and inspect.isclass(obj) and issubclass(obj, Config):
         xpminfo = getxpminfo(obj)
         names = set(xpminfo.arguments.keys())
@@ -165,15 +179,21 @@ def copy_asset_files(app, exc):
 def setup(app: Sphinx) -> Dict[str, Any]:
     """Setup experimaestro for Sphinx documentation"""
 
+    # Adds our stylesheet
     app.connect("build-finished", copy_asset_files)
     app.add_css_file("experimaestro.css")
 
     # We need autodoc
     app.setup_extension("sphinx.ext.autodoc")
 
+    # Defines our extensions (documenter, domains)
     app.add_autodocumenter(ConfigDocumenter)
-
     app.add_directive("py:xpmconfig", XPMConfigDirective)
+
+    pydomain = app.registry.domains["py"]
+    pydomain.object_types["xpmconfig"] = pydomain.object_types["class"]
+    # pydomain.add_object_type('py:xpmconfig', pydomain.object_types["class"])
+
     app.add_directive("py:xpmparam", XPMParamDirective)
     app.connect("autodoc-process-docstring", _process_docstring, 600)
 
