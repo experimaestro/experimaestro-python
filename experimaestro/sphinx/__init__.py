@@ -9,12 +9,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from docutils import nodes
 from sphinx.application import Sphinx
 from sphinx import addnodes
-from sphinx.ext.autodoc import ClassDocumenter
+from sphinx.ext.autodoc import ClassDocumenter, Documenter, restify
 from sphinx.locale import _, __
 from sphinx.util import inspect, logging
 from sphinx.domains.python import (
     PyClasslike,
     PyAttribute,
+    PyObject,
     directives,
     desc_signature,
     _parse_annotation,
@@ -24,8 +25,7 @@ from docutils.statemachine import StringList
 import logging
 import re
 
-from experimaestro import Config
-from experimaestro.core.types import ObjectType, ArrayType
+from experimaestro import Config, Task
 
 # See Sphinx documentation on developping extensions
 # https://www.sphinx-doc.org/en/master/extdev/index.html#dev-extensions
@@ -36,7 +36,21 @@ logger = logging.getLogger(__name__)
 class XPMConfigDirective(PyClasslike):
     """Directive for XPM configurations/tasks"""
 
-    pass
+    option_spec: OptionSpec = PyClasslike.option_spec.copy()
+
+    option_spec.update(
+        {
+            "task": directives.unchanged,
+        }
+    )
+
+    def get_signature_prefix(self, sig: str) -> List[nodes.Node]:
+        """May return a prefix to put before the object name in the
+        signature.
+        """
+        if self.options.get("task") is not None:
+            return [nodes.Text("XPM Task")]
+        return [nodes.Text("XPM Config")]
 
 
 class XPMParamDirective(PyAttribute):
@@ -52,10 +66,12 @@ class XPMParamDirective(PyAttribute):
 
     def handle_signature(self, sig: str, signode: desc_signature) -> Tuple[str, str]:
         fullname, prefix = super().handle_signature(sig, signode)
+
         if self.options.get("constant") is not None:
             signode += addnodes.desc_annotation("constant", nodes.Text("constant"))
         if self.options.get("generated") is not None:
             signode += addnodes.desc_annotation("generated", nodes.Text("generated"))
+
         return fullname, prefix
 
 
@@ -77,10 +93,9 @@ class ConfigDocumenter(ClassDocumenter):
     option_spec = dict(ClassDocumenter.option_spec)
 
     @classmethod
-    def can_document_member(
-        cls, member: Any, membername: str, isattr: bool, parent: Any
-    ) -> bool:
-        return isinstance(member, Config)
+    def can_document_member(cls, member: Any, *args) -> bool:
+        can_document = inspect.isclass(member) and issubclass(member, Config)
+        return can_document
 
     def add_directive_header(self, sig: str) -> None:
         super().add_directive_header(sig)
@@ -104,6 +119,80 @@ class ConfigDocumenter(ClassDocumenter):
 
         return r[0], r[1], s
 
+    @staticmethod
+    def formatDefault(value) -> str:
+        if isinstance(value, Config):
+            objecttype = value.__xpmtype__.objecttype
+            params = ", ".join(
+                [f"{key}={value}" for key, value in value.__xpm__.values.items()]
+            )
+            # It would be possible to do better... if not
+            return f"{objecttype.__module__}.{objecttype.__qualname__}({params})"
+
+        return str(value)
+
+    def add_directive_header(self, sig: str) -> None:
+        sourcename = self.get_sourcename()
+        xpminfo = getxpminfo(self.object)
+
+        # Mostly copied from ClassDocumenter but adapted (no other choice)
+        # FIXME: would be better to be a plugin
+
+        if self.doc_as_attr:
+            self.directivetype = "attribute"
+
+        # Skip ClassDocumenter
+        Documenter.add_directive_header(self, sig)
+
+        if self.analyzer and ".".join(self.objpath) in self.analyzer.finals:
+            self.add_line("   :final:", sourcename)
+
+        canonical_fullname = self.get_canonical_fullname()
+        if (
+            not self.doc_as_attr
+            and canonical_fullname
+            and self.fullname != canonical_fullname
+        ):
+            self.add_line("   :canonical: %s" % canonical_fullname, sourcename)
+
+        # Our specific code
+        if issubclass(self.object, Task):
+            self.add_line(f"   :task:", sourcename)
+
+        # add inheritance info, if wanted
+        if not self.doc_as_attr and self.options.show_inheritance:
+            if inspect.getorigbases(self.object):
+                # A subclass of generic types
+                # refs: PEP-560 <https://www.python.org/dev/peps/pep-0560/>
+                bases = list(self.object.__orig_bases__)
+            elif hasattr(self.object, "__bases__") and len(self.object.__bases__):
+                # A normal class
+                bases = list(self.object.__bases__)
+            else:
+                bases = []
+
+            self.env.events.emit(
+                "autodoc-process-bases", self.fullname, self.object, self.options, bases
+            )
+
+            if self.config.autodoc_typehints_format == "short":
+                base_classes = [restify(cls, "smart") for cls in bases]
+            else:
+                base_classes = [restify(cls) for cls in bases]
+
+            sourcename = self.get_sourcename()
+            self.add_line("", sourcename)
+            self.add_line("   " + _("Bases: %s") % ", ".join(base_classes), sourcename)
+
+        # Adds return type if different
+        if xpminfo.returntype != xpminfo.objecttype:
+            self.add_line("", sourcename)
+            self.add_line(
+                "   " + _("Submit type: %s") % restify(xpminfo.returntype), sourcename
+            )
+
+            # annotations = _parse_annotation(str(xpminfo.returntype), self.env)
+
     def add_content(
         self, more_content: Optional[StringList], no_docstring: bool = False
     ) -> None:
@@ -120,7 +209,10 @@ class ConfigDocumenter(ClassDocumenter):
             self.add_line(f"   :type: {typestr}", source_name)
 
             if argument.default is not None:
-                self.add_line(f"   :value: {argument.default}", source_name)
+                self.add_line(
+                    f"   :value: {ConfigDocumenter.formatDefault(argument.default)}",
+                    source_name,
+                )
             if argument.generator:
                 self.add_line(f"   :generated:", source_name)
             elif argument.constant:
@@ -129,11 +221,8 @@ class ConfigDocumenter(ClassDocumenter):
             # self.add_line("", source_name)
             if argument.help:
                 self.add_line("", source_name)
-                self.add_line(argument.help, source_name)
+                self.add_line("    " + argument.help, source_name)
             self.add_line("", source_name)
-
-        if xpminfo.returntype != xpminfo.objecttype:
-            self.add_line(f"    :rtype: {xpminfo.returntype}", source_name)
 
 
 RE_ATTRIBUTE = re.compile(r"""^.. attribute:: (.*)""")
@@ -147,7 +236,7 @@ def _process_docstring(
     Comes after napoleon (lesser priority) so benefit from a standardized
     output
     """
-    if obj is not None and inspect.isclass(obj) and issubclass(obj, Config):
+    if obj is not None and ConfigDocumenter.can_document_member(obj):
         xpminfo = getxpminfo(obj)
         names = set(xpminfo.arguments.keys())
 

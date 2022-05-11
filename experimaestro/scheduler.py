@@ -443,7 +443,6 @@ class Scheduler:
         the status code
         """
         logger.info("Submitting job %s", job)
-
         job._readyEvent = asyncio.Event()
         job.submittime = time.time()
         job.scheduler = self

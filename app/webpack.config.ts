@@ -46,6 +46,9 @@ const mode = process.env.NODE_ENV ?? "development";
 const isProduction = mode === "production";
 const isDevelopment = !isProduction;
 
+const ws_port = process.env.XPM_WS_PORT ?? "12345";
+console.log(`Experimaestro to be reached on port ${ws_port}`);
+
 const config: Configuration = {
   mode: isProduction ? "production" : "development",
   entry: {
@@ -171,7 +174,7 @@ const config: Configuration = {
     static: "./public",
     proxy: {
       "/api": {
-        target: "ws://localhost:12345",
+        target: `ws://localhost:${ws_port}`,
         ws: true,
       },
     },

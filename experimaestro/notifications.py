@@ -56,8 +56,10 @@ class Reporter(threading.Thread):
         super().__init__(daemon=True)
         self.path = path / Reporter.NOTIFICATION_FOLDER
         self.path.mkdir(exist_ok=True)
-        self.lastcheck = 0
         self.urls: Dict[str, str] = {}
+
+        # Last check of notification URLs
+        self.lastcheck = 0
 
         self.levels = [LevelInformation(0, None, 0.0)]
 

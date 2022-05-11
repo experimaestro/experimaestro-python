@@ -1,4 +1,5 @@
-from build.lib.experimaestro.scheduler import JobState
+import time
+from experimaestro.scheduler import JobState
 from experimaestro.core.objects import TaskOutput
 from experimaestro.scheduler import Listener
 from threading import Condition
@@ -20,13 +21,22 @@ def jobmonitor(output: TaskOutput):
 
     try:
         lastprogress = 0
+        while job.scheduler is None:
+            time.sleep(0.1)
+
         job.scheduler.addlistener(listener)
 
         with tqdm(total=10000) as reporter:
+            while job.state.notstarted():
+                with cv:
+                    cv.wait(timeout=5000)
+
             while not job.state.finished():
-                delta = int(job.progress * 100) - lastprogress
+                delta = int(job.progress[0].progress * 100) - lastprogress
                 if delta >= 0:
                     reporter.update(delta)
+
+                # Wait for an event
                 with cv:
                     cv.wait(timeout=5000)
 

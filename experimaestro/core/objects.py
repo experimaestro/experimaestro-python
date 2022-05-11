@@ -1076,6 +1076,12 @@ class TypeConfig:
     def __repr__(self):
         return f"Config[{self.__xpmtype__.identifier}]"
 
+    def __str__(self):
+        params = ", ".join(
+            [f"{key}={value}" for key, value in self.__xpm__.values.items()]
+        )
+        return f"{self.__xpmtype__.objecttype.__module__}.{self.__xpmtype__.objecttype.__qualname__}({params})"
+
     def tag(self, name, value):
         self.__xpm__.addtag(name, value)
         return self

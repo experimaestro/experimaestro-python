@@ -6,8 +6,7 @@
     import { success, error } from 'xpm/ui/notifications'
     export let job
     import { copyToClibpoard } from './clipboard'
-
-    $: progress = job.progress[0].progress
+    $: progress = job.progress.length > 0 ? job.progress[0].progress : 0
 </script>
 
 <div class="resource">
