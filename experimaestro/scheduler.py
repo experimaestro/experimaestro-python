@@ -154,7 +154,12 @@ class Job(Resource):
         return self._progress
 
     def set_progress(self, level: int, value: float, desc: Optional[str]):
-        assert value >= 0 and value <= 1
+        if value < 0:
+            logger.warning(f"Progress value out of bounds ({value})")
+            value = 0
+        elif value > 1:
+            logger.warning(f"Progress value out of bounds ({value})")
+            value = 1
 
         # Adjust the length of the array
         self._progress = self._progress[: (level + 1)]
