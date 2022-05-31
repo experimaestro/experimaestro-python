@@ -2,6 +2,8 @@
 
 ## bash script (default)
 
+By default, jobs are launched directly by the scheduler.
+
 ## Slurm (since 0.8.7)
 
 The [Slurm](https://slurm.schedmd.com/documentation.html) workload manager launcher is supported.
@@ -29,3 +31,5 @@ The Slurm launcher constructor and the `config` method can take the following pa
 - `time`: Maximum job time (in seconds)
 - `gpus`: Total number of GPUs
 - `gpus_per_node`: Number of GPUs per node
+- `account`: The slurm account for launching the job
+- `qos`: The requested Quality of Service
