@@ -76,6 +76,7 @@ class Reporter(threading.Thread):
 
     @staticmethod
     def isfatal_httperror(e: Exception) -> bool:
+        """Returns True if this HTTP error indicates that the server won't recover"""
         if isinstance(e, HTTPError):
             if e.code >= 400 and e.code < 500:
                 return True
@@ -123,16 +124,16 @@ class Reporter(threading.Thread):
                             url = "{}/progress?{}".format(
                                 baseurl, urllib.parse.urlencode(params)
                             )
-                            logger.warning("Reporting progress %s", params)
+                            logger.debug("Reporting progress %s", params)
                             try:
                                 with urlopen(url) as _:
-                                    logger.info(
+                                    logger.debug(
                                         "Notification send for %s [%s]",
                                         baseurl,
                                         level,
                                     )
                             except Exception as e:
-                                logger.info(
+                                logger.warning(
                                     "Progress: %s [error while notifying %s]: %s",
                                     level,
                                     url,
@@ -207,7 +208,8 @@ class xpm_tqdm(std_tqdm):
 
     def update(self, n=1):
         result = super().update(n)
-        progress(self.n / self.total, level=self.pos)
+        if self.total is not None:
+            progress(self.n / self.total, level=self.pos)
         return result
 
     def refresh(self, nolock=False, lock_args=None):

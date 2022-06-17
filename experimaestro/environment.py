@@ -29,7 +29,10 @@ class _Schema(mm.Schema):
 
 class EnvironmentSchema(_Schema):
     hostname = mm.fields.Str()
+    """The hostname (can be empty for localhost)"""
+
     pythonpath = mm.fields.Str()
+    """Path to python executable"""
     workdir = mm.fields.Str()
     environ = mm.fields.Dict(keys=mm.fields.Str(), values=mm.fields.Str())
 

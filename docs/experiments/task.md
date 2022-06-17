@@ -75,8 +75,8 @@ accessing an attribute wraps it into another `TaskOutput` object.
 
 `TaskOutput` objects have two specific methods and variables:
 
-- `__xpm__` that is a `TaskOutputInformation` containing the `task` that was submitted
-- `__unwrap__` that returns the wrapped value (warning: unwrapping might prevent dependency tracking from working)
+- `__xpm__`, a `TaskOutputInformation` instance, containing the `task` that was submitted (dependency tracking)
+- `__unwrap__` that returns the wrapped value (warning: unwrapping might prevent dependency tracking from working, but might be useful in some corner cases)
 
 For `TaskOutputInformation`, we have:
 
