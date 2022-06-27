@@ -26,6 +26,7 @@ const stylesheets = ["./src/theme/theme.scss"];
  */
 const sourceMapsInProduction = false;
 
+const querystring = require("querystring");
 /*********************************************************************************************************************/
 /**********                                             Webpack                                             **********/
 /*********************************************************************************************************************/
@@ -172,10 +173,38 @@ const config: Configuration = {
     hot: true,
     port: 5000,
     static: "./public",
+    setupMiddlewares: (middlewares, devServer) => {
+      if (!devServer) {
+        throw new Error("webpack-dev-server is not defined");
+      }
+
+      middlewares.unshift({
+        path: "/",
+        middleware: (req, res, next) => {
+          if (req.query.token) {
+            // Sets the cookie
+            res.cookie("token", req.query.token);
+            res.redirect(307, "/");
+          } else if (req.cookie.token == undefined) {
+            res.redirect(307, "/login.html");
+          } else {
+            next();
+          }
+        },
+      });
+
+      // devServer.app!.get('/setup-middleware/some/path', (_, response) => {
+      //   response.send('setup-middlewares option GET');
+      // });
+
+      return middlewares;
+    },
     proxy: {
       "/api": {
         target: `ws://localhost:${ws_port}`,
         ws: true,
+        // Forwards the cookies
+        cookieDomainRewrite: "",
       },
     },
   },

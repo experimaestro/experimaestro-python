@@ -1,5 +1,6 @@
 """Command line jobs"""
 
+from collections import ChainMap
 import json
 import os
 import io
@@ -228,7 +229,7 @@ class CommandLineJob(Job):
         self,
         commandline: CommandLine,
         parameters,
-        workspace=None,
+        workspace: Optional[Workspace] = None,
         launcher=None,
         dryrun=False,
     ):
@@ -258,6 +259,10 @@ class CommandLineJob(Job):
 
         return None
 
+    @property
+    def environ(self):
+        return ChainMap(self.workspace.environment.environ, self.launcher.environ or {})
+
     async def aio_run(self):
         if self._process:
             return self._process
@@ -282,7 +287,7 @@ class CommandLineJob(Job):
         scriptbuilder.notificationURL = self.launcher.notificationURL
         scriptPath = scriptbuilder.write(self)
 
-        processbuilder.environ = self.launcher.environ
+        processbuilder.environ = self.environ
         processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
         processbuilder.stderr = Redirect.file(self.stderr)
         processbuilder.stdout = Redirect.file(self.stdout)

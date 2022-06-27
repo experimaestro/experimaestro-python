@@ -1,6 +1,10 @@
+from ast import unparse
 import logging
 import asyncio
 import urllib
+from urllib.parse import parse_qs, urlparse, urlunparse
+import uuid
+from experimaestro.server.auth import get_cookie
 import pkg_resources
 import websockets
 import websockets.exceptions
@@ -107,6 +111,10 @@ class Listener(BaseListener):
 
 
 async def handler(websocket, path, listener: Listener):
+    if not websocket.authorized:
+        await websocket.send("unauthorized")
+        return
+
     await listener.register(websocket)
     try:
         while True:
@@ -116,7 +124,7 @@ async def handler(websocket, path, listener: Listener):
                 assert isinstance(actiontype, str)
             except websockets.exceptions.ConnectionClosedOK:
                 break
-            except Exception as e:
+            except Exception:
                 await websocket.send(
                     json_dumps({"error": True, "message": "message parsing error"})
                 )
@@ -167,16 +175,35 @@ MIMETYPES = {
 }
 
 
-class RequestProcessor:
-    def __init__(self, scheduler):
-        self.scheduler = scheduler
+class ServerProtocol(websockets.WebSocketServerProtocol):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = None
 
-    async def __call__(self, path, request_headers):
-        headers = websockets.http.Headers()
-
+    async def process_request(self, path, headers):
+        # if "Upgrade" in headers:
         if path == "/api" or path == "/ws":
-            # Continue HTTP upgrade
+            self.authorized = False
+            token = get_cookie(headers.get("Cookie", ""), "token")
+            if token == self.token:
+                self.authorized = True
+
             return None
+
+        resp_headers = websockets.http.Headers()
+
+        # Detect a token and redirect (to login or page)
+        url = urlparse(path)
+        if token := parse_qs(url.query).get("token", ""):
+            resp_headers["Set-Cookie"] = f"token={token[0]}"
+            resp_headers["Location"] = f"http://{self._host}:{self._port}{url.path}"
+            return http.HTTPStatus.TEMPORARY_REDIRECT, resp_headers, b"Redirection\n"
+
+        token = get_cookie(headers.get("Cookie", ""), "token")
+        if token is not None or token != self.token:
+            resp_headers["Set-Cookie"] = "token=;expires=Thu, 01 Jan 1970 00:00:00 GMT"
+            resp_headers["Location"] = f"http://{self._host}:{self._port}/login.html"
+            return http.HTTPStatus.TEMPORARY_REDIRECT, resp_headers, b"Redirect\n"
 
         if path.startswith("/notifications/"):
             m = re.match(r"^/notifications/([a-z0-9]+)/progress\?(.*)$", path)
@@ -200,15 +227,27 @@ class RequestProcessor:
         datapath = "data%s" % path
         if pkg_resources.resource_exists("experimaestro.server", datapath):
             code = http.HTTPStatus.OK
-            headers["Cache-Control"] = "max-age=0"
+            resp_headers["Cache-Control"] = "max-age=0"
             mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
-            headers["Content-Type"] = mimetype
-            logging.info("Reading %s [%s]", datapath, mimetype)
+            resp_headers["Content-Type"] = mimetype
+            logging.debug("Reading %s [%s]", datapath, mimetype)
             body = pkg_resources.resource_string("experimaestro.server", datapath)
-            return (code, headers, body)
+            return (code, resp_headers, body)
 
-        headers["Content-Type"] = MIMETYPES["txt"]
-        return (http.HTTPStatus.NOT_FOUND, headers, "No such path %s" % path)
+        resp_headers["Content-Type"] = MIMETYPES["txt"]
+        return (http.HTTPStatus.NOT_FOUND, resp_headers, "No such path %s" % path)
+
+
+class ServerProtocolFactory:
+    def __init__(self, scheduler: Scheduler, token: str):
+        self.scheduler = scheduler
+        self.token = token
+
+    def __call__(self, *args, **kwargs):
+        protocol = ServerProtocol(*args, **kwargs)
+        protocol.scheduler = self.scheduler
+        protocol.token = self.token
+        return protocol
 
 
 class Server:
@@ -221,6 +260,7 @@ class Server:
         self.scheduler = scheduler
         self._loop = None
         self._stop = None
+        self.token = uuid.uuid4().hex
 
     def getNotificationSpec(self):
         return (
@@ -261,11 +301,20 @@ class Server:
 
     async def _serve(self, stop):
         bound_handler = functools.partial(handler, listener=self.listener)
-        process_request = RequestProcessor(self.scheduler)
+        logger = logging.getLogger("websockets.server")
+        logger.setLevel(logging.WARNING)
         async with websockets.serve(
-            bound_handler, self.bindinghost, self._port, process_request=process_request
+            bound_handler,
+            self.bindinghost,
+            self._port,  # process_request=process_request,
+            create_protocol=ServerProtocolFactory(self.scheduler, self.token),
         ) as server:
             self._port_future.set_result(server.sockets[0].getsockname()[1])
-            logging.info("Webserver started on http://%s:%d", self.host, self._port)
+            logging.info(
+                "Webserver started on http://%s:%d?token=%s",
+                self.host,
+                self._port,
+                self.token,
+            )
             await stop
         logging.info("Server stopped")

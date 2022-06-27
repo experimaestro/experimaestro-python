@@ -1,14 +1,23 @@
 from pathlib import Path
 
+from experimaestro.environment import Environment
+
 
 class Workspace:
-    """A workspace"""
+    """An experimental workspace
+
+    This workspace is created by an experiment object and is used by launchers
+    to set up jobs
+    """
 
     CURRENT = None
+    environment: Environment
 
     """Creates a workspace for experiments"""
 
-    def __init__(self, path: Path, launcher=None):
+    def __init__(self, environment: Environment, launcher=None):
+        self.environment = environment
+        path = environment.workdir
         if isinstance(path, Path):
             path = path.absolute()
         self.path = path

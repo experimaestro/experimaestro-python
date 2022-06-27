@@ -53,7 +53,7 @@ class Settings(JsonSettings):
 
 @schema(EnvironmentSchema)
 class Environment:
-    """This defines the environment for an experiment, which can be stored"""
+    """This defines the environment for an experiment, and can be stored"""
 
     def __init__(self, workdir=None):
         self.hostname = None
@@ -75,6 +75,10 @@ class Environment:
     @workdir.setter
     def workdir(self, value):
         self._workdir = value
+
+    def setenv(self, key: str, value: str):
+        """Set the environment variable with key"""
+        self.environ[key] = value
 
     @staticmethod
     @memoize()

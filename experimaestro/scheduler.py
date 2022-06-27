@@ -96,7 +96,7 @@ class JobDependency(Dependency):
 
 
 class Job(Resource):
-    """Context of a job"""
+    """A job is a resouce that is produced by the execution of some code"""
 
     # Set by the scheduler
     _readyEvent: Optional[asyncio.Event]
@@ -610,12 +610,16 @@ class Scheduler:
                     if self.xp.server is not None:
                         job.add_notification_server(self.xp.server)
 
-                    # Runs the job
-                    process = await job.aio_run()
-
                 except Exception:
                     logger.warning("Error while locking job", exc_info=True)
                     return JobState.WAITING
+
+                try:
+                    # Runs the job
+                    process = await job.aio_run()
+                except Exception:
+                    logger.warning("Error while starting job", exc_info=True)
+                    return JobState.ERROR
 
             try:
                 if isinstance(process, JobState):
@@ -685,7 +689,7 @@ class experiment:
             self.environment = Environment(workdir=env)
 
         # Creates the workspace
-        self.workspace = Workspace(self.environment.workdir, launcher=launcher)
+        self.workspace = Workspace(self.environment, launcher=launcher)
         self.workdir = self.workspace.experimentspath / name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.xplockpath = self.workdir / "lock"
@@ -758,7 +762,8 @@ class experiment:
         return future.result()
 
     def setenv(self, name, value):
-        self.workspace.launcher.environ[name] = value
+        """Shortcut to set the environment value"""
+        self.environment.setenv(name, value)
 
     def token(self, name: str, count: int):
         """Returns a token for this experiment depending on the host"""

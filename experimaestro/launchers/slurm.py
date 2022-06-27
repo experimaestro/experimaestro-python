@@ -34,19 +34,15 @@ class SlurmJobState:
 
     def finished(self):
         """Returns true if the job has finished"""
-        return (
-            self.status
-            in [
-                "COMPLETED",
-                "FAILED",
-                "DEADLINE",
-                "NODE_FAIL",
-                "REVOKED",
-                "TIMEOUT",
-                "BOOT_FAIL",
-            ]
-            or self.status.startswith("CANCELLED")
-        )
+        return self.status in [
+            "COMPLETED",
+            "FAILED",
+            "DEADLINE",
+            "NODE_FAIL",
+            "REVOKED",
+            "TIMEOUT",
+            "BOOT_FAIL",
+        ] or self.status.startswith("CANCELLED")
 
     def __repr__(self):
         return f"{self.status} ({self.start}-{self.end})"
@@ -235,8 +231,17 @@ class SlurmOptions:
     qos: Optional[str] = None
     """The requested Quality of Service"""
 
+    partition: Optional[str] = None
+    """The requested partition"""
+
     mem: Optional[str] = None
     """Requested memory on the node (in megabytes by default)"""
+
+    exclude: Optional[str] = None
+    """List of hosts to exclude"""
+
+    mem_per_gpu: Optional[str] = None
+    """Requested memory per allocated GPU (size with units: K, M, G, or T)"""
 
     # GPU-related
     gpus: Optional[int] = None

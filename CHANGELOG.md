@@ -1,3 +1,5 @@
+- Token authentification
+
 # 0.10.0
 
 - Forces a configuration to be a meta-parameter or a parameter

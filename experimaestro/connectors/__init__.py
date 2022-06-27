@@ -10,7 +10,7 @@ This module contains :
 
 import enum
 from experimaestro.compat import cached_property
-from typing import Any, Dict, Optional, Type, Union
+from typing import Any, Dict, Mapping, Optional, Type, Union
 from pathlib import Path
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
@@ -121,7 +121,7 @@ class ProcessBuilder:
         self.stdout = Redirect.inherit()
         self.stderr = Redirect.inherit()
         self.detach = True
-        self.environ = {}
+        self.environ: Mapping[str, str] = {}
         self.command = []
 
     def start(self) -> Process:

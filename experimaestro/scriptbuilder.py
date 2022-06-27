@@ -1,3 +1,4 @@
+from collections import ChainMap
 from pathlib import Path
 from typing import Optional, Dict, List
 
@@ -106,7 +107,9 @@ class ShScriptBuilder:
             # Use pipefail for fine grained analysis of errors in commands
             out.write("set -o pipefail\n\n")
 
-            for name, value in job.launcher.environ.items():
+            job.workspace
+
+            for name, value in job.environ.items():
                 out.write("""export {}={}\n""".format(name, shquote(value)))
 
             # Write some command

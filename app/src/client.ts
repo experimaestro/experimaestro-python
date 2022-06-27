@@ -23,13 +23,14 @@ class Client {
     this.ws.addEventListener("message", this.message);
   }
 
-  open = () => {
+  open = (event) => {
     console.log("Connection opened");
     connected.update((_) => true);
     this.send({ type: "refresh" });
   };
 
-  close = () => {
+  close = (event) => {
+    console.log("Closing in WS", this, event);
     console.log("Connection closed");
     connected.update((_) => false);
     info("Websocket connexion closed");
@@ -37,6 +38,11 @@ class Client {
 
   message = (event: any) => {
     console.log("[WS:in]", event.data);
+    if (event.data == "unauthorized") {
+      window.location.href = "/login.html";
+      return;
+    }
+
     let action = JSON.parse(event.data);
     if (action.error) {
       error(action.message);
