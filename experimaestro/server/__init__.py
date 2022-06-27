@@ -1,8 +1,7 @@
-from ast import unparse
 import logging
 import asyncio
 import urllib
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import parse_qs, urlparse
 import uuid
 from experimaestro.server.auth import get_cookie
 import pkg_resources
@@ -193,18 +192,6 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
         resp_headers = websockets.http.Headers()
 
         # Detect a token and redirect (to login or page)
-        url = urlparse(path)
-        if token := parse_qs(url.query).get("token", ""):
-            resp_headers["Set-Cookie"] = f"token={token[0]}"
-            resp_headers["Location"] = f"http://{self._host}:{self._port}{url.path}"
-            return http.HTTPStatus.TEMPORARY_REDIRECT, resp_headers, b"Redirection\n"
-
-        token = get_cookie(headers.get("Cookie", ""), "token")
-        if token is not None or token != self.token:
-            resp_headers["Set-Cookie"] = "token=;expires=Thu, 01 Jan 1970 00:00:00 GMT"
-            resp_headers["Location"] = f"http://{self._host}:{self._port}/login.html"
-            return http.HTTPStatus.TEMPORARY_REDIRECT, resp_headers, b"Redirect\n"
-
         if path.startswith("/notifications/"):
             m = re.match(r"^/notifications/([a-z0-9]+)/progress\?(.*)$", path)
             if m:
@@ -220,6 +207,25 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
                     # Just ignore
                     pass
                 return (http.HTTPStatus.OK, headers, "")
+
+        if path != "/login.html":
+            url = urlparse(path)
+            if token := parse_qs(url.query).get("token", ""):
+                resp_headers["Set-Cookie"] = f"token={token[0]}"
+                resp_headers["Location"] = f"{url.path}"
+                return (
+                    http.HTTPStatus.TEMPORARY_REDIRECT,
+                    resp_headers,
+                    b"Redirection\n",
+                )
+
+            token = get_cookie(headers.get("Cookie", ""), "token")
+            if token != self.token:
+                resp_headers[
+                    "Set-Cookie"
+                ] = "token=;expires=Thu, 01 Jan 1970 00:00:00 GMT"
+                resp_headers["Location"] = f"/login.html"
+                return http.HTTPStatus.TEMPORARY_REDIRECT, resp_headers, b"Redirect\n"
 
         if path == "/":
             path = "/index.html"

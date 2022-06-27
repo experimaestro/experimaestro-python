@@ -26,7 +26,9 @@ const stylesheets = ["./src/theme/theme.scss"];
  */
 const sourceMapsInProduction = false;
 
-const querystring = require("querystring");
+// const HtmlWebpackPlugin = require('html-webpack-plugin');
+const CopyPlugin = require("copy-webpack-plugin");
+
 /*********************************************************************************************************************/
 /**********                                             Webpack                                             **********/
 /*********************************************************************************************************************/
@@ -64,8 +66,8 @@ const config: Configuration = {
     mainFields: ["svelte", "browser", "module", "main"],
   },
   output: {
-    path: path.resolve(__dirname, "../experimaestro/server/data/static"),
-    publicPath: "/static/",
+    path: path.resolve(__dirname, "../experimaestro/server/data"),
+    publicPath: "/",
     filename: "[name].js",
     chunkFilename: "[name].[id].js",
   },
@@ -210,6 +212,9 @@ const config: Configuration = {
   },
   target: isDevelopment ? "web" : "browserslist",
   plugins: [
+    new CopyPlugin({
+      patterns: [{ from: "public", to: "." }],
+    }),
     new MiniCssExtractPlugin({
       filename: "[name].css",
     }),
