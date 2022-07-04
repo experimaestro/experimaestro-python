@@ -1,6 +1,11 @@
 # Command Line Interface
 
-## Dealing with orphans
+## Job Control
+
+Besides the web interface, it is possible to use the command line to check the job
+status and control jobs.
+
+## Cleaning up
 
 Check for tasks that are not part of any experimental plan in the given
 experimental folder.

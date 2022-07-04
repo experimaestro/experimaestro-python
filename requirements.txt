@@ -16,6 +16,8 @@ docstring_parser
 termcolor
 requests
 pyparsing
+# Parse size 
+humanfriendly
 
 # Avoid version 0.10.4
 watchdog > 2.0.0

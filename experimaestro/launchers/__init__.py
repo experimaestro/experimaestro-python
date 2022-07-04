@@ -1,5 +1,5 @@
 from pathlib import Path, PosixPath
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 from experimaestro.commandline import CommandLineJob
 from experimaestro.connectors import Connector
 from experimaestro.connectors.local import ProcessBuilder, LocalConnector
