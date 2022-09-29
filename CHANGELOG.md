@@ -1,3 +1,6 @@
+# 0.10.6
+
+- Python script for launching task (better compatibility with OS X/Windows)
 - Token authentification
 
 # 0.10.0
