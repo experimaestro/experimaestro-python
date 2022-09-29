@@ -1,5 +1,6 @@
 import click
-from experimaestro import parse_commandline, Environment
+from experimaestro import Environment
+from experimaestro.run import parse_commandline
 
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
 
@@ -8,13 +9,6 @@ from experimaestro import parse_commandline, Environment
 def cli():
     """Main entry point for CLI"""
     pass
-
-
-@cli.command(context_settings={"allow_extra_args": True})
-@click.pass_context
-def xpm(context):
-    """Command used to run a task"""
-    parse_commandline(context)
 
 
 class forwardoptionMetaclass(type):

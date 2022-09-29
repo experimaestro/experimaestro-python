@@ -91,6 +91,16 @@ class Reporter(threading.Thread):
     def shouldreportprogress(self):
         return any(level.shouldreportprogress(self) for level in self.levels)
 
+    def check_urls(self):
+        mtime = os.path.getmtime(self.path)
+        if mtime > self.lastcheck:
+            for f in self.path.iterdir():
+                self.urls[f.name] = f.read_text().strip()
+                logger.info("Added new notification URL: %s", self.urls[f.name])
+                f.unlink()
+
+            self.lastcheck = os.path.getmtime(self.path)
+
     def run(self):
         logger.info("Running notification thread")
 
@@ -104,14 +114,7 @@ class Reporter(threading.Thread):
             toremove = []
 
             # Check if new notification servers are on
-            mtime = os.path.getmtime(self.path)
-            if mtime > self.lastcheck:
-                for f in self.path.iterdir():
-                    self.urls[f.name] = f.read_text().strip()
-                    logger.info("Added new notification URL: %s", self.urls[f.name])
-                    f.unlink()
-
-                self.lastcheck = os.path.getmtime(self.path)
+            self.check_urls()
 
             if self.urls:
                 # OK, let's go
@@ -151,6 +154,24 @@ class Reporter(threading.Thread):
                     if level.shouldreportprogress(self):
                         params = level.report()
                         logger.info("Progress: %s", level)
+
+    def eoj(self):
+        with self.cv:
+            self.check_urls()
+            if self.urls:
+                # Go over all URLs
+                for key, baseurl in self.urls.items():
+                    url = "{}?status=eoj".format(baseurl)
+                    try:
+                        with urlopen(url) as _:
+                            logger.debug(
+                                "EOJ botification sent for %s",
+                                baseurl,
+                            )
+                    except Exception:
+                        logger.warning(
+                            "Could not report EOJ",
+                        )
 
     def setprogress(self, progress: float, level: int, desc: Optional[str]):
         """Sets the new progress if sufficiently different"""
@@ -192,6 +213,11 @@ def progress(value: float, level=0, desc: Optional[str] = None):
         # Skip if in a slave process
         return
     Reporter.instance().setprogress(value, level, desc)
+
+
+def report_eoj():
+    """Notify that the job is over"""
+    Reporter.instance().eoj()
 
 
 class xpm_tqdm(std_tqdm):

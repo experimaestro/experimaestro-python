@@ -4,8 +4,6 @@ if __name__ == "__main__":
     from pathlib import Path
     import time
 
-    logging.basicConfig(level=logging.DEBUG)
-
     from experimaestro.scheduler import JobState
     from experimaestro.tests.utils import (
         TemporaryExperiment,
@@ -14,7 +12,19 @@ if __name__ == "__main__":
     )
     from experimaestro.tests.task_tokens import TokenTask
 
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    logging.getLogger("xpm").setLevel(logging.DEBUG)
+
     workdir, x, lockingpath, readypath, timepath = sys.argv[1:]
+
+    handler = logging.StreamHandler()
+    bf = logging.Formatter(
+        f"[XP{x}] {{name:10s}} {{levelname:8s}} {{message}}", style="{"
+    )
+    handler.setFormatter(bf)
+    root.addHandler(handler)
+
     with TemporaryExperiment("reschedule%s" % x, workdir=workdir) as xp:
         logging.info("Reschedule with token [%s]: starting task in %s", x, workdir)
         token = xp.workspace.connector.createtoken("test-token-reschedule", 1)
@@ -23,7 +33,7 @@ if __name__ == "__main__":
             .add_dependencies(token.dependency(1))
             .submit()
         )
-        logging.info("Waiting for task to be scheduled")
+        logging.info("Waiting for task (token with %s) to be scheduled", lockingpath)
         while task.job.state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 

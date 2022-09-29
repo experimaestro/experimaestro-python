@@ -39,12 +39,12 @@ class Launcher:
     def get(path: Path):
         """Get a default launcher for a given path"""
         if isinstance(path, PosixPath):
-            from .unix import UnixLauncher
+            from .python import PythonLauncher
 
-            return UnixLauncher(LocalConnector())
+            return PythonLauncher(LocalConnector())
 
         if isinstance(path, SshPath):
-            from .unix import UnixLauncher
+            from .python import PythonLauncher
 
-            return UnixLauncher(SshConnector.fromPath(path))
+            return PythonLauncher(SshConnector.fromPath(path))
         raise ValueError("Cannot create a default launcher for %s", type(path))

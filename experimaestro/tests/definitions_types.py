@@ -1,4 +1,4 @@
-from experimaestro import argument, task, parse_commandline
+from experimaestro import argument, task
 
 
 @argument("value", type=int)
@@ -15,7 +15,3 @@ class FloatTask:
     def execute(self):
         if not isinstance(self.value, float):
             raise AssertionError("Not a float but %s" % type(self.value))
-
-
-if __name__ == "__main__":
-    parse_commandline()

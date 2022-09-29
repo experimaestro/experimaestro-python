@@ -561,7 +561,7 @@ class Scheduler:
 
         return job.state
 
-    async def aio_start(self, job) -> Optional[JobState]:
+    async def aio_start(self, job: Job) -> Optional[JobState]:
         """Start a job
 
         Returns None if the dependencies could not be locked after all
@@ -755,10 +755,9 @@ class experiment:
                     await self.central.exitCondition.wait()
 
                 if self.failedJobs:
-                    raise FailedExperiment("%d failed jobs", self.failedJobs)
+                    raise FailedExperiment(f"{self.failedJobs} failed jobs")
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
-
         return future.result()
 
     def setenv(self, name, value):
@@ -818,22 +817,25 @@ class experiment:
             rmtree(self.jobsbakpath)
 
         # Close the different locks
-        if exc_type:
-            logger.exception("Not waiting since an exception was thrown")
-        else:
-            self.wait()
+        try:
+            if exc_type:
+                logger.exception(
+                    "Not waiting since an exception was thrown (some jobs may be running)"
+                )
+            else:
+                self.wait()
+        finally:
+            SIGNAL_HANDLER.remove(self)
 
-        SIGNAL_HANDLER.remove(self)
+            if self.central is not None:
+                self.central.loop.stop()
 
-        if self.central is not None:
-            self.central.loop.stop()
+            self.central = None
+            self.workspace.__exit__(exc_type, exc_value, traceback)
+            if self.xplock:
+                self.xplock.__exit__(exc_type, exc_value, traceback)
 
-        self.central = None
-        self.workspace.__exit__(exc_type, exc_value, traceback)
-        if self.xplock:
-            self.xplock.__exit__(exc_type, exc_value, traceback)
-
-        # Put back old experiment as current one
-        experiment.CURRENT = self.old_experiment
-        if self.server:
-            self.server.stop()
+            # Put back old experiment as current one
+            experiment.CURRENT = self.old_experiment
+            if self.server:
+                self.server.stop()

@@ -72,7 +72,7 @@ def test_slurm_config(tmp_path, slurmlauncher: SlurmLauncher):
     assert gotoptions == {key: str(value) for key, value in options.items()}
 
 
-@pytest.mark.timeout(timeout=3)
+@pytest.mark.timeout(3)
 def test_slurm_batchprocess(tmp_path: Path, slurmlauncher: SlurmLauncher):
     waitFromSpec(tmp_path, slurmlauncher)
 

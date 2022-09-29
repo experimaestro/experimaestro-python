@@ -47,7 +47,9 @@ class LocalProcess(Process):
         return f"Process({self._process.pid})"
 
     def wait(self) -> int:
+        logger.debug("Waiting for process with PID %s", self._process.pid)
         code = self._process.wait()
+        logger.debug("Finished to wait for process with PID %s", self._process.pid)
         return code
 
     async def aio_isrunning(self):

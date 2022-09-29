@@ -9,9 +9,7 @@ import subprocess
 import json
 from termcolor import colored, cprint
 
-from experimaestro.core.objects import Config, ConfigInformation
 import experimaestro
-import experimaestro.taskglobals as taskglobals
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -59,27 +57,9 @@ def version():
 def run(parameters):
     """Run a task"""
 
-    with open(parameters, "r") as fp:
-        params = json.load(fp)
-        env = taskglobals.Env.instance()
+    from experimaestro.run import run as do_run
 
-        env.wspath = Path(params["workspace"])
-        env.taskpath = parameters.parent
-
-        task = ConfigInformation.fromParameters(params["objects"])
-        task.__taskdir__ = Path.cwd()
-
-        # Set the tags
-        task.__tags__ = params["tags"]
-
-        # If we have sub-parameters, we set the __maintaskdir__ folder
-        if params["has_subparam"]:
-            task.__maintaskdir__ = Path.cwd().parents[1]
-
-        from experimaestro import progress
-
-        progress(0)
-        task.execute()
+    do_run(parameters)
 
 
 @click.option(

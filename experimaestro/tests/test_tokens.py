@@ -166,8 +166,8 @@ def test_token_reschedule():
     - we wait for both to be scheduled
     - we write a file so that both can finish
     """
-    queue1 = multiprocessing.Queue(3)
-    queue2 = multiprocessing.Queue(3)
+    # queue1 = multiprocessing.Queue(3)
+    # queue2 = multiprocessing.Queue(3)
 
     with TemporaryDirectory("reschedule") as workdir:
         lockingpath = workdir / "lockingpath"
@@ -182,25 +182,38 @@ def test_token_reschedule():
         time1 = workdir / "time.1"
         p1 = subprocess.Popen(command + ["1", lockingpath, str(ready1), str(time1)])
 
-        ready2 = workdir / "ready.1"
+        ready2 = workdir / "ready.2"
         time2 = workdir / "time.2"
         p2 = subprocess.Popen(command + ["2", lockingpath, str(ready2), str(time2)])
 
+        logging.info("Waiting for both experiments to be ready")
+
         try:
             with timeout(20):
+                logging.info("Waiting for both experiments to be ready")
                 # Wait that both processes are ready
                 while not ready1.is_file():
                     time.sleep(0.01)
                 while not ready2.is_file():
                     time.sleep(0.01)
-                logging.info("Both processes are ready: allowing tasks to finish")
+
+                # Create the locking path
+                logging.info(
+                    "Both processes are ready: allowing tasks to finish by writing in %s",
+                    lockingpath,
+                )
                 lockingpath.write_text("Let's go")
 
                 # Waiting for the output
                 while not time1.is_file():
                     time.sleep(0.01)
+                logging.info("Experiment 1 finished")
+
                 while not time2.is_file():
                     time.sleep(0.01)
+                logging.info("Experiment 2 finished")
+
+                logging.info("Both processes are ready: allowing tasks to finish")
 
                 time1 = get_times_frompath(time1)
                 time2 = get_times_frompath(time2)

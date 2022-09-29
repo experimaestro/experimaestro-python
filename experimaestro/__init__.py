@@ -48,9 +48,8 @@ from .core.objects import (
 )
 from .environment import Environment
 from .workspace import Workspace
-from .scheduler import Scheduler, experiment
+from .scheduler import Scheduler, experiment, FailedExperiment
 from .notifications import progress, tqdm
-from .register import parse_commandline
 from .core.types import Any
 from .checkers import Choices
 from .xpmutils import DirectoryContext

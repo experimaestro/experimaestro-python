@@ -1,14 +1,14 @@
-from collections import ChainMap
 from pathlib import Path
-from typing import Optional, Dict, List
-
+import sys
+from typing import Optional, List
+import os
 from experimaestro.utils import logger
-from .scheduler import Workspace
-from .connectors import Connector, RedirectType, Redirect
+from .connectors import RedirectType, Redirect
 from .commandline import CommandLineJob, AbstractCommand, CommandContext, CommandPart
 from shlex import quote as shquote
 
 
+# TODO: should be reworked with the new way to build commands
 class ShCommandContext(CommandContext):
     def writeRedirection(self, out, redirect, stream):
         if redirect.type == RedirectType.INHERIT:
@@ -43,20 +43,13 @@ class ShCommandContext(CommandContext):
             self.writeRedirection(out, outputRedirect, stream)
 
 
-SH_FLOCK = """exec {0}<> {1}
-if ! flock -n {0}; then 
-    echo Could not lock {1} - stopping 1>&2
-    exit 017
-fi
-"""
+class PythonScriptBuilder:
+    """Builds a Python script"""
 
-
-class ShScriptBuilder:
-    def __init__(self, shpath: Path = "/bin/bash"):
-        self.shpath = shpath
+    def __init__(self, pythonpath: Path = None):
+        self.pythonpath = pythonpath or Path(sys.executable)
         self.lockfiles: List[Path] = []
         self.notificationURL: Optional[str] = None
-        self.preprocessCommands: Optional[AbstractCommand] = None
         self.command: Optional[AbstractCommand] = None
         self.processtype = "local"
 
@@ -72,115 +65,48 @@ class ShScriptBuilder:
         Returns:
             [type] -- [description]
         """
-        assert isinstance(job, CommandLineJob)
+        assert isinstance(
+            job, CommandLineJob
+        ), "Cannot handle a job which is not a command line job"
         assert self.command is not None
-        assert job.workspace
+        assert job.workspace, "No workspace defined for the job"
+        assert job.launcher is not None, "No launcher defined for the job"
 
         directory = job.jobpath
         connector = job.launcher.connector
-        directorypath = connector.resolve(directory)
         ws = job.workspace
         context = ShCommandContext(
             ws, job.launcher.connector, directory, job.name, job.config
         )
 
-        relpath = lambda path: shquote(context.relpath(path))
+        def relpath(path: Path):
+            return shquote(context.relpath(path))
 
-        scriptpath = job.jobpath / ("%s.sh" % job.name)
-        pidpath = relpath(job.pidpath)
+        # FIXME: big hack to generate the params.json file
+        # which is all what we need for now, but this might not be true in the future
+        with open(os.devnull, "w") as fpnull:
+            self.command.output(context, fpnull)
+        scriptpath = job.jobpath / ("%s.py" % job.name)
 
         logger.info("Writing script %s", scriptpath)
         with scriptpath.open("wt") as out:
-            out.write("#!{}\n".format(self.shpath))
+            out.write("#!{}\n".format(self.pythonpath))
             out.write("# Experimaestro generated task\n")
 
             # --- Checks locks right away
 
-            # change directory
-            out.write(f"""cd {shquote(directorypath)}\n""")
+            out.write("""from experimaestro.run import TaskRunner\nimport os\n\n""")
 
-            # Lock all the needed files
-            FIRST_FD = 9
-            for i, path in enumerate(self.lockfiles):
-                out.write(SH_FLOCK.format(i + FIRST_FD, relpath(path)))
-
-            # Use pipefail for fine grained analysis of errors in commands
-            out.write("set -o pipefail\n\n")
-
-            job.workspace
+            out.write("lockfiles = [\n")
+            for path in self.lockfiles:
+                out.write(f"   '''{relpath(path)}''',\n")
+            out.write("]\n")
 
             for name, value in job.environ.items():
-                out.write("""export {}={}\n""".format(name, shquote(value)))
-
-            # Write some command
-            if self.preprocessCommands:
-                self.preprocessCommands.output(context, out)
-
-            # --- CLEANUP
-
-            out.write("cleanup() {\n")
-
-            # Write something
-            out.write(" echo Cleaning up 1>&2\n")
-
-            # Remove traps
-            out.write(" trap - 0\n")
-
-            # Remove PID file
-            out.write("""rm %s\n""" % pidpath)
-
-            # Remove temporary files
-
-            def cleanup(c: CommandPart):
-                namedRedirections = context.getNamedRedirections(c, False)
-                for file in namedRedirections.redirections():
-                    out.write(" rm -f {}\n".format(relpath(file)))
-
-            self.command.forEach(cleanup)
-
-            # Notify if possible
-            if self.notificationURL:
-                out.write(
-                    " wget --tries=1 --connect-timeout=1 --read-timeout=1 --quiet -O "
-                )
-                out.write('/dev/null "$XPM_NOTIFICATION_URL?status=eoj"\n')
-
-            # Kills remaining processes
-            out.write(' test ! -z "$PID" && pkill -KILL -P $PID')
+                out.write(f"""os.environ["{name}"] = "{shquote(value)}"\n""")
             out.write("\n")
 
-            out.write("}\n")
-
-            # --- END CLEANUP
-
-            out.write("# Set trap to cleanup when exiting")
-            out.write("\n")
-            out.write("trap cleanup 0")
-            out.write("\n")
-
-            out.write("\n")
-
-            out.write(
-                """checkerror()  { 
-    local e; for e in \"$@\"; do [[ \"$e\" != 0 ]] && [[ "$e" != 141 ]] && exit $e; done; 
-    return 0; }\n\n"""
-            )
-
-            # Output the full command
-            out.write("(\n")
-            self.command.output(context, out)
-            out.write(") & \n")
-
-            # Retrieve PID
-            out.write("PID=$!\n")
-            out.write("wait $PID\n")
-            out.write("code=$?\n")
-            out.write("if test $code -ne 0; then\n")
-            out.write(" echo $code > {}\n".format(relpath(job.failedpath)))
-            out.write(" exit $code\n")
-            out.write("fi\n")
-            out.write("\n")
-            out.write("touch {}\n".format(relpath(job.donepath)))
+            out.write("""TaskRunner(__file__, lockfiles).run()\n""")
 
         # Set the file as executable
         connector.setExecutable(scriptpath, True)

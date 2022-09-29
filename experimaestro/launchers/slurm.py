@@ -12,7 +12,7 @@ from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from experimaestro.utils.asyncio import asyncThreadcheck
 from experimaestro.compat import cached_property
 from . import Launcher
-from experimaestro.scriptbuilder import ShScriptBuilder
+from experimaestro.scriptbuilder import PythonScriptBuilder
 from experimaestro.connectors import (
     Connector,
     ProcessBuilder,
@@ -358,7 +358,7 @@ class SlurmLauncher(Launcher):
 
         We assume *nix, but should be changed to PythonScriptBuilder when working
         """
-        builder = ShScriptBuilder()
+        builder = PythonScriptBuilder()
         builder.processtype = "slurm"
         return builder
 
