@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PosixPath, _posix_flavour
 from typing import Union
 import io
 import os
+from experimaestro.registry import LauncherRegistry, YAMLDataClass
 from fabric import Connection
 from urllib.parse import urlparse
 from itertools import chain
@@ -110,7 +112,17 @@ class SshPath(Path, PurePosixPath):
         return "ssh://%s/%s" % (self._drv, self._flavour.join(self._parts[1:]))
 
 
+@dataclass
+class SshConfiguration(YAMLDataClass):
+    yaml_tag = "!connectors:ssh"
+    hostname: str
+
+
 class SshConnector(Connector):
+    @staticmethod
+    def init_registry(registry: LauncherRegistry):
+        registry.register_connector("ssh", SshConfiguration)
+
     def __init__(self, hostname: str):
         self.connection = Connection(hostname)
         # self.hostname = hostname

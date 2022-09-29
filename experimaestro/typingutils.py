@@ -25,6 +25,22 @@ def get_list(typehint):
     return None
 
 
+def is_annotated(typehint):
+    return isinstance(typehint, typing._AnnotatedAlias)
+
+
+def get_type(typehint):
+    """Returns the type discarding Annotated and optional"""
+    while True:
+        if t := get_optional(typehint):
+            typehint = t
+        if isinstance(typehint, typing._AnnotatedAlias):
+            typehint = typing.get_args(typehint)[0]
+        else:
+            break
+    return typehint
+
+
 def get_dict(typehint):
     if isgenericalias(typehint):
         # Python 3.6, 3.7+ test

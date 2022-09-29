@@ -5,6 +5,8 @@ from experimaestro.connectors.local import LocalConnector
 import re
 import logging
 from contextlib import contextmanager
+from dataclasses import dataclass
+from experimaestro.registry import GPU, LauncherRegistry, LauncherSpec, YAMLDataClass
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from experimaestro.utils.asyncio import asyncThreadcheck
@@ -279,6 +281,29 @@ class SlurmOptions:
         return merged
 
 
+@dataclass
+class SlurmHost(YAMLDataClass):
+    yaml_tag = "!slurm:host"
+
+    name: str
+    gpus: List[GPU]
+    partitions: List[str]
+
+
+@dataclass
+class SlurmConfiguration(YAMLDataClass):
+    yaml_tag = "!slurm"
+    connector: str
+    hosts: List[SlurmHost]
+
+    def fullfills_spec(self, spec: LauncherSpec):
+        for host in self.hosts:
+            for gpu in host.gpus:
+                if gpu.memory > spec.cuda_memory:
+                    return True
+        return False
+
+
 class SlurmLauncher(Launcher):
     """Slurm workload manager launcher
 
@@ -305,6 +330,10 @@ class SlurmLauncher(Launcher):
         self.interval = interval
         self.launcherenv = launcherenv
         self.options = options or SlurmOptions()
+
+    @staticmethod
+    def init_registry(registry: LauncherRegistry):
+        registry.register_launcher("slurm", SlurmConfiguration)
 
     @cached_property
     def key(self):

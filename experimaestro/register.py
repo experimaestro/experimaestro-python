@@ -7,6 +7,7 @@ from .core.objects import ConfigInformation
 
 
 def parse_commandline(argv=None):
+    """Called when executing a task"""
     if argv is None:
         argv = sys.argv[1:]
     taskid, params = argv

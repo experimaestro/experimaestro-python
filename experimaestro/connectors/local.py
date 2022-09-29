@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path, WindowsPath, PosixPath
 import os
 import threading
+from experimaestro.registry import LauncherRegistry
 import fasteners
 import psutil
 
@@ -141,6 +142,10 @@ class LocalConnector(Connector):
         if LocalConnector.INSTANCE is None:
             LocalConnector.INSTANCE = LocalConnector()
         return LocalConnector.INSTANCE
+
+    @staticmethod
+    def init_registry(registry: LauncherRegistry):
+        pass
 
     def __init__(self, localpath: Path = None):
         localpath = localpath
