@@ -1,6 +1,7 @@
 from pathlib import Path
+from typing import Optional
 
-from experimaestro.environment import Environment
+from experimaestro.scheduler.environment import Environment
 
 
 class Workspace:
@@ -18,10 +19,11 @@ class Workspace:
     def __init__(self, environment: Environment, launcher=None):
         self.environment = environment
         path = environment.workdir
+        self.notificationURL: Optional[str] = None
         if isinstance(path, Path):
             path = path.absolute()
         self.path = path
-        from .launchers import Launcher
+        from ..launchers import Launcher
 
         self.launcher = launcher or Launcher.get(path)
 

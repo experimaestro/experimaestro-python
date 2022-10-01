@@ -2,7 +2,6 @@
 a computational resource (e.g. number of launched jobs, etc.)
 """
 
-import asyncio
 import sys
 from pathlib import Path
 from experimaestro.core.objects import Config
@@ -14,7 +13,7 @@ from typing import Dict
 
 from .ipc import ipcom
 from .locking import Lock, LockError
-from .dependencies import Dependency, DependencyStatus, Resource
+from .scheduler.dependencies import Dependency, DependencyStatus, Resource
 import logging
 import json
 

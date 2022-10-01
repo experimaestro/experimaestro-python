@@ -1,12 +1,17 @@
 from pathlib import Path, PosixPath
-from typing import Dict, List, Optional, Union
-from experimaestro.commandline import CommandLineJob
+from typing import Dict, List, Optional
+from experimaestro.commandline import AbstractCommand, Job, CommandLineJob
 from experimaestro.connectors import Connector
 from experimaestro.connectors.local import ProcessBuilder, LocalConnector
 from experimaestro.connectors.ssh import SshPath, SshConnector
 
 
 class ScriptBuilder:
+    lockfiles: List[Path]
+    command: "AbstractCommand"
+    """A script builder is responsible for generating the script
+    used to launch a command line job"""
+
     def write(self, job: CommandLineJob) -> Path:
         raise NotImplementedError()
 
@@ -29,6 +34,13 @@ class Launcher:
         """Returns a script builder"""
         raise NotImplementedError()
 
+    def onSubmit(self, job: Job):
+        """Called when submitting a job
+
+        Example of use: this allows the launcher to add token dependencies
+        """
+        pass
+
     def processbuilder(self) -> ProcessBuilder:
         """Returns the process builder for this launcher
 
@@ -39,12 +51,12 @@ class Launcher:
     def get(path: Path):
         """Get a default launcher for a given path"""
         if isinstance(path, PosixPath):
-            from .python import PythonLauncher
+            from .direct import DirectLauncher
 
-            return PythonLauncher(LocalConnector())
+            return DirectLauncher(LocalConnector())
 
         if isinstance(path, SshPath):
-            from .python import PythonLauncher
+            from .direct import DirectLauncher
 
-            return PythonLauncher(SshConnector.fromPath(path))
+            return DirectLauncher(SshConnector.fromPath(path))
         raise ValueError("Cannot create a default launcher for %s", type(path))

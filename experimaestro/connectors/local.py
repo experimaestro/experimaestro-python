@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path, WindowsPath, PosixPath
 import os
 import threading
-from experimaestro.registry import LauncherRegistry
+from experimaestro.launcherfinder import LauncherRegistry
 import fasteners
 import psutil
 

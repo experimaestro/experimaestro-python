@@ -261,11 +261,22 @@ class CommandLineJob(Job):
 
     @property
     def environ(self):
-        return ChainMap(self.workspace.environment.environ, self.launcher.environ or {})
+        return ChainMap(
+            self.workspace.environment.environ,
+            self.launcher.environ if self.launcher else {},
+        )
+
+    @property
+    def notificationURL(self):
+        if self.launcher and self.launcher.notificationURL:
+            return self.launcher.notificationURL
+        return self.workspace.notificationURL
 
     async def aio_run(self):
         if self._process:
             return self._process
+
+        assert self.launcher is not None, "No launcher defined for this job"
 
         # Use the lock during preparation
         logger.info("Running job %s...", self)
@@ -284,7 +295,7 @@ class CommandLineJob(Job):
         # Now we can write the script
         scriptbuilder.lockfiles.append(self.lockpath)
         scriptbuilder.command = self.commandline
-        scriptbuilder.notificationURL = self.launcher.notificationURL
+        scriptbuilder.notificationURL = self.notificationURL
         scriptPath = scriptbuilder.write(self)
 
         processbuilder.environ = self.environ

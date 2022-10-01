@@ -11,7 +11,7 @@ import websockets.http
 import http
 import json
 import threading
-from typing import Optional
+from typing import Optional, Tuple
 import time
 import functools
 from json import JSONEncoder
@@ -259,7 +259,7 @@ class ServerProtocolFactory:
 class Server:
     def __init__(self, scheduler: Scheduler, port: int, *, host=None):
         self.bindinghost = (
-            "127.0.0.1" if host is None or host == "127.0.0.1" else "0.0.0.0"
+            "127.0.0.1" if (host is None or host == "127.0.0.1") else "0.0.0.0"
         )
         self.host = host or "127.0.0.1"
         self._port = port
@@ -268,7 +268,9 @@ class Server:
         self._stop = None
         self.token = uuid.uuid4().hex
 
-    def getNotificationSpec(self):
+    def getNotificationSpec(self) -> Tuple[str, str]:
+        """Returns a tuple (server ID, server URL)"""
+        # TODO: return fqdn if the job is from outside
         return (
             f"""{self.host}_{self.port}.url""",
             f"""http://{self.host}:{self.port}/notifications""",

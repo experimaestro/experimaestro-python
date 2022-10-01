@@ -1,4 +1,7 @@
+from ctypes import Union
 import typing
+from typing import TypeVar, Type, Union, get_origin, get_args
+from types import GenericAlias
 
 
 def isgenericalias(typehint):

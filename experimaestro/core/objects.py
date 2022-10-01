@@ -576,7 +576,7 @@ class ConfigInformation:
             raise ValueError("%s is not a task" % self.xpmtype)
 
         # --- Submit the job
-        from experimaestro.scheduler import Job, experiment, JobContext
+        from experimaestro.scheduler import experiment, JobContext
 
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun

@@ -13,12 +13,12 @@ from typing import Dict
 
 from experimaestro.tokens import ProcessCounterToken
 
+from experimaestro.core.objects import Config, GenerationContext
+from experimaestro.utils import logger
+from experimaestro.locking import Locks, LockError, Lock
 from .environment import Environment
 from .workspace import Workspace
-from .core.objects import Config, GenerationContext
-from .utils import logger
 from .dependencies import Dependency, DependencyStatus, Resource
-from .locking import Locks, LockError, Lock
 import concurrent.futures
 
 

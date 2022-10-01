@@ -3,7 +3,7 @@ from pathlib import Path, PurePosixPath, PosixPath, _posix_flavour
 from typing import Union
 import io
 import os
-from experimaestro.registry import LauncherRegistry, YAMLDataClass
+from experimaestro.launcherfinder import LauncherRegistry, YAMLDataClass
 from fabric import Connection
 from urllib.parse import urlparse
 from itertools import chain
@@ -114,7 +114,6 @@ class SshPath(Path, PurePosixPath):
 
 @dataclass
 class SshConfiguration(YAMLDataClass):
-    yaml_tag = "!connectors:ssh"
     hostname: str
 
 

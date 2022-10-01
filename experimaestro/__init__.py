@@ -46,8 +46,8 @@ from .core.objects import (
     SerializedConfig,
     Serialized,
 )
-from .environment import Environment
-from .workspace import Workspace
+from .scheduler.environment import Environment
+from .scheduler.workspace import Workspace
 from .scheduler import Scheduler, experiment, FailedExperiment
 from .notifications import progress, tqdm
 from .core.types import Any

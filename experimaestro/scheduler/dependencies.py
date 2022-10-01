@@ -4,11 +4,11 @@ import threading
 from typing import Optional, Set, TYPE_CHECKING
 import asyncio
 from enum import Enum
-from .utils import logger
-from .locking import Lock
+from ..utils import logger
+from ..locking import Lock
 
 if TYPE_CHECKING:
-    from .scheduler import Job
+    from . import Job
 
 
 class Dependents:

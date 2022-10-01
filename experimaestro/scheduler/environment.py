@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict
 import marshmallow as mm
-from .connectors import parsepath
+from ..connectors import parsepath
 from experimaestro.utils.settings import JsonSettings, PathField
 from pytools import memoize
 
@@ -63,7 +63,7 @@ class Environment:
     @property
     def basepath(self):
         if self.hostname:
-            from .connectors.ssh import SshPath
+            from ..connectors.ssh import SshPath
 
             return SshPath(f"ssh://{self.hostname}")
         return Path()
