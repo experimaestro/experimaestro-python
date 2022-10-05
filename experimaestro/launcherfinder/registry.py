@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 import itertools
 from types import new_class
-from typing import Annotated, ClassVar, Dict, List, Optional, Set, Type
+from typing import ClassVar, Dict, List, Optional, Set, Type
+from experimaestro import Annotated
 from pathlib import Path
 import typing
 import pkg_resources

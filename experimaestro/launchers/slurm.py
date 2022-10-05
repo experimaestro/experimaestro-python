@@ -3,8 +3,8 @@ import click
 import logging
 import threading
 from pathlib import Path
+from experimaestro import Annotated
 from typing import (
-    Annotated,
     Any,
     Dict,
     List,
@@ -505,7 +505,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
 
         for partition_name, partition in self.partitions.items():
             for node in partition.nodes:
-                cpu = CPUSpecification(0, 0)
+                cpu = CPUSpecification(1, 1)
                 cuda = [CudaSpecification(0)]
 
                 for feature in node.features:

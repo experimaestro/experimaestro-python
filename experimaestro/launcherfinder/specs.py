@@ -124,10 +124,9 @@ class HostSimpleRequirement(HostRequirement):
                     # print("GPU", host_gpu, req_gpu)
                     return None
 
-        if host.cpu:
-            if host.cpu < self.cpu:
-                # print("Mem", host.cpu, self.cpu)
-                return None
+        if host.cpu < self.cpu:
+            print("Mem", host.cpu, self.cpu)
+            return None
 
         return MatchRequirement(1, self)
 

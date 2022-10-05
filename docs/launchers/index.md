@@ -36,6 +36,12 @@ The Slurm launcher constructor and the `config` method can take the following pa
 - `account`: The slurm account for launching the job
 - `qos`: The requested Quality of Service
 
+To use launcher configuration files, one can use an automatic convertion tool
+
+```sh
+scontrol show nodes | experimaestro launchers slurm convert
+```
+
 ## Launcher configuration file (since 0.11, alpha)
 
 In order to automate the process of choosing the right launcher, a `launchers.yaml`

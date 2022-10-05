@@ -1,13 +1,18 @@
-from ctypes import Union
+import sys
 import typing
-from typing import TypeVar, Type, Union, get_origin, get_args
-from types import GenericAlias
+
+if sys.version_info.major == 3 and sys.version_info.minor < 9:
+    from typing_extensions import _AnnotatedAlias as AnnotatedAlias, get_args
+else:
+    from typing import _AnnotatedAlias as AnnotatedAlias, get_args
+
+GenericAlias = typing._GenericAlias
 
 
 def isgenericalias(typehint):
     """Returns True if it is a generic type alias"""
     # Works with Python 3.7, 3.8 and 3.9
-    return isinstance(typehint, typing._GenericAlias)
+    return isinstance(typehint, GenericAlias)
 
 
 def get_optional(typehint):
@@ -29,7 +34,7 @@ def get_list(typehint):
 
 
 def is_annotated(typehint):
-    return isinstance(typehint, typing._AnnotatedAlias)
+    return isinstance(typehint, AnnotatedAlias)
 
 
 def get_type(typehint):
@@ -37,8 +42,8 @@ def get_type(typehint):
     while True:
         if t := get_optional(typehint):
             typehint = t
-        if isinstance(typehint, typing._AnnotatedAlias):
-            typehint = typing.get_args(typehint)[0]
+        if isinstance(typehint, AnnotatedAlias):
+            typehint = get_args(typehint)[0]
         else:
             break
     return typehint

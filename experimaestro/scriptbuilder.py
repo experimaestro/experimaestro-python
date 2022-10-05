@@ -106,7 +106,9 @@ class PythonScriptBuilder:
                 out.write(f"""os.environ["{name}"] = "{shquote(value)}"\n""")
             out.write("\n")
 
-            out.write("""TaskRunner(__file__, lockfiles).run()\n""")
+            out.write(
+                f"""TaskRunner("{shquote(connector.resolve(scriptpath))}", lockfiles).run()\n"""
+            )
 
         # Set the file as executable
         connector.setExecutable(scriptpath, True)

@@ -125,7 +125,7 @@ parameters** – this allows to avoid running twice the same task and the
 painful creation of unique folder names for each experiment (such as in
 e.g. Capreolus or OpenNIR), which are error-prone and time-consuming.
 
-Experimaestro has a automated process that generates a unique signature
+Experimaestro has an automated process that generates a unique signature
 for each task depending on experimental parameters – this idea is used
 for instance in [PlanOut]() to uniquely identify the system
 parameters in A/B testing. First, any value can be associated with a

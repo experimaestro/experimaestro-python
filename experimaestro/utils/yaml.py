@@ -77,7 +77,7 @@ class YAMLDataClass:
                 if typingutils.is_annotated(fieldtype):
                     initializers = [
                         x
-                        for x in typing.get_args(fieldtype)
+                        for x in typingutils.get_args(fieldtype)
                         if isinstance(x, Initialize)
                     ]
                     assert (
@@ -111,7 +111,7 @@ class YAMLDataClass:
 T = TypeVar("T")
 
 
-class YAMLList(list[T]):
+class YAMLList(List[T]):
     @classmethod
     def from_yaml(cls, loader, node):
         array = [loader.construct_object(el, deep=True) for el in node.value]
@@ -126,11 +126,11 @@ class YAMLList(list[T]):
         (list_type,) = [
             p for p in cls.__orig_bases__ if typing.get_origin(p) is YAMLList
         ]
-        (list_element_type,) = typing.get_args(list_type)
+        (list_element_type,) = typingutils.get_args(list_type)
         return list_element_type
 
 
-class YAMLDict(dict[str, T]):
+class YAMLDict(Dict[str, T]):
     @classmethod
     def from_yaml(cls, loader, node):
         map = {}
@@ -150,7 +150,7 @@ class YAMLDict(dict[str, T]):
         (list_type,) = [
             p for p in cls.__orig_bases__ if typing.get_origin(p) is YAMLDict
         ]
-        (value_type,) = typing.get_args(list_type)
+        (value_type,) = typingutils.get_args(list_type)
         return value_type
 
 
