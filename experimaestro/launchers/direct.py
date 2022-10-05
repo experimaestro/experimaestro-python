@@ -28,10 +28,12 @@ class DirectLauncher(Launcher):
 
 @dataclass
 class DirectLauncherConfiguration(YAMLDataClass, LauncherConfiguration):
-    connector: str
+    connector: str = "connector"
     cpu: CPU = field(default_factory=CPU)
     gpus: GPUList = field(default_factory=GPUList)
     tokens: Optional[Dict[str, int]] = None
+    tags: List[str] = field(default_factory=lambda: [])
+    weight: int = 0
 
     @cached_property
     def spec(self) -> HostSpecification:
@@ -43,10 +45,12 @@ class DirectLauncherConfiguration(YAMLDataClass, LauncherConfiguration):
         if requirement.match(self.spec):
             launcher = DirectLauncher(connector=registry.getConnector(self.connector))
             if self.tokens:
-                launcher = LauncherDecorator(launcher)
-                for token_identifier in self.tokens:
+                for token_identifier, count in self.tokens.items():
                     token = registry.getToken(token_identifier)
-                    launcher.add_token(token)
-                return launcher
+
+                    launcher.addListener(
+                        lambda job: job.dependencies.add(token.dependency(count))
+                    )
+            return launcher
 
         return None

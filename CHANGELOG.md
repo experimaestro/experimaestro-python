@@ -1,3 +1,8 @@
+# 0.11.0
+
+- Launcher can modify the job before submitting it to the scheduler (i.e. to add a token)
+- Launcher finder to request specific resources by querying their properties
+
 # 0.10.6
 
 - Python script for launching task (better compatibility with OS X/Windows)

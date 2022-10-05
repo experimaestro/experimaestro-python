@@ -94,7 +94,7 @@ class TaskRunner:
 
     def handle_error(self, code, frame_type):
         logger.info("Handling error")
-        self.failedpath.write_text("1")
+        self.failedpath.write_text(str(code))
         self.cleanup()
         sys.exit(1)
 
@@ -128,8 +128,13 @@ class TaskRunner:
                 run(workdir / "params.json")
 
                 # Everything went OK
-                self.donepath.touch()
                 sys.exit(0)
         except Exception:
             logger.exception("Got exception while running")
-            self.handle_error(None, None)
+            self.handle_error(1, None)
+
+        except SystemExit as e:
+            if e.code == 0:
+                self.donepath.touch()
+            else:
+                self.handle_error(e.code, None)

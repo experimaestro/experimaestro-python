@@ -1,7 +1,8 @@
 from copy import copy
 from dataclasses import dataclass
+from difflib import Match
 from enum import Enum
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 from humanfriendly import parse_size, format_size
 
 # --- Host specification part
@@ -46,6 +47,12 @@ class HostSpecification:
 # --- Query part
 
 
+@dataclass
+class MatchRequirement:
+    score: float
+    requirement: "HostSimpleRequirement"
+
+
 class HostRequirement:
     """A requirement must be a disjunction of host requirements"""
 
@@ -57,18 +64,26 @@ class HostRequirement:
     def __or__(self, other: "HostRequirement"):
         return RequirementUnion(self, other)
 
-    def match(self, host: HostSpecification) -> bool:
+    def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         raise NotImplementedError()
 
 
 class RequirementUnion(HostRequirement):
-    requirements: List[HostRequirement]
+    requirements: List["HostSimpleRequirement"]
 
-    def __init__(self, *requirements: "HostRequirement"):
+    def __init__(self, *requirements: "HostSimpleRequirement"):
         self.requirements = list(requirements)
 
-    def match(self, host: HostSpecification) -> bool:
-        return any(r.match(host) for r in self.requirements)
+    def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
+        """Returns the matched requirement (if any)"""
+        argmax: Optional[MatchRequirement] = None
+        for ix, r in enumerate(self.requirements):
+            max_score = 0.0 if argmax is None else argmax.score
+            if match := r.match(host):
+                if match.score > max_score:
+                    argmax = MatchRequirement(match.score, r)
+
+        return argmax
 
 
 class HostSimpleRequirement(HostRequirement):
@@ -98,23 +113,23 @@ class HostSimpleRequirement(HostRequirement):
         self.cuda_gpus.extend(req.cuda_gpus)
         self.cuda_gpus.sort()
 
-    def match(self, host: HostSpecification) -> bool:
+    def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         if self.cuda_gpus:
             if len(host.cuda) < len(self.cuda_gpus):
                 # print("GPU", host.cuda, self.cuda_gpus)
-                return False
+                return None
 
             for host_gpu, req_gpu in zip(host.cuda, self.cuda_gpus):
                 if host_gpu < req_gpu:
                     # print("GPU", host_gpu, req_gpu)
-                    return False
+                    return None
 
         if host.cpu:
             if host.cpu < self.cpu:
                 # print("Mem", host.cpu, self.cpu)
-                return False
+                return None
 
-        return True
+        return MatchRequirement(1, self)
 
     def __mul__(self, count: int) -> "HostSimpleRequirement":
         if count == 1:

@@ -36,12 +36,68 @@ The Slurm launcher constructor and the `config` method can take the following pa
 - `account`: The slurm account for launching the job
 - `qos`: The requested Quality of Service
 
-## Launcher configuration file (beta)
+## Launcher configuration file (since 0.11, alpha)
 
 In order to automate the process of choosing the right launcher, a `launchers.yaml`
 configuration file can be written.
 
 ```py
-# Finds a launcher so that we get 2 CUDA GPUs with 12G of memory (at least) on each
-gpulauncher_mem48 = launcher.find_launcher(LauncherSpec(cuda_memory=["12G", "12G"]))
+# Finds a launcher so that we get 2 CUDA GPUs with 14G of memory (at least) on each
+from experimaestro.launcherfinder import cuda_gpu, find_launcher
+gpulauncher = find_launcher(cuda_gpu(mem="14G") * 2)
+```
+
+Example of a configuration
+
+```yaml
+# Local launchers
+local:
+  - # Standard launcher for small tasks
+    connector: local
+
+    # Describes the available CPUs
+    cpu: { cores: 40, memory: 1G }
+
+  - # Intensive launcher with more memory and GPU
+    connector: local
+
+    # Use a token to avoid running too many tasks
+    tokens:
+      localtoken: 1
+
+    cpu: { cores: 40, memory: 8G }
+
+    gpus:
+      - model: GTX1080
+        count: 1
+        memory: 8116MiB
+
+# Slurm launchers
+slurm:
+  - # The way to connect to the SLURM host
+    connector: slurm.gateway.com
+
+    # Describes the GPU features and link them to the two
+    # possible properties (memory and number of GPUs)
+    features_regex:
+      - GPU(?P<cuda_count>\d+)
+      - GPUM(?P<cuda_memory>\d+G)
+
+    partitions:
+      # Partition "big GPUs"
+      biggpus:
+        # has two types of nodes
+        nodes:
+          - # Nodes yep/yop
+            hosts: [yop, yep]
+            # Associated features
+            features: [GPU3, GPUM48G]
+          - hosts: [yip, yup, yap]
+            features: [GPU2, GPUM24G]
+
+      # Partition "Small GPUs"
+      smallgpus:
+        nodes:
+          - hosts: [alpha, beta, gamma, delta]
+            features: [GPU2, GPUM24G]
 ```

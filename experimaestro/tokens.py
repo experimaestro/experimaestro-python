@@ -2,6 +2,7 @@
 a computational resource (e.g. number of launched jobs, etc.)
 """
 
+from dataclasses import dataclass
 import sys
 from pathlib import Path
 from experimaestro.core.objects import Config
@@ -10,6 +11,10 @@ import threading
 import os.path
 from watchdog.events import FileSystemEventHandler
 from typing import Dict
+from experimaestro.launcherfinder.base import TokenConfiguration
+
+from experimaestro.launcherfinder.registry import LauncherRegistry
+from experimaestro.utils.yaml import YAMLDict
 
 from .ipc import ipcom
 from .locking import Lock, LockError
@@ -134,8 +139,11 @@ class TokenFile:
                     from experimaestro.connectors.local import LocalConnector
 
                     connector = LocalConnector.instance()
+
                     process = Process.fromDefinition(connector, json.loads(s))
-                    process.wait()
+                    if process is not None:
+                        # Process is None: process has finished
+                        process.wait()
 
                 self.delete()
 
@@ -169,6 +177,10 @@ class CounterToken(Token, FileSystemEventHandler):
             created = CounterToken(name, path, count)
             CounterToken.TOKENS[name] = created
         return created
+
+    @staticmethod
+    def init_registry(registry: LauncherRegistry):
+        registry.register_token("countertoken", CounterTokenConfiguration)
 
     def __init__(self, name: str, path: Path, count: int, force=True):
         """[summary]
@@ -431,3 +443,17 @@ class ProcessCounterToken(Token):
 
 if sys.platform != "win32":
     os.register_at_fork(after_in_child=CounterToken.forkhandler)
+
+
+@dataclass
+class CounterConfiguration(TokenConfiguration):
+    tokens: int
+
+    def create(self, registry: "LauncherRegistry", identifier: str):
+        from experimaestro.connectors.local import LocalConnector
+
+        return LocalConnector.instance().createtoken(identifier, self.tokens)
+
+
+class CounterTokenConfiguration(YAMLDict[CounterConfiguration]):
+    pass

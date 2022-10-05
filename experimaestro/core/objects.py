@@ -597,6 +597,17 @@ class ConfigInformation:
         self.seal(JobContext(self.job))
 
         # --- Search for dependencies
+
+        # Call onSubmit
+        launcher = (
+            launcher
+            or (workspace and workspace.launcher)
+            or (experiment.CURRENT and experiment.CURRENT.workspace.launcher)
+        )
+        if launcher:
+            launcher.onSubmit(self.job)
+
+        # Add job dependencies
         self.updatedependencies(self.job.dependencies, [], set([id(self.pyobject)]))
 
         # Add predefined dependencies

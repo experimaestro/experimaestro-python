@@ -1,4 +1,7 @@
-from typing import TYPE_CHECKING, Optional
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, List, Optional
+
+from experimaestro.utils.yaml import YAMLDataClass
 from .specs import HostRequirement
 
 if TYPE_CHECKING:
@@ -9,6 +12,9 @@ if TYPE_CHECKING:
 
 
 class LauncherConfiguration:
+    tags: List[str]
+    weight: int
+
     """Generic class for a launcher configuration"""
 
     def get(
@@ -22,6 +28,6 @@ class ConnectorConfiguration:
         raise NotImplementedError(f"For {self.__class__}")
 
 
-class TokenConfiguration:
-    def create(self, registry: "LauncherRegistry") -> "Token":
+class TokenConfiguration(YAMLDataClass):
+    def create(self, registry: "LauncherRegistry", identifier: str) -> "Token":
         raise NotImplementedError(f"For {self.__class__}")

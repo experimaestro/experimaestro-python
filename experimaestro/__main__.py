@@ -1,12 +1,11 @@
+import pkg_resources
 from itertools import chain
 from shutil import rmtree
-from typing import List, Tuple
 import click
 import logging
-from functools import update_wrapper
+from functools import cached_property, update_wrapper
 from pathlib import Path
 import subprocess
-import json
 from termcolor import colored, cprint
 
 import experimaestro
@@ -242,6 +241,29 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
             found += 1
 
     print(f"{found} jobs are not orphans")
+
+
+class Launchers(click.MultiCommand):
+    """Connectors commands"""
+
+    @cached_property
+    def commands(self):
+        map = {}
+        for ep in pkg_resources.iter_entry_points(f"experimaestro.{self.name}"):
+            if get_cli := getattr(ep.load(), "get_cli", None):
+                map[ep.name] = get_cli()
+        return map
+
+    def list_commands(self, ctx):
+        return self.commands.keys()
+
+    def get_command(self, ctx, name):
+        return self.commands[name]
+
+
+cli.add_command(Launchers("launchers", help="Launcher specific commands"))
+cli.add_command(Launchers("connectors", help="Connector specific commands"))
+cli.add_command(Launchers("tokens", help="Token specific commands"))
 
 
 def main():
