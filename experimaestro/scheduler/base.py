@@ -671,8 +671,8 @@ class experiment:
         env: Union[Path, str, Environment],
         name: str,
         *,
-        host: str = None,
-        port: int = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
         launcher=None,
     ):
         """

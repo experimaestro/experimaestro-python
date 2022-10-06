@@ -60,6 +60,8 @@ def rmfile(path: Path):
 
 
 class TaskRunner:
+    """Runs a task, after locking"""
+
     def __init__(self, scriptpath: str, lockfiles: List[str]):
         # Sets the working directory
         self.scriptpath = Path(scriptpath)
@@ -113,6 +115,9 @@ class TaskRunner:
                 fullpath = str(Path(lockfile).resolve())
                 logger.info("Locking %s", fullpath)
                 lock = fasteners.InterProcessLock(fullpath)
+                # FIXME: should have a clever way to lock
+                # Problem = slurm would have a job doing nothing...
+                # Fix = maybe with two files
                 if not lock.acquire(blocking=True):
                     logger.info("Could not lock %s", lockfile)
                     raise AssertionError("Could not lock %s", lockfile)

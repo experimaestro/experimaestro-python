@@ -6,13 +6,10 @@ from experimaestro.launcherfinder import (
     LauncherRegistry,
     HostRequirement,
 )
-from experimaestro.launcherfinder.registry import CPU, GPU, GPUList, YAMLDataClass
+from experimaestro.launcherfinder.registry import CPU, GPUList, YAMLDataClass
 from experimaestro.launcherfinder.specs import (
-    CPUSpecification,
-    CudaSpecification,
     HostSpecification,
 )
-from experimaestro.launchers.decorator import LauncherDecorator
 from experimaestro.scriptbuilder import PythonScriptBuilder
 from . import Launcher
 
@@ -47,7 +44,7 @@ class DirectLauncherConfiguration(YAMLDataClass, LauncherConfiguration):
             if self.tokens:
                 for token_identifier, count in self.tokens.items():
                     token = registry.getToken(token_identifier)
-
+                    # TODO: handle the case where this is not a CounterToken
                     launcher.addListener(
                         lambda job: job.dependencies.add(token.dependency(count))
                     )

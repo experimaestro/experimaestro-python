@@ -10,41 +10,46 @@ the config/task instance, as in the example below:
 
 !!! example
 
-    ```py3 linenums="1"
+````py3 linenums="1"
 
-        model = Model1(layers=3)
-        learnedmodel = Learn(epochs=100)
-        learnedmodel.model = model
-        learnedmodel.submit()
-        ```
+model = Model1(layers=3)
+learnedmodel = Learn(epochs=100)
+learnedmodel.model = model
+learnedmodel.submit()
+```
 
-        - line 1: the `Model1` configuration is set with argument `layers` set to `3`.
-        - line 2: the `Learn` task is configured with parameter `epochs` set to 100
-        - line 3: Set the parameter `model` of the `Learn` task instance to `model`
-        - line 4: Submit the task to the job scheduler
+- line 1: the `Model1` configuration is set with argument `layers` set to `3`.
+- line 2: the `Learn` task is configured with parameter `epochs` set to 100
+- line 3: Set the parameter `model` of the `Learn` task instance to `model`
+- line 4: Submit the task to the job scheduler
 
-    Once a task is submitted, the value of its arguments cannot be changed (it is **sealed**).
-    This allows to re-use configuration/tasks latter.
+Once a task is submitted, the value of its arguments cannot be changed (it is **sealed**).
+This allows to re-use configuration/tasks latter.
 
-    ### Unique job identifier
+### Unique job identifier
 
-    When a task is submitted, a unique id is computed based on the value of its arguments.
-    Parameters are ignored if:
+When a task is submitted, a unique id is computed based on the value of its arguments.
+Parameters are ignored if:
 
-    - They were defined with `ignored` set to `True`
-    - They have a type `Path`
+- They were defined with `ignored` set to `True`
+- They have a type `Path`
 
-    ## Tokens
+## Tokens
 
-    Tokens can be used to restrict the number of running jobs.
+Tokens can be used to restrict the number of running jobs.
 
-    ```py3
-    # Creates a token with 4 available slots
-    token = connector.createtoken("cpu", 4)
+```py3
+# Creates a token with 3 "resources"
+# (resources are whatever you want)
+token = connector.createtoken("cpu", 3)
 
-    # Add a task that needs 2 slots from the token
-    task = token(1, task)
-    ```
+# Add two tasks that needs 2 "resources" from the token
+# Those task won't be able to run at the same time
+# and one will wait until there are enough "resources"
+# before being run
+task1 = token(2, task)
+task2 = token(2, task)
+```
 
 ## Tags
 
@@ -56,7 +61,7 @@ Tagging a value can be done easily by using the `tag` function from `experimaest
 
 ```py3
 tag(value: Union[str, int, float, bool])
-```
+````
 
 For example,
 
@@ -64,20 +69,24 @@ For example,
 model = MyModel(epochs=tag(100))
 ```
 
-To retrieve tags, use the `tags` method().
-In the above example, `model.tags()` will return `{ "epochs": 100 }`
+will create a tag with key "epochs" and value "100"./
 
-### Adding a tag
-
-Adding a tag can be done by using a configuration instance method:
+Adding a tag can be also be done by using a configuration instance method:
 
 ```python
 tag(name: str, value: Union[str, int, float, bool])
 ```
 
+### Retrieving tags
+
+To retrieve tags, use the `tags` method().
+In the above example, `model.tags()` will return `{ "epochs": 100 }`
+
 ### Paths based on tags
 
-Use `tagspath(value)`
+Use `tagspath(config: Config)` to create a unique path where
+all the tags associated with configuration will be associated with
+their values. The keys are ordered to ensure the uniqueness of the path.
 
 ## Summarizing experimental results
 

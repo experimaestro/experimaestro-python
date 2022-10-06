@@ -539,6 +539,8 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
         hosts: set[str] = set()
         partitions: Set[str] = set()
 
+        # TODO:
+        # - take into account maximum node duration
         current_match = None
         for node in self.computed_nodes:
             if match := requirement.match(node):
@@ -587,6 +589,13 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
             else:
                 logger.warning("Selecting first host")
                 launcher.options.nodelist = next(iter(hosts))
+
+            if current_match.requirement.duration > 0:
+                total_seconds = current_match.requirement.duration
+                seconds = total_seconds % 60
+                minutes = (total_seconds // 60) % 60
+                hours = total_seconds // 3600
+                launcher.options.time = f"{hours}:{minutes}:{seconds}"
 
             logger.debug("Slurm options: %s", " ".join(launcher.options.args()))
             return launcher

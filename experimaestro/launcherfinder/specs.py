@@ -2,8 +2,8 @@ from copy import copy
 from dataclasses import dataclass
 from difflib import Match
 from enum import Enum
-from typing import List, Optional, Set, Tuple
-from humanfriendly import parse_size, format_size
+from typing import List, Optional, Set, Tuple, Union
+from humanfriendly import parse_size, format_size, parse_timespan
 
 # --- Host specification part
 
@@ -92,13 +92,16 @@ class HostSimpleRequirement(HostRequirement):
     cuda_gpus: List["CudaSpecification"]
     cpu: "CPUSpecification"
 
+    duration: int
+    """Requested duration (in seconds)"""
+
     def __repr__(self):
         return f"Req(cpu={self.cpu}, cuda={self.cuda_gpus})"
 
     def __init__(self, *reqs: "HostSimpleRequirement"):
         self.cuda_gpus = []
         self.cpu = CPUSpecification(0, 1)
-
+        self.duration = 0
         for req in reqs:
             self._add(req)
 
@@ -110,6 +113,7 @@ class HostSimpleRequirement(HostRequirement):
     def _add(self, req: "HostSimpleRequirement"):
         self.cpu.memory = max(req.cpu.memory, self.cpu.memory)
         self.cpu.cores = max(req.cpu.cores, self.cpu.cores)
+        self.duration = max(req.duration, self.duration)
         self.cuda_gpus.extend(req.cuda_gpus)
         self.cuda_gpus.sort()
 
@@ -154,4 +158,19 @@ def cuda_gpu(*, mem: Optional[str] = None):
     _mem = parse_size(mem) if mem else 0
     r = HostSimpleRequirement()
     r.cuda_gpus.append(CudaSpecification(_mem))
+    return r
+
+
+def duration(timespec: Union[str, int]):
+    """Request a given time duration
+
+    Args:
+        timespec: A string like 5h (5 hours), 10m (10 minutes) or 42s (42 seconds). parsable by [humanfriendly](https://humanfriendly.readthedocs.io/en/latest/api.html) or a number of seconds
+    """
+    r = HostSimpleRequirement()
+    if isinstance(timespec, (int, float)):
+        r.duration = int(timespec)
+    else:
+        r.duration = int(parse_timespan(timespec))
+
     return r
