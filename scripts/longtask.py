@@ -17,6 +17,6 @@ class TaskA(Task):
 if __name__ == "__main__":
     with TemporaryDirectory() as xppath:
         with experiment(xppath, "longxp", port=12349) as xp:
-            taska = TaskA().submit()
+            taska = TaskA().tag("task", "a").submit()
             print("Standard error", taska.__xpm__.stderr())
             xp.wait()

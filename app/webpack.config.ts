@@ -29,13 +29,14 @@ const sourceMapsInProduction = false;
 // const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require("copy-webpack-plugin");
 
+const ReactRefresh = require("@pmmmwh/react-refresh-webpack-plugin");
+
 /*********************************************************************************************************************/
 /**********                                             Webpack                                             **********/
 /*********************************************************************************************************************/
 
 import type Webpack from "webpack";
 import type WebpackDev from "webpack-dev-server";
-import SveltePreprocess from "svelte-preprocess";
 import MiniCssExtractPlugin from "mini-css-extract-plugin";
 import CSSMinimizerPlugin from "css-minimizer-webpack-plugin";
 import TerserPlugin from "terser-webpack-plugin";
@@ -55,15 +56,11 @@ console.log(`Experimaestro to be reached on port ${ws_port}`);
 const config: Configuration = {
   mode: isProduction ? "production" : "development",
   entry: {
-    index: [...stylesheets, "./src/index.ts"],
+    index: [...stylesheets, "./src/index.tsx"],
   },
   resolve: {
-    alias: {
-      // Note: Later in this config file, we'll automatically add paths from `tsconfig.compilerOptions.paths`
-      svelte: path.resolve("node_modules", "svelte"),
-    },
-    extensions: [".mjs", ".js", ".ts", ".svelte"],
-    mainFields: ["svelte", "browser", "module", "main"],
+    extensions: [".mjs", ".js", ".ts", ".tsx"],
+    mainFields: ["browser", "module", "main"],
   },
   output: {
     path: path.resolve(__dirname, "../experimaestro/server/data"),
@@ -73,43 +70,6 @@ const config: Configuration = {
   },
   module: {
     rules: [
-      // Rule: Svelte
-      {
-        test: /\.svelte$/,
-        // exclude: /node_modules/,
-        use: {
-          loader: "svelte-loader",
-          options: {
-            compilerOptions: {
-              // Dev mode must be enabled for HMR to work!
-              dev: isDevelopment,
-            },
-            emitCss: isProduction,
-            hotReload: isDevelopment,
-            hotOptions: {
-              // List of options and defaults: https://www.npmjs.com/package/svelte-loader-hot#usage
-              noPreserveState: false,
-              optimistic: true,
-            },
-            preprocess: SveltePreprocess({
-              scss: true,
-              sass: true,
-              // postcss is done later
-              postcss: false,
-            }),
-          },
-        },
-      },
-
-      // Required to prevent errors from Svelte on Webpack 5+, omit on Webpack 4
-      // See: https://github.com/sveltejs/svelte-loader#usage
-      {
-        test: /node_modules\/svelte\/.*\.mjs$/,
-        resolve: {
-          fullySpecified: false,
-        },
-      },
-
       // Rule: SASS
       {
         test: /\.(scss|sass)$/,
@@ -127,9 +87,7 @@ const config: Configuration = {
             loader: "postcss-loader",
             options: {
               postcssOptions: {
-                ctx: {
-                  hello: 1,
-                },
+                ctx: {},
               },
             },
           },
@@ -163,11 +121,21 @@ const config: Configuration = {
         ],
       },
 
-      // Rule: TypeScript
+      // Rule: JS/TS and react
       {
-        test: /\.ts$/,
-        use: "ts-loader",
+        test: /\.(ts|js)x?$/i,
         exclude: /node_modules/,
+        use: {
+          loader: "babel-loader",
+          options: {
+            presets: [
+              "@babel/preset-env",
+              "@babel/preset-react",
+              "@babel/preset-typescript",
+            ],
+            plugins: ["react-refresh/babel"],
+          },
+        },
       },
     ],
   },
@@ -182,7 +150,7 @@ const config: Configuration = {
 
       middlewares.unshift({
         path: "/",
-        middleware: (req, res, next) => {
+        middleware: (req: any, res: any, next: any) => {
           if (req.query.token) {
             // Sets the cookie
             res.cookie("token", req.query.token);
@@ -218,6 +186,7 @@ const config: Configuration = {
     new MiniCssExtractPlugin({
       filename: "[name].css",
     }),
+    new ReactRefresh(),
   ],
   devtool: isProduction && !sourceMapsInProduction ? false : "source-map",
   stats: {
@@ -310,6 +279,7 @@ if ("compilerOptions" in tsconfig && "paths" in tsconfig.compilerOptions) {
 
     if (config.resolve && config.resolve.alias) {
       if (!(wpAlias in config.resolve.alias) && wpPaths.length) {
+        // @ts-ignore
         config.resolve.alias[wpAlias] =
           wpPaths.length > 1 ? wpPaths : wpPaths[0];
       }
@@ -340,38 +310,12 @@ if (useBabel && (isProduction || useBabelInDevelopment)) {
 
   config.module?.rules?.unshift({
     test: /\.(?:m?js|ts)$/,
-    include: [
-      path.resolve(__dirname, "src"),
-      path.resolve("node_modules", "svelte"),
-    ],
+    include: [path.resolve(__dirname, "src"), path.resolve("node_modules")],
     exclude: [
       /node_modules[/\\](css-loader|core-js|webpack|regenerator-runtime)/,
     ],
     use: loader,
   });
-
-  const svelte = config.module?.rules?.find((rule) => {
-    if (typeof rule !== "object") return false;
-    else if (Array.isArray(rule.use))
-      return rule.use.includes(
-        (e: any) =>
-          typeof e.loader === "string" && e.loader.startsWith("svelte-loader")
-      );
-    else if (typeof rule.use === "object")
-      return rule.use.loader?.startsWith("svelte-loader") ?? false;
-    return false;
-  }) as Webpack.RuleSetRule;
-
-  if (!svelte) {
-    console.error("ERR: Could not find svelte-loader for babel injection!");
-    process.exit(1);
-  }
-
-  if (!Array.isArray(svelte.use)) {
-    svelte.use = [svelte.use as any];
-  }
-
-  svelte.use.unshift(loader);
 }
 
 export default config;

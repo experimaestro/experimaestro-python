@@ -1,14 +1,24 @@
-import { info, error } from "xpm/ui/notifications";
-import { connected, process } from "./store";
+import store from "./store";
+import { actions } from "./reducers";
+
+function error(message: string) {
+  console.error("Not implemented");
+}
+function info(message: string) {
+  console.error("Not implemented");
+}
 
 /// Connects to the Websocket server
 class Client {
   ws: WebSocket;
-  waiting: Map<number, any>;
+  waiting: { [key: number]: object };
   queued: Array<any>;
 
   constructor() {
     console.log("Connecting to websocket");
+
+    this.queued = [];
+    this.waiting = {};
 
     let location = window.location;
     var url =
@@ -23,17 +33,17 @@ class Client {
     this.ws.addEventListener("message", this.message);
   }
 
-  open = (event) => {
+  open = () => {
     console.log("Connection opened");
-    connected.update((_) => true);
+    store.dispatch(actions.setConnected(true));
     this.send({ type: "refresh" });
   };
 
   close = (event) => {
     console.log("Closing in WS", this, event);
     console.log("Connection closed");
-    connected.update((_) => false);
-    info("Websocket connexion closed");
+    store.dispatch(actions.setConnected(true));
+    // info("Websocket connexion closed");
   };
 
   message = (event: any) => {
@@ -47,7 +57,14 @@ class Client {
     if (action.error) {
       error(action.message);
     } else {
-      process(action);
+      switch (action.type) {
+        case "JOB_ADD":
+          store.dispatch(actions.addJob(action.payload));
+          break;
+        case "JOB_UPDATE":
+          store.dispatch(actions.updateJob(action.payload));
+          BroadcastChannel;
+      }
     }
   };
 
@@ -59,7 +76,7 @@ class Client {
     } else {
       console.log("Connection not ready");
       if (message) {
-        error("No websocket connection: could not " + message);
+        error(`No websocket connection: could not ${message}`);
       }
       return false;
     }
