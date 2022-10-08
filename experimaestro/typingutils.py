@@ -24,13 +24,20 @@ def get_optional(typehint):
     return None
 
 
-def get_list(typehint):
+def get_list_component(typehint):
+    """Returns the list component (or None if not a list)"""
     if isgenericalias(typehint):
         # Python 3.6, 3.7+ test
         if typehint.__origin__ in [typing.List, list]:
             assert len(typehint.__args__) == 1
             return typehint.__args__[0]
     return None
+
+
+get_list = get_list_component
+"""
+    :deprecated: use get_list_component
+"""
 
 
 def is_annotated(typehint):

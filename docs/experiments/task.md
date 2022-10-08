@@ -89,8 +89,7 @@ For `TaskOutputInformation`, we have:
 Sometimes, a configuration might need to compute some output that might be interesting to cache, but without relying on a fully-fledged task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
 ```py3
-@config()
-class Terms():
+class Terms(Config):
     @cache("terms.npy")
     def load(self, path: Path):
         if path.is_file():

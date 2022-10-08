@@ -1,4 +1,7 @@
+import codecs
 from collections import defaultdict
+import io
+import sys
 import click
 import logging
 import threading
@@ -10,6 +13,7 @@ from typing import (
     List,
     Optional,
     Set,
+    TextIO,
     Tuple,
     get_type_hints,
 )
@@ -385,20 +389,24 @@ def cli():
 @cli.command()
 def convert():
     """Convert the ouptut of 'scontrol show node' into a YAML form compatible with launchers.yaml"""
-    import sys
-    import re
+    import yaml
+    from experimaestro.launcherfinder import LauncherRegistry
 
+    configuration = SlurmConfiguration(id="", partitions={})
+    fill_configuration(sys.stdin, configuration)
+    yaml.dump(configuration, sys.stdout, Dumper=LauncherRegistry.instance().Dumper)
+
+
+def fill_configuration(input: TextIO, configuration: "SlurmConfiguration"):
     re_nodename = re.compile(r"""^NodeName=(\w+)""")
     re_features = re.compile(r"""^\s*AvailableFeatures=([,\w]+)""")
     re_partitions = re.compile(r"""^\s*Partitions=([,\w]+)""")
 
-    partitions2features2nodes = defaultdict(lambda: {})
-    partitions = {}
-    configuration = SlurmConfiguration(partitions=partitions)
-
     nodename = ""
     features = []
     partition_names = []
+    partitions = configuration.partitions
+    partitions2features2nodes = defaultdict(lambda: {})
 
     def process():
         for partition_name in partition_names:
@@ -416,7 +424,7 @@ def convert():
             else:
                 nodes.hosts.append(nodename)
 
-    for line in sys.stdin.readlines():
+    for line in input.readlines():
         if match := re_nodename.search(line):
             if nodename:
                 process()
@@ -428,11 +436,6 @@ def convert():
 
     if nodename:
         process()
-
-    import yaml
-    from experimaestro.launcherfinder import LauncherRegistry
-
-    yaml.dump(configuration, sys.stdout, Dumper=LauncherRegistry.instance().Dumper)
 
 
 # ---- SLURM launcher finder
@@ -482,10 +485,16 @@ class FeatureBooleanFormula:
 
 @dataclass
 class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
+    id: str
+    """Slurm ID"""
+
     partitions: Dict[str, SlurmPartition]
     connector: str = "local"
     use_features: bool = True
     use_hosts: bool = True
+
+    query_slurm: bool = False
+    """True to query SLURM directly"""
 
     tags: List[str] = field(default_factory=lambda: [])
     weight: int = 0
@@ -498,6 +507,21 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     Regex to get the information from tags
         - CUDA: cuda:count, cuda:memory
     """
+
+    def compute(self, registry: "LauncherRegistry"):
+        if self.query_slurm:
+            self.query_slurm = False
+
+            connector = registry.getConnector(self.connector)
+            pb = connector.processbuilder()
+            pb.command = ["scontrol", "--hide", "show", "nodes"]
+
+            def handle_output(input: io.BytesIO):
+                StreamReader = codecs.getreader("utf-8")
+                fill_configuration(StreamReader(input), self)
+
+            pb.stdout = Redirect.pipe(handle_output)
+            pb.start()
 
     @cached_property
     def computed_nodes(self) -> List[SlurmNodesSpecification]:
@@ -533,6 +557,9 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     def get(
         self, registry: "LauncherRegistry", requirement: HostRequirement
     ) -> Optional["Launcher"]:
+
+        # Compute the configuration if needed
+        self.compute(registry)
 
         # Compute tags or hosts
         fbf = FeatureBooleanFormula()

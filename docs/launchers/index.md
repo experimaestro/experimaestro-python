@@ -80,8 +80,9 @@ local:
 
 # Slurm launchers
 slurm:
-  - # The way to connect to the SLURM host
-    connector: slurm.gateway.com
+  - # Manual SLURM configuration
+    id: manual
+    connector: local
 
     # Describes the GPU features and link them to the two
     # possible properties (memory and number of GPUs)
@@ -106,4 +107,17 @@ slurm:
         nodes:
           - hosts: [alpha, beta, gamma, delta]
             features: [GPU2, GPUM24G]
+
+  - # Automatic SLURM configuration
+    id: manual
+    connector: local
+
+    # Describes the GPU features and link them to the two
+    # possible properties (memory and number of GPUs)
+    features_regex:
+      - GPU(?P<cuda_count>\d+)
+      - GPUM(?P<cuda_memory>\d+G)
+
+    partitions: []
+    query_slurm: true
 ```

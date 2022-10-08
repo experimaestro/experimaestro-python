@@ -71,7 +71,7 @@ these steps:
 
 - The object is constructed using `self.__init__()`
 - The attributes are set (e.g. `gamma` in the example above)
-- `self.__postinit__()` is called (if the method exists)
+- `self.__post_init__()` is called (if the method exists)
 
 Sometimes, it is necessary to postpone a part of the initialization of a configuration
 object because it depends on an external processing. In this case, the `initializer` decorator can

@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib
 import struct
 import io
+import typing
 import fasteners
 from enum import Enum
 import inspect
@@ -568,7 +569,7 @@ class ConfigInformation:
                 logger.error("While setting %s", path + [argument.name])
                 raise
 
-    def submit(self, workspace, launcher, dryrun=False):
+    def submit(self, workspace, launcher, dryrun=False) -> "TaskOutput":
         # --- Prepare the object
         if self.job:
             raise Exception("task %s was already submitted" % self)
@@ -928,7 +929,7 @@ class ConfigInformation:
 
                 if as_instance:
                     # Calls post-init
-                    o.__postinit__()
+                    o.__post_init__()
 
                 assert definition["id"] not in objects, (
                     "Duplicate id %s" % definition["id"]
@@ -971,8 +972,8 @@ class ConfigInformation:
             for key, value in config.__xpm__.values.items():
                 setattr(o, key, values.get(key, value))
 
-            # Call __postinit__
-            o.__postinit__()
+            # Call __post_init__
+            o.__post_init__()
 
             return o
 
@@ -1039,7 +1040,7 @@ def cache(fn, name: str):
 
 
 class TypeConfig:
-    """Class of configuration objects"""
+    """Class for configuration objects"""
 
     __xpmtype__: ObjectType
 
@@ -1155,18 +1156,29 @@ class TypeConfig:
         return clone(self)
 
 
-MixinType = TypeVar("MixinType", bound="Config", covariant=True)
+# Until intersection types exist, this hacks
+# allows to consider the configuration object and
+# the object itself at the same time
+if typing.TYPE_CHECKING:
+    # @typing.dataclass_transform(kw_only=True)
+    # class ConfigMeta(type): ...
+    class _TypeConfig(TypeConfig):
+        ...
+
+else:
+    # Dummy class
+    class _TypeConfig:
+        pass
 
 
-class TypeConfigMixin(Generic[MixinType], TypeConfig):
-    pass
-
-
-class Config:
+class Config(_TypeConfig):
     """Base type for all objects in python interface"""
 
     __xpmtype__: ClassVar[ObjectType]
+    """The object type holds all the information about a specific subclass experimaestro metadata"""
+
     __xpm__: ConfigInformation
+    """The __xpm__ object contains all instance specific information about a configuration/task"""
 
     @classmethod
     def __getxpmtype__(cls):
@@ -1188,13 +1200,11 @@ class Config:
         return ((), {"__xpmobject__": True})
 
     @classmethod
-    def c(cls: Type[T], **kwargs) -> TypeConfigMixin[T]:
+    def c(cls: Type[T], **kwargs) -> T:
         """Allows typing to process easily"""
         return cls.__new__(cls, **kwargs)
 
-    def __new__(
-        cls: Type[T], *args, __xpmobject__=False, **kwargs
-    ) -> TypeConfigMixin[T]:
+    def __new__(cls: Type[T], *args, __xpmobject__=False, **kwargs) -> T:
         """Returns an instance of a TypeConfig when called __xpmobject__ is False,
         and otherwise the real object
         """
@@ -1212,15 +1222,21 @@ class Config:
         """Validate the values"""
         pass
 
-    def __postinit__(self):
+    def __post_init__(self):
         """Called after the object  __init__() and with properties set"""
+        # Default implementation is to do nothing
         pass
 
 
 class Task(Config):
-    """base class for tasks"""
+    """Base class for tasks"""
 
     __tags__: Dict[str, str]
+    """Tags associated with class"""
+
+    def execute(self):
+        """The main method that should be implemented in all"""
+        raise NotImplementedError()
 
 
 # --- Output proxy
