@@ -29,8 +29,10 @@ class ProgressingTask(Task):
                     )
                     _progress = float(_progress)
                     _level = int(_level)
-                    progress(_progress, level=_level, desc=_desc or None)
                     self.path.unlink()
+
+                    if _progress > 0:
+                        progress(_progress, level=_level, desc=_desc or None)
                     if _progress >= 0.99 and _level == 0:
                         break
 
@@ -39,7 +41,7 @@ def writeprogress(path: Path, progress, level=0, desc=None):
     """Write the progress to a file to see if this is correctly reported
     by the XPM server"""
     while True:
-        time.sleep(1e-2)
+        time.sleep(5e-2)
         with fasteners.InterProcessLock(path.with_suffix(".lock")):
             if not path.is_file():
                 path.write_text(f"{level} {progress:.3f} {desc if desc else ''}")
@@ -81,12 +83,12 @@ def test_progress_basic():
             time.sleep(1e-2)
 
         logger.info("Checking job progress")
-        progresses = [(i + 1.0) / 10.0 for i in range(10)]
+        progresses = [i / 10.0 for i in range(11)]
         for v in progresses:
             writeprogress(path, v)
             if v < 1:
                 l = listener.progresses.get()[0]
-                logging.info("Got %s", l)
+                logger.info("Got %s", l)
                 assert l.progress == v
 
 
@@ -130,7 +132,7 @@ def test_progress_multiple():
 
             # Both schedulers should receive the job progress information
             logger.info("Checking job progress")
-            progresses = [(i + 1.0) / 10.0 for i in range(10)]
+            progresses = [i / 10.0 for i in range(11)]
             for v in progresses:
                 writeprogress(path, v)
                 if v < 1:

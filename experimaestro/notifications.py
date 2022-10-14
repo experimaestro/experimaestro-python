@@ -179,7 +179,7 @@ class Reporter(threading.Thread):
             if (
                 (level + 1) != len(self.levels)
                 or (progress != self.levels[level].progress)
-                or (desc is not None and desc != self.levels[level].desc)
+                or (desc != self.levels[level].desc)
             ):
                 self.levels = self.levels[: (level + 1)]
                 while level >= len(self.levels):
