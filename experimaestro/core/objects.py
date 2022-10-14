@@ -1156,22 +1156,7 @@ class TypeConfig:
         return clone(self)
 
 
-# Until intersection types exist, this hacks
-# allows to consider the configuration object and
-# the object itself at the same time
-if typing.TYPE_CHECKING:
-    # @typing.dataclass_transform(kw_only=True)
-    # class ConfigMeta(type): ...
-    class _TypeConfig(TypeConfig):
-        ...
-
-else:
-    # Dummy class
-    class _TypeConfig:
-        pass
-
-
-class Config(_TypeConfig):
+class Config:
     """Base type for all objects in python interface"""
 
     __xpmtype__: ClassVar[ObjectType]

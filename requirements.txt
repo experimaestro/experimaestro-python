@@ -7,6 +7,7 @@ cached_property; python_version < "3.9"
 
 # Other
 fasteners
+pyyaml
 psutil
 websockets
 jsonstreams >= 0.5

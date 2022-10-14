@@ -200,7 +200,7 @@ class ConfigDocumenter(ClassDocumenter):
         xpminfo = getxpminfo(self.object)
         source_name = self.get_sourcename()
 
-        super().add_content(more_content, no_docstring)
+        super().add_content(more_content)
 
         for name, argument in xpminfo.arguments.items():
             typestr = argument.type.name()
