@@ -12,6 +12,7 @@ import enum
 from experimaestro.compat import cached_property
 from typing import Any, Dict, Mapping, Optional, Type, Union
 from pathlib import Path
+from experimaestro.utils import logger
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
 from experimaestro.utils.asyncio import asyncThreadcheck
@@ -97,10 +98,11 @@ class Process:
         """True is the process is truly running (I/O)"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.aio_isrunning")
 
-    @cached_property
     async def aio_code(self):
         """Returns a future containing the returned code"""
-        return await asyncThreadcheck("aio_code", self.wait)
+        code = await asyncThreadcheck("aio_code", self.wait)
+        logger.debug("Got for return code %s: %s", self, code)
+        return code
 
     def kill(self):
         raise NotImplementedError(f"Not implemented: {self.__class__}.kill")

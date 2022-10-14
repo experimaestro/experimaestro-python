@@ -29,7 +29,11 @@ class PsutilProcess(Process):
         self._process = psutil.Process(pid)
 
     def wait(self) -> int:
+        logger.debug("Waiting (psutil) for process with PID %s", self._process.pid)
         code = self._process.wait()
+        logger.debug(
+            "Finished to wait (psutil) for process with PID %s", self._process.pid
+        )
         return code
 
     async def aio_isrunning(self):
@@ -47,9 +51,11 @@ class LocalProcess(Process):
         return f"Process({self._process.pid})"
 
     def wait(self) -> int:
-        logger.debug("Waiting for process with PID %s", self._process.pid)
+        logger.debug("Waiting (python) for process with PID %s", self._process.pid)
         code = self._process.wait()
-        logger.debug("Finished to wait for process with PID %s", self._process.pid)
+        logger.debug(
+            "Finished to wait (python) for process with PID %s", self._process.pid
+        )
         return code
 
     async def aio_isrunning(self):

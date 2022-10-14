@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 import fasteners
 from typing import List, Tuple, Union
+from experimaestro.commandline import CommandLineJob
 from experimaestro import Task, Annotated, pathgenerator, progress, tqdm
 from experimaestro.core.objects import TaskOutput, logger
 from experimaestro.notifications import LevelInformation
@@ -21,8 +22,8 @@ class ProgressingTask(Task):
 
         while True:
             time.sleep(1e-4)
-            with fasteners.InterProcessLock(self.path.with_suffix(".lock")):
-                if self.path.is_file():
+            if self.path.is_file():
+                with fasteners.InterProcessLock(self.path.with_suffix(".lock")):
                     _level, _progress, _desc = self.path.read_text().split(
                         " ", maxsplit=2
                     )
@@ -30,7 +31,7 @@ class ProgressingTask(Task):
                     _level = int(_level)
                     progress(_progress, level=_level, desc=_desc or None)
                     self.path.unlink()
-                    if _progress == 1.0 and _level == 0:
+                    if _progress >= 0.99 and _level == 0:
                         break
 
 
@@ -38,6 +39,7 @@ def writeprogress(path: Path, progress, level=0, desc=None):
     """Write the progress to a file to see if this is correctly reported
     by the XPM server"""
     while True:
+        time.sleep(1e-2)
         with fasteners.InterProcessLock(path.with_suffix(".lock")):
             if not path.is_file():
                 path.write_text(f"{level} {progress:.3f} {desc if desc else ''}")
@@ -90,7 +92,11 @@ def test_progress_basic():
 
 def test_progress_multiple():
     """Test that even with two schedulers, we get notified"""
-    with TemporaryExperiment("progress-progress-multiple-1", maxwait=5, port=0) as xp1:
+    max_wait = 5
+
+    with TemporaryExperiment(
+        "progress-progress-multiple-1", maxwait=max_wait, port=0
+    ) as xp1:
         assert xp1.server is not None
         assert xp1.server.port > 0
 
@@ -106,7 +112,10 @@ def test_progress_multiple():
             time.sleep(1e-2)
 
         with TemporaryExperiment(
-            "progress-progress-multiple-2", workdir=xp1.workdir, maxwait=5, port=0
+            "progress-progress-multiple-2",
+            workdir=xp1.workdir,
+            maxwait=max_wait,
+            port=0,
         ) as xp2:
             assert xp2.server is not None
             assert xp2.server.port > 0
@@ -114,7 +123,7 @@ def test_progress_multiple():
             xp2.scheduler.addlistener(listener2)
 
             out = ProgressingTask().submit()
-            job = out.__xpm__.job
+            job = out.__xpm__.job  # type: CommandLineJob
             logger.info("Waiting for job to start (2)")
             while job.state.notstarted():
                 time.sleep(1e-2)

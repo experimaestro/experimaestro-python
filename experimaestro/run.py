@@ -52,6 +52,7 @@ def run(parameters: Path):
         # Notify that the task has started
         progress(0)
 
+        # Execute the task
         task.execute()
 
 

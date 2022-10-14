@@ -336,9 +336,9 @@ class SchedulerCentral(threading.Thread):
 
     """The event loop thread used by the scheduler"""
 
-    def __init__(self):
+    def __init__(self, name: str):
         # Daemon thread so it is non blocking
-        super().__init__(name="Scheduler EL", daemon=True)
+        super().__init__(name=f"Scheduler EL ({name})", daemon=True)
 
         self._ready = threading.Event()
 
@@ -356,8 +356,8 @@ class SchedulerCentral(threading.Thread):
         self.loop.run_forever()
 
     @staticmethod
-    def create():
-        instance = SchedulerCentral()
+    def create(name: str):
+        instance = SchedulerCentral(name)
         instance.start()
         instance._ready.wait()
         return instance
@@ -369,7 +369,7 @@ class Scheduler:
     The scheduler is based on asyncio for easy concurrency handling
     """
 
-    def __init__(self, xp: "experiment", name):
+    def __init__(self, xp: "experiment", name: str):
         # Name of the experiment
         self.name = name
         self.xp = xp
@@ -507,7 +507,7 @@ class Scheduler:
 
             # And now, we wait...
             logger.info("Got a process for job %s - waiting to complete", job)
-            code = await process.aio_code
+            code = await process.aio_code()
             logger.info("Job %s completed with code %d", job, code)
             job.state = JobState.DONE if code == 0 else JobState.ERROR
 
@@ -631,7 +631,7 @@ class Scheduler:
                 else:
                     logger.debug("Waiting for job %s process to end", job)
 
-                    code = await process.aio_code
+                    code = await process.aio_code()
                     logger.debug("Got return code %s for %s", code, job)
 
                     if code is None:
@@ -803,7 +803,7 @@ class experiment:
         # Exit mode when catching signals
         self.exitMode = False
 
-        self.central = SchedulerCentral.create()
+        self.central = SchedulerCentral.create(self.scheduler.name)
 
         if not SIGNAL_HANDLER:
             SIGNAL_HANDLER = SignalHandler()
@@ -822,6 +822,8 @@ class experiment:
         # Close the different locks
         try:
             if exc_type:
+                # import faulthandler
+                # faulthandler.dump_traceback()
                 logger.exception(
                     "Not waiting since an exception was thrown (some jobs may be running)"
                 )

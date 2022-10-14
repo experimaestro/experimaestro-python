@@ -61,7 +61,7 @@ class Reporter(threading.Thread):
         # Last check of notification URLs
         self.lastcheck = 0
 
-        self.levels = [LevelInformation(0, None, 0.0)]
+        self.levels = [LevelInformation(0, None, -1)]
 
         self.stopping = False
 
@@ -173,14 +173,14 @@ class Reporter(threading.Thread):
                             "Could not report EOJ",
                         )
 
-    def setprogress(self, progress: float, level: int, desc: Optional[str]):
+    def set_progress(self, progress: float, level: int, desc: Optional[str]):
         """Sets the new progress if sufficiently different"""
-        if (
-            (level + 1) != len(self.levels)
-            or (progress != self.levels[level].progress)
-            or (desc is not None and desc != self.levels[level].desc)
-        ):
-            with self.cv:
+        with self.cv:
+            if (
+                (level + 1) != len(self.levels)
+                or (progress != self.levels[level].progress)
+                or (desc is not None and desc != self.levels[level].desc)
+            ):
                 self.levels = self.levels[: (level + 1)]
                 while level >= len(self.levels):
                     self.levels.append(LevelInformation(level, None, 0.0))
@@ -212,7 +212,7 @@ def progress(value: float, level=0, desc: Optional[str] = None):
     if TaskEnv.instance().slave:
         # Skip if in a slave process
         return
-    Reporter.instance().setprogress(value, level, desc)
+    Reporter.instance().set_progress(value, level, desc)
 
 
 def report_eoj():

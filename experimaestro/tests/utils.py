@@ -69,6 +69,9 @@ class timeout:
 
     def handle_timeout(self, signum, frame):
         logging.error("Timeout - sending signal")
+        import faulthandler
+
+        faulthandler.dump_traceback()
         raise TimeoutError(self.error_message)
 
     def __enter__(self):
