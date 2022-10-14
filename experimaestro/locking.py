@@ -34,7 +34,7 @@ class Lock:
         return await asyncThreadcheck("lock (aenter)", self.__enter__)
 
     async def __aexit__(self, *args):
-        return await asyncThreadcheck("lock (aexit)", self.release)
+        return await asyncThreadcheck("lock (aexit)", self.__exit__, *args)
 
     def _acquire(self):
         raise NotImplementedError()

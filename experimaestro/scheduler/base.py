@@ -471,7 +471,7 @@ class Scheduler:
         for listener in self.listeners:
             try:
                 listener.job_submitted(job)
-            except Exception as e:
+            except Exception:
                 logger.exception("Got an error with listener %s", listener)
 
         # Add dependencies, and add to blocking resources
@@ -569,9 +569,12 @@ class Scheduler:
         """
 
         # We first lock the job before proceeding
+        assert job.launcher is not None
+        assert self.xp.central is not None
+
         with Locks() as locks:
             logger.debug("[starting] Locking job %s", job)
-            async with job.launcher.connector.lock(job.lockpath) as joblock:
+            async with job.launcher.connector.lock(job.lockpath):
                 logger.debug("[starting] Locked job %s", job)
 
                 state = None

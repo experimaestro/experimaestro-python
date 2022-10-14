@@ -186,8 +186,6 @@ def test_token_reschedule():
         time2 = workdir / "time.2"
         p2 = subprocess.Popen(command + ["2", lockingpath, str(ready2), str(time2)])
 
-        logging.info("Waiting for both experiments to be ready")
-
         try:
             with timeout(20):
                 logging.info("Waiting for both experiments to be ready")
@@ -205,10 +203,12 @@ def test_token_reschedule():
                 lockingpath.write_text("Let's go")
 
                 # Waiting for the output
+                logging.info("Waiting for XP1 to finish (%s)", time1)
                 while not time1.is_file():
                     time.sleep(0.01)
                 logging.info("Experiment 1 finished")
 
+                logging.info("Waiting for XP2 to finish")
                 while not time2.is_file():
                     time.sleep(0.01)
                 logging.info("Experiment 2 finished")

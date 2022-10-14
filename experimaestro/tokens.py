@@ -109,8 +109,9 @@ class TokenFile:
         return self
 
     def delete(self):
-        logging.debug("Deleting token file %s", self.path)
-        self.path.unlink()
+        if self.path.is_file():
+            logging.debug("Deleting token file %s", self.path)
+            self.path.unlink()
 
     def watch(self):
         """Watch the matching process"""
@@ -124,6 +125,7 @@ class TokenFile:
         # Watch for the job
         def run():
             logger.debug("Locking job lock path %s", lockpath)
+            process = None
             with fasteners.InterProcessLock(lockpath):
                 if not pidpath.is_file():
                     logger.debug("Job already finished (no PID file)")
@@ -139,13 +141,14 @@ class TokenFile:
                     from experimaestro.connectors.local import LocalConnector
 
                     connector = LocalConnector.instance()
-
                     process = Process.fromDefinition(connector, json.loads(s))
-                    if process is not None:
-                        # Process is None: process has finished
-                        process.wait()
 
-                self.delete()
+            # Wait out of the lock
+            if process is not None:
+                # Process is None: process has finished
+                process.wait()
+
+            self.delete()
 
         threading.Thread(target=run).start()
 

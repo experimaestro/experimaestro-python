@@ -20,9 +20,12 @@ if __name__ == "__main__":
 
     handler = logging.StreamHandler()
     bf = logging.Formatter(
-        f"[XP{x}] {{name:10s}} {{levelname:8s}} {{message}}", style="{"
+        f"[XP{x}] "
+        + "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]: %(message)s",
+        datefmt="%H:%M:%S.%f",
     )
     handler.setFormatter(bf)
+    root.handlers.clear()
     root.addHandler(handler)
 
     with TemporaryExperiment("reschedule%s" % x, workdir=workdir) as xp:

@@ -285,8 +285,6 @@ class CommandLineJob(Job):
         processbuilder = self.launcher.processbuilder()
         donepath = self.donepath
 
-        logger.info("Locking job lock path %s", self.lockpath)
-
         # Check again if done (now that we have locked)
         if donepath.is_file():
             logger.info("Job %s is already done", self)

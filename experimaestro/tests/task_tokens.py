@@ -10,7 +10,10 @@ class TokenTask(Task):
     """Wait until the file is given"""
 
     path: Param[Path]
+    """The path to watch"""
+
     x: Param[int]
+    """A dummy parameter to create several distinct token tasks"""
 
     def execute(self):
         print(time.time())

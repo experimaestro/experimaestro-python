@@ -128,11 +128,14 @@ class InterProcessLock(fasteners.InterProcessLock, Lock):
         self.max_delay = max_delay
 
     def __enter__(self):
+        logger.debug("Locking %s", self.path)
         if not super().acquire(blocking=True, max_delay=self.max_delay, timeout=None):
             raise threading.ThreadError("Could not acquire lock")
+        logger.debug("Locked %s", self.path)
         return self
 
     def __exit__(self, *args):
+        logger.debug("Unlocking %s", self.path)
         super().__exit__(*args)
 
 
