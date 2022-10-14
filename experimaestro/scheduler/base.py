@@ -579,7 +579,7 @@ class Scheduler:
 
                 state = None
                 try:
-                    logger.info(
+                    logger.debug(
                         "Starting job %s with %d dependencies",
                         job,
                         len(job.dependencies),

@@ -3,14 +3,14 @@ from copy import copy
 import logging
 from pathlib import Path
 import time
-from typing import Dict, List, OrderedDict, Tuple, Union
+import fasteners
+from typing import List, Tuple, Union
 from experimaestro import Task, Annotated, pathgenerator, progress, tqdm
-from experimaestro.core.arguments import Param
 from experimaestro.core.objects import TaskOutput, logger
 from experimaestro.notifications import LevelInformation
 from experimaestro.scheduler import Job, Listener
 from queue import Queue
-from .utils import TemporaryDirectory, TemporaryExperiment, get_times
+from .utils import TemporaryExperiment
 
 
 class ProgressingTask(Task):
@@ -21,22 +21,27 @@ class ProgressingTask(Task):
 
         while True:
             time.sleep(1e-4)
-            if self.path.exists():
-                try:
+            with fasteners.InterProcessLock(self.path.with_suffix(".lock")):
+                if self.path.is_file():
                     _level, _progress, _desc = self.path.read_text().split(
                         " ", maxsplit=2
                     )
                     _progress = float(_progress)
                     _level = int(_level)
                     progress(_progress, level=_level, desc=_desc or None)
+                    self.path.unlink()
                     if _progress == 1.0 and _level == 0:
                         break
-                except:
-                    pass
 
 
 def writeprogress(path: Path, progress, level=0, desc=None):
-    path.write_text(f"{level} {progress:.3f} {desc if desc else ''}")
+    """Write the progress to a file to see if this is correctly reported
+    by the XPM server"""
+    while True:
+        with fasteners.InterProcessLock(path.with_suffix(".lock")):
+            if not path.is_file():
+                path.write_text(f"{level} {progress:.3f} {desc if desc else ''}")
+                break
 
 
 class ProgressListener(Listener):

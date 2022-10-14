@@ -49,7 +49,9 @@ def run(parameters: Path):
         if params["has_subparam"]:
             task.__maintaskdir__ = Path.cwd().parents[1]
 
+        # Notify that the task has started
         progress(0)
+
         task.execute()
 
 

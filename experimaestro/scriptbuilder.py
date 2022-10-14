@@ -88,7 +88,7 @@ class PythonScriptBuilder:
             self.command.output(context, fpnull)
         scriptpath = job.jobpath / ("%s.py" % job.name)
 
-        logger.info("Writing script %s", scriptpath)
+        logger.debug("Writing script %s", scriptpath)
         with scriptpath.open("wt") as out:
             out.write("#!{}\n".format(self.pythonpath))
             out.write("# Experimaestro generated task\n")

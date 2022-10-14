@@ -27,7 +27,7 @@ class LevelInformation:
     previous_progress: float = -1
     previous_desc: Optional[str] = None
 
-    def shouldreportprogress(self, reporter: "Reporter"):
+    def modified(self, reporter: "Reporter"):
         return (
             abs(self.progress - self.previous_progress) > reporter.progress_threshold
         ) or (self.previous_desc != self.desc)
@@ -88,8 +88,8 @@ class Reporter(threading.Thread):
 
         return False
 
-    def shouldreportprogress(self):
-        return any(level.shouldreportprogress(self) for level in self.levels)
+    def modified(self):
+        return any(level.modified(self) for level in self.levels)
 
     def check_urls(self):
         mtime = os.path.getmtime(self.path)
@@ -106,7 +106,7 @@ class Reporter(threading.Thread):
 
         while True:
             with self.cv:
-                self.cv.wait_for(lambda: self.stopping or self.shouldreportprogress())
+                self.cv.wait_for(lambda: self.stopping or self.modified())
                 if self.stopping:
                     break
 
@@ -119,7 +119,7 @@ class Reporter(threading.Thread):
             if self.urls:
                 # OK, let's go
                 for level in self.levels:
-                    if level.shouldreportprogress(self):
+                    if level.modified(self):
                         params = level.report()
 
                         # Go over all URLs
@@ -151,7 +151,7 @@ class Reporter(threading.Thread):
                     del self.urls[key]
             else:
                 for level in self.levels:
-                    if level.shouldreportprogress(self):
+                    if level.modified(self):
                         params = level.report()
                         logger.info("Progress: %s", level)
 
