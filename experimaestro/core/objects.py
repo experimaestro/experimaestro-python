@@ -1328,6 +1328,7 @@ class TaskOutput(Proxy):
         return TaskOutput(value, self.__xpm__.task)
 
     def __getitem__(self, key: Any):
+        print("Getting", key)
         return self._wrap(self.__xpm__.value.__getitem__(key))
 
     def __getattr__(self, key: str, default=None) -> Any:
@@ -1335,6 +1336,11 @@ class TaskOutput(Proxy):
 
     def __unwrap__(self):
         return self.__xpm__.value
+
+    def __call__(self, *args, **kwargs):
+        assert callable(self.__xpm__.value), "Attribute is not a function"
+        __self__ = TaskOutput(self.__xpm__.value.__self__, self.__xpm__.task)
+        return self.__xpm__.value.__func__(__self__, *args, **kwargs)
 
 
 class SerializedTaskOutput(TaskOutput):
