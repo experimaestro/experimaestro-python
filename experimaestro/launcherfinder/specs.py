@@ -11,7 +11,10 @@ from humanfriendly import parse_size, format_size, parse_timespan
 @dataclass
 class CudaSpecification:
     memory: int
+    """Memory (in bytes)"""
+
     model: str = ""
+    """CUDA card model name"""
 
     def __lt__(self, other: "CudaSpecification"):
         return self.memory < other.memory
@@ -33,12 +36,16 @@ class CPUSpecification:
 
 
 class HostSpecification:
-    _cuda: List[CudaSpecification]
-    _cpu: CPUSpecification
+    cuda: List[CudaSpecification]
+    cpu: CPUSpecification
+    priority: int
 
-    def __init__(self, cpu: CPUSpecification, cuda: List[CudaSpecification]) -> None:
+    def __init__(
+        self, cpu: CPUSpecification, cuda: List[CudaSpecification], priority: int = 0
+    ) -> None:
         self.cpu = cpu
         self.cuda = sorted(cuda)
+        self.priority = priority
 
     def __repr__(self) -> str:
         return f"Host({self.cpu}, {self.cuda})"
@@ -69,6 +76,8 @@ class HostRequirement:
 
 
 class RequirementUnion(HostRequirement):
+    """Ordered list of simple host requirements -- the first one is the priority"""
+
     requirements: List["HostSimpleRequirement"]
 
     def __init__(self, *requirements: "HostSimpleRequirement"):
@@ -76,12 +85,15 @@ class RequirementUnion(HostRequirement):
 
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         """Returns the matched requirement (if any)"""
+
         argmax: Optional[MatchRequirement] = None
-        for ix, r in enumerate(self.requirements):
-            max_score = 0.0 if argmax is None else argmax.score
-            if match := r.match(host):
+
+        for req in self.requirements:
+            max_score = float("-inf") if argmax is None else argmax.score
+
+            if match := req.match(host):
                 if match.score > max_score:
-                    argmax = MatchRequirement(match.score, r)
+                    argmax = MatchRequirement(match.score, req)
 
         return argmax
 
@@ -120,19 +132,17 @@ class HostSimpleRequirement(HostRequirement):
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         if self.cuda_gpus:
             if len(host.cuda) < len(self.cuda_gpus):
-                # print("GPU", host.cuda, self.cuda_gpus)
                 return None
 
             for host_gpu, req_gpu in zip(host.cuda, self.cuda_gpus):
                 if host_gpu < req_gpu:
-                    # print("GPU", host_gpu, req_gpu)
                     return None
 
         if host.cpu < self.cpu:
-            print("Mem", host.cpu, self.cpu)
             return None
 
-        return MatchRequirement(1, self)
+        print("MATCHING", host)
+        return MatchRequirement(host.priority, self)
 
     def __mul__(self, count: int) -> "HostSimpleRequirement":
         if count == 1:

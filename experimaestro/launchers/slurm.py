@@ -275,6 +275,9 @@ class SlurmOptions:
     mem_per_gpu: Optional[str] = None
     """Requested memory per allocated GPU (size with units: K, M, G, or T)"""
 
+    cpu_per_task: Optional[str] = None
+    """Number of CPUs"""
+
     nodelist: Optional[str] = None
     """Request a specific list of hosts"""
 
@@ -393,11 +396,12 @@ def convert():
     from experimaestro.launcherfinder import LauncherRegistry
 
     configuration = SlurmConfiguration(id="", partitions={})
-    fill_configuration(sys.stdin, configuration)
+    fill_nodes_configuration(sys.stdin, configuration)
     yaml.dump(configuration, sys.stdout, Dumper=LauncherRegistry.instance().Dumper)
 
 
-def fill_configuration(input: TextIO, configuration: "SlurmConfiguration"):
+def fill_nodes_configuration(input: TextIO, configuration: "SlurmConfiguration"):
+    """Parses the output of scontrol show nodes"""
     re_nodename = re.compile(r"""^NodeName=(\w+)""")
     re_features = re.compile(r"""^\s*AvailableFeatures=([,\w]+)""")
     re_partitions = re.compile(r"""^\s*Partitions=([,\w]+)""")
@@ -410,10 +414,7 @@ def fill_configuration(input: TextIO, configuration: "SlurmConfiguration"):
 
     def process():
         for partition_name in partition_names:
-            partition = partitions.get(partition_name, None)
-            if partition is None:
-                partition = SlurmPartition(nodes=[])
-                partitions[partition_name] = partition
+            partition = partitions.setdefault(partition_name, SlurmPartition(nodes=[]))
 
             fl = "&".join(sorted(features))
             nodes = partitions2features2nodes[partition_name].get(fl)
@@ -438,6 +439,24 @@ def fill_configuration(input: TextIO, configuration: "SlurmConfiguration"):
         process()
 
 
+def fill_partitions_configuration(input: TextIO, configuration: "SlurmConfiguration"):
+    """Parses the output of scontrol show --oneliner partition"""
+    re_partitionname = re.compile(r"""^PartitionName=(\w+)""")
+    re_mem_per_cpu = re.compile(r"""(?:=|\s)DefMemPerCPU=(\d+)(?:\D|$)""")
+    re_cpu_per_gpu = re.compile(r"""(?:=|\s)DefCpuPerGPU=(\d+)(?:\D|$)""")
+
+    for line in input.readlines():
+        if match := re_partitionname.search(line):
+            name = match.group(1)
+            cfg = configuration.partitions.setdefault(name, SlurmPartition(nodes=[]))
+
+            if m := re_mem_per_cpu.search(line):
+                cfg.mem_per_cpu = int(m.group(1)) * 1024
+
+            if m := re_cpu_per_gpu.search(line):
+                cfg.cpu_per_gpu = int(m.group(1))
+
+
 # ---- SLURM launcher finder
 
 
@@ -455,8 +474,16 @@ class SlurmNodes(YAMLDataClass):
 
 
 @dataclass
+class SlurmPartitionConfiguration(YAMLDataClass):
+    cpu_per_gpu: int = 0
+    mem_per_cpu: Annotated[int, Initialize(humanfriendly.parse_size)] = 0
+
+
+@dataclass
 class SlurmPartition(YAMLDataClass):
-    nodes: List[SlurmNodes]
+    nodes: List[SlurmNodes] = field(default_factory=lambda: [])
+    configuration: Optional[SlurmPartitionConfiguration] = None
+    priority: int = 0
 
 
 class FeatureConjunction(List[str]):
@@ -494,7 +521,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     use_hosts: bool = True
 
     query_slurm: bool = False
-    """True to query SLURM directly"""
+    """True to query SLURM directly (using scontrol)"""
 
     tags: List[str] = field(default_factory=lambda: [])
     weight: int = 0
@@ -512,13 +539,25 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
         if self.query_slurm:
             self.query_slurm = False
 
+            # Read node information
             connector = registry.getConnector(self.connector)
             pb = connector.processbuilder()
             pb.command = ["scontrol", "--hide", "show", "nodes"]
 
             def handle_output(input: io.BytesIO):
                 StreamReader = codecs.getreader("utf-8")
-                fill_configuration(StreamReader(input), self)
+                fill_nodes_configuration(StreamReader(input), self)
+
+            pb.stdout = Redirect.pipe(handle_output)
+            pb.start()
+
+            # Read partition information
+            pb = connector.processbuilder()
+            pb.command = ["scontrol", "--hide", "show", "--oneliner", "partition"]
+
+            def handle_output(input: io.BytesIO):
+                StreamReader = codecs.getreader("utf-8")
+                fill_partitions_configuration(StreamReader(input), self)
 
             pb.stdout = Redirect.pipe(handle_output)
             pb.start()
@@ -529,7 +568,8 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
 
         for partition_name, partition in self.partitions.items():
             for node in partition.nodes:
-                cpu = CPUSpecification(1, 1)
+                # CPU Memory specification are handled through command line
+                cpu = CPUSpecification(sys.maxsize, sys.maxsize)
                 cuda = [CudaSpecification(0)]
 
                 for feature in node.features:
@@ -572,6 +612,8 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
         for node in self.computed_nodes:
             if match := requirement.match(node):
                 logger.debug("Match %s for %s", match, node)
+
+                # If score is below, goes to the next one
                 if current_match and (
                     match.score <= current_match.score
                     and match.requirement is not current_match.requirement
@@ -610,6 +652,12 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
                 if current_match.requirement.cuda_gpus
                 else 0
             )
+
+            if current_match.requirement.cpu.memory > 0:
+                launcher.options.mem = current_match.requirement.cpu.memory
+
+            if current_match.requirement.cpu.cores > 0:
+                launcher.options.cpu_per_task = current_match.requirement.cpu.cores
 
             if use_features:
                 launcher.options.constraint = fbf.to_constraint()
