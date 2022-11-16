@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PosixPath, _posix_flavour
-from typing import Union
+from typing import Union, Dict, Any
 import io
 import os
 from experimaestro.launcherfinder import LauncherRegistry, YAMLDataClass
 from fabric import Connection
+from invoke import Promise
+import invoke.exceptions
 from urllib.parse import urlparse
 from itertools import chain
 from . import Connector
@@ -18,6 +20,7 @@ from . import (
 )
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token, CounterToken
+from experimaestro.utils import logger
 
 # Might be wise to switch to https://github.com/marian-code/ssh-utilities
 
@@ -116,6 +119,112 @@ class SshPath(Path, PurePosixPath):
 class SshConfiguration(YAMLDataClass):
     hostname: str
 
+    def create(self, registry: LauncherRegistry):
+        return SshConnector.get(self.hostname)
+
+
+def get_stream(redirect: Redirect, write: bool):
+    if redirect.type == RedirectType.FILE:
+        raise NotImplementedError()
+
+    if redirect.type == RedirectType.PIPE:
+        raise NotImplementedError()
+
+    if redirect.type == RedirectType.INHERIT:
+        return None
+
+    raise NotImplementedError("For %s", redirect)
+
+
+class SshProcess(Process):
+    def __init__(self, promise: Promise):
+        self.promise = promise
+
+    def tospec(self) -> Dict[str, Any]:
+        return {""}
+
+    def __repr__(self):
+        return f"Process({self._process.pid})"
+
+    def wait(self) -> int:
+        logger.debug("Waiting (python) for process with PID %s", self._process.pid)
+        code = self._process.wait()
+        logger.debug(
+            "Finished to wait (python) for process with PID %s", self._process.pid
+        )
+        return code
+
+    def tospec(self):
+        return {"type": "local", "pid": self._process.pid}
+
+    def kill(self):
+        self._process.kill()
+
+    @staticmethod
+    def fromspec(connector, spec):
+        pid = spec["pid"]
+        try:
+            return PsutilProcess(pid)
+        except psutil.NoSuchProcess:
+            pass
+
+        return None
+
+    def wait(self) -> int:
+        try:
+            self.promise.join()
+        except invoke.exceptions.Failure:
+            raise
+
+
+class SshProcessBuilder(ProcessBuilder):
+    def __init__(self, connector: "SshConnector"):
+        super().__init__()
+        self.connector = connector
+
+    def start(self):
+        """Start the process"""
+
+        trans = str.maketrans({'"': r"\"", "$": r"\$"})
+        command = f'''"{'", "'.join([c.translate(trans) for c in self.command])}"'''
+
+        # stdin = get_stream(self.stdin, False)
+        # stdout = get_stream(self.stdout, True)
+        # stderr = get_stream(self.stderr, True)
+
+        self.connector.connection.run(
+            command, asynchronous=not self.detach, disown=self.detach
+        )
+        raise NotImplementedError()
+        # if self.detach:
+        #     self.connector.connection
+        #     p = subprocess.Popen(
+        #         self.command,
+        #         stdin=stdin,
+        #         stderr=stderr,
+        #         stdout=stdout,
+        #         env=self.environ,
+        #         close_fds=True,
+        #         cwd="/",
+        #     )
+        # else:
+        #     p = subprocess.Popen(
+        #         self.command,
+        #         stdin=stdin,
+        #         stderr=stderr,
+        #         stdout=stdout,
+        #         env=self.environ,
+        #     )
+
+        # process = LocalProcess(p)
+
+        # if self.stdout and self.stdout.type == RedirectType.PIPE:
+        #     self.stdout.function(p.stdout)
+        # if self.stderr and self.stderr.type == RedirectType.PIPE:
+        #     self.stderr.function(p.stderr)
+
+        # return process
+
 
 class SshConnector(Connector):
     @staticmethod
@@ -156,11 +265,10 @@ class SshConnector(Connector):
         return "%s" % self.hostname
 
     def processbuilder(self) -> ProcessBuilder:
-        raise NotImplementedError()
+        return SshProcessBuilder(self)
 
     def lock(self, path: Path, max_delay: int = -1) -> Lock:
         """Returns a lock on a file"""
-        print(path.hostpath())
         raise NotImplementedError()
 
     def resolve(self, path: Path, basepath: Path = None):
