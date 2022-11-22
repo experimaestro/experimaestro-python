@@ -31,3 +31,22 @@ def test_findlauncher_specs():
     m = req.match(host)
     assert m is not None
     assert m.requirement is req2
+
+
+def test_findlauncher_specs_gpu_mem():
+    host = HostSpecification(
+        CPUSpecification(parse_size("12G"), 1),
+        [CudaSpecification(parse_size("48G"), min_memory=parse_size("24G"))],
+    )
+
+    # Not enough requested
+    req = cuda_gpu(mem="20G")
+    assert req.match(host) is None
+
+    # Too much requested
+    req = cuda_gpu(mem="50G")
+    assert req.match(host) is None
+
+    # Just enough
+    req = cuda_gpu(mem="30G")
+    assert req.match(host) is not None
