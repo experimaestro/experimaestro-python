@@ -90,6 +90,12 @@ slurm:
       - GPU(?P<cuda_count>\d+)
       - GPUM(?P<cuda_memory>\d+G)
 
+    options:
+      gpu:
+        # At least 70% of the memory should be requested
+        # (from version 0.11.8)
+        min_mem_ratio: 0.7
+
     partitions:
       # Partition "big GPUs"
       biggpus:

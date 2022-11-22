@@ -16,11 +16,18 @@ class CudaSpecification:
     model: str = ""
     """CUDA card model name"""
 
+    min_memory: int = 0
+    """Minimum request memory (in bytes)"""
+
     def __lt__(self, other: "CudaSpecification"):
         return self.memory < other.memory
 
+    def match(self, spec: "CudaSpecification"):
+        """Returns True if the specification matches this host"""
+        return (self.memory > spec.memory) and (self.min_memory < spec.memory)
+
     def __repr__(self):
-        return f"CUDA({self.model} {format_size(self.memory)})"
+        return f"CUDA({self.model} {format_size(self.memory)}/{format_size(self.min_memory)})"
 
 
 @dataclass
@@ -135,13 +142,12 @@ class HostSimpleRequirement(HostRequirement):
                 return None
 
             for host_gpu, req_gpu in zip(host.cuda, self.cuda_gpus):
-                if host_gpu < req_gpu:
+                if not host_gpu.match(req_gpu):
                     return None
 
         if host.cpu < self.cpu:
             return None
 
-        print("MATCHING", host)
         return MatchRequirement(host.priority, self)
 
     def __mul__(self, count: int) -> "HostSimpleRequirement":

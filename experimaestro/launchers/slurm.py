@@ -511,6 +511,17 @@ class FeatureBooleanFormula:
 
 
 @dataclass
+class SlurmConfigGPUOptions(YAMLDataClass):
+    min_mem_ratio: float = 0.0
+    """Minimum amount of memory that we need to ask"""
+
+
+@dataclass
+class SlurmConfigOptions(YAMLDataClass):
+    gpu: SlurmConfigGPUOptions = field(default_factory=lambda: SlurmConfigGPUOptions())
+
+
+@dataclass
 class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     id: str
     """Slurm ID"""
@@ -519,6 +530,8 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     connector: str = "local"
     use_features: bool = True
     use_hosts: bool = True
+
+    options: SlurmConfigOptions = field(default_factory=lambda: SlurmConfigOptions())
 
     query_slurm: bool = False
     """True to query SLURM directly (using scontrol)"""
@@ -564,6 +577,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
 
     @cached_property
     def computed_nodes(self) -> List[SlurmNodesSpecification]:
+        """Computes the list of hosts"""
         hosts = []
 
         for partition_name, partition in self.partitions.items():
@@ -583,6 +597,9 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
                                 count = int(_count)
                             if memory := d.get("cuda_memory", None):
                                 cuda[0].memory = humanfriendly.parse_size(memory)
+                                cuda[0].min_memory = int(
+                                    cuda[0].memory * self.options.gpu.min_mem_ratio
+                                )
 
                     if count > 1:
                         cuda.extend([cuda[0] for _ in range(count - 1)])
