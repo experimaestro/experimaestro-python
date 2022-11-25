@@ -1,7 +1,8 @@
 from pathlib import Path
 import marshmallow as mm
 
-class JsonSettings():   
+
+class JsonSettings:
     @classmethod
     def load(cls, path: Path):
         if path.is_file():

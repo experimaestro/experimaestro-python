@@ -2,10 +2,12 @@ from experimaestro.connectors.ssh import SshPath
 
 # --- Test SSH path and SSH path manipulation
 
+
 def test_absolute():
     path = SshPath("ssh://host//a/path")
     assert path.host == "host"
     assert path.is_absolute()
+
 
 def test_relative():
     path = SshPath("ssh://host")
@@ -13,6 +15,7 @@ def test_relative():
     assert path.hostpath == ""
     assert path._parts == []
     assert not path.is_absolute()
+
 
 def test_relative_withpath():
     path = SshPath("ssh://host/relative/path")

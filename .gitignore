@@ -13,4 +13,4 @@ site/
 build/
 
 # Generated
-experimaestro/version.py
+src/experimaestro/version.py

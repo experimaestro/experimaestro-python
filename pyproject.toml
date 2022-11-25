@@ -1,5 +1,5 @@
 [tool.setuptools_scm]
-write_to = "experimaestro/version.py"
+write_to = "src/experimaestro/version.py"
 fallback_version = "0.0.0-dev"
 
 [build-system]

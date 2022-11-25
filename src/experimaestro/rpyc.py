@@ -12,7 +12,8 @@ import logging
 logger = logging.getLogger("rpyc")
 logger.setLevel(logging.WARNING)
 
-class client():
+
+class client:
     def __init__(self, hostname: str, pythonpath: str, port: int = None):
         """[summary]
 
@@ -46,16 +47,25 @@ class client():
         p = run(command, capture_output=True)
         p.check_returncode()
         remote_unix_path = p.stdout.decode("utf-8").strip() + "/rpyc-server.sock"
-        
+
         # Start server
         command = self.ssh(f"-L{local_unix_path}:{remote_unix_path}")
-        command.extend([self.pythonpath, "-m", "experimaestro", "rpyc-server", "--clean", remote_unix_path])
-        
+        command.extend(
+            [
+                self.pythonpath,
+                "-m",
+                "experimaestro",
+                "rpyc-server",
+                "--clean",
+                remote_unix_path,
+            ]
+        )
+
         logger.debug("Runnning %s", command)
         process = Popen(command, stdout=PIPE)
         atexit.register(lambda process: process.kill(), process)
 
-        # Wait for the server to be started        
+        # Wait for the server to be started
         process.stdout.readline()
 
         # Connect to server
@@ -75,10 +85,13 @@ class client():
 
 server = None
 
+
 class ClassicService(rpyc.core.service.ClassicService):
     """Full duplex master/slave service, i.e. both parties have full control
     over the other. Must be used by both parties."""
-    __slots__ = ("connected")
+
+    __slots__ = "connected"
+
     def __init__(self):
         super().__init__()
         self.connected = False
@@ -97,15 +110,19 @@ def cleanup(path):
     path.unlink()
     path.parent.rmdir()
 
+
 def start_server(unix_path, clean=None):
     service = ClassicService()
-    server = OneShotServer(socket_path=str(unix_path), listener_timeout=1, service=service, logger=logger)
+    server = OneShotServer(
+        socket_path=str(unix_path), listener_timeout=1, service=service, logger=logger
+    )
+
     def sayhello():
         while not server.active:
-            time.sleep(.01)
+            time.sleep(0.01)
         print("HELLO", flush=True)
         logger.debug("Server started")
-        
+
         time.sleep(5)
         if not service.connected:
             logger.warning("No inbound connection: stopping")
@@ -115,6 +132,7 @@ def start_server(unix_path, clean=None):
     if clean:
         atexit.register(cleanup, unix_path)
     server.start()
+
 
 def stop_server():
     server.stop()
