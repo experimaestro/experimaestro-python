@@ -10,7 +10,7 @@ import shlex
 import os
 import logging
 
-DIR = Path(__file__).parents[2]
+DIR = Path(__file__).parents[3]
 RE_SNIPPET_START = re.compile(
     r"<!-- SNIPPET: (?P<id>\S+)(?:\s+ARGS\[(?P<args>[^\]]+)\])?(?:\s+ENV\[(?P<env>[^\]]+)\])? -->"
 )
