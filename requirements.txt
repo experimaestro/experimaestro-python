@@ -20,6 +20,9 @@ pyparsing
 # Parse size 
 humanfriendly
 
+# parsing
+arpgeggio >= 2.0
+
 # Avoid version 0.10.4
 watchdog > 2.0.0
 
