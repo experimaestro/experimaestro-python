@@ -4,8 +4,10 @@ from experimaestro.launcherfinder.specs import (
     HostSpecification,
     cpu,
     cuda_gpu,
+    HostSimpleRequirement,
 )
-from humanfriendly import parse_size
+from experimaestro.launcherfinder import parse
+from humanfriendly import parse_size, parse_timespan
 
 
 def test_findlauncher_specs():
@@ -50,3 +52,15 @@ def test_findlauncher_specs_gpu_mem():
     # Just enough
     req = cuda_gpu(mem="30G")
     assert req.match(host) is not None
+
+
+def test_findlauncher_parse():
+
+    r = parse("""duration=4 d & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
+    assert isinstance(r, HostSimpleRequirement)
+
+    assert len(r.cuda_gpus) == 2
+    assert r.cuda_gpus[0].memory == parse_size("4G")
+    assert r.duration == parse_timespan("4 d")
+    assert r.cpu.memory == parse_size("400M")
+    assert r.cpu.cores == 4

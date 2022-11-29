@@ -190,7 +190,7 @@ class LauncherRegistry:
         raise AssertionError(f"No connector with identifier {identifier}")
 
     def find(
-        self, spec: HostRequirement, *, tags: Set[str] = set()
+        self, *specs: HostRequirement, tags: Set[str] = set()
     ) -> Optional["Launcher"]:
         """ "
         Arguments:
@@ -205,14 +205,19 @@ class LauncherRegistry:
             return DirectLauncher(LocalConnector.instance())
 
         # We have registered launchers
-        for handler in self.launchers:
-            if (not tags) or any((tag in tags) for tag in handler.tags):
-                if launcher := handler.get(self, spec):
-                    return launcher
+        for spec in specs:
+            if isinstance(spec, str):
+                from .parser import parse
+
+                spec = parse(spec)
+            for handler in self.launchers:
+                if (not tags) or any((tag in tags) for tag in handler.tags):
+                    if launcher := handler.get(self, spec):
+                        return launcher
         return None
 
 
-def find_launcher(*specs: HostRequirement, tags: Set[str] = set()) -> "Launcher":
+def find_launcher(*specs: HostRequirement | str, tags: Set[str] = set()) -> "Launcher":
     """Find a launcher matching a given specification"""
     launcher = LauncherRegistry.instance().find(*specs, tags=tags)
     if not launcher:

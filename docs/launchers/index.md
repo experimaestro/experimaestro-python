@@ -53,6 +53,15 @@ from experimaestro.launcherfinder import cuda_gpu, find_launcher
 gpulauncher = find_launcher(cuda_gpu(mem="14G") * 2)
 ```
 
+Simple strings can also be parsed (for configuration files)
+
+```py
+
+from experimaestro.launcherfinder import find_launcher
+
+find_launcher("""duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
+```
+
 Example of a configuration
 
 ```yaml

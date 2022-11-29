@@ -115,7 +115,7 @@ class HostSimpleRequirement(HostRequirement):
     """Requested duration (in seconds)"""
 
     def __repr__(self):
-        return f"Req(cpu={self.cpu}, cuda={self.cuda_gpus})"
+        return f"Req(cpu={self.cpu}, cuda={self.cuda_gpus}, duration={self.duration})"
 
     def __init__(self, *reqs: "HostSimpleRequirement"):
         self.cuda_gpus = []
