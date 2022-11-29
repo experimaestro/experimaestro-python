@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import itertools
 from types import new_class
-from typing import ClassVar, Dict, List, Optional, Set, Type
+from typing import ClassVar, Dict, List, Optional, Set, Type, Union
 from experimaestro import Annotated
 from pathlib import Path
 import typing
@@ -190,7 +190,7 @@ class LauncherRegistry:
         raise AssertionError(f"No connector with identifier {identifier}")
 
     def find(
-        self, *specs: HostRequirement, tags: Set[str] = set()
+        self, *specs: Union[HostRequirement, str], tags: Set[str] = set()
     ) -> Optional["Launcher"]:
         """ "
         Arguments:
@@ -217,7 +217,9 @@ class LauncherRegistry:
         return None
 
 
-def find_launcher(*specs: HostRequirement | str, tags: Set[str] = set()) -> "Launcher":
+def find_launcher(
+    *specs: Union[HostRequirement, str], tags: Set[str] = set()
+) -> "Launcher":
     """Find a launcher matching a given specification"""
     launcher = LauncherRegistry.instance().find(*specs, tags=tags)
     if not launcher:
