@@ -65,7 +65,8 @@ find_launcher("""duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
 Example of a configuration
 
 ```yaml
-# Local launchers
+# --- Local launchers
+
 local:
   - # Standard launcher for small tasks
     connector: local
@@ -87,10 +88,11 @@ local:
         count: 1
         memory: 8116MiB
 
-# Slurm launchers
+# --- Slurm launchers
+
 slurm:
-  - # Manual SLURM configuration
-    id: manual
+  # We can use fully manual SLURM configuration
+  - id: manual
     connector: local
 
     # Describes the GPU features and link them to the two
@@ -103,6 +105,8 @@ slurm:
       gpu:
         # At least 70% of the memory should be requested
         # (from version 0.11.8)
+        # For instance, if the GPU has 64G, we won't target it
+        # if we request less than 44.8G (= 70% of 64G)
         min_mem_ratio: 0.7
 
     partitions:
@@ -123,8 +127,8 @@ slurm:
           - hosts: [alpha, beta, gamma, delta]
             features: [GPU2, GPUM24G]
 
-  - # Automatic SLURM configuration
-    id: manual
+  # We can also use SLURM for semi-automatic configuration
+  - id: manual
     connector: local
 
     # Describes the GPU features and link them to the two
@@ -134,5 +138,7 @@ slurm:
       - GPUM(?P<cuda_memory>\d+G)
 
     partitions: []
+
+    # Use `sinfo` to ask partition/node details (e.g. name and features)
     query_slurm: true
 ```
