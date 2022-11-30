@@ -275,8 +275,8 @@ class SlurmOptions:
     mem_per_gpu: Optional[str] = None
     """Requested memory per allocated GPU (size with units: K, M, G, or T)"""
 
-    cpu_per_task: Optional[str] = None
-    """Number of CPUs"""
+    cpus_per_task: Optional[str] = None
+    """Number of cpus requested per task"""
 
     nodelist: Optional[str] = None
     """Request a specific list of hosts"""
