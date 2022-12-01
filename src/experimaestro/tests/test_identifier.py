@@ -302,11 +302,12 @@ def test_identifier_deprecated_attribute():
     assert_equal(Values(values=[1]), Values(value=1))
 
 
+class A(Config):
+    x: Param[int]
+
+
 def test_identifier_meta():
     """Test forced meta-parameter"""
-
-    class A(Config):
-        x: Param[int]
 
     class B(Config):
         a: Param[A]
@@ -340,4 +341,36 @@ def test_identifier_meta():
     assert_equal(
         DictConfig(params={"a": A(x=1)}),
         DictConfig(params={"a": A(x=1), "b": setmeta(A(x=2), True)}),
+    )
+
+
+def test_identifier_meta_default_dict():
+    class DictConfig(Config):
+        params: Param[Dict[str, A]] = {}
+
+    assert_equal(
+        DictConfig(params={}),
+        DictConfig(params={"b": setmeta(A(x=2), True)}),
+    )
+
+    # Dict with mixed
+    assert_equal(
+        DictConfig(params={"a": A(x=1)}),
+        DictConfig(params={"a": A(x=1), "b": setmeta(A(x=2), True)}),
+    )
+
+
+def test_identifier_meta_default_array():
+    class ArrayConfigWithDefault(Config):
+        array: Param[List[A]] = []
+
+    # Array (with default) with mixed
+    assert_equal(
+        ArrayConfigWithDefault(array=[A(x=1)]),
+        ArrayConfigWithDefault(array=[A(x=1), setmeta(A(x=2), True)]),
+    )
+    # Array (with default) with empty list
+    assert_equal(
+        ArrayConfigWithDefault(array=[]),
+        ArrayConfigWithDefault(array=[setmeta(A(x=2), True)]),
     )

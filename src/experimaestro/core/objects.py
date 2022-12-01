@@ -45,6 +45,15 @@ def is_ignored(value):
     )
 
 
+def remove_meta(value):
+    """Cleanup a dict/list by removing ignored values"""
+    if isinstance(value, list):
+        return [el for el in value if not is_ignored(el)]
+    if isinstance(value, dict):
+        return {key: value for key, value in value.items() if not is_ignored(value)}
+    return value
+
+
 class HashComputer:
     """This class is in charge of computing a config/task identifier"""
 
@@ -164,7 +173,10 @@ class HashComputer:
                         and argument.default is None
                         and argvalue is None
                     )
-                    or (argument.default is not None and argument.default == argvalue)
+                    or (
+                        argument.default is not None
+                        and argument.default == remove_meta(argvalue)
+                    )
                 ):
                     # No update if same value (and not constant)
                     continue
