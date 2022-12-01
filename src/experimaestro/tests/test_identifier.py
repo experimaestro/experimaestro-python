@@ -333,6 +333,9 @@ def test_identifier_meta():
         ArrayConfig(array=[A(x=1)]), ArrayConfig(array=[A(x=1), setmeta(A(x=2), True)])
     )
 
+    # Array with empty list
+    assert_equal(ArrayConfig(array=[]), ArrayConfig(array=[setmeta(A(x=2), True)]))
+
     # Dict with mixed
     assert_equal(
         DictConfig(params={"a": A(x=1)}),

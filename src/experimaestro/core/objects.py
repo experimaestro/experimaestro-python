@@ -38,6 +38,13 @@ class Identifier:
         self.sub = sub
 
 
+def is_ignored(value):
+    """Returns True if the value should be ignored by itself"""
+    return (
+        value is not None and isinstance(value, Config) and (value.__xpm__.meta == True)
+    )
+
+
 class HashComputer:
     """This class is in charge of computing a config/task identifier"""
 
@@ -81,14 +88,6 @@ class HashComputer:
         else:
             self._hasher.update(bytes)
 
-    def ignore(self, value):
-        # Returns True if the value should be ignored by itself
-        return (
-            value is not None
-            and isinstance(value, Config)
-            and (value.__xpm__.meta == True)
-        )
-
     def update(self, value, subparam=False):
         if value is None:
             self._hashupdate(HashComputer.NONE_ID, subparam=subparam)
@@ -102,7 +101,7 @@ class HashComputer:
             self._hashupdate(HashComputer.STR_ID, subparam=subparam)
             self._hashupdate(value.encode("utf-8"), subparam=subparam)
         elif isinstance(value, list):
-            values = [el for el in value if not self.ignore(el)]
+            values = [el for el in value if not is_ignored(el)]
             self._hashupdate(HashComputer.LIST_ID, subparam=subparam)
             self._hashupdate(struct.pack("!d", len(values)), subparam=subparam)
             for x in values:
@@ -117,7 +116,7 @@ class HashComputer:
         elif isinstance(value, dict):
             self._hashupdate(HashComputer.DICT_ID, subparam=subparam)
             items = [
-                (key, value) for key, value in value.items() if not self.ignore(value)
+                (key, value) for key, value in value.items() if not is_ignored(value)
             ]
             items.sort(key=lambda x: x[0])
             for key, value in items:
@@ -719,6 +718,19 @@ class ConfigInformation:
             # TODO: remove when not needed (cache issues)
             objectout.write("typename", self.xpmtype.name())
             objectout.write("identifier", self.identifier.all.hex())
+
+            if is_ignored(self):
+                objectout.write("ignore", True)
+
+            # Write which fields are ignored
+            objectout.write(
+                "ignored",
+                [
+                    argument.name
+                    for argument, value in self.xpmvalues()
+                    if is_ignored(value)
+                ],
+            )
 
             with objectout.subobject("fields") as jsonfields:
                 for argument, value in self.xpmvalues():

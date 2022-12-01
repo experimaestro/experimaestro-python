@@ -61,6 +61,17 @@ def run(parameters):
     do_run(parameters)
 
 
+@click.argument("path2", type=Path)
+@click.argument("path1", type=Path)
+@cli.command(context_settings={"allow_extra_args": True})
+def diff(path1, path2):
+    """Compute the difference between two configurations"""
+
+    from experimaestro.tools.diff import diff
+
+    diff(path1, path2)
+
+
 @click.option(
     "--clean", is_flag=True, help="Remove the socket file and its enclosing directory"
 )
