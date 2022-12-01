@@ -18,3 +18,7 @@ Options:
   --clean     Prune the orphan folders
   --show-all  Show even not orphans
 ```
+
+## Difference between two configurations
+
+It is possible to look at the differences (that explain that two tasks have a different identifier) by using the `parameters-difference` command
