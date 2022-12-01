@@ -302,7 +302,7 @@ def test_identifier_deprecated_attribute():
     assert_equal(Values(values=[1]), Values(value=1))
 
 
-class A(Config):
+class MetaA(Config):
     x: Param[int]
 
 
@@ -310,67 +310,68 @@ def test_identifier_meta():
     """Test forced meta-parameter"""
 
     class B(Config):
-        a: Param[A]
+        a: Param[MetaA]
 
     class C(Config):
-        a: Meta[A]
+        a: Meta[MetaA]
 
     class ArrayConfig(Config):
-        array: Param[List[A]]
+        array: Param[List[MetaA]]
 
     class DictConfig(Config):
-        params: Param[Dict[str, A]]
+        params: Param[Dict[str, MetaA]]
 
     # As meta
-    assert_notequal(B(a=A(x=1)), B(a=A(x=2)))
-    assert_equal(B(a=setmeta(A(x=1), True)), B(a=setmeta(A(x=2), True)))
+    assert_notequal(B(a=MetaA(x=1)), B(a=MetaA(x=2)))
+    assert_equal(B(a=setmeta(MetaA(x=1), True)), B(a=setmeta(MetaA(x=2), True)))
 
     # As parameter
-    assert_equal(C(a=A(x=1)), C(a=A(x=2)))
-    assert_notequal(C(a=setmeta(A(x=1), False)), C(a=setmeta(A(x=2), False)))
+    assert_equal(C(a=MetaA(x=1)), C(a=MetaA(x=2)))
+    assert_notequal(C(a=setmeta(MetaA(x=1), False)), C(a=setmeta(MetaA(x=2), False)))
 
     # Array with mixed
     assert_equal(
-        ArrayConfig(array=[A(x=1)]), ArrayConfig(array=[A(x=1), setmeta(A(x=2), True)])
+        ArrayConfig(array=[MetaA(x=1)]),
+        ArrayConfig(array=[MetaA(x=1), setmeta(MetaA(x=2), True)]),
     )
 
     # Array with empty list
-    assert_equal(ArrayConfig(array=[]), ArrayConfig(array=[setmeta(A(x=2), True)]))
+    assert_equal(ArrayConfig(array=[]), ArrayConfig(array=[setmeta(MetaA(x=2), True)]))
 
     # Dict with mixed
     assert_equal(
-        DictConfig(params={"a": A(x=1)}),
-        DictConfig(params={"a": A(x=1), "b": setmeta(A(x=2), True)}),
+        DictConfig(params={"a": MetaA(x=1)}),
+        DictConfig(params={"a": MetaA(x=1), "b": setmeta(MetaA(x=2), True)}),
     )
 
 
 def test_identifier_meta_default_dict():
     class DictConfig(Config):
-        params: Param[Dict[str, A]] = {}
+        params: Param[Dict[str, MetaA]] = {}
 
     assert_equal(
         DictConfig(params={}),
-        DictConfig(params={"b": setmeta(A(x=2), True)}),
+        DictConfig(params={"b": setmeta(MetaA(x=2), True)}),
     )
 
     # Dict with mixed
     assert_equal(
-        DictConfig(params={"a": A(x=1)}),
-        DictConfig(params={"a": A(x=1), "b": setmeta(A(x=2), True)}),
+        DictConfig(params={"a": MetaA(x=1)}),
+        DictConfig(params={"a": MetaA(x=1), "b": setmeta(MetaA(x=2), True)}),
     )
 
 
 def test_identifier_meta_default_array():
     class ArrayConfigWithDefault(Config):
-        array: Param[List[A]] = []
+        array: Param[List[MetaA]] = []
 
     # Array (with default) with mixed
     assert_equal(
-        ArrayConfigWithDefault(array=[A(x=1)]),
-        ArrayConfigWithDefault(array=[A(x=1), setmeta(A(x=2), True)]),
+        ArrayConfigWithDefault(array=[MetaA(x=1)]),
+        ArrayConfigWithDefault(array=[MetaA(x=1), setmeta(MetaA(x=2), True)]),
     )
     # Array (with default) with empty list
     assert_equal(
         ArrayConfigWithDefault(array=[]),
-        ArrayConfigWithDefault(array=[setmeta(A(x=2), True)]),
+        ArrayConfigWithDefault(array=[setmeta(MetaA(x=2), True)]),
     )
