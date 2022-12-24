@@ -1,7 +1,6 @@
 # --- Parse specifications from strings
 
 from functools import reduce
-from itertools import accumulate
 from arpeggio import (
     ZeroOrMore,
     OneOrMore,
@@ -78,7 +77,6 @@ class Visitor(PTNodeVisitor):
         return specs.cpu(**children[0])
 
     def visit_specs(self, node, children):
-        print(children)
         a = children[0]
         for c in children[1:]:
             a.update(c)

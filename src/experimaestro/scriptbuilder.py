@@ -4,7 +4,7 @@ from typing import Optional, List
 import os
 from experimaestro.utils import logger
 from .connectors import RedirectType, Redirect
-from .commandline import CommandLineJob, AbstractCommand, CommandContext, CommandPart
+from .commandline import CommandLineJob, AbstractCommand, CommandContext
 from shlex import quote as shquote
 
 
@@ -95,6 +95,7 @@ class PythonScriptBuilder:
 
             # --- Checks locks right away
 
+            out.write("""import logging\nlogging.basicConfig(level=logging.INFO)\n\n""")
             out.write("""from experimaestro.run import TaskRunner\nimport os\n\n""")
 
             out.write("lockfiles = [\n")
@@ -107,7 +108,8 @@ class PythonScriptBuilder:
             out.write("\n")
 
             out.write(
-                f"""TaskRunner("{shquote(connector.resolve(scriptpath))}", lockfiles).run()\n"""
+                f"""TaskRunner("{shquote(connector.resolve(scriptpath))}","""
+                """ lockfiles).run()\n"""
             )
 
         # Set the file as executable

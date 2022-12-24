@@ -1,10 +1,17 @@
 repos:
-  - repo: https://github.com/ambv/black
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.2.0
+    hooks:
+    -   id: check-yaml
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+-   repo: https://github.com/psf/black
     rev: 22.3.0
     hooks:
-      - id: black
-        language_version: python3
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: "v2.6.2" # Use the sha or tag you want to point at
+    -   id: black
+-   repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
     hooks:
-      - id: prettier
+    -   id: flake8
+        additional_dependencies:
+            - flake8-print
