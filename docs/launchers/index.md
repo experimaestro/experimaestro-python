@@ -137,7 +137,9 @@ slurm:
       - GPU(?P<cuda_count>\d+)
       - GPUM(?P<cuda_memory>\d+G)
 
-    partitions: []
+    partitions:
+      # Disable the "heavy" partition
+      heavy: { disabled: true }
 
     # Use `sinfo` to ask partition/node details (e.g. name and features)
     query_slurm: true

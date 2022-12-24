@@ -484,6 +484,8 @@ class SlurmPartition(YAMLDataClass):
     nodes: List[SlurmNodes] = field(default_factory=lambda: [])
     configuration: Optional[SlurmPartitionConfiguration] = None
     priority: int = 0
+    disabled: bool = False
+    """Can be used to disable a partition"""
 
 
 class FeatureConjunction(List[str]):
@@ -581,6 +583,9 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
         hosts = []
 
         for partition_name, partition in self.partitions.items():
+            if partition.disabled:
+                continue
+
             for node in partition.nodes:
                 # CPU Memory specification are handled through command line
                 cpu = CPUSpecification(sys.maxsize, sys.maxsize)
