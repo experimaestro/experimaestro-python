@@ -240,7 +240,8 @@ class Job(Resource):
 
     @property
     def failedpath(self):
-        """When a job has been unsuccessful, this file is written with an error code inside"""
+        """When a job has been unsuccessful, this file is written with an error
+        code inside"""
         return self.jobpath / ("%s.failed" % self.name)
 
     @property
@@ -257,7 +258,10 @@ class Job(Resource):
 
     def dependencychanged(self, dependency, oldstatus, status):
         """Called when a dependency has changed"""
-        value = lambda s: (1 if s == DependencyStatus.OK else 0)
+
+        def value(s):
+            return 1 if s == DependencyStatus.OK else 0
+
         self.unsatisfied -= value(status) - value(oldstatus)
 
         logger.debug("Job %s: unsatisfied %d", self, self.unsatisfied)
@@ -313,13 +317,20 @@ class JobError(Exception):
 class SignalHandler:
     def __init__(self):
         self.experiments: Set["experiment"] = set()
-        signal.signal(signal.SIGINT, self)
+        self.original_sigint_handler = None
 
     def add(self, xp: "experiment"):
+        if not self.experiments:
+            self.original_sigint_handler = signal.getsignal(signal.SIGINT)
+
+            signal.signal(signal.SIGINT, self)
+
         self.experiments.add(xp)
 
     def remove(self, xp):
         self.experiments.remove(xp)
+        if not self.experiments:
+            signal.signal(signal.SIGINT, self.original_sigint_handler)
 
     def __call__(self, signum, frame):
         """SIGINT signal handler"""
@@ -498,7 +509,7 @@ class Scheduler:
             for listener in self.listeners:
                 try:
                     listener.job_state(job)
-                except Exception as e:
+                except Exception:
                     logger.exception("Got an error with listener %s", listener)
 
             # Adds to the listeners
@@ -805,9 +816,6 @@ class experiment:
 
         self.central = SchedulerCentral.create(self.scheduler.name)
 
-        if not SIGNAL_HANDLER:
-            SIGNAL_HANDLER = SignalHandler()
-
         SIGNAL_HANDLER.add(self)
 
         self.old_experiment = experiment.CURRENT
@@ -825,7 +833,8 @@ class experiment:
                 # import faulthandler
                 # faulthandler.dump_traceback()
                 logger.exception(
-                    "Not waiting since an exception was thrown (some jobs may be running)"
+                    "Not waiting since an exception was thrown"
+                    " (some jobs may be runningq)"
                 )
             else:
                 self.wait()
