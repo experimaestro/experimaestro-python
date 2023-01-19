@@ -1011,9 +1011,10 @@ class ConfigInformation:
                 for name, value in definition["fields"].items():
                     v = ConfigInformation._objectFromParameters(value, objects)
 
-                    argument = cls.__xpmtype__.arguments[name]
-                    if argument.is_data and v is not None:
-                        v = data_loader(v)
+                    if not as_instance:
+                        argument = cls.__getxpmtype__().arguments[name]
+                        if argument.is_data and v is not None:
+                            v = data_loader(v)
 
                     if as_instance:
                         setattr(o, name, v)

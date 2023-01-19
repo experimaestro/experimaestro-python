@@ -8,6 +8,7 @@ Test annotation handling for configurations and tasks
 import sys
 from pathlib import Path
 from typing import Dict, Optional, List, Set
+from experimaestro.core.context import SerializationContext
 from experimaestro.core.types import DictType, IntType, StrType
 from enum import Enum
 import pytest
@@ -66,7 +67,7 @@ def serializeCycle(config: Config):
     with jsonstreams.Stream(
         jsonstreams.Type.ARRAY, fd=stringOut, close_fd=False
     ) as out:
-        config.__xpm__._outputjson_inner(out, None, serialized)
+        config.__xpm__._outputjson_inner(out, SerializationContext(), serialized)
 
     objects = json.loads(stringOut.getvalue())
 
@@ -283,7 +284,8 @@ def test_task_config():
             return {}
 
     output = Task().submit(dryrun=True)
-    assert Output.__xpmtype__.configtype == type(output.__unwrap__())
+    # flake8: noqa: E721
+    assert Output.__xpmtype__.configtype is type(output.__unwrap__())
 
 
 def test_default_mismatch():
