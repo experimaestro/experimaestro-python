@@ -31,6 +31,7 @@ from .core.arguments import (
     SubParam,
     Option,
     Meta,
+    DataPath,
     Annotated,
     Constant,
     # Annotations helpers

@@ -2,15 +2,14 @@
 
 from collections import ChainMap
 import json
-import os
 import io
 from pathlib import Path
-from typing import Optional, Union, Callable, Dict
+from typing import List, Optional, Union, Callable, Dict
 import itertools
-import psutil
+from experimaestro.core.context import SerializationContext
 
 from experimaestro.utils import logger
-from .scheduler import Job, JobError, JobState
+from .scheduler import Job, JobState
 from .connectors import Process, Redirect, RedirectType, Connector
 from .scheduler import Workspace
 from .core.objects import Config
@@ -51,7 +50,7 @@ class AbstractCommandComponent(CommandPart):
     pass
 
 
-class CommandContext:
+class CommandContext(SerializationContext):
     def __init__(
         self,
         workspace: Workspace,
@@ -60,6 +59,7 @@ class CommandContext:
         name: str,
         config: Config,
     ):
+        super().__init__()
         self.workspace = workspace
         self.connector = connector
         self.path = path

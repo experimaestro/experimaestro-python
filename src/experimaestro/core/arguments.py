@@ -1,7 +1,6 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
-from pathlib import Path
-from typing import Any, Optional, TypeVar, TYPE_CHECKING
+from typing import Optional, TypeVar, TYPE_CHECKING
 from experimaestro.typingutils import get_optional
 import sys
 
@@ -33,7 +32,39 @@ class Argument:
         checker=None,
         constant=False,
         subparam=False,
+        is_data=False,
     ):
+        """Creates a new argument
+
+        Args:
+            name (str): The name of the argument
+
+            type (experimaestro.core.types.Type): The type of the argument
+
+            required (bool, optional): True if required (if None, determines
+            automatically). Defaults to None.
+
+            help (str, optional): Help string. Defaults to None.
+
+            generator (Generator, optional): The value generator (e.g. for
+            paths). Defaults to None.
+
+            ignored (bool, optional): True if ignored (if None, computed
+            automatically). Defaults to None.
+
+            default (any, optional): . Defaults to None.
+
+            checker (any, optional): Value checker. Defaults to None.
+
+            constant (bool, optional): If true, the value is constant. Defaults
+            to False.
+
+            subparam (bool, optional): If this is a sub-parameter. Defaults to
+            False.
+
+            is_data (bool, optional): Flag for paths that are data path (to be
+            serialized). Defaults to False.
+        """
         required = (default is None) if required is None else required
         if default is not None and required is not None and required:
             raise Exception(
@@ -51,6 +82,7 @@ class Argument:
         self.generator = generator
         self.subparam = subparam
         self.objecttype = None
+        self.is_data = is_data
 
         assert (
             not self.constant or self.default is not None
@@ -91,7 +123,6 @@ class ArgumentOptions:
 
     def create(self, name, originaltype, typehint):
         from experimaestro.core.types import Type
-        import experimaestro.core.objects as objects
 
         optionaltype = get_optional(typehint)
         type = Type.fromType(optionaltype or typehint)
@@ -138,6 +169,10 @@ optionHint = _Param(ignored=True)
 Option = Annotated[T, optionHint]
 Meta = Annotated[T, optionHint]
 
+dataHint = _Param(ignored=True, is_data=True)
+DataPath = Annotated[T, dataHint]
+"""Annotates a path that should be kept to restore an object to its state"""
+
 subparamHint = _Param(subparam=True)
 SubParam = Annotated[T, subparamHint]
 
@@ -151,7 +186,8 @@ class help(TypeAnnotation):
 
 
 class default(TypeAnnotation):
-    """Adds a default value (useful when we have problems with setattr and class properties)"""
+    """Adds a default value (useful when we have problems with setattr and class
+    properties)"""
 
     def __init__(self, value):
         self.value = value

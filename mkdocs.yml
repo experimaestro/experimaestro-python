@@ -12,6 +12,7 @@ nav:
       - Plan: experiments/plan.md
   - Launchers: launchers/index.md
   - Connectors: connectors/index.md
+  - Serialization: serialization.md
   - Integration:
       - Jupyter: jupyter.md
       - Documentation: documenting.md

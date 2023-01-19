@@ -223,5 +223,5 @@ def find_launcher(
     """Find a launcher matching a given specification"""
     launcher = LauncherRegistry.instance().find(*specs, tags=tags)
     if not launcher:
-        raise LauncherNotFoundError()
+        raise LauncherNotFoundError(f"No launcher with specification: {specs}")
     return launcher

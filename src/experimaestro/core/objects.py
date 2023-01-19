@@ -1,19 +1,20 @@
 """Configuration and tasks"""
 
+import json
 from pathlib import Path
 import hashlib
 import struct
 import io
-import typing
+import jsonstreams
 import fasteners
 from enum import Enum
 import inspect
 import importlib
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
-    Generic,
     List,
     Optional,
     Set,
@@ -23,10 +24,12 @@ from typing import (
     get_type_hints,
     overload,
 )
-from experimaestro.utils import logger
 import sys
+import experimaestro
+from experimaestro.utils import logger
 from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
+from .context import SerializationContext
 
 T = TypeVar("T", bound="Config")
 
@@ -40,9 +43,7 @@ class Identifier:
 
 def is_ignored(value):
     """Returns True if the value should be ignored by itself"""
-    return (
-        value is not None and isinstance(value, Config) and (value.__xpm__.meta == True)
-    )
+    return value is not None and isinstance(value, Config) and (value.__xpm__.meta)
 
 
 def remove_meta(value):
@@ -155,7 +156,7 @@ class HashComputer:
                     if (
                         argvalue is None
                         or not isinstance(argvalue, Config)
-                        or (argvalue.__xpm__.meta != False)
+                        or (argvalue.__xpm__.meta is not False)
                     ):
                         continue
 
@@ -518,7 +519,7 @@ class ConfigInformation:
             if hasattr(self.pyobject, "__validate__"):
                 try:
                     self.pyobject.__validate__()
-                except:
+                except Exception:
                     logger.error(
                         "Error while validating %s at %s", self.xpmtype, self._initinfo
                     )
@@ -702,8 +703,16 @@ class ConfigInformation:
                 "Cannot serialize objects of type %s", type(value)
             )
 
-    def _outputjson_inner(self, jsonstream, context, serialized: Set[int]):
+    def _outputjson_inner(
+        self,
+        jsonstream,
+        context: SerializationContext,
+        serialized: Set[int],
+        *,
+        full=True,
+    ):
         """Serialize the configuration"""
+
         # Skip if already serialized
         if id(self.pyobject) in serialized:
             return
@@ -728,27 +737,35 @@ class ConfigInformation:
 
             # Serialize identifier and typename
             # TODO: remove when not needed (cache issues)
-            objectout.write("typename", self.xpmtype.name())
-            objectout.write("identifier", self.identifier.all.hex())
+            if full:
+                objectout.write("typename", self.xpmtype.name())
+                objectout.write("identifier", self.identifier.all.hex())
 
-            if is_ignored(self):
-                objectout.write("ignore", True)
+                if is_ignored(self):
+                    objectout.write("ignore", True)
 
-            # Write which fields are ignored
-            objectout.write(
-                "ignored",
-                [
-                    argument.name
-                    for argument, value in self.xpmvalues()
-                    if is_ignored(value)
-                ],
-            )
+                # Write which fields are ignored
+                objectout.write(
+                    "ignored",
+                    [
+                        argument.name
+                        for argument, value in self.xpmvalues()
+                        if is_ignored(value)
+                    ],
+                )
 
             with objectout.subobject("fields") as jsonfields:
                 for argument, value in self.xpmvalues():
-                    ConfigInformation._outputjsonvalue(
-                        [argument.name], value, jsonfields, value
-                    )
+                    with context.push(argument.name) as var_path:
+                        if argument.is_data and value is not None:
+                            assert isinstance(
+                                value, Path
+                            ), f"Data arguments should be paths (type is {type(value)})"
+                            value = context.serialize(var_path, value)
+
+                        ConfigInformation._outputjsonvalue(
+                            [argument.name], value, jsonfields, value
+                        )
 
     @staticmethod
     def _outputjsonobjects(value, jsonout, context, serialized):
@@ -784,7 +801,7 @@ class ConfigInformation:
                 "Cannot serialize objects of type %s", type(value)
             )
 
-    def outputjson(self, out: io.TextIOBase, context: "CommandContext"):
+    def outputjson(self, out: io.TextIOBase, context: SerializationContext):
         """Outputs the json of this object
 
         The format is an array of objects
@@ -812,8 +829,6 @@ class ConfigInformation:
             out {io.TextIOBase} -- The output stream
             context {[type]} -- the command context
         """
-        import jsonstreams
-
         serialized: Set[int] = set()
         with jsonstreams.Stream(jsonstreams.Type.OBJECT, fd=out, close_fd=True) as out:
             # Write information
@@ -828,6 +843,47 @@ class ConfigInformation:
             # Write objects
             with out.subarray("objects") as arrayout:
                 self._outputjson_inner(arrayout, context, serialized)
+
+    def __json__(self):
+        with io.StringIO() as string_out:
+            with jsonstreams.Stream(
+                jsonstreams.Type.ARRAY, fd=string_out, close_fd=False
+            ) as out:
+                serialized: Set[int] = set()
+                self._outputjson_inner(
+                    out, SerializationContext(), serialized, full=False
+                )
+
+            text = string_out.getvalue()
+
+        return text
+
+    def serialize(self, save_directory: Path):
+        """Serialize the configuration and its data files into a directory"""
+        context = SerializationContext(save_directory=save_directory)
+
+        with (save_directory / "definition.json").open("wt") as out:
+            with jsonstreams.Stream(jsonstreams.Type.ARRAY, fd=out) as out:
+                serialized: Set[int] = set()
+                self._outputjson_inner(out, context, serialized, full=False)
+
+    @staticmethod
+    def deserialize(path: Union[str, Path, Callable[[Path], Path]]):
+        # Load
+        if callable(path):
+            data_loader = path
+        else:
+            path = Path(path)
+
+            def data_loader(s):
+                return path / Path(s)
+
+        with data_loader("definition.json").open("rt") as fh:
+            config = json.load(fh)
+
+        return ConfigInformation.fromParameters(
+            config, as_instance=False, data_loader=data_loader
+        )
 
     # def _outputjson(self, jsonout, context, key=[]):
     #     with jsonout.subobject(*key) as objectout:
@@ -847,6 +903,7 @@ class ConfigInformation:
                     for key, value in value.items()
                 }
 
+            # The value is an object (that should have been serialized first)
             if value["type"] == "python":
                 return objects[value["value"]]
 
@@ -861,6 +918,7 @@ class ConfigInformation:
                         raise TypeError(f"Cannot handle type {c['type']}")
                 return o
 
+            # A path
             if value["type"] == "path":
                 return Path(value["value"])
 
@@ -875,16 +933,26 @@ class ConfigInformation:
 
     @overload
     @staticmethod
-    def fromParameters(definitions: Dict, as_instance=True) -> "TypeConfig":
+    def fromParameters(
+        definitions: List[Dict], as_instance=True, save_directory: Optional[Path] = None
+    ) -> "TypeConfig":
         ...
 
     @overload
     @staticmethod
-    def fromParameters(definitions: Dict, as_instance=False) -> "Config":
+    def fromParameters(
+        definitions: List[Dict],
+        as_instance=False,
+        save_directory: Optional[Path] = None,
+    ) -> "Config":
         ...
 
     @staticmethod
-    def fromParameters(definitions: Dict, as_instance=True):
+    def fromParameters(
+        definitions: List[Dict],
+        as_instance=True,
+        data_loader: Optional[Callable[[Path], Path]] = None,
+    ):
         """Builds config (instances) from a dictionary"""
         o = None
         objects = {}
@@ -901,7 +969,6 @@ class ConfigInformation:
                 path = definition["file"]
                 with add_to_path(str(Path(path).parent)):
                     spec = importlib.util.spec_from_file_location(module_name, path)
-                    print(spec, module_name, path)
                     mod = importlib.util.module_from_spec(spec)
                     sys.modules[module_name] = mod
                     spec.loader.exec_module(mod)
@@ -943,6 +1010,11 @@ class ConfigInformation:
                 # Set the fields
                 for name, value in definition["fields"].items():
                     v = ConfigInformation._objectFromParameters(value, objects)
+
+                    argument = cls.__xpmtype__.arguments[name]
+                    if argument.is_data and v is not None:
+                        v = data_loader(v)
+
                     if as_instance:
                         setattr(o, name, v)
                         assert (
@@ -1116,7 +1188,10 @@ class TypeConfig:
         params = ", ".join(
             [f"{key}={value}" for key, value in self.__xpm__.values.items()]
         )
-        return f"{self.__xpmtype__.objecttype.__module__}.{self.__xpmtype__.objecttype.__qualname__}({params})"
+        return (
+            f"{self.__xpmtype__.objecttype.__module__}."
+            f"{self.__xpmtype__.objecttype.__qualname__}({params})"
+        )
 
     def tag(self, name, value):
         self.__xpm__.addtag(name, value)
@@ -1176,7 +1251,8 @@ class TypeConfig:
         raise AssertionError("Cannot ask the job path of a non submitted task")
 
     def copy(self):
-        """Returns a copy of this configuration (ignores other non parameters attributes)"""
+        """Returns a copy of this configuration (ignores other non parameters
+        attributes)"""
         return clone(self)
 
 
@@ -1184,10 +1260,12 @@ class Config:
     """Base type for all objects in python interface"""
 
     __xpmtype__: ClassVar[ObjectType]
-    """The object type holds all the information about a specific subclass experimaestro metadata"""
+    """The object type holds all the information about a specific subclass
+    experimaestro metadata"""
 
     __xpm__: ConfigInformation
-    """The __xpm__ object contains all instance specific information about a configuration/task"""
+    """The __xpm__ object contains all instance specific information about a
+    configuration/task"""
 
     @classmethod
     def __getxpmtype__(cls):
@@ -1235,6 +1313,10 @@ class Config:
         """Called after the object  __init__() and with properties set"""
         # Default implementation is to do nothing
         pass
+
+    def __json__(self):
+        """Returns a JSON version of the object (if possible)"""
+        return self.__xpm__.__json__()
 
 
 class Task(Config):
@@ -1352,7 +1434,6 @@ class TaskOutput(Proxy):
         return TaskOutput(value, self.__xpm__.task)
 
     def __getitem__(self, key: Any):
-        print("Getting", key)
         return self._wrap(self.__xpm__.value.__getitem__(key))
 
     def __getattr__(self, key: str, default=None) -> Any:
