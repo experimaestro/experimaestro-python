@@ -63,7 +63,7 @@ const config: Configuration = {
     mainFields: ["browser", "module", "main"],
   },
   output: {
-    path: path.resolve(__dirname, "../experimaestro/server/data"),
+    path: path.resolve(__dirname, "../src/experimaestro/server/data"),
     publicPath: "/",
     filename: "[name].js",
     chunkFilename: "[name].[id].js",
