@@ -555,7 +555,11 @@ class ConfigInformation:
         if self._identifier is None:
             hashcomputer = HashComputer()
             hashcomputer.update(self.pyobject)
-            self._identifier = hashcomputer.identifier()
+            if self._sealed:
+                # Only cache the idenfitier if sealed
+                self._identifier = hashcomputer.identifier()
+            else:
+                return hashcomputer.identifier()
         return self._identifier
 
     def dependency(self):
@@ -1318,6 +1322,9 @@ class Config:
     def __json__(self):
         """Returns a JSON version of the object (if possible)"""
         return self.__xpm__.__json__()
+
+    def __identifier__(self) -> Identifier:
+        return self.__xpm__.identifier
 
 
 class Task(Config):
