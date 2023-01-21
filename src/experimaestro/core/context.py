@@ -9,7 +9,8 @@ def shallow_copy(src_path: Path, dest_path: Path):
     """Copy a directory or file, trying to use hard links if possible"""
     if src_path.is_file():
         try:
-            dest_path.hardlink_to(src_path)
+            # FIXME: deprecated in python 3.12
+            dest_path.link_to(src_path)
         except OSError:
             shutil.copy(src_path, dest_path)
     else:
