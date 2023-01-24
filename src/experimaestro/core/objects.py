@@ -1,5 +1,6 @@
 """Configuration and tasks"""
 
+from functools import cached_property
 import json
 from pathlib import Path
 import hashlib
@@ -12,7 +13,6 @@ import inspect
 import importlib
 from typing import (
     Any,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -29,16 +29,38 @@ import experimaestro
 from experimaestro.utils import logger
 from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
-from .context import SerializationContext
+from .context import SerializationContext, SerializedPath, SerializedPathLoader
 
 T = TypeVar("T", bound="Config")
 
 
 class Identifier:
-    def __init__(self, all, main, sub):
-        self.all = all
+    def __init__(self, main: bytes, sub: Optional[bytes] = None):
         self.main = main
         self.sub = sub
+
+    @cached_property
+    def all(self):
+        if self.sub is None:
+            return self.main
+
+        h = hashlib.sha256()
+        h.update(self.main)
+        h.update(self.sub)
+        return h.digest()
+
+    def state_dict(self):
+        if self.sub is None:
+            return self.main.hex()
+
+        return {"main": self.main.hex(), "sub": self.sub.hex()}
+
+    @staticmethod
+    def from_state_dict(data: Union[Dict[str, str], str]):
+        if isinstance(data, str):
+            return Identifier(bytes.fromhex(data))
+
+        return Identifier(bytes.fromhex(data["main"]), bytes.fromhex(data["sub"]))
 
 
 def is_ignored(value):
@@ -77,17 +99,9 @@ class HashComputer:
         self._tasks = set()
 
     def identifier(self) -> Identifier:
-        sub = None if self._subhasher is None else self._subhasher.digest()
         main = self._hasher.digest()
-        if sub:
-            h = hashlib.sha256()
-            h.update(main)
-            h.update(sub)
-            all = h.digest()
-        else:
-            all = main
-
-        return Identifier(all, main, sub)
+        sub = self._subhasher.digest() if self._subhasher is not None else None
+        return Identifier(main, sub)
 
     def _hashupdate(self, bytes, subparam):
         if subparam:
@@ -553,14 +567,19 @@ class ConfigInformation:
     def identifier(self) -> Identifier:
         """Computes the unique identifier"""
         if self._identifier is None:
-            hashcomputer = HashComputer()
-            hashcomputer.update(self.pyobject)
             if self._sealed:
                 # Only cache the idenfitier if sealed
-                self._identifier = hashcomputer.identifier()
+                self._identifier = self.compute_identifier()
             else:
-                return hashcomputer.identifier()
+                return self.compute_identifier()
         return self._identifier
+
+    def compute_identifier(self):
+        """Compute identifier (no cache)"""
+
+        hashcomputer = HashComputer()
+        hashcomputer.update(self.pyobject)
+        return hashcomputer.identifier()
 
     def dependency(self):
         """Returns a dependency"""
@@ -666,6 +685,7 @@ class ConfigInformation:
         """Serialize a value"""
         if value is None:
             jsonout.write(*key, None)
+
         elif isinstance(value, Config):
             with jsonout.subobject(*key) as obj:
                 obj.write("type", "python")
@@ -682,6 +702,11 @@ class ConfigInformation:
             with jsonout.subobject(*key) as objectout:
                 objectout.write("type", "path")
                 objectout.write("value", str(value))
+        elif isinstance(value, SerializedPath):
+            with jsonout.subobject(*key) as objectout:
+                objectout.write("type", "path.serialized")
+                objectout.write("value", str(value.path))
+                objectout.write("is_folder", value.is_folder)
         elif isinstance(value, (int, float, str)):
             jsonout.write(*key, value)
         elif isinstance(value, Enum):
@@ -741,9 +766,9 @@ class ConfigInformation:
 
             # Serialize identifier and typename
             # TODO: remove when not needed (cache issues)
+            objectout.write("identifier", self.identifier.state_dict())
             if full:
                 objectout.write("typename", self.xpmtype.name())
-                objectout.write("identifier", self.identifier.all.hex())
 
                 if is_ignored(self):
                     objectout.write("ignore", True)
@@ -796,7 +821,7 @@ class ConfigInformation:
             for el in value:
                 ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
         elif isinstance(value, dict):
-            for name, el in value.items():
+            for el in value.values():
                 ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
         elif isinstance(value, (Path, int, float, str, Enum)):
             pass
@@ -872,14 +897,22 @@ class ConfigInformation:
                 self._outputjson_inner(out, context, serialized, full=False)
 
     @staticmethod
-    def deserialize(path: Union[str, Path, Callable[[Path], Path]]):
+    def deserialize(path: Union[str, Path, SerializedPathLoader]) -> "Config":
+        """Deserialize a configuration
+
+        :param path: The filesystem Path to use, or a way to download the
+            information through a function taking two arguments
+        :return: A Config object
+        """
         # Load
         if callable(path):
             data_loader = path
         else:
             path = Path(path)
 
-            def data_loader(s):
+            def data_loader(s: Union[Path, str, SerializedPath]):
+                if isinstance(s, SerializedPath):
+                    return path / Path(s.path)
                 return path / Path(s)
 
         with data_loader("definition.json").open("rt") as fh:
@@ -926,6 +959,9 @@ class ConfigInformation:
             if value["type"] == "path":
                 return Path(value["value"])
 
+            if value["type"] == "path.serialized":
+                return SerializedPath(value["value"], value["is_folder"])
+
             if value["type"] == "enum":
                 module = importlib.import_module(value["module"])
                 enumClass = getqualattr(module, value["enum"])
@@ -955,7 +991,7 @@ class ConfigInformation:
     def fromParameters(
         definitions: List[Dict],
         as_instance=True,
-        data_loader: Optional[Callable[[Path], Path]] = None,
+        data_loader: Optional[SerializedPathLoader] = None,
     ):
         """Builds config (instances) from a dictionary"""
         o = None
@@ -996,7 +1032,9 @@ class ConfigInformation:
                     # ... sets potentially useful properties
                     if "typename" in definition:
                         o.__xpmtypename__ = definition["typename"]
-                        o.__xpmidentifier__ = definition["identifier"]
+                        o.__xpmidentifier__ = Identifier.from_state_dict(
+                            definition["identifier"]
+                        )
 
                         if "." in o.__xpmtypename__:
                             _, name = o.__xpmtypename__.rsplit(".", 1)
@@ -1006,10 +1044,12 @@ class ConfigInformation:
                             taskglobals.Env.instance().wspath
                             / "jobs"
                             / o.__xpmtypename__.lower()
-                            / o.__xpmidentifier__.lower()
+                            / o.__xpmidentifier__.all.hex().lower()
                         )
                         o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
                         o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
+                else:
+                    xpminfo = o.__xpm__  # type: ConfigInformation
 
                 # Set the fields
                 for name, value in definition["fields"].items():
@@ -1018,6 +1058,7 @@ class ConfigInformation:
                     if not as_instance:
                         argument = cls.__getxpmtype__().arguments[name]
                         if argument.is_data and v is not None:
+                            assert isinstance(v, SerializedPath)
                             v = data_loader(v)
 
                     if as_instance:
@@ -1031,6 +1072,12 @@ class ConfigInformation:
                 if as_instance:
                     # Calls post-init
                     o.__post_init__()
+                else:
+                    # Seal and set the identifier
+                    xpminfo._identifier = Identifier.from_state_dict(
+                        definition["identifier"]
+                    )
+                    xpminfo.seal(GenerationContext())
 
                 assert definition["id"] not in objects, (
                     "Duplicate id %s" % definition["id"]
@@ -1124,9 +1171,9 @@ def cache(fn, name: str):
         import experimaestro.taskglobals as taskglobals
 
         # Get path and create directory if needed
-        hexid = config.__xpmidentifier__  # type: str
+        hexid = config.__xpmidentifier__  # type: Identifier
         typename = config.__xpmtypename__  # type: str
-        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid
+        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid.all.hex()
 
         if not dir.exists():
             dir.mkdir(parents=True, exist_ok=True)

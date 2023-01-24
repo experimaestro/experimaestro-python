@@ -1,13 +1,10 @@
-from contextlib import contextmanager
 import tempfile
 import shutil
 import os
 from pathlib import Path
 import logging
 import signal
-import pytest
 
-from experimaestro.launchers import Launcher
 from experimaestro import experiment, task
 
 
@@ -56,7 +53,10 @@ class TemporaryDirectory:
         if os.environ.get("XPM_KEEPWORKDIR", False) == "1":
             logging.warning("NOT Removing %s" % self.path)
         else:
-            logging.warning("CLLLLLEAEANING UP %s", self.path)
+            logging.warning(
+                "Cleaning up working directory %s" "(use XPM_KEEPWORKDIR=1 to keep it)",
+                self.path,
+            )
             shutil.rmtree(self.path, ignore_errors=True)
 
 
@@ -118,7 +118,7 @@ class TemporaryExperiment:
 
 def is_posix():
     try:
-        import posix
+        import posix  # noqa: F401
 
         return True
     except ImportError:

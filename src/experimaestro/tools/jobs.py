@@ -1,4 +1,4 @@
-from experimaestro.core.objects import ConfigInformation, TypeConfig
+from experimaestro.core.objects import ConfigInformation
 from experimaestro.utils import logger
 import experimaestro.taskglobals as taskglobals
 from pathlib import Path
@@ -24,13 +24,13 @@ def fix_deprecated(workpath: Path, fix: bool):
 
         try:
             object = ConfigInformation.fromParameters(params["objects"], False)
-        except:
+        except Exception:
             logger.exception("Error while loading the parameters from %s", job)
             continue
 
         # Now, computes the signature
         old_identifier = job.parent.name
-        new_identifier = str(object.__xpm__.identifier.all.hex())
+        new_identifier = str(object.__xpm__.compute_identifier().all.hex())
 
         if new_identifier != old_identifier:
             logger.info(
@@ -51,7 +51,8 @@ def fix_deprecated(workpath: Path, fix: bool):
                 if newjobpath.exists():
                     if newjobpath.resolve() != oldjobpath.resolve():
                         logger.warning(
-                            "New job path %s exists and is set to a different value (%s) than the computed one (%s)",
+                            "New job path %s exists and is set to a "
+                            "different value (%s) than the computed one (%s)",
                             newjobpath,
                             newjobpath.resolve(),
                             oldjobpath.resolve(),

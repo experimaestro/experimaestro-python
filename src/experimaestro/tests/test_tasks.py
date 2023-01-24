@@ -3,19 +3,30 @@
 from pathlib import Path
 import pytest
 
-from experimaestro import *
+from experimaestro import Config, deprecate, Task, Param
 from experimaestro.tools.jobs import fix_deprecated
 from experimaestro.scheduler import FailedExperiment, JobState
 
 from .utils import TemporaryDirectory, TemporaryExperiment, get_times
 
-from .tasks.all import *
+from .tasks.all import (
+    Concat,
+    ForeignTaskA,
+    Fail,
+    FailConsumer,
+    SetUnknown,
+    Method,
+    Say,
+    SimpleTask,
+    CacheConfig,
+    CacheConfigTask,
+)
 from . import restart
 from .definitions_types import IntegerTask, FloatTask
 
 
 def test_task_types():
-    with TemporaryExperiment("simple") as xp:
+    with TemporaryExperiment("simple"):
         assert IntegerTask(value=5).submit().__xpm__.job.wait() == JobState.DONE
         assert FloatTask(value=5.1).submit().__xpm__.job.wait() == JobState.DONE
 
@@ -109,7 +120,7 @@ def test_restart(terminate):
 
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
-    with TemporaryExperiment("duplicate", maxwait=10) as xp:
+    with TemporaryExperiment("duplicate", maxwait=10):
         task1 = SimpleTask(x=1).submit()
         task2 = SimpleTask(x=1).submit()
         assert task1 is task2, f"{id(task1)} != {id(task2)}"
@@ -118,7 +129,7 @@ def test_submitted_twice():
 def test_configcache():
     """Test a configuration cache"""
 
-    with TemporaryExperiment("configcache", maxwait=10) as xp:
+    with TemporaryExperiment("configcache", maxwait=10):
         task = CacheConfigTask(data=CacheConfig()).submit()
 
     assert task.__xpm__.job.wait() == JobState.DONE
@@ -174,7 +185,8 @@ def checknewpaths(task_new, task_old_path):
 
 
 def test_tasks_deprecated_inner():
-    """Test that when submitting the task, the computed idenfitier is the one of the new class"""
+    """Test that when submitting the task, the computed identitier is the one of
+    the new class"""
     with TemporaryExperiment("deprecated") as xp:
         # Check that paths are really different first
         task_new = TaskWithDeprecated(p=NewConfig()).submit(dryrun=True)
@@ -217,7 +229,8 @@ class DeprecatedTask(NewTask):
 
 
 def test_tasks_deprecated():
-    """Test that when submitting the task, the computed idenfitier is the one of the new class"""
+    """Test that when submitting the task, the computed identifier is the one of
+    the new class"""
     with TemporaryExperiment("deprecated", maxwait=100) as xp:
         # Check that paths are really different first
         task_new = NewTask(x=1).submit(dryrun=True)

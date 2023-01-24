@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import Optional, Union
 from experimaestro import Config
+from experimaestro.core.context import SerializedPath
 from experimaestro.core.objects import ConfigInformation
-from huggingface_hub import ModelHubMixin, hf_hub_download
+from huggingface_hub import ModelHubMixin, hf_hub_download, snapshot_download
 import os
 
 
@@ -46,8 +47,25 @@ class ExperimaestroHFHub(ModelHubMixin):
 
         else:
 
-            def data_loader(path: Union[Path, str]):
-                path = Path(path)
+            def data_loader(s_path: Union[Path, str, SerializedPath]):
+                if not isinstance(s_path, SerializedPath):
+                    s_path = SerializedPath(Path(s_path), False)
+                path = s_path.path
+
+                # Folder
+                if s_path.is_folder:
+                    hf_path = snapshot_download(
+                        repo_id=model_id,
+                        allow_patterns=f"{s_path.path}/**",
+                        revision=revision,
+                        cache_dir=cache_dir,
+                        proxies=proxies,
+                        resume_download=resume_download,
+                        token=token,
+                        local_files_only=local_files_only,
+                    )
+                    return Path(hf_path) / path
+
                 hf_path = Path(
                     hf_hub_download(
                         repo_id=model_id,

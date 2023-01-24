@@ -1,6 +1,6 @@
 import inspect
 import sys
-from typing import Union, Dict, Iterator, List, Type as TypingType
+from typing import Union, Dict, Iterator, List
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -147,10 +147,9 @@ class ObjectType(Type):
     """ObjectType contains class-level information about
     experimaestro configurations and tasks
 
-    Attributes:
-
-    objecttype: The python Type of the associated object
-    configtype: The python Type of the configuration object that uses property for arguments
+    :param objecttype: The python Type of the associated object
+    :param configtype: The python Type of the configuration object that uses
+        property for arguments
     """
 
     # Those entries should not be copied in the __dict__
@@ -363,13 +362,15 @@ class ObjectType(Type):
     def deprecate(self):
         if len(self.basetype.__bases__) != 1:
             raise RuntimeError(
-                "Deprecated configurations must have only one parent (the new configuration)"
+                "Deprecated configurations must have "
+                "only one parent (the new configuration)"
             )
         assert not self._deprecated, "Already deprecated"
 
         # Uses the parent identifier (and saves the deprecated one for path updates)
         self._deprecated_identifier = self.identifier
-        self.identifier = self.basetype.__bases__[0].__getxpmtype__().identifier
+        parent = self.basetype.__bases__[0].__getxpmtype__()
+        self.identifier = parent.identifier
         self._deprecated = True
 
     @property
