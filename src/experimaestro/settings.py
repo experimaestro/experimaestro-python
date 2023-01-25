@@ -23,7 +23,6 @@ class Settings:
 
 
 @lru_cache()
-@staticmethod
 def get_settings(path: Optional[Path] = None) -> Settings:
     schema = OmegaConf.structured(Settings)
 
