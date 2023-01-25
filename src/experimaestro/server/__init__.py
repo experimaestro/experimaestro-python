@@ -18,6 +18,7 @@ from json import JSONEncoder
 import re
 from experimaestro.scheduler import Scheduler, Listener as BaseListener
 from experimaestro.notifications import LevelInformation
+from experimaestro.settings import ServerSettings
 
 
 class XPMJsonEncoder(JSONEncoder):
@@ -224,7 +225,7 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
                 resp_headers[
                     "Set-Cookie"
                 ] = "token=;expires=Thu, 01 Jan 1970 00:00:00 GMT"
-                resp_headers["Location"] = f"/login.html"
+                resp_headers["Location"] = "/login.html"
                 return http.HTTPStatus.TEMPORARY_REDIRECT, resp_headers, b"Redirect\n"
 
         if path == "/":
@@ -257,16 +258,19 @@ class ServerProtocolFactory:
 
 
 class Server:
-    def __init__(self, scheduler: Scheduler, port: int, *, host=None):
-        self.bindinghost = (
-            "127.0.0.1" if (host is None or host == "127.0.0.1") else "0.0.0.0"
-        )
-        self.host = host or "127.0.0.1"
-        self._port = port
+    def __init__(self, scheduler: Scheduler, settings: ServerSettings):
+
+        self.host = settings.host
+        if self.host is None or self.host == "127.0.0.1":
+            self.bindinghost = "127.0.0.1"
+        else:
+            self.bindinghost = "0.0.0.0"
+
+        self._port = settings.port
         self.scheduler = scheduler
         self._loop = None
         self._stop = None
-        self.token = uuid.uuid4().hex
+        self.token = settings.token or uuid.uuid4().hex
 
     def getNotificationSpec(self) -> Tuple[str, str]:
         """Returns a tuple (server ID, server URL)"""

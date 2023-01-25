@@ -13,6 +13,7 @@ nav:
   - Launchers: launchers/index.md
   - Connectors: connectors/index.md
   - Serialization: serialization.md
+  - Configuration: configuration.md
   - Integration:
       - Jupyter: jupyter.md
       - Documentation: documenting.md

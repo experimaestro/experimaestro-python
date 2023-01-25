@@ -10,6 +10,7 @@ import signal
 import asyncio
 from experimaestro.notifications import LevelInformation, Reporter
 from typing import Dict
+from experimaestro.settings import get_settings
 
 from experimaestro.tokens import ProcessCounterToken
 
@@ -687,6 +688,7 @@ class experiment:
         *,
         host: Optional[str] = None,
         port: Optional[int] = None,
+        token: Optional[str] = None,
         launcher=None,
     ):
         """
@@ -710,10 +712,21 @@ class experiment:
         self.xplock = None
         self.old_experiment = None
 
+        settings = get_settings()
+
+        if host:
+            settings.server.host = host
+
+        if port:
+            settings.server.port = port
+
+        if token:
+            settings.server.token = token
+
         # Create the scheduler
         self.scheduler = Scheduler(self, name)
         self.server = (
-            Server(self.scheduler, host=host, port=port) if port is not None else None
+            Server(self.scheduler, settings.server) if port is not None else None
         )
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":

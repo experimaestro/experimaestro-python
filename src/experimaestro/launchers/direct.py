@@ -31,6 +31,7 @@ class DirectLauncherConfiguration(YAMLDataClass, LauncherConfiguration):
     tokens: Optional[Dict[str, int]] = None
     tags: List[str] = field(default_factory=lambda: [])
     weight: int = 0
+    disable: bool = False
 
     @cached_property
     def spec(self) -> HostSpecification:

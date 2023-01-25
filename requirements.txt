@@ -17,8 +17,9 @@ docstring_parser
 termcolor
 requests
 pyparsing
-# Parse size 
+# Parse size
 humanfriendly
+huggingface_hub ~= 0.11.1
 
 # parsing
 Arpeggio >= 2.0
@@ -29,7 +30,7 @@ watchdog > 2.0.0
 # Configuration
 marshmallow
 
-# SSH support (fabric is built on Paramiko, 
+# SSH support (fabric is built on Paramiko,
 # and allows using OpenSSH config out of the box)
 fabric
 

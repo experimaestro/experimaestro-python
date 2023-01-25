@@ -1,8 +1,6 @@
 from copy import copy
 from dataclasses import dataclass
-from difflib import Match
-from enum import Enum
-from typing import List, Optional, Set, Tuple, Union
+from typing import List, Optional, Union
 from humanfriendly import parse_size, format_size, parse_timespan
 
 # --- Host specification part
@@ -27,7 +25,10 @@ class CudaSpecification:
         return (self.memory > spec.memory) and (self.min_memory < spec.memory)
 
     def __repr__(self):
-        return f"CUDA({self.model} {format_size(self.memory)}/{format_size(self.min_memory)})"
+        return (
+            f"CUDA({self.model} "
+            f"{format_size(self.memory)}/{format_size(self.min_memory)})"
+        )
 
 
 @dataclass
@@ -119,7 +120,7 @@ class HostSimpleRequirement(HostRequirement):
 
     def __init__(self, *reqs: "HostSimpleRequirement"):
         self.cuda_gpus = []
-        self.cpu = CPUSpecification(0, 1)
+        self.cpu = CPUSpecification(0, 0)
         self.duration = 0
         for req in reqs:
             self._add(req)
@@ -180,8 +181,11 @@ def cuda_gpu(*, mem: Optional[str] = None):
 def duration(timespec: Union[str, int]):
     """Request a given time duration
 
-    Args:
-        timespec: A string like 5h (5 hours), 10m (10 minutes) or 42s (42 seconds). parsable by [humanfriendly](https://humanfriendly.readthedocs.io/en/latest/api.html) or a number of seconds
+
+    :param timespec: A string like 5h (5 hours), 10m (10 minutes) or 42s (42
+        seconds). parsable by
+        [humanfriendly](https://humanfriendly.readthedocs.io/en/latest/api.html)
+        or a number of seconds
     """
     r = HostSimpleRequirement()
     if isinstance(timespec, (int, float)):

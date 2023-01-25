@@ -135,7 +135,7 @@ class SlurmProcessWatcher(threading.Thread):
                             jobid, state, start, end, *_ = line.split("|")
                             self.jobs[jobid] = SlurmJobState(state, start, end)
                             logger.debug("Parsed line: %s", line)
-                        except ValueError as e:
+                        except ValueError:
                             logger.error("Could not parse line %s", line)
                 logger.debug("Jobs %s", self.jobs)
                 self.cv.notify_all()
@@ -391,7 +391,8 @@ def cli():
 
 @cli.command()
 def convert():
-    """Convert the ouptut of 'scontrol show node' into a YAML form compatible with launchers.yaml"""
+    """Convert the ouptut of 'scontrol show node' into a YAML form compatible
+    with launchers.yaml"""
     import yaml
     from experimaestro.launcherfinder import LauncherRegistry
 
@@ -423,7 +424,8 @@ def fill_nodes_configuration(input: TextIO, configuration: "SlurmConfiguration")
                 partitions2features2nodes[partition_name][fl] = nodes
                 partition.nodes.append(nodes)
             else:
-                nodes.hosts.append(nodename)
+                if nodename not in nodes.hosts:
+                    nodes.hosts.append(nodename)
 
     for line in input.readlines():
         if match := re_nodename.search(line):
@@ -676,10 +678,12 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
             )
 
             if current_match.requirement.cpu.memory > 0:
-                launcher.options.mem = current_match.requirement.cpu.memory
+                launcher.options.mem = (
+                    f"{current_match.requirement.cpu.memory // 1024}M"
+                )
 
             if current_match.requirement.cpu.cores > 0:
-                launcher.options.cpu_per_task = current_match.requirement.cpu.cores
+                launcher.options.cpus_per_task = current_match.requirement.cpu.cores
 
             if use_features:
                 launcher.options.constraint = fbf.to_constraint()
