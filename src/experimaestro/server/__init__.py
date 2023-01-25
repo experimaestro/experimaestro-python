@@ -260,12 +260,12 @@ class ServerProtocolFactory:
 class Server:
     def __init__(self, scheduler: Scheduler, settings: ServerSettings):
 
-        self.host = settings.host
-        if self.host is None or self.host == "127.0.0.1":
+        if settings.host is None or settings.host == "127.0.0.1":
             self.bindinghost = "127.0.0.1"
         else:
             self.bindinghost = "0.0.0.0"
 
+        self.host = settings.host or "127.0.0.1"
         self._port = settings.port
         self.scheduler = scheduler
         self._loop = None
@@ -321,11 +321,12 @@ class Server:
             self._port,  # process_request=process_request,
             create_protocol=ServerProtocolFactory(self.scheduler, self.token),
         ) as server:
-            self._port_future.set_result(server.sockets[0].getsockname()[1])
+            port = server.sockets[0].getsockname()[1]
+            self._port_future.set_result(port)
             logging.info(
                 "Webserver started on http://%s:%d?token=%s",
                 self.host,
-                self._port,
+                port,
                 self.token,
             )
             await stop

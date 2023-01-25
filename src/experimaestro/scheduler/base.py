@@ -714,13 +714,13 @@ class experiment:
 
         settings = get_settings()
 
-        if host:
+        if host is not None:
             settings.server.host = host
 
-        if port:
+        if port is not None:
             settings.server.port = port
 
-        if token:
+        if token is not None:
             settings.server.token = token
 
         # Create the scheduler
