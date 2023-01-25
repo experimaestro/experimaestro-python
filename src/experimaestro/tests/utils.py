@@ -54,7 +54,8 @@ class TemporaryDirectory:
             logging.warning("NOT Removing %s" % self.path)
         else:
             logging.warning(
-                "Cleaning up working directory %s" "(use XPM_KEEPWORKDIR=1 to keep it)",
+                "Cleaning up working directory %s"
+                " (use XPM_KEEPWORKDIR=1 to keep it)",
                 self.path,
             )
             shutil.rmtree(self.path, ignore_errors=True)

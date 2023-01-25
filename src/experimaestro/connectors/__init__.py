@@ -9,8 +9,7 @@ This module contains :
 """
 
 import enum
-from experimaestro.compat import cached_property
-from typing import Any, Dict, Mapping, Optional, Type, Union
+from typing import Any, Dict, Mapping, Type, Union
 from pathlib import Path
 from experimaestro.utils import logger
 from experimaestro.locking import Lock
@@ -56,6 +55,22 @@ Redirect._NONE = Redirect(RedirectType.NONE)
 Redirect._INHERIT = Redirect(RedirectType.INHERIT)
 
 
+class ProcessState(enum.Enum):
+    SCHEDULED = 0
+    RUNNING = 1
+    FINISHED = 2
+    DONE = 3
+    ERROR = 4
+
+    @property
+    def running(self):
+        return self.value < ProcessState.FINISHED.value
+
+    @property
+    def finished(self):
+        return self.value >= ProcessState.FINISHED.value
+
+
 class Process:
     HANDLERS = None
 
@@ -94,9 +109,13 @@ class Process:
         """Wait until the process finishes and returns the error code"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
 
+    async def aio_state(self) -> ProcessState:
+        """Returns the job state"""
+        raise NotImplementedError(f"Not implemented: {self.__class__}.aio_state")
+
     async def aio_isrunning(self):
         """True is the process is truly running (I/O)"""
-        raise NotImplementedError(f"Not implemented: {self.__class__}.aio_isrunning")
+        return (await self.aio_state()).running
 
     async def aio_code(self):
         """Returns a future containing the returned code"""
@@ -177,8 +196,6 @@ def parsepath(path: Union[str, Path]) -> Path:
 
     Returns a local path or a SshPath
     """
-    from urllib.parse import urlparse
-
     if isinstance(path, Path):
         return path
 

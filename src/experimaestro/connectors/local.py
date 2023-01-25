@@ -15,6 +15,7 @@ from . import (
     Connector,
     Process,
     ProcessBuilder,
+    ProcessState,
     RedirectType,
     Redirect,
 )
@@ -36,8 +37,10 @@ class PsutilProcess(Process):
         )
         return code
 
-    async def aio_isrunning(self):
-        return self._process.is_running()
+    async def aio_state(self):
+        if self._process.is_running():
+            return ProcessState.RUNNING
+        return ProcessState.FINISHED
 
     def __repr__(self):
         return f"PsUtil({self._process})"
@@ -58,8 +61,15 @@ class LocalProcess(Process):
         )
         return code
 
-    async def aio_isrunning(self):
-        return self._process.poll() is None
+    async def aio_state(self):
+        code = self._process.poll()
+        if code is None:
+            return ProcessState.RUNNING
+
+        if code == 0:
+            return ProcessState.DONE
+
+        return ProcessState.ERROR
 
     def tospec(self):
         return {"type": "local", "pid": self._process.pid}

@@ -1,3 +1,4 @@
+from experimaestro.launcherfinder.registry import LauncherRegistry
 from experimaestro.launcherfinder.specs import (
     CPUSpecification,
     CudaSpecification,
@@ -8,6 +9,9 @@ from experimaestro.launcherfinder.specs import (
 )
 from experimaestro.launcherfinder import parse
 from humanfriendly import parse_size, parse_timespan
+from importlib import resources
+
+from experimaestro.launchers.slurm import SlurmLauncher
 
 
 def test_findlauncher_specs():
@@ -64,3 +68,26 @@ def test_findlauncher_parse():
     assert r.duration == parse_timespan("4 d")
     assert r.cpu.memory == parse_size("400M")
     assert r.cpu.cores == 4
+
+
+def split_set(s: str, sep=","):
+    return set(s.split(sep))
+
+
+def slurm_constraint_split(constraint: str):
+    return [split_set(c[1:-1], "&") for c in constraint.split("|")].sort()
+
+
+def test_findlauncher_slurm():
+    path = resources.path(f"{__package__ }.launchers", "config_slurm")
+    registry = LauncherRegistry(path)
+    launcher = registry.find("""duration=4 days & cuda(mem=24G) * 2""")
+    assert isinstance(launcher, SlurmLauncher)
+
+    options = launcher.options
+
+    assert options.gpus_per_node == 2
+    assert split_set(options.partition) == set(["hard", "electronic"])
+    assert slurm_constraint_split(options.constraint) == slurm_constraint_split(
+        "(A6000&GPU2&GPUM48G)|(A6000&GPU3&GPUM48G)|(RTX&GPU4&GPUM48G)"
+    )

@@ -43,6 +43,7 @@ from experimaestro.connectors import (
     Connector,
     ProcessBuilder,
     Process,
+    ProcessState,
     Redirect,
     RedirectType,
 )
@@ -55,28 +56,39 @@ class SlurmJobState:
     end: str
     status: str
 
+    STATE_MAP = {
+        "CONFIGURING": ProcessState.SCHEDULED,
+        "REQUEUE_FED": ProcessState.SCHEDULED,
+        "REQUEUE_HOLD": ProcessState.SCHEDULED,
+        "COMPLETING": ProcessState.RUNNING,
+        "RUNNING": ProcessState.RUNNING,
+        "COMPLETED": ProcessState.DONE,
+        "FAILED": ProcessState.ERROR,
+        "DEADLINE": ProcessState.ERROR,
+        "NODE_FAIL": ProcessState.ERROR,
+        "REVOKED": ProcessState.ERROR,
+        "TIMEOUT": ProcessState.ERROR,
+        "CANCELLED": ProcessState.ERROR,
+        "BOOT_FAIL": ProcessState.ERROR,
+    }
+
     def __init__(self, status, start, end):
-        self.status = status
+        self.slurm_state = status if status[-1] == "+" else status
+        self.state = SlurmJobState.STATE_MAP[self.slurm_state]
         self.start = start
         self.end = end
 
     def finished(self):
         """Returns true if the job has finished"""
-        return self.status in [
-            "COMPLETED",
-            "FAILED",
-            "DEADLINE",
-            "NODE_FAIL",
-            "REVOKED",
-            "TIMEOUT",
-            "BOOT_FAIL",
-        ] or self.status.startswith("CANCELLED")
+        return self.state.finished
 
     def __repr__(self):
-        return f"{self.status} ({self.start}-{self.end})"
+        return f"{self.slurm_state} ({self.start}-{self.end})"
 
 
 class SlurmProcessWatcher(threading.Thread):
+    """Process that calls sacct at regular interval to check job status"""
+
     WATCHERS: Dict[Tuple[Tuple[str, Any]], "SlurmProcessWatcher"] = {}
 
     def __init__(self, launcher: "SlurmLauncher"):
@@ -161,13 +173,13 @@ class BatchSlurmProcess(Process):
             while True:
                 state = watcher.getjob(self.jobid)
                 if state and state.finished():
-                    return 0 if state.status == "COMPLETED" else 1
+                    return 0 if state.slurm_state == "COMPLETED" else 1
 
-    async def aio_isrunning(self):
+    async def aio_state(self):
         def check():
             with SlurmProcessWatcher.get(self.launcher) as watcher:
                 jobinfo = watcher.getjob(self.jobid)
-                return jobinfo is not None and not jobinfo.finished()
+                return jobinfo.state if jobinfo else ProcessState.SCHEDULED
 
         return await asyncThreadcheck("slurm.aio_isrunning", check)
 
@@ -615,7 +627,9 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
                 host.features = node.features
                 host.partition = partition_name
                 host.hosts = node.hosts
+                host.priority = partition.priority
                 hosts.append(host)
+        hosts.sort(key=lambda host: -host.priority)
         return hosts
 
     def get(

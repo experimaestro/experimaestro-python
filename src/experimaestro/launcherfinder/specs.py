@@ -22,7 +22,7 @@ class CudaSpecification:
 
     def match(self, spec: "CudaSpecification"):
         """Returns True if the specification matches this host"""
-        return (self.memory > spec.memory) and (self.min_memory < spec.memory)
+        return (self.memory >= spec.memory) and (self.min_memory <= spec.memory)
 
     def __repr__(self):
         return (

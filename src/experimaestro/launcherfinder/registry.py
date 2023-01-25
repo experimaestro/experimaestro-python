@@ -114,7 +114,7 @@ class LauncherRegistry:
 
         return LauncherRegistry.INSTANCE
 
-    def __init__(self):
+    def __init__(self, basepath: Optional[Path] = None):
         self.LauncherLoader: Type[Loader] = new_loader("LauncherLoader")
         self.ConnectorLoader: Type[Loader] = new_loader("ConnectorLoader")
         self.TokenLoader: Type[Loader] = new_loader("TokenLoader")
@@ -142,7 +142,7 @@ class LauncherRegistry:
         # self.TokenLoader.add_constructor("!unknown", unknown_error)
 
         # Read the configuration file
-        basepath = Path("~/.config/experimaestro").expanduser()
+        basepath = basepath or Path("~/.config/experimaestro").expanduser()
         launchers: Launchers = (
             load_yaml(self.LauncherLoader, basepath / "launchers.yaml") or {}
         )

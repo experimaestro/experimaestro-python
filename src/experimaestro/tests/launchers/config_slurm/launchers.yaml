@@ -1,0 +1,134 @@
+local: []
+slurm:
+  -
+    id: "test_slurm"
+
+    features_regex:
+    - GPU(?P<cuda_count>\d+)
+    - GPUM(?P<cuda_memory>\d+G)
+
+    connector: local
+    options:
+      gpu:
+        # At least 40% of the memory should be requested
+        min_mem_ratio: 0.4
+
+    partitions:
+      electronic:
+        configuration: null
+        disabled: false
+        nodes:
+        - count: 0
+          features:
+          - GPU4
+          - RTX
+          - GPUM24G
+          hosts:
+          - daft
+          - kavinsky
+          - modjo
+          - punk
+        priority: 0
+      funky:
+        configuration: null
+        disabled: false
+        nodes:
+        - count: 0
+          features:
+          - GPU4
+          - TITANV
+          - GPUM12G
+          hosts:
+          - bernard
+        - count: 0
+          features:
+          - GPU4
+          - TITANX
+          - GPUM12G
+          hosts:
+          - chic
+          - edwards
+          - nile
+          - rodgers
+        - count: 0
+          features:
+          - GPU8
+          - TITANX
+          - GPUM12G
+          hosts:
+          - pascal
+        priority: 0
+      hard:
+        configuration: null
+        disabled: false
+        nodes:
+        - count: 0
+          features:
+          - GPU2
+          - A6000
+          - GPUM48G
+          hosts:
+          - aerosmith
+        - count: 0
+          features:
+          - GPU3
+          - A5000
+          - GPUM24G
+          hosts:
+          - led
+          - zeppelin
+        - count: 0
+          features:
+          - GPU3
+          - A6000
+          - GPUM48G
+          hosts:
+          - top
+          - zz
+        priority: 0
+      heavy:
+        configuration: null
+        disabled: true
+        nodes:
+        - count: 0
+          features:
+          - GPU8
+          - A100
+          - GPUM40G
+          hosts:
+          - a7x
+        priority: 0
+      jazzy:
+        configuration: null
+        disabled: false
+        nodes:
+        - count: 0
+          features:
+          - GPU4
+          - TITANX
+          - GPUM12G
+          hosts:
+          - cal
+          - pas
+          - titan
+        - count: 0
+          features:
+          - GPU2
+          - '3080'
+          - GPUM10G
+          hosts:
+          - project
+        - count: 0
+          features:
+          - GPU3
+          - '2080'
+          - GPUM11G
+          hosts:
+          - sister
+          - sledge
+        priority: 0
+    query_slurm: false
+    tags: []
+    use_features: true
+    use_hosts: true
+    weight: 0
