@@ -22,7 +22,7 @@ class Settings:
     server: ServerSettings = field(default_factory=ServerSettings)
 
 
-@lru_cache
+@lru_cache()
 @staticmethod
 def get_settings(path: Optional[Path] = None) -> Settings:
     schema = OmegaConf.structured(Settings)
