@@ -74,7 +74,11 @@ class SlurmJobState:
 
     def __init__(self, status, start, end):
         self.slurm_state = status if status[-1] == "+" else status
-        self.state = SlurmJobState.STATE_MAP[self.slurm_state]
+        if self.slurm_state.startswith("CANCELLED"):
+            self.state = ProcessState.ERROR
+        else:
+            self.state = SlurmJobState.STATE_MAP[self.slurm_state]
+
         self.start = start
         self.end = end
 

@@ -726,7 +726,9 @@ class experiment:
         # Create the scheduler
         self.scheduler = Scheduler(self, name)
         self.server = (
-            Server(self.scheduler, settings.server) if port is not None else None
+            Server(self.scheduler, settings.server)
+            if settings.server.port is not None
+            else None
         )
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
