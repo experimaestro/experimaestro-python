@@ -463,8 +463,8 @@ class ConfigInformation:
             setattr(self.pyobject, k, v)
             return
 
-        if self._sealed:
-            raise AttributeError("Object is read-only")
+        if self._sealed and not bypass:
+            raise AttributeError(f"Object is read-only (trying to set {k})")
 
         try:
             argument = self.xpmtype.arguments.get(k, None)
@@ -568,7 +568,7 @@ class ConfigInformation:
         """Computes the unique identifier"""
         if self._identifier is None:
             if self._sealed:
-                # Only cache the idenfitier if sealed
+                # Only cache the identifier if sealed
                 self._identifier = self.compute_identifier()
             else:
                 return self.compute_identifier()
@@ -897,7 +897,9 @@ class ConfigInformation:
                 self._outputjson_inner(out, context, serialized, full=False)
 
     @staticmethod
-    def deserialize(path: Union[str, Path, SerializedPathLoader]) -> "Config":
+    def deserialize(
+        path: Union[str, Path, SerializedPathLoader], as_instance: bool = False
+    ) -> "Config":
         """Deserialize a configuration
 
         :param path: The filesystem Path to use, or a way to download the
@@ -919,7 +921,7 @@ class ConfigInformation:
             config = json.load(fh)
 
         return ConfigInformation.fromParameters(
-            config, as_instance=False, data_loader=data_loader
+            config, as_instance=as_instance, data_loader=data_loader
         )
 
     # def _outputjson(self, jsonout, context, key=[]):
@@ -1023,6 +1025,7 @@ class ConfigInformation:
             else:
                 # Creates an object (and not a config)
                 o = cls.__new__(cls, __xpmobject__=as_instance)
+                xpmtype = cls.__getxpmtype__()
 
                 # If instance...
                 if as_instance:
@@ -1040,14 +1043,16 @@ class ConfigInformation:
                             _, name = o.__xpmtypename__.rsplit(".", 1)
                         else:
                             name = o.__xpmtypename__
-                        basepath = (
-                            taskglobals.Env.instance().wspath
-                            / "jobs"
-                            / o.__xpmtypename__.lower()
-                            / o.__xpmidentifier__.all.hex().lower()
-                        )
-                        o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
-                        o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
+
+                        if taskglobals.Env.instance().wspath is not None:
+                            basepath = (
+                                taskglobals.Env.instance().wspath
+                                / "jobs"
+                                / o.__xpmtypename__.lower()
+                                / o.__xpmidentifier__.all.hex().lower()
+                            )
+                            o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
+                            o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
                 else:
                     xpminfo = o.__xpm__  # type: ConfigInformation
 
@@ -1055,11 +1060,11 @@ class ConfigInformation:
                 for name, value in definition["fields"].items():
                     v = ConfigInformation._objectFromParameters(value, objects)
 
-                    if not as_instance:
-                        argument = cls.__getxpmtype__().arguments[name]
-                        if argument.is_data and v is not None:
-                            assert isinstance(v, SerializedPath)
-                            v = data_loader(v)
+                    # Transform serialized paths arguments
+                    argument = xpmtype.arguments[name]
+                    if argument.is_data and v is not None:
+                        assert isinstance(v, SerializedPath)
+                        v = data_loader(v)
 
                     if as_instance:
                         setattr(o, name, v)
@@ -1107,14 +1112,15 @@ class ConfigInformation:
 
             self.objects[id(self)] = o
 
-            # Generate values
-            for arg in config.__xpmtype__.arguments.values():
-                if arg.generator is not None:
-                    config.__xpm__.set(
-                        arg.name, arg.generator(self.context, o), bypass=True
-                    )
-                if not arg.required and not hasattr(o, arg.name):
-                    config.__xpm__.set(arg.name, None)
+            # Generate values (in configuration)
+            if not config.__xpm__._sealed:
+                for arg in config.__xpmtype__.arguments.values():
+                    if arg.generator is not None:
+                        config.__xpm__.set(
+                            arg.name, arg.generator(self.context, o), bypass=True
+                        )
+                    if not arg.required and not hasattr(o, arg.name):
+                        config.__xpm__.set(arg.name, None)
 
             # Set values
             for key, value in config.__xpm__.values.items():

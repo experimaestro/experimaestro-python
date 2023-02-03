@@ -29,7 +29,7 @@ class Main(Task):
         }
 
     def execute(self):
-        print(self.a.b.x)
+        print(self.a.b.x)  # noqa: T201
 
 
 class MainB(Task):
@@ -59,7 +59,7 @@ def test_output_taskoutput():
     Main(a=output).submit(dryrun=True)
 
 
-def test_output_serialiation():
+def test_output_serialization():
     """Test output serialization"""
 
     with TemporaryExperiment("output_serialization", maxwait=5) as xp:

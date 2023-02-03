@@ -43,6 +43,7 @@ from .core.objects import (
     Config,
     copyconfig,
     setmeta,
+    TaskOutput,
     Task,
     SerializedConfig,
     Serialized,
