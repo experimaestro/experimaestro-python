@@ -79,15 +79,15 @@ def slurm_constraint_split(constraint: str):
 
 
 def test_findlauncher_slurm():
-    path = resources.path(f"{__package__ }.launchers", "config_slurm")
-    registry = LauncherRegistry(path)
-    launcher = registry.find("""duration=4 days & cuda(mem=24G) * 2""")
-    assert isinstance(launcher, SlurmLauncher)
+    with resources.path(f"{__package__ }.launchers", "config_slurm") as path:
+        registry = LauncherRegistry(path)
+        launcher = registry.find("""duration=4 days & cuda(mem=24G) * 2""")
+        assert isinstance(launcher, SlurmLauncher)
 
-    options = launcher.options
+        options = launcher.options
 
-    assert options.gpus_per_node == 2
-    assert split_set(options.partition) == set(["hard", "electronic"])
-    assert slurm_constraint_split(options.constraint) == slurm_constraint_split(
-        "(A6000&GPU2&GPUM48G)|(A6000&GPU3&GPUM48G)|(RTX&GPU4&GPUM48G)"
-    )
+        assert options.gpus_per_node == 2
+        assert split_set(options.partition) == set(["hard", "electronic"])
+        assert slurm_constraint_split(options.constraint) == slurm_constraint_split(
+            "(A6000&GPU2&GPUM48G)|(A6000&GPU3&GPUM48G)|(RTX&GPU4&GPUM48G)"
+        )
