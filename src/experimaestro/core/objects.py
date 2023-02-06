@@ -1025,7 +1025,7 @@ class ConfigInformation:
             else:
                 # Creates an object (and not a config)
                 o = cls.__new__(cls, __xpmobject__=as_instance)
-                xpmtype = cls.__getxpmtype__()
+                xpmtype = cls.__getxpmtype__()  # type: ObjectType
 
                 # If instance...
                 if as_instance:
@@ -1063,8 +1063,13 @@ class ConfigInformation:
                     # Transform serialized paths arguments
                     argument = xpmtype.arguments[name]
                     if argument.is_data and v is not None:
-                        assert isinstance(v, SerializedPath)
-                        v = data_loader(v)
+                        if isinstance(v, SerializedPath):
+                            if data_loader is None:
+                                v = v.path
+                            else:
+                                v = data_loader(v)
+                        else:
+                            assert isinstance(v, Path), "Excepted Path, got {type(v)}"
 
                     if as_instance:
                         setattr(o, name, v)
