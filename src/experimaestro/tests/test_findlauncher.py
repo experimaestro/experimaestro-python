@@ -81,6 +81,8 @@ def slurm_constraint_split(constraint: str):
 def test_findlauncher_slurm():
     path = ResourcePathWrapper.create(f"{__package__ }.launchers", "config_slurm")
 
+    assert (path / "launchers.yaml").is_file()
+
     registry = LauncherRegistry(path)
     launcher = registry.find("""duration=4 days & cuda(mem=24G) * 2""")
     assert isinstance(launcher, SlurmLauncher)
