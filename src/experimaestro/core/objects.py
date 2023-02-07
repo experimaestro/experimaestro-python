@@ -1477,10 +1477,10 @@ class TaskOutputInfo:
 
 
 class TaskOutput(Proxy):
-    """Task proxy
+    """Task output
 
-    This is used when accessing properties *after* having submitted a task,
-    to keep track of the dependencies
+    When a task is submitted, to track down dependencies, the output configuration
+    has to be wrapped within a TaskOutput.
     """
 
     def __init__(self, value: Any, task: Union[Task, TaskOutputInfo]):
