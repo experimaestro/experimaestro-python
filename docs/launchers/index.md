@@ -42,7 +42,7 @@ To use launcher configuration files, one can use an automatic convertion tool
 scontrol show nodes | experimaestro launchers slurm convert
 ```
 
-## Launcher configuration file (since 0.11, alpha)
+## Launcher configuration file (since 0.11)
 
 In order to automate the process of choosing the right launcher, a `launchers.yaml`
 configuration file can be written.
@@ -62,7 +62,28 @@ from experimaestro.launcherfinder import find_launcher
 find_launcher("""duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
 ```
 
-Example of a configuration
+## Tags
+
+Tags can be used to filter out some launchers
+
+```py
+
+from experimaestro.launcherfinder import find_launcher
+
+find_launcher("""duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""", tags=["slurm"])
+```
+will search for a launcher that has the tag `slurm` (see example below).
+
+## Search process
+
+Launcher groups are sorted by decreasing weights and filtered by group before the search.
+Then, for each launcher group, experimaestro searches for the first matching launcher (details
+are type-specific).
+
+## Example of a configuration
+
+This configurations contains four launcher groups (two local, two through slurm).
+
 
 ```yaml
 # --- Local launchers
@@ -70,12 +91,14 @@ Example of a configuration
 local:
   - # Standard launcher for small tasks
     connector: local
+    weight: 5
 
     # Describes the available CPUs
     cpu: { cores: 40, memory: 1G }
 
   - # Intensive launcher with more memory and GPU
     connector: local
+    weight: 4
 
     # Use a token to avoid running too many tasks
     tokens:
@@ -94,6 +117,8 @@ slurm:
   # We can use fully manual SLURM configuration
   - id: manual
     connector: local
+    tags: [slurm]
+    weight: 3
 
     # Describes the GPU features and link them to the two
     # possible properties (memory and number of GPUs)
@@ -128,8 +153,9 @@ slurm:
             features: [GPU2, GPUM24G]
 
   # We can also use SLURM for semi-automatic configuration
-  - id: manual
+  - id: auto
     connector: local
+    tags: [slurm]
 
     # Describes the GPU features and link them to the two
     # possible properties (memory and number of GPUs)
