@@ -33,6 +33,11 @@ export type Jobs = {
   ids: Array<string>;
 };
 
+export type Services = {
+  byId: { [key: string]: string };
+  ids: string[]
+}
+
 const status2int = (status: JobStatus): number => {
   switch (status) {
     case "running":
@@ -63,7 +68,12 @@ export type State = {
   connected: boolean;
   experiment: string;
   jobs: Jobs;
+  services: Services;
 };
+
+type ServicesPayload = {
+  [key: string]: string
+}
 
 export const slice = createSlice({
   name: "db",
@@ -71,6 +81,7 @@ export const slice = createSlice({
     connected: false,
     experiment: "",
     jobs: { byId: {}, ids: [] },
+    services: { byId: {}, ids: [] }
   } as State,
   reducers: {
     addJob(draft, action: PayloadAction<Job>) {
@@ -80,6 +91,7 @@ export const slice = createSlice({
       draft.jobs.byId[action.payload.jobId] = action.payload;
       draft.jobs.ids.sort(jobComparator(draft.jobs.byId));
     },
+
     updateJob(draft, action: PayloadAction<Job>) {
       const jobUpdate = action.payload;
 
@@ -93,6 +105,13 @@ export const slice = createSlice({
       }
       draft.jobs.ids.sort(jobComparator(draft.jobs.byId));
     },
+
+    updateServices(draft, {payload}: PayloadAction<ServicesPayload>) {
+      draft.services.byId = payload
+      console.log(payload)
+      draft.services.ids = Object.keys(payload)
+    },
+
     setConnected(draft, action: PayloadAction<boolean>) {
       draft.connected = action.payload;
     },

@@ -31,6 +31,8 @@ const CopyPlugin = require("copy-webpack-plugin");
 
 const ReactRefresh = require("@pmmmwh/react-refresh-webpack-plugin");
 
+const proxy_matcher = (s: string) => s.match(/^\/(api|services)/)
+
 /*********************************************************************************************************************/
 /**********                                             Webpack                                             **********/
 /*********************************************************************************************************************/
@@ -169,14 +171,15 @@ const config: Configuration = {
 
       return middlewares;
     },
-    proxy: {
-      "/api": {
-        target: `ws://localhost:${ws_port}`,
-        ws: true,
-        // Forwards the cookies
-        cookieDomainRewrite: "",
-      },
-    },
+    proxy: [
+        {
+          context: ['/services', '/api'],
+          target: `ws://localhost:${ws_port}`,
+          ws: true,
+          // Forwards the cookies
+          cookieDomainRewrite: "",
+        }
+    ],
   },
   target: isDevelopment ? "web" : "browserslist",
   plugins: [

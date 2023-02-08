@@ -111,6 +111,12 @@ class Listener(BaseListener):
 
 
 async def handler(websocket, path, listener: Listener):
+    """Websocket handler
+
+    :param websocket: The websocket object
+    :param path: _description_
+    :param listener: Experimaestro listener
+    """
     if not websocket.authorized:
         await websocket.send("unauthorized")
         return
@@ -139,6 +145,19 @@ async def handler(websocket, path, listener: Listener):
                 jobid = action["payload"]
                 await websocket.send(
                     json_dumps(job_details(listener.scheduler.jobs[jobid]))
+                )
+            elif actiontype == "services":
+                # Get the list of services
+                services = {
+                    id: service.description()
+                    for id, service in listener.scheduler.xp.services.items()
+                }
+
+                await websocket.send(
+                    json_dumps({
+                        "type": "SERVICES_LIST",
+                        "payload": services
+                    })
                 )
             elif actiontype == "kill":
                 jobid = action["payload"]
@@ -176,6 +195,8 @@ MIMETYPES = {
 
 
 class ServerProtocol(websockets.WebSocketServerProtocol):
+    scheduler: Scheduler
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.user = None
@@ -208,6 +229,22 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
                     # Just ignore
                     pass
                 return (http.HTTPStatus.OK, headers, "")
+
+        if m := re.match(r"^/services/([a-z0-9_-]+)$", path):
+            try:
+                service = self.scheduler.xp.services[m.group(1)]
+                base_url = service.get_url()
+                if base_url:
+                    resp_headers["Location"] = f"{base_url}"
+                    return (
+                        http.HTTPStatus.PERMANENT_REDIRECT,
+                        resp_headers,
+                        b"Redirection\n",
+                    )
+
+            except Exception:
+                logging.exception("Could not handle %s", path)
+                return (http.HTTPStatus.NOT_FOUND, headers, "")
 
         if path != "/login.html":
             url = urlparse(path)
@@ -324,7 +361,7 @@ class Server:
             port = server.sockets[0].getsockname()[1]
             self._port_future.set_result(port)
             logging.info(
-                "Webserver started on http://%s:%d?token=%s",
+                "Web server started on http://%s:%d?token=%s",
                 self.host,
                 port,
                 self.token,

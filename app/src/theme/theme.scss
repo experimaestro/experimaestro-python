@@ -20,8 +20,6 @@ body {
 }
 
 .ws-status {
-  position: absolute;
-  right: 1rem;
   font-size: 2rem;
   &.ws-no-link {
     color: red;

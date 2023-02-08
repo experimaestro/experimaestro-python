@@ -37,6 +37,7 @@ class Client {
     console.log("Connection opened");
     store.dispatch(actions.setConnected(true));
     this.send({ type: "refresh" });
+    this.send({ type: "services" });
   };
 
   close = (event) => {
@@ -63,7 +64,12 @@ class Client {
           break;
         case "JOB_UPDATE":
           store.dispatch(actions.updateJob(action.payload));
-          BroadcastChannel;
+          break;
+        case "SERVICES_LIST":
+          store.dispatch(actions.updateServices(action.payload));
+          break;
+        default:
+          console.error("Unhandled action type", action.type)
       }
     }
   };

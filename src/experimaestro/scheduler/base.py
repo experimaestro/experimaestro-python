@@ -712,6 +712,7 @@ class experiment:
         self.xplockpath = self.workdir / "lock"
         self.xplock = None
         self.old_experiment = None
+        self.services = {}
 
         settings = get_settings()
 
@@ -857,6 +858,11 @@ class experiment:
         finally:
             SIGNAL_HANDLER.remove(self)
 
+            # Stop services
+            for service in self.services.values():
+                logger.info("Closing service %s", service.description())
+                service.stop()
+
             if self.central is not None:
                 self.central.loop.stop()
 
@@ -872,4 +878,5 @@ class experiment:
 
     def add_service(self, service: Service) -> Service:
         """Adds a service (e.g. tensorboard viewer) to the experiment"""
+        self.services[service.id] = service
         return service
