@@ -3,8 +3,7 @@
 from pathlib import Path
 from typing import Dict
 import marshmallow as mm
-from ..connectors import parsepath
-from experimaestro.utils.settings import JsonSettings, PathField
+from experimaestro.utils.settings import JsonSettings
 from pytools import memoize
 
 
@@ -69,7 +68,7 @@ class Environment:
         return Path()
 
     @property
-    def workdir(self):
+    def workdir(self) -> Path:
         assert self._workdir, "The working directory has not been set"
         return self.basepath / self._workdir
 

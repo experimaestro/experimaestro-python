@@ -2,5 +2,9 @@
 write_to = "src/experimaestro/version.py"
 fallback_version = "0.0.0-dev"
 
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.14.6"
+tag_format = "$version"
 [build-system]
 requires = ["setuptools", "setuptools-scm", "wheel"]  # PEP 508 specifications.

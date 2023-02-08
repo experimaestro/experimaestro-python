@@ -10,6 +10,7 @@ import signal
 import asyncio
 from experimaestro.notifications import LevelInformation, Reporter
 from typing import Dict
+from experimaestro.scheduler.services import Service
 from experimaestro.settings import get_settings
 
 from experimaestro.tokens import ProcessCounterToken
@@ -868,3 +869,7 @@ class experiment:
             experiment.CURRENT = self.old_experiment
             if self.server:
                 self.server.stop()
+
+        def add_service(self, service: Service) -> Service:
+            """Adds a service (e.g. tensorboard viewer) to the experiment"""
+            return service
