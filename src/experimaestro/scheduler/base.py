@@ -870,6 +870,6 @@ class experiment:
             if self.server:
                 self.server.stop()
 
-        def add_service(self, service: Service) -> Service:
-            """Adds a service (e.g. tensorboard viewer) to the experiment"""
-            return service
+    def add_service(self, service: Service) -> Service:
+        """Adds a service (e.g. tensorboard viewer) to the experiment"""
+        return service

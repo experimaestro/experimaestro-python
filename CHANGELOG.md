@@ -1,106 +1,153 @@
-# 0.11.0
+## 0.15.0 (2023-02-08)
 
-- Launcher can modify the job before submitting it to the scheduler (i.e. to add a token)
-- Launcher finder to request specific resources by querying their properties
+### Feat
 
-# 0.10.6
+- **scheduler**: foundations for experiment services
 
-- Python script for launching task (better compatibility with OS X/Windows)
-- Token authentification
+## 0.14.6 (2023-02-06)
 
-# 0.10.0
+## 0.14.5 (2023-02-06)
 
-- Forces a configuration to be a meta-parameter or a parameter
-- Sphinx documentation extension
+## 0.14.4 (2023-02-03)
 
-# 0.9.12
+## 0.14.3 (2023-01-24)
 
-- Document arguments with a docstring (python 3.9+)
-- `@deprecate` configurations allows to transparently change their location (or ID)
-- A job can now notify multiple experimaestro servers
+## 0.14.2 (2023-01-21)
 
-# 0.9.11
+## 0.14.1 (2023-01-21)
 
-- Various fixes
-- Asynchronous process checking
-- Configurations can use `Enum` values
+## 0.14 (2023-01-19)
 
-# 0.9.10
+## 0.13.3 (2022-12-24)
 
-- More stability in scheduler (asyncio to avoid race conditions)
+## 0.13.2 (2022-12-24)
 
-# 0.9.9
+## 0.13.1 (2022-12-01)
 
-- Improved documentation generation
-- Jupyter support with `jobmonitor` and `serverwidget`
+## 0.13.0 (2022-12-01)
 
-# 0.9.4
+## 0.12.2 (2022-11-30)
 
-- Generated documentation uses relative links (so it can be moved to any directory)
+## 0.12.0 (2022-11-29)
 
-# 0.9.3
+## 0.11.8 (2022-11-22)
 
-- Task outputs objets to wrap task outputs
-- Re-submitting a failed job now works
+## 0.11.7 (2022-10-24)
 
-# 0.8.7
+## 0.11.6 (2022-10-14)
 
-- (Enhancement) Slurm support
+## 0.11.5 (2022-10-08)
 
-# 0.8.6
+## 0.11.3 (2022-10-06)
 
-- (Enhancement) Python 3.9 support
+## 0.11.2 (2022-10-05)
 
-# 0.8.5
+## 0.11.1 (2022-10-05)
 
-- (Enhancement) Dict(ionaries) parameters (keys should be simple types)
-- (Fix) Nested configurations dependencies
-- (Enhancement) Generated path conflicts are handled
-- (Fix) Validate before sealing
-- (Fix) Generate values when validation is done
-- (Fix) Fixed bug with dependencies of task returning configurations
+## 0.10.6 (2022-09-29)
 
-# 0.8.4
+## 0.10.5 (2022-05-31)
 
-- Improvement to documentation
-- Use `Task` as base class instead of `@task`
+## 0.10.4 (2022-05-12)
 
-# 0.8.3
+## 0.10.3 (2022-02-10)
 
-- Possible to use `Config` as base class instead of `@config`
-- Value checkers annotations
-- Constant values are now properly handled
+## 0.10.2 (2022-02-07)
 
-# 0.8.2
+## 0.10.1 (2022-02-04)
 
-- Alternative annotation for default values (to avoid a bug in e.g. Torch)
+## 0.10.0 (2022-02-04)
 
-# 0.8.1
+## 0.9.12 (2022-01-11)
 
-- Fixes for (un)serialization (through pickle \_\_getnewargs_ex\_\_)
-- Full type hint support
-- Initial tqdm support
+## 0.9.11 (2021-11-19)
 
-# 0.7.12
+## 0.9.10 (2021-09-23)
 
-- Tasks can access their tags at runtime (e.g. to log hyper-parameters with tensorboard)
-- Tasks and configurations can be executed without scheduling (debugging)
+## 0.9.9 (2021-07-22)
 
-# 0.7.11
+## 0.9.8 (2021-07-22)
 
-- NPM packages update (security)
+## 0.9.7 (2021-07-19)
 
-# 0.7.10
+## 0.9.6 (2021-07-19)
 
-- Sub-parameters
-- Fixes with file-based tokens
-- Fixes with duplicate objects
+## 0.9.5 (2021-07-19)
 
-# 0.7.9
+## 0.9.4 (2021-05-26)
 
-- Attribute `__xpm_default_keep__` can be used to avoid using `@configmethod` for configuration only-classes (e.g. datamaestro)
+## 0.9.3 (2021-05-26)
 
-# 0.7.8
+## 0.9.2 (2021-05-25)
 
-- Fixed dependency token deadlock
-- Directory-based tokens (with external token watch)
+## 0.9.1 (2021-05-24)
+
+## 0.9.0 (2021-05-24)
+
+## 0.8.9 (2021-05-20)
+
+## 0.8.8 (2021-04-05)
+
+## 0.8.7 (2021-04-03)
+
+## 0.8.6 (2021-03-18)
+
+## 0.8.5 (2021-03-18)
+
+## 0.8.4 (2021-03-02)
+
+## 0.8.3 (2021-02-19)
+
+## 0.8.2 (2021-01-29)
+
+## 0.8.1 (2021-01-28)
+
+## 0.8.0 (2021-01-27)
+
+## 0.7.12 (2021-01-12)
+
+## 0.7.11 (2021-01-07)
+
+## 0.7.10 (2021-01-07)
+
+## 0.7.9 (2020-12-15)
+
+## 0.7.8 (2020-12-09)
+
+## 0.7.7 (2020-10-19)
+
+## 0.7.6 (2020-10-02)
+
+## 0.7.5 (2020-09-17)
+
+## 0.7.4 (2020-09-11)
+
+## 0.7.3 (2020-07-07)
+
+## 0.7.2 (2020-05-27)
+
+## 0.7.0 (2020-05-26)
+
+## 0.6.0 (2020-05-21)
+
+## 0.5.9 (2020-01-14)
+
+## 0.5.7 (2020-01-13)
+
+## 0.5.6 (2020-01-10)
+
+## 0.5.5 (2019-12-19)
+
+## 0.5.4 (2019-12-12)
+
+## 0.5.3 (2019-12-12)
+
+## 0.5.2 (2019-12-12)
+
+## 0.5.1 (2019-12-11)
+
+## 0.5.0 (2019-12-11)
+
+## v0.3.1 (2019-02-22)
+
+## v0.3.0 (2019-02-22)
