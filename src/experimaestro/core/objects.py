@@ -572,23 +572,38 @@ class ConfigInformation:
 
         Sealer(context)(self.pyobject)
 
+    def __unseal__(self):
+        """Unseal this configuration and its descendant
+
+        Internal API - do not use
+        """
+        context = GenerationContext()
+
+        class Unsealer(GenerationConfigProcessing):
+            def preprocess(self, config: Config):
+                return config.__xpm__._sealed, config
+
+            def postprocess(self, config: Config, values):
+                config.__xpm__._sealed = False
+                config.__xpm__._identifier = None
+
+        Unsealer(context)(self.pyobject)
+
     @property
     def identifier(self) -> Identifier:
         """Computes the unique identifier"""
-        if self._identifier is None:
+        if self._identifier is None or not self._sealed:
+            hashcomputer = HashComputer()
+            hashcomputer.update(self.pyobject, myself=True)
+            identifier = hashcomputer.identifier()
+
             if self._sealed:
                 # Only cache the identifier if sealed
-                self._identifier = self.compute_identifier()
-            else:
-                return self.compute_identifier()
+                self._identifier = identifier
+
+            return identifier
+
         return self._identifier
-
-    def compute_identifier(self):
-        """Compute identifier (no cache)"""
-
-        hashcomputer = HashComputer()
-        hashcomputer.update(self.pyobject, myself=True)
-        return hashcomputer.identifier()
 
     def dependency(self):
         """Returns a dependency"""
@@ -1114,7 +1129,7 @@ class ConfigInformation:
                     xpminfo._identifier = Identifier.from_state_dict(
                         definition["identifier"]
                     )
-                    xpminfo._seal = True
+                    xpminfo._sealed = True
 
                 assert definition["id"] not in objects, (
                     "Duplicate id %s" % definition["id"]

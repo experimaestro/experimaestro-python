@@ -394,7 +394,8 @@ def test_identifier_reload_config():
 
     # Reload the configuration
     new_config = ConfigInformation.fromParameters(data, as_instance=False)
-    new_identifier = new_config.__xpm__.compute_identifier().all
+    new_config.__xpm__.__unseal__()
+    new_identifier = new_config.__xpm__.identifier.all
 
     assert new_identifier == old_identifier
 
@@ -423,6 +424,7 @@ def test_identifier_reload_task():
 
     # Reload the configuration
     new_config = ConfigInformation.fromParameters(data, as_instance=False)
-    new_identifier = new_config.__xpm__.compute_identifier().all
+    new_config.__xpm__.__unseal__()
+    new_identifier = new_config.__xpm__.identifier.all
 
     assert new_identifier == old_identifier, f"{data}"

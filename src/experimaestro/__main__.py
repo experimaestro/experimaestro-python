@@ -125,7 +125,9 @@ def diff(path: Path):
             done.add(id(value))
 
             old_id = value.__xpm__.identifier.all.hex()
-            new_id = str(value.__xpm__.compute_identifier().all.hex())
+            value.__xpm__.__unseal__()
+
+            new_id = str(value.__xpm__.identifier.all.hex())
 
             if new_id != old_id:
                 print(f"{path} differ: {new_id} vs {old_id}")

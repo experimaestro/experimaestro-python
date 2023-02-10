@@ -31,10 +31,12 @@ def fix_deprecated(workpath: Path, fix: bool):
         if job is None:
             continue
 
-        # Now, computes the signature
+        # Now, computes the old  signature
         name = job_path.parents[1].name
-        old_identifier = job_path.parent.name
-        new_identifier = str(job.__xpm__.compute_identifier().all.hex())
+        old_identifier = job.__xpm__.identifier.all.hex()
+
+        job.__xpm__.__unseal__()
+        new_identifier = job.__xpm__.identifier.all.hex()
 
         if new_identifier != old_identifier:
             logger.info(

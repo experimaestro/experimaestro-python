@@ -88,7 +88,7 @@ class TemporaryExperiment:
         self.name = name
         self.workdir = workdir
         self.clean_workdir = workdir is None
-        self.timeout = timeout(maxwait)
+        self.timeout = timeout(maxwait) if maxwait > 0 else 0
         self.port = port
 
     def __enter__(self) -> experiment:
@@ -105,14 +105,16 @@ class TemporaryExperiment:
         self.experiment.workspace.launcher.setenv(
             "PYTHONPATH", str(Path(__file__).parents[2])
         )
-        self.timeout.__enter__()
+        if self.timeout:
+            self.timeout.__enter__()
 
         logging.info("Created new temporary experiment (%s)", workdir)
         return self.experiment
 
     def __exit__(self, *args):
         self.experiment.__exit__(*args)
-        self.timeout.__exit__(*args)
+        if self.timeout:
+            self.timeout.__exit__(*args)
         if self.clean_workdir:
             self.workdir.__exit__(*args)
 
