@@ -1,3 +1,4 @@
+import os
 from omegaconf import OmegaConf
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -24,11 +25,14 @@ class Settings:
 
 @lru_cache()
 def get_settings(path: Optional[Path] = None) -> Settings:
-    schema = OmegaConf.structured(Settings)
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return Settings()
+    else:
+        schema = OmegaConf.structured(Settings)
 
-    path = path or Path("~/.config/experimaestro/settings.yaml").expanduser()
-    if not path.is_file():
-        return schema
+        path = path or Path("~/.config/experimaestro/settings.yaml").expanduser()
+        if not path.is_file():
+            return schema
 
-    conf = OmegaConf.load(path)
-    return OmegaConf.merge(schema, conf)
+        conf = OmegaConf.load(path)
+        return OmegaConf.merge(schema, conf)

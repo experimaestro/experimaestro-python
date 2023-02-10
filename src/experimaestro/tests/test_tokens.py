@@ -1,4 +1,3 @@
-import multiprocessing
 import sys
 import json
 import fasteners
@@ -140,7 +139,7 @@ def test_token_monitor():
         task = TokenTask(path=path, x=x).add_dependencies(token.dependency(1)).submit()
         return task
 
-    with TemporaryExperiment("tokens1", maxwait=10) as xp1, TemporaryExperiment(
+    with TemporaryExperiment("tokens1", maxwait=10, port=0) as xp1, TemporaryExperiment(
         "tokens2", maxwait=10
     ) as xp2:
         path = xp1.workspace.path / "test_token.file"
@@ -160,7 +159,8 @@ def test_token_monitor():
 
 
 def test_token_reschedule():
-    """Test whether a job can be re-submitted if it failed to acquire a token due to multiple schedulers concurrency
+    """Test whether a job can be re-submitted if it failed to acquire a token
+    due to multiple schedulers concurrency
 
     - task 1 and 2 are started in two different processes, using the token
     - we wait for both to be scheduled
@@ -197,7 +197,8 @@ def test_token_reschedule():
 
                 # Create the locking path
                 logging.info(
-                    "Both processes are ready: allowing tasks to finish by writing in %s",
+                    "Both processes are ready:"
+                    "allowing tasks to finish by writing in %s",
                     lockingpath,
                 )
                 lockingpath.write_text("Let's go")
