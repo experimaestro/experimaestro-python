@@ -112,7 +112,7 @@ class HashComputer:
         else:
             self._hasher.update(bytes)
 
-    def update(self, value, subparam=False):
+    def update(self, value, subparam=False, myself=False):
         if value is None:
             self._hashupdate(HashComputer.NONE_ID, subparam=subparam)
         elif isinstance(value, float):
@@ -151,10 +151,19 @@ class HashComputer:
             self.update(value.__xpm__.task, subparam=subparam)
         # Handles configurations
         elif isinstance(value, Config):
-            xpmtype = value.__xpmtype__
 
             # Encodes the identifier
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
+            if not myself:
+                # Just use the object identifier
+                value_id = value.__xpm__.identifier
+                self._hashupdate(value_id.all, subparam=subparam)
+
+                # If the config has sub-parameters, also update this way
+                if value_id.sub is not None and not subparam:
+                    self._hashupdate(value_id.sub, subparam=True)
+
+            xpmtype = value.__xpmtype__
             self._hashupdate(xpmtype.identifier.name.encode("utf-8"), subparam=subparam)
 
             # Process arguments (sort by name to ensure uniqueness)
@@ -578,7 +587,7 @@ class ConfigInformation:
         """Compute identifier (no cache)"""
 
         hashcomputer = HashComputer()
-        hashcomputer.update(self.pyobject)
+        hashcomputer.update(self.pyobject, myself=True)
         return hashcomputer.identifier()
 
     def dependency(self):
