@@ -1,3 +1,25 @@
+## 0.17.0 (2023-02-10)
+
+### BREAKING CHANGE
+
+- New identifiers will be different in all cases - use the deprecated command to recompute identifiers for old experiments
+- For any task output which is different than the task itself, the identifier will change
+
+### Feat
+
+- **configuration**: re-use computed sub-configuration identifiers
+
+### Fix
+
+- **configuration**: fixed bugs with identifiers
+- **configuration**: serialize the task to recompute exactly the identifier
+
+## 0.16.0 (2023-02-08)
+
+### Feat
+
+- **server**: web services for experiment server
+
 ## 0.15.1 (2023-02-08)
 
 ### Fix
