@@ -1,3 +1,5 @@
+# flake8: noqa: T201
+from typing import Set
 import pkg_resources
 from itertools import chain
 from shutil import rmtree
@@ -84,14 +86,63 @@ def rpyc_server(unix_path, clean):
     start_server(unix_path, clean=clean)
 
 
+@cli.group()
+def deprecated():
+    pass
+
+
 @click.argument("path", type=Path)
-@click.option("--fix", is_flag=True, help="Do fix deprecated jobs")
-@cli.command()
-def deprecated(path: Path, fix: bool):
-    """List deprecated jobs and allows fixing (i.e. linking) them"""
+@deprecated.command()
+def fix(path: Path):
+    """Fix deprecated jobs using symlinks"""
     from experimaestro.tools.jobs import fix_deprecated
 
-    fix_deprecated(path, fix)
+    fix_deprecated(path, True)
+
+
+@click.argument("path", type=Path)
+@deprecated.command(name="list")
+def deprecated_list(path: Path):
+    """List deprecated jobs"""
+    from experimaestro.tools.jobs import fix_deprecated
+
+    fix_deprecated(path, False)
+
+
+@click.argument("path", type=Path)
+@deprecated.command()
+def diff(path: Path):
+    """Show the reason of the identifier change for a job"""
+    from experimaestro.tools.jobs import load_job
+    from experimaestro import Config
+
+    job = load_job(path / "params.json")
+
+    def check(path: str, value, done: Set[int]):
+        if isinstance(value, Config):
+            if id(value) in done:
+                return
+            done.add(id(value))
+
+            old_id = value.__xpm__.identifier.all.hex()
+            new_id = str(value.__xpm__.compute_identifier().all.hex())
+
+            if new_id != old_id:
+                print(f"{path} differ: {new_id} vs {old_id}")
+
+                for arg in value.__xpmtype__.arguments.values():
+                    arg_value = getattr(value, arg.name)
+                    check(f"{path}/{arg.name}", arg_value, done)
+
+        elif isinstance(value, list):
+            for ix, array_value in enumerate(value):
+                check(f"{path}.{ix}", array_value, done)
+
+        elif isinstance(value, dict):
+            for key, dict_value in value.items():
+                check(f"{path}.{key}", dict_value, done)
+
+    check(".", job, set())
 
 
 @click.argument("path", type=Path)

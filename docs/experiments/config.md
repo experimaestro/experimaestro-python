@@ -64,6 +64,17 @@ It is possible to deprecate a parameter or option:
 
     ```
 
+**Warning** the signature will change when deprecating attributes
+
+
+To fix the identifiers, one can use the `deprecated` command. This
+will create symbolic links so that old jobs are preserved and
+re-used.
+
+```sh
+experimaestro deprecated
+```
+
 ### Object life cycle
 
 During [task](../task) execution, the objects are constructed following

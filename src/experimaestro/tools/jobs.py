@@ -5,47 +5,49 @@ from pathlib import Path
 import json
 
 
+def load_job(job_path: Path):
+    logger.info("Loading configuration %s", job_path.parent)
+    params = json.loads(job_path.resolve().read_text())
+    taskglobals.Env.instance().wspath = Path(params["workspace"])
+
+    try:
+        return ConfigInformation.fromParameters(params["objects"], False)
+    except Exception:
+        logger.exception("Error while loading the parameters from %s", job_path)
+        return None
+
+
 def fix_deprecated(workpath: Path, fix: bool):
     jobspath = workpath / "jobs"
     logger.info("Looking for deprecated jobs in %s", jobspath)
-    for job in jobspath.glob("*/*/params.json"):
-
-        logger.info("Looking up at %s", job.parent)
+    for job_path in jobspath.glob("*/*/params.json"):
 
         # If link, skip
-        if job.parent.is_symlink():
+        if job_path.parent.is_symlink():
             logger.debug("... it is a symlink - skipping")
             continue
 
-        # Unserialize
-        logger.debug("Loading configuration %s", job.parent)
-        params = json.loads(job.resolve().read_text())
-        taskglobals.Env.instance().wspath = Path(params["workspace"])
-
-        try:
-            object = ConfigInformation.fromParameters(params["objects"], False)
-        except Exception:
-            logger.exception("Error while loading the parameters from %s", job)
+        job = load_job(job_path)
+        if job is None:
             continue
 
         # Now, computes the signature
-        old_identifier = job.parent.name
-        new_identifier = str(object.__xpm__.compute_identifier().all.hex())
+        name = job_path.parents[1].name
+        old_identifier = job_path.parent.name
+        new_identifier = str(job.__xpm__.compute_identifier().all.hex())
 
         if new_identifier != old_identifier:
             logger.info(
                 "Configuration %s (%s) has a new identifier %s (%s)",
-                job.parents[1].name,
+                name,
                 old_identifier,
-                object.__xpmtype__.identifier,
+                job.__xpmtype__.identifier,
                 new_identifier,
             )
 
             if fix:
-                oldjobpath = jobspath / job.parents[1].name / old_identifier
-                newjobpath = (
-                    jobspath / str(object.__xpmtype__.identifier) / new_identifier
-                )
+                oldjobpath = jobspath / name / old_identifier
+                newjobpath = jobspath / str(job.__xpmtype__.identifier) / new_identifier
                 newjobpath.parent.mkdir(exist_ok=True)
 
                 if newjobpath.exists():
@@ -58,5 +60,5 @@ def fix_deprecated(workpath: Path, fix: bool):
                             oldjobpath.resolve(),
                         )
                 else:
-                    logger.info("Fixing %s/%s", job.parents[1].name, old_identifier)
+                    logger.info("Fixing %s/%s", name, old_identifier)
                     newjobpath.symlink_to(oldjobpath)

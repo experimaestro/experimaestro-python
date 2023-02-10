@@ -724,9 +724,12 @@ class ConfigInformation:
                     for c in value.__xpm__.path:
                         out.write(c.toJSON())
         elif isinstance(value, TaskOutput):
-            ConfigInformation._outputjsonvalue(
-                key, value.__unwrap__(), jsonout, context
-            )
+            with jsonout.subobject(*key) as obj:
+                obj.write("type", "python")
+                obj.write("value", id(value.__unwrap__()))
+                # We add the task for identifier computation
+                obj.write("task", id(value.__xpm__.task))
+
         else:
             raise NotImplementedError(
                 "Cannot serialize objects of type %s", type(value)
@@ -740,7 +743,13 @@ class ConfigInformation:
         *,
         full=True,
     ):
-        """Serialize the configuration"""
+        """Serialize the configuration
+
+        :param jsontstream: the JSON output stream
+        :param context: The serialization context (e.g. useful to create files)
+        :param serialized: The set of id of already serialized configuration
+            (avoids recursion)
+        """
 
         # Skip if already serialized
         if id(self.pyobject) in serialized:
@@ -798,7 +807,7 @@ class ConfigInformation:
 
     @staticmethod
     def _outputjsonobjects(value, jsonout, context, serialized):
-        """Serialize all configuration objects present within the value"""
+        """Serialize all needed configuration objects"""
         # objects
         if isinstance(value, SerializedTaskOutput):
             with jsonout.subobject() as objectout:
@@ -813,6 +822,11 @@ class ConfigInformation:
 
         # Unwrap if needed
         if isinstance(value, TaskOutput):
+            # We will need to output the task configuration objects
+            ConfigInformation._outputjsonobjects(
+                value.__xpm__.task, jsonout, context, serialized
+            )
+
             value = value.__unwrap__()
 
         if isinstance(value, Config):
@@ -924,14 +938,13 @@ class ConfigInformation:
             config, as_instance=as_instance, data_loader=data_loader
         )
 
-    # def _outputjson(self, jsonout, context, key=[]):
-    #     with jsonout.subobject(*key) as objectout:
-    #         self._outputjson_inner(objectout, context)
-
     @staticmethod
     def _objectFromParameters(value: Any, objects: Dict[str, Any]):
+        # A list
         if isinstance(value, list):
             return [ConfigInformation._objectFromParameters(x, objects) for x in value]
+
+        # A dictionary
         if isinstance(value, dict):
             if "type" not in value:
                 # Just a plain dictionary
@@ -944,7 +957,11 @@ class ConfigInformation:
 
             # The value is an object (that should have been serialized first)
             if value["type"] == "python":
-                return objects[value["value"]]
+                obj = objects[value["value"]]
+                if task_id := value.get("task", None):
+                    task = objects[task_id]
+                    return TaskOutput(obj, task)
+                return obj
 
             if value["type"] == "serialized":
                 o = objects[value["value"]]
@@ -971,6 +988,7 @@ class ConfigInformation:
 
             raise Exception("Unhandled type: %s", value["type"])
 
+        # Just a simple value
         return value
 
     @overload
@@ -1087,7 +1105,7 @@ class ConfigInformation:
                     xpminfo._identifier = Identifier.from_state_dict(
                         definition["identifier"]
                     )
-                    xpminfo.seal(GenerationContext())
+                    xpminfo._seal = True
 
                 assert definition["id"] not in objects, (
                     "Duplicate id %s" % definition["id"]
@@ -1477,10 +1495,10 @@ class TaskOutputInfo:
 
 
 class TaskOutput(Proxy):
-    """Task output
+    """Task proxy
 
-    When a task is submitted, to track down dependencies, the output configuration
-    has to be wrapped within a TaskOutput.
+    This is used when accessing properties *after* having submitted a task,
+    to keep track of the dependencies
     """
 
     def __init__(self, value: Any, task: Union[Task, TaskOutputInfo]):

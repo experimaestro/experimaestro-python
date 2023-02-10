@@ -1,5 +1,6 @@
 # Tests for identifier computation
 
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 from experimaestro import (
@@ -14,8 +15,9 @@ from experimaestro import (
     Option,
     pathgenerator,
     Annotated,
+    Task,
 )
-from experimaestro.core.objects import TaskOutput, setmeta
+from experimaestro.core.objects import ConfigInformation, TaskOutput, setmeta
 
 
 @config()
@@ -271,7 +273,8 @@ def test_constant():
 
 
 def test_identifier_deprecated_class():
-    """Test that when submitting the task, the computed idenfitier is the one of the new class"""
+    """Test that when submitting the task, the computed identifier is the one of
+    the new class"""
 
     class NewConfig(Config):
         __xpmid__ = "new"
@@ -375,3 +378,51 @@ def test_identifier_meta_default_array():
         ArrayConfigWithDefault(array=[]),
         ArrayConfigWithDefault(array=[setmeta(MetaA(x=2), True)]),
     )
+
+
+class IdentifierReloadConfig(Config):
+    id: Param[str]
+
+
+def test_identifier_reload_config():
+    # Creates the configuration
+    config = IdentifierReloadConfig(id="123")
+    old_identifier = config.__xpm__.identifier.all
+
+    # Get the data structure
+    data = json.loads(config.__xpm__.__json__())
+
+    # Reload the configuration
+    new_config = ConfigInformation.fromParameters(data, as_instance=False)
+    new_identifier = new_config.__xpm__.compute_identifier().all
+
+    assert new_identifier == old_identifier
+
+
+class IdentifierReloadTask(Task):
+    id: Param[str]
+
+    def taskoutputs(self):
+        return IdentifierReloadConfig(id=self.id)
+
+
+class IdentifierReloadTaskDerived(Config):
+    task: Param[IdentifierReloadConfig]
+
+
+def test_identifier_reload_task():
+    """When using a task output, the identifier should not be different"""
+
+    # Creates the configuration
+    task = IdentifierReloadTask(id="123").submit(dryrun=True)
+    config = IdentifierReloadTaskDerived(task=task)
+    old_identifier = config.__xpm__.identifier.all
+
+    # Get the data structure
+    data = json.loads(config.__xpm__.__json__())
+
+    # Reload the configuration
+    new_config = ConfigInformation.fromParameters(data, as_instance=False)
+    new_identifier = new_config.__xpm__.compute_identifier().all
+
+    assert new_identifier == old_identifier, f"{data}"
