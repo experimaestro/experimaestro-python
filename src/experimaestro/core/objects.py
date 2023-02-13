@@ -6,7 +6,6 @@ from pathlib import Path
 import hashlib
 import struct
 import io
-import jsonstreams
 import fasteners
 from enum import Enum
 import inspect
@@ -156,11 +155,12 @@ class HashComputer:
                 self.update(key, subparam=subparam)
                 self.update(value, subparam=subparam)
         elif isinstance(value, TaskOutput):
-            # Use the configuration of the task proxy
+            # Add the task ID...
             self.update(value.__xpm__.task, subparam=subparam)
+            # ... as well as the configuration
+            self.update(value.__unwrap__(), subparam=subparam)
         # Handles configurations
         elif isinstance(value, Config):
-
             # Encodes the identifier
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
             if not myself:
@@ -171,6 +171,9 @@ class HashComputer:
                 # If the config has sub-parameters, also update this way
                 if value_id.sub is not None and not subparam:
                     self._hashupdate(value_id.sub, subparam=True)
+
+                # And that's it!
+                return
 
             xpmtype = value.__xpmtype__
             self._hashupdate(xpmtype.identifier.name.encode("utf-8"), subparam=subparam)
@@ -714,162 +717,157 @@ class ConfigInformation:
     # --- Serialization
 
     @staticmethod
-    def _outputjsonvalue(key, value, jsonout, context):
+    def _outputjsonvalue(value, context):
         """Serialize a value"""
         if value is None:
-            jsonout.write(*key, None)
+            return None
 
         elif isinstance(value, Config):
-            with jsonout.subobject(*key) as obj:
-                obj.write("type", "python")
-                obj.write("value", id(value))
+            return {"type": "python", "value": id(value)}
+
         elif isinstance(value, list):
-            with jsonout.subarray(*key) as arrayout:
-                for el in value:
-                    ConfigInformation._outputjsonvalue([], el, arrayout, context)
+            return [ConfigInformation._outputjsonvalue(el, context) for el in value]
+
         elif isinstance(value, dict):
-            with jsonout.subobject(*key) as objectout:
-                for name, el in value.items():
-                    ConfigInformation._outputjsonvalue([name], el, objectout, context)
+            return {
+                name: ConfigInformation._outputjsonvalue(el, context)
+                for name, el in value.items()
+            }
         elif isinstance(value, Path):
-            with jsonout.subobject(*key) as objectout:
-                objectout.write("type", "path")
-                objectout.write("value", str(value))
+            return {"type": "path", "value": str(value)}
         elif isinstance(value, SerializedPath):
-            with jsonout.subobject(*key) as objectout:
-                objectout.write("type", "path.serialized")
-                objectout.write("value", str(value.path))
-                objectout.write("is_folder", value.is_folder)
+            return {
+                "type": "path.serialized",
+                "value": str(value.path),
+                "is_folder": value.is_folder,
+            }
         elif isinstance(value, (int, float, str)):
-            jsonout.write(*key, value)
+            return value
         elif isinstance(value, Enum):
-            with jsonout.subobject(*key) as objectout:
-                objectout.write("type", "enum")
-                objectout.write("module", value.__class__.__module__)
-                objectout.write("enum", value.__class__.__qualname__)
-                objectout.write("value", value.name)
+            return {
+                "type": "enum",
+                "module": value.__class__.__module__,
+                "enum": value.__class__.__qualname__,
+                "value": value.name,
+            }
         elif isinstance(value, SerializedTaskOutput):
             # Reference to a serialized object
-            with jsonout.subobject(*key) as objectout:
-                objectout.write("type", "serialized")
-                objectout.write("value", id(value.__xpm__.serialized.loader))
-                with objectout.subarray("path") as out:
-                    for c in value.__xpm__.path:
-                        out.write(c.toJSON())
+            return {
+                "type": "serialized",
+                "value": id(value.__xpm__.serialized.loader),
+                "path": [c.toJSON() for c in value.__xpm__.path],
+            }
         elif isinstance(value, TaskOutput):
-            with jsonout.subobject(*key) as obj:
-                obj.write("type", "python")
-                obj.write("value", id(value.__unwrap__()))
+            return {
+                "type": "python",
+                "value": id(value.__unwrap__()),
                 # We add the task for identifier computation
-                obj.write("task", id(value.__xpm__.task))
-
+                "task": id(value.__xpm__.task),
+            }
         else:
             raise NotImplementedError(
                 "Cannot serialize objects of type %s", type(value)
             )
 
-    def _outputjson_inner(
+    def __get_objects__(
         self,
-        jsonstream,
+        objects: List[Dict],
         context: SerializationContext,
-        serialized: Set[int],
         *,
         full=True,
-    ):
-        """Serialize the configuration
+    ) -> List[Dict]:
+        """Returns the list of objects necessary to deserialize ourself
 
-        :param jsontstream: the JSON output stream
+        :param objects: the already output objects
         :param context: The serialization context (e.g. useful to create files)
-        :param serialized: The set of id of already serialized configuration
-            (avoids recursion)
         """
 
         # Skip if already serialized
-        if id(self.pyobject) in serialized:
-            return
+        if id(self.pyobject) in context.serialized:
+            return objects
 
-        serialized.add(id(self.pyobject))
+        context.serialized.add(id(self.pyobject))
 
         # Serialize sub-objects
         for argument, value in self.xpmvalues():
             if value is not None:
-                ConfigInformation._outputjsonobjects(
-                    value, jsonstream, context, serialized
+                ConfigInformation.__collect_objects__(value, objects, context)
+
+        # Serialize ourselves
+        state_dict = {
+            "id": id(self.pyobject),
+            "module": self.xpmtype._module,
+            "type": self.xpmtype.objecttype.__qualname__,
+            "identifier": self.identifier.state_dict(),
+        }
+
+        if not self.xpmtype._package:
+            state_dict["file"] = str(self.xpmtype._file)
+
+        # Serialize identifier and typename
+        if full:
+            state_dict["typename"] = self.xpmtype.name()
+
+            if is_ignored(self):
+                state_dict["ignore"] = True
+
+            # Write which fields are ignored
+            state_dict["ignored"] = [
+                argument.name
+                for argument, value in self.xpmvalues()
+                if is_ignored(value)
+            ]
+
+        jsonfields = state_dict["fields"] = {}
+        for argument, value in self.xpmvalues():
+            with context.push(argument.name) as var_path:
+                if argument.is_data and value is not None:
+                    assert isinstance(
+                        value, Path
+                    ), f"Data arguments should be paths (type is {type(value)})"
+                    value = context.serialize(var_path, value)
+
+                jsonfields[argument.name] = ConfigInformation._outputjsonvalue(
+                    value, context
                 )
 
-        with jsonstream.subobject() as objectout:
-            # Serialize ourselves
-            objectout.write("id", id(self.pyobject))
-            if not self.xpmtype._package:
-                objectout.write("file", str(self.xpmtype._file))
-
-            objectout.write("module", self.xpmtype._module)
-            objectout.write("type", self.xpmtype.objecttype.__qualname__)
-
-            # Serialize identifier and typename
-            # TODO: remove when not needed (cache issues)
-            objectout.write("identifier", self.identifier.state_dict())
-            if full:
-                objectout.write("typename", self.xpmtype.name())
-
-                if is_ignored(self):
-                    objectout.write("ignore", True)
-
-                # Write which fields are ignored
-                objectout.write(
-                    "ignored",
-                    [
-                        argument.name
-                        for argument, value in self.xpmvalues()
-                        if is_ignored(value)
-                    ],
-                )
-
-            with objectout.subobject("fields") as jsonfields:
-                for argument, value in self.xpmvalues():
-                    with context.push(argument.name) as var_path:
-                        if argument.is_data and value is not None:
-                            assert isinstance(
-                                value, Path
-                            ), f"Data arguments should be paths (type is {type(value)})"
-                            value = context.serialize(var_path, value)
-
-                        ConfigInformation._outputjsonvalue(
-                            [argument.name], value, jsonfields, value
-                        )
+        objects.append(state_dict)
+        return objects
 
     @staticmethod
-    def _outputjsonobjects(value, jsonout, context, serialized):
-        """Serialize all needed configuration objects"""
+    def __collect_objects__(value, objects: List[Dict], context: SerializationContext):
+        """Serialize all needed configuration objects, looking at sub
+        configurations if necessary"""
         # objects
         if isinstance(value, SerializedTaskOutput):
-            with jsonout.subobject() as objectout:
-                serialized = value.__xpm__.serialized
-                loader = serialized.loader
-                objectout.write("id", id(loader))
-                objectout.write("serialized", True)
-                objectout.write("module", loader.__class__.__module__)
-                objectout.write("type", loader.__class__.__qualname__)
-                objectout.write("value", loader.toJSON())
+            loader = value.__xpm__.serialized.loader
+            objects.append(
+                {
+                    "id": id(loader),
+                    "serialized": True,
+                    "module": loader.__class__.__module__,
+                    "type": loader.__class__.__qualname__,
+                    "value": loader.toJSON(),
+                }
+            )
             return
 
         # Unwrap if needed
         if isinstance(value, TaskOutput):
             # We will need to output the task configuration objects
-            ConfigInformation._outputjsonobjects(
-                value.__xpm__.task, jsonout, context, serialized
-            )
+            ConfigInformation.__collect_objects__(value.__xpm__.task, objects, context)
 
+            # Unwrap the value to output it
             value = value.__unwrap__()
 
         if isinstance(value, Config):
-            value.__xpm__._outputjson_inner(jsonout, context, serialized)
+            value.__xpm__.__get_objects__(objects, context)
         elif isinstance(value, list):
             for el in value:
-                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
+                ConfigInformation.__collect_objects__(el, objects, context)
         elif isinstance(value, dict):
             for el in value.values():
-                ConfigInformation._outputjsonobjects(el, jsonout, context, serialized)
+                ConfigInformation.__collect_objects__(el, objects, context)
         elif isinstance(value, (Path, int, float, str, Enum)):
             pass
         else:
@@ -905,43 +903,27 @@ class ConfigInformation:
             out {io.TextIOBase} -- The output stream
             context {[type]} -- the command context
         """
-        serialized: Set[int] = set()
-        with jsonstreams.Stream(jsonstreams.Type.OBJECT, fd=out, close_fd=True) as out:
-            # Write information
-            out.write("has_subparam", self.identifier.sub is not None)
+        json.dump(
+            {
+                "has_subparam": self.identifier.sub is not None,
+                "workspace": str(context.workspace.path.absolute()),
+                "tags": {key: value for key, value in self.tags().items()},
+                "objects": self.__get_objects__([], context),
+            },
+            out,
+        )
 
-            out.write("workspace", str(context.workspace.path.absolute()))
-
-            with out.subobject("tags") as objectout:
-                for key, value in self.tags().items():
-                    objectout.write(key, value)
-
-            # Write objects
-            with out.subarray("objects") as arrayout:
-                self._outputjson_inner(arrayout, context, serialized)
-
-    def __json__(self):
-        with io.StringIO() as string_out:
-            with jsonstreams.Stream(
-                jsonstreams.Type.ARRAY, fd=string_out, close_fd=False
-            ) as out:
-                serialized: Set[int] = set()
-                self._outputjson_inner(
-                    out, SerializationContext(), serialized, full=False
-                )
-
-            text = string_out.getvalue()
-
-        return text
+    def __json__(self) -> str:
+        """Returns the JSON representation of the object itself"""
+        return json.dumps(self.__get_objects__([], SerializationContext(), full=False))
 
     def serialize(self, save_directory: Path):
         """Serialize the configuration and its data files into a directory"""
         context = SerializationContext(save_directory=save_directory)
 
         with (save_directory / "definition.json").open("wt") as out:
-            with jsonstreams.Stream(jsonstreams.Type.ARRAY, fd=out) as out:
-                serialized: Set[int] = set()
-                self._outputjson_inner(out, context, serialized, full=False)
+            objects = self.__get_objects__([], context, full=False)
+            json.dump(objects, out)
 
     @staticmethod
     def deserialize(
@@ -972,10 +954,13 @@ class ConfigInformation:
         )
 
     @staticmethod
-    def _objectFromParameters(value: Any, objects: Dict[str, Any]):
+    def _objectFromParameters(value: Any, objects: Dict[str, Any], as_instance: bool):
         # A list
         if isinstance(value, list):
-            return [ConfigInformation._objectFromParameters(x, objects) for x in value]
+            return [
+                ConfigInformation._objectFromParameters(x, objects, as_instance)
+                for x in value
+            ]
 
         # A dictionary
         if isinstance(value, dict):
@@ -983,15 +968,17 @@ class ConfigInformation:
                 # Just a plain dictionary
                 return {
                     ConfigInformation._objectFromParameters(
-                        key, objects
-                    ): ConfigInformation._objectFromParameters(value, objects)
+                        key, objects, as_instance
+                    ): ConfigInformation._objectFromParameters(
+                        value, objects, as_instance
+                    )
                     for key, value in value.items()
                 }
 
             # The value is an object (that should have been serialized first)
             if value["type"] == "python":
                 obj = objects[value["value"]]
-                if task_id := value.get("task", None):
+                if task_id := (value.get("task", None) if not as_instance else None):
                     task = objects[task_id]
                     return TaskOutput(obj, task)
                 return obj
@@ -1111,7 +1098,9 @@ class ConfigInformation:
 
                 # Set the fields
                 for name, value in definition["fields"].items():
-                    v = ConfigInformation._objectFromParameters(value, objects)
+                    v = ConfigInformation._objectFromParameters(
+                        value, objects, as_instance
+                    )
 
                     # Transform serialized paths arguments
                     argument = xpmtype.arguments[name]

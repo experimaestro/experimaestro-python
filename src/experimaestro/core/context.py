@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 import shutil
-from typing import List, Optional, Protocol, Union
+from typing import List, Optional, Protocol, Set, Union
 import os
 import sys
 
@@ -38,12 +38,14 @@ class SerializedPath:
 class SerializationContext:
     save_directory: Optional[Path]
     var_path: List[str]
+    serialized: Set[int]
 
     """Context when serializing experimaestro configurations"""
 
     def __init__(self, *, save_directory: Optional[Path] = None):
         self.save_directory = save_directory
         self.var_path = []
+        self.serialized = set()
 
     def serialize(self, var_path: List[str], data_path: Path) -> SerializedPath:
         if self.save_directory:

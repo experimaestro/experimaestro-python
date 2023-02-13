@@ -73,6 +73,10 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
                 else:
                     logger.info("Fixing %s/%s", name, old_identifier)
                     if cleanup:
+                        # Rename the folder
                         oldjobpath.rename(newjobpath)
+
+                        # Rewrite params.json
+                        job.__xpm__.__json__()
                     else:
                         newjobpath.symlink_to(oldjobpath)

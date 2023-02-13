@@ -431,6 +431,10 @@ class IdentifierReloadTaskDerived(Config):
     task: Param[IdentifierReloadTask]
 
 
+class IdentifierReloadTaskDerived2(Task):
+    param: Param[IdentifierReloadTaskDerived]
+
+
 def test_identifier_reload_task():
     """When using a task output, the identifier should not be different"""
 
@@ -438,3 +442,6 @@ def test_identifier_reload_task():
     task = IdentifierReloadTask(id="123").submit(dryrun=True)
     config = IdentifierReloadTaskDerived(task=task)
     check_reload(config)
+
+    task2 = IdentifierReloadTaskDerived2(param=config).submit(dryrun=True)
+    check_reload(task2.__unwrap__())

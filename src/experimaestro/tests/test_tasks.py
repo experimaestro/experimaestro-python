@@ -220,7 +220,7 @@ def test_tasks_deprecated_inner():
 
         # Fix deprecated
         OldConfig.__xpmtype__.deprecate()
-        fix_deprecated(xp.workspace.path, True)
+        fix_deprecated(xp.workspace.path, True, False)
 
         checknewpaths(task_new, task_old_path)
 
@@ -264,6 +264,6 @@ def test_tasks_deprecated():
 
         # Fix deprecated
         OldTask.__xpmtype__.deprecate()
-        fix_deprecated(xp.workspace.path, True)
+        fix_deprecated(xp.workspace.path, True, False)
 
         checknewpaths(task_new, task_old_path)

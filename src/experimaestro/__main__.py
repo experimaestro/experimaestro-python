@@ -11,6 +11,7 @@ import subprocess
 from termcolor import colored, cprint
 
 import experimaestro
+from experimaestro.core.objects import TaskOutput
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -109,11 +110,21 @@ def deprecated_list(path: Path, fix: bool, cleanup: bool):
 def diff(path: Path):
     """Show the reason of the identifier change for a job"""
     from experimaestro.tools.jobs import load_job
-    from experimaestro import Config
+    from experimaestro import Config, Task  # FIXME: remove prints
+    from experimaestro.core.objects import GenerationContext
 
     job = load_job(path / "params.json")
     new_job = load_job(path / "params.json")
     new_job.__xpm__.__unseal__()
+
+    class MyGenerationContext(GenerationContext):
+        @property
+        def path(self):
+            return Path("/dev/null")
+
+    new_job.__xpm__.seal(MyGenerationContext())
+    print("ARRRGGG", new_job.__identifier__())
+    new_job.__xpm__._identifier = None
 
     def check(path: str, value, new_value, done: Set[int]):
         if isinstance(value, Config):
@@ -127,10 +138,13 @@ def diff(path: Path):
             if new_id != old_id:
                 print(f"{path} differ: {new_id} vs {old_id}")
 
-                for arg in value.__xpmtype__.arguments.values():
-                    arg_value = getattr(value, arg.name)
-                    arg_newvalue = getattr(new_value, arg.name)
-                    check(f"{path}/{arg.name}", arg_value, arg_newvalue, done)
+                if isinstance(value, TaskOutput):
+                    check(f"{path}.<task>", value.__xpm__.task, new_value.__xpm__.task)
+                else:
+                    for arg in value.__xpmtype__.arguments.values():
+                        arg_value = getattr(value, arg.name)
+                        arg_newvalue = getattr(new_value, arg.name)
+                        check(f"{path}/{arg.name}", arg_value, arg_newvalue, done)
 
         elif isinstance(value, list):
             for ix, (array_value, array_newvalue) in enumerate(zip(value, new_value)):

@@ -53,23 +53,12 @@ def test_noname():
 
 def serializeCycle(config: Config):
     """Serialize and deserialize a configuration"""
-    from io import StringIO
-    import jsonstreams
     from experimaestro.core.objects import ConfigInformation
-    import json
     import experimaestro.taskglobals as taskglobals
 
     taskglobals.Env.instance().wspath = Path("/tmp-xpm1234")
 
-    stringOut = StringIO()
-
-    serialized: Set[int] = set()
-    with jsonstreams.Stream(
-        jsonstreams.Type.ARRAY, fd=stringOut, close_fd=False
-    ) as out:
-        config.__xpm__._outputjson_inner(out, SerializationContext(), serialized)
-
-    objects = json.loads(stringOut.getvalue())
+    objects = config.__xpm__.__get_objects__([], SerializationContext())
 
     return ConfigInformation.fromParameters(objects)
 
