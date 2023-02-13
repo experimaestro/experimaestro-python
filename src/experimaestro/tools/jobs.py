@@ -1,3 +1,4 @@
+from experimaestro.core.context import SerializationContext
 from experimaestro.core.objects import ConfigInformation
 from experimaestro.utils import logger
 import experimaestro.taskglobals as taskglobals
@@ -11,10 +12,10 @@ def load_job(job_path: Path):
     taskglobals.Env.instance().wspath = Path(params["workspace"])
 
     try:
-        return ConfigInformation.fromParameters(params["objects"], False)
+        return params, ConfigInformation.fromParameters(params["objects"], False)
     except Exception:
         logger.exception("Error while loading the parameters from %s", job_path)
-        return None
+        return None, None
 
 
 def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
@@ -36,7 +37,7 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
             logger.debug("... it is a symlink - skipping")
             continue
 
-        job = load_job(job_path)
+        params, job = load_job(job_path)
         if job is None:
             continue
 
@@ -73,10 +74,16 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
                 else:
                     logger.info("Fixing %s/%s", name, old_identifier)
                     if cleanup:
+                        # Rewrite params.json
+                        params["objects"] = job.__xpm__.__get_objects__(
+                            [], SerializationContext()
+                        )
+                        tmppath = job_path.with_suffix(".json.tmp")
+                        with tmppath.open("wt") as out:
+                            json.dump(params, out)
+                        tmppath.replace(job_path)
+
                         # Rename the folder
                         oldjobpath.rename(newjobpath)
-
-                        # Rewrite params.json
-                        job.__xpm__.__json__()
                     else:
                         newjobpath.symlink_to(oldjobpath)

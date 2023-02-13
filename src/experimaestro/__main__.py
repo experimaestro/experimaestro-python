@@ -110,21 +110,20 @@ def deprecated_list(path: Path, fix: bool, cleanup: bool):
 def diff(path: Path):
     """Show the reason of the identifier change for a job"""
     from experimaestro.tools.jobs import load_job
-    from experimaestro import Config, Task  # FIXME: remove prints
+    from experimaestro import Config
     from experimaestro.core.objects import GenerationContext
 
     job = load_job(path / "params.json")
     new_job = load_job(path / "params.json")
-    new_job.__xpm__.__unseal__()
 
+    # To have faster ID computation
     class MyGenerationContext(GenerationContext):
         @property
         def path(self):
             return Path("/dev/null")
 
+    new_job.__xpm__.__unseal__()
     new_job.__xpm__.seal(MyGenerationContext())
-    print("ARRRGGG", new_job.__identifier__())
-    new_job.__xpm__._identifier = None
 
     def check(path: str, value, new_value, done: Set[int]):
         if isinstance(value, Config):

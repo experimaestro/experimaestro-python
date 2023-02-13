@@ -12,6 +12,7 @@ import inspect
 import importlib
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     List,
@@ -722,9 +723,6 @@ class ConfigInformation:
         if value is None:
             return None
 
-        elif isinstance(value, Config):
-            return {"type": "python", "value": id(value)}
-
         elif isinstance(value, list):
             return [ConfigInformation._outputjsonvalue(el, context) for el in value]
 
@@ -733,16 +731,20 @@ class ConfigInformation:
                 name: ConfigInformation._outputjsonvalue(el, context)
                 for name, el in value.items()
             }
+
         elif isinstance(value, Path):
             return {"type": "path", "value": str(value)}
+
         elif isinstance(value, SerializedPath):
             return {
                 "type": "path.serialized",
                 "value": str(value.path),
                 "is_folder": value.is_folder,
             }
+
         elif isinstance(value, (int, float, str)):
             return value
+
         elif isinstance(value, Enum):
             return {
                 "type": "enum",
@@ -750,6 +752,7 @@ class ConfigInformation:
                 "enum": value.__class__.__qualname__,
                 "value": value.name,
             }
+
         elif isinstance(value, SerializedTaskOutput):
             # Reference to a serialized object
             return {
@@ -757,6 +760,7 @@ class ConfigInformation:
                 "value": id(value.__xpm__.serialized.loader),
                 "path": [c.toJSON() for c in value.__xpm__.path],
             }
+
         elif isinstance(value, TaskOutput):
             return {
                 "type": "python",
@@ -764,17 +768,19 @@ class ConfigInformation:
                 # We add the task for identifier computation
                 "task": id(value.__xpm__.task),
             }
-        else:
-            raise NotImplementedError(
-                "Cannot serialize objects of type %s", type(value)
-            )
+
+        elif isinstance(value, Config):
+            return {
+                "type": "python",
+                "value": id(value),
+            }
+
+        raise NotImplementedError("Cannot serialize objects of type %s", type(value))
 
     def __get_objects__(
         self,
         objects: List[Dict],
         context: SerializationContext,
-        *,
-        full=True,
     ) -> List[Dict]:
         """Returns the list of objects necessary to deserialize ourself
 
@@ -798,26 +804,17 @@ class ConfigInformation:
             "id": id(self.pyobject),
             "module": self.xpmtype._module,
             "type": self.xpmtype.objecttype.__qualname__,
+            "typename": self.xpmtype.name(),
             "identifier": self.identifier.state_dict(),
         }
+
+        if self.meta:
+            state_dict["meta"] = self.meta
 
         if not self.xpmtype._package:
             state_dict["file"] = str(self.xpmtype._file)
 
         # Serialize identifier and typename
-        if full:
-            state_dict["typename"] = self.xpmtype.name()
-
-            if is_ignored(self):
-                state_dict["ignore"] = True
-
-            # Write which fields are ignored
-            state_dict["ignored"] = [
-                argument.name
-                for argument, value in self.xpmvalues()
-                if is_ignored(value)
-            ]
-
         jsonfields = state_dict["fields"] = {}
         for argument, value in self.xpmvalues():
             with context.push(argument.name) as var_path:
@@ -841,15 +838,16 @@ class ConfigInformation:
         # objects
         if isinstance(value, SerializedTaskOutput):
             loader = value.__xpm__.serialized.loader
-            objects.append(
-                {
-                    "id": id(loader),
-                    "serialized": True,
-                    "module": loader.__class__.__module__,
-                    "type": loader.__class__.__qualname__,
-                    "value": loader.toJSON(),
-                }
-            )
+            if id(loader) not in context.serialized:
+                objects.append(
+                    {
+                        "id": id(loader),
+                        "serialized": True,
+                        "module": loader.__class__.__module__,
+                        "type": loader.__class__.__qualname__,
+                        "value": loader.toJSON(),
+                    }
+                )
             return
 
         # Unwrap if needed
@@ -915,14 +913,14 @@ class ConfigInformation:
 
     def __json__(self) -> str:
         """Returns the JSON representation of the object itself"""
-        return json.dumps(self.__get_objects__([], SerializationContext(), full=False))
+        return json.dumps(self.__get_objects__([], SerializationContext()))
 
     def serialize(self, save_directory: Path):
         """Serialize the configuration and its data files into a directory"""
         context = SerializationContext(save_directory=save_directory)
 
         with (save_directory / "definition.json").open("wt") as out:
-            objects = self.__get_objects__([], context, full=False)
+            objects = self.__get_objects__([], context)
             json.dump(objects, out)
 
     @staticmethod
@@ -978,9 +976,12 @@ class ConfigInformation:
             # The value is an object (that should have been serialized first)
             if value["type"] == "python":
                 obj = objects[value["value"]]
-                if task_id := (value.get("task", None) if not as_instance else None):
-                    task = objects[task_id]
-                    return TaskOutput(obj, task)
+
+                # If we have a task
+                if not as_instance:
+                    if task_id := value.get("task", None):
+                        task = objects[task_id]
+                        return TaskOutput(obj, task)
                 return obj
 
             if value["type"] == "serialized":
@@ -1093,6 +1094,10 @@ class ConfigInformation:
                             o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
                 else:
                     xpminfo = o.__xpm__  # type: ConfigInformation
+
+                    meta = definition.get("meta", None)
+                    if meta:
+                        xpminfo._meta = meta
                     if xpminfo.xpmtype.task is not None:
                         o.__xpm__.job = object()
 
@@ -1482,7 +1487,16 @@ class Serialized:
 
 
 class SerializedConfig:
-    def __init__(self, pyobject: Config, loader):
+    """A serializable configuration
+
+    This can be used to define a loading mechanism when instanciating the
+    configuration
+    """
+
+    pyobject: Config
+    """The configuration that will be serialized"""
+
+    def __init__(self, pyobject: Config, loader: Callable[[Path], Config]):
         self.pyobject = pyobject
         self.loader = loader
 

@@ -427,12 +427,13 @@ class IdentifierReloadTask(Task):
     id: Param[str]
 
 
+class IdentifierReloadTaskConfig(Config):
+    x: Param[int]
+
+
 class IdentifierReloadTaskDerived(Config):
     task: Param[IdentifierReloadTask]
-
-
-class IdentifierReloadTaskDerived2(Task):
-    param: Param[IdentifierReloadTaskDerived]
+    other: Param[IdentifierReloadTaskConfig]
 
 
 def test_identifier_reload_task():
@@ -440,8 +441,17 @@ def test_identifier_reload_task():
 
     # Creates the configuration
     task = IdentifierReloadTask(id="123").submit(dryrun=True)
-    config = IdentifierReloadTaskDerived(task=task)
+    config = IdentifierReloadTaskDerived(
+        task=task, other=IdentifierReloadTaskConfig(x=2)
+    )
     check_reload(config)
 
-    task2 = IdentifierReloadTaskDerived2(param=config).submit(dryrun=True)
-    check_reload(task2.__unwrap__())
+
+def test_identifier_reload_meta():
+    """Test identifier don't change when using meta"""
+    # Creates the configuration
+    task = IdentifierReloadTask(id="123").submit(dryrun=True)
+    config = IdentifierReloadTaskDerived(
+        task=task, other=setmeta(IdentifierReloadTaskConfig(x=2), True)
+    )
+    check_reload(config)

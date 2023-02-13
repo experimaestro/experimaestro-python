@@ -44,7 +44,7 @@ It is possible to generate a configuration when submitting a task.
 
     class ModelLoader(Serialized):
         @staticmethod
-        def fromJSON(path):
+        def fromJSON(path: Path):
             return unserialize(path)
 
     class ModelLearn(Task):
