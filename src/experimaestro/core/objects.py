@@ -113,6 +113,15 @@ class HashComputer:
             self._hasher.update(bytes)
 
     def update(self, value, subparam=False, myself=False):
+        """Update the hash
+
+        :param value: The value to add to the hash
+        :param subparam: True if this value is a sub-parameter, defaults to
+            False
+        :param myself: True if the value is the configuration for which we wish
+            to compute the identifier, defaults to False
+        :raises NotImplementedError: If the value cannot be processed
+        """
         if value is None:
             self._hashupdate(HashComputer.NONE_ID, subparam=subparam)
         elif isinstance(value, float):
@@ -317,13 +326,13 @@ NOT_SET = object()
 class ConfigProcessing:
     """Allows to perform an operation on all nested configurations"""
 
-    def __init__(self, recursetask=False):
+    def __init__(self, recurse_task=False):
         """
 
         Parameters:
-            recursetask: Recurse into linked tasks
+            recurse_task: Recurse into linked tasks
         """
-        self.recursetask = recursetask
+        self.recurse_task = recurse_task
 
         # Stores already visited nodes
         self.visited = {}
@@ -385,7 +394,7 @@ class ConfigProcessing:
             return result
 
         if isinstance(x, TaskOutput):
-            if self.recursetask:
+            if self.recurse_task:
                 self(x.__xpm__.task)
 
             return x
@@ -397,8 +406,8 @@ class ConfigProcessing:
 
 
 class GenerationConfigProcessing(ConfigProcessing):
-    def __init__(self, context: GenerationContext):
-        super().__init__()
+    def __init__(self, context: GenerationContext, recurse_task=False):
+        super().__init__(recurse_task=recurse_task)
         self.context = context
 
     def list(self, i: int):
@@ -506,7 +515,7 @@ class ConfigInformation:
     def tags(self):
         class TagFinder(ConfigProcessing):
             def __init__(self):
-                super().__init__(recursetask=True)
+                super().__init__(recurse_task=True)
                 self.tags = {}
 
             def postprocess(self, config: Config, values):
@@ -570,7 +579,7 @@ class ConfigInformation:
 
                 config.__xpm__._sealed = True
 
-        Sealer(context)(self.pyobject)
+        Sealer(context, recurse_task=True)(self.pyobject)
 
     def __unseal__(self):
         """Unseal this configuration and its descendant
@@ -587,7 +596,7 @@ class ConfigInformation:
                 config.__xpm__._sealed = False
                 config.__xpm__._identifier = None
 
-        Unsealer(context)(self.pyobject)
+        Unsealer(context, recurse_task=True)(self.pyobject)
 
     @property
     def identifier(self) -> Identifier:
@@ -1097,6 +1106,8 @@ class ConfigInformation:
                             o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
                 else:
                     xpminfo = o.__xpm__  # type: ConfigInformation
+                    if xpminfo.xpmtype.task is not None:
+                        o.__xpm__.job = object()
 
                 # Set the fields
                 for name, value in definition["fields"].items():

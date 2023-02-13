@@ -72,7 +72,7 @@ will create symbolic links so that old jobs are preserved and
 re-used.
 
 ```sh
-experimaestro deprecated
+experimaestro deprecated list WORKDIR
 ```
 
 ### Object life cycle

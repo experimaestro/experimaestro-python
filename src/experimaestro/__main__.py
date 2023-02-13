@@ -91,22 +91,17 @@ def deprecated():
     pass
 
 
-@click.argument("path", type=Path)
-@deprecated.command()
-def fix(path: Path):
-    """Fix deprecated jobs using symlinks"""
-    from experimaestro.tools.jobs import fix_deprecated
-
-    fix_deprecated(path, True)
-
-
+@click.option("--fix", is_flag=True, help="Generate links to new IDs")
+@click.option("--cleanup", is_flag=True, help="Remove symbolic links and move folders")
 @click.argument("path", type=Path)
 @deprecated.command(name="list")
-def deprecated_list(path: Path):
+def deprecated_list(path: Path, fix: bool, cleanup: bool):
     """List deprecated jobs"""
     from experimaestro.tools.jobs import fix_deprecated
 
-    fix_deprecated(path, False)
+    if cleanup and not fix:
+        logging.warning("Ignoring --cleanup since we are not fixing old IDs")
+    fix_deprecated(path, fix, cleanup)
 
 
 @click.argument("path", type=Path)
@@ -117,34 +112,35 @@ def diff(path: Path):
     from experimaestro import Config
 
     job = load_job(path / "params.json")
+    new_job = load_job(path / "params.json")
+    new_job.__xpm__.__unseal__()
 
-    def check(path: str, value, done: Set[int]):
+    def check(path: str, value, new_value, done: Set[int]):
         if isinstance(value, Config):
             if id(value) in done:
                 return
             done.add(id(value))
 
             old_id = value.__xpm__.identifier.all.hex()
-            value.__xpm__.__unseal__()
-
-            new_id = str(value.__xpm__.identifier.all.hex())
+            new_id = new_value.__xpm__.identifier.all.hex()
 
             if new_id != old_id:
                 print(f"{path} differ: {new_id} vs {old_id}")
 
                 for arg in value.__xpmtype__.arguments.values():
                     arg_value = getattr(value, arg.name)
-                    check(f"{path}/{arg.name}", arg_value, done)
+                    arg_newvalue = getattr(new_value, arg.name)
+                    check(f"{path}/{arg.name}", arg_value, arg_newvalue, done)
 
         elif isinstance(value, list):
-            for ix, array_value in enumerate(value):
-                check(f"{path}.{ix}", array_value, done)
+            for ix, (array_value, array_newvalue) in enumerate(zip(value, new_value)):
+                check(f"{path}.{ix}", array_value, array_newvalue, done)
 
         elif isinstance(value, dict):
             for key, dict_value in value.items():
-                check(f"{path}.{key}", dict_value, done)
+                check(f"{path}.{key}", dict_value, new_value[key], done)
 
-    check(".", job, set())
+    check(".", job, new_job, set())
 
 
 @click.argument("path", type=Path)

@@ -445,6 +445,7 @@ class ObjectType(Type):
         if not isinstance(value, types):
             raise ValueError("%s is not a subtype of %s" % (value, types))
 
+        # Check that the task has been submitted
         if self.task and not value.__xpm__.job:
             raise ValueError("The value must be submitted before giving it")
         return value

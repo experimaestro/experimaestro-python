@@ -17,9 +17,18 @@ def load_job(job_path: Path):
         return None
 
 
-def fix_deprecated(workpath: Path, fix: bool):
+def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
     jobspath = workpath / "jobs"
     logger.info("Looking for deprecated jobs in %s", jobspath)
+
+    if cleanup:
+        for job_path in jobspath.glob("*/*/params.json"):
+
+            # If link, skip
+            if job_path.parent.is_symlink():
+                job_path.parent.unlink()
+                logger.info("Removing symlink %s", job_path.parent)
+
     for job_path in jobspath.glob("*/*/params.json"):
 
         # If link, skip
@@ -33,10 +42,10 @@ def fix_deprecated(workpath: Path, fix: bool):
 
         # Now, computes the old  signature
         name = job_path.parents[1].name
-        old_identifier = job.__xpm__.identifier.all.hex()
+        old_identifier: str = job_path.parent.name
 
         job.__xpm__.__unseal__()
-        new_identifier = job.__xpm__.identifier.all.hex()
+        new_identifier: str = job.__xpm__.identifier.all.hex()
 
         if new_identifier != old_identifier:
             logger.info(
@@ -63,4 +72,7 @@ def fix_deprecated(workpath: Path, fix: bool):
                         )
                 else:
                     logger.info("Fixing %s/%s", name, old_identifier)
-                    newjobpath.symlink_to(oldjobpath)
+                    if cleanup:
+                        oldjobpath.rename(newjobpath)
+                    else:
+                        newjobpath.symlink_to(oldjobpath)

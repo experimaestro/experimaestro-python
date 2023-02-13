@@ -47,6 +47,9 @@ class LevelInformation:
 class Reporter(threading.Thread):
     NOTIFICATION_FOLDER = ".notifications"
 
+    console: bool
+    """Whether to output to the console if no notification server is up"""
+
     def __init__(self, path: Path):
         """Starts a notification thread
 
@@ -64,6 +67,8 @@ class Reporter(threading.Thread):
         self.levels = [LevelInformation(0, None, -1)]
 
         self.stopping = False
+
+        self.console = False
 
         self.progress_threshold = 0.01
         self.cv = threading.Condition()
@@ -149,7 +154,7 @@ class Reporter(threading.Thread):
                 for key in toremove:
                     logger.info("Removing notification URL %s", self.urls[key])
                     del self.urls[key]
-            else:
+            elif self.console:
                 for level in self.levels:
                     if level.modified(self):
                         params = level.report()
@@ -173,7 +178,9 @@ class Reporter(threading.Thread):
                             "Could not report EOJ",
                         )
 
-    def set_progress(self, progress: float, level: int, desc: Optional[str]):
+    def set_progress(
+        self, progress: float, level: int, desc: Optional[str], console=False
+    ):
         """Sets the new progress if sufficiently different"""
         with self.cv:
             if (
@@ -181,6 +188,7 @@ class Reporter(threading.Thread):
                 or (progress != self.levels[level].progress)
                 or (desc != self.levels[level].desc)
             ):
+                self.console = console
                 self.levels = self.levels[: (level + 1)]
                 while level >= len(self.levels):
                     self.levels.append(LevelInformation(level, None, 0.0))
@@ -201,7 +209,7 @@ class Reporter(threading.Thread):
         return Reporter.INSTANCE
 
 
-def progress(value: float, level=0, desc: Optional[str] = None):
+def progress(value: float, level=0, desc: Optional[str] = None, console=False):
     """When called from a running task, report the progress
 
     Args:
@@ -212,7 +220,7 @@ def progress(value: float, level=0, desc: Optional[str] = None):
     if TaskEnv.instance().slave:
         # Skip if in a slave process
         return
-    Reporter.instance().set_progress(value, level, desc)
+    Reporter.instance().set_progress(value, level, desc, console=console)
 
 
 def report_eoj():
@@ -221,7 +229,8 @@ def report_eoj():
 
 
 class xpm_tqdm(std_tqdm):
-    """XPM wrapper for experimaestro that automatically reports progress to the server"""
+    """XPM wrapper for experimaestro that automatically reports progress to the
+    server"""
 
     def __init__(self, iterable=None, file=None, *args, **kwargs):
         # Report progress bar
@@ -230,12 +239,12 @@ class xpm_tqdm(std_tqdm):
         self.is_tty = hasattr(_file, "isatty") or _file.isatty()
 
         super().__init__(iterable, disable=False, file=file, *args, **kwargs)
-        progress(0.0, level=self.pos, desc=kwargs.get("desc", None))
+        progress(0.0, level=self.pos, desc=kwargs.get("desc", None), console=False)
 
     def update(self, n=1):
         result = super().update(n)
         if self.total is not None:
-            progress(self.n / self.total, level=self.pos)
+            progress(self.n / self.total, level=self.pos, console=False)
         return result
 
     def refresh(self, nolock=False, lock_args=None):

@@ -380,13 +380,7 @@ def test_identifier_meta_default_array():
     )
 
 
-class IdentifierReloadConfig(Config):
-    id: Param[str]
-
-
-def test_identifier_reload_config():
-    # Creates the configuration
-    config = IdentifierReloadConfig(id="123")
+def check_reload(config):
     old_identifier = config.__xpm__.identifier.all
 
     # Get the data structure
@@ -400,15 +394,41 @@ def test_identifier_reload_config():
     assert new_identifier == old_identifier
 
 
-class IdentifierReloadTask(Task):
+class IdentifierReloadConfig(Config):
+    id: Param[str]
+
+
+def test_identifier_reload_config():
+    # Creates the configuration
+    check_reload(IdentifierReloadConfig(id="123"))
+
+
+class IdentifierReloadTaskOutput(Task):
     id: Param[str]
 
     def taskoutputs(self):
         return IdentifierReloadConfig(id=self.id)
 
 
-class IdentifierReloadTaskDerived(Config):
+class IdentifierReloadTaskOutputDerived(Config):
     task: Param[IdentifierReloadConfig]
+
+
+def test_identifier_reload_taskoutput():
+    """When using a task output, the identifier should not be different"""
+
+    # Creates the configuration
+    task = IdentifierReloadTaskOutput(id="123").submit(dryrun=True)
+    config = IdentifierReloadTaskOutputDerived(task=task)
+    check_reload(config)
+
+
+class IdentifierReloadTask(Task):
+    id: Param[str]
+
+
+class IdentifierReloadTaskDerived(Config):
+    task: Param[IdentifierReloadTask]
 
 
 def test_identifier_reload_task():
@@ -417,14 +437,4 @@ def test_identifier_reload_task():
     # Creates the configuration
     task = IdentifierReloadTask(id="123").submit(dryrun=True)
     config = IdentifierReloadTaskDerived(task=task)
-    old_identifier = config.__xpm__.identifier.all
-
-    # Get the data structure
-    data = json.loads(config.__xpm__.__json__())
-
-    # Reload the configuration
-    new_config = ConfigInformation.fromParameters(data, as_instance=False)
-    new_config.__xpm__.__unseal__()
-    new_identifier = new_config.__xpm__.identifier.all
-
-    assert new_identifier == old_identifier, f"{data}"
+    check_reload(config)
