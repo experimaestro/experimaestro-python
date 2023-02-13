@@ -43,7 +43,7 @@ def token_experiment(xp, token, ntasks=3):
         while task.__xpm__.job.state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
-    # Wait a bit (TODO: find a better way)
+    # Wait a bit (ENHANCE: find a better way)
     time.sleep(1)
 
     # Now any task can finish
@@ -233,7 +233,7 @@ def test_token_reschedule():
             pytest.fail("Other exception")
 
 
-@pytest.mark.skip("TODO: not implemented")
+@pytest.mark.skip("ENHANCE: not implemented")
 def test_token_process():
     """Test tokens with two processes"""
     raise NotImplementedError()

@@ -116,11 +116,15 @@ export default () => {
             onKill={() => setKillJob(job)}
             onShow={() => {
               console.log("Showing", job.jobId, showJob);
+              client.send({
+                type: "details",
+                payload: job.jobId
+              })
               setShowJob(showJob === job.jobId ? undefined : job.jobId);
             }}
           />
         ))}
-        {showJob && <TaskDetail job={jobs.byId[showJob]} />}
+        {showJob && <TaskDetail onHide={() => setShowJob("")} job={jobs.byId[showJob]} />}
       </>
     </div>
   );

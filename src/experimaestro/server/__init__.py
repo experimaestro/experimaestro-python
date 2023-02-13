@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import asyncio
 import urllib
@@ -12,7 +13,6 @@ import http
 import json
 import threading
 from typing import Optional, Tuple
-import time
 import functools
 from json import JSONEncoder
 import re
@@ -38,7 +38,7 @@ def formattime(v: Optional[float]):
     if not v:
         return ""
 
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(v))
+    return datetime.fromtimestamp(v).isoformat()
 
 
 def job_details(job):
@@ -311,7 +311,6 @@ class Server:
 
     def getNotificationSpec(self) -> Tuple[str, str]:
         """Returns a tuple (server ID, server URL)"""
-        # TODO: return fqdn if the job is from outside
         return (
             f"""{self.host}_{self.port}.url""",
             f"""http://{self.host}:{self.port}/notifications""",
