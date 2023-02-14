@@ -120,10 +120,10 @@ def test_path():
     a.__xpm__.validate()
     with TemporaryExperiment("constant") as xp:
         jobcontext = Job(a)
-        a.__xpm__.seal(jobcontext)
+        a.__xpm__.seal(JobContext(jobcontext))
         assert isinstance(a.value, Path)
         assert a.value.name == "file.txt"
-        assert a.value.parents[0].name == a.__xpm__.identifier.hex()
+        assert a.value.parents[0].name == a.__xpm__.identifier.all.hex()
         assert a.value.parents[1].name == str(a.__xpmtype__.identifier)
         assert a.value.parents[2].name == "jobs"
         assert a.value.parents[3] == xp.workspace.path
