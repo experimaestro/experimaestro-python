@@ -2,6 +2,7 @@
 
 from functools import cached_property
 import json
+import os
 from pathlib import Path
 import hashlib
 import struct
@@ -23,6 +24,7 @@ from typing import (
     Union,
     get_type_hints,
     overload,
+    TYPE_CHECKING,
 )
 import sys
 import experimaestro
@@ -30,6 +32,11 @@ from experimaestro.utils import logger
 from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
 from .context import SerializationContext, SerializedPath, SerializedPathLoader
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.workspace import RunMode
+    from experimaestro.launchers import Launcher
+    from experimaestro.scheduler import Workspace
 
 T = TypeVar("T", bound="Config")
 
@@ -54,6 +61,9 @@ class Identifier:
             return self.main.hex()
 
         return {"main": self.main.hex(), "sub": self.sub.hex()}
+
+    def __eq__(self, other: "Identifier"):
+        return self.main == other.main and self.sub == other.sub
 
     @staticmethod
     def from_state_dict(data: Union[Dict[str, str], str]):
@@ -92,11 +102,12 @@ class HashComputer:
     DICT_ID = b"\x09"
     ENUM_ID = b"\x0a"
 
-    def __init__(self):
+    def __init__(self, version=None):
         # Hasher for parameters
         self._hasher = hashlib.sha256()
         self._subhasher = None
         self._tasks = set()
+        self.version = version or int(os.environ.get("XPM_HASH_COMPUTER", 2))
 
     def identifier(self) -> Identifier:
         main = self._hasher.digest()
@@ -158,13 +169,16 @@ class HashComputer:
         elif isinstance(value, TaskOutput):
             # Add the task ID...
             self.update(value.__xpm__.task, subparam=subparam)
+
             # ... as well as the configuration
-            self.update(value.__unwrap__(), subparam=subparam)
+            if self.version > 1:
+                self.update(value.__unwrap__(), subparam=subparam)
+
         # Handles configurations
         elif isinstance(value, Config):
             # Encodes the identifier
             self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
-            if not myself:
+            if not myself and self.version > 1:
                 # Just use the object identifier
                 value_id = value.__xpm__.identifier
                 self._hashupdate(value_id.all, subparam=subparam)
@@ -641,7 +655,12 @@ class ConfigInformation:
                 logger.error("While setting %s", path + [argument.name])
                 raise
 
-    def submit(self, workspace, launcher, dryrun=False) -> "TaskOutput":
+    def submit(
+        self, workspace: "Workspace", launcher: "Launcher", run_mode=None
+    ) -> "TaskOutput":
+        from experimaestro.scheduler import experiment, JobContext
+        from experimaestro.scheduler.workspace import RunMode
+
         # --- Prepare the object
         if self.job:
             raise Exception("task %s was already submitted" % self)
@@ -649,10 +668,9 @@ class ConfigInformation:
             raise ValueError("%s is not a task" % self.xpmtype)
 
         # --- Submit the job
-        from experimaestro.scheduler import experiment, JobContext
 
         self.job = self.xpmtype.task(
-            self.pyobject, launcher=launcher, workspace=workspace, dryrun=dryrun
+            self.pyobject, launcher=launcher, workspace=workspace, run_mode=run_mode
         )
 
         # Validate the object
@@ -671,6 +689,10 @@ class ConfigInformation:
 
         # --- Search for dependencies
 
+        workspace = workspace or (
+            experiment.CURRENT.workspace if experiment.CURRENT else None
+        )
+
         # Call onSubmit
         launcher = (
             launcher
@@ -686,13 +708,18 @@ class ConfigInformation:
         # Add predefined dependencies
         self.job.dependencies.update(self.dependencies)
 
-        if not dryrun:
+        run_mode = (
+            workspace.run_mode if run_mode is None else run_mode
+        ) or RunMode.NORMAL
+        if run_mode == RunMode.NORMAL:
             other = experiment.CURRENT.submit(self.job)
             if other:
                 # Just returns the other task
                 return other.config.__xpm__._taskoutput
         else:
-            logger.warning("Simulating: not submitting job %s", self.job)
+            logger.warning("Simulating: not submitting %s", self.job.relpath)
+            if run_mode == RunMode.GENERATE_ONLY:
+                experiment.CURRENT.prepare(self.job)
 
         # Handle an output configuration
         if hasattr(self.pyobject, "config"):
@@ -1340,9 +1367,15 @@ class TypeConfig:
             ), f"{context.__class__} is not an instance of GenerationContext"
         return self.__xpm__.fromConfig(context)  # type: ignore
 
-    def submit(self, *, workspace=None, launcher=None, dryrun=False):
-        """Submit this task"""
-        return self.__xpm__.submit(workspace, launcher, dryrun=dryrun)
+    def submit(self, *, workspace=None, launcher=None, run_mode: "RunMode" = None):
+        """Submit this task
+
+        :param workspace: the workspace, defaults to None
+        :param launcher: The launcher, defaults to None
+        :param run_mode: Run mode (if None, uses the workspace default)
+        :return: a :py:class:TaskOutput object
+        """
+        return self.__xpm__.submit(workspace, launcher, run_mode=run_mode)
 
     def stdout(self):
         return self.__xpm__.job.stdout

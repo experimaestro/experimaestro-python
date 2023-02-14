@@ -1,12 +1,13 @@
 import time
 import sys
 from typing import Callable
-from experimaestro import task, pathoption, Scheduler
+from experimaestro import task, pathoption
 import psutil
 import logging
 import subprocess
 import json
 import signal
+from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tests.utils import TemporaryExperiment, is_posix
 from experimaestro.scheduler import JobState
 from . import restart_main
@@ -58,9 +59,9 @@ def restart(terminate: Callable, experiment):
     xpmprocess = None
     try:
         with TemporaryExperiment("restart", maxwait=10) as xp:
-            # Create the task with dryrun and so we can get the file paths
+            # Create the task with dry_run and so we can get the file paths
             task = Restart()
-            task.submit(dryrun=True)
+            task.submit(run_mode=RunMode.DRY_RUN)
 
         # Start the experiment with another process, and kill the job
         command = [

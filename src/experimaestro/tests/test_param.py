@@ -25,6 +25,7 @@ from experimaestro import (
     Annotated,
 )
 import experimaestro.core.types as types
+from experimaestro.scheduler.workspace import RunMode
 from experimaestro.xpmutils import DirectoryContext
 
 # --- Test manual name for configuration
@@ -272,7 +273,7 @@ def test_task_config():
         def config(self) -> Output:
             return {}
 
-    output = Task().submit(dryrun=True)
+    output = Task().submit(run_mode=RunMode.DRY_RUN)
     # flake8: noqa: E721
     assert Output.__xpmtype__.configtype is type(output.__unwrap__())
 

@@ -2,6 +2,7 @@
 
 from experimaestro import Config, Task, Param
 from experimaestro.core.objects import SerializedConfig, Serialized, TaskOutput
+from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tests.utils import TemporaryExperiment
 
 
@@ -41,7 +42,7 @@ class MainB(Task):
 
 def test_output_taskoutput():
     a = A(b=B())
-    output, ioutput = Main(a=a).submit(dryrun=True)
+    output, ioutput = Main(a=a).submit(run_mode=RunMode.DRY_RUN)
 
     assert isinstance(ioutput["serialized"], TaskOutput)
     assert isinstance(output, TaskOutput), "outputs should be task proxies"
@@ -56,7 +57,7 @@ def test_output_taskoutput():
     Main(a=ioutput["a"])
 
     # Now, submits
-    Main(a=output).submit(dryrun=True)
+    Main(a=output).submit(run_mode=RunMode.DRY_RUN)
 
 
 def test_output_serialization():

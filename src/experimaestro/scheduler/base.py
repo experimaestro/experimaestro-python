@@ -13,13 +13,13 @@ from typing import Dict
 from experimaestro.scheduler.services import Service
 from experimaestro.settings import get_settings
 
-from experimaestro.tokens import ProcessCounterToken
 
 from experimaestro.core.objects import Config, GenerationContext
 from experimaestro.utils import logger
 from experimaestro.locking import Locks, LockError, Lock
+from experimaestro.tokens import ProcessCounterToken
 from .environment import Environment
-from .workspace import Workspace
+from .workspace import RunMode, Workspace
 from .dependencies import Dependency, DependencyStatus, Resource
 import concurrent.futures
 
@@ -110,14 +110,14 @@ class Job(Resource):
         *,
         workspace: Workspace = None,
         launcher: "Launcher" = None,
-        dryrun: bool = False,
+        run_mode: RunMode = RunMode.NORMAL,
     ):
         super().__init__()
 
         self.workspace = workspace or Workspace.CURRENT
         self.launcher = launcher or self.workspace.launcher if self.workspace else None
 
-        if not dryrun:
+        if run_mode == RunMode.NORMAL:
             assert self.workspace is not None, "No experiment has been defined"
             assert self.launcher is not None, (
                 "No launcher, and no default defined for the workspace %s" % workspace
@@ -216,6 +216,13 @@ class Job(Resource):
     @property
     def identifier(self):
         return self.config.__xpm__.identifier.all.hex()
+
+    def prepare(self, overwrite=False):
+        """Prepare all files before starting a task
+
+        :param overwrite: if True, overwrite files even if the task has been run
+        """
+        pass
 
     async def aio_run(self):
         """Actually run the code"""
@@ -431,6 +438,11 @@ class Scheduler:
 
         job._future = asyncio.run_coroutine_threadsafe(self.aio_submit(job), self.loop)
 
+    def prepare(self, job: Job):
+        """Prepares the job for running"""
+        logger.info("Preparing job %s", job.path)
+        job.prepare(overwrite=True)
+
     async def aio_registerJob(self, job: Job):
         """Register a job by adding it to the list, and checks
         whether the job has already been submitted
@@ -471,7 +483,7 @@ class Scheduler:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_symlink():
             path.unlink()
-        path.symlink_to(job.jobpath)
+        path.symlink_to(job.path)
 
         # Add process dependency if job has subparameters
         hashidentifier = job.hashidentifier
@@ -690,6 +702,7 @@ class experiment:
         host: Optional[str] = None,
         port: Optional[int] = None,
         token: Optional[str] = None,
+        run_mode: Optional[RunMode] = None,
         launcher=None,
     ):
         """
@@ -706,7 +719,9 @@ class experiment:
             self.environment = Environment(workdir=env)
 
         # Creates the workspace
-        self.workspace = Workspace(self.environment, launcher=launcher)
+        self.workspace = Workspace(
+            self.environment, launcher=launcher, run_mode=run_mode
+        )
         self.workdir = self.workspace.experimentspath / name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.xplockpath = self.workdir / "lock"
@@ -741,6 +756,10 @@ class experiment:
 
     def submit(self, job: Job):
         return self.scheduler.submit(job)
+
+    def prepare(self, job: Job):
+        """Generate the file"""
+        return self.scheduler.prepare(job)
 
     @property
     def loop(self):

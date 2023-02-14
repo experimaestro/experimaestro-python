@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 import logging
 from experimaestro import Config, deprecate, Task, Param
+from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tools.jobs import fix_deprecated
 from experimaestro.scheduler import FailedExperiment, JobState
 
@@ -57,7 +58,7 @@ def test_not_submitted():
 def test_fail_simple():
     """Failing task... should fail"""
     with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("failing", maxwait=1000):  # FIXME: should wait less!
+        with TemporaryExperiment("failing", maxwait=10):
             fail = Fail().submit()
             fail.__unwrap__().touch()
 
@@ -189,9 +190,11 @@ def test_tasks_deprecated_inner():
     the new class"""
     with TemporaryExperiment("deprecated", maxwait=0) as xp:
         # --- Check that paths are really different first
-        task_new = TaskWithDeprecated(p=NewConfig()).submit(dryrun=True)
-        task_old = TaskWithDeprecated(p=OldConfig()).submit(dryrun=True)
-        task_deprecated = TaskWithDeprecated(p=DeprecatedConfig()).submit(dryrun=True)
+        task_new = TaskWithDeprecated(p=NewConfig()).submit(run_mode=RunMode.DRY_RUN)
+        task_old = TaskWithDeprecated(p=OldConfig()).submit(run_mode=RunMode.DRY_RUN)
+        task_deprecated = TaskWithDeprecated(p=DeprecatedConfig()).submit(
+            run_mode=RunMode.DRY_RUN
+        )
 
         logging.debug(
             "New task ID: %s", task_new.__unwrap__().__xpm__.identifier.all.hex()
@@ -246,9 +249,9 @@ def test_tasks_deprecated():
     the new class"""
     with TemporaryExperiment("deprecated", maxwait=100) as xp:
         # Check that paths are really different first
-        task_new = NewTask(x=1).submit(dryrun=True)
-        task_old = OldTask(x=1).submit(dryrun=True)
-        task_deprecated = DeprecatedTask(x=1).submit(dryrun=True)
+        task_new = NewTask(x=1).submit(run_mode=RunMode.DRY_RUN)
+        task_old = OldTask(x=1).submit(run_mode=RunMode.DRY_RUN)
+        task_deprecated = DeprecatedTask(x=1).submit(run_mode=RunMode.DRY_RUN)
 
         assert (
             task_new.__xpm__.stdout() != task_old.__xpm__.stdout()

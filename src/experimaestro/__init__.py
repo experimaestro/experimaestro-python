@@ -49,7 +49,7 @@ from .core.objects import (
     Serialized,
 )
 from .scheduler.environment import Environment
-from .scheduler.workspace import Workspace
+from .scheduler.workspace import Workspace, RunMode
 from .scheduler import Scheduler, experiment, FailedExperiment
 from .notifications import progress, tqdm
 from .core.types import Any

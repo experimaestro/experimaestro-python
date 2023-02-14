@@ -10,6 +10,7 @@ from experimaestro import (
     Task,
     Param,
 )
+from experimaestro.scheduler.workspace import RunMode
 from experimaestro.xpmutils import DirectoryContext
 from experimaestro.tests.utils import TemporaryExperiment
 
@@ -59,15 +60,15 @@ def test_inneroutput():
 
     output = Output().tag("hello", "world")
     task = MyTask(outputs={}, mainoutput=output)
-    task.submit(dryrun=True)
+    task.submit(run_mode=RunMode.DRY_RUN)
     assert output.tags() == {"hello": "world"}
 
     output = Output().tag("hello", "world")
     task = MyTask(outputs={"a": output}, mainoutput=Output())
-    task.submit(dryrun=True)
+    task.submit(run_mode=RunMode.DRY_RUN)
     assert output.tags() == {"hello": "world"}
 
-    evaluate = Evaluate(task=task).submit(dryrun=True)
+    evaluate = Evaluate(task=task).submit(run_mode=RunMode.DRY_RUN)
     assert evaluate.__xpm__.tags() == {"hello": "world"}
 
 
@@ -94,7 +95,7 @@ def test_objects_nested_tags():
     a = A(x=tag(1), b=B())
     with TemporaryExperiment("nested_tags"):
         # context = TaskDirectoryContext(a, Path("/__fakepath__"))
-        output = a.submit(dryrun=True)
+        output = a.submit(run_mode=RunMode.DRY_RUN)
 
     # Tags of main object...
     assert a.__xpm__.tags() == {"x": 1}

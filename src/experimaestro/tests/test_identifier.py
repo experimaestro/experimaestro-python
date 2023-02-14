@@ -18,6 +18,7 @@ from experimaestro import (
     Task,
 )
 from experimaestro.core.objects import ConfigInformation, TaskOutput, setmeta
+from experimaestro.scheduler.workspace import RunMode
 
 
 @config()
@@ -248,8 +249,14 @@ def test_taskconfigidentifier():
         def config(self):
             return Config(a=1)
 
-    assert_equal(Task(x=1).submit(dryrun=True), Task(x=1).submit(dryrun=True))
-    assert_notequal(Task(x=2).submit(dryrun=True), Task(x=1).submit(dryrun=True))
+    assert_equal(
+        Task(x=1).submit(run_mode=RunMode.DRY_RUN),
+        Task(x=1).submit(run_mode=RunMode.DRY_RUN),
+    )
+    assert_notequal(
+        Task(x=2).submit(run_mode=RunMode.DRY_RUN),
+        Task(x=1).submit(run_mode=RunMode.DRY_RUN),
+    )
 
 
 def test_constant():
@@ -418,7 +425,7 @@ def test_identifier_reload_taskoutput():
     """When using a task output, the identifier should not be different"""
 
     # Creates the configuration
-    task = IdentifierReloadTaskOutput(id="123").submit(dryrun=True)
+    task = IdentifierReloadTaskOutput(id="123").submit(run_mode=RunMode.DRY_RUN)
     config = IdentifierReloadTaskOutputDerived(task=task)
     check_reload(config)
 
@@ -440,7 +447,7 @@ def test_identifier_reload_task():
     """When using a task output, the identifier should not be different"""
 
     # Creates the configuration
-    task = IdentifierReloadTask(id="123").submit(dryrun=True)
+    task = IdentifierReloadTask(id="123").submit(run_mode=RunMode.DRY_RUN)
     config = IdentifierReloadTaskDerived(
         task=task, other=IdentifierReloadTaskConfig(x=2)
     )
@@ -450,7 +457,7 @@ def test_identifier_reload_task():
 def test_identifier_reload_meta():
     """Test identifier don't change when using meta"""
     # Creates the configuration
-    task = IdentifierReloadTask(id="123").submit(dryrun=True)
+    task = IdentifierReloadTask(id="123").submit(run_mode=RunMode.DRY_RUN)
     config = IdentifierReloadTaskDerived(
         task=task, other=setmeta(IdentifierReloadTaskConfig(x=2), True)
     )

@@ -113,8 +113,8 @@ def diff(path: Path):
     from experimaestro import Config
     from experimaestro.core.objects import GenerationContext
 
-    job = load_job(path / "params.json")
-    new_job = load_job(path / "params.json")
+    _, job = load_job(path / "params.json")
+    _, new_job = load_job(path / "params.json")
 
     # To have faster ID computation
     class MyGenerationContext(GenerationContext):

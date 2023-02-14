@@ -3,6 +3,7 @@
 from pathlib import Path
 from experimaestro import Config, DataPath, Task, Param
 from experimaestro.core.objects import ConfigInformation
+from experimaestro.scheduler.workspace import RunMode
 
 
 class A(Config):
@@ -30,7 +31,7 @@ def test_serialization_simple(tmp_path_factory):
 def test_serialization_identifier(tmp_path_factory):
     dir = tmp_path_factory.mktemp("ser")
 
-    a = TaskA(id="id").submit(dryrun=True)
+    a = TaskA(id="id").submit(run_mode=RunMode.DRY_RUN)
     a = a.__unwrap__()
     a.__xpm__.serialize(dir)
 

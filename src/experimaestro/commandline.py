@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Union, Callable, Dict
 import itertools
 from experimaestro.core.context import SerializationContext
+from experimaestro.scheduler.workspace import RunMode
 
 from experimaestro.utils import logger
 from .scheduler import Job, JobState
@@ -231,10 +232,10 @@ class CommandLineJob(Job):
         parameters,
         workspace: Optional[Workspace] = None,
         launcher=None,
-        dryrun=False,
+        run_mode: RunMode = None,
     ):
         super().__init__(
-            parameters, workspace=workspace, launcher=launcher, dryrun=dryrun
+            parameters, workspace=workspace, launcher=launcher, run_mode=run_mode
         )
         self.commandline = commandline
 
@@ -272,21 +273,21 @@ class CommandLineJob(Job):
             return self.launcher.notificationURL
         return self.workspace.notificationURL
 
-    async def aio_run(self):
-        if self._process:
-            return self._process
+    def prepare(self, overwrite=False):
+        """Prepare all files before starting a task
+
+        :param overwrite: if True, overwrite files even if the task has been run
+        """
+        logger.debug("Preparing job %s...", self)
 
         assert self.launcher is not None, "No launcher defined for this job"
 
-        # Use the lock during preparation
-        logger.info("Running job %s...", self)
-
         scriptbuilder = self.launcher.scriptbuilder()
-        processbuilder = self.launcher.processbuilder()
+        self.path.mkdir(parents=True, exist_ok=True)
         donepath = self.donepath
 
         # Check again if done (now that we have locked)
-        if donepath.is_file():
+        if not overwrite and donepath.is_file():
             logger.info("Job %s is already done", self)
             return JobState.DONE
 
@@ -294,14 +295,20 @@ class CommandLineJob(Job):
         scriptbuilder.lockfiles.append(self.lockpath)
         scriptbuilder.command = self.commandline
         scriptbuilder.notificationURL = self.notificationURL
-        scriptPath = scriptbuilder.write(self)
+        return scriptbuilder.write(self)
 
+    async def aio_run(self):
+        if self._process:
+            return self._process
+
+        scriptPath = self.prepare()
+
+        logger.info("Starting job %s", self.jobpath)
+        processbuilder = self.launcher.processbuilder()
         processbuilder.environ = self.environ
         processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
         processbuilder.stderr = Redirect.file(self.stderr)
         processbuilder.stdout = Redirect.file(self.stdout)
-
-        logger.info("Starting job %s", self.jobpath)
         self._process = processbuilder.start()
 
         with self.pidpath.open("w") as fp:
@@ -316,11 +323,13 @@ class CommandLineTask:
     def __init__(self, commandline: CommandLine):
         self.commandline = commandline
 
-    def __call__(self, pyobject, *, launcher=None, workspace=None, dryrun=False) -> Job:
+    def __call__(
+        self, pyobject, *, launcher=None, workspace=None, run_mode=None
+    ) -> Job:
         return CommandLineJob(
             self.commandline,
             pyobject,
             launcher=launcher,
             workspace=workspace,
-            dryrun=dryrun,
+            run_mode=run_mode,
         )

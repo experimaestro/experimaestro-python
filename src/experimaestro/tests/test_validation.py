@@ -15,9 +15,9 @@ from experimaestro import (
 from enum import Enum
 import experimaestro.core.types as types
 from experimaestro.scheduler import Job, JobContext
+from experimaestro.scheduler.workspace import RunMode
 from .utils import TemporaryExperiment
 from experimaestro.xpmutils import EmptyContext
-import logging
 
 valns = Identifier("validation")
 
@@ -122,7 +122,6 @@ def test_path():
         jobcontext = Job(a)
         a.__xpm__.seal(jobcontext)
         assert isinstance(a.value, Path)
-        parents = list(a.value.parents)
         assert a.value.name == "file.txt"
         assert a.value.parents[0].name == a.__xpm__.identifier.hex()
         assert a.value.parents[1].name == str(a.__xpmtype__.identifier)
@@ -140,7 +139,7 @@ def test_constant():
 
     a = A()
     a.__xpm__.validate()
-    with TemporaryExperiment("constant") as ws:
+    with TemporaryExperiment("constant"):
         joba = Job(a)
         a.__xpm__.seal(JobContext(joba))
         assert a.value == 1
@@ -170,7 +169,7 @@ class PathParent:
     pass
 
 
-def test_path():
+def test_path_option():
     c = PathParent()
     expect_validate(c)
 
@@ -223,7 +222,7 @@ def test_validation_enum():
     try:
         EnumConfig(a=1)
         assert False, "Enum value should be rejected"
-    except AssertionError as e:
+    except AssertionError:
         pass
 
 
@@ -249,5 +248,5 @@ class TaskConfigConsumer:
 def test_taskargument():
     x = taskconfig()
     with TemporaryExperiment("fake"):
-        x.submit(dryrun=True)
+        x.submit(run_mode=RunMode.DRY_RUN)
         expect_validate(TaskConfigConsumer(x=x))
