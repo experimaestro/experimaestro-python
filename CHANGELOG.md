@@ -1,3 +1,9 @@
+## 0.19.0 (2023-02-14)
+
+### Feat
+
+- allow using the old task identifier computation to fix params.json
+
 ## 0.18.0 (2023-02-13)
 
 ### BREAKING CHANGE
