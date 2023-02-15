@@ -1,3 +1,9 @@
+## 0.19.1 (2023-02-15)
+
+### Fix
+
+- fix bugs with generate/dry-run modes
+
 ## 0.19.0 (2023-02-14)
 
 ### Feat
