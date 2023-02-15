@@ -62,6 +62,10 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
                 newjobpath = jobspath / str(job.__xpmtype__.identifier) / new_identifier
                 newjobpath.parent.mkdir(exist_ok=True)
 
+                # Remove the old symlink if dandling
+                if newjobpath.is_symlink() and not newjobpath.exists():
+                    newjobpath.unlink()
+
                 if newjobpath.exists():
                     if newjobpath.resolve() != oldjobpath.resolve():
                         logger.warning(

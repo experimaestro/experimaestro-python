@@ -823,17 +823,18 @@ class experiment:
         self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
 
         # Move old jobs into "jobs.bak"
-        self.jobsbakpath.mkdir(exist_ok=True)
-        for p in self.jobspath.glob("*/*"):
-            if p.is_symlink():
-                target = self.jobsbakpath / p.relative_to(self.jobspath)
-                if target.is_symlink():
-                    # Remove if duplicate
-                    p.unlink()
-                else:
-                    # Rename otherwise
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    p.rename(target)
+        if self.workspace.run_mode == RunMode.NORMAL:
+            self.jobsbakpath.mkdir(exist_ok=True)
+            for p in self.jobspath.glob("*/*"):
+                if p.is_symlink():
+                    target = self.jobsbakpath / p.relative_to(self.jobspath)
+                    if target.is_symlink():
+                        # Remove if duplicate
+                        p.unlink()
+                    else:
+                        # Rename otherwise
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        p.rename(target)
 
         if self.server:
             self.server.start()
@@ -859,9 +860,10 @@ class experiment:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        # If no exception, remove old "jobs"
-        if exc_type is None and self.jobsbakpath.is_dir():
-            rmtree(self.jobsbakpath)
+        # If no exception and normal run mode, remove old "jobs"
+        if self.workspace.run_mode == RunMode.NORMAL:
+            if exc_type is None and self.jobsbakpath.is_dir():
+                rmtree(self.jobsbakpath)
 
         # Close the different locks
         try:
