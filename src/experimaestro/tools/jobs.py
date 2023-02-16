@@ -6,13 +6,15 @@ from pathlib import Path
 import json
 
 
-def load_job(job_path: Path):
+def load_job(job_path: Path, discard_id=True):
     logger.info("Loading configuration %s", job_path.parent)
     params = json.loads(job_path.resolve().read_text())
     taskglobals.Env.instance().wspath = Path(params["workspace"])
 
     try:
-        return params, ConfigInformation.fromParameters(params["objects"], False)
+        return params, ConfigInformation.fromParameters(
+            params["objects"], False, discard_id=discard_id
+        )
     except Exception:
         logger.exception("Error while loading the parameters from %s", job_path)
         return None, None
@@ -44,8 +46,6 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
         # Now, computes the old  signature
         name = job_path.parents[1].name
         old_identifier: str = job_path.parent.name
-
-        job.__xpm__.__unseal__()
         new_identifier: str = job.__xpm__.identifier.all.hex()
 
         if new_identifier != old_identifier:

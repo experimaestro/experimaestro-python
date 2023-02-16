@@ -394,8 +394,10 @@ def check_reload(config):
     data = json.loads(config.__xpm__.__json__())
 
     # Reload the configuration
-    new_config = ConfigInformation.fromParameters(data, as_instance=False)
-    new_config.__xpm__.__unseal__()
+    new_config = ConfigInformation.fromParameters(
+        data, as_instance=False, discard_id=True
+    )
+    assert new_config.__xpm__._identifier is None
     new_identifier = new_config.__xpm__.identifier.all
 
     assert new_identifier == old_identifier

@@ -1044,7 +1044,10 @@ class ConfigInformation:
     @overload
     @staticmethod
     def fromParameters(
-        definitions: List[Dict], as_instance=True, save_directory: Optional[Path] = None
+        definitions: List[Dict],
+        as_instance=True,
+        save_directory: Optional[Path] = None,
+        discard_id: bool = False,
     ) -> "TypeConfig":
         ...
 
@@ -1054,6 +1057,7 @@ class ConfigInformation:
         definitions: List[Dict],
         as_instance=False,
         save_directory: Optional[Path] = None,
+        discard_id: bool = False,
     ) -> "Config":
         ...
 
@@ -1062,6 +1066,7 @@ class ConfigInformation:
         definitions: List[Dict],
         as_instance=True,
         data_loader: Optional[SerializedPathLoader] = None,
+        discard_id: bool = False,
     ):
         """Builds config (instances) from a dictionary"""
         o = None
@@ -1103,9 +1108,10 @@ class ConfigInformation:
                     # ... sets potentially useful properties
                     if "typename" in definition:
                         o.__xpmtypename__ = definition["typename"]
-                        o.__xpmidentifier__ = Identifier.from_state_dict(
-                            definition["identifier"]
-                        )
+                        if not discard_id:
+                            o.__xpmidentifier__ = Identifier.from_state_dict(
+                                definition["identifier"]
+                            )
 
                         if "." in o.__xpmtypename__:
                             _, name = o.__xpmtypename__.rsplit(".", 1)
@@ -1160,9 +1166,10 @@ class ConfigInformation:
                     o.__post_init__()
                 else:
                     # Seal and set the identifier
-                    xpminfo._identifier = Identifier.from_state_dict(
-                        definition["identifier"]
-                    )
+                    if not discard_id:
+                        xpminfo._identifier = Identifier.from_state_dict(
+                            definition["identifier"]
+                        )
                     xpminfo._sealed = True
 
                 assert definition["id"] not in objects, (

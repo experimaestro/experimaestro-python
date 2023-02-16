@@ -113,17 +113,8 @@ def diff(path: Path):
     from experimaestro import Config
     from experimaestro.core.objects import GenerationContext
 
-    _, job = load_job(path / "params.json")
+    _, job = load_job(path / "params.json", discard_id=False)
     _, new_job = load_job(path / "params.json")
-
-    # To have faster ID computation
-    class MyGenerationContext(GenerationContext):
-        @property
-        def path(self):
-            return Path("/dev/null")
-
-    new_job.__xpm__.__unseal__()
-    new_job.__xpm__.seal(MyGenerationContext())
 
     def check(path: str, value, new_value, done: Set[int]):
         if isinstance(value, Config):
