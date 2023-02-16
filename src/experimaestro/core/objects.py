@@ -412,10 +412,12 @@ class ConfigProcessing:
             return result
 
         if isinstance(x, TaskOutput):
-            if self.recurse_task:
+            # Process task if different
+            if self.recurse_task and x.__xpm__.task is not x.__unwrap__():
                 self(x.__xpm__.task)
 
-            return x
+            # Processed the wrapped config
+            return self(x.__unwrap__())
 
         if isinstance(x, (float, int, str, Path, Enum)):
             return x

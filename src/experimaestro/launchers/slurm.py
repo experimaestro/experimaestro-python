@@ -59,6 +59,7 @@ class SlurmJobState:
     STATE_MAP = {
         "CONFIGURING": ProcessState.SCHEDULED,
         "REQUEUE_FED": ProcessState.SCHEDULED,
+        "PENDING": ProcessState.SCHEDULED,
         "REQUEUE_HOLD": ProcessState.SCHEDULED,
         "COMPLETING": ProcessState.RUNNING,
         "RUNNING": ProcessState.RUNNING,
@@ -648,8 +649,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
         hosts: set[str] = set()
         partitions: Set[str] = set()
 
-        # TODO:
-        # - take into account maximum node duration
+        # ENHANCE: take into account maximum node duration
         current_match = None
         for node in self.computed_nodes:
             if match := requirement.match(node):
