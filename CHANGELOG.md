@@ -1,3 +1,9 @@
+## 0.19.2 (2023-02-16)
+
+### Fix
+
+- better identifier recomputation
+
 ## 0.19.1 (2023-02-15)
 
 ### Fix
