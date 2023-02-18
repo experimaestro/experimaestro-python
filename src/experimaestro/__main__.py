@@ -1,4 +1,5 @@
 # flake8: noqa: T201
+import sys
 from typing import Set
 import pkg_resources
 from itertools import chain
@@ -15,6 +16,19 @@ from experimaestro.core.objects import TaskOutput
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
+
+
+def check_xp_path(ctx, self, path: Path):
+    if not (path / ".__experimaestro__").is_file():
+        cprint(f"{path} is not an experimaestro working directory", "red")
+        for path in path.parents:
+            if (path / ".__experimaestro__").is_file():
+                cprint(f"{path} could be the folder you want", "green")
+                if click.confirm("Do you want to use this folder?"):
+                    return path
+        sys.exit(1)
+
+    return path
 
 
 class RunConfig:
@@ -94,7 +108,7 @@ def deprecated():
 
 @click.option("--fix", is_flag=True, help="Generate links to new IDs")
 @click.option("--cleanup", is_flag=True, help="Remove symbolic links and move folders")
-@click.argument("path", type=Path)
+@click.argument("path", type=Path, callback=check_xp_path)
 @deprecated.command(name="list")
 def deprecated_list(path: Path, fix: bool, cleanup: bool):
     """List deprecated jobs"""
@@ -105,7 +119,7 @@ def deprecated_list(path: Path, fix: bool, cleanup: bool):
     fix_deprecated(path, fix, cleanup)
 
 
-@click.argument("path", type=Path)
+@click.argument("path", type=Path, callback=check_xp_path)
 @deprecated.command()
 def diff(path: Path):
     """Show the reason of the identifier change for a job"""
@@ -147,7 +161,7 @@ def diff(path: Path):
     check(".", job, new_job, set())
 
 
-@click.argument("path", type=Path)
+@click.argument("path", type=Path, callback=check_xp_path)
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
 @click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
@@ -254,7 +268,7 @@ def jobs(
 )
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")
 @click.option("--size", is_flag=True, help="Show size of each folder")
-@click.argument("path", type=Path)
+@click.argument("path", type=Path, callback=check_xp_path)
 @cli.command()
 def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: bool):
     """Check for tasks that are not part of an experimental plan"""

@@ -4,7 +4,7 @@ from pathlib import Path
 from shutil import rmtree
 import threading
 import time
-from typing import List, Optional, Set, Union, TYPE_CHECKING
+from typing import List, Optional, Set, TypeVar, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
@@ -682,6 +682,9 @@ class Scheduler:
         return state
 
 
+ServiceClass = TypeVar("ServiceClass", bound=Service)
+
+
 class experiment:
     """Experiment context"""
 
@@ -722,6 +725,10 @@ class experiment:
         self.workspace = Workspace(
             self.environment, launcher=launcher, run_mode=run_mode
         )
+
+        # Mark the directory has an experimaestro folder
+        (self.workspace.path / ".__experimaestro__").touch()
+
         self.workdir = self.workspace.experimentspath / name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.xplockpath = self.workdir / "lock"
@@ -744,7 +751,7 @@ class experiment:
         self.scheduler = Scheduler(self, name)
         self.server = (
             Server(self.scheduler, settings.server)
-            if settings.server.port is not None
+            if settings.server.port is not None and run_mode == RunMode.NORMAL
             else None
         )
 
@@ -897,7 +904,7 @@ class experiment:
             if self.server:
                 self.server.stop()
 
-    def add_service(self, service: Service) -> Service:
+    def add_service(self, service: ServiceClass) -> ServiceClass:
         """Adds a service (e.g. tensorboard viewer) to the experiment"""
         self.services[service.id] = service
         return service

@@ -3,6 +3,7 @@ import typing_extensions
 from experimaestro.core.types import ObjectType
 import experimaestro
 import io
+from experimaestro.scheduler.base import Job
 
 from experimaestro.scheduler.workspace import RunMode
 from .context import (
@@ -95,7 +96,7 @@ class ConfigInformation:
     pyobject: Incomplete
     xpmtype: Incomplete
     values: Incomplete
-    job: Incomplete
+    job: Job
     dependencies: Incomplete
     def __init__(self, pyobject: TypeConfig) -> None: ...
     def set_meta(self, value: Optional[bool]): ...

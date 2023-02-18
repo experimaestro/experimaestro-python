@@ -2,6 +2,7 @@
 
 from functools import cached_property
 import json
+from termcolor import cprint
 import os
 from pathlib import Path
 import hashlib
@@ -719,9 +720,19 @@ class ConfigInformation:
                 # Just returns the other task
                 return other.config.__xpm__._taskoutput
         else:
-            logger.warning("Simulating: not submitting %s", self.job.relpath)
+            # Show a warning
             if run_mode == RunMode.GENERATE_ONLY:
                 experiment.CURRENT.prepare(self.job)
+
+            # Check if job is done
+            tags = ", ".join(f"{k}={v}" for k, v in self.job.tags.items())
+            s = f"""Simulating {self.job.relpath} {f"({tags})" if tags else ""}"""
+            if self.job.donepath.is_file():
+                cprint(f"[done] {s}", "light_green", file=sys.stderr)
+            elif self.job.failedpath.is_file():
+                cprint(f"[failed] {s}", "light_red", file=sys.stderr)
+            else:
+                cprint(f"[not run] {s}", "light_blue", file=sys.stderr)
 
         # Handle an output configuration
         if hasattr(self.pyobject, "config"):
@@ -909,6 +920,7 @@ class ConfigInformation:
         {
             "tags: [ LIST_OF_TAGS ],
             "workspace": FOLDERPATH,
+            "version": 2,
             "objects": [
                 {
                     "id": <ID of the object>,
@@ -935,6 +947,7 @@ class ConfigInformation:
                 "has_subparam": self.identifier.sub is not None,
                 "workspace": str(context.workspace.path.absolute()),
                 "tags": {key: value for key, value in self.tags().items()},
+                "version": 2,
                 "objects": self.__get_objects__([], context),
             },
             out,
