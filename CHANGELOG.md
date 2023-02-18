@@ -1,3 +1,13 @@
+## 0.20.0 (2023-02-18)
+
+### Feat
+
+- improvements for dry-run modes to show completed jobs
+
+### Refactor
+
+- more reliable identifier computation
+
 ## 0.19.2 (2023-02-16)
 
 ### Fix
