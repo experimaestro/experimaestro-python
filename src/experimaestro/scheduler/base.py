@@ -317,6 +317,10 @@ class Listener:
     def job_state(self, job):
         pass
 
+    def service_add(self, service: Service):
+        """Notify when a new service is added"""
+        pass
+
 
 class JobError(Exception):
     def __init__(self, code):
@@ -735,7 +739,7 @@ class experiment:
         self.xplockpath = self.workdir / "lock"
         self.xplock = None
         self.old_experiment = None
-        self.services = {}
+        self.services: Dict[str, Service] = {}
 
         settings = get_settings()
 
@@ -909,4 +913,6 @@ class experiment:
     def add_service(self, service: ServiceClass) -> ServiceClass:
         """Adds a service (e.g. tensorboard viewer) to the experiment"""
         self.services[service.id] = service
+        for listener in self.scheduler.listeners:
+            listener.service_add(service)
         return service

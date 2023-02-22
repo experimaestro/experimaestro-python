@@ -10,7 +10,6 @@ import Modal from "react-bootstrap/Modal";
 function formatms(t: undefined | string) {
   if (t) {
     const date = DateTime.fromISO(t)
-    console.log(t, date)
     return date.toLocaleString(
       DateTime.DATETIME_FULL_WITH_SECONDS
       );
@@ -39,8 +38,6 @@ const useStyles = createUseStyles({
 export default ({ job, onHide }: { job: Job, onHide: () => void }) => {
   const classes = useStyles();
   const { success, error } = useMessages();
-
-  console.log("Showing detail of", job);
 
   return <Modal show={true} size="xl" onHide={onHide}>
     <Modal.Header>

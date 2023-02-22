@@ -9,6 +9,7 @@ import http
 import threading
 from typing import Optional, Tuple
 from experimaestro.scheduler import Scheduler, Listener as BaseListener
+from experimaestro.scheduler.services import Service, ServiceListener
 from experimaestro.settings import ServerSettings
 from flask import Flask, Response
 from flask import request, redirect
@@ -53,11 +54,14 @@ def job_create(job: Job):
     }
 
 
-class Listener(BaseListener):
+class Listener(BaseListener, ServiceListener):
     def __init__(self, scheduler: Scheduler, socketio):
         self.scheduler = scheduler
         self.socketio = socketio
         self.scheduler.addlistener(self)
+        self.services = {}
+        for service in self.scheduler.xp.services.values():
+            self.service_add(service)
 
     def job_submitted(self, job):
         self.socketio.emit("job.add", job_create(job))
@@ -71,6 +75,21 @@ class Listener(BaseListener):
                 "progress": progress_state(job),
             },
         )
+
+    def service_add(self, service: Service):
+        service.add_listener(self)
+        self.services[service.id] = service
+        self.socketio.emit(
+            "service.add",
+            {
+                "id": service.id,
+                "description": service.description(),
+                "state": service.state.name,
+            },
+        )
+
+    def service_state_changed(self, service: Service):
+        self.socketio.emit("service.update", {"state": service.state})
 
 
 MIMETYPES = {
@@ -110,13 +129,15 @@ def start_app(server: "Server"):
 
     @socketio.on("services")
     def handle_services_list():
-        emit(
-            "services",
-            {
-                id: service.description()
-                for id, service in listener.scheduler.xp.services.items()
-            },
-        )
+        for service in listener.services.values():
+            emit(
+                "service.add",
+                {
+                    "id": service.id,
+                    "description": service.description(),
+                    "state": service.state.name,
+                },
+            )
 
     @socketio.on("job.kill")
     def handle_job_kill(jobid: str):
@@ -128,7 +149,16 @@ def start_app(server: "Server"):
         if process is not None:
             process.kill()
 
-    @app.route("/notifications/<path:jobid>/progress")
+    @app.route("/services/<service>")
+    def route_serice(service):
+        service = server.scheduler.xp.services.get(service, None)
+        if service is None:
+            return Response(f"Service {service} not found", http.HTTPStatus.NOT_FOUND)
+
+        base_url = service.get_url()
+        return redirect(base_url, 302)
+
+    @app.route("/notifications/<jobid>/progress")
     def notifications_progress(jobid):
         level = int(request.args.get("level", 0))
         progress = float(request.args.get("progress", 0.0))

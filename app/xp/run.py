@@ -19,7 +19,7 @@ from experimaestro import (
     tagspath,
 )
 from experimaestro.core.arguments import Param
-from experimaestro.scheduler.services import WebService
+from experimaestro.scheduler.services import ServiceState, WebService
 from experimaestro.utils import cleanupdir
 
 
@@ -77,12 +77,15 @@ class TensorboardService(WebService):
 
     def close(self):
         if self.server:
+            self.state = ServiceState.STOPPING
             self.server.shutdown()
+            self.state = ServiceState.STOPPED
 
     def _serve(self, running: threading.Event):
         import tensorboard as tb
 
         try:
+            self.state = ServiceState.STARTING
             self.program = tb.program.TensorBoard()
             self.program.configure(
                 host="localhost",
@@ -94,6 +97,7 @@ class TensorboardService(WebService):
 
             self.url = self.server.get_url()
             running.set()
+            self.state = ServiceState.RUNNING
             self.server.serve_forever()
         except Exception:
             logging.exception("Error while starting tensorboard")

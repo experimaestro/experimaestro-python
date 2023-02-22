@@ -1,22 +1,59 @@
 import abc
+from enum import Enum
 import functools
 import threading
+from typing import Set
+
+
+class ServiceListener:
+    def service_state_changed(service):
+        pass
+
+
+class ServiceState(Enum):
+    STOPPED = 0
+    STARTING = 1
+    RUNNING = 2
+    STOPPING = 3
 
 
 class Service:
     id: str
+    _state: ServiceState = ServiceState.STOPPED
+
+    def __init__(self):
+        self.listeners: Set[ServiceListener] = set()
+
+    def add_listener(self, listener: ServiceListener):
+        self.listeners.add(listener)
+
+    def remove_listener(self, listener: ServiceListener):
+        self.listeners.remove(listener)
 
     def description(self):
         return ""
 
+    @property
+    def state(self):
+        return self._state
 
-class WebService:
+    @state.setter
+    def state(self, state: ServiceState):
+        # Set the state
+        self._state = state
+
+        for listener in self.listeners:
+            listener.service_state_changed(self)
+
+
+class WebService(Service):
     def __init__(self):
-        self.running = None
+        super().__init__()
         self.url = None
 
     def get_url(self):
-        if self.running is None:
+        if self.state == ServiceState.STOPPED:
+            self.state = ServiceState.STARTING
             self.running = threading.Event()
             self.serve()
 

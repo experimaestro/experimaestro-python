@@ -33,8 +33,16 @@ export type Jobs = {
   ids: Array<string>;
 };
 
+type ServiceStatus = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING"
+
+type  ServiceInformation = {
+  "id": string,
+  "description": string,
+  "state": ServiceStatus
+}
+
 export type Services = {
-  byId: { [key: string]: string };
+  byId: { [key: string]: ServiceInformation };
   ids: string[]
 }
 
@@ -71,9 +79,7 @@ export type State = {
   services: Services;
 };
 
-type ServicesPayload = {
-  [key: string]: string
-}
+
 
 export const slice = createSlice({
   name: "db",
@@ -106,10 +112,16 @@ export const slice = createSlice({
       draft.jobs.ids.sort(jobComparator(draft.jobs.byId));
     },
 
-    updateServices(draft, {payload}: PayloadAction<ServicesPayload>) {
-      draft.services.byId = payload
-      console.log(payload)
-      draft.services.ids = Object.keys(payload)
+    addService(draft, {payload}: PayloadAction<ServiceInformation>) {
+      draft.services.byId[payload.id] = payload
+      draft.services.ids = Object.keys(draft.services.byId)
+    },
+
+    updateService(draft, {payload}: PayloadAction<Partial<ServiceInformation>>) {
+      if (!payload.id) {
+        return;
+      }
+      draft.services.byId[payload.id] = {...draft.services.byId[payload.id], ...payload}
     },
 
     setConnected(draft, action: PayloadAction<boolean>) {

@@ -15,8 +15,15 @@ class Client {
       socket.emit('services')
     });
 
-    this.socket.on('close', function() {
+    socket.on("disconnect", () => {
       store.dispatch(actions.setConnected(false))
+    });
+
+    this.socket.on('service.add', function(data) {
+      store.dispatch(actions.addService(data))
+    })
+    this.socket.on('service.update', function(data) {
+      store.dispatch(actions.updateService(data))
     })
 
     this.socket.on('job.add', function(data) {
