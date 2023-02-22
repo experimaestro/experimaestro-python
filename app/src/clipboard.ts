@@ -1,6 +1,6 @@
 export async function copyToClibpoard(content: string): Promise<void> {
   // Use modern APIs
-  if (navigator.clipboard.writeText) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
     return navigator.clipboard.writeText(content)
   }
 

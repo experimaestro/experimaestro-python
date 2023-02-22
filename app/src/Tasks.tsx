@@ -62,10 +62,7 @@ export default () => {
 
   function kill() {
     if (killJob) {
-      client.send(
-        { type: "kill", payload: killJob.jobId },
-        "cannot kill job " + killJob.jobId
-      );
+      client.job_kill(killJob.jobId)
       setKillJob(undefined);
     }
   }
@@ -116,10 +113,7 @@ export default () => {
             onKill={() => setKillJob(job)}
             onShow={() => {
               console.log("Showing", job.jobId, showJob);
-              client.send({
-                type: "details",
-                payload: job.jobId
-              })
+              client.job_details(job.jobId)
               setShowJob(showJob === job.jobId ? undefined : job.jobId);
             }}
           />

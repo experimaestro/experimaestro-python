@@ -173,8 +173,9 @@ const config: Configuration = {
     },
     proxy: [
         {
-          context: ['/services', '/api'],
-          target: `ws://localhost:${ws_port}`,
+          context: ['/services', '/api', '/auth'],
+          target: `http://localhost:${ws_port}`,
+          // Use websockets
           ws: true,
           // Forwards the cookies
           cookieDomainRewrite: "",

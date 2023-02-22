@@ -722,6 +722,7 @@ class experiment:
             self.environment = Environment(workdir=env)
 
         # Creates the workspace
+        run_mode = run_mode or RunMode.NORMAL
         self.workspace = Workspace(
             self.environment, launcher=launcher, run_mode=run_mode
         )
@@ -751,7 +752,8 @@ class experiment:
         self.scheduler = Scheduler(self, name)
         self.server = (
             Server(self.scheduler, settings.server)
-            if settings.server.port is not None and run_mode == RunMode.NORMAL
+            if settings.server.port is not None
+            and self.workspace.run_mode == RunMode.NORMAL
             else None
         )
 

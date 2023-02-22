@@ -223,5 +223,9 @@ def find_launcher(
     """Find a launcher matching a given specification"""
     launcher = LauncherRegistry.instance().find(*specs, tags=tags)
     if not launcher:
-        raise LauncherNotFoundError(f"No launcher with specification: {specs}")
+        raise LauncherNotFoundError(
+            f"No launcher with specification: {specs}."
+            "Please refer to the documentation at the following URL: "
+            "https://experimaestro-python.readthedocs.io/en/latest/launchers/"
+        )
     return launcher

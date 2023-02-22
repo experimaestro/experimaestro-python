@@ -58,6 +58,7 @@
     "@types/react-redux": "^7.1.24",
     "axios": "^0.27.2",
     "bootstrap": "^5.2.2",
+    "crypto": "^1.0.1",
     "immer": "^9.0.15",
     "lodash": "^4.17.21",
     "luxon": "^3.2.1",
@@ -69,7 +70,8 @@
     "react-jss": "^10.9.2",
     "react-redux": "^8.0.4",
     "sass": "^1.55.0",
-    "sirv-cli": "^2.0.2"
+    "sirv-cli": "^2.0.2",
+    "socket.io-client": "^4.6.1"
   },
   "browserslist": [
     "defaults"

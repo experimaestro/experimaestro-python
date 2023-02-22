@@ -4,6 +4,7 @@ import tempfile
 import logging
 from pathlib import Path
 import threading
+from typing import Optional
 import click
 import os
 import time
@@ -103,8 +104,9 @@ class TensorboardService(WebService):
 @click.option("--keep", is_flag=True, help="Keep temporary directory")
 @click.option("--tensorboard", is_flag=True, help="Adds a tensorboard service")
 @click.option("--port", type=int, default=12345, help="Port for experimaestro server")
+@click.option("--token", type=str, default=None, help="Token for experimaestro server")
 @click.command()
-def cli(keep: bool, debug: bool, port: int, tensorboard: bool):
+def cli(keep: bool, debug: bool, port: int, tensorboard: bool, token: Optional[str]):
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
     maindir = tempfile.TemporaryDirectory()
@@ -114,9 +116,10 @@ def cli(keep: bool, debug: bool, port: int, tensorboard: bool):
     with maindir:
         maindir = Path(maindir.name)
         xpdir = maindir / "xpm"
+        xpdir.mkdir()
         logging.info("Running in %s", xpdir)
         with experiment(
-            Path(xpdir) / "", "web-interface", port=port, token="1283jdasfjadse8134"
+            Path(xpdir) / "", "web-interface", port=port, token=token
         ) as xp:
             if tensorboard:
                 tb = xp.add_service(TensorboardService(xp.workdir / "runs"))

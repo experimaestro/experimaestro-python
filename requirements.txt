@@ -10,7 +10,6 @@ cached_property; python_version < "3.9"
 fasteners
 pyyaml
 psutil
-websockets
 pytools
 tqdm
 docstring_parser
@@ -20,6 +19,10 @@ pyparsing
 # Parse size
 humanfriendly
 huggingface_hub ~= 0.11.1
+
+# server
+flask
+flask-socketio
 
 # parsing
 Arpeggio >= 2.0
