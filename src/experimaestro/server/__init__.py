@@ -11,9 +11,10 @@ from typing import Optional, Tuple
 from experimaestro.scheduler import Scheduler, Listener as BaseListener
 from experimaestro.scheduler.services import Service, ServiceListener
 from experimaestro.settings import ServerSettings
-from flask import Flask, Response
+from flask import Flask, Request, Response
 from flask import request, redirect
 from flask_socketio import SocketIO, emit, ConnectionRefusedError
+import requests
 
 
 def formattime(v: Optional[float]):
@@ -108,6 +109,39 @@ MIMETYPES = {
 }
 
 
+def proxy_response(base_url: str, request: Request, path: str):
+    # Whitelist a few headers to pass on
+    request_headers = {}
+    for key, value in request.headers.items():
+        request_headers[key] = value
+
+    if request.query_string:
+        path = f"""{path}?{request.query_string.decode("utf-8")}"""
+
+    data = None
+    if request.method == "POST":
+        data = request.get_data()
+
+    response = requests.request(
+        request.method,
+        f"{base_url}{path}",
+        data=data,
+        stream=True,
+        headers=request_headers,
+    )
+    headers = {}
+    for key, value in response.headers.items():
+        headers[key] = value
+
+    flask_response = Response(
+        response=response.raw.read(),
+        status=response.status_code,
+        headers=headers,
+        content_type=response.headers["content-type"],
+    )
+    return flask_response
+
+
 def start_app(server: "Server"):
     app = Flask("experimaestro")
     socketio = SocketIO(app, path="/api")
@@ -149,14 +183,18 @@ def start_app(server: "Server"):
         if process is not None:
             process.kill()
 
-    @app.route("/services/<service>")
-    def route_serice(service):
+    @app.route("/services/<path:path>", methods=["GET", "POST"])
+    def route_service(path):
+        service, *path = path.split("/", 1)
+        if not path:
+            return redirect(f"/services/{service}/", http.HTTPStatus.PERMANENT_REDIRECT)
+
         service = server.scheduler.xp.services.get(service, None)
         if service is None:
             return Response(f"Service {service} not found", http.HTTPStatus.NOT_FOUND)
 
         base_url = service.get_url()
-        return redirect(base_url, 302)
+        return proxy_response(base_url, request, path[0] if path else "/")
 
     @app.route("/notifications/<jobid>/progress")
     def notifications_progress(jobid):
