@@ -26,14 +26,12 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
 
     if cleanup:
         for job_path in jobspath.glob("*/*/params.json"):
-
             # If link, skip
             if job_path.parent.is_symlink():
                 job_path.parent.unlink()
                 logger.info("Removing symlink %s", job_path.parent)
 
     for job_path in jobspath.glob("*/*/params.json"):
-
         # If link, skip
         if job_path.parent.is_symlink():
             logger.debug("... it is a symlink - skipping")
