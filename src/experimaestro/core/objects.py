@@ -727,12 +727,13 @@ class ConfigInformation:
             # Check if job is done
             tags = ", ".join(f"{k}={v}" for k, v in self.job.tags.items())
             s = f"""Simulating {self.job.relpath} {f"({tags})" if tags else ""}"""
-            if self.job.donepath.is_file():
-                cprint(f"[done] {s}", "light_green", file=sys.stderr)
-            elif self.job.failedpath.is_file():
-                cprint(f"[failed] {s}", "light_red", file=sys.stderr)
-            else:
-                cprint(f"[not run] {s}", "light_blue", file=sys.stderr)
+            if self.job.workspace is not None:
+                if self.job.donepath.is_file():
+                    cprint(f"[done] {s}", "light_green", file=sys.stderr)
+                elif self.job.failedpath.is_file():
+                    cprint(f"[failed] {s}", "light_red", file=sys.stderr)
+                else:
+                    cprint(f"[not run] {s}", "light_blue", file=sys.stderr)
 
         # Handle an output configuration
         if hasattr(self.pyobject, "config"):

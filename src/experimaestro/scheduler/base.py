@@ -732,8 +732,6 @@ class experiment:
         )
 
         # Mark the directory has an experimaestro folder
-        (self.workspace.path / ".__experimaestro__").touch()
-
         self.workdir = self.workspace.experimentspath / name
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.xplockpath = self.workdir / "lock"
@@ -853,6 +851,7 @@ class experiment:
             self.server.start()
 
         self.workspace.__enter__()
+        (self.workspace.path / ".__experimaestro__").touch()
 
         global SIGNAL_HANDLER
         # Number of unfinished jobs

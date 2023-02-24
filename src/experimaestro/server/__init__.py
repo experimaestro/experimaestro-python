@@ -144,7 +144,7 @@ def proxy_response(base_url: str, request: Request, path: str):
 
 def start_app(server: "Server"):
     app = Flask("experimaestro")
-    socketio = SocketIO(app, path="/api")
+    socketio = SocketIO(app, path="/api", async_mode="eventlet")
     listener = Listener(server.scheduler, socketio)
 
     @socketio.on("connect")
@@ -227,6 +227,15 @@ def start_app(server: "Server"):
                 return resp
         return redirect("/login.html", 302)
 
+    @app.route("/stop")
+    def route_stop():
+        if (server.token == request.args.get("xpm-token", None)) or (
+            server.token == request.cookies.get("experimaestro_token", None)
+        ):
+            socketio.stop()
+            return Response(status=http.HTTPStatus.ACCEPTED)
+        return Response(status=http.HTTPStatus.UNAUTHORIZED)
+
     @app.route("/<path:path>")
     def static_route(path):
         if token := request.form.get("experimaestro_token", None):
@@ -246,7 +255,7 @@ def start_app(server: "Server"):
         return Response("Page not found", status=404)
 
     # Start the app
-    if server.port is None:
+    if server.port is None or server.port == 0:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("localhost", 0))
         server.port = sock.getsockname()[1]
@@ -260,8 +269,15 @@ def start_app(server: "Server"):
     )
 
     server.instance = socketio
+    with server.cv_running:
+        server.running = True
+        server.cv_running.notify()
     socketio.run(
-        app, host=server.host, port=server.port, debug=True, use_reloader=False
+        app,
+        host=server.host,
+        port=server.port,
+        debug=False,
+        use_reloader=False,
     )
     logging.info("Web server stopped")
 
@@ -278,6 +294,8 @@ class Server:
         self.scheduler = scheduler
         self.token = settings.token or uuid.uuid4().hex
         self.instance = None
+        self.running = False
+        self.cv_running = threading.Condition()
 
     def getNotificationSpec(self) -> Tuple[str, str]:
         """Returns a tuple (server ID, server URL)"""
@@ -287,10 +305,22 @@ class Server:
         )
 
     def stop(self):
-        if self.instance and self.instance.wsgi_server:
-            self.instance.wsgi_server.shutdown()
+        if self.instance:
+            try:
+                requests.get(
+                    f"http://{self.host}:{self.port}/stop?xpm-token={self.token}"
+                )
+            except requests.exceptions.ConnectionError:
+                # This is expected
+                pass
 
     def start(self):
         """Start the websocket server in a new process process"""
         logging.info("Starting the web server")
         self.thread = threading.Thread(target=start_app, args=(self,)).start()
+
+        # Wait until we really started
+        while True:
+            with self.cv_running:
+                if self.running:
+                    break

@@ -142,12 +142,16 @@ def cli(keep: bool, debug: bool, port: int, tensorboard: bool, token: Optional[s
                 time.sleep(0.1)
 
             print("\n\n --- Ready to take commands ---")  # noqa: T201
-            with (socketpath).open("w") as fp:
-                while True:
-                    command = input("Command: ")
-                    fp.write(command)
-                    fp.write("\n")
-                    fp.flush()
+            try:
+                with socketpath.open("w") as fp:
+                    while True:
+                        command = input("Command: ")
+                        fp.write(command)
+                        fp.write("\n")
+                        fp.flush()
+
+            except BrokenPipeError:
+                pass
 
 
 if __name__ == "__main__":
