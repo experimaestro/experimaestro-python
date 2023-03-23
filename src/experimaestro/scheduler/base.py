@@ -402,7 +402,7 @@ class Scheduler:
         self.exitmode = False
 
         # List of all jobs
-        self.jobs: Dict[str, Job] = {}
+        self.jobs: Dict[str, "Job"] = {}
 
         # List of jobs
         self.waitingjobs = set()
@@ -571,7 +571,7 @@ class Scheduler:
 
         # Job is finished
         if job.state != JobState.DONE:
-            self.xp.failedJobs += 1
+            self.xp.failedJobs[job.identifier] = job
 
         # Decrement the number of unfinished jobs and notify
         self.xp.unfinishedJobs -= 1
@@ -816,7 +816,14 @@ class experiment:
                     await self.central.exitCondition.wait()
 
                 if self.failedJobs:
-                    raise FailedExperiment(f"{self.failedJobs} failed jobs")
+                    # Show some more information
+                    for job in self.failedJobs.values():
+                        logger.error(
+                            "Job %s failed, check the log file %s",
+                            job.relpath,
+                            job.stderr,
+                        )
+                    raise FailedExperiment(f"{len(self.failedJobs)} failed jobs")
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         return future.result()
@@ -857,8 +864,8 @@ class experiment:
         # Number of unfinished jobs
         self.unfinishedJobs = 0
 
-        # Number of failed jobs
-        self.failedJobs = 0
+        # List of failed jobs
+        self.failedJobs: Dict[str, Job] = {}
 
         # Exit mode when catching signals
         self.exitMode = False
@@ -884,7 +891,7 @@ class experiment:
                 # faulthandler.dump_traceback()
                 logger.exception(
                     "Not waiting since an exception was thrown"
-                    " (some jobs may be runningq)"
+                    " (some jobs may be running)"
                 )
             else:
                 self.wait()
