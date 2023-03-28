@@ -71,6 +71,7 @@ class SlurmJobState:
         "TIMEOUT": ProcessState.ERROR,
         "CANCELLED": ProcessState.ERROR,
         "BOOT_FAIL": ProcessState.ERROR,
+        "OUT_OF_MEMORY": ProcessState.ERROR,
     }
 
     def __init__(self, status, start, end):
@@ -78,7 +79,12 @@ class SlurmJobState:
         if self.slurm_state.startswith("CANCELLED"):
             self.state = ProcessState.ERROR
         else:
-            self.state = SlurmJobState.STATE_MAP[self.slurm_state]
+            self.state = SlurmJobState.STATE_MAP.get(self.slurm_state, None)
+            if self.state is None:
+                logging.warning(
+                    "Unknown state: %s (supposing this is an error)", self.slurm_state
+                )
+                self.state = ProcessState.ERROR
 
         self.start = start
         self.end = end
@@ -640,7 +646,6 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     def get(
         self, registry: "LauncherRegistry", requirement: HostRequirement
     ) -> Optional["Launcher"]:
-
         # Compute the configuration if needed
         self.compute(registry)
 
