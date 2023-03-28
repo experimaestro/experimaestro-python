@@ -1,3 +1,21 @@
+## 0.21.0 (2023-03-28)
+
+### Feat
+
+- When an experiment fails, display the path to stderr
+- service proxying
+
+### Fix
+
+- Information message when locking experiment
+- Improving slurm support
+- Fix test bugs
+- better handlign of services
+
+### Refactor
+
+- **server**: switched to flask and socketio for future evolutions of the server
+
 ## 0.20.0 (2023-02-18)
 
 ### Feat
