@@ -837,7 +837,7 @@ class experiment:
         return self.workspace.connector.createtoken(name, count)
 
     def __enter__(self):
-        logger.debug("Locking experiment %s", self.xplockpath)
+        logger.info("Locking experiment %s", self.xplockpath)
         self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
 
         # Move old jobs into "jobs.bak"
