@@ -10,13 +10,13 @@ the config/task instance, as in the example below:
 
 !!! example
 
-````py3 linenums="1"
+    ````py3 linenums="1"
 
-model = Model1(layers=3)
-learnedmodel = Learn(epochs=100)
-learnedmodel.model = model
-learnedmodel.submit()
-```
+    model = Model1(layers=3)
+    learnedmodel = Learn(epochs=100)
+    learnedmodel.model = model
+    learnedmodel.submit()
+    ```
 
 - line 1: the `Model1` configuration is set with argument `layers` set to `3`.
 - line 2: the `Learn` task is configured with parameter `epochs` set to 100
