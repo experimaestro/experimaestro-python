@@ -10,7 +10,7 @@ the config/task instance, as in the example below:
 
 !!! example
 
-    ````py3 linenums="1"
+    ```py3 linenums="1"
 
     model = Model1(layers=3)
     learnedmodel = Learn(epochs=100)
