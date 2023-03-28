@@ -63,7 +63,7 @@
     "lodash": "^4.17.21",
     "luxon": "^3.2.1",
     "material-icons": "^1.11.11",
-    "node-sass": "^7.0.3",
+    "node-sass": "^8.0.0",
     "react": "^18.2.0",
     "react-bootstrap": "^2.5.0",
     "react-dom": "^18.2.0",
