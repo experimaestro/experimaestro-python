@@ -34,7 +34,8 @@ features. More precisely, it
    importantly, it defines experiments imperatively and not declaratively.
 
 !!! note
-Experimaestro and datamaestro are described in the following paper
+
+    Experimaestro and datamaestro are described in the following paper
 
     Benjamin Piwowarski. 2020.
     [Experimaestro and Datamaestro: Experiment and Dataset Managers (for IR).](https://doi.org/10.1145/3397271.3401410)
