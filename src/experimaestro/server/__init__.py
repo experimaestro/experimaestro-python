@@ -90,7 +90,7 @@ class Listener(BaseListener, ServiceListener):
         )
 
     def service_state_changed(self, service: Service):
-        self.socketio.emit("service.update", {"state": service.state})
+        self.socketio.emit("service.update", {"state": service.state.name})
 
 
 MIMETYPES = {
