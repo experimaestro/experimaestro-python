@@ -1,3 +1,14 @@
+## 0.22.0 (2023-04-05)
+
+### Feat
+
+- tags as immutable and hashable dicts
+
+### Fix
+
+- corrected service status update for servers
+- improved server
+
 ## 0.21.0 (2023-03-28)
 
 ### Feat
