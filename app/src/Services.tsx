@@ -17,7 +17,7 @@ const Services = () => {
     }
     return <NavDropdown title="Services" id="basic-nav-dropdown">{
         services.ids.map(id =>
-            <NavDropdown.Item key={id} href={`/services/${id}`} target='_blank'}>
+            <NavDropdown.Item key={id} href={`/services/${id}`} target='_blank'>
                 <code>{id}</code> {services.byId[id].description}{" "}
                 {STATE_COMPONENTS[services.byId[id].state] ?? services.byId[id].state}
             </NavDropdown.Item>

@@ -15,6 +15,7 @@ tqdm
 docstring_parser
 termcolor >= 2.0.0
 requests
+sortedcontainers
 pyparsing
 # Parse size
 humanfriendly

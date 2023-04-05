@@ -15,6 +15,7 @@ from .annotations import (
     cache,
     Identifier,
     Array,
+    TagDict,
     tag,
     tags,
     tagspath,

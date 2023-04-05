@@ -1,11 +1,9 @@
 # Import Python modules
 
-import sys
 import inspect
-import logging
 from pathlib import Path
 from typing import Callable, Type as TypingType, Optional, TypeVar, Union
-
+from sortedcontainers import SortedDict
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
 from experimaestro.generators import PathGenerator
@@ -33,12 +31,18 @@ class config:
         """[summary]
 
         Keyword Arguments:
-            identifier {Identifier, str} -- Unique identifier of the type, generate by default (None)
-            description {str} -- (deprecated, use comments) Description of the config/task, use comments with (default) None
-            register {bool} -- False if the type should not be registered (debug only)
+            identifier {Identifier, str} -- Unique identifier of the type,
+            generate by default (None)
 
-        The identifier, if not specified, will be set to `X.CLASSNAME`(by order of priority),
-        where X is:
+            description {str} -- (deprecated, use
+            comments) Description of the config/task, use comments with
+            (default) None
+
+            register {bool} -- False if the type should not be
+            registered (debug only)
+
+        The identifier, if not specified, will be set to `X.CLASSNAME`(by order
+        of priority), where X is:
             - the parent identifier
             - the module qualified name
         """
@@ -207,8 +211,12 @@ class pathoption(param):
         self.generator = PathGenerator(path)
 
 
-STDERR = lambda jobcontext, config: "%s.err" % jobcontext.name
-STDOUT = lambda jobcontext, config: "%s.out" % jobcontext.name
+def STDERR(jobcontext, config):
+    return "%s.err" % jobcontext.name
+
+
+def STDOUT(jobcontext, config):
+    return "%s.out" % jobcontext.name
 
 
 class constant(param):
@@ -229,7 +237,6 @@ def cache(name: str):
     """Use a cache path for a given config"""
 
     def annotate(method):
-
         return objects.cache(method, name)
 
     return annotate
@@ -243,9 +250,19 @@ def tag(value):
     return objects.TaggedValue(value)
 
 
-def tags(value):
+class TagDict(SortedDict):
+    """A hashable dictionary"""
+
+    def __hash__(self):
+        return hash(tuple((key, value) for key, value in self.items()))
+
+    def __setitem__(self, key, value):
+        raise Exception("A tag dictionary is not mutable")
+
+
+def tags(value) -> TagDict:
     """Return the tags associated with a value"""
-    return value.__xpm__.tags()
+    return TagDict(value.__xpm__.tags())
 
 
 def _normalizepathcomponent(v: Any):
@@ -256,10 +273,9 @@ def _normalizepathcomponent(v: Any):
 
 def tagspath(value: Config):
     """Return a unique path made of tags and their values"""
-    sortedtags = sorted(value.__xpm__.tags().items(), key=lambda x: x[0])
     return "_".join(
         f"""{_normalizepathcomponent(key)}={_normalizepathcomponent(value)}"""
-        for key, value in sortedtags
+        for key, value in tags(value).items()
     )
 
 
