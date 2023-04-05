@@ -21,6 +21,7 @@ def jobmonitor(*outputs: TaskOutput):
 
     for output in outputs:
         try:
+            job = None
             job = output.__xpm__.job
             lastprogress = 0
             while job.scheduler is None:
@@ -34,7 +35,7 @@ def jobmonitor(*outputs: TaskOutput):
 
             # Job already completed
             if job.state.value == JobState.DONE.value:
-                print("Job already completed")
+                print("Job already completed")  # noqa: T201
             else:
                 with tqdm(total=100, unit_scale=True, unit="%") as reporter:
                     progress = 0
@@ -60,8 +61,10 @@ def jobmonitor(*outputs: TaskOutput):
                             reporter.update(100 - progress)
                     else:
                         raise RuntimeError(
-                            f"Job did not complete successfully ({job.state.name}). Check the error log {job.stderr}"
+                            f"Job did not complete successfully ({job.state.name})."
+                            f"Check the error log {job.stderr}"
                         )
 
         finally:
-            job.scheduler.removelistener(listener)
+            if job is not None:
+                job.scheduler.removelistener(listener)

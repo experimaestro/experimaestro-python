@@ -27,6 +27,18 @@ def cleanupdir(path: Path):
     return path
 
 
+def is_notebook():
+    """Returns true if running in a notebook"""
+    try:
+        shell = get_ipython().__class__.__module__  # noqa: F841
+        if shell is not None and shell in ["ipykernel.zmqshell", "google.colab._shell"]:
+            return True
+    except NameError:
+        pass
+
+    return False
+
+
 class ThreadingCondition(threading.Condition):
     # Useful to debug lock problems
     TIMEOUT = float(os.environ.get("XPM_LOCK_TIMEOUT", "-1"))

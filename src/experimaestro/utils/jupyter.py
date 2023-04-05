@@ -1,4 +1,5 @@
 from typing import Callable, Dict, Optional
+import uuid
 import ipywidgets as widgets
 from experimaestro import experiment
 from IPython.display import display
@@ -6,6 +7,8 @@ from .jobs import jobmonitor  # noqa: F401
 
 
 class serverwidget:
+    TOKEN = uuid.uuid4().hex
+
     def __init__(
         self,
         name,
@@ -32,10 +35,13 @@ class serverwidget:
         with self.output:
             if experiment.CURRENT:
                 self.button.description = "Stop experimaestro server"
-                print(f"Server started : http://localhost:{self.port}")
+                print(  # noqa: T201
+                    "Server started : "
+                    f"http://localhost:{self.port}/auth?xpm-token={serverwidget.TOKEN}"
+                )
             else:
                 self.button.description = "Start experimaestro server"
-                print("Server stopped")
+                print("Server stopped")  # noqa: T201
 
     def on_button_clicked(self, b):
         with self.output:
@@ -43,11 +49,15 @@ class serverwidget:
                 try:
                     experiment.CURRENT.__exit__(None, None, None)
                 except Exception:
-                    print("Error while stopping experimaestro")
+                    print("Error while stopping experimaestro")  # noqa: T201
                 self.current = experiment.CURRENT
             else:
                 self.current = experiment(
-                    self.name, self.name, host="localhost", port=self.port
+                    self.name,
+                    self.name,
+                    host="localhost",
+                    port=self.port,
+                    token=serverwidget.TOKEN,
                 ).__enter__()
                 for key, value in self.environment.items():
                     self.current.setenv(key, value)

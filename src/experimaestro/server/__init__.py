@@ -262,7 +262,7 @@ def start_app(server: "Server"):
         sock.close()
 
     logging.info(
-        "Web server started on http://%s:%d?token=%s",
+        "Web server started on http://%s:%d/auth?xpm-token=%s",
         server.host,
         server.port,
         server.token,
