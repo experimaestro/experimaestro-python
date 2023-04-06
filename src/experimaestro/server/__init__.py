@@ -143,9 +143,14 @@ def proxy_response(base_url: str, request: Request, path: str):
 
 
 def start_app(server: "Server"):
+    logging.debug("Starting Flask server...")
     app = Flask("experimaestro")
-    socketio = SocketIO(app, path="/api", async_mode="eventlet")
+
+    logging.debug("Starting Flask server (SocketIO)...")
+    socketio = SocketIO(app, path="/api", async_mode="gevent")
     listener = Listener(server.scheduler, socketio)
+
+    logging.debug("Starting Flask server (setting up socketio)...")
 
     @socketio.on("connect")
     def handle_connect():
@@ -182,6 +187,8 @@ def start_app(server: "Server"):
         process = future.result()
         if process is not None:
             process.kill()
+
+    logging.debug("Starting Flask server (setting up routes)...")
 
     @app.route("/services/<path:path>", methods=["GET", "POST"])
     def route_service(path):
@@ -256,8 +263,9 @@ def start_app(server: "Server"):
 
     # Start the app
     if server.port is None or server.port == 0:
+        logging.info("Searching for an available port")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("localhost", 0))
+        sock.bind(("", 0))
         server.port = sock.getsockname()[1]
         sock.close()
 
