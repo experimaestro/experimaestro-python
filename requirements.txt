@@ -2,8 +2,8 @@
 click
 omegaconf
 
-# Supports Annotated[T, ...]
-typing_extensions >= 3.7.4.3; python_version < "3.9"
+# Supports recent typing
+typing_extensions >= 4.2; python_version < "3.11"
 cached_property; python_version < "3.9"
 
 # Other

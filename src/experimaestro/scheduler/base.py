@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import ChainMap, defaultdict
 import os
 from pathlib import Path
 from shutil import rmtree
@@ -14,7 +14,7 @@ from experimaestro.scheduler.services import Service
 from experimaestro.settings import get_settings
 
 
-from experimaestro.core.objects import Config, GenerationContext
+from experimaestro.core.objects import Config, ConfigWalkContext
 from experimaestro.utils import logger
 from experimaestro.locking import Locks, LockError, Lock
 from experimaestro.tokens import ProcessCounterToken
@@ -150,6 +150,23 @@ class Job(Resource):
     def wait(self) -> JobState:
         assert self._future, "Cannot wait a not submitted job"
         return self._future.result()
+
+    @property
+    def environ(self):
+        """Returns the job environment
+
+        It is made of (by order of priority):
+
+        1. The job environment
+        1. The launcher environment
+        1. The workspace environment
+
+        """
+        return ChainMap(
+            {},
+            self.launcher.environ if self.launcher else {},
+            self.workspace.environment.environ,
+        )
 
     @property
     def progress(self):
@@ -292,7 +309,7 @@ class Job(Resource):
         return self._future
 
 
-class JobContext(GenerationContext):
+class JobContext(ConfigWalkContext):
     def __init__(self, job: Job):
         super().__init__()
         self.job = job
@@ -839,6 +856,7 @@ class experiment:
     def __enter__(self):
         logger.info("Locking experiment %s", self.xplockpath)
         self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
+        logger.info("Experiment locked")
 
         # Move old jobs into "jobs.bak"
         if self.workspace.run_mode == RunMode.NORMAL:

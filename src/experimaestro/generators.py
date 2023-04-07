@@ -1,15 +1,16 @@
 import inspect
 from pathlib import Path
-from typing import Callable, List, Tuple, Union
+from typing import Callable, Union
 from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
-from experimaestro.core.objects import GenerationContext, Config
+from experimaestro.core.objects import ConfigWalkContext, Config
 
 
 class Generator:
     """Base class for all generators"""
 
     def isoutput(self):
-        """Returns True if this generator is a task output (e.g. generates a path within the job folder)"""
+        """Returns True if this generator is a task output (e.g. generates a
+        path within the job folder)"""
         return False
 
 
@@ -17,11 +18,11 @@ class PathGenerator(Generator):
     """Generates a path"""
 
     def __init__(
-        self, path: Union[str, Path, Callable[[GenerationContext, Config], Path]]
+        self, path: Union[str, Path, Callable[[ConfigWalkContext, Config], Path]]
     ):
         self.path = path
 
-    def __call__(self, context: GenerationContext, config: Config):
+    def __call__(self, context: ConfigWalkContext, config: Config):
         if inspect.isfunction(self.path):
             path = context.currentpath() / self.path(context, config)  # type: Path
         else:
@@ -34,7 +35,7 @@ class PathGenerator(Generator):
 
 
 class pathgenerator(TypeAnnotation):
-    def __init__(self, value: Union[str, Callable[[GenerationContext, Config], str]]):
+    def __init__(self, value: Union[str, Callable[[ConfigWalkContext, Config], str]]):
         self.value = value
 
     def annotate(self, options: ArgumentOptions):

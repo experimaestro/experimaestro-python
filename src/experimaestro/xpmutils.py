@@ -1,10 +1,10 @@
 """Utilities exposed to users of the experimaestro API"""
 
 from pathlib import Path
-from experimaestro.core.objects import GenerationContext
+from experimaestro.core.objects import ConfigWalkContext
 
 
-class DirectoryContext(GenerationContext):
+class DirectoryContext(ConfigWalkContext):
     """Special generation context used for debugging and testing"""
 
     def __init__(self, path: Path):
@@ -16,7 +16,7 @@ class DirectoryContext(GenerationContext):
         return self._path
 
 
-class EmptyContext(GenerationContext):
+class EmptyContext(ConfigWalkContext):
     """Special generation context used for debugging and testing"""
 
     @property

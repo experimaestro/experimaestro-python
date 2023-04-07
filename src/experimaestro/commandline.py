@@ -1,6 +1,5 @@
 """Command line jobs"""
 
-from collections import ChainMap
 import json
 import io
 from pathlib import Path
@@ -259,13 +258,6 @@ class CommandLineJob(Job):
             return None
 
         return None
-
-    @property
-    def environ(self):
-        return ChainMap(
-            self.workspace.environment.environ,
-            self.launcher.environ if self.launcher else {},
-        )
 
     @property
     def notificationURL(self):

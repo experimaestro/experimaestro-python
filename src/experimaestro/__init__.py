@@ -49,17 +49,19 @@ from .core.objects import (
     SerializedConfig,
     Serialized,
 )
+from .core.types import Any, SubmitHook, submit_hook_decorator
+from .launchers import Launcher
 from .scheduler.environment import Environment
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler import Scheduler, experiment, FailedExperiment
 from .notifications import progress, tqdm
-from .core.types import Any
 from .checkers import Choices
 from .xpmutils import DirectoryContext
 from .mkdocs.annotations import documentation
+from .scheduler.base import Job
 
 
-def set_launcher(launcher):
+def set_launcher(launcher: Launcher):
     Workspace.CURRENT.launcher = launcher
 
 

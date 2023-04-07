@@ -1,25 +1,36 @@
 from pathlib import Path, PosixPath
-from typing import Callable, Dict, List, Optional, Protocol
+from typing import Callable, Dict, List, Optional
 from experimaestro.commandline import AbstractCommand, Job, CommandLineJob
 from experimaestro.connectors import Connector
 from experimaestro.connectors.local import ProcessBuilder, LocalConnector
 from experimaestro.connectors.ssh import SshPath, SshConnector
+from abc import ABC, abstractmethod
 
 
-class ScriptBuilder:
-    lockfiles: List[Path]
-    command: "AbstractCommand"
+class ScriptBuilder(ABC):
     """A script builder is responsible for generating the script
     used to launch a command line job"""
 
+    lockfiles: List[Path]
+    """The files that must be locked before starting the job"""
+
+    command: "AbstractCommand"
+    """Command to be run"""
+
+    @abstractmethod
     def write(self, job: CommandLineJob) -> Path:
-        raise NotImplementedError()
+        """Write the commmand line job
+
+        :params job: The job to be written
+        """
+        ...
 
 
 SubmitListener = Callable[[Job], None]
+"""Listen to job submissions"""
 
 
-class Launcher:
+class Launcher(ABC):
     """A launcher"""
 
     submit_listeners: List[SubmitListener]
@@ -36,9 +47,10 @@ class Launcher:
     def setNotificationURL(self, url: Optional[str]):
         self.notificationURL = url
 
+    @abstractmethod
     def scriptbuilder(self) -> ScriptBuilder:
         """Returns a script builder"""
-        raise NotImplementedError(f"For class {self.__class__}")
+        ...
 
     def addListener(self, listener: SubmitListener):
         self.submit_listeners.append(listener)

@@ -1,6 +1,7 @@
+from abc import ABC, abstractmethod
 import inspect
 import sys
-from typing import Union, Dict, Iterator, List
+from typing import Set, Union, Dict, Iterator, List
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -16,6 +17,11 @@ if sys.version_info.major == 3 and sys.version_info.minor < 9:
     from typing_extensions import _AnnotatedAlias, get_type_hints
 else:
     from typing import _AnnotatedAlias, get_type_hints
+
+if typing.TYPE_CHECKING:
+    from experimaestro.scheduler.base import Job
+    from experimaestro.launchers import Launcher
+    from experimaestro.core.objects import Config
 
 
 class Identifier:
@@ -143,7 +149,42 @@ class DeprecatedAttribute:
         self.fn(instance, value)
 
 
+class SubmitHook(ABC):
+    """Hook called before the job is submitted to the scheduler
+
+    This allows modifying e.g. the run environnement
+    """
+
+    @abstractmethod
+    def __call__(self, job: "Job", launcher: "Launcher"):
+        ...
+
+    @abstractmethod
+    def __spec__(self):
+        """Returns an identifier tuple for hashing/equality"""
+        ...
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return False
+        return self.__spec__ == other.__spec__
+
+    def __hash__(self):
+        return hash((self.__class__, self.__spec__))
+
+
+def submit_hook_decorator(hook: SubmitHook):
+    def decorator(cls: typing.Type["Config"]):
+        cls.__getxpmtype__().submit_hooks.add(hook)
+        return cls
+
+    return decorator
+
+
 class ObjectType(Type):
+    submit_hooks: Set[SubmitHook]
+    """Hooks associated with this configuration"""
+
     """ObjectType contains class-level information about
     experimaestro configurations and tasks
 
@@ -167,6 +208,7 @@ class ObjectType(Type):
         self.taskcommandfactory = None
         self.task = None
         self._title = None
+        self.submit_hooks = set()
 
         # Get the identifier
         if identifier is None and hasattr(tp, "__xpmid__"):
@@ -219,7 +261,7 @@ class ObjectType(Type):
         self.configtype.__module__ = tp.__module__
 
         # Create the type-specific object class
-        # (now, the same as basetype - TODO: remove references)
+        # (now, the same as basetype - but in the future, remove references)
         self.objecttype = self.basetype  # type: type
         self.basetype._ = self.configtype
 

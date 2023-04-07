@@ -125,7 +125,7 @@ def diff(path: Path):
     """Show the reason of the identifier change for a job"""
     from experimaestro.tools.jobs import load_job
     from experimaestro import Config
-    from experimaestro.core.objects import GenerationContext
+    from experimaestro.core.objects import ConfigWalkContext
 
     _, job = load_job(path / "params.json", discard_id=False)
     _, new_job = load_job(path / "params.json")

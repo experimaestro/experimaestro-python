@@ -20,6 +20,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Tuple,
     Type,
     TypeVar,
     Union,
@@ -35,6 +36,7 @@ from experimaestro.core.types import DeprecatedAttribute, ObjectType
 from .context import SerializationContext, SerializedPath, SerializedPathLoader
 
 if TYPE_CHECKING:
+    from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
     from experimaestro.launchers import Launcher
     from experimaestro.scheduler import Workspace
@@ -307,7 +309,7 @@ def add_to_path(p):
         sys.path = old_path
 
 
-class GenerationContext:
+class ConfigWalkContext:
     """Context when generating values in configurations"""
 
     @property
@@ -342,33 +344,38 @@ class GenerationContext:
 NOT_SET = object()
 
 
-class ConfigProcessing:
+class ConfigWalk:
     """Allows to perform an operation on all nested configurations"""
 
-    def __init__(self, recurse_task=False):
+    def __init__(self, context: ConfigWalkContext = None, recurse_task=False):
         """
 
-        Parameters:
-            recurse_task: Recurse into linked tasks
+        :param recurse_task: Recurse into linked tasks
+        :param context: The context, by default only tracks the position in the
+            config tree
         """
         self.recurse_task = recurse_task
+        self.context = ConfigWalkContext() if context is None else context
 
         # Stores already visited nodes
         self.visited = {}
 
-    def preprocess(self, config: "Config"):
+    def preprocess(self, config: "Config") -> Tuple[bool, Any]:
+        """Returns a tuple boolean/value
+
+        The boolean value is used to stop the processing if False.
+        The value is returned
+        """
         return True, None
 
     def postprocess(self, config: "Config", values: Dict[str, Any]):
         return config
 
-    @contextmanager
     def list(self, i: int):
-        yield i
+        return self.context.push(str(i))
 
-    @contextmanager
     def map(self, k: str):
-        yield k
+        return self.context.push(k)
 
     def __call__(self, x):
         if isinstance(x, Config):
@@ -426,18 +433,6 @@ class ConfigProcessing:
         raise NotImplementedError(f"Cannot handle a value of type {type(x)}")
 
 
-class GenerationConfigProcessing(ConfigProcessing):
-    def __init__(self, context: GenerationContext, recurse_task=False):
-        super().__init__(recurse_task=recurse_task)
-        self.context = context
-
-    def list(self, i: int):
-        return self.context.push(str(i))
-
-    def map(self, k: str):
-        return self.context.push(k)
-
-
 def getqualattr(module, qualname):
     """Get a qualified attributed value"""
     cls = module
@@ -464,6 +459,7 @@ class ConfigInformation:
         # Meta-informations
         self._tags = {}
         self._initinfo = ""
+        self.submit_hooks = set()
 
         # Generated task
         self._taskoutput = None
@@ -534,7 +530,7 @@ class ConfigInformation:
                 yield argument, self.values[argument.name]
 
     def tags(self):
-        class TagFinder(ConfigProcessing):
+        class TagFinder(ConfigWalk):
             def __init__(self):
                 super().__init__(recurse_task=True)
                 self.tags = {}
@@ -578,7 +574,7 @@ class ConfigInformation:
                     )
                     raise
 
-    def seal(self, context: GenerationContext):
+    def seal(self, context: ConfigWalkContext):
         """Seal the object, generating values when needed,
         before scheduling the associated job(s)
 
@@ -586,7 +582,7 @@ class ConfigInformation:
             - context: the generation context
         """
 
-        class Sealer(GenerationConfigProcessing):
+        class Sealer(ConfigWalk):
             def preprocess(self, config: Config):
                 return not config.__xpm__._sealed, config
 
@@ -607,9 +603,9 @@ class ConfigInformation:
 
         Internal API - do not use
         """
-        context = GenerationContext()
+        context = ConfigWalkContext()
 
-        class Unsealer(GenerationConfigProcessing):
+        class Unsealer(ConfigWalk):
             def preprocess(self, config: Config):
                 return config.__xpm__._sealed, config
 
@@ -658,6 +654,23 @@ class ConfigInformation:
                 logger.error("While setting %s", path + [argument.name])
                 raise
 
+    def apply_submit_hooks(self, job: "Job"):
+        """Apply configuration hooks"""
+        context = ConfigWalkContext()
+
+        class HookGatherer(ConfigWalk):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.hooks = set()
+
+            def postprocess(self, config: "Config", values: Dict[str, Any]):
+                self.hooks.update(config.__xpm__.submit_hooks)
+
+        gatherer = HookGatherer(context, recurse_task=False)
+        gatherer(self.pyobject)
+        for hook in gatherer.hooks:
+            hook(job)
+
     def submit(
         self, workspace: "Workspace", launcher: "Launcher", run_mode=None
     ) -> "TaskOutput":
@@ -696,7 +709,7 @@ class ConfigInformation:
             experiment.CURRENT.workspace if experiment.CURRENT else None
         )
 
-        # Call onSubmit
+        # Call onSubmit hooks
         launcher = (
             launcher
             or (workspace and workspace.launcher)
@@ -704,6 +717,9 @@ class ConfigInformation:
         )
         if launcher:
             launcher.onSubmit(self.job)
+
+        # Apply submit hooks
+        self.apply_submit_hooks(self.job)
 
         # Add job dependencies
         self.updatedependencies(self.job.dependencies, [], set([id(self.pyobject)]))
@@ -1194,8 +1210,8 @@ class ConfigInformation:
 
         return o
 
-    class FromPython(GenerationConfigProcessing):
-        def __init__(self, context: GenerationContext):
+    class FromPython(ConfigWalk):
+        def __init__(self, context: ConfigWalkContext):
             super().__init__(context)
             self.objects = {}
 
@@ -1233,7 +1249,7 @@ class ConfigInformation:
 
             return o
 
-    def fromConfig(self, context: GenerationContext):
+    def fromConfig(self, context: ConfigWalkContext):
         """Generate an instance given the current configuration"""
         self.validate()
         processor = ConfigInformation.FromPython(context)
@@ -1378,7 +1394,7 @@ class TypeConfig:
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-    def instance(self, context: GenerationContext = None) -> T:
+    def instance(self, context: ConfigWalkContext = None) -> T:
         """Return an instance with the current values"""
         if context is None:
             from experimaestro.xpmutils import EmptyContext
@@ -1386,8 +1402,8 @@ class TypeConfig:
             context = EmptyContext()
         else:
             assert isinstance(
-                context, GenerationContext
-            ), f"{context.__class__} is not an instance of GenerationContext"
+                context, ConfigWalkContext
+            ), f"{context.__class__} is not an instance of ConfigWalkContext"
         return self.__xpm__.fromConfig(context)  # type: ignore
 
     def submit(self, *, workspace=None, launcher=None, run_mode: "RunMode" = None):
@@ -1434,7 +1450,7 @@ class Config:
     configuration/task"""
 
     @classmethod
-    def __getxpmtype__(cls):
+    def __getxpmtype__(cls) -> "ObjectType":
         """Get (and create if necessary) the Object type of this"""
         xpmtype = cls.__dict__.get("__xpmtype__", None)
         if xpmtype is None:
