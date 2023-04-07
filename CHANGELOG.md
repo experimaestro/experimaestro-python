@@ -1,3 +1,9 @@
+## 0.23.0 (2023-04-07)
+
+### Feat
+
+- submit hooks to allow e.g. changing the environment variables
+
 ## 0.22.0 (2023-04-05)
 
 ### Feat
