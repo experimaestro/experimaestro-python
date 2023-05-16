@@ -1,13 +1,11 @@
 # Test that progress notification work
 from copy import copy
-import logging
 from pathlib import Path
 import time
 import fasteners
 from typing import List, Tuple, Union
-from experimaestro.commandline import CommandLineJob
 from experimaestro import Task, Annotated, pathgenerator, progress, tqdm
-from experimaestro.core.objects import TaskOutput, logger
+from experimaestro.core.objects import ConfigWrapper, logger
 from experimaestro.notifications import LevelInformation
 from experimaestro.scheduler import Job, Listener
 from queue import Queue
@@ -74,7 +72,7 @@ def test_progress_basic():
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
-        out = ProgressingTask().submit()  # type: TaskOutput
+        out: ConfigWrapper = ProgressingTask().submit()
         path = out.path  # type: Path
         job = out.__xpm__.job
 
@@ -87,9 +85,9 @@ def test_progress_basic():
         for v in progresses:
             writeprogress(path, v)
             if v < 1:
-                l = listener.progresses.get()[0]
-                logger.info("Got %s", l)
-                assert l.progress == v
+                info = listener.progresses.get()[0]
+                logger.info("Got %s", info)
+                assert info.progress == v
 
 
 def test_progress_multiple():
@@ -105,7 +103,7 @@ def test_progress_multiple():
         listener1 = ProgressListener()
         xp1.scheduler.addlistener(listener1)
 
-        out = ProgressingTask().submit()  # type: TaskOutput
+        out = ProgressingTask().submit()  # type: ConfigWrapper
         path = out.path  # type: Path
         job = out.__xpm__.job
 
@@ -219,7 +217,7 @@ def test_progress_nested():
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
-        out = NestedProgressingTask().submit()  # type: TaskOutput
+        out = NestedProgressingTask().submit()  # type: ConfigWrapper
         job = out.__xpm__.job
         path = out.path  # type: Path
 

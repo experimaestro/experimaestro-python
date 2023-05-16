@@ -1,12 +1,12 @@
 import time
 from experimaestro.scheduler import JobState
-from experimaestro.core.objects import TaskOutput
+from experimaestro.core.objects import ConfigWrapper
 from experimaestro.scheduler import Listener
 from threading import Condition
 from tqdm.autonotebook import tqdm
 
 
-def jobmonitor(*outputs: TaskOutput):
+def jobmonitor(*outputs: ConfigWrapper):
     """Follow the progress of a list of jobs (in order)"""
 
     cv = Condition()

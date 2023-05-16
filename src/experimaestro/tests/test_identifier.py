@@ -17,7 +17,7 @@ from experimaestro import (
     Annotated,
     Task,
 )
-from experimaestro.core.objects import ConfigInformation, TaskOutput, setmeta
+from experimaestro.core.objects import ConfigInformation, ConfigWrapper, setmeta
 from experimaestro.scheduler.workspace import RunMode
 
 
@@ -56,7 +56,7 @@ class Values:
 
 
 def getidentifier(x):
-    if isinstance(x, TaskOutput):
+    if isinstance(x, ConfigWrapper):
         return x.__xpm__.identifier.all
     return x.__xpm__.identifier.all
 
@@ -412,14 +412,14 @@ def test_identifier_reload_config():
     check_reload(IdentifierReloadConfig(id="123"))
 
 
-class IdentifierReloadTaskOutput(Task):
+class IdentifierReloadConfigWrapper(Task):
     id: Param[str]
 
     def taskoutputs(self):
         return IdentifierReloadConfig(id=self.id)
 
 
-class IdentifierReloadTaskOutputDerived(Config):
+class IdentifierReloadConfigWrapperDerived(Config):
     task: Param[IdentifierReloadConfig]
 
 
@@ -427,8 +427,8 @@ def test_identifier_reload_taskoutput():
     """When using a task output, the identifier should not be different"""
 
     # Creates the configuration
-    task = IdentifierReloadTaskOutput(id="123").submit(run_mode=RunMode.DRY_RUN)
-    config = IdentifierReloadTaskOutputDerived(task=task)
+    task = IdentifierReloadConfigWrapper(id="123").submit(run_mode=RunMode.DRY_RUN)
+    config = IdentifierReloadConfigWrapperDerived(task=task)
     check_reload(config)
 
 

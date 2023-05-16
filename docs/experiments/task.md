@@ -67,18 +67,18 @@ It is possible to generate a configuration when submitting a task.
 
     ```
 
-## Task output object
+## Wrapper object
 
-Calling submit returns a `TaskOutput` object, which is necessary to keep track
+Calling submit returns a `ConfigWrapper` object, which is necessary to keep track
 of dependencies. This task output is a proxy for the returned object, i.e.
-accessing an attribute wraps it into another `TaskOutput` object.
+accessing an attribute wraps it into another `ConfigWrapper` object.
 
-`TaskOutput` objects have two specific methods and variables:
+`ConfigWrapper` objects have two specific methods and variables:
 
-- `__xpm__`, a `TaskOutputInformation` instance, containing the `task` that was submitted (dependency tracking)
+- `__xpm__`, a `ConfigWrapperInformation` instance, containing the `task` that was submitted (dependency tracking)
 - `__unwrap__` that returns the wrapped value (warning: unwrapping might prevent dependency tracking from working, but might be useful in some corner cases)
 
-For `TaskOutputInformation`, we have:
+For `ConfigWrapperInformation`, we have:
 
 - `stdout()` and `stderr()` that return a `Path` to the file that contains the standard output/error
 - `tags()` that returns the tags of the wrapped variable

@@ -12,7 +12,7 @@ import subprocess
 from termcolor import colored, cprint
 
 import experimaestro
-from experimaestro.core.objects import TaskOutput
+from experimaestro.core.objects import ConfigWrapper
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -142,7 +142,7 @@ def diff(path: Path):
             if new_id != old_id:
                 print(f"{path} differ: {new_id} vs {old_id}")
 
-                if isinstance(value, TaskOutput):
+                if isinstance(value, ConfigWrapper):
                     check(f"{path}.<task>", value.__xpm__.task, new_value.__xpm__.task)
                 else:
                     for arg in value.__xpmtype__.arguments.values():
