@@ -18,6 +18,7 @@ from experimaestro import (
     Task,
 )
 from experimaestro.core.objects import ConfigInformation, ConfigWrapper, setmeta
+from experimaestro.core.serializers import SerializedConfig
 from experimaestro.scheduler.workspace import RunMode
 
 
@@ -385,6 +386,32 @@ def test_identifier_meta_default_array():
         ArrayConfigWithDefault(array=[]),
         ArrayConfigWithDefault(array=[setmeta(MetaA(x=2), True)]),
     )
+
+
+# --- Check ConfigWrapper
+
+
+class Model(Config):
+    def __post_init__(self):
+        self.initialized = False
+
+
+class Trainer(Config):
+    model: Param[Model]
+
+
+class SerializedModel(SerializedConfig):
+    def initialize(self):
+        self.config.initialized = True
+
+
+def test_identifier_serialized_config():
+    trainer1 = Trainer(model=Model())
+    trainer2 = Trainer(model=SerializedModel(config=Model()))
+    assert_notequal(trainer1, trainer2)
+
+
+# --- Check configuration reloads
 
 
 def check_reload(config):

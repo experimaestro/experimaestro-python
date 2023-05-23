@@ -2,6 +2,7 @@
 
 from functools import cached_property
 import json
+from types import NoneType
 from termcolor import cprint
 import os
 from pathlib import Path
@@ -14,7 +15,6 @@ import inspect
 import importlib
 from typing import (
     Any,
-    Callable,
     ClassVar,
     Dict,
     List,
@@ -279,7 +279,13 @@ def updatedependencies(
         for el in value:
             updatedependencies(dependencies, el, path, taskids)
     elif isinstance(value, ConfigWrapper):
-        dependencies.add(value.__xpm__.task.__xpm__.dependency())
+        # Add the base value (if any)
+        if value.__xpm__.base is not None:
+            value.__xpm__.base.__xpm__.updatedependencies(dependencies, path, taskids)
+
+        # Add the task (if any)
+        if value.__xpm__.task is not None:
+            dependencies.add(value.__xpm__.task.__xpm__.dependency())
     elif isinstance(value, (dict,)):
         for key, val in value.items():
             updatedependencies(dependencies, key, path, taskids)
@@ -421,7 +427,11 @@ class ConfigWalk:
 
         if isinstance(x, ConfigWrapper):
             # Process task if different
-            if self.recurse_task and x.__xpm__.task is not x.__unwrap__():
+            if (
+                x.__xpm__.task is not None
+                and self.recurse_task
+                and x.__xpm__.task is not x.__unwrap__()
+            ):
                 self(x.__xpm__.task)
 
             # Processed the wrapped config
@@ -429,6 +439,9 @@ class ConfigWalk:
 
         if isinstance(x, (float, int, str, Path, Enum)):
             return x
+
+        if isinstance(x, Proxy):
+            return self(x.__unwrap__())
 
         raise NotImplementedError(f"Cannot handle a value of type {type(x)}")
 
@@ -448,7 +461,7 @@ class ConfigInformation:
     """Forces this configuration to be a meta-parameter"""
 
     # Set to true when loading from JSON
-    LOADING = False
+    LOADING: ClassVar[bool] = False
 
     def __init__(self, pyobject: "TypeConfig"):
         # The underlying pyobject and XPM type
@@ -477,6 +490,7 @@ class ConfigInformation:
         self._meta = None
 
     def set_meta(self, value: Optional[bool]):
+        """Sets the meta flag"""
         assert not self._sealed, "Configuration is sealed"
         self._meta = value
 
@@ -672,12 +686,17 @@ class ConfigInformation:
             hook(job)
 
     def submit(
-        self, workspace: "Workspace", launcher: "Launcher", run_mode=None
+        self, workspace: "Workspace", launcher: "Launcher", *, run_mode=None, pre=None
     ) -> "ConfigWrapper":
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
 
+        # --- Handle default values
+
+        pre = pre or []
+
         # --- Prepare the object
+
         if self.job:
             raise Exception("task %s was already submitted" % self)
         if not self.xpmtype.task:
@@ -685,6 +704,7 @@ class ConfigInformation:
 
         # --- Submit the job
 
+        # Creates a new job
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, run_mode=run_mode
         )
@@ -759,16 +779,20 @@ class ConfigInformation:
                 hints = get_type_hints(self.pyobject.config)
                 config = hints["return"](**config)
             config.__xpm__.validate()
-            self._taskoutput = ConfigWrapper(config, self.pyobject)
+            self._taskoutput = ConfigWrapper.__create_taskoutput__(
+                config, self.pyobject
+            )
 
         # New way to handle outputs
         elif hasattr(self.pyobject, "taskoutputs"):
             value = self.pyobject.taskoutputs()
-            self._taskoutput = ConfigWrapper(value, self.pyobject)
+            self._taskoutput = ConfigWrapper.__create_taskoutput__(value, self.pyobject)
 
         # Otherwise, the output is just the config
         else:
-            self._taskoutput = ConfigWrapper(self.pyobject, self.pyobject)
+            self._taskoutput = ConfigWrapper.__create_taskoutput__(
+                self.pyobject, self.pyobject
+            )
 
         return self._taskoutput
 
@@ -810,20 +834,13 @@ class ConfigInformation:
                 "value": value.name,
             }
 
-        elif isinstance(value, SerializedConfigWrapper):
-            # Reference to a serialized object
-            return {
-                "type": "serialized",
-                "value": id(value.__xpm__.serialized.loader),
-                "path": [c.toJSON() for c in value.__xpm__.path],
-            }
-
         elif isinstance(value, ConfigWrapper):
             return {
                 "type": "python",
                 "value": id(value.__unwrap__()),
                 # We add the task for identifier computation
                 "task": id(value.__xpm__.task),
+                "path": [c.toJSON() for c in value.__xpm__.path or []],
             }
 
         elif isinstance(value, Config):
@@ -892,25 +909,18 @@ class ConfigInformation:
     def __collect_objects__(value, objects: List[Dict], context: SerializationContext):
         """Serialize all needed configuration objects, looking at sub
         configurations if necessary"""
-        # objects
-        if isinstance(value, SerializedConfigWrapper):
-            loader = value.__xpm__.serialized.loader
-            if id(loader) not in context.serialized:
-                objects.append(
-                    {
-                        "id": id(loader),
-                        "serialized": True,
-                        "module": loader.__class__.__module__,
-                        "type": loader.__class__.__qualname__,
-                        "value": loader.toJSON(),
-                    }
-                )
-            return
-
         # Unwrap if needed
         if isinstance(value, ConfigWrapper):
             # We will need to output the task configuration objects
-            ConfigInformation.__collect_objects__(value.__xpm__.task, objects, context)
+            if value.__xpm__.task is not None:
+                ConfigInformation.__collect_objects__(
+                    value.__xpm__.task, objects, context
+                )
+
+            if value.__xpm__.base is not None:
+                ConfigInformation.__collect_objects__(
+                    value.__xpm__.base, objects, context
+                )
 
             # Unwrap the value to output it
             value = value.__unwrap__()
@@ -1040,7 +1050,7 @@ class ConfigInformation:
                 if not as_instance:
                     if task_id := value.get("task", None):
                         task = objects[task_id]
-                        return ConfigWrapper(obj, task)
+                        return ConfigWrapper.__create_taskoutput__(obj, task)
                 return obj
 
             if value["type"] == "serialized":
@@ -1102,6 +1112,7 @@ class ConfigInformation:
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
+        from .serializers import SerializedConfig
 
         for definition in definitions:
             module_name = definition["module"]
@@ -1184,7 +1195,10 @@ class ConfigInformation:
                             assert isinstance(v, Path), "Excepted Path, got {type(v)}"
 
                     if as_instance:
+                        # Unwrap the value if needed
+                        v = unwrap(v)
                         setattr(o, name, v)
+
                         assert (
                             getattr(o, name) is v
                         ), f"Problem with deserialization {name} of {o.__class__}"
@@ -1194,6 +1208,8 @@ class ConfigInformation:
                 if as_instance:
                     # Calls post-init
                     o.__post_init__()
+                    if isinstance(o, SerializedConfig):
+                        o.initialize()
                 else:
                     # Seal and set the identifier
                     if not discard_id:
@@ -1246,6 +1262,13 @@ class ConfigInformation:
 
             # Call __post_init__
             o.__post_init__()
+
+            # Process a serialized configuration
+            from .serializers import SerializedConfig
+
+            if isinstance(o, SerializedConfig):
+                o.initialize()
+                o = o.__unwrap__()
 
             return o
 
@@ -1406,15 +1429,18 @@ class TypeConfig:
             ), f"{context.__class__} is not an instance of ConfigWalkContext"
         return self.__xpm__.fromConfig(context)  # type: ignore
 
-    def submit(self, *, workspace=None, launcher=None, run_mode: "RunMode" = None):
+    def submit(
+        self, *, workspace=None, launcher=None, run_mode: "RunMode" = None, pre=None
+    ):
         """Submit this task
 
         :param workspace: the workspace, defaults to None
         :param launcher: The launcher, defaults to None
         :param run_mode: Run mode (if None, uses the workspace default)
+        :param pre: Pre-tasks to execute before
         :return: a :py:class:ConfigWrapper object
         """
-        return self.__xpm__.submit(workspace, launcher, run_mode=run_mode)
+        return self.__xpm__.submit(workspace, launcher, run_mode=run_mode, pre=pre)
 
     def stdout(self):
         return self.__xpm__.job.stdout
@@ -1515,9 +1541,6 @@ class Task(Config):
         raise NotImplementedError()
 
 
-# --- Output proxy
-
-
 class Proxy:
     """A proxy for a value"""
 
@@ -1525,7 +1548,29 @@ class Proxy:
         raise NotImplementedError()
 
 
+def unwrap(v: Any):
+    """Unwrap all proxies"""
+    while isinstance(v, Proxy):
+        v = v.__unwrap__()
+    return v
+
+
+class AttrAccessor:
+    """Access an attribute"""
+
+    def __init__(self, key: str):
+        self.key = key
+
+    def get(self, value):
+        return getattr(value, self.key)
+
+    def toJSON(self):
+        return {"type": "attr", "name": self.key}
+
+
 class ItemAccessor:
+    """Access an array item"""
+
     def __init__(self, key: Any):
         self.key = key
 
@@ -1536,49 +1581,65 @@ class ItemAccessor:
         return value.__getitem__(self.key)
 
 
-class AttrAccessor:
-    def __init__(self, key: Any, default: Any):
-        self.key = key
-        self.default = default
-
-    def get(self, value):
-        return getattr(value, self.key, self.default)
-
-    def toJSON(self):
-        return {"type": "attr", "name": self.key}
-
-
-class Serialized:
-    """Simple serialization object"""
-
-    def __init__(self, value):
-        self.value = value
-
-    def toJSON(self):
-        return self.value
-
-
-class SerializedConfig:
-    """A serializable configuration
-
-    This can be used to define a loading mechanism when instanciating the
-    configuration
-    """
-
-    pyobject: Config
-    """The configuration that will be serialized"""
-
-    def __init__(self, pyobject: Config, loader: Callable[[Path], Config]):
-        self.pyobject = pyobject
-        self.loader = loader
-
-
 class ConfigWrapperInfo:
-    def __init__(self, task: Task):
-        self.task = task
-        self.value = None
-        self.path = None
-        self.serialized = None
+    """Global information about the Configuration wrapper"""
+
+    def __init__(
+        self,
+        value: Any,
+        *,
+        task: Optional[Task] = None,
+        parent: Optional["ConfigWrapperInfo"] = None,
+        base: Optional[Config] = None,
+        path: Optional[List[Path]] = None,
+    ):
+        # Current value
+        self.value = value
+        self.parent = parent
+
+        # The task
+        if isinstance(value, Task):
+            self.task = value
+        else:
+            self.task = task
+
+        # Holds serialized config information
+        from .serializers import SerializedConfig
+
+        if isinstance(value, SerializedConfig):
+            self.base = value
+            self.value = value.config
+            self.path = [AttrAccessor("config")]
+        else:
+            self.base = base
+            self.path = path
+
+    def __state_dict__(self):
+        return {"task": self.task, "base": self.base, "path": self.path}
+
+    def __getitem__(self, key: Any):
+        kwargs = self.__state_dict__()
+        value = self.value.__getitem__(key)
+
+        if self.path:
+            kwargs["path"].append(ItemAccessor(key))
+
+        return ConfigWrapperInfo(value, **kwargs)
+
+    def __getattr__(self, key: str, *default) -> Any:
+        kwargs = self.__state_dict__()
+        value = getattr(self.value, key, *default)
+        if self.path:
+            kwargs["path"].append(AttrAccessor(key, *default))
+        return ConfigWrapperInfo(value, parent=self, **kwargs)
+
+    def wrap(self):
+        """Wrap a value if needed"""
+        if isinstance(self.value, (str, int, float, Path, bool, NoneType)):
+            return self.value
+
+        # Returns a new config wrapper
+        return ConfigWrapper(self)
 
     @property
     def identifier(self):
@@ -1589,86 +1650,58 @@ class ConfigWrapperInfo:
         return self.task.__xpm__.job
 
     def tags(self):
+        """Returns the tags of the task"""
         tags = self.task.__xpm__.tags()
         return tags
 
     def stdout(self):
+        """Returns the standard output of the associated task"""
         return self.task.__xpm__.job.stdout
 
     def stderr(self):
+        """Returns the standard error of the associated task"""
         return self.task.__xpm__.job.stderr
 
     def wait(self):
+        """Wait for the task to end
+
+        :return: True if the task completed without error
+        """
         from experimaestro.scheduler import JobState
 
         return self.task.__xpm__.job.wait() == JobState.DONE
 
 
+# Cleanup into just one
 class ConfigWrapper(Proxy):
     """Task proxy
 
     This is used when accessing properties *after* having submitted a task,
-    to keep track of the dependencies
+    to keep track of the dependencies, and/or as an accessor when dealing with
+    a serialized config
     """
 
-    def __init__(self, value: Any, task: Union[Task, ConfigWrapperInfo]):
-        self.__xpm__ = (
-            task if isinstance(task, ConfigWrapperInfo) else ConfigWrapperInfo(task)
-        )
-        self.__xpm__.value = value
+    def __init__(self, info: ConfigWrapperInfo):
+        self.__xpm__ = info
 
-    def _wrap(self, value):
-        if isinstance(value, SerializedConfig):
-            return SerializedConfigWrapper(value.pyobject, value, self.__xpm__.task, [])
-
-        if isinstance(value, (str, int, float, Path, bool)):
-            # No need to wrap if direct
-            return value
-
-        return ConfigWrapper(value, self.__xpm__.task)
+    @staticmethod
+    def __create_taskoutput__(value: Any, task: Task):
+        return ConfigWrapperInfo(value, task=task).wrap()
 
     def __getitem__(self, key: Any):
-        return self._wrap(self.__xpm__.value.__getitem__(key))
+        return self.__xpm__[key].wrap()
 
-    def __getattr__(self, key: str, default=None) -> Any:
-        return self._wrap(getattr(self.__xpm__.value, key, default))
+    def __getattr__(self, key: str, *default) -> Any:
+        return self.__xpm__.__getattr__(key, *default).wrap()
 
     def __unwrap__(self):
         return self.__xpm__.value
 
     def __call__(self, *args, **kwargs):
         assert callable(self.__xpm__.value), "Attribute is not a function"
-        __self__ = ConfigWrapper(self.__xpm__.value.__self__, self.__xpm__.task)
+
+        __self__ = self.__xpm__.parent.wrap()
         return self.__xpm__.value.__func__(__self__, *args, **kwargs)
-
-
-class SerializedConfigWrapper(ConfigWrapper):
-    """Used when serializing a configuration
-
-    Here, we need to keep track of the path to the value we need
-    """
-
-    def __init__(
-        self, value, serialized: SerializedConfig, task: Task, path: List[Any]
-    ):
-        super().__init__(value, task)
-        self.__xpm__.serialized = serialized
-        self.__xpm__.path = path
-
-    def __getitem__(self, key: Any):
-        value = self.__xpm__.value.__getitem__(key)
-        return SerializedConfigWrapper(
-            value, self.serialized, self.__xpm__.task, self.path + [ItemAccessor(key)]
-        )
-
-    def __getattr__(self, key: str, default=None) -> Any:
-        value = getattr(self.__xpm__.value, key, default)
-        return SerializedConfigWrapper(
-            value,
-            self.__xpm__.serialized,
-            self.__xpm__.task,
-            self.__xpm__.path + [AttrAccessor(key, default)],
-        )
 
 
 # --- Utility functions

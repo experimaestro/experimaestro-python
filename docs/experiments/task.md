@@ -30,6 +30,44 @@ some special variables are defined:
 - task directory can is `self.__taskdir__`
 - when using [sub-parameters](../config#sub-parameters), `self.__maintaskdir__` is the directory of the main task
 
+
+## Restoring object state
+
+It is possible to restore an object state from disk; in that case, `SerializedConfig` (which can
+be subclassed) can be used:
+
+```py3
+from experimaestro import Config, SerializedConfig
+
+class Model(Config):
+    ...
+
+class SerializedModel(SerializedConfig):
+    def initialize(self):
+        # Access the configuration through self.config
+        self.config.initialized = True
+```
+
+A serialized configuration can be used instead of the configuration. This is useful
+to separate the loading mechanism from the configuration logic.
+
+
+The most often use case is when the state can be recovered from disk. In that case,
+`PathBasedSerializedConfig` can be used
+
+```py3
+from experimaestro import Config, PathBasedSerializedConfig
+
+class Model(Config):
+    ...
+
+class SerializedModel(PathBasedSerializedConfig):
+    def initialize(self):
+        # Loads the model from disk
+        data = torch.load(self.path)
+        self.config.load_state_dict(data)
+```
+
 ## Tasks outputs
 
 It is possible to generate a configuration when submitting a task.
@@ -53,7 +91,7 @@ It is possible to generate a configuration when submitting a task.
         parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
         def taskoutputs(self) -> Model:
-            return SerializedConfig(self.model, ModelLoader(str(self.parameters)))
+            return SerializedModel(config=self.model, path=ModelLoader(str(self.parameters)))
 
         def execute(self):
             """Called when this task is run"""

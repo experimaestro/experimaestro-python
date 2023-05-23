@@ -47,9 +47,8 @@ from .core.objects import (
     ConfigWrapper,
     ConfigWrapper as TaskOutput,  # maintains compatibility
     Task,
-    SerializedConfig,
-    Serialized,
 )
+from .core.serializers import SerializedConfig, PathBasedSerializedConfig
 from .core.types import Any, SubmitHook, submit_hook_decorator
 from .launchers import Launcher
 from .scheduler.environment import Environment
