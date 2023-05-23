@@ -4,7 +4,7 @@ fallback_version = "0.0.0-dev"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.23.0"
+version = "0.24.0"
 changelog_start_rev = "0.15.0"
 tag_format = "$version"
 update_changelog_on_bump = true

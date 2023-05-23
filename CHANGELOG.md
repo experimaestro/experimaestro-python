@@ -1,3 +1,18 @@
+## 0.24.0 (2023-05-23)
+
+### Feat
+
+- serialized configurations
+
+### Fix
+
+- requirement for fabric
+- add gevent-websocket for supporting websockets
+
+### Refactor
+
+- Changed TaskOutput to ConfigWrapper
+
 ## 0.23.0 (2023-04-07)
 
 ### Feat
