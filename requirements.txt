@@ -39,6 +39,8 @@ marshmallow
 # SSH support (fabric is built on Paramiko,
 # and allows using OpenSSH config out of the box)
 fabric
+# Bug fix: required by fabric but not in reqs.
+decorator
 
 # Remote code execution
 rpyc

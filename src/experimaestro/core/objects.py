@@ -2,7 +2,12 @@
 
 from functools import cached_property
 import json
-from types import NoneType
+
+try:
+    from types import NoneType
+except Exception:
+    # compatibility: python-3.8
+    NoneType = type(None)
 from termcolor import cprint
 import os
 from pathlib import Path
