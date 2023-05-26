@@ -1,3 +1,13 @@
+## 0.27.0 (2023-05-26)
+
+### Feat
+
+- Expose the unwrap function
+
+### Fix
+
+- Removes unnecessary server logs
+
 ## 0.26.0 (2023-05-26)
 
 ### Fix
