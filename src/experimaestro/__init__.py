@@ -44,6 +44,7 @@ from .core.objects import (
     Config,
     copyconfig,
     setmeta,
+    unwrap,
     ConfigWrapper,
     ConfigWrapper as TaskOutput,  # maintains compatibility
     Task,
