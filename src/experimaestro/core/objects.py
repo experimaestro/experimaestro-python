@@ -477,7 +477,6 @@ class ConfigInformation:
         # Meta-informations
         self._tags = {}
         self._initinfo = ""
-        self.submit_hooks = set()
 
         # Generated task
         self._taskoutput = None
@@ -673,7 +672,7 @@ class ConfigInformation:
                 logger.error("While setting %s", path + [argument.name])
                 raise
 
-    def apply_submit_hooks(self, job: "Job"):
+    def apply_submit_hooks(self, job: "Job", launcher: "Launcher"):
         """Apply configuration hooks"""
         context = ConfigWalkContext()
 
@@ -683,12 +682,14 @@ class ConfigInformation:
                 self.hooks = set()
 
             def postprocess(self, config: "Config", values: Dict[str, Any]):
-                self.hooks.update(config.__xpm__.submit_hooks)
+                self.hooks.update(config.__xpmtype__.submit_hooks)
 
         gatherer = HookGatherer(context, recurse_task=False)
         gatherer(self.pyobject)
+
+        # Apply hooks
         for hook in gatherer.hooks:
-            hook(job)
+            hook.process(job, launcher)
 
     def submit(
         self, workspace: "Workspace", launcher: "Launcher", *, run_mode=None, pre=None
@@ -728,23 +729,25 @@ class ConfigInformation:
         # Now, seal the object
         self.seal(JobContext(self.job))
 
-        # --- Search for dependencies
+        # --- Workspace
 
         workspace = workspace or (
             experiment.CURRENT.workspace if experiment.CURRENT else None
         )
 
-        # Call onSubmit hooks
+        # --- Launcher
+
         launcher = (
             launcher
             or (workspace and workspace.launcher)
             or (experiment.CURRENT and experiment.CURRENT.workspace.launcher)
         )
+
         if launcher:
             launcher.onSubmit(self.job)
 
         # Apply submit hooks
-        self.apply_submit_hooks(self.job)
+        self.apply_submit_hooks(self.job, launcher)
 
         # Add job dependencies
         self.updatedependencies(self.job.dependencies, [], set([id(self.pyobject)]))

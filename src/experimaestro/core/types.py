@@ -155,12 +155,18 @@ class SubmitHook(ABC):
     This allows modifying e.g. the run environnement
     """
 
+    def __call__(self, cls: typing.Type["Config"]):
+        """Decorates a an XPM configuration"""
+        cls.__getxpmtype__().submit_hooks.add(self)
+        return cls
+
     @abstractmethod
-    def __call__(self, job: "Job", launcher: "Launcher"):
+    def process(self, job: "Job", launcher: "Launcher"):
+        """Apply the hook for the job/launcher"""
         ...
 
     @abstractmethod
-    def __spec__(self):
+    def spec(self):
         """Returns an identifier tuple for hashing/equality"""
         ...
 
@@ -170,15 +176,7 @@ class SubmitHook(ABC):
         return self.__spec__ == other.__spec__
 
     def __hash__(self):
-        return hash((self.__class__, self.__spec__))
-
-
-def submit_hook_decorator(hook: SubmitHook):
-    def decorator(cls: typing.Type["Config"]):
-        cls.__getxpmtype__().submit_hooks.add(hook)
-        return cls
-
-    return decorator
+        return hash((self.__class__, self.spec()))
 
 
 class ObjectType(Type):

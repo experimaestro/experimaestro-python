@@ -105,6 +105,33 @@ It is possible to generate a configuration when submitting a task.
 
     ```
 
+
+## Submit hooks
+
+When a task is submitted, it is possible to modify the job/launcher environnement
+
+```py3
+from experimaestro import SubmitHook, Job, Launcher, submit_hook_decorator
+
+
+class needs_java(SubmitHook):
+    def __init__(self, version: int):
+        self.version = version
+
+    def spec(self):
+        """Returns a hashable identifier for this hook (so it is only applied once)"""
+        return self.version
+
+    def process(self, job: Job, launcher: Launcher):
+        """Apply the hook for a given job/launcher"""
+        job.environ["JAVA_HOME"] = "THE_JAVA_HOME"
+...
+
+@needs_java(11)
+class IndexCollection(Config):
+    ...
+```
+
 ## Wrapper object
 
 Calling submit returns a `ConfigWrapper` object, which is necessary to keep track

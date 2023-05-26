@@ -7,6 +7,7 @@ from experimaestro import Config, deprecate, Task, Param
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tools.jobs import fix_deprecated
 from experimaestro.scheduler import FailedExperiment, JobState
+from experimaestro import SubmitHook, Job, Launcher
 
 from .utils import TemporaryDirectory, TemporaryExperiment, get_times
 
@@ -270,3 +271,28 @@ def test_tasks_deprecated():
         fix_deprecated(xp.workspace.path, True, False)
 
         checknewpaths(task_new, task_old_path)
+
+
+class needs_java(SubmitHook):
+    def __init__(self, version: int):
+        self.version = version
+
+    def spec(self):
+        return self.version
+
+    def process(self, job: Job, launcher: Launcher):
+        job.environ["JAVA_HOME"] = "THE_JAVA_HOME"
+
+
+@needs_java(11)
+class HookedTask(Task):
+    def execute(self):
+        pass
+
+
+def test_task_submit_hook():
+    result = HookedTask().submit(run_mode=RunMode.DRY_RUN)
+    assert (
+        result.__xpm__.task.__xpm__.job.environ.get("JAVA_HOME", None)
+        == "THE_JAVA_HOME"
+    )

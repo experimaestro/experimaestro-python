@@ -49,7 +49,7 @@ from .core.objects import (
     Task,
 )
 from .core.serializers import SerializedConfig, PathBasedSerializedConfig
-from .core.types import Any, SubmitHook, submit_hook_decorator
+from .core.types import Any, SubmitHook
 from .launchers import Launcher
 from .scheduler.environment import Environment
 from .scheduler.workspace import Workspace, RunMode

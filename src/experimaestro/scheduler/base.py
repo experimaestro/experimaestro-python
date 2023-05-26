@@ -1,4 +1,5 @@
 from collections import ChainMap, defaultdict
+from functools import cached_property
 import os
 from pathlib import Path
 from shutil import rmtree
@@ -151,7 +152,7 @@ class Job(Resource):
         assert self._future, "Cannot wait a not submitted job"
         return self._future.result()
 
-    @property
+    @cached_property
     def environ(self):
         """Returns the job environment
 
@@ -165,7 +166,7 @@ class Job(Resource):
         return ChainMap(
             {},
             self.launcher.environ if self.launcher else {},
-            self.workspace.environment.environ,
+            self.workspace.environment.environ if self.workspace else {},
         )
 
     @property
