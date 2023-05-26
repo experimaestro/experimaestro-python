@@ -325,6 +325,10 @@ class Server:
     def start(self):
         """Start the websocket server in a new process process"""
         logging.info("Starting the web server")
+
+        # Avoids clutering
+        logging.getLogger("geventwebsocket.handler").setLevel(logging.WARNING)
+
         self.thread = threading.Thread(target=start_app, args=(self,)).start()
 
         # Wait until we really started
