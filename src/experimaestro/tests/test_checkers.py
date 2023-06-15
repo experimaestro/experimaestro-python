@@ -1,4 +1,4 @@
-from experimaestro import config
+from experimaestro import Config
 from experimaestro.core.arguments import Annotated
 from experimaestro.checkers import Choices
 import pytest
@@ -7,8 +7,7 @@ import pytest
 def test_choices():
     """Test choices"""
 
-    @config()
-    class TestChoices:
+    class TestChoices(Config):
         a: Annotated[str, Choices(["a", "b"])]
 
     TestChoices(a="a").__xpm__.validate()

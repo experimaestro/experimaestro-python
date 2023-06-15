@@ -4,15 +4,12 @@ from experimaestro import (
     tag,
     config,
     argument,
-    pathgenerator,
-    Annotated,
     Config,
     Task,
     Param,
 )
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.xpmutils import DirectoryContext
-from experimaestro.tests.utils import TemporaryExperiment
 
 
 @argument("x", type=int)
@@ -80,28 +77,6 @@ class TaskDirectoryContext(DirectoryContext):
     @property
     def task(self):
         return self._task
-
-
-def test_objects_nested_tags():
-    """Tags should be propagated to nested output configurations"""
-
-    class B(Config):
-        p: Annotated[Path, pathgenerator("p.txt")]
-
-    class A(Task):
-        x: Param[int]
-        b: Param[B]
-
-    a = A(x=tag(1), b=B())
-    with TemporaryExperiment("nested_tags"):
-        # context = TaskDirectoryContext(a, Path("/__fakepath__"))
-        output = a.submit(run_mode=RunMode.DRY_RUN)
-
-    # Tags of main object...
-    assert a.__xpm__.tags() == {"x": 1}
-
-    # ...should be propagated to output configurations
-    assert output.b.__xpm__.tags() == {"x": 1}
 
 
 def test_objects_tags():

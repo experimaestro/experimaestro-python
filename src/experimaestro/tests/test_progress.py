@@ -5,7 +5,7 @@ import time
 import fasteners
 from typing import List, Tuple, Union
 from experimaestro import Task, Annotated, pathgenerator, progress, tqdm
-from experimaestro.core.objects import ConfigWrapper, logger
+from experimaestro.core.objects import logger
 from experimaestro.notifications import LevelInformation
 from experimaestro.scheduler import Job, Listener
 from queue import Queue
@@ -72,7 +72,7 @@ def test_progress_basic():
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
-        out: ConfigWrapper = ProgressingTask().submit()
+        out = ProgressingTask().submit()
         path = out.path  # type: Path
         job = out.__xpm__.job
 
@@ -103,7 +103,7 @@ def test_progress_multiple():
         listener1 = ProgressListener()
         xp1.scheduler.addlistener(listener1)
 
-        out = ProgressingTask().submit()  # type: ConfigWrapper
+        out = ProgressingTask().submit()
         path = out.path  # type: Path
         job = out.__xpm__.job
 
@@ -217,7 +217,7 @@ def test_progress_nested():
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
-        out = NestedProgressingTask().submit()  # type: ConfigWrapper
+        out = NestedProgressingTask().submit()
         job = out.__xpm__.job
         path = out.path  # type: Path
 

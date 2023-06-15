@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Optional, Union
-from experimaestro import Config, ConfigWrapper
+from experimaestro import Config
 from experimaestro.core.context import SerializedPath
 from experimaestro.core.objects import ConfigInformation
 from huggingface_hub import ModelHubMixin, hf_hub_download, snapshot_download
@@ -10,10 +10,8 @@ import os
 class ExperimaestroHFHub(ModelHubMixin):
     """Defines models that can be uploaded/downloaded from the Hub"""
 
-    def __init__(
-        self, config: Union[Config, ConfigWrapper], variant: Optional[str] = None
-    ):
-        self.config = config if isinstance(config, Config) else config.__unwrap__()
+    def __init__(self, config: Config, variant: Optional[str] = None):
+        self.config = config
         self.variant = variant
 
     def _save_pretrained(self, save_directory: Union[str, Path]):

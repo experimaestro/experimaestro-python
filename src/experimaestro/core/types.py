@@ -264,10 +264,10 @@ class ObjectType(Type):
         self.basetype._ = self.configtype
 
         # Return type is used by tasks to change the output
-        if hasattr(self.basetype, "taskoutputs") or False:
-            self.returntype = get_type_hints(getattr(self.basetype, "taskoutputs")).get(
-                "return", typing.Any
-            )
+        if hasattr(self.basetype, "task_outputs") or False:
+            self.returntype = get_type_hints(
+                getattr(self.basetype, "task_outputs")
+            ).get("return", typing.Any)
         else:
             self.returntype = self.objecttype
 
@@ -459,23 +459,12 @@ class ObjectType(Type):
 
     def validate(self, value):
         """Ensures that the value is compatible with this type"""
-        from .objects import Config, Proxy
+        from .objects import Config
 
         self.__initialize__()
 
         if value is None:
             return None
-
-        if isinstance(value, Proxy):
-            _value = value.__unwrap__()
-            _value = self.validate(_value)
-
-            # If this is a simple type, OK
-            if isinstance(_value, (int, float, str, bool, Path)):
-                return _value
-
-            # Returns the proxy
-            return value
 
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")

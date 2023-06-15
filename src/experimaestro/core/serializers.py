@@ -1,4 +1,4 @@
-from typing import List, TypeVar
+from typing import List, TypeVar, Callable, Any
 from pathlib import Path
 from experimaestro import Param
 
@@ -41,6 +41,6 @@ class PathSerializationLWTask(SerializationLWTask):
     """Path containing the data"""
 
     @classmethod
-    def construct(cls, value: T, path: Path) -> T:
+    def construct(cls, value: T, path: Path, dep: Callable[[Config], Any]) -> T:
         value = copyconfig(value)
-        return value.add_pretasks(cls(value=value, path=path))
+        return value.add_pretasks(dep(cls(value=value, path=path)))

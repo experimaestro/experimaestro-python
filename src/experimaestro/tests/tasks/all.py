@@ -3,36 +3,30 @@ from typing import List
 from experimaestro import (
     param,
     Param,
-    config,
-    task,
+    Task,
+    Config,
     pathoption,
-    Identifier,
     STDOUT,
     cache,
 )
 
-tasks = Identifier("tasks")
 
-
-@task()
-class SimpleTask:
+class SimpleTask(Task):
     x: Param[int]
 
     def execute(self):
-        print(self.x)
+        print(self.x)  # noqa: T201
 
 
 @pathoption("out", STDOUT)
-@task(tasks.say)
-class Say:
+class Say(Task):
     word: Param[str]
 
     def execute(self):
         self.out.write_text(self.word.upper())
 
 
-@task(tasks.concat)
-class Concat:
+class Concat(Task):
     strings: Param[List[Say]]
 
     def execute(self):
@@ -41,25 +35,22 @@ class Concat:
         for string in self.strings:
             with open(string.out) as fp:
                 says.append(fp.read().strip())
-        print(" ".join(says))
+        print(" ".join(says))  # noqa: T201
 
 
 @param("x", type=int)
-@config()
-class ForeignClassB1:
+class ForeignClassB1(Config):
     pass
 
 
 @param("b", type=ForeignClassB1)
-@task()
-class ForeignTaskA:
+class ForeignTaskA(Task):
     def execute(self):
-        print(self.b.x)
+        print(self.b.x)  # noqa: T201
 
 
 @pathoption("wait", "wait")
-@task(tasks.fail)
-class Fail:
+class Fail(Task):
     def execute(self):
         while not self.wait.is_file():
             time.sleep(0.01)
@@ -74,21 +65,18 @@ class Fail:
 
 
 @param("fail", Fail)
-@task(tasks.failconsumer)
-class FailConsumer:
+class FailConsumer(Task):
     def execute(self):
         return True
 
 
 @param("a", int)
-@task(tasks.method)
-class Method:
+class Method(Task):
     def execute(self):
         assert self.a == 1
 
 
-@task(tasks.setunknown)
-class SetUnknown:
+class SetUnknown(Task):
     def execute(self):
         self.abc = 1
 
@@ -96,8 +84,7 @@ class SetUnknown:
 """Check that config works properly"""
 
 
-@config()
-class CacheConfig:
+class CacheConfig(Config):
     @cache("cached")
     def get(self, path):
         if not path.is_file():
@@ -106,7 +93,6 @@ class CacheConfig:
 
 
 @param("data", type=CacheConfig)
-@task()
-class CacheConfigTask:
+class CacheConfigTask(Task):
     def execute(self):
         assert self.data.get() == "hello"

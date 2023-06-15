@@ -23,9 +23,9 @@ class LoadModel(SerializationLWTask):
 class Trainer(Task):
     model: Param[Config]
 
-    def taskoutputs(self):
+    def task_outputs(self, dep):
         model = copyconfig(self.model)
-        return model.add_pretasks(LoadModel(value=model))
+        return model.add_pretasks(dep(LoadModel(value=model)))
 
     def execute(self):
         assert not self.model.initialized, "Model not initialized"

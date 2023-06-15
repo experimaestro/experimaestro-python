@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import subprocess
-from experimaestro import task, param
+from experimaestro import Task, param
 from experimaestro.tokens import CounterToken, TokenFile
 from experimaestro.scheduler import JobState
 from .utils import (
@@ -75,8 +75,7 @@ def test_token_ok():
 
 
 @param("x", type=int)
-@task()
-class dummy_task:
+class dummy_task(Task):
     def execute(self):
         pass
 

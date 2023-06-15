@@ -90,7 +90,7 @@ It is possible to generate a configuration when submitting a task.
         model: Param[Model]
         parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
-        def taskoutputs(self) -> Model:
+        def task_outputs(self) -> Model:
             return SerializedModel(config=self.model, path=ModelLoader(str(self.parameters)))
 
         def execute(self):
@@ -132,22 +132,6 @@ class IndexCollection(Config):
     ...
 ```
 
-## Wrapper object
-
-Calling submit returns a `ConfigWrapper` object, which is necessary to keep track
-of dependencies. This task output is a proxy for the returned object, i.e.
-accessing an attribute wraps it into another `ConfigWrapper` object.
-
-`ConfigWrapper` objects have two specific methods and variables:
-
-- `__xpm__`, a `ConfigWrapperInformation` instance, containing the `task` that was submitted (dependency tracking)
-- `__unwrap__` that returns the wrapped value (warning: unwrapping might prevent dependency tracking from working, but might be useful in some corner cases)
-
-For `ConfigWrapperInformation`, we have:
-
-- `stdout()` and `stderr()` that return a `Path` to the file that contains the standard output/error
-- `tags()` that returns the tags of the wrapped variable
-- `wait()` that waits until the task is finished
 
 ## Lightweights tasks using `@cache`
 

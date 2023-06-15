@@ -36,7 +36,7 @@ def test_task_types():
 def test_simple_task():
     with TemporaryDirectory(prefix="xpm", suffix="helloworld") as workdir:
         assert isinstance(workdir, Path)
-        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=1000):
+        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=10):
             # Submit the tasks
             hello = Say(word="hello").submit()
             world = Say(word="world").submit()
@@ -45,7 +45,7 @@ def test_simple_task():
             concat = Concat(strings=[hello, world]).submit()
 
         assert concat.__xpm__.job.state == JobState.DONE
-        assert Path(concat.__xpm__.stdout()).read_text() == "HELLO WORLD\n"
+        assert Path(concat.stdout()).read_text() == "HELLO WORLD\n"
 
 
 def test_not_submitted():
@@ -61,7 +61,7 @@ def test_fail_simple():
     with pytest.raises(FailedExperiment):
         with TemporaryExperiment("failing", maxwait=10):
             fail = Fail().submit()
-            fail.__unwrap__().touch()
+            fail.touch()
 
 
 def test_foreign_type():
@@ -74,7 +74,7 @@ def test_foreign_type():
         a = ForeignTaskA(b=b).submit()
 
         assert a.__xpm__.job.wait() == JobState.DONE
-        assert a.__xpm__.stdout().read_text().strip() == "1"
+        assert a.stdout().read_text().strip() == "1"
 
 
 def test_fail_dep():
@@ -83,7 +83,7 @@ def test_fail_dep():
         with TemporaryExperiment("failingdep"):
             fail = Fail().submit()
             dep = FailConsumer(fail=fail).submit()
-            fail.__unwrap__().touch()
+            fail.touch()
 
     assert fail.__xpm__.job.state == JobState.ERROR
     assert dep.__xpm__.job.state == JobState.ERROR
@@ -180,30 +180,26 @@ def test_tasks_deprecated_inner():
             run_mode=RunMode.DRY_RUN
         )
 
-        logging.debug(
-            "New task ID: %s", task_new.__unwrap__().__xpm__.identifier.all.hex()
-        )
-        logging.debug(
-            "Old task ID: %s", task_old.__unwrap__().__xpm__.identifier.all.hex()
-        )
+        logging.debug("New task ID: %s", task_new.__xpm__.identifier.all.hex())
+        logging.debug("Old task ID: %s", task_old.__xpm__.identifier.all.hex())
         logging.debug(
             "Old task (with deprecated flag): %s",
-            task_deprecated.__unwrap__().__xpm__.identifier.all.hex(),
+            task_deprecated.__xpm__.identifier.all.hex(),
         )
         assert (
-            task_new.__xpm__.stdout() != task_old.__xpm__.stdout()
+            task_new.stdout() != task_old.stdout()
         ), "Old and new path should be different"
 
         assert (
-            task_new.__xpm__.stdout() == task_deprecated.__xpm__.stdout()
+            task_new.stdout() == task_deprecated.stdout()
         ), "Deprecated path should be the same as non deprecated"
 
         # --- Now check that automatic linking is performed
 
         # Run old task with deprecated configuration
         task_old = TaskWithDeprecated(p=OldConfig()).submit()
-        task_old.__xpm__.wait()
-        task_old_path = task_old.__xpm__.stdout().parent
+        task_old.wait()
+        task_old_path = task_old.stdout().parent
 
         # Fix deprecated
         OldConfig.__xpmtype__.deprecate()
@@ -238,16 +234,16 @@ def test_tasks_deprecated():
         task_deprecated = DeprecatedTask(x=1).submit(run_mode=RunMode.DRY_RUN)
 
         assert (
-            task_new.__xpm__.stdout() != task_old.__xpm__.stdout()
+            task_new.stdout() != task_old.stdout()
         ), "Old and new path should be different"
         assert (
-            task_new.__xpm__.stdout() == task_deprecated.__xpm__.stdout()
+            task_new.stdout() == task_deprecated.stdout()
         ), "Deprecated path should be the same as non deprecated"
 
         # OK, now check that automatic linking is performed
         task_old = OldTask(x=1).submit()
-        task_old.__xpm__.wait()
-        task_old_path = task_old.__xpm__.stdout().parent
+        task_old.wait()
+        task_old_path = task_old.stdout().parent
 
         # Fix deprecated
         OldTask.__xpmtype__.deprecate()

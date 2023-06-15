@@ -7,8 +7,6 @@ if __name__ == "__main__":
     from experimaestro.scheduler import JobState
     from experimaestro.tests.utils import (
         TemporaryExperiment,
-        TemporaryDirectory,
-        timeout,
     )
     from experimaestro.tests.task_tokens import TokenTask
 
@@ -21,7 +19,8 @@ if __name__ == "__main__":
     handler = logging.StreamHandler()
     bf = logging.Formatter(
         f"[XP{x}] "
-        + "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]: %(message)s",
+        "[%(levelname)s] %(asctime)s %(name)s "
+        "[%(process)d/%(threadName)s]: %(message)s",
         datefmt="%H:%M:%S.%f",
     )
     handler.setFormatter(bf)
@@ -47,4 +46,4 @@ if __name__ == "__main__":
         # Wait until the experiment
         task.__xpm__.task.job.wait()
         logging.info("Reschedule with token [%s]: finished", x)
-        Path(timepath).write_text(Path(task.__xpm__.stdout()).read_text())
+        Path(timepath).write_text(Path(task.stdout()).read_text())

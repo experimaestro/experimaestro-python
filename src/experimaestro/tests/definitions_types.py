@@ -1,17 +1,15 @@
-from experimaestro import argument, task
+from experimaestro import argument, Task
 
 
 @argument("value", type=int)
-@task("testinteger")
-class IntegerTask:
+class IntegerTask(Task):
     def execute(self):
         if not isinstance(self.value, int):
             raise AssertionError("Not an integer")
 
 
 @argument("value", type=float)
-@task("testfloat")
-class FloatTask:
+class FloatTask(Task):
     def execute(self):
         if not isinstance(self.value, float):
             raise AssertionError("Not a float but %s" % type(self.value))

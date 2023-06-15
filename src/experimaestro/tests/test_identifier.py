@@ -7,7 +7,6 @@ from experimaestro import (
     config,
     Param,
     param,
-    task,
     deprecate,
     Config,
     Constant,
@@ -21,37 +20,31 @@ from experimaestro import (
 from experimaestro.core.objects import (
     ConfigInformation,
     ConfigWalkContext,
-    ConfigWrapper,
     setmeta,
 )
 from experimaestro.scheduler.workspace import RunMode
 
 
-@config()
-class A:
+class A(Config):
     a: Param[int]
     pass
 
 
-@config()
-class B:
+class B(Config):
     a: Param[int]
     pass
 
 
-@config()
-class C:
+class C(Config):
     a: Param[int] = 1
     b: Param[int]
 
 
-@config()
-class D:
+class D(Config):
     a: Param[A]
 
 
-@config()
-class Float:
+class Float(Config):
     value: Param[float]
 
 
@@ -62,8 +55,6 @@ class Values:
 
 
 def getidentifier(x):
-    if isinstance(x, ConfigWrapper):
-        return x.__xpm__.identifier.all
     return x.__xpm__.identifier.all
 
 
@@ -244,24 +235,22 @@ def test_defaultnew():
 def test_taskconfigidentifier():
     """Test whether the embedded task arguments make the configuration different"""
 
-    @param("a", type=int)
-    @config()
-    class Config:
-        pass
+    class MyConfig(Config):
+        a: Param[int]
 
-    @param("x", type=int)
-    @task()
-    class Task:
-        def config(self):
-            return Config(a=1)
+    class MyTask(Task):
+        x: Param[int]
+
+        def task_outputs(self, dep):
+            return dep(MyConfig(a=1))
 
     assert_equal(
-        Task(x=1).submit(run_mode=RunMode.DRY_RUN),
-        Task(x=1).submit(run_mode=RunMode.DRY_RUN),
+        MyTask(x=1).submit(run_mode=RunMode.DRY_RUN),
+        MyTask(x=1).submit(run_mode=RunMode.DRY_RUN),
     )
     assert_notequal(
-        Task(x=2).submit(run_mode=RunMode.DRY_RUN),
-        Task(x=1).submit(run_mode=RunMode.DRY_RUN),
+        MyTask(x=2).submit(run_mode=RunMode.DRY_RUN),
+        MyTask(x=1).submit(run_mode=RunMode.DRY_RUN),
     )
 
 
@@ -446,14 +435,14 @@ def test_identifier_reload_config():
     check_reload(IdentifierReloadConfig(id="123"))
 
 
-class IdentifierReloadConfigWrapper(Task):
+class IdentifierReload(Task):
     id: Param[str]
 
-    def taskoutputs(self):
+    def task_outputs(self, dep):
         return IdentifierReloadConfig(id=self.id)
 
 
-class IdentifierReloadConfigWrapperDerived(Config):
+class IdentifierReloadDerived(Config):
     task: Param[IdentifierReloadConfig]
 
 
@@ -461,8 +450,8 @@ def test_identifier_reload_taskoutput():
     """When using a task output, the identifier should not be different"""
 
     # Creates the configuration
-    task = IdentifierReloadConfigWrapper(id="123").submit(run_mode=RunMode.DRY_RUN)
-    config = IdentifierReloadConfigWrapperDerived(task=task)
+    task = IdentifierReload(id="123").submit(run_mode=RunMode.DRY_RUN)
+    config = IdentifierReloadDerived(task=task)
     check_reload(config)
 
 

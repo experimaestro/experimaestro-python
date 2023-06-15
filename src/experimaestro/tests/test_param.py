@@ -7,7 +7,7 @@ Test annotation handling for configurations and tasks
 
 import sys
 from pathlib import Path
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List
 from experimaestro.core.context import SerializationContext
 from experimaestro.core.types import DictType, IntType, StrType
 from enum import Enum
@@ -17,7 +17,6 @@ from experimaestro import (
     Option,
     Constant,
     Param,
-    task,
     Task,
     default,
     Config,
@@ -25,7 +24,6 @@ from experimaestro import (
     Annotated,
 )
 import experimaestro.core.types as types
-from experimaestro.scheduler.workspace import RunMode
 from experimaestro.xpmutils import DirectoryContext
 
 # --- Test manual name for configuration
@@ -261,21 +259,6 @@ def test_param_dict():
 
 
 # --- Task annotations
-
-
-def test_task_config():
-    @config()
-    class Output:
-        pass
-
-    @task()
-    class Task:
-        def config(self) -> Output:
-            return {}
-
-    output = Task().submit(run_mode=RunMode.DRY_RUN)
-    # flake8: noqa: E721
-    assert Output.__xpmtype__.configtype is type(output.__unwrap__())
 
 
 def test_default_mismatch():

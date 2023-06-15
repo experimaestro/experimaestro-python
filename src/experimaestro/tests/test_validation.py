@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from experimaestro import (
     config,
-    task,
+    Task,
     Identifier,
     argument,
     pathoption,
@@ -229,20 +229,16 @@ def test_validation_enum():
 # --- Task as argument
 
 
-@config()
-class TaskParentConfig:
+class TaskParentConfig(Config):
     pass
 
 
-@task()
-class taskconfig(TaskParentConfig):
+class taskconfig(TaskParentConfig, Task):
     pass
 
 
-@argument("x", type=TaskParentConfig)
-@config()
-class TaskConfigConsumer:
-    pass
+class TaskConfigConsumer(Config):
+    x: Param[TaskParentConfig]
 
 
 def test_taskargument():

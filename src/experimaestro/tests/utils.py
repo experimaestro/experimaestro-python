@@ -24,9 +24,9 @@ class TimeInterval:
 
 
 def get_times(task: task) -> TimeInterval:
-    logging.info("Reading times from %s", task.__xpm__.stdout())
+    logging.info("Reading times from %s", task.stdout())
     return TimeInterval(
-        *(float(t) for t in task.__xpm__.stdout().read_text().strip().split("\n"))
+        *(float(t) for t in task.stdout().read_text().strip().split("\n"))
     )
 
 

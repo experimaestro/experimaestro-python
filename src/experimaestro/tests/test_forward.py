@@ -1,12 +1,11 @@
-from experimaestro import argument, config
+from experimaestro import argument, Config
 from experimaestro.click import forwardoption
 import click
 
 
 def test_main():
     @argument("epochs", type=int, default=100, help="Number of learning epochs")
-    @config("mymodel")
-    class MyModel:
+    class MyModel(Config):
         pass
 
     @forwardoption.epochs(MyModel)
@@ -20,8 +19,7 @@ def test_main():
 
 def test_rename():
     @argument("epochs", type=int, default=100, help="Number of learning epochs")
-    @config("mymodel")
-    class MyModel:
+    class MyModel(Config):
         pass
 
     @forwardoption.epochs(MyModel, "my-epochs")

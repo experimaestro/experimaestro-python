@@ -121,8 +121,8 @@ class LoadParameters(PathSerializationLWTask):
 class Trainer(Task):
     model: Param[Config]
 
-    def taskoutputs(self):
-        model = copyconfig(self.model)
+    def task_outputs(self, dep):
+        model = dep(copyconfig(self.model))
         # Note the "add_pretasks" here
         return model.add_pretasks(LoadParameters(value=model, path=".../..."))
 

@@ -1,6 +1,6 @@
 """Test for task outputs"""
 
-from experimaestro import Config, Task, Param, ConfigWrapper
+from experimaestro import Config, Task, Param
 from experimaestro.scheduler.workspace import RunMode
 
 
@@ -15,7 +15,7 @@ class A(Config):
 class Main(Task):
     a: Param[A]
 
-    def taskoutputs(self):
+    def task_outputs(self, dep):
         return self.a, {
             "a": self.a,
         }
@@ -34,8 +34,6 @@ class MainB(Task):
 def test_output_taskoutput():
     a = A(b=B())
     output, ioutput = Main(a=a).submit(run_mode=RunMode.DRY_RUN)
-
-    assert isinstance(output, ConfigWrapper), "outputs should be task proxies"
 
     # Direct
     Main(a=output)

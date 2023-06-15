@@ -214,6 +214,15 @@ class LightweightTask(Config):
 class Task(LightweightTask):
     __tags__: Dict[str, str]
 
+    def submit(
+        self,
+        *,
+        workspace: Incomplete | None = ...,
+        launcher: Incomplete | None = ...,
+        run_mode: RunMode = ...
+    ): ...
+    def task_outputs(self, dep: Callable[[Config], None]) -> Any: ...
+
 class Proxy:
     def __unwrap__(self) -> Any: ...
 

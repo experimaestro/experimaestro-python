@@ -1,7 +1,7 @@
 import time
 import sys
 from typing import Callable
-from experimaestro import task, pathoption
+from experimaestro import Task, pathoption
 import psutil
 import logging
 import subprocess
@@ -28,8 +28,7 @@ if is_posix():
 
 @pathoption("touch", "touch")
 @pathoption("wait", "wait")
-@task("restart")
-class Restart:
+class Restart(Task):
     def execute(self):
         # Write the file "touch" to notify that we started
         with open(self.touch, "w") as out:
