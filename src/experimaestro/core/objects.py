@@ -801,13 +801,24 @@ class ConfigInformation:
             # Check if job is done
             tags = ", ".join(f"{k}={v}" for k, v in self.job.tags.items())
             s = f"""Simulating {self.job.relpath} {f"({tags})" if tags else ""}"""
+
+            color = "white"
             if self.job.workspace is not None:
                 if self.job.donepath.is_file():
-                    cprint(f"[done] {s}", "light_green", file=sys.stderr)
+                    color = "light_green"
+                    cprint(f"[done] {s}", color, file=sys.stderr)
                 elif self.job.failedpath.is_file():
-                    cprint(f"[failed] {s}", "light_red", file=sys.stderr)
+                    color = "light_red"
+                    cprint(f"[failed] {s}", color, file=sys.stderr)
                 else:
-                    cprint(f"[not run] {s}", "light_blue", file=sys.stderr)
+                    color = "light_blue"
+                    cprint(f"[not run] {s}", color, file=sys.stderr)
+
+                if not self.job.dependencies:
+                    cprint("   [No dependencies]", color, file=sys.stderr)
+
+                for dep in self.job.dependencies:
+                    cprint(f"   [Depency] {dep}", color, file=sys.stderr)
 
         # Handle an output configuration
         def mark_output(config: "Config"):
