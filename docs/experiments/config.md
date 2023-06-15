@@ -126,6 +126,9 @@ class Trainer(Task):
         # Note the "add_pretasks" here
         return model.add_pretasks(LoadParameters(value=model, path=".../..."))
 
+        # For a PathSerializationLWTask, can be shortened into
+        LoadParameters.construct(model, path=".../...")
+
     def execute(self):
         ...
 
