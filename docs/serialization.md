@@ -8,7 +8,7 @@ model (e.g. with HuggingFace hub).
 from experimaestro import DataPath
 
 class MyConfig(Config):
-    to_serialize: DataPath[Path]
+    to_serialize: DataPath
     """This path will be serialized on the hub"""
 ```
 

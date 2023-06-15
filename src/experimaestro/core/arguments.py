@@ -2,6 +2,7 @@
 
 from typing import Optional, TypeVar, TYPE_CHECKING
 from experimaestro.typingutils import get_optional
+from pathlib import Path
 import sys
 
 if TYPE_CHECKING:
@@ -31,7 +32,6 @@ class Argument:
         default=None,
         checker=None,
         constant=False,
-        subparam=False,
         is_data=False,
     ):
         """Creates a new argument
@@ -59,9 +59,6 @@ class Argument:
             constant (bool, optional): If true, the value is constant. Defaults
             to False.
 
-            subparam (bool, optional): If this is a sub-parameter. Defaults to
-            False.
-
             is_data (bool, optional): Flag for paths that are data path (to be
             serialized). Defaults to False.
         """
@@ -80,7 +77,6 @@ class Argument:
         self.required = required
         self.default = default
         self.generator = generator
-        self.subparam = subparam
         self.objecttype = None
         self.is_data = is_data
 
@@ -170,11 +166,8 @@ Option = Annotated[T, optionHint]
 Meta = Annotated[T, optionHint]
 
 dataHint = _Param(ignored=True, is_data=True)
-DataPath = Annotated[T, dataHint]
+DataPath = Annotated[Path, dataHint]
 """Annotates a path that should be kept to restore an object to its state"""
-
-subparamHint = _Param(subparam=True)
-SubParam = Annotated[T, subparamHint]
 
 
 class help(TypeAnnotation):

@@ -138,7 +138,6 @@ class param:
         self.required = required
         self.generator = None
         self.checker = checker
-        self.subparam = False
         self.constant = constant
 
     def __call__(self, tp):
@@ -165,18 +164,9 @@ class param:
             generator=self.generator,
             default=self.default,
             checker=self.checker,
-            subparam=self.subparam,
             constant=self.constant,
         )
         xpmtype.addArgument(argument)
-
-
-class subparam(param):
-    """Defines an argument for an experimaestro type"""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.subparam = True
 
 
 # Just a rebind (back-compatibility)

@@ -1,4 +1,4 @@
-from experimaestro import Config, Task, Param, PathBasedSerializedConfig, copyconfig
+from experimaestro import Config, Task, Param, PathSerializationLWTask, copyconfig
 from experimaestro.tests.utils import TemporaryExperiment
 
 
@@ -14,17 +14,18 @@ class Model(Config):
         self.submodel.initialized = False
 
 
-class SerializedModel(PathBasedSerializedConfig):
-    def initialize(self):
-        self.config.initialized = True
-        self.config.submodel.initialized = True
+class SerializedModel(PathSerializationLWTask):
+    def execute(self):
+        self.value.initialized = True
+        self.value.submodel.initialized = True
 
 
 class Trainer(Task):
     model: Param[Config]
 
     def taskoutputs(self):
-        return SerializedModel(config=copyconfig(self.model))
+        model = copyconfig(self.model)
+        return model.add_pretasks(SerializedModel(value=model))
 
     def execute(self):
         assert not self.model.initialized, "Model not initialized"
@@ -51,4 +52,6 @@ def test_serializers_xp():
         Evaluate(model=trained_model).submit()
 
         # Use a submodel
-        Evaluate(model=trained_model.submodel, is_submodel=True).submit()
+        Evaluate(model=trained_model.submodel, is_submodel=True).add_pretasks_from(
+            trained_model
+        ).submit()

@@ -16,9 +16,14 @@ from experimaestro import (
     pathgenerator,
     Annotated,
     Task,
+    LightweightTask,
 )
-from experimaestro.core.objects import ConfigInformation, ConfigWrapper, setmeta
-from experimaestro.core.serializers import SerializedConfig
+from experimaestro.core.objects import (
+    ConfigInformation,
+    ConfigWalkContext,
+    ConfigWrapper,
+    setmeta,
+)
 from experimaestro.scheduler.workspace import RunMode
 
 
@@ -388,27 +393,29 @@ def test_identifier_meta_default_array():
     )
 
 
-# --- Check ConfigWrapper
+class IdentifierPreLightTask(LightweightTask):
+    pass
 
 
-class Model(Config):
-    def __post_init__(self):
-        self.initialized = False
+class IdentifierPreTask(Task):
+    pass
 
 
-class Trainer(Config):
-    model: Param[Model]
+def test_identifier_pre_task():
+    task = IdentifierPreTask().submit(run_mode=RunMode.DRY_RUN)
+    task_with_pre = (
+        IdentifierPreTask()
+        .add_pretasks(IdentifierPreLightTask())
+        .submit(run_mode=RunMode.DRY_RUN)
+    )
+    task_with_pre_2 = (
+        IdentifierPreTask()
+        .add_pretasks(IdentifierPreLightTask())
+        .submit(run_mode=RunMode.DRY_RUN)
+    )
 
-
-class SerializedModel(SerializedConfig):
-    def initialize(self):
-        self.config.initialized = True
-
-
-def test_identifier_serialized_config():
-    trainer1 = Trainer(model=Model())
-    trainer2 = Trainer(model=SerializedModel(config=Model()))
-    assert_notequal(trainer1, trainer2)
+    assert_notequal(task, task_with_pre)
+    assert_equal(task_with_pre, task_with_pre_2)
 
 
 # --- Check configuration reloads
@@ -491,3 +498,43 @@ def test_identifier_reload_meta():
         task=task, other=setmeta(IdentifierReloadTaskConfig(x=2), True)
     )
     check_reload(config)
+
+
+class LoopA(Config):
+    param_b: Param["LoopB"]
+
+
+class LoopB(Config):
+    param_c: Param["LoopC"]
+
+
+class LoopC(Config):
+    param_a: Param["LoopA"]
+    param_b: Param["LoopB"]
+
+
+def test_identifier_loop():
+    c = LoopC()
+    b = LoopB(param_c=c)
+    a = LoopA(param_b=b)
+    c.param_a = a
+    c.param_b = b
+
+    configs = [a, b, c]
+    identifiers = [[] for _ in configs]
+
+    for i in range(len(configs)):
+        context = ConfigWalkContext()
+        configs[i].__xpm__.seal(context)
+        assert all([c.__xpm__._sealed for c in configs])
+
+        for j in range(len(configs)):
+            identifiers[j].append(configs[j].__xpm__.identifier)
+
+        configs[i].__xpm__.__unseal__()
+        assert all([not c.__xpm__._sealed for c in configs])
+
+    # Check
+    for i in range(len(configs)):
+        for j in range(1, len(configs)):
+            assert identifiers[i][0] == identifiers[i][j]

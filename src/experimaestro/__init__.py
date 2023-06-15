@@ -7,7 +7,6 @@ from .annotations import (
     config,
     task,
     param,
-    subparam,
     ConstantParam,
     constant,
     option,
@@ -29,7 +28,6 @@ from .annotations import (
 from .core.arguments import (
     # Types
     Param,
-    SubParam,
     Option,
     Meta,
     DataPath,
@@ -48,8 +46,9 @@ from .core.objects import (
     ConfigWrapper,
     ConfigWrapper as TaskOutput,  # maintains compatibility
     Task,
+    LightweightTask,
 )
-from .core.serializers import SerializedConfig, PathBasedSerializedConfig
+from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
 from .scheduler.environment import Environment

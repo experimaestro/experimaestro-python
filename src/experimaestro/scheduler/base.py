@@ -1,4 +1,4 @@
-from collections import ChainMap, defaultdict
+from collections import ChainMap
 from functools import cached_property
 import os
 from pathlib import Path
@@ -18,7 +18,6 @@ from experimaestro.settings import get_settings
 from experimaestro.core.objects import Config, ConfigWalkContext
 from experimaestro.utils import logger
 from experimaestro.locking import Locks, LockError, Lock
-from experimaestro.tokens import ProcessCounterToken
 from .environment import Environment
 from .workspace import RunMode, Workspace
 from .dependencies import Dependency, DependencyStatus, Resource
@@ -217,8 +216,6 @@ class Job(Resource):
     def relpath(self):
         identifier = self.config.__xpm__.identifier
         base = Path(str(self.type.identifier))
-        if identifier.sub:
-            return base / identifier.main.hex() / "xpms" / identifier.sub.hex()
         return base / identifier.all.hex()
 
     @property
@@ -425,11 +422,6 @@ class Scheduler:
         # List of jobs
         self.waitingjobs = set()
 
-        # Sub-param jobs tokens
-        self.subjobsTokens: Dict[str, ProcessCounterToken] = defaultdict(
-            lambda: ProcessCounterToken(1)
-        )
-
         # Listeners
         self.listeners: Set[Listener] = set()
 
@@ -506,13 +498,6 @@ class Scheduler:
         if path.is_symlink():
             path.unlink()
         path.symlink_to(job.path)
-
-        # Add process dependency if job has subparameters
-        hashidentifier = job.hashidentifier
-        if hashidentifier.sub is not None:
-            token = self.subjobsTokens[hashidentifier.main.hex()]
-            dependency = token.dependency(1)
-            job.dependencies.add(dependency)
 
         job.state = JobState.WAITING
         for listener in self.listeners:

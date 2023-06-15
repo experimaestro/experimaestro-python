@@ -9,12 +9,10 @@ from typing import List
 import fasteners
 from experimaestro.notifications import progress, report_eoj
 from .core.types import ObjectType
-from .core.objects import ConfigInformation
 from experimaestro.utils import logger
-from experimaestro.core.objects import Config, ConfigInformation
+from experimaestro.core.objects import ConfigInformation
 import experimaestro.taskglobals as taskglobals
 import atexit
-from experimaestro import progress
 
 
 def parse_commandline(argv=None):
@@ -44,10 +42,6 @@ def run(parameters: Path):
 
         # Set the tags
         task.__tags__ = params["tags"]
-
-        # If we have sub-parameters, we set the __maintaskdir__ folder
-        if params["has_subparam"]:
-            task.__maintaskdir__ = Path.cwd().parents[1]
 
         # Notify that the task has started
         progress(0)
@@ -108,7 +102,6 @@ class TaskRunner:
         signal.signal(signal.SIGTERM, self.handle_error)
         signal.signal(signal.SIGINT, self.handle_error)
         try:
-
             workdir = self.scriptpath.parent
             os.chdir(workdir)
             os.getpid()
@@ -118,7 +111,7 @@ class TaskRunner:
                 fullpath = str(Path(lockfile).resolve())
                 logger.info("Locking %s", fullpath)
                 lock = fasteners.InterProcessLock(fullpath)
-                # FIXME: should have a clever way to lock
+                # MAYBE: should have a clever way to lock
                 # Problem = slurm would have a job doing nothing...
                 # Fix = maybe with two files
                 if not lock.acquire(blocking=True):

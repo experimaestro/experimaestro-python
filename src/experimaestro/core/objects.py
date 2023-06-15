@@ -50,35 +50,28 @@ T = TypeVar("T", bound="Config")
 
 
 class Identifier:
-    def __init__(self, main: bytes, sub: Optional[bytes] = None):
+    def __init__(self, main: bytes):
         self.main = main
-        self.sub = sub
+        self.has_loops = False
 
     @cached_property
     def all(self):
-        if self.sub is None:
-            return self.main
-
         h = hashlib.sha256()
         h.update(self.main)
-        h.update(self.sub)
         return h.digest()
 
     def state_dict(self):
-        if self.sub is None:
-            return self.main.hex()
-
-        return {"main": self.main.hex(), "sub": self.sub.hex()}
+        return self.main.hex()
 
     def __eq__(self, other: "Identifier"):
-        return self.main == other.main and self.sub == other.sub
+        return self.main == other.main
 
     @staticmethod
     def from_state_dict(data: Union[Dict[str, str], str]):
         if isinstance(data, str):
             return Identifier(bytes.fromhex(data))
 
-        return Identifier(bytes.fromhex(data["main"]), bytes.fromhex(data["sub"]))
+        return Identifier(bytes.fromhex(data["main"]))
 
 
 def is_ignored(value):
@@ -95,6 +88,46 @@ def remove_meta(value):
     return value
 
 
+class ConfigPath:
+    """Used to keep track of cycles when computing a hash"""
+
+    def __init__(self):
+        self.loops: List[bool] = []
+        """Indicates whether a loop was detected up to this node"""
+
+        self.config2index = {}
+        """Associate an index in the list with a configuration"""
+
+    def detect_loop(self, config) -> Optional[int]:
+        """If there is a loop, return the relative index and update the path"""
+        index = self.config2index.get(id(config), None)
+        if index is not None:
+            for i in range(index, self.depth):
+                self.loops[i] = True
+            return self.depth - index
+
+    def has_loop(self):
+        return self.loops[-1]
+
+    @property
+    def depth(self):
+        return len(self.loops)
+
+    @contextmanager
+    def push(self, config):
+        config_id = id(config)
+        assert config_id not in self.config2index
+
+        self.config2index[config_id] = self.depth
+        self.loops.append(False)
+
+        try:
+            yield
+        finally:
+            self.loops.pop()
+            del self.config2index[config_id]
+
+
 class HashComputer:
     """This class is in charge of computing a config/task identifier"""
 
@@ -109,103 +142,105 @@ class HashComputer:
     TASK_ID = b"\x08"
     DICT_ID = b"\x09"
     ENUM_ID = b"\x0a"
+    PRE_TASKS = b"\x0b"
+    CYCLE_REFERENCE = b"\x0c"
 
-    def __init__(self, version=None):
+    def __init__(self, config: "Config", config_path: ConfigPath, *, version=None):
         # Hasher for parameters
         self._hasher = hashlib.sha256()
-        self._subhasher = None
-        self._tasks = set()
+        self.config = config
+        self.config_path = config_path
         self.version = version or int(os.environ.get("XPM_HASH_COMPUTER", 2))
 
     def identifier(self) -> Identifier:
         main = self._hasher.digest()
-        sub = self._subhasher.digest() if self._subhasher is not None else None
-        return Identifier(main, sub)
+        return Identifier(main)
 
-    def _hashupdate(self, bytes, subparam):
-        if subparam:
-            # If subparam, creates a specific sub-hasher
-            if self._subhasher is None:
-                self._subhasher = hashlib.sha256()
-            self._subhasher.update(bytes)
-        else:
-            self._hasher.update(bytes)
+    def _hashupdate(self, bytes: bytes):
+        """Update the hash computers with some bytes"""
+        self._hasher.update(bytes)
 
-    def update(self, value, subparam=False, myself=False):
+    def update(self, value, *, myself=False):
         """Update the hash
 
         :param value: The value to add to the hash
-        :param subparam: True if this value is a sub-parameter, defaults to
-            False
         :param myself: True if the value is the configuration for which we wish
             to compute the identifier, defaults to False
         :raises NotImplementedError: If the value cannot be processed
         """
         if value is None:
-            self._hashupdate(HashComputer.NONE_ID, subparam=subparam)
+            self._hashupdate(HashComputer.NONE_ID)
         elif isinstance(value, float):
-            self._hashupdate(HashComputer.FLOAT_ID, subparam=subparam)
-            self._hashupdate(struct.pack("!d", value), subparam=subparam)
+            self._hashupdate(HashComputer.FLOAT_ID)
+            self._hashupdate(struct.pack("!d", value))
         elif isinstance(value, int):
-            self._hashupdate(HashComputer.INT_ID, subparam=subparam)
-            self._hashupdate(struct.pack("!q", value), subparam=subparam)
+            self._hashupdate(HashComputer.INT_ID)
+            self._hashupdate(struct.pack("!q", value))
         elif isinstance(value, str):
-            self._hashupdate(HashComputer.STR_ID, subparam=subparam)
-            self._hashupdate(value.encode("utf-8"), subparam=subparam)
+            self._hashupdate(HashComputer.STR_ID)
+            self._hashupdate(value.encode("utf-8"))
         elif isinstance(value, list):
             values = [el for el in value if not is_ignored(el)]
-            self._hashupdate(HashComputer.LIST_ID, subparam=subparam)
-            self._hashupdate(struct.pack("!d", len(values)), subparam=subparam)
+            self._hashupdate(HashComputer.LIST_ID)
+            self._hashupdate(struct.pack("!d", len(values)))
             for x in values:
-                self.update(x, subparam=subparam)
+                self.update(x)
         elif isinstance(value, Enum):
-            self._hashupdate(HashComputer.ENUM_ID, subparam=subparam)
+            self._hashupdate(HashComputer.ENUM_ID)
             k = value.__class__
             self._hashupdate(
                 f"{k.__module__}.{k.__qualname__ }:{value.name}".encode("utf-8"),
-                subparam=subparam,
             )
         elif isinstance(value, dict):
-            self._hashupdate(HashComputer.DICT_ID, subparam=subparam)
+            self._hashupdate(HashComputer.DICT_ID)
             items = [
                 (key, value) for key, value in value.items() if not is_ignored(value)
             ]
             items.sort(key=lambda x: x[0])
             for key, value in items:
-                self.update(key, subparam=subparam)
-                self.update(value, subparam=subparam)
+                self.update(key)
+                self.update(value)
         elif isinstance(value, ConfigWrapper):
             # Add the task ID...
-            self.update(value.__xpm__.task, subparam=subparam)
+            self.update(value.__xpm__.task)
 
             # ... as well as the configuration
             if self.version > 1:
-                self.update(value.__unwrap__(), subparam=subparam)
+                self.update(value.__unwrap__())
 
         # Handles configurations
         elif isinstance(value, Config):
             # Encodes the identifier
-            self._hashupdate(HashComputer.OBJECT_ID, subparam=subparam)
-            if not myself and self.version > 1:
-                # Just use the object identifier
-                value_id = value.__xpm__.identifier
-                self._hashupdate(value_id.all, subparam=subparam)
+            self._hashupdate(HashComputer.OBJECT_ID)
 
-                # If the config has sub-parameters, also update this way
-                if value_id.sub is not None and not subparam:
-                    self._hashupdate(value_id.sub, subparam=True)
+            # If we encode another config, then
+            if not myself:
+                if loop_ix := self.config_path.detect_loop(value):
+                    # Loop detected: use cycle reference
+                    self._hashupdate(HashComputer.CYCLE_REFERENCE)
+                    self._hashupdate(struct.pack("!q", loop_ix))
+
+                else:
+                    # Just use the object identifier
+                    value_id = HashComputer.compute(
+                        value, version=self.version, config_path=self.config_path
+                    )
+                    self._hashupdate(value_id.all)
 
                 # And that's it!
                 return
 
+            # Process pre-tasks
+            if value.__xpm__.pre_tasks:
+                self._hashupdate(HashComputer.PRE_TASKS)
+                self.update(value.__xpm__.pre_tasks)
+
             xpmtype = value.__xpmtype__
-            self._hashupdate(xpmtype.identifier.name.encode("utf-8"), subparam=subparam)
+            self._hashupdate(xpmtype.identifier.name.encode("utf-8"))
 
             # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
-                arg_subparam = subparam or argument.subparam
-
                 # Ignored argument
                 if argument.ignored:
                     argvalue = value.__xpm__.values.get(argument.name, None)
@@ -248,14 +283,36 @@ class HashComputer:
                     continue
 
                 # Hash name
-                self.update(argument.name, subparam=arg_subparam)
+                self.update(argument.name)
 
                 # Hash value
-                self._hashupdate(HashComputer.NAME_ID, subparam=arg_subparam)
-                self.update(argvalue, subparam=arg_subparam)
+                self._hashupdate(HashComputer.NAME_ID)
+                self.update(argvalue)
 
         else:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
+
+    @staticmethod
+    def compute(
+        config: "Config", config_path: ConfigPath = None, version=None
+    ) -> Identifier:
+        """Compute the identifier for a configuration"""
+
+        # Try to use the cached value first
+        if config.__xpm__._sealed:
+            identifier = config.__xpm__._identifier
+            if identifier is not None and not identifier.has_loops:
+                return identifier
+
+        config_path = config_path or ConfigPath()
+
+        with config_path.push(config):
+            self = HashComputer(config, config_path, version=version)
+            self.update(config, myself=True)
+            identifier = self.identifier()
+            identifier.has_loop = config_path.has_loop()
+
+        return identifier
 
 
 def updatedependencies(
@@ -411,6 +468,11 @@ class ConfigWalk:
                     with self.map(arg.name):
                         result[arg.name] = self(v)
 
+            # Deals with pre-tasks
+            if info.pre_tasks:
+                with self.map("__pre_tasks__"):
+                    self(info.pre_tasks)
+
             processed = self.postprocess(x, result)
             self.visited[xid] = processed
             return processed
@@ -486,6 +548,9 @@ class ConfigInformation:
 
         # Explicitely added dependencies
         self.dependencies = []
+
+        # Lightweight tasks
+        self.pre_tasks: List["LightweightTask"] = []
 
         # Cached information
         self._identifier = None
@@ -637,9 +702,7 @@ class ConfigInformation:
     def identifier(self) -> Identifier:
         """Computes the unique identifier"""
         if self._identifier is None or not self._sealed:
-            hashcomputer = HashComputer()
-            hashcomputer.update(self.pyobject, myself=True)
-            identifier = hashcomputer.identifier()
+            identifier = HashComputer.compute(self.pyobject)
 
             if self._sealed:
                 # Only cache the identifier if sealed
@@ -692,14 +755,10 @@ class ConfigInformation:
             hook.process(job, launcher)
 
     def submit(
-        self, workspace: "Workspace", launcher: "Launcher", *, run_mode=None, pre=None
+        self, workspace: "Workspace", launcher: "Launcher", *, run_mode=None
     ) -> "ConfigWrapper":
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
-
-        # --- Handle default values
-
-        pre = pre or []
 
         # --- Prepare the object
 
@@ -881,6 +940,9 @@ class ConfigInformation:
             if value is not None:
                 ConfigInformation.__collect_objects__(value, objects, context)
 
+        # Serialize pre-tasks
+        ConfigInformation.__collect_objects__(self.pre_tasks, objects, context)
+
         # Serialize ourselves
         state_dict = {
             "id": id(self.pyobject),
@@ -889,6 +951,9 @@ class ConfigInformation:
             "typename": self.xpmtype.name(),
             "identifier": self.identifier.state_dict(),
         }
+
+        if self.pre_tasks:
+            state_dict["pre-tasks"] = [id(pre_task) for pre_task in self.pre_tasks]
 
         if self.meta:
             state_dict["meta"] = self.meta
@@ -979,7 +1044,6 @@ class ConfigInformation:
         """
         json.dump(
             {
-                "has_subparam": self.identifier.sub is not None,
                 "workspace": str(context.workspace.path.absolute()),
                 "tags": {key: value for key, value in self.tags().items()},
                 "version": 2,
@@ -1061,17 +1125,6 @@ class ConfigInformation:
                         return ConfigWrapper.__create_taskoutput__(obj, task)
                 return obj
 
-            if value["type"] == "serialized":
-                o = objects[value["value"]]
-                for c in value["path"]:
-                    if c["type"] == "item":
-                        o = o[c["name"]]
-                    elif c["type"] == "attr":
-                        o = getattr(o, c["name"])
-                    else:
-                        raise TypeError(f"Cannot handle type {c['type']}")
-                return o
-
             # A path
             if value["type"] == "path":
                 return Path(value["value"])
@@ -1120,8 +1173,8 @@ class ConfigInformation:
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
-        from .serializers import SerializedConfig
 
+        # Loop over all the definitions and create objects
         for definition in definitions:
             module_name = definition["module"]
 
@@ -1142,95 +1195,100 @@ class ConfigInformation:
 
             cls = getqualattr(mod, definition["type"])
 
-            if definition.get("serialized", False):
-                o = cls.fromJSON(definition["value"])
-            else:
-                # Creates an object (and not a config)
-                o = cls.__new__(cls, __xpmobject__=as_instance)
-                xpmtype = cls.__getxpmtype__()  # type: ObjectType
+            # Creates an object (or a config)
+            o = cls.__new__(cls, __xpmobject__=as_instance)
+            assert definition["id"] not in objects, "Duplicate id %s" % definition["id"]
+            objects[definition["id"]] = o
 
-                # If instance...
-                if as_instance:
-                    # ... calls the parameter-less initialization
-                    o.__init__()
+        # Now that objects have been created, fill in the fields
+        for definition in definitions:
+            o = objects[definition["id"]]
+            xpmtype = o.__getxpmtype__()  # type: ObjectType
 
-                    # ... sets potentially useful properties
-                    if "typename" in definition:
-                        o.__xpmtypename__ = definition["typename"]
-                        if not discard_id:
-                            o.__xpmidentifier__ = Identifier.from_state_dict(
-                                definition["identifier"]
-                            )
+            # If instance...
+            if as_instance:
+                # ... calls the parameter-less initialization
+                o.__init__()
 
-                        if "." in o.__xpmtypename__:
-                            _, name = o.__xpmtypename__.rsplit(".", 1)
-                        else:
-                            name = o.__xpmtypename__
-
-                        if taskglobals.Env.instance().wspath is not None:
-                            basepath = (
-                                taskglobals.Env.instance().wspath
-                                / "jobs"
-                                / o.__xpmtypename__.lower()
-                                / o.__xpmidentifier__.all.hex().lower()
-                            )
-                            o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
-                            o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
-                else:
-                    xpminfo = o.__xpm__  # type: ConfigInformation
-
-                    meta = definition.get("meta", None)
-                    if meta:
-                        xpminfo._meta = meta
-                    if xpminfo.xpmtype.task is not None:
-                        o.__xpm__.job = object()
-
-                # Set the fields
-                for name, value in definition["fields"].items():
-                    v = ConfigInformation._objectFromParameters(
-                        value, objects, as_instance
-                    )
-
-                    # Transform serialized paths arguments
-                    argument = xpmtype.arguments[name]
-                    if argument.is_data and v is not None:
-                        if isinstance(v, SerializedPath):
-                            if data_loader is None:
-                                v = v.path
-                            else:
-                                v = data_loader(v)
-                        else:
-                            assert isinstance(v, Path), "Excepted Path, got {type(v)}"
-
-                    if as_instance:
-                        # Unwrap the value if needed
-                        v = unwrap(v)
-                        setattr(o, name, v)
-
-                        assert (
-                            getattr(o, name) is v
-                        ), f"Problem with deserialization {name} of {o.__class__}"
-                    else:
-                        o.__xpm__.set(name, v, bypass=True)
-
-                if as_instance:
-                    # Calls post-init
-                    o.__post_init__()
-                    if isinstance(o, SerializedConfig):
-                        o.initialize()
-                else:
-                    # Seal and set the identifier
+                # ... sets potentially useful properties
+                if "typename" in definition:
+                    o.__xpmtypename__ = definition["typename"]
                     if not discard_id:
-                        xpminfo._identifier = Identifier.from_state_dict(
+                        o.__xpmidentifier__ = Identifier.from_state_dict(
                             definition["identifier"]
                         )
-                    xpminfo._sealed = True
 
-                assert definition["id"] not in objects, (
-                    "Duplicate id %s" % definition["id"]
-                )
+                    if "." in o.__xpmtypename__:
+                        _, name = o.__xpmtypename__.rsplit(".", 1)
+                    else:
+                        name = o.__xpmtypename__
 
-            objects[definition["id"]] = o
+                    if taskglobals.Env.instance().wspath is not None:
+                        basepath = (
+                            taskglobals.Env.instance().wspath
+                            / "jobs"
+                            / o.__xpmtypename__.lower()
+                            / o.__xpmidentifier__.all.hex().lower()
+                        )
+                        o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
+                        o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
+            else:
+                xpminfo = o.__xpm__  # type: ConfigInformation
+
+                meta = definition.get("meta", None)
+                if meta:
+                    xpminfo._meta = meta
+                if xpminfo.xpmtype.task is not None:
+                    o.__xpm__.job = object()
+
+            # Set the fields
+            for name, value in definition["fields"].items():
+                v = ConfigInformation._objectFromParameters(value, objects, as_instance)
+
+                # Transform serialized paths arguments
+                argument = xpmtype.arguments[name]
+                if argument.is_data and v is not None:
+                    if isinstance(v, SerializedPath):
+                        if data_loader is None:
+                            v = v.path
+                        else:
+                            v = data_loader(v)
+                    else:
+                        assert isinstance(v, Path), "Excepted Path, got {type(v)}"
+
+                if as_instance:
+                    # Unwrap the value if needed
+                    v = unwrap(v)
+                    setattr(o, name, v)
+
+                    assert (
+                        getattr(o, name) is v
+                    ), f"Problem with deserialization {name} of {o.__class__}"
+                else:
+                    o.__xpm__.set(name, v, bypass=True)
+
+            if as_instance:
+                # Calls post-init
+                o.__post_init__()
+
+            else:
+                # Sets pre-tasks
+                o.__xpm__.pre_tasks = [
+                    objects[pre_task_id]
+                    for pre_task_id in definition.get("pre-tasks", [])
+                ]
+
+                # Seal and set the identifier
+                if not discard_id:
+                    xpminfo._identifier = Identifier.from_state_dict(
+                        definition["identifier"]
+                    )
+                xpminfo._sealed = True
+
+        # Execute pre-tasks
+        for definition in definitions:
+            for pre_task_id in definition.get("pre-tasks", []):
+                objects[pre_task_id].execute()
 
         return o
 
@@ -1238,21 +1296,32 @@ class ConfigInformation:
         def __init__(self, context: ConfigWalkContext):
             super().__init__(context)
             self.objects = {}
+            self.object_cache = {}
+            self.pre_tasks = {}
 
         def preprocess(self, config: "Config"):
             v = self.objects.get(id(config))
             return v is None, v
 
+        def object_from_config(self, config: "Config"):
+            o = self.object_cache.get(id(config), None)
+
+            if o is None:
+                # Creates an object (and not a config)
+                o = config.__xpmtype__.objecttype.__new__(
+                    config.__xpmtype__.objecttype, __xpmobject__=True
+                )
+
+                # And calls the parameter-less initialization
+                o.__init__()
+
+                # Store in cache
+                self.object_cache[id(config)] = o
+
+            return o
+
         def postprocess(self, config: "Config", values: Dict[str, Any]):
-            # Creates an object (and not a config)
-            o = config.__xpmtype__.objecttype.__new__(
-                config.__xpmtype__.objecttype, __xpmobject__=True
-            )
-
-            # And calls the parameter-less initialization
-            o.__init__()
-
-            self.objects[id(self)] = o
+            o = self.object_from_config(config)
 
             # Generate values (in configuration)
             if not config.__xpm__._sealed:
@@ -1266,17 +1335,17 @@ class ConfigInformation:
 
             # Set values
             for key, value in config.__xpm__.values.items():
-                setattr(o, key, values.get(key, value))
+                value = unwrap(value)
+                if isinstance(value, Config):
+                    value = self.object_from_config(value)
+                setattr(o, key, value)
 
             # Call __post_init__
             o.__post_init__()
 
-            # Process a serialized configuration
-            from .serializers import SerializedConfig
-
-            if isinstance(o, SerializedConfig):
-                o.initialize()
-                o = o.__unwrap__()
+            # Gather pre-tasks
+            for pre_task in config.__xpm__.pre_tasks:
+                self.pre_tasks[id(pre_task)] = self.object_from_config(pre_task)
 
             return o
 
@@ -1284,7 +1353,12 @@ class ConfigInformation:
         """Generate an instance given the current configuration"""
         self.validate()
         processor = ConfigInformation.FromPython(context)
-        return processor(self.pyobject)
+        last_object = processor(self.pyobject)
+
+        for pre_task in processor.pre_tasks.values():
+            pre_task.execute()
+
+        return last_object
 
     def add_dependencies(self, *dependencies):
         self.dependencies.extend(dependencies)
@@ -1437,18 +1511,15 @@ class TypeConfig:
             ), f"{context.__class__} is not an instance of ConfigWalkContext"
         return self.__xpm__.fromConfig(context)  # type: ignore
 
-    def submit(
-        self, *, workspace=None, launcher=None, run_mode: "RunMode" = None, pre=None
-    ):
+    def submit(self, *, workspace=None, launcher=None, run_mode: "RunMode" = None):
         """Submit this task
 
         :param workspace: the workspace, defaults to None
         :param launcher: The launcher, defaults to None
         :param run_mode: Run mode (if None, uses the workspace default)
-        :param pre: Pre-tasks to execute before
         :return: a :py:class:ConfigWrapper object
         """
-        return self.__xpm__.submit(workspace, launcher, run_mode=run_mode, pre=pre)
+        return self.__xpm__.submit(workspace, launcher, run_mode=run_mode)
 
     def stdout(self):
         return self.__xpm__.job.stdout
@@ -1470,6 +1541,21 @@ class TypeConfig:
         """Returns a copy of this configuration (ignores other non parameters
         attributes)"""
         return clone(self)
+
+    def add_pretasks(self, *tasks: "LightweightTask"):
+        assert all(
+            [isinstance(task, LightweightTask) for task in tasks]
+        ), "One of the pre-tasks are not lightweight tasks"
+        self.__xpm__.pre_tasks.extend(tasks)
+        return self
+
+    def add_pretasks_from(self, *configs: "Config"):
+        assert all(
+            [isinstance(unwrap(config), TypeConfig) for config in configs]
+        ), "One of the parameters is not a configuration object"
+        for config in configs:
+            self.add_pretasks(*unwrap(config).__xpm__.pre_tasks)
+        return self
 
 
 class Config:
@@ -1537,16 +1623,27 @@ class Config:
     def __identifier__(self) -> Identifier:
         return self.__xpm__.identifier
 
+    def add_pretasks(self, *tasks: "LightweightTask"):
+        """Add pre-tasks"""
+        raise AssertionError("This method can only be used during configuration")
 
-class Task(Config):
+    def add_pretasks_from(self, *configs: "Config"):
+        """Add pre-tasks from the listed configurations"""
+        raise AssertionError("This method can only be used during configuration")
+
+
+class LightweightTask(Config):
+    """A task that can be run before or after a real task to modify its behaviour"""
+
+    def execute(self):
+        raise NotImplementedError()
+
+
+class Task(LightweightTask):
     """Base class for tasks"""
 
     __tags__: Dict[str, str]
     """Tags associated with class"""
-
-    def execute(self):
-        """The main method that should be implemented in all"""
-        raise NotImplementedError()
 
 
 class Proxy:
@@ -1611,16 +1708,8 @@ class ConfigWrapperInfo:
         else:
             self.task = task
 
-        # Holds serialized config information
-        from .serializers import SerializedConfig
-
-        if isinstance(value, SerializedConfig):
-            self.base = value
-            self.value = value.config
-            self.path = [AttrAccessor("config")]
-        else:
-            self.base = base
-            self.path = path
+        self.base = base
+        self.path = path
 
     def __state_dict__(self):
         return {"task": self.task, "base": self.base, "path": self.path}
@@ -1680,7 +1769,6 @@ class ConfigWrapperInfo:
         return self.task.__xpm__.job.wait() == JobState.DONE
 
 
-# Cleanup into just one
 class ConfigWrapper(Proxy):
     """Task proxy
 

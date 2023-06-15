@@ -31,37 +31,37 @@ some special variables are defined:
 - when using [sub-parameters](../config#sub-parameters), `self.__maintaskdir__` is the directory of the main task
 
 
-## Restoring object state
+## Complex initializations
 
-It is possible to restore an object state from disk; in that case, `SerializedConfig` (which can
-be subclassed) can be used:
+Sometimes, it is necessary to restore an object state from disk, and we want
+to separate the loading mechanism from the configuration logic; in that case,
+`LightweightTask` (which must be subclassed) can be used:
 
 ```py3
-from experimaestro import Config, SerializedConfig
+from experimaestro import Config, LightweightTask
 
 class Model(Config):
     ...
 
-class SerializedModel(SerializedConfig):
-    def initialize(self):
+class SerializedModel(LightweightTask):
+    ...
+
+    def execute(self):
         # Access the configuration through self.config
         self.config.initialized = True
 ```
 
-A serialized configuration can be used instead of the configuration. This is useful
-to separate the loading mechanism from the configuration logic.
-
 
 The most often use case is when the state can be recovered from disk. In that case,
-`PathBasedSerializedConfig` can be used
+`PathSerializationLWTask` can be used
 
 ```py3
-from experimaestro import Config, PathBasedSerializedConfig
+from experimaestro import Config, DataPath, LightweightTask
 
 class Model(Config):
     ...
 
-class SerializedModel(PathBasedSerializedConfig):
+class SerializedModel(PathSerializationLWTask):
     def initialize(self):
         # Loads the model from disk
         data = torch.load(self.path)

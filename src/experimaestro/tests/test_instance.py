@@ -1,7 +1,7 @@
 from typing import Optional
 from experimaestro import config, Param, Config
 from experimaestro.core.objects import TypeConfig
-from experimaestro.core.serializers import SerializedConfig
+from experimaestro.core.serializers import SerializationLWTask
 
 
 @config()
@@ -32,23 +32,27 @@ def test_simple_instance():
     assert isinstance(b.a, A.__xpmtype__.basetype)
 
 
+# --- Test pre tasks
+
+
 class Model(Config):
     def __post_init__(self):
         self.initialized = False
 
 
-class Trainer(Config):
+class Evaluator(Config):
     model: Param[Model]
 
 
-class SerializedModel(SerializedConfig):
-    def initialize(self):
-        self.config.initialized = True
+class LoadModel(SerializationLWTask):
+    def execute(self):
+        self.value.initialized = True
 
 
 def test_instance_serialized():
-    model = SerializedModel(config=Model())
-    trainer = Trainer(model=model)
+    model = Model()
+    model.add_pretasks(LoadModel(value=model))
+    trainer = Evaluator(model=model)
     instance = trainer.instance()
 
     assert isinstance(

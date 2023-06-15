@@ -75,6 +75,7 @@ re-used.
 experimaestro deprecated list WORKDIR
 ```
 
+
 ### Object life cycle
 
 During [task](../task) execution, the objects are constructed following
@@ -83,6 +84,7 @@ these steps:
 - The object is constructed using `self.__init__()`
 - The attributes are set (e.g. `gamma` in the example above)
 - `self.__post_init__()` is called (if the method exists)
+- Pre-tasks are ran (if any, see below)
 
 Sometimes, it is necessary to postpone a part of the initialization of a configuration
 object because it depends on an external processing. In this case, the `initializer` decorator can
@@ -96,11 +98,43 @@ class MyConfig(Config):
     @initializer
     def initialize(self, ...):
         # Do whatever is needed
-        passs
+        pass
 
 ```
 
-`
+### Pre-tasks
+
+Sometimes one might need to modify an object after it has been initialized. For instance,
+for a trained machine learning model, it is necessary to load the parameters from disk after
+the model has been initialized. In this case, one can use the `add_pretasks` method
+for configurations that allow
+
+```py3
+class Model(Config):
+    ...
+
+class LoadParameters(PathSerializationLWTask):
+    def execute(self):
+        # Here, we can load the parameters
+        self.value.load(self.path)
+
+class Trainer(Task):
+    model: Param[Config]
+
+    def taskoutputs(self):
+        model = copyconfig(self.model)
+        # Note the "add_pretasks" here
+        return model.add_pretasks(LoadParameters(value=model, path=".../..."))
+
+    def execute(self):
+        ...
+
+# Trained model can be used later - the parameters
+# learned during training are automatically loaded.
+trained_model = Trainer(model=Model()).submit()
+
+```
+
 
 ## Types
 
@@ -212,22 +246,3 @@ class ModelLearn(Config):
     def __validate__(self):
         assert self.batch_size % self.micro_batch_size == 0
 ```
-
-## Sub-parameters
-
-When one to re-use partial results from a previous task,
-e.g. for instance when running a model with a different number of epochs,
-one can use _sub-parameters_. Tasks with the same parameters
-but with different _sub-parameters_ are run sequentially.
-
-For instance, given this task definition
-
-```py3
-class ModelLearn(Task):
-    epoch: SubParam[int] = 100
-    learning_rate: Param[float] = 1e-3
-    def execute(self):
-        pass
-```
-
-when the learning rate is the same, only one task is run at the same time.
