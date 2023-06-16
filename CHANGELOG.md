@@ -1,3 +1,21 @@
+## 0.28.0 (2023-06-16)
+
+### BREAKING CHANGE
+
+- - subparam were removed (should be replaced by something more stable)
+- serialiazed configurations were removed (too much trouble too)
+
+### Feat
+
+- show dependencies when simulating
+- removed config wrapper
+- easier path LW task access
+- **Lightweight-pre-tasks**: Lightweight pre-tasks allow code to be executed to modify objects
+
+### Fix
+
+- bug in dependency tracking
+
 ## 0.27.0 (2023-05-26)
 
 ### Feat
