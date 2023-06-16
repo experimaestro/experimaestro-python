@@ -76,7 +76,9 @@ experimaestro deprecated list WORKDIR
 ```
 
 
-### Object life cycle
+## Object life cycle
+
+### Initialisation
 
 During [task](../task) execution, the objects are constructed following
 these steps:
@@ -104,40 +106,58 @@ class MyConfig(Config):
 
 ### Pre-tasks
 
-Sometimes one might need to modify an object after it has been initialized. For instance,
-for a trained machine learning model, it is necessary to load the parameters from disk after
-the model has been initialized. In this case, one can use the `add_pretasks` method
-for configurations that allow
+
+Sometimes, it is necessary to restore an object state from disk, and we want
+to separate the loading mechanism from the configuration logic; in that case,
+`LightweightTask` (a `Config` which must be subclassed) can be used:
 
 ```py3
+from experimaestro import Config, LightweightTask
+
 class Model(Config):
     ...
 
-class LoadParameters(PathSerializationLWTask):
-    def execute(self):
-        # Here, we can load the parameters
-        self.value.load(self.path)
+class ModelLoader(LightweightTask):
+    model: Param[Model]
 
-class Trainer(Task):
-    model: Param[Config]
+    def execute(self):
+        # Access the configuration through self.config
+        self.model.initialized = True
+```
+
+Lightweight tasks are executed automatically by using the `add_pretasks`
+method of a configuration object.
+
+```py3
+
+class ModelLearner(Task):
+    model: Param[model]
 
     def task_outputs(self, dep):
-        model = dep(copyconfig(self.model))
-        # Note the "add_pretasks" here
-        return model.add_pretasks(LoadParameters(value=model, path=".../..."))
-
-        # For a PathSerializationLWTask, can be shortened into
-        LoadParameters.construct(model, path=".../...")
-
-    def execute(self):
-        ...
-
-# Trained model can be used later - the parameters
-# learned during training are automatically loaded.
-trained_model = Trainer(model=Model()).submit()
+        model = copyconfig(self.model)
+        return model.add_pretasks(dep(ModelLoader(model=model)))
 
 ```
 
+When initializing a single `Config`, the `SerializationLWTask`,
+a child class of `LightweightTask`, has a parameter `value` (of type `Config`).
+
+The typical use case is when the state can be recovered from disk. In that case,
+`PathSerializationLWTask` can be used -- it is a lightweight task configuration
+object with two fields (`value` and `path`).
+
+```py3
+from experimaestro import Config, LightweightTask
+
+class Model(Config):
+    ...
+
+class SerializedModel(PathSerializationLWTask):
+    def execute(self):
+        # Loads the model from disk
+        data = torch.load(self.path)
+        self.config.load_state_dict(data)
+```
 
 ## Types
 
