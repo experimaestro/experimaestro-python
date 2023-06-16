@@ -6,6 +6,7 @@ import logging
 import signal
 
 from experimaestro import experiment, task
+from experimaestro.scheduler.workspace import RunMode
 
 
 class TimeInterval:
@@ -84,12 +85,20 @@ class timeout:
 
 
 class TemporaryExperiment:
-    def __init__(self, name, workdir=None, maxwait=10, port=None):
+    def __init__(
+        self,
+        name,
+        workdir=None,
+        maxwait=10,
+        port=None,
+        run_mode: RunMode = RunMode.NORMAL,
+    ):
         self.name = name
         self.workdir = workdir
         self.clean_workdir = workdir is None
         self.timeout = timeout(maxwait) if maxwait > 0 else 0
         self.port = port
+        self.run_mode = run_mode
 
     def __enter__(self) -> experiment:
         if self.clean_workdir:
@@ -98,7 +107,9 @@ class TemporaryExperiment:
         else:
             workdir = self.workdir
 
-        self.experiment = experiment(workdir, self.name, port=self.port)
+        self.experiment = experiment(
+            workdir, self.name, port=self.port, run_mode=self.run_mode
+        )
         self.experiment.__enter__()
 
         # Set some useful environment variables

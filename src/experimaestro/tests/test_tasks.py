@@ -227,7 +227,7 @@ class DeprecatedTask(NewTask):
 def test_tasks_deprecated():
     """Test that when submitting the task, the computed identifier is the one of
     the new class"""
-    with TemporaryExperiment("deprecated", maxwait=100) as xp:
+    with TemporaryExperiment("deprecated", maxwait=10) as xp:
         # Check that paths are really different first
         task_new = NewTask(x=1).submit(run_mode=RunMode.DRY_RUN)
         task_old = OldTask(x=1).submit(run_mode=RunMode.DRY_RUN)

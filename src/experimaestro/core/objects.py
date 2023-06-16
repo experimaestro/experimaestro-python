@@ -59,6 +59,9 @@ class Identifier:
         h.update(self.main)
         return h.digest()
 
+    def __hash__(self) -> int:
+        return hash(self.main)
+
     def state_dict(self):
         return self.main.hex()
 
@@ -458,6 +461,14 @@ class ConfigWalk:
                 with self.map("__pre_tasks__"):
                     self(info.pre_tasks)
 
+            # Process task if different
+            if (
+                x.__xpm__.task is not None
+                and self.recurse_task
+                and x.__xpm__.task is not x
+            ):
+                self(x.__xpm__.task)
+
             processed = self.postprocess(x, result)
             self.visited[xid] = processed
             return processed
@@ -698,15 +709,20 @@ class ConfigInformation:
         path: List[str],
         taskids: Set[int],
     ):
-        for argument, value in self.xpmvalues():
-            try:
-                if value is not None:
-                    updatedependencies(
-                        dependencies, value, path + [argument.name], taskids
-                    )
-            except Exception:
-                logger.error("While setting %s", path + [argument.name])
-                raise
+        # Check for an associated task
+        if self.task:
+            updatedependencies(dependencies, self.task, path, taskids)
+        else:
+            # Look arguments
+            for argument, value in self.xpmvalues():
+                try:
+                    if value is not None:
+                        updatedependencies(
+                            dependencies, value, path + [argument.name], taskids
+                        )
+                except Exception:
+                    logger.error("While setting %s", path + [argument.name])
+                    raise
 
     def apply_submit_hooks(self, job: "Job", launcher: "Launcher"):
         """Apply configuration hooks"""
