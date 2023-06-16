@@ -1,4 +1,4 @@
 # Connectors
 
 - Localhost connector (default)
-- SSH (planned)
+- SSH (alpha)

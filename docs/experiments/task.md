@@ -70,7 +70,10 @@ class SerializedModel(PathSerializationLWTask):
 
 ## Tasks outputs
 
-It is possible to generate a configuration when submitting a task.
+By default, the task configuration object is returned when submitting
+a task. It is possible to change this behavior by defining a `task_outputs`
+This method has one argument, `dep`, which can be used to mark a dependency
+to the task. This is often coupled with pre-tasks (see [configurations](./config#pre-tasks))
 
 !!! example "Task outputs"
 
@@ -80,18 +83,20 @@ It is possible to generate a configuration when submitting a task.
     ```py3
     from experimaestro import Serialized, Task, Param
 
-    class ModelLoader(Serialized):
-        @staticmethod
-        def fromJSON(path: Path):
-            return unserialize(path)
-
     class ModelLearn(Task):
         epochs: Param[int] = 100
         model: Param[Model]
         parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
-        def task_outputs(self) -> Model:
-            return SerializedModel(config=self.model, path=ModelLoader(str(self.parameters)))
+        def task_outputs(self, dep) -> Model:
+            # Copy the configuration before adding a model loader pre-task
+            learned_model = copyconfig(self.model)
+
+            # Define the model loader, and make it depend on this task
+            model_loader = dep(ModelLoader(model=learned_model, path=str(self.parameters)))
+
+            # return the learned_model with the model_loader
+            return learned_model.add_pretasks(model_loader)
 
         def execute(self):
             """Called when this task is run"""
