@@ -13,7 +13,7 @@ psutil
 pytools
 tqdm
 docstring_parser
-termcolor >= 2.0.0
+termcolor >= 2.3.0
 requests
 sortedcontainers
 pyparsing

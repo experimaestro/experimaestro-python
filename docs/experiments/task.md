@@ -31,45 +31,51 @@ some special variables are defined:
 - when using [sub-parameters](../config#sub-parameters), `self.__maintaskdir__` is the directory of the main task
 
 
-## Tasks outputs
+## Tasks outputs and dependencies
 
-By default, the task configuration object is returned when submitting
-a task. It is possible to change this behavior by defining a `task_outputs`
-This method has one argument, `dep`, which can be used to mark a dependency
-to the task. This is often coupled with pre-tasks (see [configurations](./config#pre-tasks))
+Task outputs can be re-used by other tasks. It is thus important
+to properly define what is a task dependency (i.e. the task
+should be run before) or not. To do so, the `task_outputs` method
+of a `Task` takes one argument, `dep`, which can be used to mark a dependency
+to the task.
+
+By default, the task configuration is marked as a dependency as follows:
+
+```py3
+
+    class MyTask(Task):
+        # (by default)
+        def task_outputs(self, dep) -> Task:
+            return dep(self)
+```
+
+For more complex cases, one can redefine the `task_outputs` method
+and explicitly declare the dependencies.
 
 !!! example "Task outputs"
 
-    It is possible to use classes if variables need to be defined,
-    or if a configuration should be returned (here, `Model`)
+    In this example, we sample from a dataset composed of composed of queries
+    and documents. The documents are left untouched, but the topics are sampled.
+    In that case, we express the fact that:
+
+    - the returned object `Dataset` should be dependant on the task `RandomFold`
+    - the `topics` property of this dataset should also be dependant
+    - but the `documents` property should not (since we do not sample from it)
 
     ```py3
-    from experimaestro import Serialized, Task, Param
 
-    class ModelLearn(Task):
-        epochs: Param[int] = 100
-        model: Param[Model]
-        parameters: Annotated[Path, pathgenerator("parameters.pth")]
+        class RandomFold(Task):
+            dataset: Param[Dataset]
+            """The source dataset"""
 
-        def task_outputs(self, dep) -> Model:
-            # Copy the configuration before adding a model loader pre-task
-            learned_model = copyconfig(self.model)
+            topics: Annotated[Path, pathgenerator("topics.tsv")]
+            """Generated topics"""
 
-            # Define the model loader, and make it depend on this task
-            model_loader = dep(ModelLoader(model=learned_model, path=str(self.parameters)))
-
-            # return the learned_model with the model_loader
-            return learned_model.add_pretasks(model_loader)
-
-        def execute(self):
-            """Called when this task is run"""
-            pass
-
-    # Building
-    learn = ModelLearn(model=model)
-
-    # learnedmodel can be used as a model
-    learnedmodel = learn.submit()
+            def task_outputs(self, dep) -> Adhoc:
+                return dep(Dataset(
+                    topics=dep(Topics(path=self.topics)),
+                    documents=self.dataset.documents,
+                ))
 
     ```
 
