@@ -85,3 +85,9 @@ def test_dependencies_inner_task_output(xp):
     a = task_a.submit()
     b = Inner_TaskB(param_a=a).submit()
     check_dependencies(b, task_a)
+
+
+def test_dependencies_pre_task(xp):
+    a = TaskA().submit()
+    a2 = TaskA().add_pretasks(a).submit()
+    check_dependencies(a2, a)

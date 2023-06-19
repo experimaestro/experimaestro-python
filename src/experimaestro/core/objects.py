@@ -327,11 +327,8 @@ def updatedependencies(
         taskids: Sets of added tasks (ids) to avoid repeated depencies
     """
 
-    if isinstance(value, Task):
-        if id(value) not in taskids:
-            taskids.add(id(value))
-            dependencies.add(value.__xpm__.dependency())
-    elif isinstance(value, Config):
+    # Adds pre-tasks
+    if isinstance(value, Config):
         value.__xpm__.updatedependencies(dependencies, path, taskids)
     elif isinstance(value, (list, set)):
         for el in value:
@@ -709,9 +706,17 @@ class ConfigInformation:
         path: List[str],
         taskids: Set[int],
     ):
+        # Add pre-tasks
+        for pre_task in self.pre_tasks:
+            pre_task.__xpm__.updatedependencies(
+                dependencies, path + ["__pre_tasks___"], taskids
+            )
+
         # Check for an associated task
         if self.task:
-            updatedependencies(dependencies, self.task, path, taskids)
+            if id(self.task) not in taskids:
+                taskids.add(id(self.task))
+                dependencies.add(self.task.__xpm__.dependency())
         else:
             # Look arguments
             for argument, value in self.xpmvalues():
