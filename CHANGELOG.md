@@ -1,3 +1,9 @@
+## 0.29.0 (2023-06-19)
+
+### Fix
+
+- pre task dependencies are taken into account
+
 ## 0.28.0 (2023-06-16)
 
 ### BREAKING CHANGE
