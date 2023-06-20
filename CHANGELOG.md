@@ -1,3 +1,9 @@
+## 0.29.1 (2023-06-20)
+
+### Fix
+
+- exception thrown when adding pre-task to a sealed config
+
 ## 0.29.0 (2023-06-19)
 
 ### Fix
