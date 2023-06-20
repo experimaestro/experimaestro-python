@@ -343,6 +343,12 @@ def updatedependencies(
         raise NotImplementedError("update dependencies for type %s" % type(value))
 
 
+class SealedError(Exception):
+    """Exception when trying to modify a sealed configuration"""
+
+    pass
+
+
 class TaggedValue:
     def __init__(self, value):
         self.value = value
@@ -1521,6 +1527,8 @@ class TypeConfig:
         assert all(
             [isinstance(task, LightweightTask) for task in tasks]
         ), "One of the pre-tasks are not lightweight tasks"
+        if self.__xpm__._sealed:
+            raise SealedError("Cannot add pre-tasks to a sealed configuration")
         self.__xpm__.pre_tasks.extend(tasks)
         return self
 
@@ -1634,8 +1642,6 @@ def copyconfig(config: Config, **kwargs):
     wrapped into a task output (i.e., the configuration can be
     a task output).
     """
-
-    config = config
 
     # Builds a new configuration object
     copy = config.__class__()
