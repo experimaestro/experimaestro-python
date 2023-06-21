@@ -1,13 +1,21 @@
 from pathlib import Path
-from experimaestro import Config, config, tag, Annotated
-from experimaestro.annotations import deprecate
+
+import pytest
+from experimaestro import Config, Task, Annotated, copyconfig
 from experimaestro.core.arguments import Param
 from experimaestro.core.objects import TypeConfig
 from experimaestro.generators import pathgenerator
+from experimaestro.scheduler.workspace import RunMode
+from experimaestro.tests.utils import TemporaryExperiment
 
 
-@config()
-class A:
+@pytest.fixture()
+def xp():
+    with TemporaryExperiment("deprecated", maxwait=0, run_mode=RunMode.DRY_RUN) as xp:
+        yield xp
+
+
+class A(Config):
     x: Param[int] = 3
 
 
@@ -17,12 +25,10 @@ def test_object_default():
     assert a.x == 3
 
 
-@config()
-class B:
+class B(Config):
     a: Param[A] = A(x=3)
 
 
-@config()
 class C(B):
     pass
 
@@ -55,3 +61,19 @@ def test_hierarchy():
     assert OA.__bases__ == (Config,)
     assert OB.__bases__ == (Config,)
     assert OC.__bases__ == (B,)
+
+
+class CopyConfig(Task):
+    path: Annotated[Path, pathgenerator("hello.txt")]
+    x: Param[int]
+
+
+def test_copyconfig(xp):
+    b = CopyConfig(x=2)
+
+    b.submit()
+
+    copy_b = copyconfig(b)
+
+    assert copy_b.x == b.x
+    assert "path" not in copy_b.__xpm__.values

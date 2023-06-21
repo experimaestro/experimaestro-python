@@ -382,29 +382,34 @@ def test_identifier_meta_default_array():
     )
 
 
-class IdentifierPreLightTask(LightweightTask):
-    pass
-
-
-class IdentifierPreTask(Task):
-    pass
-
-
 def test_identifier_pre_task():
-    task = IdentifierPreTask().submit(run_mode=RunMode.DRY_RUN)
+    class MyConfig(Config):
+        pass
+
+    class IdentifierPreLightTask(LightweightTask):
+        pass
+
+    class IdentifierPreTask(Task):
+        x: Param[MyConfig]
+
+    task = IdentifierPreTask(x=MyConfig()).submit(run_mode=RunMode.DRY_RUN)
     task_with_pre = (
-        IdentifierPreTask()
+        IdentifierPreTask(x=MyConfig())
         .add_pretasks(IdentifierPreLightTask())
         .submit(run_mode=RunMode.DRY_RUN)
     )
     task_with_pre_2 = (
-        IdentifierPreTask()
+        IdentifierPreTask(x=MyConfig())
         .add_pretasks(IdentifierPreLightTask())
         .submit(run_mode=RunMode.DRY_RUN)
     )
+    task_with_pre_3 = IdentifierPreTask(
+        x=MyConfig().add_pretasks(IdentifierPreLightTask())
+    ).submit(run_mode=RunMode.DRY_RUN)
 
-    assert_notequal(task, task_with_pre)
-    assert_equal(task_with_pre, task_with_pre_2)
+    assert_notequal(task, task_with_pre, "No pre-task")
+    assert_equal(task_with_pre, task_with_pre_2, "Same parameters")
+    assert_equal(task_with_pre, task_with_pre_3, "Pre-tasks are order-less")
 
 
 # --- Check configuration reloads
@@ -420,7 +425,7 @@ def check_reload(config):
     new_config = ConfigInformation.fromParameters(
         data, as_instance=False, discard_id=True
     )
-    assert new_config.__xpm__._identifier is None
+    assert new_config.__xpm__._full_identifier is None
     new_identifier = new_config.__xpm__.identifier.all
 
     assert new_identifier == old_identifier

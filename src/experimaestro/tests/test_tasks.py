@@ -282,21 +282,21 @@ def test_task_submit_hook():
 
 class LightweightConfig(Config):
     def __post_init__(self) -> None:
-        self.data = None
+        self.data = 0
 
 
 class LightweightPreTask(LightweightTask):
     x: Param[LightweightConfig]
 
     def execute(self) -> None:
-        self.x.data = "yeah"
+        self.x.data += 1
 
 
 class MyLightweightTask(Task):
     x: Param[LightweightConfig]
 
     def execute(self) -> None:
-        assert self.x.data == "yeah"
+        assert self.x.data == 1
 
 
 def test_task_lightweight():
@@ -306,4 +306,14 @@ def test_task_lightweight():
         assert (
             MyLightweightTask(x=x).add_pretasks(lwtask).submit().__xpm__.job.wait()
             == JobState.DONE
-        )
+        ), "Pre-tasks should be executed"
+
+        x_2 = LightweightConfig()
+        lwtask_2 = LightweightPreTask(x=x)
+        assert (
+            MyLightweightTask(x=x_2.add_pretasks(lwtask_2))
+            .add_pretasks(lwtask_2)
+            .submit()
+            .__xpm__.job.wait()
+            == JobState.DONE
+        ), "Pre-tasks should be run just once"

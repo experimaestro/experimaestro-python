@@ -22,6 +22,7 @@ from typing import (
     Any,
     ClassVar,
     Dict,
+    Iterator,
     List,
     Optional,
     Set,
@@ -144,8 +145,7 @@ class HashComputer:
     TASK_ID = b"\x08"
     DICT_ID = b"\x09"
     ENUM_ID = b"\x0a"
-    PRE_TASKS = b"\x0b"
-    CYCLE_REFERENCE = b"\x0c"
+    CYCLE_REFERENCE = b"\x0b"
 
     def __init__(self, config: "Config", config_path: ConfigPath, *, version=None):
         # Hasher for parameters
@@ -230,11 +230,6 @@ class HashComputer:
                 self._hashupdate(HashComputer.TASK_ID)
                 self.update(value.__xpm__.task)
 
-            # Process pre-tasks
-            if value.__xpm__.pre_tasks:
-                self._hashupdate(HashComputer.PRE_TASKS)
-                self.update(value.__xpm__.pre_tasks)
-
             xpmtype = value.__xpmtype__
             self._hashupdate(xpmtype.identifier.name.encode("utf-8"))
 
@@ -296,11 +291,17 @@ class HashComputer:
     def compute(
         config: "Config", config_path: ConfigPath = None, version=None
     ) -> Identifier:
-        """Compute the identifier for a configuration"""
+        """Compute the identifier for a configuration
+
+        :param config: the configuration for which we compute the identifier
+        :param config_path: used to track down cycles between configurations
+        :param version: version for the hash computation (None for the last one)
+        """
 
         # Try to use the cached value first
+        # (if there are no loops)
         if config.__xpm__._sealed:
-            identifier = config.__xpm__._identifier
+            identifier = config.__xpm__._raw_identifier
             if identifier is not None and not identifier.has_loops:
                 return identifier
 
@@ -540,7 +541,13 @@ class ConfigInformation:
         self.pre_tasks: List["LightweightTask"] = []
 
         # Cached information
-        self._identifier = None
+
+        self._full_identifier = None
+        """The full identifier (with pre-tasks)"""
+
+        self._raw_identifier = None
+        """The identifier without taking into account pre-tasks"""
+
         self._validated = False
         self._sealed = False
         self._meta = None
@@ -685,19 +692,74 @@ class ConfigInformation:
 
         Unsealer(context, recurse_task=True)(self.pyobject)
 
-    @property
-    def identifier(self) -> Identifier:
+    def collect_pre_tasks(self) -> Iterator["Config"]:
+        context = ConfigWalkContext()
+        pre_tasks: Dict[int, "Config"] = {}
+
+        class PreTaskCollect(ConfigWalk):
+            def preprocess(self, config: Config):
+                # Do not cross tasks
+                return not isinstance(config.__xpm__, Task), config
+
+            def postprocess(self, config: Config, values):
+                pre_tasks.update(
+                    {id(pre_task): pre_task for pre_task in config.__xpm__.pre_tasks}
+                )
+
+        PreTaskCollect(context, recurse_task=True)(self.pyobject)
+        return pre_tasks.values()
+
+    def identifiers(self, only_raw: bool):
         """Computes the unique identifier"""
-        if self._identifier is None or not self._sealed:
-            identifier = HashComputer.compute(self.pyobject)
 
+        raw_identifier = self._raw_identifier
+        full_identifier = self._full_identifier
+
+        # Computes raw identifier if needed
+        if raw_identifier is None or not self._sealed:
+            # Get the main identifier
+            raw_identifier = HashComputer.compute(self.pyobject)
             if self._sealed:
-                # Only cache the identifier if sealed
-                self._identifier = identifier
+                self._raw_identifier = raw_identifier
 
-            return identifier
+        if only_raw:
+            return raw_identifier, full_identifier
 
-        return self._identifier
+        # OK, let's compute the full identifier
+        if full_identifier is None or not self._sealed:
+            # Compute the full identifier by including the pre-tasks
+            hasher = hashlib.sha256()
+            hasher.update(raw_identifier.all)
+            pre_tasks_ids = [
+                pre_task.__xpm__.raw_identifier.all
+                for pre_task in self.collect_pre_tasks()
+            ]
+            for task_id in sorted(pre_tasks_ids):
+                hasher.update(task_id)
+
+            full_identifier = Identifier(hasher.digest())
+            full_identifier.has_loops = raw_identifier.has_loops
+
+            # Only cache the identifier if sealed
+            if self._sealed:
+                self._full_identifier = full_identifier
+
+        return raw_identifier, full_identifier
+
+    @property
+    def raw_identifier(self) -> Identifier:
+        """Computes the unique identifier (without task modifiers)"""
+        raw_identifier, _ = self.identifiers(True)
+        return raw_identifier
+
+    @property
+    def full_identifier(self) -> Identifier:
+        """Computes the unique identifier (with task modifiers)"""
+        _, full_identifier = self.identifiers(False)
+        return full_identifier
+
+    identifier = full_identifier
+    """Deprecated: use full_identifier"""
 
     def dependency(self):
         """Returns a dependency"""
@@ -1264,10 +1326,13 @@ class ConfigInformation:
                     )
                 xpminfo._sealed = True
 
-        # Execute pre-tasks
+        # Execute pre-tasks (just once)
+        completed_pretasks = set()
         for definition in definitions:
             for pre_task_id in definition.get("pre-tasks", []):
-                objects[pre_task_id].execute()
+                if pre_task_id not in completed_pretasks:
+                    completed_pretasks.add(pre_task_id)
+                    objects[pre_task_id].execute()
 
         return o
 
@@ -1640,7 +1705,13 @@ def copyconfig(config: Config, **kwargs):
 
     Useful to modify a configuration that can be potentially
     wrapped into a task output (i.e., the configuration can be
-    a task output).
+    a task output). If the configuration is sealed, the copy
+    will be unsealed.
+
+    :param config: _description_
+    :param kwargs: Modify the configuration by assigning the values
+
+    :return: _description_
     """
 
     # Builds a new configuration object
@@ -1650,6 +1721,11 @@ def copyconfig(config: Config, **kwargs):
     fullkwargs.update(kwargs)
     for name, value in fullkwargs.items():
         copy.__xpm__.set(name, value, True)
+
+    # Remove generated attributes
+    for argument, value in copy.__xpm__.xpmvalues(generated=True):
+        if argument.generator is not None and value is not None:
+            del copy.__xpm__.values[argument.name]
 
     return copy
 
