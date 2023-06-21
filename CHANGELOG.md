@@ -1,3 +1,9 @@
+## 0.29.2 (2023-06-21)
+
+### Fix
+
+- pre-task are properly handled
+
 ## 0.29.1 (2023-06-20)
 
 ### Fix
