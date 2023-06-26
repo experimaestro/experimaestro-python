@@ -56,9 +56,8 @@ class Identifier:
 
     @cached_property
     def all(self):
-        h = hashlib.sha256()
-        h.update(self.main)
-        return h.digest()
+        """Returns the overall identifier"""
+        return self.main
 
     def __hash__(self) -> int:
         return hash(self.main)
@@ -652,8 +651,7 @@ class ConfigInformation:
                     raise
 
     def seal(self, context: ConfigWalkContext):
-        """Seal the object, generating values when needed,
-        before scheduling the associated job(s)
+        """Seals the object and generate values when needed
 
         Arguments:
             - context: the generation context

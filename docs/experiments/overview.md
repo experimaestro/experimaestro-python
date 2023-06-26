@@ -53,7 +53,7 @@ class IndexCollection:
     storeDocvectors: Param[bool] = False
     storeRawDocs: Param[bool] = False
     storeTransformedDocs: Param[bool] = False
-    documents: Param[AdhocDocuments]
+    documents: Param[Documents]
 
     # An option doesn't change the outcome, just the processing
     threads: Option[int] = 8

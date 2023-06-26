@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from experimaestro import Config, Task, Annotated, copyconfig
+from experimaestro import Config, Task, Annotated, copyconfig, default
 from experimaestro.core.arguments import Param
 from experimaestro.core.objects import TypeConfig
 from experimaestro.generators import pathgenerator
@@ -33,6 +33,10 @@ class C(B):
     pass
 
 
+class DefaultAnnotationConfig(Config):
+    a: Annotated[A, default(A(x=3))]
+
+
 def test_object_config_default():
     """Test default configurations as default values"""
     b = B()
@@ -40,6 +44,9 @@ def test_object_config_default():
 
     c = C()
     assert c.a.x == 3
+
+    annotationConfig = DefaultAnnotationConfig()
+    assert annotationConfig.a.x == 3
 
 
 def test_hierarchy():

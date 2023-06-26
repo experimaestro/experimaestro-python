@@ -540,7 +540,7 @@ class Scheduler:
             # And now, we wait...
             logger.info("Got a process for job %s - waiting to complete", job)
             code = await process.aio_code()
-            logger.info("Job %s completed with code %d", job, code)
+            logger.info("Job %s completed with code %s", job, code)
             job.state = JobState.DONE if code == 0 else JobState.ERROR
 
         # Check if done
@@ -716,8 +716,10 @@ class experiment:
         launcher=None,
     ):
         """
-        :param env: an environment -- or a working directory for a local environment
-        :param port: the port for the web server (overrides environment port if any)
+        :param env: an environment -- or a working directory for a local
+            environment
+        :param port: the port for the web server (overrides environment port if
+            any). Use None to avoid running a web server (default when dry run).
         :param launcher: The launcher (if not provided, inferred from path)
         """
 
@@ -840,9 +842,10 @@ class experiment:
         return self.workspace.connector.createtoken(name, count)
 
     def __enter__(self):
-        logger.info("Locking experiment %s", self.xplockpath)
-        self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
-        logger.info("Experiment locked")
+        if self.workspace.run_mode != RunMode.DRY_RUN:
+            logger.info("Locking experiment %s", self.xplockpath)
+            self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
+            logger.info("Experiment locked")
 
         # Move old jobs into "jobs.bak"
         if self.workspace.run_mode == RunMode.NORMAL:
