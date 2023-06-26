@@ -427,14 +427,17 @@ class ConfigWalk:
         """
         return True, None
 
-    def postprocess(self, config: "Config", values: Dict[str, Any]):
-        return config
+    def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
+        return stub
 
     def list(self, i: int):
         return self.context.push(str(i))
 
     def map(self, k: str):
         return self.context.push(k)
+
+    def stub(self, config: "Config"):
+        return config
 
     def __call__(self, x):
         if isinstance(x, Config):
@@ -444,7 +447,10 @@ class ConfigWalk:
             xid = id(x)
             if xid in self.visited:
                 return self.visited[xid]
-            self.visited[xid] = NOT_SET
+
+            # Get a stub
+            stub = self.stub(x)
+            self.visited[xid] = stub
 
             # Pre-process
             flag, value = self.preprocess(x)
@@ -453,6 +459,7 @@ class ConfigWalk:
                 # Stop processing and returns value
                 return value
 
+            # Process all the arguments
             result = {}
             for arg, v in info.xpmvalues():
                 if v is not None:
@@ -472,7 +479,7 @@ class ConfigWalk:
             ):
                 self(x.__xpm__.task)
 
-            processed = self.postprocess(x, result)
+            processed = self.postprocess(stub, x, result)
             self.visited[xid] = processed
             return processed
 
@@ -611,7 +618,7 @@ class ConfigInformation:
                 super().__init__(recurse_task=True)
                 self.tags = {}
 
-            def postprocess(self, config: Config, values):
+            def postprocess(self, stub, config: Config, values):
                 self.tags.update(config.__xpm__._tags)
                 return self.tags
 
@@ -626,11 +633,6 @@ class ConfigInformation:
             for k, argument in self.xpmtype.arguments.items():
                 value = self.values.get(k)
                 if value is not None:
-                    if value is None and argument.required:
-                        raise ValueError(
-                            "Value %s is required but missing when building %s at %s"
-                            % (k, self.xpmtype, self._initinfo)
-                        )
                     if isinstance(value, Config):
                         value.__xpm__.validate()
                 elif argument.required:
@@ -661,7 +663,7 @@ class ConfigInformation:
             def preprocess(self, config: Config):
                 return not config.__xpm__._sealed, config
 
-            def postprocess(self, config: Config, values):
+            def postprocess(self, stub, config: Config, values):
                 # Generate values
                 for k, argument in config.__xpmtype__.arguments.items():
                     if argument.generator:
@@ -684,7 +686,7 @@ class ConfigInformation:
             def preprocess(self, config: Config):
                 return config.__xpm__._sealed, config
 
-            def postprocess(self, config: Config, values):
+            def postprocess(self, stub, config: Config, values):
                 config.__xpm__._sealed = False
                 config.__xpm__._identifier = None
 
@@ -699,7 +701,7 @@ class ConfigInformation:
                 # Do not cross tasks
                 return not isinstance(config.__xpm__, Task), config
 
-            def postprocess(self, config: Config, values):
+            def postprocess(self, stub, config: Config, values):
                 pre_tasks.update(
                     {id(pre_task): pre_task for pre_task in config.__xpm__.pre_tasks}
                 )
@@ -804,7 +806,7 @@ class ConfigInformation:
                 super().__init__(*args, **kwargs)
                 self.hooks = set()
 
-            def postprocess(self, config: "Config", values: Dict[str, Any]):
+            def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
                 self.hooks.update(config.__xpmtype__.submit_hooks)
 
         gatherer = HookGatherer(context, recurse_task=False)
@@ -1337,16 +1339,15 @@ class ConfigInformation:
     class FromPython(ConfigWalk):
         def __init__(self, context: ConfigWalkContext):
             super().__init__(context)
+            self.processed: Set[int] = set()
             self.objects = {}
-            self.object_cache = {}
             self.pre_tasks = {}
 
         def preprocess(self, config: "Config"):
-            v = self.objects.get(id(config))
-            return v is None, v
+            return True, None
 
-        def object_from_config(self, config: "Config"):
-            o = self.object_cache.get(id(config), None)
+        def stub(self, config: "Config"):
+            o = self.objects.get(id(config), None)
 
             if o is None:
                 # Creates an object (and not a config)
@@ -1358,37 +1359,34 @@ class ConfigInformation:
                 o.__init__()
 
                 # Store in cache
-                self.object_cache[id(config)] = o
+                self.objects[id(config)] = o
 
             return o
 
-        def postprocess(self, config: "Config", values: Dict[str, Any]):
-            o = self.object_from_config(config)
+        def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
+            # Generate values or use default ones (in configuration)
+            for arg in config.__xpmtype__.arguments.values():
+                if arg.generator is not None:
+                    setattr(stub, arg.name, arg.generator(self.context, stub))
+                elif arg.default is not None and (
+                    arg.name not in config.__xpm__.values
+                ):
+                    setattr(stub, arg.name, self(arg.default))
+                elif not arg.required and (arg.name not in values):
+                    setattr(stub, arg.name, None)
 
-            # Generate values (in configuration)
-            if not config.__xpm__._sealed:
-                for arg in config.__xpmtype__.arguments.values():
-                    if arg.generator is not None:
-                        config.__xpm__.set(
-                            arg.name, arg.generator(self.context, o), bypass=True
-                        )
-                    if not arg.required and not hasattr(o, arg.name):
-                        config.__xpm__.set(arg.name, None)
-
-            # Set values
-            for key, value in config.__xpm__.values.items():
-                if isinstance(value, Config):
-                    value = self.object_from_config(value)
-                setattr(o, key, value)
+            # Copy values from the
+            for key, value in values.items():
+                setattr(stub, key, value)
 
             # Call __post_init__
-            o.__post_init__()
+            stub.__post_init__()
 
             # Gather pre-tasks
             for pre_task in config.__xpm__.pre_tasks:
-                self.pre_tasks[id(pre_task)] = self.object_from_config(pre_task)
+                self.pre_tasks[id(pre_task)] = self.stub(pre_task)
 
-            return o
+            return stub
 
     def fromConfig(self, context: ConfigWalkContext):
         """Generate an instance given the current configuration"""
