@@ -834,6 +834,20 @@ class ConfigInformation:
         for hook in gatherer.hooks:
             hook.process(job, launcher)
 
+    def validate_and_seal(self, context: ConfigWalkContext):
+        try:
+            self.validate()
+        except Exception as e:
+            logger.error(
+                "Error while validating object of type %s, defined %s",
+                self.xpmtype,
+                self._initinfo,
+            )
+            raise e
+
+        # Now, seal the object
+        self.seal(context)
+
     def submit(self, workspace: "Workspace", launcher: "Launcher", *, run_mode=None):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
@@ -853,18 +867,8 @@ class ConfigInformation:
         )
 
         # Validate the object
-        try:
-            self.validate()
-        except Exception as e:
-            logger.error(
-                "Error while validating object of type %s, defined %s",
-                self.xpmtype,
-                self._initinfo,
-            )
-            raise e
-
-        # Now, seal the object
-        self.seal(JobContext(self.job))
+        job_context = JobContext(self.job)
+        self.validate_and_seal(job_context)
 
         # --- Workspace
 
@@ -1383,17 +1387,6 @@ class ConfigInformation:
             return o
 
         def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
-            # Generate values or use default ones (in configuration)
-            for arg in config.__xpmtype__.arguments.values():
-                if arg.generator is not None:
-                    setattr(stub, arg.name, arg.generator(self.context, stub))
-                elif arg.default is not None and (
-                    arg.name not in config.__xpm__.values
-                ):
-                    setattr(stub, arg.name, self(arg.default))
-                elif not arg.required and (arg.name not in values):
-                    setattr(stub, arg.name, None)
-
             # Copy values from the
             for key, value in values.items():
                 setattr(stub, key, value)
@@ -1410,7 +1403,11 @@ class ConfigInformation:
 
     def fromConfig(self, context: ConfigWalkContext, *, objects: ObjectStore = None):
         """Generate an instance given the current configuration"""
+
+        # Validate and seal
         self.validate()
+        self.seal(context)
+
         processor = ConfigInformation.FromPython(context, objects=objects)
         last_object = processor(self.pyobject)
 
