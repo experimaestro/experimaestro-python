@@ -1,3 +1,9 @@
+## 0.29.5 (2023-06-27)
+
+### Fix
+
+- cleaned up the instance() mode
+
 ## 0.29.4 (2023-06-26)
 
 ### Fix
