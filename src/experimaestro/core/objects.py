@@ -512,6 +512,24 @@ def getqualattr(module, qualname):
     return cls
 
 
+class ObjectStore:
+    def __init__(self):
+        self.store: Dict[int, Any] = {}
+        self.constructed: Set[int] = set()
+
+    def set_constructed(self, identifier: int):
+        self.constructed.add(identifier)
+
+    def is_constructed(self, identifier: int):
+        return identifier in self.constructed
+
+    def retrieve(self, identifier: int):
+        return self.store.get(identifier, None)
+
+    def add_stub(self, identifier: int, stub: Any):
+        self.store[identifier] = stub
+
+
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
@@ -1337,17 +1355,18 @@ class ConfigInformation:
         return o
 
     class FromPython(ConfigWalk):
-        def __init__(self, context: ConfigWalkContext):
+        def __init__(self, context: ConfigWalkContext, *, objects: ObjectStore = None):
             super().__init__(context)
-            self.processed: Set[int] = set()
-            self.objects = {}
+            self.objects = ObjectStore() if objects is None else objects
             self.pre_tasks = {}
 
         def preprocess(self, config: "Config"):
+            if self.objects.is_constructed(id(config)):
+                return False, self.objects.retrieve(id(config))
             return True, None
 
         def stub(self, config: "Config"):
-            o = self.objects.get(id(config), None)
+            o = self.objects.retrieve(id(config))
 
             if o is None:
                 # Creates an object (and not a config)
@@ -1359,7 +1378,7 @@ class ConfigInformation:
                 o.__init__()
 
                 # Store in cache
-                self.objects[id(config)] = o
+                self.objects.add_stub(id(config), o)
 
             return o
 
@@ -1386,14 +1405,16 @@ class ConfigInformation:
             for pre_task in config.__xpm__.pre_tasks:
                 self.pre_tasks[id(pre_task)] = self.stub(pre_task)
 
+            self.objects.set_constructed(id(config))
             return stub
 
-    def fromConfig(self, context: ConfigWalkContext):
+    def fromConfig(self, context: ConfigWalkContext, *, objects: ObjectStore = None):
         """Generate an instance given the current configuration"""
         self.validate()
-        processor = ConfigInformation.FromPython(context)
+        processor = ConfigInformation.FromPython(context, objects=objects)
         last_object = processor(self.pyobject)
 
+        # Execute pre-tasks
         for pre_task in processor.pre_tasks.values():
             pre_task.execute()
 
@@ -1538,7 +1559,9 @@ class TypeConfig:
         self.__xpm__.add_dependencies(*dependencies)
         return self
 
-    def instance(self, context: ConfigWalkContext = None) -> T:
+    def instance(
+        self, context: ConfigWalkContext = None, *, objects: ObjectStore = None
+    ) -> T:
         """Return an instance with the current values"""
         if context is None:
             from experimaestro.xpmutils import EmptyContext
@@ -1548,7 +1571,7 @@ class TypeConfig:
             assert isinstance(
                 context, ConfigWalkContext
             ), f"{context.__class__} is not an instance of ConfigWalkContext"
-        return self.__xpm__.fromConfig(context)  # type: ignore
+        return self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
 
     def submit(self, *, workspace=None, launcher=None, run_mode: "RunMode" = None):
         """Submit this task

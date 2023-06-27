@@ -44,6 +44,7 @@ from .core.objects import (
     setmeta,
     Task,
     LightweightTask,
+    ObjectStore,
 )
 from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
