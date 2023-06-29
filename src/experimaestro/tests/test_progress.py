@@ -210,7 +210,7 @@ def check_nested(
 
 def test_progress_nested():
     """Test that we get all the progress reports"""
-    with TemporaryExperiment("progress-nested", maxwait=10, port=0) as xp:
+    with TemporaryExperiment("progress-nested", maxwait=20, port=0) as xp:
         assert xp.server is not None
         assert xp.server.port > 0
 

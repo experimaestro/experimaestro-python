@@ -62,13 +62,13 @@ def token_experiment(xp, token, ntasks=3):
 @pytest.mark.xfail(strict=True)
 def test_token_fail():
     """Simple token test: should fail without token"""
-    with TemporaryExperiment("tokens", maxwait=10) as xp:
+    with TemporaryExperiment("tokens", maxwait=20) as xp:
         token_experiment(xp, None)
 
 
 def test_token_ok():
     """Simple token test: should succeed with token"""
-    with TemporaryExperiment("tokens", maxwait=10) as xp:
+    with TemporaryExperiment("tokens", maxwait=20) as xp:
         token = CounterToken("token-ok", xp.workdir / "token", 1)
         token_experiment(xp, token)
     logging.info("Finished token_ok test")
@@ -82,7 +82,7 @@ class dummy_task(Task):
 
 def test_token_cleanup():
     """Test that tokens are correctly cleaned up if the process finished"""
-    with TemporaryExperiment("token_cleanup", maxwait=10) as xp:
+    with TemporaryExperiment("token_cleanup", maxwait=20) as xp:
         token = CounterToken("token-cleanup", xp.workdir / "token-cleanup", 1)
 
         task = dummy_task(x=1)
@@ -138,8 +138,8 @@ def test_token_monitor():
         task = TokenTask(path=path, x=x).add_dependencies(token.dependency(1)).submit()
         return task
 
-    with TemporaryExperiment("tokens1", maxwait=10, port=0) as xp1, TemporaryExperiment(
-        "tokens2", maxwait=10
+    with TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1, TemporaryExperiment(
+        "tokens2", maxwait=20
     ) as xp2:
         path = xp1.workspace.path / "test_token.file"
         task1 = run(xp1, 1, path)

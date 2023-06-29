@@ -257,6 +257,7 @@ class SlurmProcessBuilder(ProcessBuilder):
         logger.info("slurm sbatch command: %s", builder.command)
         handler = OutputCaptureHandler()
         builder.stdout = Redirect.pipe(handler)
+        builder.stderr = Redirect.inherit()
         p = builder.start()
         if p.wait() != 0:
             logger.error("Error while running sbatch command")

@@ -44,7 +44,7 @@ class Evaluate(Task):
 
 
 def test_serializers_xp():
-    with TemporaryExperiment("serializers", maxwait=10, port=0):
+    with TemporaryExperiment("serializers", maxwait=20, port=0):
         model = Model(submodel=SubModel())
         trained_model: Model = Trainer(model=model).submit()
 

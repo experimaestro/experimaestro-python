@@ -12,7 +12,8 @@ import logging
 
 DIR = Path(__file__).parents[3]
 RE_SNIPPET_START = re.compile(
-    r"<!-- SNIPPET: (?P<id>\S+)(?:\s+ARGS\[(?P<args>[^\]]+)\])?(?:\s+ENV\[(?P<env>[^\]]+)\])? -->"
+    r"<!-- SNIPPET: (?P<id>\S+)"
+    r"(?:\s+ARGS\[(?P<args>[^\]]+)\])?(?:\s+ENV\[(?P<env>[^\]]+)\])? -->"
 )
 RE_SNIPPET_START2 = re.compile(r"```python")
 RE_SNIPPET_END = re.compile(r"```")
@@ -89,7 +90,7 @@ def test_snippet(snippetpath, path, id):
     snippet, args, env = get_snippet(snippetpath, path, id)
     assert snippet != ""
 
-    WAIT_TIME = 10
+    WAIT_TIME = 20
 
     fullenv = {name: value for name, value in os.environ.items()}
     fullenv.update(

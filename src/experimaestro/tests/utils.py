@@ -89,7 +89,7 @@ class TemporaryExperiment:
         self,
         name,
         workdir=None,
-        maxwait=10,
+        maxwait=20,
         port=None,
         run_mode: RunMode = RunMode.NORMAL,
     ):

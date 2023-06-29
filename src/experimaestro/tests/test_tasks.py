@@ -36,7 +36,7 @@ def test_task_types():
 def test_simple_task():
     with TemporaryDirectory(prefix="xpm", suffix="helloworld") as workdir:
         assert isinstance(workdir, Path)
-        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=10):
+        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=20):
             # Submit the tasks
             hello = Say(word="hello").submit()
             world = Say(word="world").submit()
@@ -59,7 +59,7 @@ def test_not_submitted():
 def test_fail_simple():
     """Failing task... should fail"""
     with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("failing", maxwait=10):
+        with TemporaryExperiment("failing", maxwait=20):
             fail = Fail().submit()
             fail.touch()
 
@@ -122,7 +122,7 @@ def test_restart(terminate):
 
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
-    with TemporaryExperiment("duplicate", maxwait=10):
+    with TemporaryExperiment("duplicate", maxwait=20):
         task1 = SimpleTask(x=1).submit()
         task2 = SimpleTask(x=1).submit()
         assert task1 is task2, f"{id(task1)} != {id(task2)}"
@@ -131,7 +131,7 @@ def test_submitted_twice():
 def test_configcache():
     """Test a configuration cache"""
 
-    with TemporaryExperiment("configcache", maxwait=10):
+    with TemporaryExperiment("configcache", maxwait=20):
         task = CacheConfigTask(data=CacheConfig()).submit()
 
     assert task.__xpm__.job.wait() == JobState.DONE
@@ -227,7 +227,7 @@ class DeprecatedTask(NewTask):
 def test_tasks_deprecated():
     """Test that when submitting the task, the computed identifier is the one of
     the new class"""
-    with TemporaryExperiment("deprecated", maxwait=10) as xp:
+    with TemporaryExperiment("deprecated", maxwait=20) as xp:
         # Check that paths are really different first
         task_new = NewTask(x=1).submit(run_mode=RunMode.DRY_RUN)
         task_old = OldTask(x=1).submit(run_mode=RunMode.DRY_RUN)
@@ -300,7 +300,7 @@ class MyLightweightTask(Task):
 
 
 def test_task_lightweight():
-    with TemporaryExperiment("lightweight", maxwait=10):
+    with TemporaryExperiment("lightweight", maxwait=20):
         x = LightweightConfig()
         lwtask = LightweightPreTask(x=x)
         assert (

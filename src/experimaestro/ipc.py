@@ -22,20 +22,14 @@ class IPCom:
 
     def fswatch(self, watcher: FileSystemEventHandler, path: Path, recursive=False):
         if not self.observer.is_alive():
-            # Just in case...
-            self.observer.start()
+            logging.error("Observer is not alive")
+
         return self.observer.schedule(
             watcher, str(path.absolute()), recursive=recursive
         )
 
     def fsunwatch(self, watcher):
         self.observer.unschedule(watcher)
-
-    # def run(self):
-    #     logger.info("Starting IPC thread")
-    #     self.loop = asyncio.new_event_loop()
-    #     asyncio.set_event_loop(self.loop)
-    #     self.loop.run_forever()
 
 
 def fork_childhandler():
