@@ -465,6 +465,8 @@ class ConfigWalk:
                 if v is not None:
                     with self.map(arg.name):
                         result[arg.name] = self(v)
+                else:
+                    result[arg.name] = None
 
             # Deals with pre-tasks
             if info.pre_tasks:
