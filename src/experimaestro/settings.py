@@ -26,6 +26,7 @@ class Settings:
 @lru_cache()
 def get_settings(path: Optional[Path] = None) -> Settings:
     if "PYTEST_CURRENT_TEST" in os.environ:
+        # Avoids using settings when testing
         return Settings()
     else:
         schema = OmegaConf.structured(Settings)

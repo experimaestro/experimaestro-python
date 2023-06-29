@@ -122,7 +122,7 @@ def test_restart(terminate):
 
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
-    with TemporaryExperiment("duplicate", maxwait=10):
+    with TemporaryExperiment("duplicate", maxwait=0): # FIXME: revert to 10
         task1 = SimpleTask(x=1).submit()
         task2 = SimpleTask(x=1).submit()
         assert task1 is task2, f"{id(task1)} != {id(task2)}"

@@ -719,7 +719,8 @@ class experiment:
         :param env: an environment -- or a working directory for a local
             environment
         :param port: the port for the web server (overrides environment port if
-            any). Use None to avoid running a web server (default when dry run).
+            any). Use None to avoid running a web server (default when dry run). 
+            Use -1 when using a server from the pool.
         :param launcher: The launcher (if not provided, inferred from path)
         """
 
@@ -758,7 +759,7 @@ class experiment:
         # Create the scheduler
         self.scheduler = Scheduler(self, name)
         self.server = (
-            Server(self.scheduler, settings.server)
+            Server.create(self.scheduler, settings.server)
             if settings.server.port is not None
             and self.workspace.run_mode == RunMode.NORMAL
             else None

@@ -90,7 +90,7 @@ class TemporaryExperiment:
         name,
         workdir=None,
         maxwait=10,
-        port=None,
+        port=-1,
         run_mode: RunMode = RunMode.NORMAL,
     ):
         self.name = name
@@ -106,7 +106,8 @@ class TemporaryExperiment:
             workdir = self.workdir.__enter__()
         else:
             workdir = self.workdir
-
+    
+        logging.info("Running with port %s", self.port)
         self.experiment = experiment(
             workdir, self.name, port=self.port, run_mode=self.run_mode
         )

@@ -3,11 +3,12 @@ import logging
 import asyncio
 import socket
 import uuid
-from experimaestro.scheduler.base import Job
+import time
 import pkg_resources
 import http
 import threading
 from typing import Optional, Tuple
+from experimaestro.scheduler.base import Job
 from experimaestro.scheduler import Scheduler, Listener as BaseListener
 from experimaestro.scheduler.services import Service, ServiceListener
 from experimaestro.settings import ServerSettings
@@ -57,12 +58,9 @@ def job_create(job: Job):
 
 class Listener(BaseListener, ServiceListener):
     def __init__(self, scheduler: Scheduler, socketio):
-        self.scheduler = scheduler
         self.socketio = socketio
-        self.scheduler.addlistener(self)
-        self.services = {}
-        for service in self.scheduler.xp.services.values():
-            self.service_add(service)
+        self.scheduler = None
+        self.change_scheduler(scheduler)
 
     def job_submitted(self, job):
         self.socketio.emit("job.add", job_create(job))
@@ -92,6 +90,20 @@ class Listener(BaseListener, ServiceListener):
     def service_state_changed(self, service: Service):
         self.socketio.emit("service.update", {"state": service.state.name})
 
+    def change_scheduler(self, scheduler: Optional[Scheduler]):
+        """Change the scheduler"""
+        
+        # Unsubscribe from the previous scheduler
+        if self.scheduler is not None:
+            self.scheduler.removelistener(self)
+        
+        # Sets the new scheduler
+        self.scheduler = scheduler
+        if scheduler:
+            self.services = {}
+            self.scheduler.addlistener(self)
+            for service in self.scheduler.xp.services.values():
+                self.service_add(service)
 
 MIMETYPES = {
     "html": "text/html",
@@ -148,7 +160,10 @@ def start_app(server: "Server"):
 
     logging.debug("Starting Flask server (SocketIO)...")
     socketio = SocketIO(app, path="/api", async_mode="gevent")
+
+    logging.debug("Setting up the listener...")
     listener = Listener(server.scheduler, socketio)
+    server.listener = listener
 
     logging.debug("Starting Flask server (setting up socketio)...")
 
@@ -291,7 +306,10 @@ def start_app(server: "Server"):
 
 
 class Server:
+    POOL_SERVER: Optional["Server"] = None
+
     def __init__(self, scheduler: Scheduler, settings: ServerSettings):
+        """Initialize a server"""
         if settings.host is None or settings.host == "127.0.0.1":
             self.bindinghost = "127.0.0.1"
         else:
@@ -303,8 +321,29 @@ class Server:
         self.token = settings.token or uuid.uuid4().hex
         self.instance = None
         self.running = False
-        self.cv_running = threading.Condition()
+        self.is_pool = settings.port == -1
+        if self.is_pool:
+            self.port = 0
 
+        self.cv_running = threading.Condition()
+        self.listener: Optional[Listener] = None
+    
+    @staticmethod
+    def create(scheduler: Scheduler, settings: ServerSettings):
+        if settings.port != -1:
+            return Server(scheduler, settings)
+
+        if Server.POOL_SERVER is None:
+            Server.POOL_SERVER = Server(scheduler, settings)
+            return Server.POOL_SERVER
+        
+        # Use a server pool (testing mode)
+        while True:
+            time.sleep(.01)
+            if Server.POOL_SERVER.scheduler is None:
+                Server.POOL_SERVER.change_scheduler(scheduler)
+                return Server.POOL_SERVER
+    
     def getNotificationSpec(self) -> Tuple[str, str]:
         """Returns a tuple (server ID, server URL)"""
         return (
@@ -313,7 +352,9 @@ class Server:
         )
 
     def stop(self):
-        if self.instance:
+        if self.is_pool:
+            self.change_scheduler(None)
+        elif self.instance:
             try:
                 requests.get(
                     f"http://{self.host}:{self.port}/stop?xpm-token={self.token}"
@@ -324,9 +365,14 @@ class Server:
 
     def start(self):
         """Start the websocket server in a new process process"""
-        logging.info("Starting the web server")
+        if self.is_pool:
+            with self.cv_running:
+                if self.running:
+                    logging.debug("The web server is already running (pool)")
+                    return
 
         # Avoids clutering
+        logging.info("Starting the web server")
         logging.getLogger("geventwebsocket.handler").setLevel(logging.WARNING)
 
         self.thread = threading.Thread(target=start_app, args=(self,)).start()
@@ -336,3 +382,12 @@ class Server:
             with self.cv_running:
                 if self.running:
                     break
+
+    def change_scheduler(self, scheduler: Scheduler):
+        """Change the scheduler
+        
+        To be used only when testing
+        """
+        self.scheduler = scheduler
+        if self.listener:
+            self.listener.change_scheduler(scheduler)
