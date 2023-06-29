@@ -254,8 +254,9 @@ class ObjectType(Type):
             if issubclass(s, Config) and (s is not Config)
         ) or (TypeConfig,)
 
-        self.configtype = type("TypeConfig", __configbases__ + (self.basetype,), {})
-        self.configtype.__qualname__ = f"{self.basetype.__qualname__}.TypeConfig"
+        *tp_qual, tp_name = self.basetype.__qualname__.split(".")
+        self.configtype = type(f"{tp_name}_XPMConfig", __configbases__ + (self.basetype,), {})
+        self.configtype.__qualname__ = ".".join(tp_qual + [self.configtype.__name__])
         self.configtype.__module__ = tp.__module__
 
         # Create the type-specific object class
@@ -310,7 +311,10 @@ class ObjectType(Type):
 
         # Get the module
         module = inspect.getmodule(self.originaltype)
-        self._file = Path(inspect.getfile(self.originaltype)).absolute()
+        if getattr(module, '__file__', None) is None:
+            self._file = None
+        else:
+            self._file = Path(inspect.getfile(self.originaltype)).absolute()
         self._module = module.__name__
         self._package = module.__package__
 
