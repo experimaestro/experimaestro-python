@@ -159,6 +159,15 @@ class SerializedModel(PathSerializationLWTask):
         self.config.load_state_dict(data)
 ```
 
+It is possible to copy pre-tasks from one configuration to another by using
+`add_pretasks_from`. For instance
+
+```py3
+    config2.add_pretasks_from(config1)
+```
+
+copies the pre-tasks of `config1` to `config2`.
+
 ## Types
 
 Possible types are:
