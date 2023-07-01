@@ -1,43 +1,26 @@
-import codecs
-from collections import defaultdict
-import io
-import sys
-import click
 import logging
 import threading
 from pathlib import Path
-from experimaestro import Annotated
 from typing import (
     Any,
     Dict,
     List,
     Optional,
-    Set,
-    TextIO,
     Tuple,
     get_type_hints,
 )
 from experimaestro.connectors.local import LocalConnector
 import re
-import humanfriendly
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from experimaestro.launcherfinder import YAMLDataClass, HostRequirement
-from experimaestro.launcherfinder.base import LauncherConfiguration
+from dataclasses import dataclass
 from experimaestro.launcherfinder.registry import (
-    Initialize,
     LauncherRegistry,
-)
-from experimaestro.launcherfinder.specs import (
-    CPUSpecification,
-    CudaSpecification,
-    HostSpecification,
 )
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from experimaestro.utils.asyncio import asyncThreadcheck
 from experimaestro.compat import cached_property
-from . import Launcher
+from experimaestro.launchers import Launcher
 from experimaestro.scriptbuilder import PythonScriptBuilder
 from experimaestro.connectors import (
     Connector,
@@ -363,12 +346,19 @@ class SlurmLauncher(Launcher):
         self.launcherenv = launcherenv
         self.options = options or SlurmOptions()
 
+    def __str__(self):
+        return f"SlurmLauncher({self.options})"
+
     @staticmethod
     def init_registry(registry: LauncherRegistry):
+        from .configuration import SlurmConfiguration
+
         registry.register_launcher("slurm", SlurmConfiguration)
 
     @staticmethod
     def get_cli():
+        from .cli import cli
+
         return cli
 
     @cached_property
@@ -403,326 +393,3 @@ class SlurmLauncher(Launcher):
 
         By default, returns the associated connector builder"""
         return SlurmProcessBuilder(self)
-
-
-# --- Command line
-
-
-@click.group()
-def cli():
-    pass
-
-
-@cli.command()
-def convert():
-    """Convert the ouptut of 'scontrol show node' into a YAML form compatible
-    with launchers.yaml"""
-    import yaml
-    from experimaestro.launcherfinder import LauncherRegistry
-
-    configuration = SlurmConfiguration(id="", partitions={})
-    fill_nodes_configuration(sys.stdin, configuration)
-    yaml.dump(configuration, sys.stdout, Dumper=LauncherRegistry.instance().Dumper)
-
-
-def fill_nodes_configuration(input: TextIO, configuration: "SlurmConfiguration"):
-    """Parses the output of scontrol show nodes"""
-    re_nodename = re.compile(r"""^NodeName=(\w+)""")
-    re_features = re.compile(r"""^\s*AvailableFeatures=([,\w]+)""")
-    re_partitions = re.compile(r"""^\s*Partitions=([,\w]+)""")
-
-    nodename = ""
-    features = []
-    partition_names = []
-    partitions = configuration.partitions
-    partitions2features2nodes = defaultdict(lambda: {})
-
-    def process():
-        for partition_name in partition_names:
-            partition = partitions.setdefault(partition_name, SlurmPartition(nodes=[]))
-
-            fl = "&".join(sorted(features))
-            nodes = partitions2features2nodes[partition_name].get(fl)
-            if nodes is None:
-                nodes = SlurmNodes(hosts=[nodename], features=features)
-                partitions2features2nodes[partition_name][fl] = nodes
-                partition.nodes.append(nodes)
-            else:
-                if nodename not in nodes.hosts:
-                    nodes.hosts.append(nodename)
-
-    for line in input.readlines():
-        if match := re_nodename.search(line):
-            if nodename:
-                process()
-            nodename = match.group(1)
-        elif match := re_features.search(line):
-            features = match.group(1).split(",")
-        elif match := re_partitions.search(line):
-            partition_names = match.group(1).split(",")
-
-    if nodename:
-        process()
-
-
-def fill_partitions_configuration(input: TextIO, configuration: "SlurmConfiguration"):
-    """Parses the output of scontrol show --oneliner partition"""
-    re_partitionname = re.compile(r"""^PartitionName=(\w+)""")
-    re_mem_per_cpu = re.compile(r"""(?:=|\s)DefMemPerCPU=(\d+)(?:\D|$)""")
-    re_cpu_per_gpu = re.compile(r"""(?:=|\s)DefCpuPerGPU=(\d+)(?:\D|$)""")
-
-    for line in input.readlines():
-        if match := re_partitionname.search(line):
-            name = match.group(1)
-            cfg = configuration.partitions.setdefault(name, SlurmPartition(nodes=[]))
-
-            if m := re_mem_per_cpu.search(line):
-                cfg.mem_per_cpu = int(m.group(1)) * 1024
-
-            if m := re_cpu_per_gpu.search(line):
-                cfg.cpu_per_gpu = int(m.group(1))
-
-
-# ---- SLURM launcher finder
-
-
-class SlurmNodesSpecification(HostSpecification):
-    features: List[str]
-    hosts: List[str]
-    partition: str
-
-
-@dataclass
-class SlurmNodes(YAMLDataClass):
-    features: List[str] = field(default_factory=lambda: [])
-    hosts: List[str] = field(default_factory=lambda: [])
-    count: int = 0
-
-
-@dataclass
-class SlurmPartitionConfiguration(YAMLDataClass):
-    cpu_per_gpu: int = 0
-    mem_per_cpu: Annotated[int, Initialize(humanfriendly.parse_size)] = 0
-
-
-@dataclass
-class SlurmPartition(YAMLDataClass):
-    nodes: List[SlurmNodes] = field(default_factory=lambda: [])
-    configuration: Optional[SlurmPartitionConfiguration] = None
-    priority: int = 0
-    disabled: bool = False
-    """Can be used to disable a partition"""
-
-
-class FeatureConjunction(List[str]):
-    def __init__(self, features: List[str]):
-        super().__init__(sorted(features))
-
-    def __hash__(self) -> int:
-        return sum([hash(tag) for tag in self])
-
-
-class FeatureBooleanFormula:
-    clauses: Set[List[str]]
-
-    def __init__(self):
-        self.clauses = set()
-
-    def add(self, features: List[str]):
-        """Adds conjunction of tags"""
-        self.clauses.add(FeatureConjunction(features))
-
-    def to_constraint(self):
-        """Returns a constraint for sbatch/srun"""
-        it = ("&".join(clause) for clause in self.clauses)
-        return f"""({")|(".join(it)})"""
-
-
-@dataclass
-class SlurmConfigGPUOptions(YAMLDataClass):
-    min_mem_ratio: float = 0.0
-    """Minimum amount of memory that we need to ask"""
-
-
-@dataclass
-class SlurmConfigOptions(YAMLDataClass):
-    gpu: SlurmConfigGPUOptions = field(default_factory=lambda: SlurmConfigGPUOptions())
-
-
-@dataclass
-class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
-    id: str
-    """Slurm ID"""
-
-    partitions: Dict[str, SlurmPartition]
-    connector: str = "local"
-    use_features: bool = True
-    use_hosts: bool = True
-
-    options: SlurmConfigOptions = field(default_factory=lambda: SlurmConfigOptions())
-
-    query_slurm: bool = False
-    """True to query SLURM directly (using scontrol)"""
-
-    tags: List[str] = field(default_factory=lambda: [])
-    weight: int = 0
-
-    features_regex: Annotated[
-        List[re.Pattern],
-        Initialize(lambda regexps: [re.compile(regex) for regex in regexps]),
-    ] = field(default_factory=lambda: [])
-    """
-    Regex to get the information from tags
-        - CUDA: cuda:count, cuda:memory
-    """
-
-    def compute(self, registry: "LauncherRegistry"):
-        if self.query_slurm:
-            self.query_slurm = False
-
-            # Read node information
-            connector = registry.getConnector(self.connector)
-            pb = connector.processbuilder()
-            pb.command = ["scontrol", "--hide", "show", "nodes"]
-
-            def handle_output(input: io.BytesIO):
-                StreamReader = codecs.getreader("utf-8")
-                fill_nodes_configuration(StreamReader(input), self)
-
-            pb.stdout = Redirect.pipe(handle_output)
-            pb.start()
-
-            # Read partition information
-            pb = connector.processbuilder()
-            pb.command = ["scontrol", "--hide", "show", "--oneliner", "partition"]
-
-            def handle_output(input: io.BytesIO):
-                StreamReader = codecs.getreader("utf-8")
-                fill_partitions_configuration(StreamReader(input), self)
-
-            pb.stdout = Redirect.pipe(handle_output)
-            pb.start()
-
-    @cached_property
-    def computed_nodes(self) -> List[SlurmNodesSpecification]:
-        """Computes the list of hosts"""
-        hosts = []
-
-        for partition_name, partition in self.partitions.items():
-            if partition.disabled:
-                continue
-
-            for node in partition.nodes:
-                # CPU Memory specification are handled through command line
-                cpu = CPUSpecification(sys.maxsize, sys.maxsize)
-                cuda = [CudaSpecification(0)]
-
-                for feature in node.features:
-                    count = 1
-                    # logger.debug("Looking at %s", self.features_regex)
-                    for regex in self.features_regex:
-                        # logger.debug("%s/%s => %s", regex, tag, regex.match(tag))
-                        if m := regex.match(feature):
-                            d = m.groupdict()
-                            if _count := d.get("cuda_count", None):
-                                count = int(_count)
-                            if memory := d.get("cuda_memory", None):
-                                cuda[0].memory = humanfriendly.parse_size(memory)
-                                cuda[0].min_memory = int(
-                                    cuda[0].memory * self.options.gpu.min_mem_ratio
-                                )
-
-                    if count > 1:
-                        cuda.extend([cuda[0] for _ in range(count - 1)])
-
-                host = SlurmNodesSpecification(cpu, cuda)
-                host.features = node.features
-                host.partition = partition_name
-                host.hosts = node.hosts
-                host.priority = partition.priority
-                hosts.append(host)
-        hosts.sort(key=lambda host: -host.priority)
-        return hosts
-
-    def get(
-        self, registry: "LauncherRegistry", requirement: HostRequirement
-    ) -> Optional["Launcher"]:
-        # Compute the configuration if needed
-        self.compute(registry)
-
-        # Compute tags or hosts
-        fbf = FeatureBooleanFormula()
-        hosts: set[str] = set()
-        partitions: Set[str] = set()
-
-        # ENHANCE: take into account maximum node duration
-        current_match = None
-        for node in self.computed_nodes:
-            if match := requirement.match(node):
-                logger.debug("Match %s for %s", match, node)
-
-                # If score is below, goes to the next one
-                if current_match and (
-                    match.score <= current_match.score
-                    and match.requirement is not current_match.requirement
-                ):
-                    continue
-
-                if not current_match or (
-                    match.requirement is not current_match.requirement
-                ):
-                    # Clear if the requirement changed
-                    logger.debug("Clearing %s / %s", current_match, match)
-                    partitions.clear()
-                    fbf = FeatureBooleanFormula()
-                    hosts.clear()
-                    current_match = match
-
-                logger.debug(
-                    "Adding %s, %s, %s", node.partition, node.features, node.hosts
-                )
-                partitions.add(node.partition)
-                fbf.add(node.features)
-                if node.hosts:
-                    hosts.update(node.hosts)
-
-        # Returns the appropriate launcher (if any)
-        use_features = fbf.clauses and self.use_features
-        if use_features or hosts:
-            assert current_match is not None
-
-            # Launching using tags
-            launcher = SlurmLauncher(connector=registry.getConnector(self.connector))
-
-            launcher.options.partition = ",".join(partitions)
-            launcher.options.gpus_per_node = (
-                len(current_match.requirement.cuda_gpus)
-                if current_match.requirement.cuda_gpus
-                else 0
-            )
-
-            if current_match.requirement.cpu.memory > 0:
-                launcher.options.mem = (
-                    f"{current_match.requirement.cpu.memory // 1024}M"
-                )
-
-            if current_match.requirement.cpu.cores > 0:
-                launcher.options.cpus_per_task = current_match.requirement.cpu.cores
-
-            if use_features:
-                launcher.options.constraint = fbf.to_constraint()
-            else:
-                logger.warning("Selecting first host")
-                launcher.options.nodelist = next(iter(hosts))
-
-            if current_match.requirement.duration > 0:
-                total_seconds = current_match.requirement.duration
-                seconds = total_seconds % 60
-                minutes = (total_seconds // 60) % 60
-                hours = total_seconds // 3600
-                launcher.options.time = f"{hours}:{minutes}:{seconds}"
-
-            logger.debug("Slurm options: %s", " ".join(launcher.options.args()))
-            return launcher
-
-        return None

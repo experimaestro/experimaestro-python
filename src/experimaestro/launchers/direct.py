@@ -22,6 +22,9 @@ class DirectLauncher(Launcher):
     def init_registry(registry: LauncherRegistry):
         registry.register_launcher("local", DirectLauncherConfiguration)
 
+    def __str__(self):
+        return f"DirectLauncher({self.connector})"
+
 
 @dataclass
 class DirectLauncherConfiguration(YAMLDataClass, LauncherConfiguration):
@@ -35,7 +38,7 @@ class DirectLauncherConfiguration(YAMLDataClass, LauncherConfiguration):
 
     @cached_property
     def spec(self) -> HostSpecification:
-        return HostSpecification(self.cpu.to_spec(), self.gpus.to_spec())
+        return HostSpecification(cpu=self.cpu.to_spec(), cuda=self.gpus.to_spec())
 
     def get(
         self, registry: LauncherRegistry, requirement: "HostRequirement"

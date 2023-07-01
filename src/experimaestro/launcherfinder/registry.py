@@ -105,16 +105,29 @@ def unknown_error(loader: Loader, node):
 
 
 class LauncherRegistry:
-    INSTANCE: ClassVar[Optional["LauncherRegistry"]] = None
+    INSTANCES: ClassVar[Dict[Path, "LauncherRegistry"]] = {}
+    CURRENT_CONFIG_DIR: ClassVar[Optional[Path]] = None
 
     @staticmethod
     def instance():
-        if LauncherRegistry.INSTANCE is None:
-            LauncherRegistry.INSTANCE = LauncherRegistry()
+        """Returns an instance for the current configuration directory"""
+        if LauncherRegistry.CURRENT_CONFIG_DIR is None:
+            LauncherRegistry.CURRENT_CONFIG_DIR = Path(
+                "~/.config/experimaestro"
+            ).expanduser()
 
-        return LauncherRegistry.INSTANCE
+        if LauncherRegistry.CURRENT_CONFIG_DIR not in LauncherRegistry.INSTANCES:
+            LauncherRegistry.INSTANCES[
+                LauncherRegistry.CURRENT_CONFIG_DIR
+            ] = LauncherRegistry(LauncherRegistry.CURRENT_CONFIG_DIR)
 
-    def __init__(self, basepath: Optional[Path] = None):
+        return LauncherRegistry.INSTANCES[LauncherRegistry.CURRENT_CONFIG_DIR]
+
+    @staticmethod
+    def set_config_dir(config_dir: Path):
+        LauncherRegistry.CURRENT_CONFIG_DIR = config_dir
+
+    def __init__(self, basepath: Path):
         self.LauncherLoader: Type[Loader] = new_loader("LauncherLoader")
         self.ConnectorLoader: Type[Loader] = new_loader("ConnectorLoader")
         self.TokenLoader: Type[Loader] = new_loader("TokenLoader")
@@ -142,7 +155,6 @@ class LauncherRegistry:
         # self.TokenLoader.add_constructor("!unknown", unknown_error)
 
         # Read the configuration file
-        basepath = basepath or Path("~/.config/experimaestro").expanduser()
         launchers: Launchers = (
             load_yaml(self.LauncherLoader, basepath / "launchers.yaml") or {}
         )

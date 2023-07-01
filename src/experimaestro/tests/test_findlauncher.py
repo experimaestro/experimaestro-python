@@ -31,7 +31,8 @@ def test_findlauncher_specs():
 
     # Match host
     host = HostSpecification(
-        CPUSpecification(parse_size("12G"), 1), [CudaSpecification(parse_size("48G"))]
+        cpu=CPUSpecification(parse_size("12G"), 1),
+        cuda=[CudaSpecification(parse_size("48G"))],
     )
     req = req1 | req2
     m = req.match(host)
@@ -41,8 +42,8 @@ def test_findlauncher_specs():
 
 def test_findlauncher_specs_gpu_mem():
     host = HostSpecification(
-        CPUSpecification(parse_size("12G"), 1),
-        [CudaSpecification(parse_size("48G"), min_memory=parse_size("24G"))],
+        cpu=CPUSpecification(parse_size("12G"), 1),
+        cuda=[CudaSpecification(parse_size("48G"), min_memory=parse_size("24G"))],
     )
 
     # Not enough requested
@@ -59,7 +60,6 @@ def test_findlauncher_specs_gpu_mem():
 
 
 def test_findlauncher_parse():
-
     r = parse("""duration=4 d & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
     assert isinstance(r, HostSimpleRequirement)
 

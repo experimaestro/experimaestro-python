@@ -1,3 +1,4 @@
+from attrs import define
 from copy import copy
 from dataclasses import dataclass
 from typing import List, Optional, Union
@@ -43,20 +44,25 @@ class CPUSpecification:
         return self.memory < other.memory and self.cores < other.cores
 
 
+@define(kw_only=True)
 class HostSpecification:
     cuda: List[CudaSpecification]
+    """CUDA GPUs"""
+
     cpu: CPUSpecification
-    priority: int
+    """CPU specification for this host"""
 
-    def __init__(
-        self, cpu: CPUSpecification, cuda: List[CudaSpecification], priority: int = 0
-    ) -> None:
-        self.cpu = cpu
-        self.cuda = sorted(cuda)
-        self.priority = priority
+    priority: int = 0
+    """Priority for this host (higher better)"""
 
-    def __repr__(self) -> str:
-        return f"Host({self.cpu}, {self.cuda})"
+    max_duration: int = 0
+    """Max job duration (in seconds)"""
+
+    min_gpu: int = 0
+    """Minimum number of allocated GPUs"""
+
+    def __post_init__(self):
+        self.cuda = sorted(self.cuda)
 
 
 # --- Query part
@@ -146,7 +152,13 @@ class HostSimpleRequirement(HostRequirement):
                 if not host_gpu.match(req_gpu):
                     return None
 
+        if len(self.cuda_gpus) < host.min_gpu:
+            return None
+
         if host.cpu < self.cpu:
+            return None
+
+        if host.max_duration > 0 and self.duration > host.max_duration:
             return None
 
         return MatchRequirement(host.priority, self)

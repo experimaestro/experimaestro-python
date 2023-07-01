@@ -927,6 +927,9 @@ class ConfigInformation:
                     color = "light_blue"
                     cprint(f"[not run] {s}", color, file=sys.stderr)
 
+                if launcher:
+                    cprint(f"   [Launcher] {launcher}", color, file=sys.stderr)
+
                 if not self.job.dependencies:
                     cprint("   [No dependencies]", color, file=sys.stderr)
 

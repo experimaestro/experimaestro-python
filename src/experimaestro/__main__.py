@@ -1,6 +1,6 @@
 # flake8: noqa: T201
 import sys
-from typing import Set
+from typing import Set, Optional
 import pkg_resources
 from itertools import chain
 from shutil import rmtree
@@ -12,6 +12,7 @@ import subprocess
 from termcolor import colored, cprint
 
 import experimaestro
+import experimaestro.launcherfinder.registry as launcher_registry
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -315,6 +316,17 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
             found += 1
 
     print(f"{found} jobs are not orphans")
+
+
+@click.option("--config", type=Path, help="Show size of each folder")
+@click.argument("spec", type=str)
+@cli.command()
+def find_launchers(config: Optional[Path], spec: str):
+    """Find launchers matching a specification"""
+    if config is not None:
+        launcher_registry.LauncherRegistry.set_config_dir(config)
+
+    print(launcher_registry.find_launcher(spec))
 
 
 class Launchers(click.MultiCommand):

@@ -57,6 +57,7 @@ from .checkers import Choices
 from .xpmutils import DirectoryContext
 from .mkdocs.annotations import documentation
 from .scheduler.base import Job
+from .launcherfinder.registry import LauncherRegistry
 
 
 def set_launcher(launcher: Launcher):

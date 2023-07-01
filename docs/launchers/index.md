@@ -115,16 +115,41 @@ local:
 
 slurm:
   # We can use fully manual SLURM configuration
-  - id: manual
+  -
+    # ID for this launcher configuration
+    id: manual
+
+    # slurm clients are on the local machine
     connector: local
+
+    # Tags for filtering the launcher configurations
     tags: [slurm]
+
+    # Weight to select a launcher configuration (higher, better)
     weight: 3
 
     # Describes the GPU features and link them to the two
     # possible properties (memory and number of GPUs)
     features_regex:
+      # GPU3 means "3 GPUs" on the node
       - GPU(?P<cuda_count>\d+)
+      # GPUM32G means "32G" of GPU memory
       - GPUM(?P<cuda_memory>\d+G)
+
+    # Quality of service
+    qos:
+      qos_gpu-t3:
+        # Jobs have 20h hours max to complete
+        max_duration: 20h
+        # We need to reserver at least one GPU
+        min_gpu: 1
+        # Priority increase for this QoS
+        priority: 1
+
+      qos_gpu-t4:
+        max_duration: 100h
+        min_gpu: 1
+
 
     options:
       gpu:
@@ -151,6 +176,28 @@ slurm:
         nodes:
           - hosts: [alpha, beta, gamma, delta]
             features: [GPU2, GPUM24G]
+
+
+      gpu_p4:
+        # QoS that must be used with this partition
+        qos: [qos_gpu-t3, qos_gpu-t4]
+
+        # Accounts that can must used for this partition
+        accounts: [iea@a100]
+
+        # Default node configuration
+        configuration:
+          gpus:
+            count: 8
+            model: A100
+            memory: 40GiB
+
+        nodes:
+        - count: 0
+          features:
+          - Tesla
+          - a100
+        priority: 1
 
   # We can also use SLURM for semi-automatic configuration
   - id: auto
