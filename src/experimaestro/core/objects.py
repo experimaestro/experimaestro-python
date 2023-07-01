@@ -936,6 +936,8 @@ class ConfigInformation:
                 for dep in self.job.dependencies:
                     cprint(f"   [Depency] {dep}", color, file=sys.stderr)
 
+                print(file=sys.stderr)  # noqa: T201
+
         # Handle an output configuration
         def mark_output(config: "Config"):
             """Sets a dependency on the job"""
