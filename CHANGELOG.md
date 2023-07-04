@@ -1,3 +1,9 @@
+## 0.29.10 (2023-07-04)
+
+### Fix
+
+- max duration QoS was ignored
+
 ## 0.29.9 (2023-07-04)
 
 ### Fix
