@@ -117,10 +117,10 @@ class SlurmHostSpecification(HostSpecification):
 
 @dataclass
 class SlurmNodes(YAMLDataClass):
-    features: List[str] = field(default_factory=lambda: [])
+    features: List[str] = field(default_factory=list)
     """Nodes features"""
 
-    hosts: List[str] = field(default_factory=lambda: [])
+    hosts: List[str] = field(default_factory=list)
 
     count: int = 0
     """Number of hosts (if list of hosts is empty)"""
@@ -198,10 +198,10 @@ class SlurmNodeConfiguration(YAMLDataClass):
     max_duration: Annotated[int, Initialize(humanfriendly.parse_timespan)] = 0
     """Maximum duration of a job"""
 
-    gpu: Annotated[GPUConfig, Initialize(GPUConfig)] = None
+    gpu: GPUConfig = field(default_factory=GPUConfig)
     """GPU Configuration"""
 
-    cpu: Annotated[CPUConfig, Initialize(CPUConfig)] = None
+    cpu: CPUConfig = field(default_factory=CPUConfig)
     """CPU Configuration"""
 
     def update(self, other: "SlurmNodeConfiguration"):
@@ -227,13 +227,13 @@ class SlurmNodeConfiguration(YAMLDataClass):
 class SlurmPartition(YAMLDataClass):
     """A Slurm partition"""
 
-    accounts: List[str] = field(default_factory=lambda: [])
+    accounts: List[str] = field(default_factory=list)
     """List of accounts for this partition with the associated priority modifier"""
 
-    qos: List[str] = field(default_factory=lambda: [])
+    qos: List[str] = field(default_factory=list)
     """List of QoS for this partition with the associated priority modifier"""
 
-    nodes: List[SlurmNodes] = field(default_factory=lambda: [])
+    nodes: List[SlurmNodes] = field(default_factory=list)
     """List of nodes"""
 
     configuration: Optional[SlurmNodeConfiguration] = None
@@ -391,7 +391,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     query_slurm: bool = False
     """True to query SLURM directly (using scontrol)"""
 
-    tags: List[str] = field(default_factory=lambda: [])
+    tags: List[str] = field(default_factory=list)
 
     weight: int = 0
 
@@ -400,7 +400,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     features_regex: Annotated[
         List[re.Pattern],
         Initialize(lambda regexps: [re.compile(regex) for regex in regexps]),
-    ] = field(default_factory=lambda: [])
+    ] = field(default_factory=list)
     """
     Regex to get the information from features
         - CUDA: cuda:count, cuda:memory
@@ -558,7 +558,7 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
             if current_match.requirement.cpu.memory > 0:
                 if self.use_memory_contraint:
                     launcher.options.mem = (
-                        f"{current_match.requirement.cpu.memory // 1024}M"
+                        f"{current_match.requirement.cpu.memory // (1024*1024)}M"
                     )
                 else:
                     assert (

@@ -1,5 +1,6 @@
+import logging
 from attrs import define
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import dataclass
 from typing import List, Optional, Union
 from humanfriendly import parse_size, format_size, parse_timespan
@@ -152,6 +153,11 @@ class HostSimpleRequirement(HostRequirement):
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         if self.cuda_gpus:
             if len(host.cuda) < len(self.cuda_gpus):
+                logging.debug(
+                    "Not enough CUDA gpus (%d < %d)",
+                    len(host.cuda),
+                    len(self.cuda_gpus),
+                )
                 return None
 
             for host_gpu, req_gpu in zip(host.cuda, self.cuda_gpus):
@@ -159,6 +165,11 @@ class HostSimpleRequirement(HostRequirement):
                     return None
 
         if len(self.cuda_gpus) < host.min_gpu:
+            logging.debug(
+                "Not enough requested CUDA gpus (min=%d > %d)",
+                host.min_gpu,
+                len(self.cuda_gpus),
+            )
             return None
 
         if host.cpu < self.cpu:
@@ -173,10 +184,10 @@ class HostSimpleRequirement(HostRequirement):
         if count == 1:
             return self
 
-        _self = copy(self)
+        _self = deepcopy(self)
         for _ in range(count - 1):
             _self.cuda_gpus.extend(self.cuda_gpus)
-        self.cuda_gpus.sort()
+        _self.cuda_gpus.sort()
 
         return _self
 

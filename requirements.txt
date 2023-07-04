@@ -20,7 +20,7 @@ sortedcontainers
 pyparsing
 # Parse size
 humanfriendly
-huggingface_hub ~= 0.11.1
+huggingface_hub
 
 # server
 gevent
