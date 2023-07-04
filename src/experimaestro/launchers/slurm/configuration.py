@@ -152,9 +152,10 @@ class GPUConfig(YAMLDataClass):
 
     def to_spec(self):
         cuda = []
+        min_memory = max(int(self.memory * self.min_mem_ratio), self.min_memory)
         cuda.extend(
             [
-                CudaSpecification(self.memory, self.model, self.min_memory)
+                CudaSpecification(self.memory, self.model, min_memory)
                 for _ in range(self.count)
             ]
         )
@@ -194,13 +195,13 @@ class CPUConfig(YAMLDataClass):
 
 @dataclass
 class SlurmNodeConfiguration(YAMLDataClass):
-    max_duration: Annotated[Optional[int], Initialize(humanfriendly.parse_timespan)] = 0
+    max_duration: Annotated[int, Initialize(humanfriendly.parse_timespan)] = 0
     """Maximum duration of a job"""
 
-    gpu: Optional[GPUConfig] = None
+    gpu: Annotated[GPUConfig, Initialize(GPUConfig)] = None
     """GPU Configuration"""
 
-    cpu: Optional[CPUConfig] = None
+    cpu: Annotated[CPUConfig, Initialize(CPUConfig)] = None
     """CPU Configuration"""
 
     def update(self, other: "SlurmNodeConfiguration"):
@@ -214,8 +215,11 @@ class SlurmNodeConfiguration(YAMLDataClass):
             self.cpu.update(other.cpu)
 
     def to_host_spec(self):
-        spec = SlurmHostSpecification(cpu=self.cpu.to_spec(), cuda=self.gpu.to_spec())
-        spec.max_duration = self.max_duration
+        spec = SlurmHostSpecification(
+            cpu=(self.cpu or CPUConfig()).to_spec(),
+            cuda=(self.gpu or GPUConfig()).to_spec(),
+        )
+        spec.max_duration = self.max_duration or 0
         return spec
 
 
@@ -300,9 +304,9 @@ class NodesSpecComputer:
     def get_host(self) -> SlurmHostSpecification:
         host = self.config.to_host_spec()
         host.priority = self.priority
-        host.max_duration = self.config.max_duration
         host.qos_id = self.qos_id
         host.min_gpu = self.min_gpu
+
         return host
 
 
@@ -463,14 +467,10 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
                         if m := regex.match(feature):
                             d = m.groupdict()
                             if _count := d.get("cuda_count", None):
-                                nodes_spec.cuda_count = int(_count)
+                                nodes_spec.config.gpu.count = int(_count)
                             if memory := d.get("cuda_memory", None):
-                                nodes_spec.cuda.memory = humanfriendly.parse_size(
+                                nodes_spec.config.gpu.memory = humanfriendly.parse_size(
                                     memory
-                                )
-                                nodes_spec.cuda.min_memory = int(
-                                    nodes_spec.cuda.memory
-                                    * self.options.gpu.min_mem_ratio
                                 )
 
                 qos_list = partition.qos or [None]

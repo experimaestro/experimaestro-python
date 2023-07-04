@@ -8,7 +8,7 @@ slurm:
     - GPUM(?P<cuda_memory>\d+G)
 
     connector: local
-    options:
+    configuration:
       gpu:
         # At least 40% of the memory should be requested
         min_mem_ratio: 0.4
