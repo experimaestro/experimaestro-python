@@ -1,3 +1,10 @@
+## 0.29.9 (2023-07-04)
+
+### Fix
+
+- more fine-grained SLURM configuration
+- blank line after job information
+
 ## 0.29.8 (2023-07-01)
 
 ### Fix
