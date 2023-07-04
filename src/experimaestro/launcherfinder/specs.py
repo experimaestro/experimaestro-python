@@ -34,11 +34,17 @@ class CudaSpecification:
 
 @dataclass
 class CPUSpecification:
-    memory: int
+    memory: int = 0
     """Memory in bytes"""
 
-    cores: int
+    cores: int = 0
     """Number of cores"""
+
+    mem_per_cpu: int = 0
+    """Memory per CPU (0 if not defined)"""
+
+    cpu_per_gpu: int = 0
+    """Number of CPU per GPU (0 if not defined)"""
 
     def __lt__(self, other: "CPUSpecification"):
         return self.memory < other.memory and self.cores < other.cores

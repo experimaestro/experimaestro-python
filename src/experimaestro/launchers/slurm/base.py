@@ -347,7 +347,7 @@ class SlurmLauncher(Launcher):
         self.options = options or SlurmOptions()
 
     def __str__(self):
-        return f"SlurmLauncher({self.options})"
+        return f"SlurmLauncher({self.options}, path={self.binpath})"
 
     @staticmethod
     def init_registry(registry: LauncherRegistry):

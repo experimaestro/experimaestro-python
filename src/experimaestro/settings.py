@@ -14,6 +14,9 @@ class ServerSettings:
     host: Optional[str] = None
     """Hostname for the server"""
 
+    autohost: Optional[str] = None
+    """Automatic hostname: values can be `fqdn` or `name`"""
+
     token: Optional[str] = None
     """Token for the server"""
 

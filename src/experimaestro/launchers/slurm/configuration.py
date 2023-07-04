@@ -2,9 +2,9 @@ import codecs
 from collections import defaultdict
 from copy import deepcopy
 import io
+import math
 from attr import Factory
 from attrs import define
-import sys
 import logging
 from experimaestro import Annotated
 from typing import (
@@ -131,24 +131,92 @@ class GPUConfig(YAMLDataClass):
     """Represents a GPU"""
 
     model: Optional[str] = None
-    count: Optional[int] = None
-    memory: Annotated[Optional[int], Initialize(parse_size)] = None
-    min_memory: Annotated[Optional[int], Initialize(parse_size)] = None
+    count: int = 0
+    memory: Annotated[int, Initialize(parse_size)] = 0
+
+    min_memory: Annotated[int, Initialize(parse_size)] = 0
+    """Minimum memory to be allocated on this node"""
+
+    min_mem_ratio: Optional[float] = 0.0
+    """Minimum memory ratio"""
+
+    def update(self, other: "GPUConfig"):
+        if other.model:
+            self.model = other.model
+        if other.count:
+            self.count = other.count
+        if other.memory:
+            self.memory = other.memory
+        if other.min_memory:
+            self.min_memory = other.min_memory
+
+    def to_spec(self):
+        cuda = []
+        cuda.extend(
+            [
+                CudaSpecification(self.memory, self.model, self.min_memory)
+                for _ in range(self.count)
+            ]
+        )
+        return cuda
 
 
 @dataclass
-class SlurmPartitionConfiguration(YAMLDataClass):
+class CPUConfig(YAMLDataClass):
     cpu_per_gpu: int = 0
     """Number of CPU per GPU"""
 
     mem_per_cpu: Annotated[int, Initialize(humanfriendly.parse_size)] = 0
     """Memory per CPU"""
 
+    cores: int = 0
+
+    memory: Annotated[int, Initialize(parse_size)] = 0
+
+    def update(self, other: "CPUConfig"):
+        if other.cpu_per_gpu:
+            self.cpu_per_gpu = other.cpu_per_gpu
+        if other.mem_per_cpu:
+            self.mem_per_cpu = other.mem_per_cpu
+        if other.memory:
+            self.memory = other.memory
+        if other.cores:
+            self.cores = other.cores
+
+    def to_spec(self):
+        return CPUSpecification(
+            memory=self.memory,
+            cores=self.cores,
+            mem_per_cpu=self.mem_per_cpu,
+            cpu_per_gpu=self.cpu_per_gpu,
+        )
+
+
+@dataclass
+class SlurmNodeConfiguration(YAMLDataClass):
     max_duration: Annotated[Optional[int], Initialize(humanfriendly.parse_timespan)] = 0
     """Maximum duration of a job"""
 
-    gpus: Optional[GPUConfig] = None
-    """Default GPU settings"""
+    gpu: Optional[GPUConfig] = None
+    """GPU Configuration"""
+
+    cpu: Optional[CPUConfig] = None
+    """CPU Configuration"""
+
+    def update(self, other: "SlurmNodeConfiguration"):
+        if other.max_duration:
+            self.max_duration = other.max_duration
+
+        if other.gpu:
+            self.gpu.update(other.gpu)
+
+        if other.cpu:
+            self.cpu.update(other.cpu)
+
+    def to_host_spec(self):
+        spec = SlurmHostSpecification(cpu=self.cpu.to_spec(), cuda=self.gpu.to_spec())
+        spec.max_duration = self.max_duration
+        return spec
 
 
 @dataclass
@@ -164,7 +232,7 @@ class SlurmPartition(YAMLDataClass):
     nodes: List[SlurmNodes] = field(default_factory=lambda: [])
     """List of nodes"""
 
-    configuration: Optional[SlurmPartitionConfiguration] = None
+    configuration: Optional[SlurmNodeConfiguration] = None
     """Partition configuration"""
 
     priority: int = 0
@@ -183,21 +251,10 @@ class FeatureConjunction(List[str]):
 
 
 @dataclass
-class SlurmConfigGPUOptions(YAMLDataClass):
-    min_mem_ratio: float = 0.0
-    """Minimum amount of memory that we need to ask"""
-
-
-@dataclass
-class SlurmConfigOptions(YAMLDataClass):
-    gpu: SlurmConfigGPUOptions = field(default_factory=lambda: SlurmConfigGPUOptions())
-
-
-@dataclass
 class SlurmFeature(YAMLDataClass):
     """Associate a configuration with a Slurm feature"""
 
-    gpu: Optional[GPUConfig] = None
+    configuration: Optional[SlurmNodeConfiguration] = None
 
 
 @dataclass
@@ -216,48 +273,34 @@ class NodesSpecComputer:
     def __init__(self, config: "SlurmConfiguration", partition: SlurmPartition):
         self.config = config
         self.partition = partition
-        self.cpu = CPUSpecification(sys.maxsize, sys.maxsize)
-        self.cuda = CudaSpecification(0)
-        self.cuda_count = [1]
-        self.max_duration = (
+        self.main_config = config
+        self.config = deepcopy(config.configuration)
+
+        self.config.max_duration = (
             self.partition.configuration.max_duration
             if self.partition.configuration
-            else 0
+            else None
         )
         self.priority = partition.priority
         self.qos_id = None
         self.min_gpu = 0
 
-    def update_gpu(self, gpu: GPUConfig):
-        if gpu:
-            if gpu.count:
-                self.cuda_count = gpu.count
-
-            if gpu.memory:
-                self.cuda.memory = gpu.memory
-                self.cuda.min_memory = int(
-                    self.cuda.memory * self.config.options.gpu.min_mem_ratio
-                )
-
-            if gpu.min_memory:
-                self.cuda.min_memory = gpu.min_memory
+    def update(self, config: SlurmNodeConfiguration):
+        self.config = deepcopy(self.config)
+        self.config.update(config)
 
     def update_with_qos(self, qos_id: str):
         self.qos_id = qos_id
-        if qos := self.config.qos.get(qos_id, None):
+        if qos := self.main_config.qos.get(qos_id, None):
             self.priority += qos.priority
             self.min_gpu = qos.min_gpu
             if qos.max_duration > 0:
                 self.max_duration = qos.max_duration
 
     def get_host(self) -> SlurmHostSpecification:
-        cuda = []
-        if self.cuda.memory > 0 and self.cuda_count > 0:
-            cuda.extend([self.cuda for _ in range(self.cuda_count)])
-
-        host = SlurmHostSpecification(cpu=self.cpu, cuda=cuda)
+        host = self.config.to_host_spec()
         host.priority = self.priority
-        host.max_duration = self.max_duration
+        host.max_duration = self.config.max_duration
         host.qos_id = self.qos_id
         host.min_gpu = self.min_gpu
         return host
@@ -276,7 +319,8 @@ class FeatureBooleanFormula:
     def to_constraint(self):
         """Returns a constraint for sbatch/srun"""
         it = ("&".join(clause) for clause in self.clauses)
-        return f"""({")|(".join(it)})"""
+        s = f"""({")|(".join(it)})"""
+        return None if s == "()" else s
 
 
 class MatchingSpec:
@@ -286,6 +330,7 @@ class MatchingSpec:
         self.partitions: Set[str] = set()
         self.qos: Optional[str] = None
         self.account: Optional[str] = None
+        self.mem_per_cpu: int = 0
 
     def update(self, host_spec: SlurmHostSpecification):
         if host_spec.qos_id != self.qos and self.qos is not None:
@@ -296,6 +341,18 @@ class MatchingSpec:
         if host_spec.account_id != self.account and self.account is not None:
             # Cannot update with other account
             return
+
+        if (
+            host_spec.cpu.mem_per_cpu > 0
+            and self.mem_per_cpu > 0
+            and host_spec.cpu.mem_per_cpu != self.mem_per_cpu
+        ):
+            # Cannot update with different mem per cpu
+            return
+
+        if host_spec.cpu.mem_per_cpu:
+            self.mem_per_cpu = host_spec.cpu.mem_per_cpu
+
         self.account = host_spec.account_id
 
         self.partitions.add(host_spec.partition)
@@ -315,14 +372,17 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
     connector: str = "local"
     """Name of the connector"""
 
+    path: str = "/usr/bin"
+    """Path for SLURM commands"""
+
     use_features: bool = True
     """Whether features should be used"""
 
     use_hosts: bool = True
     """Whether hosts should be used in the query"""
 
-    options: SlurmConfigOptions = field(default_factory=lambda: SlurmConfigOptions())
-    """SLURM options"""
+    use_memory_contraint: bool = True
+    """Whether memory constraint can be specified"""
 
     query_slurm: bool = False
     """True to query SLURM directly (using scontrol)"""
@@ -344,6 +404,9 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
 
     features: Dict[str, SlurmFeature] = field(default_factory=lambda: {})
     """List of features with associated configurations"""
+
+    configuration: Optional[SlurmNodeConfiguration] = None
+    """Partition configuration"""
 
     def compute(self, registry: "LauncherRegistry"):
         if self.query_slurm:
@@ -383,15 +446,16 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
 
             for node in partition.nodes:
                 nodes_spec = NodesSpecComputer(self, partition)
+                nodes_spec.update(self.configuration)
 
                 # Set partition GPU
                 if partition.configuration:
-                    nodes_spec.update_gpu(partition.configuration.gpus)
+                    nodes_spec.update(partition.configuration)
 
                 for feature in node.features:
                     # Use feature data directly
                     if data := self.features.get(feature, None):
-                        nodes_spec.update_gpu(data.gpu)
+                        nodes_spec.update(data.configuration)
 
                     # logger.debug("Looking at %s", self.features_regex)
                     for regex in self.features_regex:
@@ -474,25 +538,38 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
             # Launching using tags
             from .base import SlurmLauncher
 
-            launcher = SlurmLauncher(connector=registry.getConnector(self.connector))
+            launcher = SlurmLauncher(
+                connector=registry.getConnector(self.connector), binpath=self.path
+            )
 
             launcher.options.partition = ",".join(matching_spec.partitions)
             launcher.options.gpus_per_node = (
                 len(current_match.requirement.cuda_gpus)
                 if current_match.requirement.cuda_gpus
-                else 0
+                else None
             )
 
             launcher.options.qos = matching_spec.qos
             launcher.options.account = matching_spec.account
 
-            if current_match.requirement.cpu.memory > 0:
-                launcher.options.mem = (
-                    f"{current_match.requirement.cpu.memory // 1024}M"
-                )
-
             if current_match.requirement.cpu.cores > 0:
                 launcher.options.cpus_per_task = current_match.requirement.cpu.cores
+
+            if current_match.requirement.cpu.memory > 0:
+                if self.use_memory_contraint:
+                    launcher.options.mem = (
+                        f"{current_match.requirement.cpu.memory // 1024}M"
+                    )
+                else:
+                    assert (
+                        matching_spec.mem_per_cpu > 0
+                    ), "Memory per CPU should be specified"
+                    cpus_per_task = math.ceil(
+                        current_match.requirement.cpu.memory / matching_spec.mem_per_cpu
+                    )
+                    launcher.options.cpus_per_task = max(
+                        launcher.options.cpus_per_task, cpus_per_task
+                    )
 
             if use_features:
                 launcher.options.constraint = matching_spec.fbf.to_constraint()

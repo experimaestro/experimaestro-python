@@ -1,6 +1,7 @@
 from datetime import datetime
 import logging
 import asyncio
+import platform
 import socket
 import uuid
 from experimaestro.scheduler.base import Job
@@ -292,6 +293,13 @@ def start_app(server: "Server"):
 
 class Server:
     def __init__(self, scheduler: Scheduler, settings: ServerSettings):
+        if settings.autohost == "fqdn":
+            settings.host = socket.getfqdn()
+            logging.info("Auto host name (fqdn): %s", settings.host)
+        elif settings.autohost == "name":
+            settings.host = platform.node()
+            logging.info("Auto host name (name): %s", settings.host)
+
         if settings.host is None or settings.host == "127.0.0.1":
             self.bindinghost = "127.0.0.1"
         else:

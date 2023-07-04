@@ -106,10 +106,11 @@ local:
 
     cpu: { cores: 40, memory: 8G }
 
-    gpus:
+    gpu:
       - model: GTX1080
         count: 1
         memory: 8116MiB
+
 
 # --- Slurm launchers
 
@@ -136,6 +137,11 @@ slurm:
       # GPUM32G means "32G" of GPU memory
       - GPUM(?P<cuda_memory>\d+G)
 
+    # Set to false if memory constraints cannot be
+    # used (uses mem_per_cpu in that case to reserve the
+    # appropriate number of cores)
+    use_memory_contraint: true
+
     # Quality of service
     qos:
       qos_gpu-t3:
@@ -151,7 +157,10 @@ slurm:
         min_gpu: 1
 
 
-    options:
+    configuration:
+      cpu:
+        # Memory allocated for one core
+        mem_per_cpu: 2048M
       gpu:
         # At least 70% of the memory should be requested
         # (from version 0.11.8)
@@ -187,7 +196,7 @@ slurm:
 
         # Default node configuration
         configuration:
-          gpus:
+          gpu:
             count: 8
             model: A100
             memory: 40GiB
