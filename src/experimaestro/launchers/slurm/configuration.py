@@ -295,7 +295,7 @@ class NodesSpecComputer:
             self.priority += qos.priority
             self.min_gpu = qos.min_gpu
             if qos.max_duration > 0:
-                self.max_duration = qos.max_duration
+                self.config.max_duration = qos.max_duration
 
     def get_host(self) -> SlurmHostSpecification:
         host = self.config.to_host_spec()
