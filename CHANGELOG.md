@@ -1,3 +1,9 @@
+## 0.30.0 (2023-07-05)
+
+### Feat
+
+- **configuration**: Add access to pre-task and dependency copying
+
 ## 0.29.11 (2023-07-04)
 
 ### Fix
