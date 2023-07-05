@@ -662,6 +662,10 @@ class ConfigInformation:
                             % (k, self.xpmtype, self._initinfo)
                         )
 
+            # Validate pre-tasks
+            for pre_task in self.pre_tasks:
+                pre_task.__xpm__.validate()
+
             # Use __validate__ method
             if hasattr(self.pyobject, "__validate__"):
                 try:
@@ -1628,6 +1632,22 @@ class TypeConfig:
             self.add_pretasks(*config.__xpm__.pre_tasks)
         return self
 
+    @property
+    def pre_tasks(self) -> List["LightweightTask"]:
+        """Access pre-tasks"""
+        return self.__xpm__.pre_tasks
+
+    def copy_dependencies(self, other: "Config"):
+        """Add all the dependencies from other configuration"""
+
+        # Add task dependency
+        if other.__xpm__.task is not None:
+            assert self.__xpm__.task is None
+            self.__xpm__.task = other.__xpm__.task
+
+        # Add other dependencies
+        self.__xpm__.add_dependencies(*other.__xpm__.dependencies)
+
 
 class Config:
     """Base type for all objects in python interface"""
@@ -1700,7 +1720,20 @@ class Config:
 
     def add_pretasks_from(self, *configs: "Config"):
         """Add pre-tasks from the listed configurations"""
-        raise AssertionError("This method can only be used during configuration")
+        raise AssertionError(
+            "The 'add_pretasks_from' can only be used during configuration"
+        )
+
+    def copy_dependencies(self, other: "Config"):
+        """Add pre-tasks from the listed configurations"""
+        raise AssertionError(
+            "The 'copy_dependencies' method can only be used during configuration"
+        )
+
+    @property
+    def pre_tasks(self) -> List["LightweightTask"]:
+        """Access pre-tasks"""
+        raise AssertionError("Pre-tasks can be accessed only during configuration")
 
 
 class LightweightTask(Config):
