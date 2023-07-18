@@ -1,5 +1,6 @@
 # flake8: noqa: T201
 import sys
+from types import ModuleType
 from typing import Set, Optional
 import pkg_resources
 from itertools import chain
@@ -316,6 +317,58 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
             found += 1
 
     print(f"{found} jobs are not orphans")
+
+
+@click.argument("package", type=str)
+@click.argument("objects", type=Path)
+@cli.command()
+def check_documentation(objects, package):
+    """Check that all the configuration and tasks are documented within a
+    package, relying on the sphinx objects.inv file"""
+    import pkgutil
+    import sphobjinv
+    import inspect
+    from experimaestro import Config
+    from importlib import import_module
+
+    def process(mod: ModuleType, configurations: Set):
+        ok = True
+        for info in pkgutil.iter_modules(mod.__path__, prefix=f"{mod.__name__}."):
+            try:
+                logging.info("Processing %s...", info.name)
+                mod = info.module_finder.find_module(info.name).load_module(info.name)
+                configurations.update(
+                    x
+                    for x in mod.__dict__.values()
+                    if inspect.isclass(x) and issubclass(x, Config)
+                )
+            except Exception:
+                logging.exception("Error while loading %s", info.name)
+                cprint(f"{info.name} module could not be loaded", "red")
+
+                ok = False
+
+            # Process sub-modules
+            if info.ispkg:
+                ok = process(mod, configurations) & ok
+
+        return ok
+
+    logging.info("Loading objects.inv")
+
+    inv = sphobjinv.Inventory(objects)
+    documented = set(
+        obj.name
+        for obj in inv.objects
+        if obj.domain == "py" and obj.role == "xpmconfig"
+    )
+
+    configurations = set()
+    ok = process(import_module(package), configurations)
+    for configuration in configurations:
+        name = f"{configuration.__module__}.{configuration.__qualname__}"
+        if name.startswith(f"{package}.") and name not in documented:
+            cprint(f"{name} is not documented", "red")
 
 
 @click.option("--config", type=Path, help="Show size of each folder")

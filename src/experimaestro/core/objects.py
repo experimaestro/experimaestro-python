@@ -1365,7 +1365,9 @@ class ConfigInformation:
             for pre_task_id in definition.get("pre-tasks", []):
                 if pre_task_id not in completed_pretasks:
                     completed_pretasks.add(pre_task_id)
-                    objects[pre_task_id].execute()
+                    pre_task = objects[pre_task_id]
+                    logger.info("Executing pre-task %s", type(pre_task))
+                    pre_task.execute()
 
         return o
 
