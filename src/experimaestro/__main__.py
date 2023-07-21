@@ -19,6 +19,16 @@ import experimaestro.launcherfinder.registry as launcher_registry
 logging.basicConfig(level=logging.INFO)
 
 
+def pass_cfg(f):
+    """Pass configuration information"""
+
+    @click.pass_context
+    def new_func(ctx, *args, **kwargs):
+        return ctx.invoke(f, ctx.obj, *args, **kwargs)
+
+    return update_wrapper(new_func, f)
+
+
 def check_xp_path(ctx, self, path: Path):
     if not (path / ".__experimaestro__").is_file():
         cprint(f"{path} is not an experimaestro working directory", "red")
@@ -104,6 +114,7 @@ def rpyc_server(unix_path, clean):
 
 @cli.group()
 def deprecated():
+    """Manage identifier changes"""
     pass
 
 
@@ -403,6 +414,24 @@ class Launchers(click.MultiCommand):
 cli.add_command(Launchers("launchers", help="Launcher specific commands"))
 cli.add_command(Launchers("connectors", help="Connector specific commands"))
 cli.add_command(Launchers("tokens", help="Token specific commands"))
+
+
+@cli.group()
+@click.argument("workdir", type=Path, callback=check_xp_path)
+@click.pass_context
+def experiments(ctx, workdir):
+    """Manage experiments"""
+    ctx.obj = workdir
+
+
+@experiments.command()
+@pass_cfg
+def list(workdir: Path):
+    for p in (workdir / "xp").iterdir():
+        if (p / "jobs.bak").exists():
+            cprint(f"[unfinished] {p.name}", "yellow")
+        else:
+            cprint(p.name, "cyan")
 
 
 def main():
