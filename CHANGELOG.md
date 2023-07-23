@@ -1,3 +1,10 @@
+## 1.0.0 (2023-07-23)
+
+### Feat
+
+- List experiments
+- **documentation**: Checks for undocumented configuration objects in a package
+
 ## 0.30.0 (2023-07-05)
 
 ### Feat
