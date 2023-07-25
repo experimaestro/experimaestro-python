@@ -255,7 +255,9 @@ class ObjectType(Type):
         ) or (TypeConfig,)
 
         *tp_qual, tp_name = self.basetype.__qualname__.split(".")
-        self.configtype = type(f"{tp_name}_XPMConfig", __configbases__ + (self.basetype,), {})
+        self.configtype = type(
+            f"{tp_name}_XPMConfig", __configbases__ + (self.basetype,), {}
+        )
         self.configtype.__qualname__ = ".".join(tp_qual + [self.configtype.__name__])
         self.configtype.__module__ = tp.__module__
 
@@ -311,7 +313,7 @@ class ObjectType(Type):
 
         # Get the module
         module = inspect.getmodule(self.originaltype)
-        if getattr(module, '__file__', None) is None:
+        if getattr(module, "__file__", None) is None:
             self._file = None
         else:
             self._file = Path(inspect.getfile(self.originaltype)).absolute()
@@ -416,6 +418,11 @@ class ObjectType(Type):
         parent = self.basetype.__bases__[0].__getxpmtype__()
         self.identifier = parent.identifier
         self._deprecated = True
+
+    @property
+    def deprecated(self) -> bool:
+        """Returns true if this type is deprecated"""
+        return self._deprecated
 
     @property
     def description(self) -> str:

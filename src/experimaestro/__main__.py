@@ -330,10 +330,16 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
     print(f"{found} jobs are not orphans")
 
 
+def arg_split(ctx, param, value):
+    # split columns by ',' and remove whitespace
+    return set(c.strip() for c in value.split(","))
+
+
+@click.option("--skip", default=set(), callback=arg_split)
 @click.argument("package", type=str)
 @click.argument("objects", type=Path)
 @cli.command()
-def check_documentation(objects, package):
+def check_documentation(objects, package, skip):
     """Check that all the configuration and tasks are documented within a
     package, relying on the sphinx objects.inv file"""
     import pkgutil
@@ -376,10 +382,15 @@ def check_documentation(objects, package):
 
     configurations = set()
     ok = process(import_module(package), configurations)
-    for configuration in configurations:
-        name = f"{configuration.__module__}.{configuration.__qualname__}"
+    names = set(
+        f"{configuration.__module__}.{configuration.__qualname__}"
+        for configuration in configurations
+    )
+
+    for name in sorted(names):
         if name.startswith(f"{package}.") and name not in documented:
-            cprint(f"{name} is not documented", "red")
+            if all(not name.startswith(f"{x}.") for x in skip):
+                cprint(f"{name} is not documented", "red")
 
 
 @click.option("--config", type=Path, help="Show size of each folder")
