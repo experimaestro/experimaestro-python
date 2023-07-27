@@ -1,3 +1,10 @@
+## 1.1.0 (2023-07-27)
+
+### Feat
+
+- Generic documentation checker (for use in automated tests)
+- improved check documentation command
+
 ## 1.0.0 (2023-07-23)
 
 ### Feat
