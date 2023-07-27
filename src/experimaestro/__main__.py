@@ -193,7 +193,21 @@ def jobs(
     clean: bool,
     force: bool,
 ):
-    """Job control: list, kill and clean"""
+    """Job control: list, kill and clean
+
+    The job filter is a boolean expression where tags (alphanumeric)
+    and special job information (@state for job state, @name for job full
+    name) can be compared to a given value (using '~' for regex matching,
+    '=', 'not in', or 'in')
+
+    For instance,
+
+    model = "bm25" and mode in ["a", b"] and @state = "RUNNING"
+
+    selects jobs where the tag model is "bm25", the tag mode is either
+    "a" or "b", and the state is running.
+
+    """
     for p in (path / "xp").glob("*"):
         if experiment and p.name != experiment:
             continue
@@ -342,55 +356,15 @@ def arg_split(ctx, param, value):
 def check_documentation(objects, package, skip):
     """Check that all the configuration and tasks are documented within a
     package, relying on the sphinx objects.inv file"""
-    import pkgutil
-    import sphobjinv
-    import inspect
-    from experimaestro import Config
-    from importlib import import_module
+    from experimaestro.tools.documentation import documented_from_objects, undocumented
 
-    def process(mod: ModuleType, configurations: Set):
-        ok = True
-        for info in pkgutil.iter_modules(mod.__path__, prefix=f"{mod.__name__}."):
-            try:
-                logging.info("Processing %s...", info.name)
-                mod = info.module_finder.find_module(info.name).load_module(info.name)
-                configurations.update(
-                    x
-                    for x in mod.__dict__.values()
-                    if inspect.isclass(x) and issubclass(x, Config)
-                )
-            except Exception:
-                logging.exception("Error while loading %s", info.name)
-                cprint(f"{info.name} module could not be loaded", "red")
+    documented = documented_from_objects(objects)
+    ok, configs = undocumented(package, documented, skip)
+    for config in configs:
+        cprint(f"{config.__module__}.{config.__qualname__}", "red")
 
-                ok = False
-
-            # Process sub-modules
-            if info.ispkg:
-                ok = process(mod, configurations) & ok
-
-        return ok
-
-    logging.info("Loading objects.inv")
-
-    inv = sphobjinv.Inventory(objects)
-    documented = set(
-        obj.name
-        for obj in inv.objects
-        if obj.domain == "py" and obj.role == "xpmconfig"
-    )
-
-    configurations = set()
-    ok = process(import_module(package), configurations)
-    names = set(
-        f"{configuration.__module__}.{configuration.__qualname__}"
-        for configuration in configurations
-    )
-
-    for name in sorted(names):
-        if name.startswith(f"{package}.") and name not in documented:
-            if all(not name.startswith(f"{x}.") for x in skip):
-                cprint(f"{name} is not documented", "red")
+    if not ok or configs:
+        sys.exit(1)
 
 
 @click.option("--config", type=Path, help="Show size of each folder")

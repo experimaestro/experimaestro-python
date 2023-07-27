@@ -51,6 +51,9 @@ class VarExpr:
         if self.varname == "@state":
             return info.state.name if info.state else None
 
+        if self.varname == "@name":
+            return str(info.path.parent.name)
+
         return info.tags.get(self.varname, None)
 
     def __repr__(self):
@@ -136,8 +139,6 @@ class LogicExpr:
         if self.operator == "and":
             return self.y.filter(information) and self.x.filter(information)
 
-        print(self.y.filter(information), "OR", self.x.filter(information))
-
         return self.y.filter(information) or self.x.filter(information)
 
     @staticmethod
@@ -172,7 +173,7 @@ quotedString = pp.QuotedString('"', unquoteResults=True) | pp.QuotedString(
     "'", unquoteResults=True
 )
 
-var = l("@state") | pp.Word(pp.alphas)
+var = l("@state") | l("@name") | pp.Word(pp.alphas)
 var.setParseAction(VarExpr)
 
 regexExpr = var + tilde + quotedString
