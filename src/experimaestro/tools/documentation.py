@@ -56,6 +56,7 @@ def undocumented(
                     if inspect.isclass(x) and issubclass(x, Config)
                 )
             except Exception:
+                logging.exception(f"Module {info.name} could not be loaded")
                 errors.append(f"Module {info.name} could not be loaded")
 
             # Process sub-modules
@@ -243,7 +244,7 @@ class DocumentationAnalyzer:
         for error in self.parsing_errors:
             cprint(f"  [import error] {error}", "red")
 
-        cprint(f"{self.undocumented} undocumented configurations")
+        cprint(f"{len(self.undocumented)} undocumented configurations")
         for error in self.undocumented:
             cprint(f"  [undocumented] {error}", "red")
 
