@@ -1,3 +1,10 @@
+## 1.1.1 (2023-08-28)
+
+### Feat
+
+- undocumented in sphinx documentation
+- Added decorator (NOOP) for config only methods
+
 ## 1.1.0 (2023-07-27)
 
 ### Feat
