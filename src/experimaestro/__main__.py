@@ -359,11 +359,11 @@ def check_documentation(objects, package, skip):
     from experimaestro.tools.documentation import documented_from_objects, undocumented
 
     documented = documented_from_objects(objects)
-    ok, configs = undocumented(package, documented, skip)
+    errors, configs = undocumented([package], documented, skip)
     for config in configs:
         cprint(f"{config.__module__}.{config.__qualname__}", "red")
 
-    if not ok or configs:
+    if errors > 0 or configs:
         sys.exit(1)
 
 

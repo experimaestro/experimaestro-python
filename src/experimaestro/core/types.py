@@ -483,7 +483,10 @@ class ObjectType(Type):
         types = self.basetype
 
         if not isinstance(value, types):
-            raise ValueError("%s is not a subtype of %s" % (value, types))
+            raise ValueError(
+                "%s is not a subtype of %s (MRO: %s)"
+                % (value, types, ", ".join(str(cls) for cls in value.__class__.__mro__))
+            )
 
         # Check that the task has been submitted
         if self.task and not value.__xpm__.job:
