@@ -1,3 +1,9 @@
+## 1.1.2 (2023-08-28)
+
+### Fix
+
+- undocumented produces more information
+
 ## 1.1.1 (2023-08-28)
 
 ### Feat
