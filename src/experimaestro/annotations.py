@@ -211,7 +211,7 @@ def STDOUT(jobcontext, config):
 
 class constant(param):
     """
-    An constant argument (useful for versionning tasks)
+    A constant argument (useful for versionning tasks)
     """
 
     def __init__(self, name: str, value, type=None, help=""):
@@ -219,6 +219,12 @@ class constant(param):
 
 
 ConstantParam = constant
+
+
+def config_only(method):
+    """Marks a configuration-only method"""
+    assert inspect.ismethod(method)
+
 
 # --- Cache
 

@@ -24,6 +24,8 @@ from .annotations import (
     # deprecated
     argument,
     initializer,
+    # Method
+    config_only,
 )
 from .core.arguments import (
     # Types
