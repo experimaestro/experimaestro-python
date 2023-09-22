@@ -28,7 +28,7 @@ enable = true
 vcs = "git"
 style = "semver"
 dirty = true
-format-jinja = "{% if distance == 0 %}{{ base }}{% else %}{{ base }}+{{ distance }}.{{ commit }}{% endif %}{% if dirty %}+dirty{% endif %}"
+format-jinja = "{% if distance == 0 %}{{ base }}{% if dirty %}+dirty{% endif %}{% else %}{{ base }}+{{ distance }}.{{ commit }}{% if dirty %}.dirty{% endif %}{% endif %}"
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
