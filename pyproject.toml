@@ -1,6 +1,126 @@
-[tool.setuptools_scm]
-write_to = "src/experimaestro/version.py"
-fallback_version = "0.0.0-dev"
+[tool.poetry]
+name = "experimaestro"
+authors = ["Benjamin Piwowarski <benjamin@piwowarski.fr>"]
+description = '"Experimaestro is a computer science experiment manager"'
+readme = "README.md"
+license = "GPL-3"
+keywords = ["experiment manager"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+include = [
+    "src/experimaestro/server/data/*",
+    "src/experimaestro/sphinx/static/experimaestro.css",
+    "src/experimaestro/mkdocs/style.css"
+]
+version = "0.0.0"
+repository = "https://github.com/experimaestro/experimaestro-python"
+documentation = "https://experimaestro-python.readthedocs.io/"
+
+[tool.poetry-dynamic-versioning]
+enable = true
+vcs = "git"
+style = "semver"
+dirty = true
+format-jinja = "{% if distance == 0 %}{{ base }}{% else %}{{ base }}+{{ distance }}.{{ commit }}{% endif %}{% if dirty %}+dirty{% endif %}"
+
+[build-system]
+requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+click = ">=8"
+omegaconf = "^2.3"
+typing-extensions = {version = ">=4.2", markers = "python_version < \"3.11\""}
+cached-property = {markers = "python_version < \"3.9\"", version = "^1.5.2"}
+attrs = "^23.1.0"
+fasteners = "^0.19"
+pyyaml = "^6.0.1"
+psutil = "^5.9.5"
+pytools = "^2023.1.1"
+tqdm = "^4.66.1"
+docstring-parser = "^0.15"
+termcolor = ">=2.3"
+requests = "^2.31"
+sortedcontainers = "^2.4"
+pyparsing = "^3.1"
+humanfriendly = "^10"
+huggingface-hub = "^0.17"
+gevent = "^23.9"
+gevent-websocket = "^0.10"
+flask = "^2.3"
+flask-socketio = "^5.3"
+arpeggio = "^2"
+watchdog = "^2"
+marshmallow = "^3.20"
+fabric = "^3"
+decorator = "^5"
+rpyc = "^5"
+
+[tool.poetry.group.ssh]
+optional = true
+
+[tool.poetry.group.ssh.dependencies]
+paramiko = "^3.3"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+docutils = "^0.18"
+Pygments = "^2.15"
+
+[tool.poetry.scripts]
+experimaestro = "experimaestro.__main__:main"
+
+[project.entry-points."mkdocs.plugins"]
+experimaestro = "experimaestro.mkdocs:Documentation"
+
+[project.entry-points."experimaestro.process"]
+local = "experimaestro.connectors.local:LocalProcess"
+slurm = "experimaestro.launchers.slurm:BatchSlurmProcess"
+
+[project.entry-points."experimaestro.connectors"]
+local = "experimaestro.connectors.local:LocalConnector"
+ssh = "experimaestro.connectors.ssh:SshConnector"
+
+[project.entry-points."experimaestro.launchers"]
+unix = "experimaestro.launchers.direct:DirectLauncher"
+slurm = "experimaestro.launchers.slurm:SlurmLauncher"
+
+[project.entry-points."experimaestro.tokens"]
+unix = "experimaestro.tokens:CounterToken"
+
+
+[tool.distutils.bdist_wheel]
+universal = true
+
+[tool.distutils.sdist]
+formats = "zip"
+
+[tool.pydocstyle]
+match-dir = '(?!tests)(?!resources)(?!docs)[^\.].*'
+match = '(?!test)(?!setup)[^\._].*\.py'
+inherit = "false"
+ignore = "D200, D203, D213, D406, D407   # Google conventions"
+
+[tool.flake8]
+doctests = "True"
+exclude = ".git, .eggs, __pycache__, tests/, docs/, build/, dist/, app/"
+max-line-length = "88"
+# See https://github.com/PyCQA/pycodestyle/issues/373
+extend-ignore = "E203"
+
+[tool.mypy]
+python_version = "3.8"
+warn_unused_ignores = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
@@ -8,6 +128,3 @@ version = "1.1.2"
 changelog_start_rev = "0.15.0"
 tag_format = "$version"
 update_changelog_on_bump = true
-
-[build-system]
-requires = ["setuptools", "setuptools-scm", "wheel"]  # PEP 508 specifications.

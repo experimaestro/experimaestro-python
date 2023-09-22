@@ -67,8 +67,5 @@ def set_launcher(launcher: Launcher):
 
 
 # Get version
-try:
-    from .version import __version__, __version_tuple__
-except:
-    __version__ = "?"
-    __version_tuple__ = (0, 0, 0, "", "")
+__version__ = "0.0.0"
+__version_tuple__ = (0, 0, 0)
