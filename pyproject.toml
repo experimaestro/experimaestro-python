@@ -80,22 +80,22 @@ Pygments = "^2.15"
 [tool.poetry.scripts]
 experimaestro = "experimaestro.__main__:main"
 
-[project.entry-points."mkdocs.plugins"]
+[tool.poetry.plugins."mkdocs.plugins"]
 experimaestro = "experimaestro.mkdocs:Documentation"
 
-[project.entry-points."experimaestro.process"]
+[tool.poetry.plugins."experimaestro.process"]
 local = "experimaestro.connectors.local:LocalProcess"
 slurm = "experimaestro.launchers.slurm:BatchSlurmProcess"
 
-[project.entry-points."experimaestro.connectors"]
+[tool.poetry.plugins."experimaestro.connectors"]
 local = "experimaestro.connectors.local:LocalConnector"
 ssh = "experimaestro.connectors.ssh:SshConnector"
 
-[project.entry-points."experimaestro.launchers"]
+[tool.poetry.plugins."experimaestro.launchers"]
 unix = "experimaestro.launchers.direct:DirectLauncher"
 slurm = "experimaestro.launchers.slurm:SlurmLauncher"
 
-[project.entry-points."experimaestro.tokens"]
+[tool.poetry.plugins."experimaestro.tokens"]
 unix = "experimaestro.tokens:CounterToken"
 
 
