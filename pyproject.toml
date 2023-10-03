@@ -124,7 +124,7 @@ warn_unused_ignores = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "1.1.2"
+version = "1.2.0"
 changelog_start_rev = "0.15.0"
 tag_format = "$version"
 update_changelog_on_bump = true
