@@ -972,7 +972,7 @@ class ConfigInformation:
                     cprint("   [No dependencies]", color, file=sys.stderr)
 
                 for dep in self.job.dependencies:
-                    cprint(f"   [Depency] {dep}", color, file=sys.stderr)
+                    cprint(f"   [Dependency] {dep}", color, file=sys.stderr)
 
                 print(file=sys.stderr)  # noqa: T201
 
