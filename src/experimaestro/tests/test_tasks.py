@@ -285,7 +285,7 @@ class LightweightConfig(Config):
         self.data = 0
 
 
-class LightweightPreTask(LightweightTask):
+class LightweightTask(LightweightTask):
     x: Param[LightweightConfig]
 
     def execute(self) -> None:
@@ -302,14 +302,14 @@ class MyLightweightTask(Task):
 def test_task_lightweight():
     with TemporaryExperiment("lightweight", maxwait=20):
         x = LightweightConfig()
-        lwtask = LightweightPreTask(x=x)
+        lwtask = LightweightTask(x=x)
         assert (
             MyLightweightTask(x=x).add_pretasks(lwtask).submit().__xpm__.job.wait()
             == JobState.DONE
         ), "Pre-tasks should be executed"
 
         x_2 = LightweightConfig()
-        lwtask_2 = LightweightPreTask(x=x)
+        lwtask_2 = LightweightTask(x=x)
         assert (
             MyLightweightTask(x=x_2.add_pretasks(lwtask_2))
             .add_pretasks(lwtask_2)
@@ -317,3 +317,13 @@ def test_task_lightweight():
             .__xpm__.job.wait()
             == JobState.DONE
         ), "Pre-tasks should be run just once"
+
+
+def test_task_lightweight_init():
+    with TemporaryExperiment("lightweight_init", maxwait=20):
+        x = LightweightConfig()
+        lwtask = LightweightTask(x=x)
+        assert (
+            MyLightweightTask(x=x).submit(init_tasks=[lwtask]).__xpm__.job.wait()
+            == JobState.DONE
+        ), "Init tasks should be executed"

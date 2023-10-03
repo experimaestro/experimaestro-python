@@ -145,6 +145,7 @@ class HashComputer:
     DICT_ID = b"\x09"
     ENUM_ID = b"\x0a"
     CYCLE_REFERENCE = b"\x0b"
+    INIT_TASKS = b"\x0c"
 
     def __init__(self, config: "Config", config_path: ConfigPath, *, version=None):
         # Hasher for parameters
@@ -161,7 +162,7 @@ class HashComputer:
         """Update the hash computers with some bytes"""
         self._hasher.update(bytes)
 
-    def update(self, value, *, myself=False):
+    def update(self, value, *, myself=False):  # noqa: C901
         """Update the hash
 
         :param value: The value to add to the hash
@@ -473,6 +474,10 @@ class ConfigWalk:
                 with self.map("__pre_tasks__"):
                     self(info.pre_tasks)
 
+            if info.init_tasks:
+                with self.map("__init_tasks__"):
+                    self(info.init_tasks)
+
             # Process task if different
             if (
                 x.__xpm__.task is not None
@@ -565,6 +570,9 @@ class ConfigInformation:
 
         # Lightweight tasks
         self.pre_tasks: List["LightweightTask"] = []
+
+        # Initialization tasks
+        self.init_tasks: List["LightweightTask"] = []
 
         # Cached information
 
@@ -666,6 +674,10 @@ class ConfigInformation:
             for pre_task in self.pre_tasks:
                 pre_task.__xpm__.validate()
 
+            # Validate init tasks
+            for init_task in self.init_tasks:
+                init_task.__xpm__.validate()
+
             # Use __validate__ method
             if hasattr(self.pyobject, "__validate__"):
                 try:
@@ -761,6 +773,12 @@ class ConfigInformation:
             for task_id in sorted(pre_tasks_ids):
                 hasher.update(task_id)
 
+            # Adds init tasks
+            if self.init_tasks:
+                hasher.update(HashComputer.INIT_TASKS)
+                for init_task in self.init_tasks:
+                    hasher.update(init_task.__xpm__.raw_identifier.all)
+
             full_identifier = Identifier(hasher.digest())
             full_identifier.has_loops = raw_identifier.has_loops
 
@@ -801,7 +819,13 @@ class ConfigInformation:
         # Add pre-tasks
         for pre_task in self.pre_tasks:
             pre_task.__xpm__.updatedependencies(
-                dependencies, path + ["__pre_tasks___"], taskids
+                dependencies, path + ["__pre_tasks__"], taskids
+            )
+
+        # Add initialization tasks
+        for init_task in self.init_tasks:
+            init_task.__xpm__.updatedependencies(
+                dependencies, path + ["__init_tasks__"], taskids
             )
 
         # Check for an associated task
@@ -854,7 +878,14 @@ class ConfigInformation:
         # Now, seal the object
         self.seal(context)
 
-    def submit(self, workspace: "Workspace", launcher: "Launcher", *, run_mode=None):
+    def submit(
+        self,
+        workspace: "Workspace",
+        launcher: "Launcher",
+        *,
+        run_mode=None,
+        init_tasks: List["LightweightTask"] = [],
+    ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
 
@@ -871,6 +902,9 @@ class ConfigInformation:
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, run_mode=run_mode
         )
+
+        # Sets the init tasks
+        self.init_tasks = init_tasks
 
         # Validate the object
         job_context = JobContext(self.job)
@@ -1030,6 +1064,9 @@ class ConfigInformation:
         # Serialize pre-tasks
         ConfigInformation.__collect_objects__(self.pre_tasks, objects, context)
 
+        # Serialize initialization tasks
+        ConfigInformation.__collect_objects__(self.init_tasks, objects, context)
+
         # Serialize ourselves
         state_dict = {
             "id": id(self.pyobject),
@@ -1039,8 +1076,11 @@ class ConfigInformation:
             "identifier": self.identifier.state_dict(),
         }
 
+        # Add pre/init tasks
         if self.pre_tasks:
             state_dict["pre-tasks"] = [id(pre_task) for pre_task in self.pre_tasks]
+        if self.init_tasks:
+            state_dict["init-tasks"] = [id(init_task) for init_task in self.init_tasks]
 
         if self.meta:
             state_dict["meta"] = self.meta
@@ -1238,7 +1278,7 @@ class ConfigInformation:
         ...
 
     @staticmethod
-    def fromParameters(
+    def fromParameters(  # noqa: C901
         definitions: List[Dict],
         as_instance=True,
         data_loader: Optional[SerializedPathLoader] = None,
@@ -1368,6 +1408,12 @@ class ConfigInformation:
                     pre_task = objects[pre_task_id]
                     logger.info("Executing pre-task %s", type(pre_task))
                     pre_task.execute()
+
+        # Execute init tasks
+        for init_task_id in definitions[-1].get("init-tasks", []):
+            init_task = objects[init_task_id]
+            logger.info("Executing init task %s", type(init_task))
+            init_task.execute()
 
         return o
 
@@ -1583,7 +1629,14 @@ class TypeConfig:
             ), f"{context.__class__} is not an instance of ConfigWalkContext"
         return self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
 
-    def submit(self, *, workspace=None, launcher=None, run_mode: "RunMode" = None):
+    def submit(
+        self,
+        *,
+        workspace=None,
+        launcher=None,
+        run_mode: "RunMode" = None,
+        init_tasks: List["LightweightTask"] = [],
+    ):
         """Submit this task
 
         :param workspace: the workspace, defaults to None
@@ -1591,7 +1644,9 @@ class TypeConfig:
         :param run_mode: Run mode (if None, uses the workspace default)
         :return: an object object
         """
-        return self.__xpm__.submit(workspace, launcher, run_mode=run_mode)
+        return self.__xpm__.submit(
+            workspace, launcher, run_mode=run_mode, init_tasks=init_tasks
+        )
 
     def stdout(self):
         return self.__xpm__.job.stdout

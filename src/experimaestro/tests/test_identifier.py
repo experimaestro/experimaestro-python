@@ -412,6 +412,38 @@ def test_identifier_pre_task():
     assert_equal(task_with_pre, task_with_pre_3, "Pre-tasks are order-less")
 
 
+def test_identifier_init_task():
+    class MyConfig(Config):
+        pass
+
+    class IdentifierInitTask(LightweightTask):
+        pass
+
+    class IdentifierInitTask2(Task):
+        pass
+
+    class IdentierTask(Task):
+        x: Param[MyConfig]
+
+    task = IdentierTask(x=MyConfig()).submit(run_mode=RunMode.DRY_RUN)
+    task_with_pre = IdentierTask(x=MyConfig()).submit(
+        run_mode=RunMode.DRY_RUN,
+        init_tasks=[IdentifierInitTask(), IdentifierInitTask2()],
+    )
+    task_with_pre_2 = IdentierTask(x=MyConfig()).submit(
+        run_mode=RunMode.DRY_RUN,
+        init_tasks=[IdentifierInitTask(), IdentifierInitTask2()],
+    )
+    task_with_pre_3 = IdentierTask(x=MyConfig()).submit(
+        run_mode=RunMode.DRY_RUN,
+        init_tasks=[IdentifierInitTask2(), IdentifierInitTask()],
+    )
+
+    assert_notequal(task, task_with_pre, "No pre-task")
+    assert_equal(task_with_pre, task_with_pre_2, "Same parameters")
+    assert_notequal(task_with_pre, task_with_pre_3, "Same parameters")
+
+
 # --- Check configuration reloads
 
 
