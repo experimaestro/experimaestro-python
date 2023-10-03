@@ -28,7 +28,7 @@ enable = true
 vcs = "git"
 style = "semver"
 dirty = true
-format-jinja = "{% if distance == 0 %}{{ base }}{% if dirty %}+dirty{% endif %}{% else %}{{ base }}+{{ distance }}.{{ commit }}{% if dirty %}.dirty{% endif %}{% endif %}"
+format-jinja = "{% if distance == 0 %}{{ base }}{% else %}{{ base }}+{{ distance }}.{{ commit }}{% if dirty %}.dirty{% endif %}{% endif %}"
 
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
@@ -126,5 +126,5 @@ warn_unused_ignores = true
 name = "cz_conventional_commits"
 version = "1.2.1"
 changelog_start_rev = "0.15.0"
-tag_format = "$version"
+tag_format = "v$version"
 update_changelog_on_bump = true
