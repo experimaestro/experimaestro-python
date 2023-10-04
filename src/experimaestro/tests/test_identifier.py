@@ -448,6 +448,8 @@ def test_identifier_init_task():
 
 
 def check_reload(config):
+    """Checks that the serialized configuration, when reloaded,
+    gives the same identifier"""
     old_identifier = config.__xpm__.identifier.all
 
     # Get the data structure
@@ -505,8 +507,8 @@ class IdentifierReloadTaskDerived(Config):
     other: Param[IdentifierReloadTaskConfig]
 
 
-def test_identifier_reload_task():
-    """When using a task output, the identifier should not be different"""
+def test_identifier_reload_task_direct():
+    """When using a direct task output, the identifier should not be different"""
 
     # Creates the configuration
     task = IdentifierReloadTask(id="123").submit(run_mode=RunMode.DRY_RUN)
