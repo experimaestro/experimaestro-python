@@ -12,6 +12,7 @@ from termcolor import cprint
 import os
 from pathlib import Path
 import hashlib
+import logging
 import struct
 import io
 import fasteners
@@ -130,6 +131,9 @@ class ConfigPath:
             del self.config2index[config_id]
 
 
+hash_logger = logging.getLogger("xpm.hash")
+
+
 class HashComputer:
     """This class is in charge of computing a config/task identifier"""
 
@@ -153,13 +157,23 @@ class HashComputer:
         self.config = config
         self.config_path = config_path
         self.version = version or int(os.environ.get("XPM_HASH_COMPUTER", 2))
+        if hash_logger.isEnabledFor(logging.DEBUG):
+            hash_logger.debug(
+                "starting hash (%s): %s", hash(str(self.config)), self.config
+            )
 
     def identifier(self) -> Identifier:
         main = self._hasher.digest()
+        if hash_logger.isEnabledFor(logging.DEBUG):
+            hash_logger.debug("hash (%s): %s", hash(str(self.config)), str(main))
         return Identifier(main)
 
     def _hashupdate(self, bytes: bytes):
         """Update the hash computers with some bytes"""
+        if hash_logger.isEnabledFor(logging.DEBUG):
+            hash_logger.debug(
+                "updating hash (%s): %s", hash(str(self.config)), str(bytes)
+            )
         self._hasher.update(bytes)
 
     def update(self, value, *, myself=False):  # noqa: C901
@@ -226,7 +240,8 @@ class HashComputer:
                 return
 
             # Process tasks
-            if value.__xpm__.task is not None:
+            if value.__xpm__.task is not None and (value.__xpm__.task is not value):
+                hash_logger.debug("Computing hash for task %s", value.__xpm__.task)
                 self._hashupdate(HashComputer.TASK_ID)
                 self.update(value.__xpm__.task)
 
@@ -1061,6 +1076,10 @@ class ConfigInformation:
             if value is not None:
                 ConfigInformation.__collect_objects__(value, objects, context)
 
+        # Adds task
+        if self.task is not None and self.task is not self:
+            ConfigInformation.__collect_objects__(self.task, objects, context)
+
         # Serialize pre-tasks
         ConfigInformation.__collect_objects__(self.pre_tasks, objects, context)
 
@@ -1084,6 +1103,9 @@ class ConfigInformation:
 
         if self.meta:
             state_dict["meta"] = self.meta
+
+        if self.task is not None:
+            state_dict["task"] = id(self.task)
 
         if not self.xpmtype._package:
             state_dict["file"] = str(self.xpmtype._file)
@@ -1110,10 +1132,6 @@ class ConfigInformation:
         """Serialize all needed configuration objects, looking at sub
         configurations if necessary"""
         if isinstance(value, Config):
-            if value.__xpm__.task is not None and value.__xpm__.task is not value:
-                ConfigInformation.__collect_objects__(
-                    value.__xpm__.task, objects, context
-                )
             value.__xpm__.__get_objects__(objects, context)
         elif isinstance(value, list):
             for el in value:
@@ -1229,16 +1247,9 @@ class ConfigInformation:
                     for key, value in value.items()
                 }
 
-            # The value is an object (that should have been serialized first)
+            # The value is an object (that has been serialized first)
             if value["type"] == "python":
-                obj = objects[value["value"]]
-
-                # If we have a task
-                if not as_instance:
-                    if task_id := value.get("task", None):
-                        task = objects[task_id]
-                        obj.__xpm__.task = task
-                return obj
+                return objects[value["value"]]
 
             # A path
             if value["type"] == "path":
@@ -1391,6 +1402,9 @@ class ConfigInformation:
                     objects[pre_task_id]
                     for pre_task_id in definition.get("pre-tasks", [])
                 ]
+
+                if task_id := definition.get("task", None):
+                    o.__xpm__.task = objects[task_id]
 
                 # Seal and set the identifier
                 if not discard_id:
