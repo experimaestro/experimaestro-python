@@ -245,7 +245,7 @@ class DocumentationAnalyzer:
             cprint(f"  [import error] {error}", "red")
 
         cprint(f"{len(self.undocumented)} undocumented configurations")
-        for error in self.undocumented:
+        for error in sorted(self.undocumented):
             cprint(f"  [undocumented] {error}", "red")
 
     def assert_no_undocumented(self):

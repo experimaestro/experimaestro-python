@@ -35,4 +35,18 @@ markdown_extensions:
   - pymdownx.snippets:
       base_path: .
 
+
+plugins:
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            heading_level: 3
+            show_root_full_path: False
+            docstring_style: sphinx
+  - search
+
 repo_url: "https://github.com/experimaestro/experimaestro-python"

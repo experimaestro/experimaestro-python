@@ -30,3 +30,32 @@ ExperimaestroHFHub().from_pretrained(hf_id_or_folder, as_instance=as_instance)
 ExperimaestroHFHub(config).push_to_hub(hf_id, variant)
 ExperimaestroHFHub().from_pretrained(hf_id_or_folder, variant=variant, as_instance=as_instance)
 ```
+
+::: experimaestro.huggingface.ExperimaestroHFHub
+    options:
+      members:
+        - from_pretrained
+        - push_to_hub
+
+## Saving/Loading sets of objects
+
+Configuration objects can be loaded and saved.
+
+```py3
+from experimaestro import load, save
+
+# Saves the object
+save([obj1, obj2], "/my/folder")
+
+# Load the object
+[obj1, obj2] = load("/my/folder")
+```
+
+If you need more control over saved data, you can use `state_dict` and `from_state_dict`
+
+
+::: experimaestro.SerializationContext
+::: experimaestro.load
+::: experimaestro.save
+::: experimaestro.state_dict
+::: experimaestro.from_state_dict

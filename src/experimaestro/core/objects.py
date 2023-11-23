@@ -1199,15 +1199,21 @@ class ConfigInformation:
 
     @staticmethod
     def deserialize(
-        path: Union[str, Path, SerializedPathLoader], as_instance: bool = False
+        path: Union[str, Path, SerializedPathLoader],
+        as_instance: bool = False,
+        return_tasks: bool = False,
     ) -> "Config":
         """Deserialize a configuration
 
         :param path: The filesystem Path to use, or a way to download the
             information through a function taking two arguments
-        :return: A Config object
+        :param as_instance: Return an instance
+        :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
+        assert not (as_instance) and not (
+            return_tasks
+        ), "Cannot set as_instance and return_tasks to True"
         if callable(path):
             data_loader = path
         else:
@@ -1222,17 +1228,17 @@ class ConfigInformation:
             config = json.load(fh)
 
         return ConfigInformation.fromParameters(
-            config, as_instance=as_instance, data_loader=data_loader
+            config,
+            as_instance=as_instance,
+            data_loader=data_loader,
+            return_tasks=return_tasks,
         )
 
     @staticmethod
-    def _objectFromParameters(value: Any, objects: Dict[str, Any], as_instance: bool):
+    def _objectFromParameters(value: Any, objects: Dict[str, Any]):
         # A list
         if isinstance(value, list):
-            return [
-                ConfigInformation._objectFromParameters(x, objects, as_instance)
-                for x in value
-            ]
+            return [ConfigInformation._objectFromParameters(x, objects) for x in value]
 
         # A dictionary
         if isinstance(value, dict):
@@ -1240,10 +1246,8 @@ class ConfigInformation:
                 # Just a plain dictionary
                 return {
                     ConfigInformation._objectFromParameters(
-                        key, objects, as_instance
-                    ): ConfigInformation._objectFromParameters(
-                        value, objects, as_instance
-                    )
+                        key, objects
+                    ): ConfigInformation._objectFromParameters(value, objects)
                     for key, value in value.items()
                 }
 
@@ -1283,19 +1287,30 @@ class ConfigInformation:
     def fromParameters(
         definitions: List[Dict],
         as_instance=False,
+        return_tasks=True,
+        save_directory: Optional[Path] = None,
+        discard_id: bool = False,
+    ) -> Tuple["Config", List["LightweightTask"]]:
+        ...
+
+    @overload
+    @staticmethod
+    def fromParameters(
+        definitions: List[Dict],
+        as_instance=False,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
     ) -> "Config":
         ...
 
     @staticmethod
-    def fromParameters(  # noqa: C901
+    def load_objects(  # noqa: C901
         definitions: List[Dict],
         as_instance=True,
         data_loader: Optional[SerializedPathLoader] = None,
         discard_id: bool = False,
     ):
-        """Builds config (instances) from a dictionary"""
+        """Load the objects"""
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
@@ -1369,7 +1384,7 @@ class ConfigInformation:
 
             # Set the fields
             for name, value in definition["fields"].items():
-                v = ConfigInformation._objectFromParameters(value, objects, as_instance)
+                v = ConfigInformation._objectFromParameters(value, objects)
 
                 # Transform serialized paths arguments
                 argument = xpmtype.arguments[name]
@@ -1413,21 +1428,53 @@ class ConfigInformation:
                     )
                 xpminfo._sealed = True
 
-        # Execute pre-tasks (just once)
-        completed_pretasks = set()
-        for definition in definitions:
-            for pre_task_id in definition.get("pre-tasks", []):
-                if pre_task_id not in completed_pretasks:
-                    completed_pretasks.add(pre_task_id)
-                    pre_task = objects[pre_task_id]
+        return objects
+
+    @staticmethod
+    def fromParameters(  # noqa: C901
+        definitions: List[Dict],
+        as_instance=True,
+        data_loader: Optional[SerializedPathLoader] = None,
+        discard_id: bool = False,
+        return_tasks: bool = False,
+    ):
+        # Get the objects
+        objects = ConfigInformation.load_objects(
+            definitions,
+            as_instance=as_instance,
+            data_loader=data_loader,
+            discard_id=discard_id,
+        )
+
+        # Get the last one
+        o = objects[definitions[-1]["id"]]
+
+        # Run pre-task (or returns them)
+        if as_instance or return_tasks:
+            # Collect pre-tasks (just once)
+            completed_pretasks = set()
+            pre_tasks = []
+            for definition in definitions:
+                for pre_task_id in definition.get("pre-tasks", []):
+                    if pre_task_id not in completed_pretasks:
+                        completed_pretasks.add(pre_task_id)
+                        pre_tasks.append(objects[pre_task_id])
+
+            # Collect init tasks
+            init_tasks = []
+            for init_task_id in definitions[-1].get("init-tasks", []):
+                init_task = objects[init_task_id]
+                init_tasks.append(init_task)
+
+            if as_instance:
+                for pre_task in pre_tasks:
                     logger.info("Executing pre-task %s", type(pre_task))
                     pre_task.execute()
-
-        # Execute init tasks
-        for init_task_id in definitions[-1].get("init-tasks", []):
-            init_task = objects[init_task_id]
-            logger.info("Executing init task %s", type(init_task))
-            init_task.execute()
+                for init_task in init_tasks:
+                    logger.info("Executing init task %s", type(init_task))
+                    init_task.execute()
+            else:
+                return o, pre_tasks, pre_task + init_tasks
 
         return o
 

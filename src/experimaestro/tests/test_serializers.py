@@ -1,4 +1,14 @@
-from experimaestro import Config, Task, Param, SerializationLWTask, copyconfig
+from experimaestro import (
+    Config,
+    Task,
+    Param,
+    SerializationLWTask,
+    copyconfig,
+    state_dict,
+    from_state_dict,
+)
+from experimaestro.core.context import SerializationContext
+from experimaestro.core.objects import TypeConfig
 from experimaestro.tests.utils import TemporaryExperiment
 
 
@@ -55,3 +65,30 @@ def test_serializers_xp():
         Evaluate(model=trained_model.submodel, is_submodel=True).add_pretasks_from(
             trained_model
         ).submit()
+
+
+class Object1(Config):
+    pass
+
+
+class Object2(Config):
+    object: Param[Object1]
+
+
+def test_serializers_serialization():
+    context = SerializationContext(save_directory=None)
+
+    obj1 = Object1()
+    obj2 = Object2(object=obj1)
+
+    data = state_dict(context, [obj1, obj2])
+
+    [obj1, obj2] = from_state_dict(data)
+    assert isinstance(obj1, Object1) and isinstance(obj1, TypeConfig)
+    assert isinstance(obj2, Object2)
+    assert obj2.object is obj1
+
+    [obj1, obj2] = from_state_dict(data, as_instance=True)
+    assert isinstance(obj1, Object1) and not isinstance(obj1, TypeConfig)
+    assert isinstance(obj2, Object2)
+    assert obj2.object is obj1

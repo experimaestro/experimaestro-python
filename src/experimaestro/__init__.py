@@ -27,6 +27,7 @@ from .annotations import (
     # Method
     config_only,
 )
+from .core.serialization import load, save, state_dict, from_state_dict
 from .core.arguments import (
     # Types
     Param,
@@ -48,6 +49,7 @@ from .core.objects import (
     LightweightTask,
     ObjectStore,
 )
+from .core.context import SerializationContext
 from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
