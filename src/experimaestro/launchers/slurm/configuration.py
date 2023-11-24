@@ -102,30 +102,6 @@ def parse_size(s: Optional[str]):
     return humanfriendly.parse_size(s) if s else None
 
 
-@define
-class SlurmHostSpecification(HostSpecification):
-    features: List[str] = Factory(list)
-    hosts: List[str] = Factory(list)
-    partition: str = Factory(str)
-
-    qos_id: Optional[str] = Factory(lambda: None)
-    """Quality of Service"""
-
-    account_id: Optional[str] = Factory(lambda: None)
-    """Account for this host"""
-
-
-@dataclass
-class SlurmNodes(YAMLDataClass):
-    features: List[str] = field(default_factory=list)
-    """Nodes features"""
-
-    hosts: List[str] = field(default_factory=list)
-
-    count: int = 0
-    """Number of hosts (if list of hosts is empty)"""
-
-
 @dataclass
 class GPUConfig(YAMLDataClass):
     """Represents a GPU"""
@@ -193,6 +169,19 @@ class CPUConfig(YAMLDataClass):
         )
 
 
+@define
+class SlurmHostSpecification(HostSpecification):
+    features: List[str] = Factory(list)
+    hosts: List[str] = Factory(list)
+    partition: str = Factory(str)
+
+    qos_id: Optional[str] = Factory(lambda: None)
+    """Quality of Service"""
+
+    account_id: Optional[str] = Factory(lambda: None)
+    """Account for this host"""
+
+
 @dataclass
 class SlurmNodeConfiguration(YAMLDataClass):
     max_duration: Annotated[int, Initialize(humanfriendly.parse_timespan)] = 0
@@ -221,6 +210,21 @@ class SlurmNodeConfiguration(YAMLDataClass):
         )
         spec.max_duration = self.max_duration or 0
         return spec
+
+
+@dataclass
+class SlurmNodes(YAMLDataClass):
+    features: List[str] = field(default_factory=list)
+    """Nodes features"""
+
+    hosts: List[str] = field(default_factory=list)
+    """List of hostnames"""
+
+    configuration: Optional[SlurmNodeConfiguration] = None
+    """(optional) nodes configuration"""
+
+    count: int = 0
+    """Number of hosts (if list of hosts is empty)"""
 
 
 @dataclass
@@ -455,6 +459,9 @@ class SlurmConfiguration(YAMLDataClass, LauncherConfiguration):
                 # Set partition GPU
                 if partition.configuration:
                     nodes_spec.update(partition.configuration)
+
+                if node.configuration:
+                    nodes_spec.update(node.configuration)
 
                 for feature in node.features:
                     # Use feature data directly

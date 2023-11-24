@@ -204,3 +204,6 @@ class LocalConnector(Connector):
 
     def setExecutable(self, path: Path, flag: bool):
         os.chmod(path, 0o744)
+
+    def __str__(self):
+        return "LocalConnector"

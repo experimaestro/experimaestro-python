@@ -132,6 +132,7 @@ class LauncherRegistry:
         self.ConnectorLoader: Type[Loader] = new_loader("ConnectorLoader")
         self.TokenLoader: Type[Loader] = new_loader("TokenLoader")
         self.Dumper: Type[Dumper] = new_class("CustomDumper", (Dumper,), {})
+        self.find_launcher_fn = None
 
         # Add safeguards
         add_path_resolvers(
@@ -151,8 +152,20 @@ class LauncherRegistry:
         for entry_point in pkg_resources.iter_entry_points("experimaestro.tokens"):
             entry_point.load().init_registry(self)
 
-        # self.TokenLoader.add_path_resolver("!unknown", [None])
-        # self.TokenLoader.add_constructor("!unknown", unknown_error)
+        # Register the find launcher function if it exists
+        launchers_py = basepath / "launchers.py"
+        if launchers_py.is_file():
+            logger.info("Loading %s", launchers_py)
+
+            from importlib import util
+
+            spec = util.spec_from_file_location("xpm_launchers_conf", launchers_py)
+            module = util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            self.find_launcher_fn = getattr(module, "find_launcher", None)
+            if self.find_launcher_fn is None:
+                logger.warn("No find_launcher() function was found in %s", launchers_py)
 
         # Read the configuration file
         launchers: Launchers = (
@@ -209,18 +222,28 @@ class LauncherRegistry:
             spec: The processing requirements
             tags: Restrict the launchers to those containing one of the specified tags
         """
-        if len(self.launchers) == 0:
+
+        if len(self.launchers) == 0 and self.find_launcher_fn is None:
             logger.info("No launchers.yaml file: using local host ")
             from experimaestro.launchers.direct import DirectLauncher
             from experimaestro.connectors.local import LocalConnector
 
             return DirectLauncher(LocalConnector.instance())
 
+        # Parse specs
+        from .parser import parse
+
+        specs = [parse(spec) if isinstance(spec, str) else spec for spec in specs]
+
+        # Use launcher function
+        if self.find_launcher_fn is not None:
+            for spec in specs:
+                if launcher := self.find_launcher_fn(*specs, tags):
+                    return launcher
+
         # We have registered launchers
         for spec in specs:
             if isinstance(spec, str):
-                from .parser import parse
-
                 spec = parse(spec)
             for handler in self.launchers:
                 if (not tags) or any((tag in tags) for tag in handler.tags):

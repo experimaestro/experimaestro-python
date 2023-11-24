@@ -1,4 +1,5 @@
 import logging
+from attr import Factory
 from attrs import define
 from copy import copy, deepcopy
 from dataclasses import dataclass
@@ -53,10 +54,10 @@ class CPUSpecification:
 
 @define(kw_only=True)
 class HostSpecification:
-    cuda: List[CudaSpecification]
+    cuda: List[CudaSpecification] = Factory(list)
     """CUDA GPUs"""
 
-    cpu: CPUSpecification
+    cpu: CPUSpecification = Factory(CPUSpecification)
     """CPU specification for this host"""
 
     priority: int = 0

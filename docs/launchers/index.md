@@ -6,6 +6,8 @@
 
 By default, jobs are launched directly by the scheduler using python scripts.
 
+::: experimaestro.launchers.direct.DirectLauncher
+
 ### Slurm (since 0.8.7)
 
 The [Slurm](https://slurm.schedmd.com/documentation.html) workload manager launcher is supported.
@@ -42,7 +44,54 @@ To use launcher configuration files, one can use an automatic convertion tool
 scontrol show nodes | experimaestro launchers slurm convert
 ```
 
+::: experimaestro.launchers.slurm.SlurmLauncher
+
+## Launcher file (since 1.2.4)
+
+The most flexible way to define potential launchers is to use a `launchers.py`
+file within the configuration directory.
+
+```py3
+from typing import Set
+from experimaestro.launcherfinder import (
+    HostRequirement,
+    HostSpecification,
+    CudaSpecification,
+    CPUSpecification,
+)
+from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
+from experimaestro.connectors.local import LocalConnector
+
+
+def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
+    """Find a launcher"""
+
+    if match := requirements.match(HostSpecification(cuda=[])):
+        # No GPU: run directly
+        return LocalConnector.instance()
+
+    if match := requirements.match(
+        HostSpecification(
+            max_duration=100 * 3600,
+            cpu=CPUSpecification(cores=32, memory=129 * (1024**3)),
+            cuda=[CudaSpecification(memory=24 * (1024**3)) for _ in range(8)],
+        )
+    ):
+        if len(match.requirement.cuda_gpus) > 0:
+            return SlurmLauncher(
+                connector=LocalConnector.instance(),
+                options=SlurmOptions(gpus_per_node=len(match.requirement.cuda_gpus)),
+            )
+
+    # Could not find a host
+    return None
+```
+
+
 ## Launcher configuration file (since 0.11)
+
+**This option is deprecated since it is less flexible than the previous one, and
+the added complexity is not worth it**
 
 In order to automate the process of choosing the right launcher, a `launchers.yaml`
 configuration file can be written.

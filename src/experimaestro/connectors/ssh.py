@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath, PosixPath, _posix_flavour
-from typing import Union, Dict, Any
+from pathlib import Path, PurePosixPath
 import io
 import os
 from experimaestro.launcherfinder import LauncherRegistry, YAMLDataClass
@@ -11,16 +10,13 @@ from urllib.parse import urlparse
 from itertools import chain
 from . import Connector
 from . import (
-    Connector,
     Process,
     ProcessBuilder,
     RedirectType,
     Redirect,
-    ProcessThreadError,
 )
 from experimaestro.locking import Lock
-from experimaestro.tokens import Token, CounterToken
-from experimaestro.utils import logger
+from experimaestro.tokens import Token
 
 # Might be wise to switch to https://github.com/marian-code/ssh-utilities
 
@@ -140,34 +136,17 @@ class SshProcess(Process):
     def __init__(self, promise: Promise):
         self.promise = promise
 
-    def tospec(self) -> Dict[str, Any]:
-        return {""}
-
     def __repr__(self):
-        return f"Process({self._process.pid})"
-
-    def wait(self) -> int:
-        logger.debug("Waiting (python) for process with PID %s", self._process.pid)
-        code = self._process.wait()
-        logger.debug(
-            "Finished to wait (python) for process with PID %s", self._process.pid
-        )
-        return code
+        return f"SshProcess({self._process.pid})"
 
     def tospec(self):
-        return {"type": "local", "pid": self._process.pid}
+        return {"type": "ssh", "pid": self._process.pid}
 
     def kill(self):
         self._process.kill()
 
     @staticmethod
     def fromspec(connector, spec):
-        pid = spec["pid"]
-        try:
-            return PsutilProcess(pid)
-        except psutil.NoSuchProcess:
-            pass
-
         return None
 
     def wait(self) -> int:
@@ -232,6 +211,10 @@ class SshConnector(Connector):
         registry.register_connector("ssh", SshConfiguration)
 
     def __init__(self, hostname: str):
+        """Creates a new SSH connector
+
+        :param hostname: a hostname specification
+        """
         self.connection = Connection(hostname)
         # self.hostname = hostname
         # self.port = None
@@ -254,10 +237,16 @@ class SshConnector(Connector):
 
     @staticmethod
     def fromPath(path: SshPath):
+        """Creates an SSH connector from an SshPath"""
         return SshConnector.get(path.host)
 
     @staticmethod
     def get(hostname):
+        """Get an SSH connector from a hostname
+
+        This method can caches SSH connectors, and is thus preferred
+        to direct initialization
+        """
         # TODO: cache values?
         return SshConnector(hostname)
 
