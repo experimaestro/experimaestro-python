@@ -1,3 +1,10 @@
+## v1.3.0 (2023-11-24)
+
+### Feat
+
+- launchers.py specification file
+- Serialization for arbitrary data structures
+
 ## v1.2.3 (2023-10-04)
 
 ### Fix
