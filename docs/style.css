@@ -1,0 +1,8 @@
+/* .doc.doc-heading > code:first-child:before {
+  content: "class "
+} */
+
+.doc.doc-heading > code:first-child {
+  font-family: Arial, Helvetica, sans-serif;
+  color: black;
+}

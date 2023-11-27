@@ -29,20 +29,13 @@ with experiment(launcher=launcher):
     mytask().submit(launcher=gpulauncher)
 ```
 
-The Slurm launcher constructor and the `config` method can take the following parameters:
-
-- `nodes`: Number of requested nodes
-- `time`: Maximum job time (in seconds)
-- `gpus`: Total number of GPUs
-- `gpus_per_node`: Number of GPUs per node
-- `account`: The slurm account for launching the job
-- `qos`: The requested Quality of Service
-
 To use launcher configuration files, one can use an automatic convertion tool
 
 ```sh
 scontrol show nodes | experimaestro launchers slurm convert
 ```
+
+::: experimaestro.launchers.slurm.SlurmOptions
 
 ::: experimaestro.launchers.slurm.SlurmLauncher
 

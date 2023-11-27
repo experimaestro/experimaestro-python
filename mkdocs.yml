@@ -44,9 +44,12 @@ plugins:
           options:
             show_source: false
             show_root_heading: true
-            heading_level: 3
+            heading_level: 4
             show_root_full_path: False
             docstring_style: sphinx
   - search
 
 repo_url: "https://github.com/experimaestro/experimaestro-python"
+
+extra_css:
+  - style.css
