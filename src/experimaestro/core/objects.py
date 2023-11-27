@@ -1211,8 +1211,8 @@ class ConfigInformation:
         :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
-        assert not (as_instance) and not (
-            return_tasks
+        assert not (
+            as_instance and return_tasks
         ), "Cannot set as_instance and return_tasks to True"
         if callable(path):
             data_loader = path
