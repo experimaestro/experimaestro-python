@@ -259,7 +259,10 @@ class SlurmProcessBuilder(ProcessBuilder):
 class SlurmOptions:
     # Options
     nodes: Optional[int] = 1
+    """Number of requested nodes"""
+
     time: Optional[str] = None
+    """Requested time"""
 
     account: Optional[str] = None
     """The account for launching the job"""
@@ -290,6 +293,7 @@ class SlurmOptions:
 
     # GPU-related
     gpus: Optional[int] = None
+    """Number of GPUs"""
 
     gpus_per_node: Optional[int] = None
     """Number of GPUs per node"""
