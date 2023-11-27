@@ -322,6 +322,18 @@ class SlurmOptions:
 
         return merged
 
+    @staticmethod
+    def format_time(duration_s: int):
+        """Format time for the SLURM option
+
+        :param duration_s: Time duration in seconds1
+        :return: The configuration string
+        """
+        seconds = duration_s % 60
+        minutes = (duration_s // 60) % 60
+        hours = duration_s // 3600
+        return f"{hours}:{minutes}:{seconds}"
+
 
 class SlurmLauncher(Launcher):
     """Slurm workload manager launcher
