@@ -2,7 +2,7 @@ from itertools import chain
 from typing import Dict, Any
 from pathlib import Path
 import json
-from termcolor import colored, cprint
+from termcolor import colored
 
 
 class ObjectProxy:
@@ -39,6 +39,9 @@ def build_value(data, store: Store):
         elif t == "path":
             # Do not return anything
             return None  # Path(data["value"])
+        elif t == "path.serialized":
+            # Again, do not return anything (won't change the identifier)
+            return None
         elif t is None:
             return {key: build_value(value, store) for key, value in data.items()}
         assert False, f"Data type {t} not handled"
