@@ -1,3 +1,9 @@
+## v1.3.2 (2023-11-28)
+
+### Feat
+
+- utility function to format time for SLURM
+
 ## v1.3.1 (2023-11-27)
 
 ### Fix
