@@ -54,6 +54,8 @@ class CPUSpecification:
 
 @define(kw_only=True)
 class HostSpecification:
+    """Specifies how the host is set"""
+
     cuda: List[CudaSpecification] = Factory(list)
     """CUDA GPUs"""
 
