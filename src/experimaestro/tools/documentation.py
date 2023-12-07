@@ -6,7 +6,8 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
-from typing import List, Optional, Set, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union, Dict, Type
+from dataclasses import dataclass
 
 import docutils.nodes as nodes
 import sphobjinv
@@ -31,30 +32,40 @@ def documented_from_objects(objects_inv: Path) -> Set[str]:
     )
 
 
-def undocumented(
+@dataclass
+class DocumentationReport:
+    #: Errors while parsing
+    errors: List[str]
+
+    #: Undocumented
+    undocumented: List[Config]
+
+    #: Documented but non existing
+    falsy_documented: List[Config]
+
+
+def analyze(
     packages: Union[str, List[str]], documented: Set[str], skip_packages: Set[str]
 ) -> Tuple[bool, List[Config]]:
     """Returns the list of undocumented configurations
 
-    :param package: package to explore
+    :param package: package(s) to explore
     :param documented: documented symbols (fully qualified names)
     :param skip_packages: List of sub-packages that should be skipped
     :return: a tuple containing whether errors where detected when importing
         files and the list of undocumented configurations
     """
 
-    def process(mod: ModuleType, configurations: Set):
+    def process(mod: ModuleType, configurations: Dict[str, Type[Config]]):
         errors = []
         for info in pkgutil.iter_modules(mod.__path__, prefix=f"{mod.__name__}."):
             try:
                 logging.info("Processing %s...", info.name)
                 mod = importlib.import_module(info.name)
-                # mod = info.module_finder.find_module(info.name).load_module(info.name)
-                configurations.update(
-                    x
-                    for x in mod.__dict__.values()
-                    if inspect.isclass(x) and issubclass(x, Config)
-                )
+                for x in mod.__dict__.values():
+                    if inspect.isclass(x) and issubclass(x, Config):
+                        configurations[f"{x.__module__}.{x.__qualname__}"] = x
+
             except Exception:
                 logging.exception(f"Module {info.name} could not be loaded")
                 errors.append(f"Module {info.name} could not be loaded")
@@ -65,18 +76,21 @@ def undocumented(
 
         return errors
 
-    configurations = set()
+    configurations = {}
     for package in list(packages):
         errors = process(import_module(package), configurations)
 
-    configs = []
-    for configuration in configurations:
-        name = f"{configuration.__module__}.{configuration.__qualname__}"
+    # Search for undocumented
+    undocumented = []
+    for name, configuration in configurations.items():
         if name.startswith(f"{package}.") and name not in documented:
             if all(not name.startswith(f"{x}.") for x in skip_packages):
-                configs.append(configuration)
+                undocumented.append(configuration)
 
-    return errors, configs
+    # Search for falsy documented
+    falsy = [name for name in documented if name not in configurations]
+
+    return DocumentationReport(errors, undocumented, falsy)
 
 
 class autodoc(nodes.Node):
@@ -214,19 +228,20 @@ class DocumentationAnalyzer:
         self.documentation_errors = []
         self.parsing_errors = []
         self.undocumented = []
+        self.falsy_documented = []  #: Documented but not in code
 
     def analyze(self):
         visitor = DocumentVisitor()
         visitor.parse_rst(self.doc_path)
         self.documentation_errors = visitor.errors
 
-        errors, configs = undocumented(
-            self.modules, visitor.documented, set(["xpmir.test"])
-        )
-        self.parsing_errors = errors
+        report = analyze(self.modules, visitor.documented, self.excluded)
+        self.parsing_errors = report.errors
         self.undocumented = [
-            f"{config.__module__}.{config.__qualname__}" for config in configs
+            f"{config.__module__}.{config.__qualname__}"
+            for config in report.undocumented
         ]
+        self.falsy_documented = report.falsy_documented
 
     def report(self):
         cprint(
@@ -237,10 +252,14 @@ class DocumentationAnalyzer:
         for error in self.documentation_errors:
             cprint(f"  [documentation error] {error}", "red")
 
+        for error in self.falsy_documented:
+            cprint(f"  [falsy documented] {error}", "red")
+
         cprint(
             f"{len(self.parsing_errors)} errors were encountered while parsing modules",
             "red" if self.parsing_errors else "green",
         )
+
         for error in self.parsing_errors:
             cprint(f"  [import error] {error}", "red")
 
@@ -254,3 +273,10 @@ class DocumentationAnalyzer:
             and len(self.parsing_errors) == 0
             and len(self.undocumented) == 0
         )
+
+    def assert_valid_documentation(self):
+        """Asserts that there are no falsy documented"""
+        self.assert_no_undocumented()
+        assert (
+            len(self.falsy_documented) == 0
+        ), f"{self.falsy_documented} falsy documented members"
