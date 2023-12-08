@@ -1,3 +1,9 @@
+## v1.3.5 (2023-12-08)
+
+### Feat
+
+- access run mode from experiment
+
 ## v1.3.4 (2023-12-07)
 
 ### Feat
