@@ -778,6 +778,10 @@ class experiment:
         return self.scheduler.prepare(job)
 
     @property
+    def run_mode(self):
+        return self.workspace.run_mode
+
+    @property
     def loop(self):
         assert self.central is not None
         return self.central.loop
