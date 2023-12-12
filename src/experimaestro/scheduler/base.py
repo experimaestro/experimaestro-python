@@ -5,7 +5,7 @@ from pathlib import Path
 from shutil import rmtree
 import threading
 import time
-from typing import List, Optional, Set, TypeVar, Union, TYPE_CHECKING
+from typing import Any, List, Optional, Set, TypeVar, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
@@ -737,7 +737,7 @@ class experiment:
         :param host: The host for the web server (overrides the environment if
             set)
         :param port: the port for the web server (overrides the environment if
-            set) Use None to avoid running a web server (default when dry run).
+            set). Use negative number to avoid running a web server (default when dry run).
 
         :param run_mode: The run mode for the experiment (normal, generate run
             files, dry run)
@@ -779,7 +779,7 @@ class experiment:
         self.scheduler = Scheduler(self, name)
         self.server = (
             Server(self.scheduler, settings.server)
-            if settings.server.port is not None
+            if (settings.server.port is not None and settings.server.port >= 0)
             and self.workspace.run_mode == RunMode.NORMAL
             else None
         )
@@ -960,3 +960,33 @@ class experiment:
         for listener in self.scheduler.listeners:
             listener.service_add(service)
         return service
+
+    def save(self, obj: Any, name: str = "default"):
+        """Serializes configurations.
+
+        Saves configuration objects within the experimental directory
+
+        :param obj: The object to save
+        :param name: The name of the saving directory (default to `default`)
+        """
+
+        if self.workspace.run_mode == RunMode.NORMAL:
+            from experimaestro import save
+
+            save_dir = self.workdir / "data" / name
+            save_dir.mkdir(exist_ok=True, parents=True)
+
+            save(obj, save_dir)
+
+    def load(self, reference: str, name: str = "default"):
+        """Serializes configurations.
+
+        Loads configuration objects from an experimental directory
+
+        :param reference: The name of the experiment
+        :param name: The name of the saving directory (default to `default`)
+        """
+        from experimaestro import load
+
+        path = self.workspace.experimentspath / reference / "data" / name
+        return load(path)

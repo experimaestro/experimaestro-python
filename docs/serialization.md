@@ -38,6 +38,32 @@ and loads from them.
 ::: experimaestro.state_dict
 ::: experimaestro.from_state_dict
 
+
+### Saving/Loading from running experiment
+
+To ease saving/loading configuration from experiments, one
+can use methods from the experiment objects as follows:
+
+```py
+from experimaestro import experiment, Param, Config
+
+class MyConfig(Config):
+    a: Param[int]
+
+if __name__ == "__main__":
+    # Saving configurations
+    with experiment("/tmp/load_save", "xp1", port=-1) as xp:
+        cfg = MyConfig(a=1)
+        xp.save([cfg])
+
+
+    # Loading configurations
+    with experiment("/tmp/load_save", "xp2", port=-1) as xp:
+        # Loads MyConfig(a=1)
+        cfg, = xp.load("xp1")
+```
+
+
 ## Specifying paths to be serialized
 
 Configurations can be serialized with the data necessary
