@@ -482,7 +482,7 @@ class Scheduler:
 
         return None
 
-    async def aio_submit(self, job: Job) -> JobState:
+    async def aio_submit(self, job: Job) -> JobState:  # noqa: C901
         """Main scheduler function: submit a job, run it (if needed), and returns
         the status code
         """
@@ -693,14 +693,25 @@ ServiceClass = TypeVar("ServiceClass", bound=Service)
 
 
 class experiment:
-    """Experiment context"""
+    """Main experiment object
+
+    It is a context object, i.e. experiments is run with
+
+    ```py
+        with experiment(...) as xp:
+            ...
+    ```
+    """
 
     # Current experiment
     CURRENT: Optional["experiment"] = None
 
     @staticmethod
     def current() -> "experiment":
-        """Returns the current experiment, but checking first if set"""
+        """Returns the current experiment, but checking first if set
+
+        If there is no current experiment, raises an AssertError
+        """
         assert experiment.CURRENT is not None, "No current experiment defined"
         return experiment.CURRENT
 
@@ -718,9 +729,18 @@ class experiment:
         """
         :param env: an environment -- or a working directory for a local
             environment
-        :param port: the port for the web server (overrides environment port if
-            any). Use None to avoid running a web server (default when dry run).
+
+        :param name: the identifier of the experiment
+
         :param launcher: The launcher (if not provided, inferred from path)
+
+        :param host: The host for the web server (overrides the environment if
+            set)
+        :param port: the port for the web server (overrides the environment if
+            set) Use None to avoid running a web server (default when dry run).
+
+        :param run_mode: The run mode for the experiment (normal, generate run
+            files, dry run)
         """
 
         from experimaestro.server import Server
@@ -842,7 +862,9 @@ class experiment:
         self.environment.setenv(name, value)
 
     def token(self, name: str, count: int):
-        """Returns a token for this experiment depending on the host"""
+        """Returns a token for this experiment
+
+        The token is the default token of the workspace connector"""
         return self.workspace.connector.createtoken(name, count)
 
     def __enter__(self):
@@ -928,7 +950,12 @@ class experiment:
                 self.server.stop()
 
     def add_service(self, service: ServiceClass) -> ServiceClass:
-        """Adds a service (e.g. tensorboard viewer) to the experiment"""
+        """Adds a service (e.g. tensorboard viewer) to the experiment
+
+        :param service: A service instance
+        :type service: Service
+        :return: The same service instance
+        """
         self.services[service.id] = service
         for listener in self.scheduler.listeners:
             listener.service_add(service)

@@ -36,13 +36,18 @@ class SerializedPath:
 
 
 class SerializationContext:
+    """Context when serializing experimaestro configurations"""
+
     save_directory: Optional[Path]
     var_path: List[str]
     serialized: Set[int]
 
-    """Context when serializing experimaestro configurations"""
-
     def __init__(self, *, save_directory: Optional[Path] = None):
+        """Creates a new serialization context
+
+        :param save_directory: Defines the directory where `SerializedPath` are
+            stored
+        """
         self.save_directory = save_directory
         self.var_path = []
         self.serialized = set()

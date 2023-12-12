@@ -14,6 +14,7 @@ nav:
   - Connectors: connectors/index.md
   - Serialization: serialization.md
   - Configuration: configuration.md
+  - Running experiments: experiments.md
   - Integration:
       - Jupyter: jupyter.md
       - Documentation: documenting.md

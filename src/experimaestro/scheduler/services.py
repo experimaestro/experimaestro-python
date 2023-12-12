@@ -6,6 +6,8 @@ from typing import Set
 
 
 class ServiceListener:
+    """A service listener"""
+
     def service_state_changed(service):
         pass
 
@@ -18,6 +20,12 @@ class ServiceState(Enum):
 
 
 class Service:
+    """An experiment service
+
+    Services can be associated with an experiment. They send
+    notifications to service listeners.
+    """
+
     id: str
     _state: ServiceState = ServiceState.STOPPED
 
@@ -25,9 +33,17 @@ class Service:
         self.listeners: Set[ServiceListener] = set()
 
     def add_listener(self, listener: ServiceListener):
+        """Adds a listener
+
+        :param listener: The listener to add
+        """
         self.listeners.add(listener)
 
     def remove_listener(self, listener: ServiceListener):
+        """Removes a listener
+
+        :param listener: The listener to remove
+        """
         self.listeners.remove(listener)
 
     def description(self):
@@ -47,6 +63,8 @@ class Service:
 
 
 class WebService(Service):
+    """Web service"""
+
     def __init__(self):
         super().__init__()
         self.url = None

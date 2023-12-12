@@ -1,8 +1,24 @@
-/* .doc.doc-heading > code:first-child:before {
+.doc-class > .doc.doc-heading > code:first-child:before {
   content: "class "
-} */
+}
+
 
 .doc.doc-heading > code:first-child {
-  font-family: Arial, Helvetica, sans-serif;
+  /* font-family: Arial, Helvetica, sans-serif; */
   color: black;
+  font-weight: normal;
+  border: none;
+  background: #eee;
+  padding: 5px 0px;
+}
+
+.doc.doc-object {
+  margin: 5px 5px;
+  padding: 0 5px;
+  border-left: 1px solid gray;
+}
+
+.doc.doc-object .doc {
+  margin: 0;
+  border-left: 0;
 }
