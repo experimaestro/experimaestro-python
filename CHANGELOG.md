@@ -1,3 +1,9 @@
+## v1.3.6 (2023-12-12)
+
+### Feat
+
+- Saving/Loading from experiments
+
 ## v1.3.5 (2023-12-08)
 
 ### Feat
