@@ -15,33 +15,29 @@ The main class is `experimaestro.experiment`
 ## Experiment configuration
 
 The module `experimaestro.experiments` contain code factorizing boilerplate for
-launching experiments
+launching experiments. It allows to setup the experimental environment and
+read ``YAML`` configuration files to setup some experimental parameters.
 
+This can be extended to support more specific experiment helpers (see e.g.
+experimaestro-ir for an example).
 
 ### Example
 
 An `experiment.py` file:
 
 ```py3
-    from xpmir.experiments.ir import PaperResults, ir_experiment, ExperimentHelper
-    from xpmir.papers import configuration
+    from experimaestro.experiments import ExperimentHelper, configuration
 
     @configuration
     class Configuration:
         #: Default learning rate
         learning_rate: float = 1e-3
 
-    @ir_experiment()
     def run(
         helper: ExperimentHelper, cfg: Configuration
-    ) -> PaperResults:
+    ):
+        # Experimental code
         ...
-
-        return PaperResults(
-            models={"my-model@RR10": outputs.listeners[validation.id]["RR@10"]},
-            evaluations=tests,
-            tb_logs={"my-model@RR10": learner.logpath},
-        )
 ```
 
 With `full.yaml` located in the same folder as `experiment.py`
