@@ -13,6 +13,7 @@ import subprocess
 from termcolor import colored, cprint
 
 import experimaestro
+from experimaestro.experiments.cli import experiments_cli
 import experimaestro.launcherfinder.registry as launcher_registry
 
 # --- Command line main options
@@ -72,6 +73,10 @@ def cli(ctx, quiet, debug, traceback):
 
     ctx.obj = RunConfig()
     ctx.obj.traceback = traceback
+
+
+# Adds the run-experiment command
+cli.add_command(experiments_cli, "run-experiment")
 
 
 @cli.command(help="Get version")
