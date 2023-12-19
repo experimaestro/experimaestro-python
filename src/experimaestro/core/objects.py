@@ -76,6 +76,9 @@ class Identifier:
 
         return Identifier(bytes.fromhex(data["main"]))
 
+    def __repr__(self):
+        return self.main.hex()
+
 
 def is_ignored(value):
     """Returns True if the value should be ignored by itself"""
