@@ -1,13 +1,16 @@
 [![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
+[![RTD](https://readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io)
 
-Experimaestro is a computer science experiment manager whose goals are:
+Experimaestro helps in designing and managing complex workflows. It allows for the definition of tasks and their dependencies, ensuring that each step in a workflow is executed in the correct order. Some key aspects of Experimaestro are:
 
-- To decompose experiments into a set of parameterizable tasks
-- Schedule tasks and handle dependencies between tasks
-- Avoids to re-run the same task two times by computing unique task IDs dependending on the parameters
-- Handle experimental parameters through tags
+- **Task Automation**: The tool automates repetitive tasks, making it easier to run large-scale experiments. It's particularly useful in scenarios where experiments need to be repeated with different parameters or datasets.
+- **Resource Management**: It efficiently manages computational resources, which is critical when dealing with data-intensive tasks or when running multiple experiments in parallel.
+- **Extensibility**: Experimaestro is designed to be flexible and extensible, allowing users to integrate it with various programming languages and tools commonly used in data science and research.
+- **Reproducibility**: By keeping a detailed record of experiments, including parameters and environments, it aids in ensuring the reproducibility of scientific experiments, which is a fundamental requirement in research.
+- **User Interface**: While primarily a back-end tool, Experimaestro also offers a user interface to help in managing and visualizing workflows.
 
 The full documentation can be read by going to the following URL: [https://experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io)
+
 
 # Install
 

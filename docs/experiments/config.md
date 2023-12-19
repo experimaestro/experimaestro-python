@@ -1,6 +1,66 @@
 # Configurations
 
-Defining experiments is based on _config(urations)_ and _tasks_. Tasks are configurations that can be executed.
+The most important concept in Experimaestro is that of a configuration. In Experimaestro, a configuration object is a fundamental concept used to specify parameters and settings for tasks and experiments. It acts as a structured way to input the necessary details to execute a task or a series of tasks. Here's a general description of what a configuration object in Experimaestro might encompass:
+
+1. **Parameter Definition**: The configuration object defines the parameters needed for a task or experiment. These parameters can include data file paths, numerical values, strings, and other types of inputs that are essential for the execution of the task.
+
+2. **Parameter Types and Validation**: Each parameter in the configuration object can have a specific type, such as integer, float, string, or more complex data types. The configuration object can include validation rules to ensure that the parameters provided are in the correct format and within expected ranges.
+
+3. **Default Values**: For some parameters, the configuration object can specify default values. This is useful in cases where a parameter is optional or where a common default value is typically used.
+
+4. **Documentation**: The configuration object can include documentation for each parameter, explaining its purpose and how it should be used. This documentation is crucial for making the configuration user-friendly, especially in complex experiments.
+
+5. **Hierarchy and Nesting**: In complex tasks, the configuration object can be hierarchical or nested. This means that a configuration object can contain other configuration objects, allowing for the organization of parameters in a structured manner.
+
+6. **Linking to Tasks**: The configuration object is typically linked to specific tasks or experiments. When a task is executed, it retrieves the necessary parameters from the associated configuration object.
+
+7. **Flexibility and Extensibility**: Configuration objects are designed to be flexible and extensible, allowing users to add new parameters or modify existing ones as the requirements of the task evolve.
+
+8. **Serialization**: Configuration objects are often serializable, meaning they can be saved to a file and loaded back. This is important for reproducibility and for sharing configurations between users or for future use.
+
+In practical use, a configuration object acts as a bridge between the user (or another system) and the execution environment, ensuring that all the necessary inputs are provided and validated before the task is run. This structured approach aids in automating and scaling experiments, as well as in ensuring their reproducibility.
+
+## Configuration identifiers
+
+A configuration identifier in the context of systems like Experimaestro is a
+unique identifier associated with a specific configuration object.
+This identifier plays a crucial role in managing and referencing configurations,
+especially in complex systems where multiple configurations are used. Here's a
+detailed description:
+
+1. **Uniqueness**: A configuration identifier is unique for each configuration
+   instance. This uniqueness ensures that each configuration can be distinctly
+   identified and referenced, avoiding confusion or overlap with other
+   configurations.
+
+1. **MD5 Hashes**: Experimaestro utilizes MD5 hashes as configuration
+    identifiers. These hashes are unique to each configuration, ensuring a
+    distinct and consistent identifier for every set of parameters.
+
+1. **Run-Once Guarantee**: The unique MD5 hash identifiers ensure that each task
+   associated with a specific configuration is executed only once. This is
+   particularly important in avoiding redundant computations and ensuring the
+   efficiency of the workflow.
+
+**How is the identifier computed?**
+
+The principale is the following. Any value can be associated with a unique byte
+string: the byte string is obtained by outputting the type of the value (e.g.
+string, ir.adhoc.dataset) and the value itself as a binary string. A special
+handling of configurations and tasks (objects) is performed by sorting keys in
+ascending lexicographic order, thus ensuring the uniqueness of the
+representation.
+
+ Moreover
+
+- Default values are removed (e.g. k1 when set to 0.9). This allows to
+  handle the situation where one adds a new experimental parameter
+  (e.g. a new loss component). In that case, using a default parameter
+  allows to add this parameter without invalidating all the previously
+  ran experiments.
+- Ignored values are removed (e.g. the number of threads when
+  indexing, the path where the index is stored)
+
 
 ## Defining a configuration
 
@@ -80,7 +140,7 @@ experimaestro deprecated list WORKDIR
 
 ### Initialisation
 
-During [task](../task) execution, the objects are constructed following
+During [task](./task.md) execution, the objects are constructed following
 these steps:
 
 - The object is constructed using `self.__init__()`

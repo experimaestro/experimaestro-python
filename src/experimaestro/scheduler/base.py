@@ -953,7 +953,6 @@ class experiment:
         """Adds a service (e.g. tensorboard viewer) to the experiment
 
         :param service: A service instance
-        :type service: Service
         :return: The same service instance
         """
         self.services[service.id] = service

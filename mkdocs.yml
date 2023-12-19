@@ -4,9 +4,7 @@ site_description: experimaestro Computer science experiments manager and schedul
 nav:
   - Introduction: index.md
   - Tutorial: tutorial.md
-  - Concepts: concepts.md
   - Experiments:
-      - Overview: experiments/overview.md
       - Configuration: experiments/config.md
       - Task: experiments/task.md
       - Plan: experiments/plan.md
