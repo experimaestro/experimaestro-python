@@ -10,7 +10,7 @@ class TaskSequence(Task):
 
     @property
     def __identifier__(self):
-        return self.tasks[-1].__identifier__
+        return self.tasks[-1].__identifier__()
 
     def execute(self):
         self.tasks[-1].__tags__ = self.__tags__
