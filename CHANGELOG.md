@@ -1,3 +1,15 @@
+## v1.4.1 (2023-12-19)
+
+### Feat
+
+- decorator class method for experiment helpers
+- representation of identifier as hex string
+- load task from directory
+
+### Fix
+
+- identifier is a method not a property
+
 ## v1.4.0 (2023-12-16)
 
 ### Feat
