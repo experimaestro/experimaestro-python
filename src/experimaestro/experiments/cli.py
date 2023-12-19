@@ -33,6 +33,17 @@ class ExperimentHelper:
         assert len(args) == 0
         self.callable(self, configuration)
 
+    @classmethod
+    def decorator(cls, *args, **kwargs):
+        """Decorator for the run(helper, configuration) method"""
+        if len(args) == 1 and len(kwargs) == 0 and inspect.isfunction(args[0]):
+            return cls(callable)
+
+        def wrapper(callable):
+            return cls(callable)
+
+        return wrapper
+
 
 class ExperimentCallable(Protocol):
     """Protocol for the run function"""
