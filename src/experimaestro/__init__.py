@@ -27,7 +27,7 @@ from .annotations import (
     # Method
     config_only,
 )
-from .core.serialization import load, save, state_dict, from_state_dict
+from .core.serialization import load, save, state_dict, from_state_dict, from_task_dir
 from .core.arguments import (
     # Types
     Param,

@@ -25,6 +25,10 @@ save([obj1, obj2, {key: obj3, key2: obj4}], "/my/folder")
 ::: experimaestro.load
 ::: experimaestro.save
 
+A task configuration/instance can be loaded with
+
+::: experimaestro.from_task_dir
+
 The serialization context is controlled by a specific object
 named `SerializationContext`:
 

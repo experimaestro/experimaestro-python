@@ -112,3 +112,17 @@ def load(
     with data_loader("definition.json").open("rt") as fh:
         content = json.load(fh)
     return from_state_dict(content, as_instance=as_instance)
+
+
+def from_task_dir(
+    path: Union[str, Path, SerializedPathLoader],
+    as_instance: bool = False,
+):
+    """Loads a task object"""
+    data_loader = get_data_loader(path)
+    with data_loader("params.json").open("rt") as fh:
+        content = json.load(fh)
+
+    content["data"] = {"type": "python", "value": content["objects"][-1]["id"]}
+
+    return from_state_dict(content, as_instance=as_instance)
