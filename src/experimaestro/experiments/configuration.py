@@ -1,3 +1,4 @@
+from omegaconf import MISSING
 from typing import Optional
 import attr
 
@@ -19,7 +20,7 @@ def configuration(*args, **kwargs):
 
 @configuration()
 class ConfigurationBase:
-    id: str
+    id: str = MISSING
     """ID of the experiment"""
 
     description: str = ""
