@@ -23,7 +23,7 @@ experimaestro-ir for an example).
 
 `ConfigurationBase` should be the parent class of any configuration.
 
-::: experimaestro.scheduler.services.ConfigurationBase
+::: experimaestro.experiments.ConfigurationBase
 
 ### Example
 
