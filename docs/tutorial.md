@@ -79,24 +79,6 @@ Taking the configuration class `Adam` defined above, we have:
 - `Adam(lr=1e-2).__identifier__()` returns `71848...` (different set of parameters)
 
 
-First, any value can be
-associated with a unique byte string: the byte string is obtained by outputting
-the type of the value (e.g. string, ir.adhoc.dataset) and the value itself as a
-binary string. A special handling of configurations and tasks (objects) is
-performed by sorting keys in ascending lexicographic order, thus ensuring the
-uniqueness of the representation.
-
- Moreover
-
-- Default values are removed (e.g. k1 when set to 0.9). This allows to
-  handle the situation where one adds a new experimental parameter
-  (e.g. a new loss component). In that case, using a default parameter
-  allows to add this parameter without invalidating all the previously
-  ran experiments.
-- Ignored values are removed (e.g. the number of threads when
-  indexing, the path where the index is stored)
-
-
 # Tasks
 
 When it comes to actually running code, Experimaestro allows to define

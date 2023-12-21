@@ -28,5 +28,5 @@ class ConfigurationBase:
     file: str = "experiment"
     """qualified name (relative to the module) for the file containing a run function"""
 
-    parent: Optional[str]
+    parent: Optional[str] = None
     """Relative path of a YAML file that should be merged"""

@@ -21,6 +21,10 @@ read ``YAML`` configuration files to setup some experimental parameters.
 This can be extended to support more specific experiment helpers (see e.g.
 experimaestro-ir for an example).
 
+`ConfigurationBase` should be the parent class of any configuration.
+
+::: experimaestro.scheduler.services.ConfigurationBase
+
 ### Example
 
 An `experiment.py` file:
