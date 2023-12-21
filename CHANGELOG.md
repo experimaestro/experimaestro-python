@@ -1,3 +1,9 @@
+## v1.4.2 (2023-12-21)
+
+### Fix
+
+- parent should be really optional
+
 ## v1.4.1 (2023-12-19)
 
 ### Feat
