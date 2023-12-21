@@ -12,4 +12,9 @@ server:
     port: 12345
     token: 2134inmd8132323
     host: 192.168.1.1
+
+workspaces:
+    # First workspace is the default
+  - id: neuralir
+    path: ~/experiments/xpmir
 ```
