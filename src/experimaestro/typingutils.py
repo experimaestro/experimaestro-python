@@ -3,7 +3,7 @@ import typing
 from typing import Generic, Protocol
 
 if sys.version_info.major == 3:
-    if sys.version_info.minor < 12:
+    if sys.version_info.minor < 11:
         from typing import _collect_type_vars as _collect_parameters
     else:
         from typing import _collect_parameters
