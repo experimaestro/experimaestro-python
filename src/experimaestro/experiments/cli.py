@@ -201,14 +201,14 @@ def experiments_cli(
             cprint(f"Error in configuration:\n\n{e}", "red", file=sys.stderr)
             sys.exit(1)
 
+    if show:
+        print(json.dumps(OmegaConf.to_container(configuration)))  # noqa: T201
+        sys.exit(0)
+
     # Move to an object container
     configuration: schema = OmegaConf.to_container(
         configuration, structured_config_mode=SCMode.INSTANTIATE
     )
-
-    if show:
-        print(json.dumps(OmegaConf.to_container(configuration)))  # noqa: T201
-        sys.exit(0)
 
     # Get the working directory
     if workdir is None or not Path(workdir).is_dir():
