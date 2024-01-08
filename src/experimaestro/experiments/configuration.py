@@ -20,14 +20,28 @@ def configuration(*args, **kwargs):
 
 @configuration()
 class ConfigurationBase:
-    id: str = MISSING
-    """ID of the experiment"""
+    """Base configuration for any experiment"""
 
-    description: str = ""
-    """Description of the experiment"""
+    id: str = MISSING
+    """ID of the experiment
+
+    This ID is used by experimaestro when running as the experiment.
+    """
 
     file: str = "experiment"
-    """qualified name (relative to the module) for the file containing a run function"""
+    """Relative path of the file containing a run function"""
 
     parent: Optional[str] = None
     """Relative path of a YAML file that should be merged"""
+
+    title: str = ""
+    """Short description of the experiment"""
+
+    subtitle: str = ""
+    """Allows to give some more details about the experiment"""
+
+    paper: str = ""
+    """Source paper for this experiment"""
+
+    description: str = ""
+    """Description of the experiment"""
