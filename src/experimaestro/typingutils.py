@@ -30,7 +30,9 @@ def get_optional(typehint):
     if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
         if len(typehint.__args__) == 2:
             for ix in (0, 1):
-                if issubclass(typehint.__args__[ix], type(None)):
+                argtype = typehint.__args__[ix]
+                origin = get_origin(argtype) or argtype
+                if issubclass(origin, type(None)):
                     return typehint.__args__[1 - ix]
     return None
 
