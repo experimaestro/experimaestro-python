@@ -63,7 +63,7 @@ def load(yaml_file: Path):
     if parent := _data.get("parent", None):
         data.extend(load(yaml_file.parent / parent))
 
-    return data
+    return data[::-1]
 
 
 @click.option("--debug", is_flag=True, help="Print debug information")
