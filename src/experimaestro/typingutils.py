@@ -1,10 +1,21 @@
 import sys
 import typing
+from typing import Generic, Protocol
 
-if sys.version_info.major == 3 and sys.version_info.minor < 9:
-    from typing_extensions import _AnnotatedAlias as AnnotatedAlias, get_args
-else:
-    from typing import _AnnotatedAlias as AnnotatedAlias, get_args
+if sys.version_info.major == 3:
+    if sys.version_info.minor < 12:
+        from typing import _collect_type_vars as _collect_parameters
+    else:
+        from typing import _collect_parameters
+
+    if sys.version_info.minor < 9:
+        from typing_extensions import (
+            _AnnotatedAlias as AnnotatedAlias,
+            get_args,
+            get_origin,
+        )
+    else:
+        from typing import _AnnotatedAlias as AnnotatedAlias, get_args, get_origin
 
 GenericAlias = typing._GenericAlias
 
@@ -19,7 +30,7 @@ def get_optional(typehint):
     if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
         if len(typehint.__args__) == 2:
             for ix in (0, 1):
-                if typehint.__args__[ix] == type(None):
+                if issubclass(typehint.__args__[ix], type(None)):
                     return typehint.__args__[1 - ix]
     return None
 
@@ -63,3 +74,35 @@ def get_dict(typehint):
             assert len(typehint.__args__) == 2
             return typehint.__args__
     return None
+
+
+# From https://github.com/python/typing/issues/777
+
+
+def _generic_mro(result, tp):
+    origin = typing.get_origin(tp) or tp
+
+    result[origin] = tp
+    if hasattr(origin, "__orig_bases__"):
+        parameters = _collect_parameters(origin.__orig_bases__)
+        substitution = dict(zip(parameters, get_args(tp)))
+        for base in origin.__orig_bases__:
+            if get_origin(base) in result:
+                continue
+            base_parameters = getattr(base, "__parameters__", ())
+            if base_parameters:
+                base = base[tuple(substitution.get(p, p) for p in base_parameters)]
+            _generic_mro(result, base)
+
+
+def generic_mro(tp):
+    origin = get_origin(tp)
+    if origin is None and not hasattr(tp, "__orig_bases__"):
+        if not isinstance(tp, type):
+            raise TypeError(f"{tp!r} is not a type or a generic alias")
+        return tp.__mro__
+    # sentinel value to avoid to subscript Generic and Protocol
+    result = {Generic: Generic, Protocol: Protocol}
+    _generic_mro(result, tp)
+    cls = origin if origin is not None else tp
+    return tuple(result.get(sub_cls, sub_cls) for sub_cls in cls.__mro__)

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import inspect
 import sys
-from typing import Set, Union, Dict, Iterator, List
+from typing import Set, Union, Dict, Iterator, List, get_args, get_origin
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -125,6 +125,10 @@ class Type:
         t = typingutils.get_dict(key)
         if t:
             return DictType(Type.fromType(t[0]), Type.fromType(t[1]))
+
+        # Takes care of generics
+        if get_origin(key):
+            return GenericType(key)
 
         raise Exception("No type found for %s", key)
 
@@ -636,3 +640,28 @@ class DictType(Type):
 
     def __repr__(self):
         return str(self)
+
+
+class GenericType(Type):
+    def __init__(self, type: typing.Type):
+        self.type = type
+        self.origin = get_origin(type)
+
+        self.args = get_args(type)
+
+    def name(self):
+        return str(self.type)
+
+    def __repr__(self):
+        return repr(self.type)
+
+    def validate(self, value):
+        # Now, let's check generics...
+        mros = typingutils.generic_mro(type(value))
+        matching = next(
+            (mro for mro in mros if (get_origin(mro) or mro) is self.origin), None
+        )
+        if matching is None:
+            raise ValueError(f"{type(value)} is not of type {self.type}")
+
+        return value
