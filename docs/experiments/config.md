@@ -164,15 +164,41 @@ class MyConfig(Config):
 
 ```
 
-### Initialization tasks
-
+## Initialization tasks
 
 Sometimes, it is necessary to restore an object state from disk, and we want
 to separate the loading mechanism from the configuration logic; in that case,
 `LightweightTask` (a `Config` which must be subclassed) can be used.
 
+### Initialization tasks
+
+Initialization tasks can only be used when submitting a task. They are not
+associated with any configuration or task (as pre-tasks), and as such their
+use is more explicit (and leads to less errors and bugs).
+
+To take the example of a model learner task, it would return a model loader only:
+```py3
+class ModelLearner(Task):
+    model: Param[model]
+
+    def task_outputs(self, dep):
+        return dep(ModelLoader(model=model))
+```
+
+When using the model:
+
+```py3
+
+model_loader = learner.submit()
+Evaluate(model=model).submit(init_tasks=[model_loader])
+```
+
 
 ## Pre-tasks (deprecated)
+
+Pre-tasks can be associated with a Configuration and run automatically
+when the configuration is loaded. Given their implicit nature, they
+are now deprecated in favor of [initialization tasks](#initialization- tasks).
 
 ```py3
 from experimaestro import Config, LightweightTask
@@ -232,28 +258,6 @@ It is possible to copy pre-tasks from one configuration to another by using
 copies the pre-tasks of `config1` to `config2`.
 
 
-## Initialization tasks
-
-Initialization tasks can only be used when submitting a task. They are not
-associated with any configuration or task (as pre-tasks), and as such their
-use is more explicit (and leads to less errors and bugs).
-
-To take the example of a model learner task, it would return a model loader only:
-```py3
-class ModelLearner(Task):
-    model: Param[model]
-
-    def task_outputs(self, dep):
-        return dep(ModelLoader(model=model))
-```
-
-When using the model:
-
-```py3
-
-model_loader = learner.submit()
-Evaluate(model=model).submit(init_tasks=[model_loader])
-```
 
 ## Types
 
