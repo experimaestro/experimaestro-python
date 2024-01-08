@@ -39,7 +39,6 @@ python = "^3.8"
 click = ">=8"
 omegaconf = "^2.3"
 typing-extensions = {version = ">=4.2", markers = "python_version < \"3.11\""}
-cached-property = {markers = "python_version < \"3.9\"", version = "^1.5.2"}
 attrs = "^23.1.0"
 fasteners = "^0.19"
 pyyaml = "^6.0.1"
@@ -119,7 +118,7 @@ max-line-length = "88"
 extend-ignore = "E203"
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 warn_unused_ignores = true
 
 [tool.commitizen]
