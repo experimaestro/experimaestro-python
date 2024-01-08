@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path, _posix_flavour
 import io
 import os
+import re
 from experimaestro.launcherfinder import LauncherRegistry, YAMLDataClass
 from fabric import Connection
 from invoke import Promise
@@ -21,7 +22,7 @@ from experimaestro.tokens import Token
 # Might be wise to switch to https://github.com/marian-code/ssh-utilities
 
 
-class SshPath(Path, PurePosixPath):
+class SshPath(Path):
     """SSH path
 
     Absolute:
@@ -31,16 +32,31 @@ class SshPath(Path, PurePosixPath):
     ssh://[user@]host[:port]/relative/path
     """
 
+    _flavour = _posix_flavour
+
+    def __new__(cls, *args, **kwargs):
+        return object.__new__(cls)
+
+    def __init__(self, url: str):
+        parsed = urlparse(url)
+        assert parsed.scheme == "ssh"
+        self._host = parsed.hostname
+
+        self._parts = re.split(r"/+", parsed.path)
+        if parsed.path.startswith("//"):
+            self._parts[0] = "/"
+        else:
+            self._parts = self._parts[1:]
+
     @property
     def hostpath(self):
-        # path = "/" if self._parts[:0]  + "/".join(self._parts[1:])
         if self.is_absolute():
-            return "/" + self._flavour.join(self._parts[1:])
-        return self._flavour.join(self._parts)
+            return "/" + "/".join(self._parts[1:])
+        return "/".join(self._parts)
 
     @property
     def host(self):
-        return self._drv
+        return self._host
 
     def is_absolute(self):
         return self._parts and self._parts[0] == "/"
@@ -66,11 +82,15 @@ class SshPath(Path, PurePosixPath):
 
     def _make_child(self, args):
         drv, root, parts = self._parse_args(args)
-        assert self._drv == drv or drv == "", f"{self._drv} and {drv}"
+        assert self._host == drv or drv == "", f"{self._host} and {drv}"
         drv, root, parts = self._flavour.join_parsed_parts(
-            "", self._root, self._parts, "", root, parts
+            "", "", self._parts, "", root, parts
         )
-        return self._from_parsed_parts(self._drv, root, parts)
+
+        child = object.__new__(SshPath)
+        child._parts = parts
+        child._host = self._host
+        return child
 
     def open(self, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
         # FIXME: should probably be wiser
@@ -105,10 +125,10 @@ class SshPath(Path, PurePosixPath):
         return obj
 
     def __repr__(self):
-        return "SshPath(%s,%s)" % (self._drv, self._flavour.join(self._parts[1:]))
+        return "SshPath(%s,%s)" % (self._host, self._flavour.join(self._parts[1:]))
 
     def __str__(self):
-        return "ssh://%s/%s" % (self._drv, self._flavour.join(self._parts[1:]))
+        return "ssh://%s/%s" % (self._host, self._flavour.join(self._parts[1:]))
 
 
 @dataclass
