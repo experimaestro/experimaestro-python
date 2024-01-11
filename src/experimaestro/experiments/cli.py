@@ -110,6 +110,12 @@ def load(yaml_file: Path):
     help="Working directory - if None, uses the default XPM " "working directory",
 )
 @click.option("--conf", "-c", "extra_conf", type=str, multiple=True)
+@click.option(
+    "--pre-yaml", type=str, multiple=True, help="Add YAML file after the main one"
+)
+@click.option(
+    "--post-yaml", type=str, multiple=True, help="Add YAML file before the main one"
+)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.argument("yaml_file", metavar="YAML file", type=str)
 @click.command()
@@ -123,6 +129,8 @@ def experiments_cli(
     env: List[Tuple[str, str]],
     run_mode: RunMode,
     extra_conf: List[str],
+    pre_yaml: List[str],
+    post_yaml: List[str],
     args: List[str],
     show: bool,
     debug: bool,
@@ -133,13 +141,17 @@ def experiments_cli(
     logging.getLogger("xpm.hash").setLevel(logging.INFO)
 
     # --- Loads the YAML
-    yamls = load(Path(yaml_file))
+    yamls = []
+    for y in pre_yaml:
+        yamls.extend(load(Path(y)))
+    yamls.extend(load(Path(yaml_file)))
+    for y in post_yaml:
+        yamls.extend(load(Path(y)))
 
     # --- Get the XP file
     if xp_file is None:
-        for data in yamls:
-            if xp_file := data.get("file"):
-                del data["file"]
+        for data in yamls[::-1]:
+            if xp_file := data.get("file", None):
                 break
 
         if xp_file is None:
