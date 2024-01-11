@@ -922,7 +922,7 @@ class experiment:
             if exc_type:
                 # import faulthandler
                 # faulthandler.dump_traceback()
-                logger.exception(
+                logger.error(
                     "Not waiting since an exception was thrown"
                     " (some jobs may be running)"
                 )

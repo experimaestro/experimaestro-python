@@ -646,7 +646,7 @@ class ConfigInformation:
                     "Cannot set non existing attribute %s in %s" % (k, self.xpmtype)
                 )
         except Exception:
-            logger.exception("Error while setting value %s" % k)
+            logger.error("Error while setting value %s in %s", k, self.xpmtype)
             raise
 
     def addtag(self, name, value):
@@ -1816,7 +1816,15 @@ class Config:
 
         # We use the configuration type
         o = object.__new__(cls.__getxpmtype__().configtype)
-        o.__init__(*args, **kwargs)
+        try:
+            o.__init__(*args, **kwargs)
+        except Exception:
+            caller = inspect.getframeinfo(inspect.stack()[1][0])
+            logger.error(
+                "Init error in %s:%s"
+                % (str(Path(caller.filename).absolute()), caller.lineno)
+            )
+            raise
         return o
 
     def __validate__(self):
