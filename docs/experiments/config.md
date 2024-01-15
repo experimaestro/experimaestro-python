@@ -20,6 +20,7 @@ The most important concept in Experimaestro is that of a configuration. In Exper
 
 In practical use, a configuration object acts as a bridge between the user (or another system) and the execution environment, ensuring that all the necessary inputs are provided and validated before the task is run. This structured approach aids in automating and scaling experiments, as well as in ensuring their reproducibility.
 
+
 ## Configuration identifiers
 
 A configuration identifier in the context of systems like Experimaestro is a
@@ -84,6 +85,18 @@ defines a configuration with name `my.model` and one argument `gamma` that has t
 
 `__xpmid__` can also be a class method to generate dynamic ids for all descendant configurations
 When `__xpmid__` is missing, the qualified name is used.
+
+## Object hierarchy
+
+When deriving `B` from `Config`, experimaestro creates two auxilliary types:
+
+1. A configuration object `A.Config` deriving from `TypeConfig` and `A`
+1. A value object deriving from `A`
+
+For a class `B` deriving from `A`, `B.Value` from `B` and `A.Value`
+
+![object hierarchy](../img/xpm-objects.svg)
+
 
 ## Deprecating a configuration or attributes
 
