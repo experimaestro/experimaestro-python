@@ -38,7 +38,7 @@ build-backend = "poetry_dynamic_versioning.backend"
 python = "^3.8"
 click = ">=8"
 omegaconf = "^2.3"
-typing-extensions = {version = ">=4.2", markers = "python_version < \"3.11\""}
+typing-extensions = {version = ">=4.2", markers = "python_version < \"3.12\""}
 attrs = "^23.1.0"
 fasteners = "^0.19"
 pyyaml = "^6.0.1"
