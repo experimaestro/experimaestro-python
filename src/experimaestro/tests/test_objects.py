@@ -4,6 +4,7 @@ import pytest
 from experimaestro import Config, Task, Annotated, copyconfig, default
 from experimaestro.core.arguments import Param
 from experimaestro.core.objects import TypeConfig
+from experimaestro.core.types import XPMValue
 from experimaestro.generators import pathgenerator
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tests.utils import TemporaryExperiment
@@ -33,6 +34,10 @@ class C(B):
     pass
 
 
+class D(B, A):
+    pass
+
+
 class DefaultAnnotationConfig(Config):
     a: Annotated[A, default(A(x=3))]
 
@@ -51,9 +56,10 @@ def test_object_config_default():
 
 def test_hierarchy():
     """Test if the object hierarchy is OK"""
-    OA = A.__xpmtype__.objecttype
-    OB = B.__xpmtype__.objecttype
-    OC = C.__xpmtype__.objecttype
+    OA = A.__getxpmtype__().objecttype
+    OB = B.__getxpmtype__().objecttype
+    OC = C.__getxpmtype__().objecttype
+    OD = D.__getxpmtype__().objecttype
 
     assert issubclass(A, Config)
     assert issubclass(B, Config)
@@ -65,9 +71,10 @@ def test_hierarchy():
 
     assert issubclass(C, B)
 
-    assert OA.__bases__ == (Config,)
-    assert OB.__bases__ == (Config,)
-    assert OC.__bases__ == (B,)
+    assert OA.__bases__ == (A, XPMValue)
+    assert OB.__bases__ == (B, XPMValue)
+    assert OC.__bases__ == (C, B.XPMValue)
+    assert OD.__bases__ == (D, B.XPMValue, A.XPMValue)
 
 
 class CopyConfig(Task):

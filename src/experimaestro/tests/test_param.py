@@ -232,8 +232,8 @@ def test_redefined_param():
     class B:
         x: Param[int] = 3
 
-    atx = A._.__xpmtype__.getArgument("x")
-    btx = B._.__xpmtype__.getArgument("x")
+    atx = A.C.__xpmtype__.getArgument("x")
+    btx = B.C.__xpmtype__.getArgument("x")
 
     assert atx.required
 

@@ -183,6 +183,12 @@ class SubmitHook(ABC):
         return hash((self.__class__, self.spec()))
 
 
+class XPMValue:
+    """Jut marks a XPMValue"""
+
+    pass
+
+
 class ObjectType(Type):
     submit_hooks: Set[SubmitHook]
     """Hooks associated with this configuration"""
@@ -251,7 +257,7 @@ class ObjectType(Type):
         else:
             self.basetype = tp
 
-        # Create the type-specific configuration class
+        # --- Create the type-specific configuration class (XPMConfig)
         __configbases__ = tuple(
             s.__getxpmtype__().configtype
             for s in tp.__bases__
@@ -260,15 +266,14 @@ class ObjectType(Type):
 
         *tp_qual, tp_name = self.basetype.__qualname__.split(".")
         self.configtype = type(
-            f"{tp_name}_XPMConfig", __configbases__ + (self.basetype,), {}
+            f"{tp_name}.XPMConfig", __configbases__ + (self.basetype,), {}
         )
         self.configtype.__qualname__ = ".".join(tp_qual + [self.configtype.__name__])
         self.configtype.__module__ = tp.__module__
 
         # Create the type-specific object class
         # (now, the same as basetype - but in the future, remove references)
-        self.objecttype = self.basetype  # type: type
-        self.basetype._ = self.configtype
+        self.basetype.XPMConfig = self.basetype.C = self.configtype
 
         # Return type is used by tasks to change the output
         if hasattr(self.basetype, "task_outputs") or False:
@@ -276,7 +281,7 @@ class ObjectType(Type):
                 getattr(self.basetype, "task_outputs")
             ).get("return", typing.Any)
         else:
-            self.returntype = self.objecttype
+            self.returntype = self.basetype
 
         # Registers ourselves
         self.basetype.__xpmtype__ = self
@@ -287,6 +292,11 @@ class ObjectType(Type):
         self._runtype = None
         self.annotations = []
         self._deprecated = False
+
+    @property
+    def objecttype(self):
+        """Returns the object type"""
+        return self.basetype.XPMValue
 
     def addAnnotation(self, annotation):
         assert not self.__initialized__
