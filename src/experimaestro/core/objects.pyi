@@ -27,13 +27,16 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
+    Generic,
     List,
     Optional,
     Set,
+    Type,
     TypeVar,
     Union,
     overload,
 )
+from typing_extensions import Self
 
 TConfig = TypeVar("TConfig", bound="Config")
 
@@ -205,12 +208,15 @@ class TypeConfig:
 class Config:
     __xpmtype__: ClassVar[ObjectType]
     __xpm__: ConfigInformation
+    __use_xpmobject__: ClassVar[bool]
+
+    XPMValue: Type[Self]
+    XPMConfig: Union[Type[Self], Type[TypeConfig[Self]]]
+    C: Union[Type[Self], Type[TypeConfig[Self]]]
+
     @classmethod
     def __getxpmtype__(cls) -> ObjectType: ...
-    def __getnewargs_ex__(self): ...
-    @classmethod
-    def c(cls, **kwargs) -> T: ...
-    def __new__(cls, *args, __xpmobject__: bool = ..., **kwargs) -> T: ...
+    def __new__(cls, *args, **kwargs) -> Self: ...
     def __validate__(self) -> None: ...
     def __post_init__(self) -> None: ...
     def __json__(self): ...
@@ -240,6 +246,6 @@ class Task(LightweightTask):
 def copyconfig(config_or_output: TConfig, **kwargs) -> TConfig: ...
 def setmeta(config: TConfig, flag: bool) -> TConfig: ...
 
-class TypeConfig:
+class TypeConfig(Generic[T]):
     def __validate__(self):
         pass

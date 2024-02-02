@@ -1093,7 +1093,7 @@ class ConfigInformation:
         state_dict = {
             "id": id(self.pyobject),
             "module": self.xpmtype._module,
-            "type": self.xpmtype.objecttype.__qualname__,
+            "type": self.xpmtype.basetype.__qualname__,
             "typename": self.xpmtype.name(),
             "identifier": self.identifier.state_dict(),
         }
@@ -1340,7 +1340,10 @@ class ConfigInformation:
             cls = getqualattr(mod, definition["type"])
 
             # Creates an object (or a config)
-            o = cls.__new__(cls, __xpmobject__=as_instance)
+            if as_instance:
+                o = cls.XPMValue.__new__(cls.XPMValue)
+            else:
+                o = cls.XPMConfig.__new__(cls.XPMConfig)
             assert definition["id"] not in objects, "Duplicate id %s" % definition["id"]
             objects[definition["id"]] = o
 
@@ -1377,6 +1380,7 @@ class ConfigInformation:
                         o.__xpm_stdout__ = basepath / f"{name.lower()}.out"
                         o.__xpm_stderr__ = basepath / f"{name.lower()}.err"
             else:
+                o.__init__()
                 xpminfo = o.__xpm__  # type: ConfigInformation
 
                 meta = definition.get("meta", None)
@@ -1497,12 +1501,7 @@ class ConfigInformation:
 
             if o is None:
                 # Creates an object (and not a config)
-                o = config.__xpmtype__.objecttype.__new__(
-                    config.__xpmtype__.objecttype, __xpmobject__=True
-                )
-
-                # And calls the parameter-less initialization
-                o.__init__()
+                o = config.XPMValue()
 
                 # Store in cache
                 self.objects.add_stub(id(config), o)
@@ -1650,8 +1649,8 @@ class TypeConfig:
             [f"{key}={value}" for key, value in self.__xpm__.values.items()]
         )
         return (
-            f"{self.__xpmtype__.objecttype.__module__}."
-            f"{self.__xpmtype__.objecttype.__qualname__}({params})"
+            f"{self.__xpmtype__.basetype.__module__}."
+            f"{self.__xpmtype__.basetype.__qualname__}({params})"
         )
 
     def tag(self, name, value):
@@ -1770,6 +1769,11 @@ class TypeConfig:
         self.__xpm__.add_dependencies(*other.__xpm__.dependencies)
 
 
+class classproperty(property):
+    def __get__(self, owner_self, owner_cls):
+        return self.fget(owner_cls)
+
+
 class Config:
     """Base type for all objects in python interface"""
 
@@ -1780,6 +1784,42 @@ class Config:
     __xpm__: ConfigInformation
     """The __xpm__ object contains all instance specific information about a
     configuration/task"""
+
+    @classproperty
+    def XPMConfig(cls):
+        if issubclass(cls, TypeConfig):
+            return cls
+        return cls.__getxpmtype__().configtype
+
+    @classproperty
+    def C(cls):
+        return cls.XPMConfig
+
+    @classproperty
+    def XPMValue(cls):
+        """Returns the value object for this configuration"""
+        if issubclass(cls, TypeConfig):
+            return cls.__xpmtype__.objecttype
+
+        if value_cls := cls.__dict__.get("__XPMValue__", None):
+            pass
+        else:
+            from .types import XPMValue
+
+            __objectbases__ = tuple(
+                s.XPMValue
+                for s in cls.__bases__
+                if issubclass(s, Config) and (s is not Config)
+            ) or (XPMValue,)
+
+            *tp_qual, tp_name = cls.__qualname__.split(".")
+            value_cls = type(f"{tp_name}.XPMValue", (cls,) + __objectbases__, {})
+            value_cls.__qualname__ = ".".join(tp_qual + [value_cls.__name__])
+            value_cls.__module__ = cls.__module__
+
+            setattr(cls, "__XPMValue__", value_cls)
+
+        return value_cls
 
     @classmethod
     def __getxpmtype__(cls) -> "ObjectType":
@@ -1796,26 +1836,23 @@ class Config:
                 raise
         return xpmtype
 
-    def __getnewargs_ex__(self):
-        # __new__ will be called with those arguments when unserializing
-        return ((), {"__xpmobject__": True})
+    def __new__(cls: Type[T], *args, **kwargs) -> T:
+        """Returns an instance of a TypeConfig (for compatibility, use XPMConfig
+        or C if possible)"""
 
-    @classmethod
-    def c(cls: Type[T], **kwargs) -> T:
-        """Allows typing to process easily"""
-        return cls.__new__(cls, **kwargs)
+        # If this is an XPMValue, just return a new instance
+        from experimaestro.core.types import XPMValue
 
-    def __new__(cls: Type[T], *args, __xpmobject__=False, **kwargs) -> T:
-        """Returns an instance of a TypeConfig when called __xpmobject__ is False,
-        and otherwise the real object
-        """
-
-        if __xpmobject__:
-            # __init__ is  called directly
+        if issubclass(cls, XPMValue):
             return object.__new__(cls)
 
-        # We use the configuration type
-        o = object.__new__(cls.__getxpmtype__().configtype)
+        # If this is the XPMConfig, just return a new instance
+        # __init__ will be called
+        if issubclass(cls, TypeConfig):
+            return object.__new__(cls)
+
+        # otherwise, we use the configuration type
+        o: TypeConfig = object.__new__(cls.__getxpmtype__().configtype)
         try:
             o.__init__(*args, **kwargs)
         except Exception:
