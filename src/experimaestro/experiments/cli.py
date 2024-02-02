@@ -10,6 +10,7 @@ import omegaconf
 import yaml
 from experimaestro import LauncherRegistry, RunMode, experiment
 from experimaestro.experiments.configuration import ConfigurationBase
+from experimaestro.exceptions import HandledException
 from experimaestro.settings import get_workspace
 from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
@@ -119,7 +120,7 @@ def load(yaml_file: Path):
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.argument("yaml_file", metavar="YAML file", type=str)
 @click.command()
-def experiments_cli(
+def experiments_cli(  # noqa: C901
     yaml_file: str,
     xp_file: str,
     host: str,
@@ -235,9 +236,13 @@ def experiments_cli(
         for key, value in env:
             xp.setenv(key, value)
 
-        # Run the experiment
-        helper.xp = xp
-        helper.run(list(args), configuration)
+        try:
+            # Run the experiment
+            helper.xp = xp
+            helper.run(list(args), configuration)
 
-        # ... and wait
-        xp.wait()
+            # ... and wait
+            xp.wait()
+
+        except HandledException:
+            sys.exit(1)
