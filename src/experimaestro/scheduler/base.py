@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Set, TypeVar, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
+from experimaestro.exceptions import HandledException
 from experimaestro.notifications import LevelInformation, Reporter
 from typing import Dict
 from experimaestro.scheduler.services import Service
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from experimaestro.launchers import Launcher
 
 
-class FailedExperiment(RuntimeError):
+class FailedExperiment(HandledException):
     """Raised when an experiment failed"""
 
     pass
@@ -68,6 +69,17 @@ class JobState(enum.Enum):
 
     def finished(self):
         return self.value >= JobState.DONE.value
+
+
+class JobFailureStatus(enum.Enum):
+    #: Job failed
+    DEPENDENCY = 0
+
+    #: Job dependency failed
+    FAILED = 1
+
+    #: Memory
+    MEMORY = 2
 
 
 class JobLock(Lock):
@@ -129,6 +141,9 @@ class Job(Resource):
         self.scheduler: Optional["Scheduler"] = None
         self.config = config
         self.state: JobState = JobState.UNSCHEDULED
+
+        #: If a job has failed, indicates the failure status
+        self.failure_status: JobFailureStatus = None
 
         # Dependencies
         self.dependencies: Set[Dependency] = set()  # as target
@@ -294,6 +309,7 @@ class Job(Resource):
             # Job completed
             if not self.state.finished():
                 self.state = JobState.ERROR
+                self.failure_status = JobFailureStatus.DEPENDENCY
                 self._readyEvent.set()
 
         if self.unsatisfied == 0:
@@ -846,13 +862,16 @@ class experiment:
 
                 if self.failedJobs:
                     # Show some more information
+                    count = 0
                     for job in self.failedJobs.values():
-                        logger.error(
-                            "Job %s failed, check the log file %s",
-                            job.relpath,
-                            job.stderr,
-                        )
-                    raise FailedExperiment(f"{len(self.failedJobs)} failed jobs")
+                        if job.failure_status != JobFailureStatus.DEPENDENCY:
+                            count += 1
+                            logger.error(
+                                "Job %s failed, check the log file %s",
+                                job.relpath,
+                                job.stderr,
+                            )
+                    raise FailedExperiment(f"{count} failed jobs")
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         return future.result()
