@@ -1,3 +1,27 @@
+## v1.5.0 (2024-02-26)
+
+### Feat
+
+- uses job failure status
+- HandledException to shorten error stack trace
+
+### Fix
+
+- Deprecate YAML defined launchers
+- added pre/post yaml options
+- better error messages
+- support python 3.12 pathlib
+- **typinutils**: test for optional
+- _collect_parameters is in Python 3.11
+- **types**: accept generics as Param (but no real validation)
+- **ConfigurationBase**: Documentation and new fields to describe an experiment
+- process YAML file in the right order
+- Configuration must be OmegaConf to be transformed
+
+### Refactor
+
+- Use XPMValue and XPMConfig to distinguish configurations and values
+
 ## v1.4.3 (2023-12-21)
 
 ### Fix
