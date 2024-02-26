@@ -85,6 +85,10 @@ def load_yaml(loader_cls: Type[Loader], path: Path):
     if not path.is_file():
         return None
 
+    logger.warning(
+        "Using YAML file to configure launchers is deprecated. Please remove %s using launchers.py",
+        path,
+    )
     logger.debug("Loading %s", path)
     with path.open("rt") as fp:
         loader = loader_cls(fp)

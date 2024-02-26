@@ -51,6 +51,13 @@ class CPUSpecification:
     def __lt__(self, other: "CPUSpecification"):
         return self.memory < other.memory and self.cores < other.cores
 
+    def total_memory(self, gpus: int = 0):
+        return max(
+            self.memory,
+            self.mem_per_cpu * self.cores,
+            self.cpu_per_gpu * self.mem_per_cpu * gpus,
+        )
+
 
 @define(kw_only=True)
 class HostSpecification:

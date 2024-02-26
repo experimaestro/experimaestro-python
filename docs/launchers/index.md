@@ -86,7 +86,7 @@ def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
 **This option is deprecated since it is less flexible than the previous one, and
 the added complexity is not worth it**
 
-In order to automate the process of choosing the right launcher, a `launchers.yaml`
+In order to automate the process of choosing the right launcher, a `launchers.py`
 configuration file can be written.
 
 ```py
