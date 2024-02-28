@@ -1,4 +1,5 @@
 import inspect
+import itertools
 import json
 import logging
 import sys
@@ -11,7 +12,7 @@ import yaml
 from experimaestro import LauncherRegistry, RunMode, experiment
 from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.exceptions import HandledException
-from experimaestro.settings import get_workspace
+from experimaestro.settings import get_settings, get_workspace
 from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
 
@@ -219,13 +220,17 @@ def experiments_cli(  # noqa: C901
         sys.exit(0)
 
     # Move to an object container
-    configuration: schema = OmegaConf.to_container(
+    configuration = OmegaConf.to_container(
         configuration, structured_config_mode=SCMode.INSTANTIATE
     )
 
     # Get the working directory
+    settings = get_settings()
+    ws_env = {}
     if workdir is None or not Path(workdir).is_dir():
-        workdir = get_workspace(workdir).path.expanduser().resolve()
+        ws_settings = get_workspace(workdir)
+        ws_settings.path.expanduser().resolve()
+        ws_env = ws_settings.env
         logging.info("Using working directory %s", workdir)
 
     # --- Runs the experiment
@@ -233,7 +238,9 @@ def experiments_cli(  # noqa: C901
         workdir, configuration.id, host=host, port=port, run_mode=run_mode
     ) as xp:
         # Set up the environment
-        for key, value in env:
+        # (1) global settings (2) workspace settings and (3) command line settings
+        for key, value in itertools.chain(settings.env.items(), ws_env.items(), env):
+            logging.info("Setting environment: %s=%s", key, value)
             xp.setenv(key, value)
 
         try:

@@ -1,9 +1,9 @@
 import os
 from omegaconf import OmegaConf
-from dataclasses import dataclass, field
+from dataclasses import field, dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 @dataclass
@@ -29,11 +29,17 @@ class WorkspaceSettings:
     path: Path
     """The workspace path"""
 
+    env: Dict[str, str] = field(default_factory=dict)
+    """Workspace specific environment variables"""
+
 
 @dataclass
 class Settings:
     server: ServerSettings = field(default_factory=ServerSettings)
     workspaces: List[WorkspaceSettings] = field(default_factory=list)
+
+    env: Dict[str, str] = field(default_factory=dict)
+    """Default environment variables"""
 
 
 @lru_cache()
