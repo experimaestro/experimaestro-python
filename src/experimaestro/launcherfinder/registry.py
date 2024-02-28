@@ -219,7 +219,7 @@ class LauncherRegistry:
         raise AssertionError(f"No connector with identifier {identifier}")
 
     def find(
-        self, *specs: Union[HostRequirement, str], tags: Set[str] = set()
+        self, *input_specs: Union[HostRequirement, str], tags: Set[str] = set()
     ) -> Optional["Launcher"]:
         """ "
         Arguments:
@@ -237,7 +237,12 @@ class LauncherRegistry:
         # Parse specs
         from .parser import parse
 
-        specs = [parse(spec) if isinstance(spec, str) else spec for spec in specs]
+        specs = []
+        for spec in input_specs:
+            if isinstance(spec, str):
+                specs.extend(parse(spec))
+            else:
+                specs.append(spec)
 
         # Use launcher function
         if self.find_launcher_fn is not None:
@@ -247,8 +252,6 @@ class LauncherRegistry:
 
         # We have registered launchers
         for spec in specs:
-            if isinstance(spec, str):
-                spec = parse(spec)
             for handler in self.launchers:
                 if (not tags) or any((tag in tags) for tag in handler.tags):
                     if launcher := handler.get(self, spec):

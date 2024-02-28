@@ -60,7 +60,7 @@ def test_findlauncher_specs_gpu_mem():
 
 
 def test_findlauncher_parse():
-    r = parse("""duration=4 d & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
+    (r,) = parse("""duration=4 d & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
     assert isinstance(r, HostSimpleRequirement)
 
     assert len(r.cuda_gpus) == 2

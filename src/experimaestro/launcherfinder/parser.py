@@ -54,8 +54,12 @@ def duration():
     return "duration", "=", RegExMatch(r"\d+"), RegExMatch(r"h(ours)?|d(ays)?")
 
 
+def one_spec():
+    return OneOrMore(OrderedChoice([duration, cuda, cpu]), sep="&")
+
+
 def grammar():
-    return OneOrMore(OrderedChoice([duration, cuda, cpu]), sep="&"), EndOfFile()
+    return OneOrMore(one_spec, sep="|"), EndOfFile()
 
 
 # ---- Visitor
@@ -63,6 +67,9 @@ def grammar():
 
 class Visitor(PTNodeVisitor):
     def visit_grammar(self, node, children):
+        return [child for child in children]
+
+    def visit_one_spec(self, node, children):
         return reduce(lambda x, el: x & el, children)
 
     def visit_duration(self, node, children):
