@@ -91,24 +91,28 @@ class PythonScriptBuilder:
         logger.debug("Writing script %s", scriptpath)
         with scriptpath.open("wt") as out:
             out.write("#!{}\n".format(self.pythonpath))
-            out.write("# Experimaestro generated task\n")
-
+            out.write("# Experimaestro generated task\n\n")
+            out.write("\nif __name__ == '__main__':\n\n" "")
             # --- Checks locks right away
 
-            out.write("""import logging\nlogging.basicConfig(level=logging.INFO)\n\n""")
-            out.write("""from experimaestro.run import TaskRunner\nimport os\n\n""")
+            out.write(
+                """    import logging\n    logging.basicConfig(level=logging.INFO)\n\n"""
+            )
+            out.write(
+                """    from experimaestro.run import TaskRunner\n    import os\n\n"""
+            )
 
-            out.write("lockfiles = [\n")
+            out.write("    lockfiles = [\n")
             for path in self.lockfiles:
-                out.write(f"   '''{relpath(path)}''',\n")
-            out.write("]\n")
+                out.write(f"       '''{relpath(path)}''',\n")
+            out.write("    ]\n")
 
             for name, value in job.environ.items():
-                out.write(f"""os.environ["{name}"] = "{shquote(value)}"\n""")
+                out.write(f"""    os.environ["{name}"] = "{shquote(value)}"\n""")
             out.write("\n")
 
             out.write(
-                f"""TaskRunner("{shquote(connector.resolve(scriptpath))}","""
+                f"""    TaskRunner("{shquote(connector.resolve(scriptpath))}","""
                 """ lockfiles).run()\n"""
             )
 
