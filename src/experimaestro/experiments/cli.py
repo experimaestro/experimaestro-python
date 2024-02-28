@@ -227,11 +227,14 @@ def experiments_cli(  # noqa: C901
     # Get the working directory
     settings = get_settings()
     ws_env = {}
-    if workdir is None or not Path(workdir).is_dir():
-        ws_settings = get_workspace(workdir)
-        ws_settings.path.expanduser().resolve()
+    workdir = Path(workdir) if workdir else None
+    if (workdir is None) or (not workdir.is_dir()):
+        logging.info("Searching for workspace %s", workdir)
+        ws_settings = get_workspace(str(workdir))
+        workdir = ws_settings.path.expanduser()
         ws_env = ws_settings.env
-        logging.info("Using working directory %s", workdir)
+
+    logging.info("Using working directory %s", str(workdir.resolve()))
 
     # --- Runs the experiment
     with experiment(
