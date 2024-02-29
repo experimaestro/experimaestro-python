@@ -1,3 +1,16 @@
+## v1.5.1 (2024-02-29)
+
+### Feat
+
+- handles properly mp.spawn
+- requirements can now include a disjunction
+- environment can be defined in the settings
+
+### Fix
+
+- **slurm**: Check if slurm process is alive before returning it
+- really using the workspace directory
+
 ## v1.5.0 (2024-02-26)
 
 ### Feat
