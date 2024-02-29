@@ -92,12 +92,12 @@ class PythonScriptBuilder:
         with scriptpath.open("wt") as out:
             out.write("#!{}\n".format(self.pythonpath))
             out.write("# Experimaestro generated task\n\n")
+            out.write("""import logging\nlogging.basicConfig(level=logging.INFO)\n\n""")
+
             out.write("\nif __name__ == '__main__':\n\n" "")
+
             # --- Checks locks right away
 
-            out.write(
-                """    import logging\n    logging.basicConfig(level=logging.INFO)\n\n"""
-            )
             out.write(
                 """    from experimaestro.run import TaskRunner\n    import os\n\n"""
             )

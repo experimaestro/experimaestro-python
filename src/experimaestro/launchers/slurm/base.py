@@ -92,6 +92,8 @@ class SlurmProcessWatcher(threading.Thread):
         self.jobs: Dict[str, SlurmJobState] = {}
 
         self.cv = ThreadingCondition()
+        self.fetched_event = threading.Event()
+        self.updating_jobs = threading.Lock()
         self.start()
 
     @staticmethod
@@ -109,10 +111,18 @@ class SlurmProcessWatcher(threading.Thread):
         with watcher.cv:
             watcher.cv.notify()
 
-    def getjob(self, jobid):
+    def getjob(self, jobid, timeout=None):
         """Allows to share the calls to sacct"""
+
+        # Ensures that we have fetched at least once
+        self.fetched_event.wait()
+
+        # Waits that jobs are refreshed (with a timeout)
         with self.cv:
-            self.cv.wait()
+            self.cv.wait(timeout=timeout)
+
+        # Ensures jobs are not updated right now
+        with self.updating_jobs:
             return self.jobs.get(jobid)
 
     def run(self):
@@ -129,9 +139,9 @@ class SlurmProcessWatcher(threading.Thread):
             builder.stdout = Redirect.pipe(handler)
             builder.environ = self.launcher.launcherenv
             logger.debug("Checking SLURM state with sacct")
-            builder.start()
+            process = builder.start()
 
-            with self.cv:
+            with self.updating_jobs:
                 self.jobs = {}
                 output = handler.output.decode("utf-8")
                 for line in output.split("\n"):
@@ -143,7 +153,11 @@ class SlurmProcessWatcher(threading.Thread):
                             logger.debug("Parsed line: %s", line)
                         except ValueError:
                             logger.error("Could not parse line %s", line)
+            process.kill()
+
+            with self.cv:
                 logger.debug("Jobs %s", self.jobs)
+                self.fetched_event.set()
                 self.cv.notify_all()
 
                 self.cv.wait_for(
@@ -193,7 +207,18 @@ class BatchSlurmProcess(Process):
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
         options = {k: v for k, v in spec.get("options", ())}
         launcher = SlurmLauncher(connector=connector, **options)
-        return BatchSlurmProcess(launcher, spec["pid"])
+        process = BatchSlurmProcess(launcher, spec["pid"])
+
+        # Checks that the process is running
+        with SlurmProcessWatcher.get(launcher) as watcher:
+            logger.info("Checking SLURM job %s", process.jobid)
+            jobinfo = watcher.getjob(process.jobid, timeout=0.1)
+            if jobinfo and jobinfo.state.running:
+                logger.debug(
+                    "SLURM job is running (%s), returning process", process.jobid
+                )
+                return process
+        return None
 
 
 def addstream(command: List[str], option: str, redirect: Redirect):
