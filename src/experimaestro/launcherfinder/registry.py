@@ -247,7 +247,7 @@ class LauncherRegistry:
         # Use launcher function
         if self.find_launcher_fn is not None:
             for spec in specs:
-                if launcher := self.find_launcher_fn(*specs, tags):
+                if launcher := self.find_launcher_fn(spec, tags):
                     return launcher
 
         # We have registered launchers
