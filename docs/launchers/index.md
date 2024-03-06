@@ -81,7 +81,7 @@ def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
 ```
 
 
-## Launcher configuration file (since 0.11)
+## Launcher configuration file (since 0.11, to be removed in 2.0)
 
 **This option is deprecated since it is less flexible than the previous one, and
 the added complexity is not worth it**

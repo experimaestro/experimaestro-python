@@ -21,7 +21,7 @@ from .annotations import (
     STDOUT,
     STDERR,
     deprecate,
-    # deprecated
+    deprecated,
     argument,
     initializer,
     # Method

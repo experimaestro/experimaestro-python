@@ -100,9 +100,9 @@ For a class `B` deriving from `A`, `B.Value` from `B` and `A.Value`
 
 ## Deprecating a configuration or attributes
 
-When a configuration is moved (or equivalently its `__xpmid__` changed), its signature
-changes, and thus the same tasks can be run twice. To avoid this, use the `@deprecate`
-annotation.
+When a configuration is moved to another module (or equivalently its
+`__xpmid__` changed), its signature changes, and thus the same tasks could be
+run twice. To avoid this, use the `@deprecate` annotation.
 
 !!! example
 
@@ -146,6 +146,43 @@ re-used.
 
 ```sh
 experimaestro deprecated list WORKDIR
+```
+
+## Changing a configuration
+
+Sometimes, a configuration should be changed but the old
+identifier should be kept.
+
+
+```py3
+# New configuration has param x instead of y
+# (but the changes can be more important)
+class ConfigurationA(Config):
+    x: Param[int]
+
+
+# This is the old configuration
+@deprecated(ConfigurationA)
+class ConfigurationA_v0(Config):
+    y: Param[int]
+
+    @classmethod
+    def handles(cls, y=None, **kwargs):
+        """Returns the new configuration"""
+        return y is not None
+
+    def converts(self):
+        return ConfigurationA(x=self.y)
+```
+
+This old configuration can still be used (even
+if some edge cases cannot be solved easily):
+
+```py3
+class ConfigurationB(Config):
+    a: Param[ConfigurationA]
+
+b = ConfigurationB(y=1)
 ```
 
 

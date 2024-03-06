@@ -1,7 +1,17 @@
 from abc import ABC, abstractmethod
 import inspect
 import sys
-from typing import Set, Union, Dict, Iterator, List, get_args, get_origin
+from typing import (
+    Optional,
+    Set,
+    Union,
+    Dict,
+    Iterator,
+    List,
+    get_args,
+    get_origin,
+    Type as TypingType,
+)
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -289,7 +299,10 @@ class ObjectType(Type):
         self.__initialized__ = False
         self._runtype = None
         self.annotations = []
-        self._deprecated = False
+        self._deprecated: Optional[TypingType[ObjectType]] = None
+
+        #: List of deprecated classes
+        self.deprecated_classes: List[TypingType["Config"]] = []
 
     @property
     def objecttype(self):
@@ -417,6 +430,11 @@ class ObjectType(Type):
 
                 argname = None
 
+    @property
+    def deprecated(self) -> bool:
+        """Returns true if this type is deprecated"""
+        return self._deprecated is not None
+
     def deprecate(self):
         if len(self.basetype.__bases__) != 1:
             raise RuntimeError(
@@ -425,16 +443,15 @@ class ObjectType(Type):
             )
         assert not self._deprecated, "Already deprecated"
 
-        # Uses the parent identifier (and saves the deprecated one for path updates)
-        self._deprecated_identifier = self.identifier
         parent = self.basetype.__bases__[0].__getxpmtype__()
         self.identifier = parent.identifier
-        self._deprecated = True
+        self._deprecated = parent
 
-    @property
-    def deprecated(self) -> bool:
-        """Returns true if this type is deprecated"""
-        return self._deprecated
+    def add_deprecated_class(self, deprecated_class: TypingType["Config"]):
+        self.deprecated_classes.append(deprecated_class)
+        deprecated_xpm = deprecated_class.__getxpmtype__()
+        deprecated_xpm._deprecated = self
+        deprecated_xpm.identifier = self.identifier
 
     @property
     def description(self) -> str:
@@ -492,7 +509,7 @@ class ObjectType(Type):
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")
 
-        types = self.basetype
+        types = (self.basetype, *[cls for cls in self.deprecated_classes])
 
         if not isinstance(value, types):
             raise ValueError(

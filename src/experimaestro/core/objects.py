@@ -33,6 +33,7 @@ from typing import (
     Union,
     overload,
     TYPE_CHECKING,
+    Type as TypingType,
 )
 import sys
 import experimaestro
@@ -564,11 +565,17 @@ class ConfigInformation:
     # Set to true when loading from JSON
     LOADING: ClassVar[bool] = False
 
+    # Set to true when validating
+    VALIDATING: ClassVar[bool] = False
+
     def __init__(self, pyobject: "TypeConfig"):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
         self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
         self.values = {}
+
+        # New configuration (when deprecated)
+        self.__new_config__: TypingType["Config"] = None
 
         # Meta-informations
         self._tags = {}
@@ -616,7 +623,15 @@ class ConfigInformation:
     def get(self, name):
         """Get an XPM managed value"""
         if name in self.xpmtype.arguments:
-            return self.values[name]
+            value = self.values[name]
+            logging.warning("Yo %s: %s, %s", name, value, self.is_validating())
+            if (
+                self.is_validating()
+                and isinstance(value, Config)
+                and value.__xpmtype__.deprecated
+            ):
+                return value.converts()
+            return value
 
         # Not an argument, bypass
         return object.__getattribute__(self.pyobject, name)
@@ -670,41 +685,57 @@ class ConfigInformation:
 
         return TagFinder()(self.pyobject)
 
+    @contextmanager
+    def validating_mode(self):
+        if ConfigInformation.VALIDATING:
+            yield
+        else:
+            ConfigInformation.VALIDATING = True
+            yield
+            ConfigInformation.VALIDATING = False
+
+    @staticmethod
+    def is_validating():
+        return ConfigInformation.VALIDATING
+
     def validate(self):
         """Validate a value"""
-        if not self._validated:
-            self._validated = True
+        with self.validating_mode():
+            if not self._validated:
+                self._validated = True
 
-            # Check each argument
-            for k, argument in self.xpmtype.arguments.items():
-                value = self.values.get(k)
-                if value is not None:
-                    if isinstance(value, Config):
-                        value.__xpm__.validate()
-                elif argument.required:
-                    if not argument.generator:
-                        raise ValueError(
-                            "Value %s is required but missing when building %s at %s"
-                            % (k, self.xpmtype, self._initinfo)
+                # Check each argument
+                for k, argument in self.xpmtype.arguments.items():
+                    value = self.values.get(k)
+                    if value is not None:
+                        if isinstance(value, Config):
+                            value.__xpm__.validate()
+                    elif argument.required:
+                        if not argument.generator:
+                            raise ValueError(
+                                "Value %s is required but missing when building %s at %s"
+                                % (k, self.xpmtype, self._initinfo)
+                            )
+
+                # Validate pre-tasks
+                for pre_task in self.pre_tasks:
+                    pre_task.__xpm__.validate()
+
+                # Validate init tasks
+                for init_task in self.init_tasks:
+                    init_task.__xpm__.validate()
+
+                # Use __validate__ method
+                if hasattr(self.pyobject, "__validate__"):
+                    try:
+                        self.pyobject.__validate__()
+                    except Exception:
+                        logger.error(
+                            "Error while validating %s at %s",
+                            self.xpmtype,
+                            self._initinfo,
                         )
-
-            # Validate pre-tasks
-            for pre_task in self.pre_tasks:
-                pre_task.__xpm__.validate()
-
-            # Validate init tasks
-            for init_task in self.init_tasks:
-                init_task.__xpm__.validate()
-
-            # Use __validate__ method
-            if hasattr(self.pyobject, "__validate__"):
-                try:
-                    self.pyobject.__validate__()
-                except Exception:
-                    logger.error(
-                        "Error while validating %s at %s", self.xpmtype, self._initinfo
-                    )
-                    raise
+                        raise
 
     def seal(self, context: ConfigWalkContext):
         """Seals the object and generate values when needed
@@ -1834,6 +1865,7 @@ class Config:
             except Exception:
                 logger.error("Error while creating object type for %s", cls)
                 raise
+
         return xpmtype
 
     def __new__(cls: Type[T], *args, **kwargs) -> T:
@@ -1850,6 +1882,18 @@ class Config:
         # __init__ will be called
         if issubclass(cls, TypeConfig):
             return object.__new__(cls)
+
+        # Check for deprecated
+        for deprecated_class in cls.__getxpmtype__().deprecated_classes:
+            if deprecated_class.handles(**kwargs):
+                # Return the new configuration, but sets the deprecated one
+                logging.warning(
+                    "Deprecated class %s.%s used",
+                    deprecated_class.__module__,
+                    deprecated_class.__qualname__,
+                )
+                o = deprecated_class(**kwargs)
+                return o
 
         # otherwise, we use the configuration type
         o: TypeConfig = object.__new__(cls.__getxpmtype__().configtype)

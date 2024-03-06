@@ -307,6 +307,19 @@ def deprecate(config: Union[TypingType[Config], Callable]):
     raise NotImplementedError("Cannot deprecate %s", config)
 
 
+def deprecated(new_class: TypingType[Config]):
+    """Deprecates this class
+
+    :param new_class: The new class corresponding to this configuration
+    """
+
+    def decorate(deprecated_class: TypingType[Config]):
+        new_class.__getxpmtype__().add_deprecated_class(deprecated_class)
+        return deprecated_class
+
+    return decorate
+
+
 def deprecateClass(klass):
     import inspect
 
