@@ -96,7 +96,7 @@ class TaskRunner:
         self.failedpath.write_text(str(code))
         self.cleanup()
         logger.info("Exiting")
-        os._exit(1)
+        sys.exit(1)
 
     def run(self):
         atexit.register(self.cleanup)
@@ -130,7 +130,7 @@ class TaskRunner:
                 run(workdir / "params.json")
 
                 # Everything went OK
-                os._exit(0)
+                sys.exit(0)
         except Exception:
             logger.exception("Got exception while running")
             self.handle_error(1, None)
