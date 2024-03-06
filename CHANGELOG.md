@@ -1,3 +1,9 @@
+## v1.5.3 (2024-03-06)
+
+### Fix
+
+- force exit with multiprocessing
+
 ## v1.5.2 (2024-03-06)
 
 ### Fix
