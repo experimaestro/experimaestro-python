@@ -1,5 +1,6 @@
 from collections import ChainMap
 from functools import cached_property
+import logging
 import os
 from pathlib import Path
 from shutil import rmtree
@@ -13,13 +14,12 @@ from experimaestro.exceptions import HandledException
 from experimaestro.notifications import LevelInformation, Reporter
 from typing import Dict
 from experimaestro.scheduler.services import Service
-from experimaestro.settings import get_settings
+from experimaestro.settings import WorkspaceSettings, get_settings
 
 
 from experimaestro.core.objects import Config, ConfigWalkContext
 from experimaestro.utils import logger
 from experimaestro.locking import Locks, LockError, Lock
-from .environment import Environment
 from .workspace import RunMode, Workspace
 from .dependencies import Dependency, DependencyStatus, Resource
 import concurrent.futures
@@ -180,7 +180,7 @@ class Job(Resource):
         return ChainMap(
             {},
             self.launcher.environ if self.launcher else {},
-            self.workspace.environment.environ if self.workspace else {},
+            self.workspace.env if self.workspace else {},
         )
 
     @property
@@ -508,6 +508,12 @@ class Scheduler:
         job.scheduler = self
         self.waitingjobs.add(job)
 
+        # Check that we don't have a completed job in
+        # alternate directories
+        for jobspath in experiment.current().alt_jobspaths:
+            # FIXME: check if done
+            pass
+
         # Creates a link into the experiment folder
         path = experiment.current().jobspath / job.relpath
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -719,7 +725,7 @@ class experiment:
     ```
     """
 
-    # Current experiment
+    #: Current experiment
     CURRENT: Optional["experiment"] = None
 
     @staticmethod
@@ -733,7 +739,7 @@ class experiment:
 
     def __init__(
         self,
-        env: Union[Path, str, Environment],
+        env: Union[Path, str, WorkspaceSettings],
         name: str,
         *,
         host: Optional[str] = None,
@@ -761,16 +767,13 @@ class experiment:
 
         from experimaestro.server import Server
 
-        if isinstance(env, Environment):
-            self.environment = env
-        else:
-            self.environment = Environment(workdir=env)
+        settings = get_settings()
+        if not isinstance(env, WorkspaceSettings):
+            env = WorkspaceSettings(id=None, path=Path(env))
 
         # Creates the workspace
         run_mode = run_mode or RunMode.NORMAL
-        self.workspace = Workspace(
-            self.environment, launcher=launcher, run_mode=run_mode
-        )
+        self.workspace = Workspace(settings, env, launcher=launcher, run_mode=run_mode)
 
         # Mark the directory has an experimaestro folder
         self.workdir = self.workspace.experimentspath / name
@@ -780,7 +783,7 @@ class experiment:
         self.old_experiment = None
         self.services: Dict[str, Service] = {}
 
-        settings = get_settings()
+        # Get configuration settings
 
         if host is not None:
             settings.server.host = host
@@ -799,6 +802,11 @@ class experiment:
             and self.workspace.run_mode == RunMode.NORMAL
             else None
         )
+
+        # Copy environment variable from main (but do not
+        # override)
+        for key, value in settings.env.items():
+            self.environment.setenv(key, value, override=False)
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
             import faulthandler
@@ -831,6 +839,12 @@ class experiment:
     def jobspath(self):
         """Return the directory in which results can be stored for this experiment"""
         return self.workdir / "jobs"
+
+    @property
+    def alt_jobspaths(self):
+        """Return potential other directories"""
+        for alt_workdir in self.workspace.alt_workdirs:
+            yield alt_workdir / "jobs"
 
     @property
     def jobsbakpath(self):
@@ -876,9 +890,11 @@ class experiment:
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         return future.result()
 
-    def setenv(self, name, value):
+    def setenv(self, name, value, override=True):
         """Shortcut to set the environment value"""
-        self.environment.setenv(name, value)
+        if override or name not in self.workspace.env:
+            logging.info("Setting environment: %s=%s", name, value)
+            self.worskpace.env[name] = value
 
     def token(self, name: str, count: int):
         """Returns a token for this experiment

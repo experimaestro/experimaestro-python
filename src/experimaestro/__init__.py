@@ -53,7 +53,6 @@ from .core.context import SerializationContext
 from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
-from .scheduler.environment import Environment
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler import Scheduler, experiment, FailedExperiment
 from .notifications import progress, tqdm

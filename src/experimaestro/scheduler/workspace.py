@@ -1,9 +1,9 @@
+from collections import ChainMap
 from enum import Enum
+from functools import cached_property
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from experimaestro.scheduler.environment import Environment
+from typing import Optional
+from experimaestro.settings import WorkspaceSettings, Settings
 
 
 class RunMode(str, Enum):
@@ -25,15 +25,22 @@ class Workspace:
     """
 
     CURRENT = None
-    environment: "Environment"
+    settings: "Settings"
+    worspace: "WorkspaceSettings"
 
     """Creates a workspace for experiments"""
 
     def __init__(
-        self, environment: "Environment", launcher=None, run_mode: RunMode = None
+        self,
+        settings: "Settings",
+        workspace_settings: "WorkspaceSettings",
+        launcher=None,
+        run_mode: RunMode = None,
     ):
-        self.environment = environment
-        path = environment.workdir
+        self.settings = settings
+        self.workspace_settings = workspace_settings
+
+        path = self.workspace_settings.path
         self.notificationURL: Optional[str] = None
         if isinstance(path, Path):
             path = path.absolute()
@@ -43,12 +50,23 @@ class Workspace:
 
         self.launcher = launcher or Launcher.get(path)
 
+        self.env = ChainMap({}, workspace_settings.env, settings.env)
+
     def __enter__(self):
         self.old_workspace = Workspace.CURRENT
         Workspace.CURRENT = self
 
     def __exit__(self, *args):
         Workspace.CURRENT = self.old_workspace
+
+    @cached_property
+    def alt_workspaces(self):
+        for ws_id in self.workspace_settings.alt_workspaces:
+            yield self.settings.workspaces[ws_id]
+
+    @property
+    def alt_workdirs(self):
+        yield from map(lambda ws: ws.path, self.workspace_settings.alt_workspaces)
 
     @property
     def connector(self):

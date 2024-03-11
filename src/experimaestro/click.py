@@ -1,6 +1,4 @@
 import click
-from experimaestro import Environment
-from experimaestro.run import parse_commandline
 
 """Defines the task command line argument prefix for experimaestro-handled command lines"""
 
@@ -45,36 +43,3 @@ class forwardoption(metaclass=forwardoptionMetaclass):
     def __getattr__(self, key):
         """Access to a class field"""
         return forwardoption([key])
-
-
-def environment(name: str):
-    def annotate(f):
-        def callback_env(ctx, name, value):
-            if value:
-                assert name not in ctx.params, "Environment has already been set"
-            else:
-                return ctx.params.get(name, None)
-            return Environment.get(value)
-
-        def callback(ctx, param, value):
-            if value:
-                if name not in ctx.params:
-                    ctx.params[name] = Environment()
-                ctx.params[name].workdir = value
-
-        f = click.option(
-            f"--{name}-workdir",
-            type=str,
-            callback=callback,
-            expose_value=False,
-            help="Experimaestro environment",
-        )(f)
-        f = click.option(
-            f"--{name}",
-            type=str,
-            callback=callback_env,
-            help="Experimaestro environment",
-        )(f)
-        return f
-
-    return annotate

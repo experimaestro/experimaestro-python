@@ -1,5 +1,4 @@
 import inspect
-import itertools
 import json
 import logging
 import sys
@@ -12,7 +11,7 @@ import yaml
 from experimaestro import LauncherRegistry, RunMode, experiment
 from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.exceptions import HandledException
-from experimaestro.settings import get_settings, get_workspace
+from experimaestro.settings import get_workspace
 from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
 
@@ -106,10 +105,16 @@ def load(yaml_file: Path):
     "--file", "xp_file", help="The file containing the main experimental code"
 )
 @click.option(
-    "--workdir",
+    "--workspace",
     type=str,
     default=None,
-    help="Working directory - if None, uses the default XPM " "working directory",
+    help="Workspace ID (reads from settings.yaml in experimaestro config)",
+)
+@click.option(
+    "--work-env",
+    type=str,
+    default=None,
+    help="Working environment",
 )
 @click.option("--conf", "-c", "extra_conf", type=str, multiple=True)
 @click.option(
@@ -128,6 +133,7 @@ def experiments_cli(  # noqa: C901
     port: int,
     xpm_config_dir: Path,
     workdir: Optional[Path],
+    workspace: Optional[str],
     env: List[Tuple[str, str]],
     run_mode: RunMode,
     extra_conf: List[str],
@@ -224,26 +230,36 @@ def experiments_cli(  # noqa: C901
         configuration, structured_config_mode=SCMode.INSTANTIATE
     )
 
-    # Get the working directory
-    settings = get_settings()
-    ws_env = {}
+    # Define the workspace
     workdir = Path(workdir) if workdir else None
-    if (workdir is None) or (not workdir.is_dir()):
-        logging.info("Searching for workspace %s", workdir)
-        ws_settings = get_workspace(str(workdir))
-        workdir = ws_settings.path.expanduser()
-        ws_env = ws_settings.env
+
+    if workspace:
+        ws_env = get_workspace(workspace)
+        if ws_env is None:
+            raise RuntimeError("No workspace named %s", workspace)
+
+        logging.info("Using workspace %s", ws_env.id)
+        if workdir:
+            # Overrides working directory
+            logging.info(" override working directory: %s", workdir)
+            ws_env.path = workdir
+    elif workdir:
+        logging.info("Using workdir %s", workdir)
+        ws_env = workdir
+    else:
+        ws_env = get_workspace()
+        assert ws_env is not None, "No workdir or workspace defined, and no default"
+        logging.info("Using default workspace %s", ws_env.id)
 
     logging.info("Using working directory %s", str(workdir.resolve()))
 
     # --- Runs the experiment
     with experiment(
-        workdir, configuration.id, host=host, port=port, run_mode=run_mode
+        ws_env, configuration.id, host=host, port=port, run_mode=run_mode
     ) as xp:
         # Set up the environment
         # (1) global settings (2) workspace settings and (3) command line settings
-        for key, value in itertools.chain(settings.env.items(), ws_env.items(), env):
-            logging.info("Setting environment: %s=%s", key, value)
+        for key, value in env:
             xp.setenv(key, value)
 
         try:

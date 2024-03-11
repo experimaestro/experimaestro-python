@@ -23,6 +23,8 @@ class ServerSettings:
 
 @dataclass
 class WorkspaceSettings:
+    """Defines the workspace"""
+
     id: str
     """The workspace identifier"""
 
@@ -31,6 +33,9 @@ class WorkspaceSettings:
 
     env: Dict[str, str] = field(default_factory=dict)
     """Workspace specific environment variables"""
+
+    alt_workspaces: List[str] = field(default_factory=list)
+    """Alternative workspaces to find jobs or experiments"""
 
 
 @dataclass
@@ -57,7 +62,7 @@ def get_settings(path: Optional[Path] = None) -> Settings:
         return OmegaConf.merge(schema, conf)
 
 
-def get_workspace(id: Optional[str]) -> WorkspaceSettings:
+def get_workspace(id: Optional[str] = None) -> Optional[WorkspaceSettings]:
     """Return the workspace settings given an id (or None for the default one)"""
     workspaces = get_settings().workspaces
     if workspaces:
