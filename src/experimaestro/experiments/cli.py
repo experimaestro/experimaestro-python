@@ -111,7 +111,7 @@ def load(yaml_file: Path):
     help="Workspace ID (reads from settings.yaml in experimaestro config)",
 )
 @click.option(
-    "--work-env",
+    "--workdir",
     type=str,
     default=None,
     help="Working environment",
@@ -243,6 +243,8 @@ def experiments_cli(  # noqa: C901
             # Overrides working directory
             logging.info(" override working directory: %s", workdir)
             ws_env.path = workdir
+        else:
+            workdir = ws_env.path
     elif workdir:
         logging.info("Using workdir %s", workdir)
         ws_env = workdir

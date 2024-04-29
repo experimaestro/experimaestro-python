@@ -1,5 +1,5 @@
 import os
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, SCMode
 from dataclasses import field, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -28,7 +28,7 @@ class WorkspaceSettings:
     id: str
     """The workspace identifier"""
 
-    path: Path
+    path: Path = field()
     """The workspace path"""
 
     env: Dict[str, str] = field(default_factory=dict)
@@ -36,6 +36,9 @@ class WorkspaceSettings:
 
     alt_workspaces: List[str] = field(default_factory=list)
     """Alternative workspaces to find jobs or experiments"""
+
+    def __post_init__(self):
+        self.path = self.path.expanduser().resolve()
 
 
 @dataclass
@@ -56,10 +59,12 @@ def get_settings(path: Optional[Path] = None) -> Settings:
 
         path = path or Path("~/.config/experimaestro/settings.yaml").expanduser()
         if not path.is_file():
-            return schema
+            return schema.to_object()
 
         conf = OmegaConf.load(path)
-        return OmegaConf.merge(schema, conf)
+        return OmegaConf.to_container(
+            OmegaConf.merge(schema, conf), structured_config_mode=SCMode.INSTANTIATE
+        )
 
 
 def get_workspace(id: Optional[str] = None) -> Optional[WorkspaceSettings]:
