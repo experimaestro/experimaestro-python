@@ -1239,13 +1239,13 @@ use-chardet-on-py3 = ["chardet (>=3.0.2,<6)"]
 
 [[package]]
 name = "rpyc"
-version = "5.3.1"
+version = "6.0.0"
 description = "Remote Python Call (RPyC) is a transparent and symmetric distributed computing library"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "rpyc-5.3.1-py3-none-any.whl", hash = "sha256:6e8153792ac221a80f420d2e0b241a10c6e43b105d325998b18a4e7af329f9ec"},
-    {file = "rpyc-5.3.1.tar.gz", hash = "sha256:f2233174879faf18ae266437d5a65511ce46c817cec4edc1344f036758cfbf52"},
+    {file = "rpyc-6.0.0-py3-none-any.whl", hash = "sha256:e86b5831378f794c623db46e8ade6fff766c56cf9dbe96886e614025b4647339"},
+    {file = "rpyc-6.0.0.tar.gz", hash = "sha256:a7e12b31f40978cbd6b74e0b713da389d4b2565cef612adcb0f4b41aeb188230"},
 ]
 
 [package.dependencies]
@@ -1592,4 +1592,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.8"
-content-hash = "61658304103d66e3437cc2f2106e0a292f264bbbb3896aa66088db9427efa8c2"
+content-hash = "e7151c7834be6fac4508ec637b8ab3b18d6c60afcf7adfc6e180f2101de8d7c8"
