@@ -806,7 +806,7 @@ class experiment:
         # Copy environment variable from main (but do not
         # override)
         for key, value in settings.env.items():
-            self.environment.setenv(key, value, override=False)
+            self.setenv(key, value, override=False)
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
             import faulthandler
