@@ -1,3 +1,14 @@
+## v1.5.5 (2024-05-10)
+
+### Fix
+
+- bugs in normal task exit
+
+### Refactor
+
+- change run-experiment parameters
+- removed unused environments
+
 ## v1.5.4 (2024-03-06)
 
 ### Fix
