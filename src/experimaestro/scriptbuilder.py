@@ -92,7 +92,11 @@ class PythonScriptBuilder:
         with scriptpath.open("wt") as out:
             out.write("#!{}\n".format(self.pythonpath))
             out.write("# Experimaestro generated task\n\n")
-            out.write("""import logging\nlogging.basicConfig(level=logging.INFO)\n\n""")
+            out.write(
+                """import logging\n"""
+                """logging.basicConfig(level=logging.INFO, """
+                """format='%(levelname)s:%(process)d:%(asctime)s [%(name)s] %(message)s', datefmt='%y-%m-%d %H:%M:%S')\n\n"""
+            )
 
             out.write("\nif __name__ == '__main__':\n\n" "")
 

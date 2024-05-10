@@ -92,7 +92,7 @@ class TaskRunner:
             logger.info("Finished cleanup")
 
     def handle_error(self, code, frame_type):
-        logger.info("Finished with code %d", code)
+        logger.info("Error handler: finished with code %d", code)
         self.failedpath.write_text(str(code))
         self.cleanup()
         logger.info("Exiting")
@@ -100,8 +100,18 @@ class TaskRunner:
 
     def run(self):
         atexit.register(self.cleanup)
-        signal.signal(signal.SIGTERM, self.handle_error)
-        signal.signal(signal.SIGINT, self.handle_error)
+        sigterm_handler = signal.signal(signal.SIGTERM, self.handle_error)
+        sigint_handler = signal.signal(signal.SIGINT, self.handle_error)
+
+        def remove_signal_handlers(remove_cleanup=True):
+            """Removes cleanup in forked processes"""
+            signal.signal(signal.SIGTERM, sigterm_handler)
+            signal.signal(signal.SIGINT, sigint_handler)
+            atexit.unregister(self.cleanup)
+
+        if sys.platform != "win32":
+            os.register_at_fork(after_in_child=remove_signal_handlers)
+
         try:
             workdir = self.scriptpath.parent
             os.chdir(workdir)
@@ -129,6 +139,10 @@ class TaskRunner:
                 self.started = True
                 run(workdir / "params.json")
 
+                # ... remove the handlers
+                logger.info("Task ended successfully")
+                remove_signal_handlers(remove_cleanup=False)
+
                 # Everything went OK
                 sys.exit(0)
         except Exception:
@@ -137,6 +151,11 @@ class TaskRunner:
 
         except SystemExit as e:
             if e.code == 0:
+                # Normal exit, just create the ".done" file
                 self.donepath.touch()
+
+                # ... and finish the exit process
+                logger.info("This is the end (TODO: remove this line)")
+                raise
             else:
                 self.handle_error(e.code, None)
