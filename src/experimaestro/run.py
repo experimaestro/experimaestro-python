@@ -155,7 +155,6 @@ class TaskRunner:
                 self.donepath.touch()
 
                 # ... and finish the exit process
-                logger.info("This is the end (TODO: remove this line)")
                 raise
             else:
                 self.handle_error(e.code, None)
