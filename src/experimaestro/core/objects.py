@@ -916,13 +916,13 @@ class ConfigInformation:
 
         # --- Submit the job
 
+        # Sets the init tasks
+        self.init_tasks = init_tasks
+
         # Creates a new job
         self.job = self.xpmtype.task(
             self.pyobject, launcher=launcher, workspace=workspace, run_mode=run_mode
         )
-
-        # Sets the init tasks
-        self.init_tasks = init_tasks
 
         # Validate the object
         job_context = JobContext(self.job)
