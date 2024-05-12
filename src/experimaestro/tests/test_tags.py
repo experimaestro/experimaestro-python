@@ -79,11 +79,29 @@ def test_tags_init_tasks():
     class InitTask(LightweightTask):
         pass
 
+    class MyConfig(Config):
+        pass
+
+    class TaskWithOutput(Task):
+        x: Param[MyConfig]
+
+        def task_outputs(self, dep) -> MyConfig:
+            return dep(MyConfig())
+
     init_task = InitTask().tag("hello", "world")
     task = MyTask()
-    task.submit(run_mode=RunMode.DRY_RUN, init_tasks=[init_task])
+    result = task.submit(run_mode=RunMode.DRY_RUN, init_tasks=[init_task])
+    assert result.tags() == {"hello": "world"}
 
-    assert task.__xpm__.tags() == {"hello": "world"}
+    other_task = TaskWithOutput(x=MyConfig().tag("hello", "world"))
+    assert other_task.tags() == {"hello": "world"}
+
+    result = other_task.submit(run_mode=RunMode.DRY_RUN)
+    assert isinstance(result, MyConfig)
+    assert result.tags() == {"hello": "world"}
+
+    result = MyTask().submit(run_mode=RunMode.DRY_RUN, init_tasks=[result])
+    assert result.tags() == {"hello": "world"}
 
 
 class TaskDirectoryContext(DirectoryContext):
