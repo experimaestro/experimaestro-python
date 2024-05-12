@@ -2,6 +2,7 @@ from typing import Dict
 from pathlib import Path
 from experimaestro import (
     tag,
+    LightweightTask,
     config,
     argument,
     Config,
@@ -67,6 +68,22 @@ def test_inneroutput():
 
     evaluate = Evaluate(task=task).submit(run_mode=RunMode.DRY_RUN)
     assert evaluate.__xpm__.tags() == {"hello": "world"}
+
+
+def test_tags_init_tasks():
+    """Test tags within init tasks"""
+
+    class MyTask(Task):
+        pass
+
+    class InitTask(LightweightTask):
+        pass
+
+    init_task = InitTask().tag("hello", "world")
+    task = MyTask()
+    task.submit(run_mode=RunMode.DRY_RUN, init_tasks=[init_task])
+
+    assert task.__xpm__.tags() == {"hello": "world"}
 
 
 class TaskDirectoryContext(DirectoryContext):
