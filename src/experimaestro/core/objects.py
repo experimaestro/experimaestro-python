@@ -979,6 +979,9 @@ class ConfigInformation:
                 elif self.job.failedpath.is_file():
                     color = "light_red"
                     cprint(f"[failed] {s}", color, file=sys.stderr)
+                elif self.job.pidpath.is_file():
+                    color = "blue"
+                    cprint(f"[running] {s}", color, file=sys.stderr)
                 else:
                     color = "light_blue"
                     cprint(f"[not run] {s}", color, file=sys.stderr)
