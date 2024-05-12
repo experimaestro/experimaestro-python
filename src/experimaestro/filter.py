@@ -22,12 +22,12 @@ class JobInformation:
 
     @cached_property
     def state(self) -> Optional[JobState]:
+        if (self.path / f"{self.scriptname}.done").is_file():
+            return JobState.DONE
+        if (self.path / f"{self.scriptname}.failed").is_file():
+            return JobState.ERROR
         if (self.path / f"{self.scriptname}.pid").is_file():
             return JobState.RUNNING
-        elif (self.path / f"{self.scriptname}.done").is_file():
-            return JobState.DONE
-        elif (self.path / f"{self.scriptname}.failed").is_file():
-            return JobState.ERROR
         else:
             return None
 
