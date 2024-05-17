@@ -15,6 +15,7 @@ from termcolor import colored, cprint
 import experimaestro
 from experimaestro.experiments.cli import experiments_cli
 import experimaestro.launcherfinder.registry as launcher_registry
+from experimaestro.settings import find_workspace
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -175,7 +176,6 @@ def diff(path: Path):
     check(".", job, new_job, set())
 
 
-@click.argument("path", type=Path, callback=check_xp_path)
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
 @click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
@@ -187,9 +187,10 @@ def diff(path: Path):
 )
 @click.option("--kill", is_flag=True, help="Kill filtered tasks (when/before running)")
 @click.option("--clean", is_flag=True, help="Remove finished tasks directories")
+@click.option("--workspace", default="", help="Experimaestro workspace")
+@click.option("--workdir", type=Path, default=None)
 @cli.command()
 def jobs(
-    path: Path,
     experiment: str,
     filter: str,
     tags: bool,
@@ -197,6 +198,8 @@ def jobs(
     kill: bool,
     clean: bool,
     force: bool,
+    workdir: Optional[Path],
+    workspace: Optional[str],
 ):
     """Job control: list, kill and clean
 
@@ -213,6 +216,9 @@ def jobs(
     "a" or "b", and the state is running.
 
     """
+    ws = find_workspace(workdir=workdir, workspace=workspace)
+    path = check_xp_path(None, None, ws.path)
+
     for p in (path / "xp").glob("*"):
         if experiment and p.name != experiment:
             continue
@@ -407,11 +413,14 @@ cli.add_command(Launchers("tokens", help="Token specific commands"))
 
 
 @cli.group()
-@click.argument("workdir", type=Path, callback=check_xp_path)
+@click.option("--workdir", type=Path, default=None)
+@click.option("--workspace", type=str, default=None)
 @click.pass_context
-def experiments(ctx, workdir):
+def experiments(ctx, workdir, workspace):
     """Manage experiments"""
-    ctx.obj = workdir
+    ws = find_workspace(workdir=workdir, workspace=workspace)
+    path = check_xp_path(None, None, ws.path)
+    ctx.obj = path
 
 
 @experiments.command()

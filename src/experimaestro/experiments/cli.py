@@ -11,7 +11,7 @@ import yaml
 from experimaestro import LauncherRegistry, RunMode, experiment
 from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.exceptions import HandledException
-from experimaestro.settings import get_workspace
+from experimaestro.settings import find_workspace
 from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
 
@@ -231,27 +231,8 @@ def experiments_cli(  # noqa: C901
     )
 
     # Define the workspace
-    workdir = Path(workdir) if workdir else None
-
-    if workspace:
-        ws_env = get_workspace(workspace)
-        if ws_env is None:
-            raise RuntimeError("No workspace named %s", workspace)
-
-        logging.info("Using workspace %s", ws_env.id)
-        if workdir:
-            # Overrides working directory
-            logging.info(" override working directory: %s", workdir)
-            ws_env.path = workdir
-        else:
-            workdir = ws_env.path
-    elif workdir:
-        logging.info("Using workdir %s", workdir)
-        ws_env = workdir
-    else:
-        ws_env = get_workspace()
-        assert ws_env is not None, "No workdir or workspace defined, and no default"
-        logging.info("Using default workspace %s", ws_env.id)
+    ws_env = find_workspace(workdir=workdir, workspace=workspace)
+    workdir = ws_env.path
 
     logging.info("Using working directory %s", str(workdir.resolve()))
 

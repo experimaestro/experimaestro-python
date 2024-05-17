@@ -4,6 +4,7 @@ from dataclasses import field, dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, List
+import logging
 
 
 @dataclass
@@ -78,3 +79,28 @@ def get_workspace(id: Optional[str] = None) -> Optional[WorkspaceSettings]:
                 return workspace
 
     return None
+
+
+def find_workspace(*, workspace: Optional[str] = None, workdir: Optional[Path] = None):
+    """Find workspace"""
+    workdir = Path(workdir) if workdir else None
+
+    if workspace:
+        ws_env = get_workspace(workspace)
+        if ws_env is None:
+            raise RuntimeError("No workspace named %s", workspace)
+
+        logging.info("Using workspace %s", ws_env.id)
+        if workdir:
+            # Overrides working directory
+            logging.info(" override working directory: %s", workdir)
+            ws_env.path = workdir
+    elif workdir:
+        logging.info("Using workdir %s", workdir)
+        ws_env = WorkspaceSettings("", workdir)
+    else:
+        ws_env = get_workspace()
+        assert ws_env is not None, "No workdir or workspace defined, and no default"
+        logging.info("Using default workspace %s", ws_env.id)
+
+    return ws_env
