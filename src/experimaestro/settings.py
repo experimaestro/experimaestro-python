@@ -60,7 +60,9 @@ def get_settings(path: Optional[Path] = None) -> Settings:
 
         path = path or Path("~/.config/experimaestro/settings.yaml").expanduser()
         if not path.is_file():
-            return schema.to_object()
+            return OmegaConf.to_container(
+                schema, structured_config_mode=SCMode.INSTANTIATE
+            )
 
         conf = OmegaConf.load(path)
         return OmegaConf.to_container(
