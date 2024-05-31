@@ -1,3 +1,21 @@
+## v1.5.7 (2024-05-31)
+
+### Feat
+
+- better job interactions
+
+### Fix
+
+- bug when no settings.yaml file
+- set init tasks before job creation
+- removed extra logging information
+- wrong information reported
+- wrong test for running/done tasks
+
+### Refactor
+
+- change the cli source dir
+
 ## v1.5.6 (2024-05-10)
 
 ### Fix
