@@ -90,10 +90,6 @@ slurm = "experimaestro.launchers.slurm:BatchSlurmProcess"
 local = "experimaestro.connectors.local:LocalConnector"
 ssh = "experimaestro.connectors.ssh:SshConnector"
 
-[tool.poetry.plugins."experimaestro.launchers"]
-unix = "experimaestro.launchers.direct:DirectLauncher"
-slurm = "experimaestro.launchers.slurm:SlurmLauncher"
-
 [tool.poetry.plugins."experimaestro.tokens"]
 unix = "experimaestro.tokens:CounterToken"
 

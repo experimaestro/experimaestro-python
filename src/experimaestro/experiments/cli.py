@@ -19,8 +19,8 @@ from termcolor import cprint
 class ExperimentHelper:
     """Helper for experiments"""
 
-    # The experiment
     xp: experiment
+    """The experiment object"""
 
     #: Run function
     callable: "ExperimentCallable"

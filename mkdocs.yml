@@ -11,8 +11,9 @@ nav:
   - Launchers: launchers/index.md
   - Connectors: connectors/index.md
   - Serialization: serialization.md
-  - Configuration: configuration.md
+  - Settings: settings.md
   - Running experiments: experiments.md
+  - Services: services.md
   - Integration:
       - Jupyter: jupyter.md
       - Documentation: documenting.md

@@ -5,6 +5,11 @@ The main class is `experimaestro.experiment`
 
 ::: experimaestro.experiment
 
+When using the command line interface to run experiment, the main object
+of interaction is the `ExperimentHelper`:
+
+::: experimaestro.experiments.cli.ExperimentHelper
+
 ## Experiment services
 
 ::: experimaestro.scheduler.services.Service

@@ -3,8 +3,6 @@
 This tutorial will illustrate the different components of Experimaestro using a simple experimental
 project to illustrate the various aspects.
 
-**...WORK IN PROGRESS...**
-
 # Installation
 
 First install the package using
@@ -167,7 +165,7 @@ evaluation_launcher = find_launcher(
 )
 ```
 
-## Experiments
+# Experiments
 
 
 When configurations and tasks are defined, it is possible to assemble
@@ -230,6 +228,11 @@ The experiment can be started with
     experimaestro run-experiment --run-mode dry-run debug.yaml
 ```
 
+The run mode controls the experiment: `dry-run` is used to just test that the
+script runs until the end, `generate` generates job directories, and `normal`
+launches the jobs.
+
+The `ExperimentHelper` API is described in [this document](./experiments.md).
 
 Finally, while many parameters can have an effect on the process outcome, only a
 subset of those are monitored during a typical experiment. These are specially
@@ -238,7 +241,7 @@ used. These tags can be easily retrieved (e.g. when generating the final
 report), and are also easily accessible when interacting with the command line
 and web interfaces.
 
-### Unique task ID
+## Unique task ID
 
 Notice that there is no indication of the folder where tasks are run and store
 results is given in the experimental plan, beside the location of the main

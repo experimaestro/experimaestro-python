@@ -10,5 +10,5 @@ from .specs import (
     HostRequirement,
     MatchRequirement,
 )
-from .registry import find_launcher, LauncherRegistry, YAMLDataClass
+from .registry import find_launcher, LauncherRegistry
 from .parser import parse

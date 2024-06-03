@@ -119,16 +119,16 @@ with experiment("...main experimental folder path...", "experiment ID", port=123
 
 ```
 
-## Conditional tasks
+## Event handlers
 
 _Planned_
 
 Sometimes, it can be useful to wait until a task completes - for instance, when exploring the hyperparameter
-space, one can wait to launch new tasks based on the outcome. This can be achieved using the `check_results` callback:
+space, one can wait to launch new tasks based on the outcome. This can be achieved using the `on_completed` callback:
 
 ```py3
 
-task.submit().on_completed(check_results)
+task.on_completed(check_results).submit()
 ```
 
 ## Misc

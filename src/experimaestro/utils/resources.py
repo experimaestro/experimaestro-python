@@ -1,11 +1,12 @@
 from contextlib import contextmanager
+from os import PathLike
 from pathlib import Path
 from typing import Union
 from importlib import resources
 from experimaestro.compat import cached_property
 
 
-class ResourcePathWrapper:
+class ResourcePathWrapper(PathLike):
     """Simple wrapper for resource path"""
 
     def __init__(self, path: Path):
@@ -29,6 +30,9 @@ class ResourcePathWrapper:
 
     def is_file(self):
         return resources.is_resource(self.package, self.name)
+
+    def __fspath__(self):
+        return resources.path(self.package, self.name).__fspath__()
 
     @contextmanager
     def open(self, *args, **kwargs):
