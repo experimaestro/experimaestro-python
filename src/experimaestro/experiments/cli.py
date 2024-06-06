@@ -1,19 +1,21 @@
+import imp
 import inspect
 import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Protocol, Tuple, Dict
+from typing import Any, List, Optional, Protocol, Tuple
 
 import click
 import omegaconf
 import yaml
-from experimaestro import LauncherRegistry, RunMode, experiment
-from experimaestro.experiments.configuration import ConfigurationBase
-from experimaestro.exceptions import HandledException
-from experimaestro.settings import find_workspace
 from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
+
+from experimaestro import LauncherRegistry, RunMode, experiment
+from experimaestro.exceptions import HandledException
+from experimaestro.experiments.configuration import ConfigurationBase
+from experimaestro.settings import find_workspace
 
 
 class ExperimentHelper:
@@ -175,28 +177,23 @@ def experiments_cli(  # noqa: C901
     xp_file = Path(xp_file)
     if not xp_file.exists() and xp_file.suffix != ".py":
         xp_file = xp_file.with_suffix(".py")
-    xp_file = Path(yaml_file).parent / xp_file
+    xp_file: Path = Path(yaml_file).parent / xp_file
 
-    with open(xp_file, "r") as f:
-        source = f.read()
-    if sys.version_info < (3, 9):
-        the__file__ = str(xp_file)
-    else:
-        the__file__ = str(xp_file.absolute())
-
-    code = compile(source, filename=the__file__, mode="exec")
-    _locals: Dict[str, Any] = {}
-
-    sys.path.append(str(xp_file.parent.absolute()))
+    # --- Finds the "run" function
     try:
-        exec(code, _locals, _locals)
+        sys.path.append(str(xp_file.parent.absolute()))
+        with open(xp_file) as src:
+            module_name = xp_file.with_suffix("").name
+            mod = imp.load_module(
+                module_name, src, str(xp_file.absolute()), (".py", "r", imp.PY_SOURCE)
+            )
+            helper = getattr(mod, "run", None)
     finally:
         sys.path.pop()
 
     # --- ... and runs it
-    helper = _locals.get("run", None)
     if helper is None:
-        raise ValueError(f"Could not find run function in {the__file__}")
+        raise ValueError(f"Could not find run function in {xp_file}")
 
     if not isinstance(helper, ExperimentHelper):
         helper = ExperimentHelper(helper)
