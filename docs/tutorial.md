@@ -155,6 +155,7 @@ When running experiments, it might be useful to specify the material constraint
 task given some specifications), and the `find_launcher` function:
 
 ```py3
+from experimaestro.launcherfinder import find_launcher
 
 learn_launcher = find_launcher(
     """duration=2 days & cuda(mem=16G) * 4  & cpu(mem=400M, cores=4)"""

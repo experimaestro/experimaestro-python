@@ -29,12 +29,6 @@ with experiment(launcher=launcher):
     mytask().submit(launcher=gpulauncher)
 ```
 
-To use launcher configuration files, one can use an automatic convertion tool
-
-```sh
-scontrol show nodes | experimaestro launchers slurm convert
-```
-
 ::: experimaestro.launchers.slurm.SlurmOptions
 
 ::: experimaestro.launchers.slurm.SlurmLauncher
