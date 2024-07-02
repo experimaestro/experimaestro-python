@@ -90,8 +90,14 @@ def process(
                     if kill:
                         if perform:
                             process = info.getprocess()
-                            print("KILLING", process)
-                            process.kill()
+                            if process is None:
+                                cprint(
+                                    "internal error – no process could be retrieved",
+                                    "red",
+                                )
+                            else:
+                                cprint(f"KILLING {process}", "light_red")
+                                process.kill()
                         else:
                             print("KILLING (not performing)", process)
                     print(
