@@ -1,3 +1,14 @@
+## v1.5.8 (2024-07-27)
+
+### Fix
+
+- andles better null process
+- use a better way to load the XP file
+
+### Refactor
+
+- removed the launchers.yaml support
+
 ## v1.5.7 (2024-05-31)
 
 ### Feat
