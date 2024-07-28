@@ -1,3 +1,9 @@
+## v1.5.9 (2024-07-28)
+
+### Fix
+
+- bug in setting workspace env
+
 ## v1.5.8 (2024-07-27)
 
 ### Fix
