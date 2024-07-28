@@ -35,10 +35,10 @@ experimaestro-ir for an example).
 An `experiment.py` file:
 
 ```py3
-    from experimaestro.experiments import ExperimentHelper, configuration
+    from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
 
     @configuration
-    class Configuration:
+    class Configuration(ConfigurationBase):
         #: Default learning rate
         learning_rate: float = 1e-3
 

@@ -889,7 +889,7 @@ class experiment:
         """Shortcut to set the environment value"""
         if override or name not in self.workspace.env:
             logging.info("Setting environment: %s=%s", name, value)
-            self.worskpace.env[name] = value
+            self.workspace.env[name] = value
 
     def token(self, name: str, count: int):
         """Returns a token for this experiment
