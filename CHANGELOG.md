@@ -1,3 +1,82 @@
+## v1.5.10 (2024-09-02)
+
+### Feat
+
+- include jobs not in experiments
+- include jobs not in experiments
+
+## v1.5.9 (2024-07-28)
+
+### Fix
+
+- bug in setting workspace env
+
+## v1.5.8 (2024-07-27)
+
+### Fix
+
+- andles better null process
+- use a better way to load the XP file
+
+### Refactor
+
+- removed the launchers.yaml support
+
+## v1.5.7 (2024-05-31)
+
+### Feat
+
+- better job interactions
+
+### Fix
+
+- bug when no settings.yaml file
+- set init tasks before job creation
+- removed extra logging information
+- wrong information reported
+- wrong test for running/done tasks
+
+### Refactor
+
+- change the cli source dir
+
+## v1.5.6 (2024-05-10)
+
+### Fix
+
+- bug in environment
+
+## v1.5.5 (2024-05-10)
+
+### Fix
+
+- bugs in normal task exit
+
+### Refactor
+
+- change run-experiment parameters
+- removed unused environments
+
+## v1.5.4 (2024-03-06)
+
+### Fix
+
+- get back to sys.exit
+
+## v1.5.3 (2024-03-06)
+
+### Fix
+
+- force exit with multiprocessing
+
+## v1.5.2 (2024-03-06)
+
+### Fix
+
+- multiple launchers
+
+## v1.5.1 (2024-02-29)
+
 ## v1.6.0 (2024-09-02)
 
 ### Feat
