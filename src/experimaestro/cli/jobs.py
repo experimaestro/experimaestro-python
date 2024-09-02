@@ -50,90 +50,100 @@ def process(
     perform=False,
     fullpath=False,
 ):
+    from .filter import createFilter, JobInformation
+    from experimaestro.scheduler import JobState
+
+    _filter = createFilter(filter) if filter else lambda x: True
+
+    # Get all jobs from experiments
+    job2xp = {}
+
     path = workspace.path
     for p in (path / "xp").glob("*"):
-        if experiment and p.name != experiment:
-            continue
+        for job in p.glob("jobs/*/*"):
+            job_path = job.resolve()
+            if job_path.is_dir():
+                *_, scriptname = job_path.parent.name.rsplit(".", 1)
+                job2xp.setdefault(scriptname, set()).add(p.name)
 
-        from .filter import createFilter, JobInformation
-        from experimaestro.scheduler import JobState
-
-        _filter = createFilter(filter) if filter else lambda x: True
-
-        print(f"* Experiment {p.name}")
         if (p / "jobs.bak").is_dir():
-            cprint("  Experiment has not finished yet", "red")
-            if not perform and (kill or clean):
+            cprint(f"  Experiment {p.name} has not finished yet", "red")
+            if (not perform) and (kill or clean):
                 cprint("  Preventing kill/clean (use --force if you want to)", "yellow")
                 kill = False
                 clean = False
-        print()
 
-        for job in p.glob("jobs/*/*"):
-            info = None
-            p = job.resolve()
-            if p.is_dir():
-                *_, scriptname = p.parent.name.rsplit(".", 1)
+    # Now, process jobs
+    for job in path.glob("jobs/*/*"):
+        info = None
+        p = job.resolve()
+        if p.is_dir():
+            *_, scriptname = p.parent.name.rsplit(".", 1)
+            xps = job2xp.get(scriptname, set())
+            if experiment and experiment not in xps:
+                continue
 
-                info = JobInformation(p, scriptname)
-                job_path = (
-                    str(job.resolve()) if fullpath else f"{job.parent.name}/{job.name}"
+            info = JobInformation(p, scriptname)
+            job_str = (
+                (str(job.resolve()) if fullpath else f"{job.parent.name}/{job.name}")
+                + " "
+                + ",".join(xps)
+            )
+
+            if filter:
+                if not _filter(info):
+                    continue
+
+            if info.state is None:
+                print(colored(f"NODIR   {job_str}", "red"), end="")
+            elif info.state.running():
+                if kill:
+                    if perform:
+                        process = info.getprocess()
+                        if process is None:
+                            cprint(
+                                "internal error – no process could be retrieved",
+                                "red",
+                            )
+                        else:
+                            cprint(f"KILLING {process}", "light_red")
+                            process.kill()
+                    else:
+                        print("KILLING (not performing)", process)
+                print(
+                    colored(f"{info.state.name:8}{job_str}", "yellow"),
+                    end="",
+                )
+            elif info.state == JobState.DONE:
+                print(
+                    colored(f"DONE    {job_str}", "green"),
+                    end="",
+                )
+            elif info.state == JobState.ERROR:
+                print(colored(f"FAIL    {job_str}", "red"), end="")
+            else:
+                print(
+                    colored(f"{info.state.name:8}{job_str}", "red"),
+                    end="",
                 )
 
-                if filter:
-                    if not _filter(info):
-                        continue
+        else:
+            if not ready:
+                continue
+            print(colored(f"READY {job_path}", "yellow"), end="")
 
-                if info.state is None:
-                    print(colored(f"NODIR   {job_path}", "red"), end="")
-                elif info.state.running():
-                    if kill:
-                        if perform:
-                            process = info.getprocess()
-                            if process is None:
-                                cprint(
-                                    "internal error – no process could be retrieved",
-                                    "red",
-                                )
-                            else:
-                                cprint(f"KILLING {process}", "light_red")
-                                process.kill()
-                        else:
-                            print("KILLING (not performing)", process)
-                    print(
-                        colored(f"{info.state.name:8}{job_path}", "yellow"),
-                        end="",
-                    )
-                elif info.state == JobState.DONE:
-                    print(
-                        colored(f"DONE    {job_path}", "green"),
-                        end="",
-                    )
-                elif info.state == JobState.ERROR:
-                    print(colored(f"FAIL    {job_path}", "red"), end="")
-                else:
-                    print(
-                        colored(f"{info.state.name:8}{job_path}", "red"),
-                        end="",
-                    )
+        if tags:
+            print(f""" {" ".join(f"{k}={v}" for k, v in info.tags.items())}""")
+        else:
+            print()
 
+        if clean and info.state and info.state.finished():
+            if perform:
+                cprint("Cleaning...", "red")
+                rmtree(p)
             else:
-                if not ready:
-                    continue
-                print(colored(f"READY {job_path}", "yellow"), end="")
-
-            if tags:
-                print(f""" {" ".join(f"{k}={v}" for k, v in info.tags.items())}""")
-            else:
-                print()
-
-            if clean and info.state and info.state.finished():
-                if perform:
-                    cprint("Cleaning...", "red")
-                    rmtree(p)
-                else:
-                    cprint("Cleaning... (not performed)", "red")
-        print()
+                cprint("Cleaning... (not performed)", "red")
+    print()
 
 
 @click.option("--experiment", default=None, help="Restrict to this experiment")
