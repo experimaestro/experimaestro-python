@@ -90,17 +90,18 @@ their values. The keys are ordered to ensure the uniqueness of the path.
 
 ## Summarizing experimental results
 
-For each experiment (identified by its name), a folder is created automatically. Using both
+For each experiment (identified by its name), a folder is created automatically. This
+can be used to store additional experimental results as shown in the example below:
 
 ```py3
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
-    model = c.Model()
+    model = Model()
 
     # Experimental plan
     models = {}
     for dlen_max, n_tokens in product([50, 200], [100, 1000]):
-        data = c.Data(n_tokens=tag(n_tokens))
-        learn = c.Learn(data=data, model=model, dlen_max=tag(dlen_max))
+        data = Data(n_tokens=tag(n_tokens))
+        learn = Learn(data=data, model=model, dlen_max=tag(dlen_max))
         learn.add_dependencies(token.dependency(1))
         models[tagspath(learn)] = learn.submit().jobpath
 
