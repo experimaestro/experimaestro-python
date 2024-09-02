@@ -1,3 +1,9 @@
+## v1.6.0 (2024-09-02)
+
+### Feat
+
+- include jobs not in experiments
+
 ## v1.5.9 (2024-07-28)
 
 ### Fix
