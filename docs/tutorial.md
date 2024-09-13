@@ -3,8 +3,6 @@
 This tutorial will illustrate the different components of Experimaestro using a simple experimental
 project to illustrate the various aspects.
 
-**...WORK IN PROGRESS...**
-
 # Installation
 
 First install the package using
@@ -33,7 +31,12 @@ An example of a configuration of an optimizer in machine learning:
 ```py3
 from experimaestro import Config, Param
 
-class Adam(Config):
+class Optimizer(Config):
+    @abstractmethod
+    def__call__(self, parameters):
+        ...
+
+class Adam(Optimizer):
     """Wrapper for Adam optimizer"""
 
     lr: Param[float] = 1e-3
@@ -82,41 +85,88 @@ Taking the configuration class `Adam` defined above, we have:
 # Tasks
 
 When it comes to actually running code, Experimaestro allows to define
-[tasks](./experiments/task.md) that are special kinds of configurations. The task defined below
-allows to index a data collection retrieved from
-Datamaestro, based on various experimental parameters (storePositions,
-storeDocvectors, storeRawDocs, storeTransformedDocs and the collection
-documents). It also defines parameters which do not change the outcome
-but rather (1) the processing (e.g. threads) and are marked with an
-ignored flag, (2) the output location on disk (e.g. index_path). In
-both cases, the parameter value should be ignored when computing the
-signature of the experiment. The method execute is called when the task
-is effectively run, with the different parameters accessible through
-self in the execute method.
+[tasks](./experiments/task.md) that are special kinds of configurations. The
+task defined below learns a model. It also defines parameters which do not
+ change the outcome but rather (1) the processing (e.g. number of GPUs to use)
+and are marked as `Meta`, (2) the output location on disk (e.g. index_path). In
+both cases, the parameter value should be ignored when computing the signature
+of the experiment. The method execute is called when the task is effectively
+run, with the different parameters accessible through self in the execute
+method.
+
 
 ```py3
-class IndexCollection:
+class LearnedModel(Config):
+    model: Param[Model]
+    """The model"""
+
+    path: Param[Path]
+    """The path to the serialized parameters"""
+
+    @cached_property
+    def instance(self):
+        """Returns the model with the learned parameters"""
+        self.model.load(path)
+        return self.model
+
+class Learn(Task):
     """Index documents"""
 
-    storePositions: Param[bool] = False
-    storeDocvectors: Param[bool] = False
-    storeRawDocs: Param[bool] = False
-    storeTransformedDocs: Param[bool] = False
-    documents: Param[Documents]
+    model: Param[Model]
+    """The model to use"""
 
-    # An option doesn't change the outcome, just the processing
-    threads: Option[int] = 8
+    data: Param[Dataset]
+    """The dataset to use"""
 
-    # A path relative to the task directory
-    index_path: Annotated[Path, pathgenerator("index")]
+    optimizer: Param[Optimizer]
+    """The optimizer"""
+
+    epochs: Param[int]
+    """Number of epochs"""
+
+    gpus: Meta[int] = 2
+    """Number of GPUs to use (note the `Meta`)"""
+
+    model_path: Annotated[Path, pathgenerator("model.pt")]
+    """A path relative to the task directory"""
+
 
     def execute(self):
-        # Calls java program and report progress
-        pass
+        # Learns and save the model in self.model_path
+        ...
+
+    def task_outputs(self, dep: Callable):
+        """Output of this task when submitted
+
+        :param dep: A function that marks any configuration object as a dependency
+        """
+        # Construct the returned configuration object
+        learned_model = LearnedModel(model=model, path=self.model_path)
+
+        # The learned model is an dependent on this task, so we use dep
+        return dep(learned_model)
 ```
 
+# Launchers and connectors
 
-## Experiments
+When running experiments, it might be useful to specify the material constraint
+– especially when running on clusters like slurm. This can be done easily with a
+[configuration file](./launchers/index.md) (that specificies how to launch a
+task given some specifications), and the `find_launcher` function:
+
+```py3
+from experimaestro.launcherfinder import find_launcher
+
+learn_launcher = find_launcher(
+    """duration=2 days & cuda(mem=16G) * 4  & cpu(mem=400M, cores=4)"""
+    """ | duration=4 days & cuda(mem=16G) * 2  & cpu(mem=400M, cores=4)"""
+)
+evaluation_launcher = find_launcher(
+    """duration=6 hours & cuda(mem=16G) * 4 & cpu(mem=2G, cores=16)"""
+)
+```
+
+# Experiments
 
 
 When configurations and tasks are defined, it is possible to assemble
@@ -126,63 +176,85 @@ experiment. This makes it particularly easy to define complex
 experimental plans. The code below shows a simple
 but full experimental plan.
 
+Let start with the experimental file `experiment.py` that
+describes the experiment:
+
 ```py3
-# Prepare the collection
-random = Random()
-wordembs = prepare_dataset("edu.stanford.glove.6b.50")
-vocab = WordvecUnkVocab(data=wordembs, random=random)
-robust = RobustDataset.prepare().submit()
 
-# Train with OpenNIR DRMM model
-ranker = Drmm(vocab=vocab).tag("ranker", "drmm")
-predictor = Reranker()
-trainer = PointwiseTrainer()
-learner = Learner(trainer=trainer, random=random, ranker=ranker,
-    valid_pred=predictor, train_dataset=robust.subset('trf1'),
-    val_dataset=robust.subset('vaf1'), max_epoch=max_epoch)
-model = learner.submit()
+from experimaestro.experiments import ExperimentHelper, configuration
 
-# Evaluate
-Evaluate(dataset=robust.subset('f1'), model=model, predictor=predictor).submit()
+@configuration
+class Configuration:
+    epochs: int
+    n_layers: List[int]
+
+def run(
+    helper: ExperimentHelper, cfg: Configuration
+):
+    # Experimental code
+    optimizer = Adam(lr=1e-4)
+    dataset = MyDataset()
+    models = [AwesomeModel(layers=tag(n_layer)) for n_layer in cfg.n_layers]
+    learned = {}
+
+    for model in models:
+        # Learn the model
+        learner = Learner(optimizer=optimizer, dataset=dataset.train, model=model)
+        learned_model = learner.submit(launcher=learn_launcher, epochs=cfg.epochs)
+
+        # Keeps track of the learned models
+        # e.g. here tagspath returns `f"layers={n_layer}"`
+        learned[tagspath(learned_model)] = learned_model
+
+        # and evaluate (another task, not shown here)
+        Evaluate(dataset=dataset.test, model=learned_model).submit(launcher=evaluation_launcher)
 ```
 
-The different tasks (whose definition is not
-shown here) are used to perform various parts of the experiment:
-(i) Word embeddings are downloaded and used to defined a vocabulary
-(line 3-4); (ii) The robust collection index downloaded and
-pre-processed for OpenNir (line 8); (iii) The DRMM is defined (l. 8) and
-learned (l. 9-11) (iv) The learned model is evaluated on a held out set
-(l. 15) Each task is submitted with .submit() (lines 5, 12 and 15), and
-handled to a job scheduler that monitors and runs the tasks (on the
-local machine, or in future versions through SSH or schedulers like OAR)
-by running the execute() method.
+With `debug.yaml` located in the same folder as `experiment.py`
 
-Finally, while many parameters can have an effect on the process
-outcome, only a subset of those are monitored during a typical
-experiment. These are specially marked using tagging. In the code above,
-one tag is used (line 8). These tags can be easily retrieved (e.g. when
-generating the final report), and are also easily accessible when
-interacting with the command line and web interfaces through a local
-server which can be launched for any experiment.
+```yaml
+    # Uses experiment.py
+    file: experiment
 
-### Unique task ID
+    # Just debugging
+    epochs: 16
 
-Notice that there is no indication of the folder where tasks are run and
-store results is given in the experimental plan, beside the location of
-the main experiment directory (not shown here). This is one of the
-strength of Experimaestro, i.e. the exact location is determined when a
-task is submitted, and **is unique for a given set of experimental
-parameters** – this allows to avoid running twice the same task and the
-painful creation of unique folder names for each experiment (such as in
-e.g. Capreolus or OpenNIR), which are error-prone and time-consuming.
+    # Experimental parameters
+    n_layers: [3, 5]
+```
 
-When .submit() is called, Experimaestro automatically computes the task
-byte string, and its signature. The identifier will be composed of the
-task ID and of the identifier, e.g. ir.model.bm25/133778acb.... All the
-artifacts generated by this task are contained within this folder (e.g.
-the argument index_path), allowing easy task management (e.g. lookup
-results, cleaning up old experiments, etc.).
+The experiment can be started with
 
-# Launchers and connectors
+```sh
+    experimaestro run-experiment --run-mode dry-run debug.yaml
+```
 
-# Configuring experiments
+The run mode controls the experiment: `dry-run` is used to just test that the
+script runs until the end, `generate` generates job directories, and `normal`
+launches the jobs.
+
+The `ExperimentHelper` API is described in [this document](./experiments.md).
+
+Finally, while many parameters can have an effect on the process outcome, only a
+subset of those are monitored during a typical experiment. These are specially
+marked using tagging with the `tag` function. In the code above, one tag is
+used. These tags can be easily retrieved (e.g. when generating the final
+report), and are also easily accessible when interacting with the command line
+and web interfaces.
+
+## Unique task ID
+
+Notice that there is no indication of the folder where tasks are run and store
+results is given in the experimental plan, beside the location of the main
+experiment directory (not shown here). This is one of the strength of
+Experimaestro, i.e. the exact location is determined when a task is submitted,
+and **is unique for a given set of experimental parameters** – this allows to
+avoid running twice the same task and the painful creation of unique folder
+names for each experiment, which are error-prone and time-consuming.
+
+When `.submit()` is called, Experimaestro automatically computes the task byte
+string, and its signature. The identifier will be composed of the task ID and of
+the identifier, e.g. `my.module.learner/133778acb`.... All the artifacts
+generated by this task are contained within this folder (e.g. the argument
+model_path), allowing easy task management (e.g. lookup results, cleaning up old
+experiments, etc.).

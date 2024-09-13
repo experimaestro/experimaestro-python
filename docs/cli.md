@@ -3,7 +3,16 @@
 ## Job Control
 
 Besides the web interface, it is possible to use the command line to check the job
-status and control jobs.
+status and control jobs:
+
+- `experimaestro jobs clean`
+- ``experimaestro jobs kill` allows to kill running jobs
+- ``experimaestro jobs list` list jobs
+- ``experimaestro jobs log` show the stdout/stderr of a given job
+- ``experimaestro jobs path` returns the full path for a given job
+
+
+Use `experimaestro jobs --help` for more details.
 
 ## Cleaning up
 

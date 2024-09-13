@@ -90,10 +90,6 @@ slurm = "experimaestro.launchers.slurm:BatchSlurmProcess"
 local = "experimaestro.connectors.local:LocalConnector"
 ssh = "experimaestro.connectors.ssh:SshConnector"
 
-[tool.poetry.plugins."experimaestro.launchers"]
-unix = "experimaestro.launchers.direct:DirectLauncher"
-slurm = "experimaestro.launchers.slurm:SlurmLauncher"
-
 [tool.poetry.plugins."experimaestro.tokens"]
 unix = "experimaestro.tokens:CounterToken"
 
@@ -123,7 +119,7 @@ warn_unused_ignores = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "1.5.6"
+version = "1.5.10"
 changelog_start_rev = "0.15.0"
 tag_format = "v$version"
 update_changelog_on_bump = true

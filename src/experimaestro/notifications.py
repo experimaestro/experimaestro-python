@@ -44,6 +44,12 @@ class LevelInformation:
         return f"[{self.level}] {self.desc} {int(self.progress*1000)/10}%"
 
 
+class ListenerInformation:
+    def __init__(self, url: str):
+        self.url = url
+        self.error_count = 0
+
+
 class Reporter(threading.Thread):
     NOTIFICATION_FOLDER = ".notifications"
 
@@ -59,7 +65,7 @@ class Reporter(threading.Thread):
         super().__init__(daemon=True)
         self.path = path / Reporter.NOTIFICATION_FOLDER
         self.path.mkdir(exist_ok=True)
-        self.urls: Dict[str, str] = {}
+        self.urls: Dict[str, ListenerInformation] = {}
 
         # Last check of notification URLs
         self.lastcheck = 0
@@ -80,7 +86,7 @@ class Reporter(threading.Thread):
             self.cv.notifyAll()
 
     @staticmethod
-    def isfatal_httperror(e: Exception) -> bool:
+    def isfatal_httperror(e: Exception, info: ListenerInformation) -> bool:
         """Returns True if this HTTP error indicates that the server won't recover"""
         if isinstance(e, HTTPError):
             if e.code >= 400 and e.code < 500:
@@ -89,6 +95,13 @@ class Reporter(threading.Thread):
             if isinstance(e.reason, ConnectionRefusedError):
                 return True
             if isinstance(e.reason, socket.gaierror) and e.reason.errno == -2:
+                return True
+            if isinstance(e.reason, TimeoutError):
+                info.error_count += 1
+
+            # Too many errors
+            if info.error_count > 3:
+                logger.info("Too many errors with %s", info.error_count)
                 return True
 
         return False
@@ -100,8 +113,8 @@ class Reporter(threading.Thread):
         mtime = os.path.getmtime(self.path)
         if mtime > self.lastcheck:
             for f in self.path.iterdir():
-                self.urls[f.name] = f.read_text().strip()
-                logger.info("Added new notification URL: %s", self.urls[f.name])
+                self.urls[f.name] = ListenerInformation(f.read_text().strip())
+                logger.info("Added new notification URL: %s", self.urls[f.name].url)
                 f.unlink()
 
             self.lastcheck = os.path.getmtime(self.path)
@@ -128,7 +141,9 @@ class Reporter(threading.Thread):
                         params = level.report()
 
                         # Go over all URLs
-                        for key, baseurl in self.urls.items():
+                        for key, info in self.urls.items():
+                            baseurl = info.url
+
                             url = "{}/progress?{}".format(
                                 baseurl, urllib.parse.urlencode(params)
                             )
@@ -147,7 +162,7 @@ class Reporter(threading.Thread):
                                     url,
                                     e,
                                 )
-                                if Reporter.isfatal_httperror(e):
+                                if Reporter.isfatal_httperror(e, info):
                                     toremove.append(key)
 
                 # Removes unvalid URLs
@@ -165,7 +180,8 @@ class Reporter(threading.Thread):
             self.check_urls()
             if self.urls:
                 # Go over all URLs
-                for key, baseurl in self.urls.items():
+                for key, info in self.urls.items():
+                    baseurl = info.url
                     url = "{}?status=eoj".format(baseurl)
                     try:
                         with urlopen(url) as _:
@@ -243,7 +259,7 @@ class xpm_tqdm(std_tqdm):
 
     def update(self, n=1):
         result = super().update(n)
-        if self.total is not None:
+        if self.total is not None and self.total > 0:
             progress(self.n / self.total, level=self.pos, console=False)
         return result
 

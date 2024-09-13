@@ -1,10 +1,12 @@
-"""Tokens are special types of dependency controlling the access to 
+"""Tokens are special types of dependency controlling the access to
 a computational resource (e.g. number of launched jobs, etc.)
 """
 
 from dataclasses import dataclass
 import sys
 from pathlib import Path
+
+from omegaconf import DictConfig
 from experimaestro.core.objects import Config
 import fasteners
 import threading
@@ -14,7 +16,6 @@ from typing import Dict
 from experimaestro.launcherfinder.base import TokenConfiguration
 
 from experimaestro.launcherfinder.registry import LauncherRegistry
-from experimaestro.utils.yaml import YAMLDict
 
 from .ipc import ipcom
 from .locking import Lock, LockError
@@ -87,7 +88,7 @@ class TokenFile:
         try:
             self.path = path
             with path.open("rt") as fp:
-                count, self.uri = [l.strip() for l in fp.readlines()]
+                count, self.uri = [line.strip() for line in fp.readlines()]
                 self.count = int(count)
         except Exception:
             logging.exception("Error while reading %s", self.path)
@@ -183,7 +184,10 @@ class CounterToken(Token, FileSystemEventHandler):
 
     @staticmethod
     def init_registry(registry: LauncherRegistry):
-        registry.register_token("countertoken", CounterTokenConfiguration)
+        registry.register_token(
+            "countertoken",
+            DictConfig({}, key_type=str, element_type=CounterConfiguration),
+        )
 
     def __init__(self, name: str, path: Path, count: int, force=True):
         """[summary]
@@ -456,7 +460,3 @@ class CounterConfiguration(TokenConfiguration):
         from experimaestro.connectors.local import LocalConnector
 
         return LocalConnector.instance().createtoken(identifier, self.tokens)
-
-
-class CounterTokenConfiguration(YAMLDict[CounterConfiguration]):
-    pass

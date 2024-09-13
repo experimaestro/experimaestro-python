@@ -262,7 +262,9 @@ class SlurmProcessBuilder(ProcessBuilder):
         addstream(builder.command, "-i", self.stdin)
 
         builder.command.extend(self.command)
-        logger.info("slurm sbatch command: %s", builder.command)
+        logger.info(
+            "slurm sbatch command: %s", " ".join(f'"{s}"' for s in builder.command)
+        )
         handler = OutputCaptureHandler()
         builder.stdout = Redirect.pipe(handler)
         builder.stderr = Redirect.inherit()

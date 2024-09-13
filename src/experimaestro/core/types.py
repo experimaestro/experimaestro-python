@@ -325,12 +325,17 @@ class ObjectType(Type):
 
         # Get the module
         module = inspect.getmodule(self.originaltype)
-        if getattr(module, "__file__", None) is None:
+        self._module = module.__name__
+        self._package = module.__package__
+
+        if self._module and self._package:
             self._file = None
         else:
             self._file = Path(inspect.getfile(self.originaltype)).absolute()
-        self._module = module.__name__
-        self._package = module.__package__
+
+        assert (
+            self._module and self._package
+        ) or self._file, f"Could not detect module/file for {self.originaltype}"
 
         # The class of the object
 

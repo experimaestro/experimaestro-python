@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import io
 import os
 import re
-from experimaestro.launcherfinder import LauncherRegistry, YAMLDataClass
+from experimaestro.launcherfinder import LauncherRegistry
 from fabric import Connection
 from invoke import Promise
 import invoke.exceptions
@@ -138,7 +138,7 @@ class SshPath(Path):
 
 
 @dataclass
-class SshConfiguration(YAMLDataClass):
+class SshConfiguration:
     hostname: str
 
     def create(self, registry: LauncherRegistry):
