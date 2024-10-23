@@ -583,6 +583,9 @@ class ConfigInformation:
         # State information
         self.job = None
 
+        #: True when this configuration was loaded from disk
+        self.loaded = False
+
         # Explicitely added dependencies
         self.dependencies = []
 
@@ -846,8 +849,8 @@ class ConfigInformation:
                 dependencies, path + ["__init_tasks__"], taskids
             )
 
-        # Check for an associated task
-        if self.task:
+        # Check for an associated task (and not loaded)
+        if self.task and not self.loaded:
             if id(self.task) not in taskids:
                 taskids.add(id(self.task))
                 dependencies.add(self.task.__xpm__.dependency())
@@ -1385,12 +1388,13 @@ class ConfigInformation:
             else:
                 o.__init__()
                 xpminfo = o.__xpm__  # type: ConfigInformation
+                xpminfo.loaded = True
 
                 meta = definition.get("meta", None)
                 if meta:
                     xpminfo._meta = meta
                 if xpminfo.xpmtype.task is not None:
-                    o.__xpm__.job = object()
+                    xpminfo.job = object()
 
             # Set the fields
             for name, value in definition["fields"].items():
