@@ -1,9 +1,8 @@
-## v1.5.11 (2024-10-23)
+## v1.5.11 (2024-09-13)
 
 ### Fix
 
-- no dependencies for loaded configurations
-- fabric is now optional
+- python 3.12 compatibility (but without ssh)
 
 ## v1.5.10 (2024-09-02)
 

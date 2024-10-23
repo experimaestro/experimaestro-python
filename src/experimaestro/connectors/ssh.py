@@ -1,5 +1,11 @@
+try:
+    from pathlib import Path, _posix_flavour
+except ImportError:
+    # Avoids problem with python 3.12 where this module does not work
+    # anyways
+    _posix_flavour = None
+
 from dataclasses import dataclass
-from pathlib import Path, _posix_flavour
 import io
 import os
 import re
