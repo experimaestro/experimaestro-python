@@ -1,3 +1,10 @@
+## v1.5.13 (2024-10-23)
+
+### Fix
+
+- no dependencies for loaded configurations
+- fabric is now optional
+
 ## v1.5.12 (2024-10-23)
 
 ### Fix
