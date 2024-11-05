@@ -1,3 +1,9 @@
+## v1.5.14 (2024-11-05)
+
+### Fix
+
+- when fabric is not there, use placeholders
+
 ## v1.5.13 (2024-10-23)
 
 ### Fix
