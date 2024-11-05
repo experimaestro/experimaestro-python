@@ -10,9 +10,6 @@ import io
 import os
 import re
 from experimaestro.launcherfinder import LauncherRegistry
-from fabric import Connection
-from invoke import Promise
-import invoke.exceptions
 from urllib.parse import urlparse
 from itertools import chain
 from . import Connector
@@ -24,6 +21,22 @@ from . import (
 )
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
+
+try:
+    from fabric import Connection
+    from invoke import Promise
+    from invoke.exceptions import Failure
+except Exception:
+    # Just define placeholders
+    class Connection:
+        pass
+
+    class Promise:
+        pass
+
+    class Failure(Exception):
+        pass
+
 
 # Might be wise to switch to https://github.com/marian-code/ssh-utilities
 
@@ -178,7 +191,7 @@ class SshProcess(Process):
     def wait(self) -> int:
         try:
             self.promise.join()
-        except invoke.exceptions.Failure:
+        except Failure:
             raise
 
 
