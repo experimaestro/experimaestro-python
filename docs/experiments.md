@@ -62,6 +62,20 @@ The experiment can be started with
     experimaestro run-experiment --run-mode normal full.yaml
 ```
 
+### Other options
+
+The Python path can be set by the configuration file, and module be used instead
+of a file:
+
+```yaml
+    # Module name containing the "run" function
+    module: first_stage.experiment
+
+    # Python paths relative to the directory containing this YAML file
+    pythonpath:
+        - ../src
+```
+
 ### Common handling
 
 ::: experimaestro.experiments.cli
