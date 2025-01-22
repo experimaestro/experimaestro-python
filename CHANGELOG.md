@@ -1,3 +1,13 @@
+## v1.6.1 (2025-01-22)
+
+### Fix
+
+- **cli.py**: Python path should be modified including when running the experiments
+
+### Refactor
+
+- pre-commit commitizen update
+
 ## v1.6.0 (2025-01-16)
 
 ### Feat
