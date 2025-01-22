@@ -208,29 +208,27 @@ def experiments_cli(  # noqa: C901
 
     # --- Finds the "run" function
 
-    try:
-        for path in pythonpath:
-            sys.path.append(str(path))
+    # Modifies the Python path
+    for path in pythonpath:
+        sys.path.append(str(path))
 
-        if xp_file:
-            if not xp_file.exists() and xp_file.suffix != ".py":
-                xp_file = xp_file.with_suffix(".py")
-            xp_file: Path = Path(yaml_file).parent / xp_file
-            with open(xp_file) as src:
-                module_name = xp_file.with_suffix("").name
-                mod = imp.load_module(
-                    module_name,
-                    src,
-                    str(xp_file.absolute()),
-                    (".py", "r", imp.PY_SOURCE),
-                )
-        else:
-            # Module
-            mod = importlib.import_module(module_name)
+    if xp_file:
+        if not xp_file.exists() and xp_file.suffix != ".py":
+            xp_file = xp_file.with_suffix(".py")
+        xp_file: Path = Path(yaml_file).parent / xp_file
+        with open(xp_file) as src:
+            module_name = xp_file.with_suffix("").name
+            mod = imp.load_module(
+                module_name,
+                src,
+                str(xp_file.absolute()),
+                (".py", "r", imp.PY_SOURCE),
+            )
+    else:
+        # Module
+        mod = importlib.import_module(module_name)
 
-        helper = getattr(mod, "run", None)
-    finally:
-        pass
+    helper = getattr(mod, "run", None)
 
     # --- ... and runs it
     if helper is None:
