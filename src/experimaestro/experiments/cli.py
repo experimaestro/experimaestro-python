@@ -1,4 +1,5 @@
 import imp
+import importlib
 import inspect
 import json
 import logging
@@ -55,18 +56,29 @@ class ExperimentCallable(Protocol):
         ...
 
 
-def load(yaml_file: Path):
-    """Loads a YAML file, and parents one if they exist"""
-    if not yaml_file.exists() and yaml_file.suffix != ".yaml":
-        yaml_file = yaml_file.with_suffix(".yaml")
+class ConfigurationLoader:
+    def __init__(self):
+        self.yamls = []
+        self.pythonpath = set()
 
-    with yaml_file.open("rt") as fp:
-        _data = yaml.full_load(fp)
-    data = [_data]
-    if parent := _data.get("parent", None):
-        data.extend(load(yaml_file.parent / parent))
+    def load(self, yaml_file: Path):
+        """Loads a YAML file, and parents one if they exist"""
+        if not yaml_file.exists() and yaml_file.suffix != ".yaml":
+            yaml_file = yaml_file.with_suffix(".yaml")
 
-    return data[::-1]
+        with yaml_file.open("rt") as fp:
+            _data = yaml.full_load(fp)
+        if parent := _data.get("parent", None):
+            self.load(yaml_file.parent / parent)
+
+        self.yamls.append(_data)
+
+        for path in _data.get("pythonpath", []):
+            path = Path(path)
+            if path.is_absolute():
+                self.pythonpath.add(path.resolve())
+            else:
+                self.pythonpath.add((yaml_file.parent / path).resolve())
 
 
 @click.option("--debug", is_flag=True, help="Print debug information")
@@ -107,6 +119,9 @@ def load(yaml_file: Path):
     "--file", "xp_file", help="The file containing the main experimental code"
 )
 @click.option(
+    "--module-name", "module_name", help="Module containing the experimental code"
+)
+@click.option(
     "--workspace",
     type=str,
     default=None,
@@ -141,31 +156,49 @@ def experiments_cli(  # noqa: C901
     extra_conf: List[str],
     pre_yaml: List[str],
     post_yaml: List[str],
+    module_name: Optional[str],
     args: List[str],
     show: bool,
     debug: bool,
 ):
     """Run an experiment"""
+
     # --- Set the logger
     logging.getLogger().setLevel(logging.DEBUG if debug else logging.INFO)
     logging.getLogger("xpm.hash").setLevel(logging.INFO)
 
     # --- Loads the YAML
-    yamls = []
+    conf_loader = ConfigurationLoader()
     for y in pre_yaml:
-        yamls.extend(load(Path(y)))
-    yamls.extend(load(Path(yaml_file)))
+        conf_loader.load(Path(y))
+    conf_loader.load(Path(yaml_file))
     for y in post_yaml:
-        yamls.extend(load(Path(y)))
+        conf_loader.load(Path(y))
+
+    # --- Merge the YAMLs
+    configuration = OmegaConf.merge(*conf_loader.yamls)
+    if extra_conf:
+        configuration.merge_with(OmegaConf.from_dotlist(extra_conf))
 
     # --- Get the XP file
-    if xp_file is None:
-        for data in yamls[::-1]:
-            if xp_file := data.get("file", None):
-                break
+    pythonpath = list(conf_loader.pythonpath)
+    if module_name is None:
+        module_name = configuration.get("module", None)
 
-        if xp_file is None:
-            raise ValueError("No experiment file given")
+    if xp_file is None:
+        xp_file = configuration.get("file", None)
+        if xp_file:
+            assert (
+                not module_name
+            ), "Module name and experiment file are mutually exclusive options"
+            xp_file = Path(xp_file)
+            if not pythonpath:
+                pythonpath.append(xp_file.parent)
+            logging.info("Using python path: %s", ", ".join(str(s) for s in pythonpath))
+
+    assert (
+        module_name or xp_file
+    ), "Either the module name or experiment file should be given"
 
     # --- Set some options
 
@@ -173,23 +206,31 @@ def experiments_cli(  # noqa: C901
         assert xpm_config_dir.is_dir()
         LauncherRegistry.set_config_dir(xpm_config_dir)
 
-    # --- Loads the XP file
-    xp_file = Path(xp_file)
-    if not xp_file.exists() and xp_file.suffix != ".py":
-        xp_file = xp_file.with_suffix(".py")
-    xp_file: Path = Path(yaml_file).parent / xp_file
-
     # --- Finds the "run" function
+
     try:
-        sys.path.append(str(xp_file.parent.absolute()))
-        with open(xp_file) as src:
-            module_name = xp_file.with_suffix("").name
-            mod = imp.load_module(
-                module_name, src, str(xp_file.absolute()), (".py", "r", imp.PY_SOURCE)
-            )
-            helper = getattr(mod, "run", None)
+        for path in pythonpath:
+            sys.path.append(str(path))
+
+        if xp_file:
+            if not xp_file.exists() and xp_file.suffix != ".py":
+                xp_file = xp_file.with_suffix(".py")
+            xp_file: Path = Path(yaml_file).parent / xp_file
+            with open(xp_file) as src:
+                module_name = xp_file.with_suffix("").name
+                mod = imp.load_module(
+                    module_name,
+                    src,
+                    str(xp_file.absolute()),
+                    (".py", "r", imp.PY_SOURCE),
+                )
+        else:
+            # Module
+            mod = importlib.import_module(module_name)
+
+        helper = getattr(mod, "run", None)
     finally:
-        sys.path.pop()
+        pass
 
     # --- ... and runs it
     if helper is None:
@@ -208,9 +249,6 @@ def experiments_cli(  # noqa: C901
     schema = list_parameters[1].annotation
     omegaconf_schema = OmegaConf.structured(schema())
 
-    configuration = OmegaConf.merge(*yamls)
-    if extra_conf:
-        configuration.merge_with(OmegaConf.from_dotlist(extra_conf))
     if omegaconf_schema is not None:
         try:
             configuration = OmegaConf.merge(omegaconf_schema, configuration)

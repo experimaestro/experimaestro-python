@@ -1,5 +1,5 @@
 from omegaconf import MISSING
-from typing import Optional
+from typing import Optional, List
 import attr
 
 try:
@@ -30,6 +30,12 @@ class ConfigurationBase:
 
     file: str = "experiment"
     """Relative path of the file containing a run function"""
+
+    module: Optional[str] = None
+    """Relative path of the file containing a run function"""
+
+    pythonpath: Optional[List[str]] = None
+    """Python path relative to the parent directory of the YAML file"""
 
     parent: Optional[str] = None
     """Relative path of a YAML file that should be merged"""

@@ -1,3 +1,9 @@
+## v1.6.0 (2025-01-16)
+
+### Feat
+
+- python path and module in experiments
+
 ## v1.5.14 (2024-11-05)
 
 ### Fix
