@@ -1340,8 +1340,14 @@ class ConfigInformation:
                     sys.modules[module_name] = mod
                     spec.loader.exec_module(mod)
             else:
-                logger.debug("Importing module %s", definition["module"])
-                mod = importlib.import_module(module_name)
+                try:
+                    logger.debug("Importing module %s", definition["module"])
+                    mod = importlib.import_module(module_name)
+                except ModuleNotFoundError:
+                    # More hints on the nature of the error
+                    logging.warning("(1) Either the python path is wrong – %s", ":".join(sys.path))
+                    logging.warning("(2) There is not __init__.py in your module")
+                    raise
 
             cls = getqualattr(mod, definition["type"])
 
