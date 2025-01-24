@@ -2,7 +2,7 @@ from collections import ChainMap
 from enum import Enum
 from functools import cached_property
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 from experimaestro.settings import WorkspaceSettings, Settings
 
 
@@ -46,6 +46,7 @@ class Workspace:
             path = path.absolute()
         self.path = path
         self.run_mode = run_mode
+        self.python_path = []
         from ..launchers import Launcher
 
         self.launcher = launcher or Launcher.get(path)

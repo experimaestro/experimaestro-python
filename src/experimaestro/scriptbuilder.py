@@ -94,6 +94,7 @@ class PythonScriptBuilder:
             out.write("# Experimaestro generated task\n\n")
             out.write(
                 """import logging\n"""
+                """import sys\n"""
                 """logging.basicConfig(level=logging.INFO, """
                 """format='%(levelname)s:%(process)d:%(asctime)s [%(name)s] %(message)s', datefmt='%y-%m-%d %H:%M:%S')\n\n"""
             )
@@ -112,8 +113,16 @@ class PythonScriptBuilder:
             out.write("    ]\n")
 
             for name, value in job.environ.items():
-                out.write(f"""    os.environ["{name}"] = "{shquote(value)}"\n""")
+                if name == "PYTHONPATH":
+                    # Handles properly python path
+                    for path in value.split(":"):
+                        out.write(f"""    sys.path.insert(0, "{shquote(path)}")\n""")
+                else:
+                    out.write(f"""    os.environ["{name}"] = "{shquote(value)}"\n""")
             out.write("\n")
+
+            for path in job.python_path:
+                out.write(f"""    sys.path.insert(0, "{shquote(str(path))}")\n""")
 
             out.write(
                 f"""    TaskRunner("{shquote(connector.resolve(scriptpath))}","""

@@ -37,7 +37,7 @@ class WorkspaceSettings:
 
     alt_workspaces: List[str] = field(default_factory=list)
     """Alternative workspaces to find jobs or experiments"""
-
+    
     def __post_init__(self):
         self.path = self.path.expanduser().resolve()
 
@@ -83,7 +83,7 @@ def get_workspace(id: Optional[str] = None) -> Optional[WorkspaceSettings]:
     return None
 
 
-def find_workspace(*, workspace: Optional[str] = None, workdir: Optional[Path] = None):
+def find_workspace(*, workspace: Optional[str] = None, workdir: Optional[Path] = None) -> WorkspaceSettings:
     """Find workspace"""
     workdir = Path(workdir) if workdir else None
 

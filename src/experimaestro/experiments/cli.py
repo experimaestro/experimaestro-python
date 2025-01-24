@@ -59,7 +59,7 @@ class ExperimentCallable(Protocol):
 class ConfigurationLoader:
     def __init__(self):
         self.yamls = []
-        self.pythonpath = set()
+        self.python_path = set()
 
     def load(self, yaml_file: Path):
         """Loads a YAML file, and parents one if they exist"""
@@ -76,9 +76,9 @@ class ConfigurationLoader:
         for path in _data.get("pythonpath", []):
             path = Path(path)
             if path.is_absolute():
-                self.pythonpath.add(path.resolve())
+                self.python_path.add(path.resolve())
             else:
-                self.pythonpath.add((yaml_file.parent / path).resolve())
+                self.python_path.add((yaml_file.parent / path).resolve())
 
 
 @click.option("--debug", is_flag=True, help="Print debug information")
@@ -181,7 +181,7 @@ def experiments_cli(  # noqa: C901
         configuration.merge_with(OmegaConf.from_dotlist(extra_conf))
 
     # --- Get the XP file
-    pythonpath = list(conf_loader.pythonpath)
+    python_path = list(conf_loader.python_path)
     if module_name is None:
         module_name = configuration.get("module", None)
 
@@ -192,9 +192,9 @@ def experiments_cli(  # noqa: C901
                 not module_name
             ), "Module name and experiment file are mutually exclusive options"
             xp_file = Path(xp_file)
-            if not pythonpath:
-                pythonpath.append(xp_file.parent)
-            logging.info("Using python path: %s", ", ".join(str(s) for s in pythonpath))
+            if not python_path:
+                python_path.append(xp_file.parent)
+            logging.info("Using python path: %s", ", ".join(str(s) for s in python_path))
 
     assert (
         module_name or xp_file
@@ -209,7 +209,7 @@ def experiments_cli(  # noqa: C901
     # --- Finds the "run" function
 
     # Modifies the Python path
-    for path in pythonpath:
+    for path in python_path:
         sys.path.append(str(path))
 
     if xp_file:
@@ -226,7 +226,11 @@ def experiments_cli(  # noqa: C901
             )
     else:
         # Module
-        mod = importlib.import_module(module_name)
+        try:
+            mod = importlib.import_module(module_name)
+        except ModuleNotFoundError as e:
+            logging.error("Module not found: %s with python path %s", e, sys.path)
+            raise
 
     helper = getattr(mod, "run", None)
 
@@ -265,10 +269,11 @@ def experiments_cli(  # noqa: C901
 
     # Define the workspace
     ws_env = find_workspace(workdir=workdir, workspace=workspace)
+    
     workdir = ws_env.path
 
     logging.info("Using working directory %s", str(workdir.resolve()))
-
+    
     # --- Runs the experiment
     with experiment(
         ws_env, configuration.id, host=host, port=port, run_mode=run_mode
@@ -277,6 +282,9 @@ def experiments_cli(  # noqa: C901
         # (1) global settings (2) workspace settings and (3) command line settings
         for key, value in env:
             xp.setenv(key, value)
+
+        # Sets the python path
+        xp.workspace.python_path.extend(python_path)
 
         try:
             # Run the experiment

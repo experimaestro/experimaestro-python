@@ -4,15 +4,15 @@
 
 - **cli.py**: Python path should be modified including when running the experiments
 
-### Refactor
-
-- pre-commit commitizen update
-
 ## v1.6.0 (2025-01-16)
 
 ### Feat
 
 - python path and module in experiments
+
+### Refactor
+
+- pre-commit commitizen update
 
 ## v1.5.14 (2024-11-05)
 
@@ -24,106 +24,21 @@
 
 ### Fix
 
-- no dependencies for loaded configurations
-- fabric is now optional
-
-## v1.5.12 (2024-10-23)
-
-### Fix
-
 - js vulnerabilities fix
-- no dependencies for loaded configurations
-- fabric is now optional
 
 ## v1.5.11 (2024-09-13)
 
 ### Fix
 
 - python 3.12 compatibility (but without ssh)
+- no dependencies for loaded configurations
+- fabric is now optional
 
 ## v1.5.10 (2024-09-02)
 
 ### Feat
 
 - include jobs not in experiments
-- include jobs not in experiments
-
-## v1.5.9 (2024-07-28)
-
-### Fix
-
-- bug in setting workspace env
-
-## v1.5.8 (2024-07-27)
-
-### Fix
-
-- andles better null process
-- use a better way to load the XP file
-
-### Refactor
-
-- removed the launchers.yaml support
-
-## v1.5.7 (2024-05-31)
-
-### Feat
-
-- better job interactions
-
-### Fix
-
-- bug when no settings.yaml file
-- set init tasks before job creation
-- removed extra logging information
-- wrong information reported
-- wrong test for running/done tasks
-
-### Refactor
-
-- change the cli source dir
-
-## v1.5.6 (2024-05-10)
-
-### Fix
-
-- bug in environment
-
-## v1.5.5 (2024-05-10)
-
-### Fix
-
-- bugs in normal task exit
-
-### Refactor
-
-- change run-experiment parameters
-- removed unused environments
-
-## v1.5.4 (2024-03-06)
-
-### Fix
-
-- get back to sys.exit
-
-## v1.5.3 (2024-03-06)
-
-### Fix
-
-- force exit with multiprocessing
-
-## v1.5.2 (2024-03-06)
-
-### Fix
-
-- multiple launchers
-
-## v1.5.1 (2024-02-29)
-
-## v1.6.0 (2024-09-02)
-
-### Feat
-
 - include jobs not in experiments
 
 ## v1.5.9 (2024-07-28)
@@ -307,125 +222,128 @@
 ### Fix
 
 - task identifier and reload
-- task identifier and reload
 
 ## v2.0.0 (2023-10-03)
 
-## 1.2.1 (2023-10-03)
+### Fix
+
+- task identifier and reload
+
+## v1.2.1 (2023-10-03)
 
 ### Feat
 
 - workspace settings
 
-## 1.2.0 (2023-10-03)
+## v1.2.0 (2023-10-03)
 
 ### Feat
 
 - init tasks
 
-## 1.1.2 (2023-08-28)
+## v1.1.2 (2023-08-28)
 
 ### Fix
 
 - undocumented produces more information
 
-## 1.1.1 (2023-08-28)
+## v1.1.1 (2023-10-03)
 
 ### Feat
 
 - undocumented in sphinx documentation
 - Added decorator (NOOP) for config only methods
 
-## 1.1.0 (2023-07-27)
+## v1.1.0 (2023-10-03)
 
 ### Feat
 
 - Generic documentation checker (for use in automated tests)
 - improved check documentation command
 
-## 1.0.0 (2023-07-23)
+## v1.0.0 (2023-10-03)
 
 ### Feat
 
 - List experiments
 - **documentation**: Checks for undocumented configuration objects in a package
 
-## 0.30.0 (2023-07-05)
+## v0.30.0 (2023-10-03)
 
 ### Feat
 
 - **configuration**: Add access to pre-task and dependency copying
 
-## 0.29.11 (2023-07-04)
+## v0.29.11 (2023-10-03)
 
 ### Fix
 
 - more slurm fixes
 
-## 0.29.10 (2023-07-04)
+## v0.29.10 (2023-10-03)
 
 ### Fix
 
 - max duration QoS was ignored
 
-## 0.29.9 (2023-07-04)
+## v0.29.9 (2023-10-03)
 
 ### Fix
 
 - more fine-grained SLURM configuration
 - blank line after job information
 
-## 0.29.8 (2023-07-01)
+## v0.29.8 (2023-10-03)
 
 ### Fix
 
 - **slurm**: Better SLURM launcher finder
 
-## 0.29.7 (2023-06-29)
+## v0.29.7 (2023-10-03)
 
-## 0.29.6 (2023-06-27)
-
-### Fix
-
-- cleaned up the instance() mode
-
-## 0.29.5 (2023-06-27)
+## v0.29.6 (2023-10-03)
 
 ### Fix
 
 - cleaned up the instance() mode
 
-## 0.29.4 (2023-06-26)
+## v0.29.5 (2023-10-03)
+
+### Fix
+
+- cleaned up the instance() mode
+
+## v0.29.4 (2023-10-03)
 
 ### Fix
 
 - better instance()
 
-## 0.29.3 (2023-06-26)
+## v0.29.3 (2023-10-03)
 
 ### Fix
 
 - identifiers
 
-## 0.29.2 (2023-06-21)
+## v0.29.2 (2023-10-03)
 
 ### Fix
 
 - pre-task are properly handled
 
-## 0.29.1 (2023-06-20)
+## v0.29.1 (2023-10-03)
 
 ### Fix
 
 - exception thrown when adding pre-task to a sealed config
 
-## 0.29.0 (2023-06-19)
+## v0.29.0 (2023-10-03)
 
 ### Fix
 
 - pre task dependencies are taken into account
 
-## 0.28.0 (2023-06-16)
+## v0.28.0 (2023-10-03)
 
 ### BREAKING CHANGE
 
@@ -443,7 +361,7 @@
 
 - bug in dependency tracking
 
-## 0.27.0 (2023-05-26)
+## v0.27.0 (2023-10-03)
 
 ### Feat
 
@@ -453,15 +371,15 @@
 
 - Removes unnecessary server logs
 
-## 0.26.0 (2023-05-26)
+## v0.26.0 (2023-10-03)
 
 ### Fix
 
 - Fix submit hooks (and document them)
 
-## 0.25.0 (2023-05-26)
+## v0.25.0 (2023-10-03)
 
-## 0.24.0 (2023-05-23)
+## v0.24.0 (2023-10-03)
 
 ### Feat
 
@@ -476,13 +394,13 @@
 
 - Changed TaskOutput to ConfigWrapper
 
-## 0.23.0 (2023-04-07)
+## v0.23.0 (2023-10-03)
 
 ### Feat
 
 - submit hooks to allow e.g. changing the environment variables
 
-## 0.22.0 (2023-04-05)
+## v0.22.0 (2023-10-03)
 
 ### Feat
 
@@ -493,7 +411,7 @@
 - corrected service status update for servers
 - improved server
 
-## 0.21.0 (2023-03-28)
+## v0.21.0 (2023-10-03)
 
 ### Feat
 
@@ -502,6 +420,7 @@
 
 ### Fix
 
+- JS vulnerabilities fix
 - Information message when locking experiment
 - Improving slurm support
 - Fix test bugs
@@ -511,7 +430,7 @@
 
 - **server**: switched to flask and socketio for future evolutions of the server
 
-## 0.20.0 (2023-02-18)
+## v0.20.0 (2023-10-03)
 
 ### Feat
 
@@ -521,25 +440,25 @@
 
 - more reliable identifier computation
 
-## 0.19.2 (2023-02-16)
+## v0.19.2 (2023-10-03)
 
 ### Fix
 
 - better identifier recomputation
 
-## 0.19.1 (2023-02-15)
+## v0.19.1 (2023-10-03)
 
 ### Fix
 
 - fix bugs with generate/dry-run modes
 
-## 0.19.0 (2023-02-14)
+## v0.19.0 (2023-10-03)
 
 ### Feat
 
 - allow using the old task identifier computation to fix params.json
 
-## 0.18.0 (2023-02-13)
+## v0.18.0 (2023-10-03)
 
 ### BREAKING CHANGE
 
@@ -561,13 +480,13 @@
 
 - removed jsonstreams dependency
 
-## 0.16.0 (2023-02-08)
+## v0.16.0 (2023-10-03)
 
 ### Feat
 
 - **server**: web services for experiment server
 
-## 0.15.1 (2023-02-08)
+## v0.15.1 (2023-10-03)
 
 ### Fix
 

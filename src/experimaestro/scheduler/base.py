@@ -1,12 +1,13 @@
 from collections import ChainMap
 from functools import cached_property
+import itertools
 import logging
 import os
 from pathlib import Path
 from shutil import rmtree
 import threading
 import time
-from typing import Any, List, Optional, Set, TypeVar, Union, TYPE_CHECKING
+from typing import Any, Iterator, List, Optional, Set, TypeVar, Union, TYPE_CHECKING
 import enum
 import signal
 import asyncio
@@ -166,6 +167,13 @@ class Job(Resource):
         assert self._future, "Cannot wait a not submitted job"
         return self._future.result()
 
+    @cached_property
+    def python_path(self) -> Iterator[str]:
+        """Returns an iterator over python path"""
+        return itertools.chain(
+            self.workspace.python_path
+        )
+        
     @cached_property
     def environ(self):
         """Returns the job environment
