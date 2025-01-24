@@ -1,3 +1,9 @@
+## v1.6.2 (2025-01-24)
+
+### Fix
+
+- python path is now propagated to the tasks
+
 ## v1.6.1 (2025-01-22)
 
 ### Fix
