@@ -656,7 +656,7 @@ class UnionType(Type):
                 pass
         
         if not isinstance(value, dict):
-            raise ValueError("value is not a dict")
+            raise ValueError(f"value is not within the types {self}")
 
 
 
