@@ -26,6 +26,13 @@ def isgenericalias(typehint):
     return isinstance(typehint, GenericAlias)
 
 
+def get_union(typehint):
+    """Return the list of types of a union (or the type itself if it is not an union)"""
+    if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
+        return typehint.__args__
+    return None
+
+
 def get_optional(typehint):
     if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
         if len(typehint.__args__) == 2:

@@ -1,7 +1,10 @@
 # --- Task and types definitions
 
 import logging
-from experimaestro import Config, config
+from typing import Union
+
+import pytest
+from experimaestro import Config, config, Param
 from experimaestro.core.objects import TypeConfig
 
 from .utils import TemporaryExperiment
@@ -60,3 +63,13 @@ def test_missing_hierarchy():
 
     assert issubclass(B, A)
     assert issubclass(B, A1)
+
+
+def test_types_union():
+    class A(Config):
+        x: Param[Union[int, str]]
+
+    A(x=1)
+    A(x="hello")
+    with pytest.raises(ValueError):
+        A(x=[])

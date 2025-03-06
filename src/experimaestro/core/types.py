@@ -125,6 +125,9 @@ class Type:
         t = typingutils.get_dict(key)
         if t:
             return DictType(Type.fromType(t[0]), Type.fromType(t[1]))
+ 
+        if union_t := typingutils.get_union(key):
+            return UnionType([Type.fromType(t) for t in union_t])
 
         # Takes care of generics
         if get_origin(key):
@@ -630,6 +633,32 @@ class EnumType(Type):
     def __repr__(self):
         return f"Enum({self.type})"
 
+class UnionType(Type):
+    def __init__(self, types: List[Type]):
+        self.types = types
+
+    def name(self):
+        return "Union[" + ", ".join(t.name() for t in self.types) + "]"
+
+    def __str__(self):
+        return "[" + " | ".join(t.name() for t in self.types) + " ]"
+
+    def __repr__(self):
+        return str(self)
+
+    def validate(self, value):
+        for subtype in self.types:
+            try:
+                return subtype.validate(value)
+            except ValueError:
+                pass
+            except TypeError:
+                pass
+        
+        if not isinstance(value, dict):
+            raise ValueError("value is not a dict")
+
+
 
 class DictType(Type):
     def __init__(self, keytype: Type, valuetype: Type):
@@ -675,6 +704,7 @@ class GenericType(Type):
             (mro for mro in mros if (get_origin(mro) or mro) is self.origin), None
         )
         target = get_origin(self.type) or self.type
+
         if matching is None:
             raise ValueError(
                 f"{type(value)} is not of type {target} ({type(value).__mro__})"
