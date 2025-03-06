@@ -1,8 +1,6 @@
+from functools import cached_property
 from pathlib import Path
 from typing import Optional
-import os
-import logging
-
 
 class Env:
     _instance = None
@@ -17,6 +15,12 @@ class Env:
     # in slave mode:
     # - no progress report
     slave: bool = False
+
+    @cached_property
+    def xpm_path(self):
+        path = self.taskpath / "xpm"
+        path.mkdir(exist_ok=True)
+        return path
 
     @staticmethod
     def instance():

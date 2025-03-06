@@ -3,6 +3,10 @@
 from functools import cached_property
 import json
 
+from attr import define
+
+from experimaestro import taskglobals
+
 try:
     from types import NoneType
 except Exception:
@@ -21,6 +25,7 @@ import inspect
 import importlib
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterator,
@@ -135,6 +140,8 @@ class ConfigPath:
 
 
 hash_logger = logging.getLogger("xpm.hash")
+
+DependentMarker = Callable[["Config"], None]
 
 
 class HashComputer:
@@ -555,6 +562,13 @@ class ObjectStore:
         self.store[identifier] = stub
 
 
+
+@define(frozen=True)
+class WatchedOutput:
+    config: "ConfigInformation"
+    method_name: str
+    callback: Callable
+
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
@@ -594,6 +608,9 @@ class ConfigInformation:
 
         # Initialization tasks
         self.init_tasks: List["LightweightTask"] = []
+        
+        # Watched outputs
+        self.watched_outputs: List[WatchedOutput] = []
 
         # Cached information
 
@@ -898,6 +915,12 @@ class ConfigInformation:
 
         # Now, seal the object
         self.seal(context)
+
+    def watch_output(self, method, callback):
+        watched = WatchedOutput(method.__self__, method.__name__, callback)
+        self.watched_outputs.append(watched)
+        if self.job:
+            self.job.watch_output(watched)
 
     def submit(
         self,
@@ -1288,8 +1311,7 @@ class ConfigInformation:
         as_instance=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "TypeConfig":
-        ...
+    ) -> "TypeConfig": ...
 
     @overload
     @staticmethod
@@ -1299,8 +1321,7 @@ class ConfigInformation:
         return_tasks=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> Tuple["Config", List["LightweightTask"]]:
-        ...
+    ) -> Tuple["Config", List["LightweightTask"]]: ...
 
     @overload
     @staticmethod
@@ -1309,8 +1330,7 @@ class ConfigInformation:
         as_instance=False,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "Config":
-        ...
+    ) -> "Config": ...
 
     @staticmethod
     def load_objects(  # noqa: C901
@@ -1345,7 +1365,9 @@ class ConfigInformation:
                     mod = importlib.import_module(module_name)
                 except ModuleNotFoundError:
                     # More hints on the nature of the error
-                    logging.warning("(1) Either the python path is wrong – %s", ":".join(sys.path))
+                    logging.warning(
+                        "(1) Either the python path is wrong – %s", ":".join(sys.path)
+                    )
                     logging.warning("(2) There is not __init__.py in your module")
                     raise
 
@@ -1914,6 +1936,20 @@ class Config:
         """Access pre-tasks"""
         raise AssertionError("Pre-tasks can be accessed only during configuration")
 
+    def register_task_output(self, method, *args, **kwargs):
+        # Determine the path for this...
+        path = (
+            taskglobals.Env.instance().xpm_path
+            / "task-outputs"
+            / f"{self.__xpmidentifier__}"
+            / f"{method.__name__}.jsonl"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = json.dumps({"args": args, "kwargs": kwargs})
+        with path.open("a+") as fp:
+            fp.writelines([data])
+
 
 class LightweightTask(Config):
     """A task that can be run before or after a real task to modify its behaviour"""
@@ -1931,6 +1967,13 @@ class Task(LightweightTask):
     def submit(self):
         raise AssertionError("This method can only be used during configuration")
 
+    def watch_output(self, method, callback):
+        """Sets up a callback
+
+        :param method: a method within a configuration
+        :param callback: the callback
+        """
+        self.__xpm__.watch_output(method, callback)
 
 # --- Utility functions
 

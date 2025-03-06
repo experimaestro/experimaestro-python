@@ -45,6 +45,7 @@ from .core.objects import (
     Config,
     copyconfig,
     setmeta,
+    DependentMarker,
     Task,
     LightweightTask,
     ObjectStore,
