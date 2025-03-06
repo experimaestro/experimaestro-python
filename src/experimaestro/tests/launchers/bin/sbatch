@@ -12,6 +12,16 @@ fi
 mkdir -p "$XPM_SLURM_DIR/jobs"
 echo "Slurm directory: $XPM_SLURM_DIR" >&2 
 
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+
+if ! which flock > /dev/null; then
+    echo -e "[${RED}ERROR${NC}] flock is not installed on this system" 1>&2
+    exit 1
+fi
+
+
 lockpath() {
     fid="$1"
     path="$2"
