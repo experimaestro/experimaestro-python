@@ -563,10 +563,11 @@ class ObjectStore:
 
 
 
-@define(frozen=True)
+@define()
 class WatchedOutput:
     config: "ConfigInformation"
     method_name: str
+    method: Callable
     callback: Callable
 
 class ConfigInformation:
@@ -917,7 +918,7 @@ class ConfigInformation:
         self.seal(context)
 
     def watch_output(self, method, callback):
-        watched = WatchedOutput(method.__self__, method.__name__, callback)
+        watched = WatchedOutput(method.__self__, method.__name__, method, callback)
         self.watched_outputs.append(watched)
         if self.job:
             self.job.watch_output(watched)
@@ -1023,7 +1024,7 @@ class ConfigInformation:
 
                 print(file=sys.stderr)  # noqa: T201
 
-        # Handle an output configuration
+        # Handle an output configuration # FIXME: remove
         def mark_output(config: "Config"):
             """Sets a dependency on the job"""
             assert not isinstance(config, Task), "Cannot set a dependency on a task"
@@ -1034,11 +1035,18 @@ class ConfigInformation:
         self.task = self.pyobject
 
         if hasattr(self.pyobject, "task_outputs"):
-            self._taskoutput = self.pyobject.task_outputs(mark_output)
+            self._taskoutput = self.pyobject.task_outputs(self.mark_output)
         else:
             self._taskoutput = self.task = self.pyobject
 
         return self._taskoutput
+
+    def mark_output(self, config: "Config"):
+        """Sets a dependency on the job"""
+        assert not isinstance(config, Task), "Cannot set a dependency on a task"
+        config.__xpm__.task = self.pyobject
+        return config
+
 
     # --- Serialization
 

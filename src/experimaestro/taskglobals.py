@@ -2,6 +2,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Optional
 
+
 class Env:
     _instance = None
 
@@ -18,7 +19,7 @@ class Env:
 
     @cached_property
     def xpm_path(self):
-        path = self.taskpath / "xpm"
+        path = self.taskpath / ".experimaestro"
         path.mkdir(exist_ok=True)
         return path
 

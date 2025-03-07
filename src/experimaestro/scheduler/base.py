@@ -1,13 +1,25 @@
 from collections import ChainMap
 from functools import cached_property
 import itertools
+import json
+from watchdog.events import FileSystemEventHandler
 import logging
 import os
 from pathlib import Path
 from shutil import rmtree
 import threading
 import time
-from typing import Any, Callable, Iterator, List, Optional, Set, TypeVar, Union, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    TypeVar,
+    Union,
+    TYPE_CHECKING,
+)
 import enum
 import signal
 import asyncio
@@ -22,6 +34,7 @@ from experimaestro.settings import WorkspaceSettings, get_settings
 from experimaestro.core.objects import Config, ConfigWalkContext, WatchedOutput
 from experimaestro.utils import logger
 from experimaestro.locking import Locks, LockError, Lock
+from experimaestro.utils.asyncio import asyncThreadcheck
 from .workspace import RunMode, Workspace
 from .dependencies import Dependency, DependencyStatus, Resource
 import concurrent.futures
@@ -111,13 +124,73 @@ class JobDependency(Dependency):
         return JobLock(self.origin)
 
 
+class TaskOutputWatcher:
+    def __init__(self, job: "Job", subpath: Path):
+        self.job = job
+        self.method_name = subpath.with_suffix("").name
+        self.config_id = subpath.parent.name
+        self.path = self.job.task_outputs_path / subpath
+        self.listeners = []
+        self._fh = None
+        self.events = []
+        self.config_method = None
+        self.lock = threading.Lock()
+
+    def add_listener(self, listener):
+        self.listeners.append(listener)
+        
+        for event in self.events:
+            listener(event)
+
+    @property
+    def fh(self):
+        if self._fh is None:
+            if self.path.is_file():
+                self._fh = self.path.open("r")
+        return self._fh
+
+    def set_method(self, method):
+        if self.config_method is None:
+            self.events = [method(self.job.config.__xpm__.mark_output, *event["args"], **event["kwargs"]) for event in self.events]
+        self.config_method = method
+
+    def update(self):
+        """Called when something happens on the event file"""
+        with self.lock:
+            logger.debug(
+                "[TASK OUTPUT] Handling task output for %s->%s (%d listeners)",
+                self.config_id, self.method_name,
+                len(self.listeners),
+            )
+
+            if fh := self.fh:
+                while json_line := fh.readline():
+                    event = json.loads(json_line)
+                    logger.debug("Event: %s", event)
+                    
+                    if self.config_method is not None:
+                        event = self.config_method(self.job.config.__xpm__.mark_output, *event["args"], **event["kwargs"])
+
+                    self.events.append(event)
+
+                    if self.listeners:
+                        for listener in self.listeners:
+                            logger.debug("Calling listener [%s] with %s", listener, event)
+                            try:
+                                listener(event)
+                            except Exception:
+                                logging.exception("Exception while calling the listener")
+                                raise
+                            logger.debug("[done] Calling listener [%s] with %s", listener, event)
+
+
 class Job(Resource):
-    """A job is a resouce that is produced by the execution of some code"""
+    """A job is a resource that is produced by the execution of some code"""
 
     # Set by the scheduler
     _readyEvent: Optional[asyncio.Event]
     _future: Optional["concurrent.futures.Future"]
-    
+
     #: Watched outputs (base name)
     watched_outputs: Dict[str, List[Callable]]
 
@@ -152,12 +225,12 @@ class Job(Resource):
 
         # Dependencies
         self.dependencies: Set[Dependency] = set()  # as target
-        
+
         # Watched outputs
         self.watched_outputs = {}
         for watched in config.__xpm__.watched_outputs:
             self.watch_output(watched)
-            
+
         # Process
         self._process = None
         self.unsatisfied = 0
@@ -169,9 +242,31 @@ class Job(Resource):
         self._progress: List[LevelInformation] = []
         self.tags = config.tags()
 
+    def get_task_output_watcher(self, subpath):
+        try:
+            return self.watched_outputs[subpath]
+        except KeyError:
+            watcher = TaskOutputWatcher(self, subpath)
+            self.watched_outputs[subpath] = watcher
+            return watcher
+    
     def watch_output(self, watched: "WatchedOutput"):
-        path = f"{watched.config.__xpm__.identifier.all}/{watched.method_name}.jsonl"
-        self.watched_outputs[path] = watched.callback
+        path = (
+            Path(f"{watched.config.__xpm__.identifier.main.hex()}")
+            / f"{watched.method_name}.jsonl"
+        )
+        logger.debug("Adding watched output %s", path)
+        
+        watcher = self.get_task_output_watcher(path)
+        watcher.set_method(watched.method)
+        watcher.add_listener(watched.callback)
+
+    def task_output_update(self, subpath: Path):
+        self.get_task_output_watcher(subpath).update()
+
+    def done_handler(self):
+        for watcher in self.watched_outputs.values():
+            watcher.update()
 
     def __str__(self):
         return "Job[{}]".format(self.identifier)
@@ -183,10 +278,8 @@ class Job(Resource):
     @cached_property
     def python_path(self) -> Iterator[str]:
         """Returns an iterator over python path"""
-        return itertools.chain(
-            self.workspace.python_path
-        )
-        
+        return itertools.chain(self.workspace.python_path)
+
     @cached_property
     def environ(self):
         """Returns the job environment
@@ -247,6 +340,14 @@ class Job(Resource):
     @property
     def path(self) -> Path:
         return self.workspace.jobspath / self.relpath
+
+    @property
+    def experimaestro_path(self) -> Path:
+        return self.jobpath / ".experimaestro"
+
+    @cached_property
+    def task_outputs_path(self) -> Path:
+        return self.experimaestro_path / "task-outputs"
 
     @property
     def relpath(self):
@@ -406,9 +507,46 @@ class SignalHandler:
 
 SIGNAL_HANDLER = SignalHandler()
 
-class WatchedOutputsMonitor:
-    def __init__(self, job: Job):
+
+class WatchedOutputsMonitor(FileSystemEventHandler):
+    """Watch dynamic outputs generated by the task"""
+
+    def __init__(self, scheduler: "Scheduler", job: Job):
+        self.scheduler = scheduler
         self.job = job
+        logger.debug("Watching task outputs in %s", job.task_outputs_path)
+        self._handle = None
+        
+    def on_modified(self, event):
+        path = Path(event.src_path)
+        if path.is_dir():
+            return
+        path.relative_to(self.job.task_outputs_path)
+        self.handle(path)
+
+    def on_created(self, event):
+        path = Path(event.src_path)
+        if path.is_dir():
+            return
+
+        self.handle(path)
+
+    def handle(self, path: Path):
+        if not path.is_relative_to(self.job.task_outputs_path):
+            return
+
+        subpath = path.relative_to(self.job.task_outputs_path)
+        self.job.task_output_update(subpath)
+
+    def __enter__(self):
+        self._handle = ipcom().fswatch(self, self.job.task_outputs_path, recursive=True)
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        if self._handle is not None:
+            ipcom().fsunwatch(self._handle)
+            self._handle = None
+
 
 class SchedulerCentral(threading.Thread):
     loop: asyncio.AbstractEventLoop
@@ -483,10 +621,12 @@ class Scheduler:
 
     def submit(self, job: Job) -> Optional[Job]:
         # Wait for the future containing the submitted job
+        logger.debug("Registering the job %s within the scheduler", job)
         otherFuture = asyncio.run_coroutine_threadsafe(
             self.aio_registerJob(job), self.loop
         )
         other = otherFuture.result()
+        logger.debug("Job already submitted" if other else "First submission")
         if other:
             return other
 
@@ -568,84 +708,81 @@ class Scheduler:
         if job.donepath.exists():
             job.state = JobState.DONE
 
-        outputs_watcher = None
-        try:
-            # Setup watched outputs
-            outputs_watcher = ipcom().fswatch(WatchedOutputsMonitor(job), path / "task-outputs", recursive=True)
-            
-            # Check if we have a running process
-            process = await job.aio_process()
-            if process is not None:
-                # Yep! First we notify the listeners
-                job.state = JobState.RUNNING
-                for listener in self.listeners:
-                    try:
-                        listener.job_state(job)
-                    except Exception:
-                        logger.exception("Got an error with listener %s", listener)
-
-                # Adds to the listeners
-                if self.xp.server is not None:
-                    job.add_notification_server(self.xp.server)
-
-                # And now, we wait...
-                logger.info("Got a process for job %s - waiting to complete", job)
-                code = await process.aio_code()
-                logger.info("Job %s completed with code %s", job, code)
-                job.state = JobState.DONE if code == 0 else JobState.ERROR
-
-            # Check if done
-            if job.donepath.exists():
-                job.state = JobState.DONE
-
-            # OK, not done; let's start the job for real
-            while not job.state.finished():
-                # Wait that the job is ready
-                await job._readyEvent.wait()
-                job._readyEvent.clear()
-
-                if job.state == JobState.READY:
-                    try:
-                        state = await self.aio_start(job)
-                    except Exception:
-                        logger.exception("Got an exception while starting the job")
-                        raise
-
-                    if state is None:
-                        # State is None if this is not the main thread
-                        return JobState.ERROR
-
-                    job.state = state
-
+        # Check if we have a running process
+        process = await job.aio_process()
+        if process is not None:
+            # Yep! First we notify the listeners
+            job.state = JobState.RUNNING
             for listener in self.listeners:
                 try:
                     listener.job_state(job)
-                except Exception as e:
-                    logger.exception("Listener %s did raise an exception", e)
+                except Exception:
+                    logger.exception("Got an error with listener %s", listener)
 
-            # Job is finished
-            if job.state != JobState.DONE:
-                self.xp.failedJobs[job.identifier] = job
+            # Adds to the listeners
+            if self.xp.server is not None:
+                job.add_notification_server(self.xp.server)
 
-            # Decrement the number of unfinished jobs and notify
-            self.xp.unfinishedJobs -= 1
-            async with self.xp.central.exitCondition:
-                self.xp.central.exitCondition.notify_all()
+            # And now, we wait...
+            logger.info("Got a process for job %s - waiting to complete", job)
+            with WatchedOutputsMonitor(self, job):
+                code = await process.aio_code()
+            logger.info("Job %s completed with code %s", job, code)
+            job.state = JobState.DONE if code == 0 else JobState.ERROR
 
-            job.endtime = time.time()
-            if job in self.waitingjobs:
-                self.waitingjobs.remove(job)
+        # Check if done
+        if job.donepath.exists():
+            job.state = JobState.DONE
 
-            with job.dependents as dependents:
-                logger.info("Processing %d dependent jobs", len(dependents))
-                for dependency in dependents:
-                    logger.debug("Checking dependency %s", dependency)
-                    self.loop.call_soon(dependency.check)
+        # OK, not done; let's start the job for real
+        while not job.state.finished():
+            # Wait that the job is ready
+            await job._readyEvent.wait()
+            job._readyEvent.clear()
 
-            return job.state
-        finally:
-            if outputs_watcher is not None:
-                ipcom().fsunwatch(outputs_watcher)
+            if job.state == JobState.READY:
+                try:
+                    with WatchedOutputsMonitor(self, job):
+                        state = await self.aio_start(job)
+                except Exception:
+                    logger.exception("Got an exception while starting the job")
+                    raise
+
+                if state is None:
+                    # State is None if this is not the main thread
+                    return JobState.ERROR
+
+                job.state = state
+
+        for listener in self.listeners:
+            try:
+                listener.job_state(job)
+            except Exception as e:
+                logger.exception("Listener %s did raise an exception", e)
+
+        # Job is finished
+        if job.state != JobState.DONE:
+            self.xp.failedJobs[job.identifier] = job
+
+        # Process all remaining tasks outputs
+        await asyncThreadcheck("End of job processing", job.done_handler)
+
+        # Decrement the number of unfinished jobs and notify
+        self.xp.unfinishedJobs -= 1
+        async with self.xp.central.exitCondition:
+            self.xp.central.exitCondition.notify_all()
+
+        job.endtime = time.time()
+        if job in self.waitingjobs:
+            self.waitingjobs.remove(job)
+
+        with job.dependents as dependents:
+            logger.info("Processing %d dependent jobs", len(dependents))
+            for dependency in dependents:
+                logger.debug("Checking dependency %s", dependency)
+                self.loop.call_soon(dependency.check)
+
+        return job.state
 
     async def aio_start(self, job: Job) -> Optional[JobState]:
         """Start a job
@@ -999,6 +1136,7 @@ class experiment:
                 service.stop()
 
             if self.central is not None:
+                logger.info("Stopping scheduler event loop")
                 self.central.loop.stop()
 
             self.central = None
