@@ -151,7 +151,7 @@ class TaskOutputWatcher:
 
     @cached_property
     def fh(self):
-        if self._fh is None:
+        if self._fh is None and self.path.is_file():
             self._fh = self.path.open("r")
         return self._fh
 
@@ -221,7 +221,7 @@ class WatchedOutputsMonitor(FileSystemEventHandler):
             self.job.task_output_update(subpath)
 
     def __enter__(self):
-        self.job.task_outputs_path.mkdir(parents=True)
+        self.job.task_outputs_path.mkdir(parents=True, exist_ok=True)
         self._handle = ipcom().fswatch(self, self.job.task_outputs_path, recursive=True)
         return self
 

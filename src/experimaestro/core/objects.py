@@ -562,13 +562,13 @@ class ObjectStore:
         self.store[identifier] = stub
 
 
-
 @define()
 class WatchedOutput:
     config: "ConfigInformation"
     method_name: str
     method: Callable
     callback: Callable
+
 
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
@@ -609,7 +609,7 @@ class ConfigInformation:
 
         # Initialization tasks
         self.init_tasks: List["LightweightTask"] = []
-        
+
         # Watched outputs
         self.watched_outputs: List[WatchedOutput] = []
 
@@ -1047,7 +1047,6 @@ class ConfigInformation:
         config.__xpm__.task = self.pyobject
         return config
 
-
     # --- Serialization
 
     @staticmethod
@@ -1319,7 +1318,8 @@ class ConfigInformation:
         as_instance=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "TypeConfig": ...
+    ) -> "TypeConfig":
+        ...
 
     @overload
     @staticmethod
@@ -1329,7 +1329,8 @@ class ConfigInformation:
         return_tasks=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> Tuple["Config", List["LightweightTask"]]: ...
+    ) -> Tuple["Config", List["LightweightTask"]]:
+        ...
 
     @overload
     @staticmethod
@@ -1338,7 +1339,8 @@ class ConfigInformation:
         as_instance=False,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "Config": ...
+    ) -> "Config":
+        ...
 
     @staticmethod
     def load_objects(  # noqa: C901
@@ -1955,8 +1957,9 @@ class Config:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         data = json.dumps({"args": args, "kwargs": kwargs})
-        with path.open("a+") as fp:
-            fp.writelines([data])
+        with path.open("at") as fp:
+            fp.writelines([data, "\n"])
+            fp.flush()
 
 
 class LightweightTask(Config):
@@ -1982,6 +1985,7 @@ class Task(LightweightTask):
         :param callback: the callback
         """
         self.__xpm__.watch_output(method, callback)
+
 
 # --- Utility functions
 
