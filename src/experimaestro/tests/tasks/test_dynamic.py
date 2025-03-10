@@ -1,11 +1,9 @@
 # Test for future task outputs handling
 # https://github.com/experimaestro/experimaestro-python/issues/90
 
-import logging
 import time
 from experimaestro import Config, Param, Task, DependentMarker, LightweightTask
-from experimaestro.scheduler.base import JobState
-from experimaestro.tests.utils import TemporaryExperiment
+from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
 
 
 class Model(Config):
@@ -22,6 +20,7 @@ class CheckpointLoader(LightweightTask):
 
     def execute(self):
         pass
+
 
 class Evaluate(Task):
     model: Param[Model]
@@ -56,16 +55,19 @@ def test_task_dynamic_simple():
 
     def evaluate(checkpoint: Checkpoint):
         # Makes this harder...
-        time.sleep(.05)
+        time.sleep(0.05)
         task = Evaluate(model=model)
         checkpoint_loader = CheckpointLoader(checkpoint=checkpoint)
         evaluations.append(task.submit(init_tasks=[checkpoint_loader]))
 
-    learn.watch_output(validation.checkpoint, evaluate)
+    with TemporaryDirectory() as workdir:
+        with TemporaryExperiment("dynamic", maxwait=2, workdir=workdir):
+            learn.watch_output(validation.checkpoint, evaluate)
+            learn.submit()
 
-    with TemporaryExperiment("dynamic", maxwait=2):
-        learn.submit()
+        assert len(evaluations) == 1
 
-    assert len(evaluations) == 1
-    
-    assert False
+        with TemporaryExperiment("dynamic", maxwait=2, workdir=workdir):
+            learn.watch_output(validation.checkpoint, evaluate)
+
+        assert len(evaluations) == 2
