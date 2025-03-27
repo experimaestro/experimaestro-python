@@ -27,11 +27,9 @@ const stylesheets = ["./src/theme/theme.scss"];
 const sourceMapsInProduction = false;
 
 // const HtmlWebpackPlugin = require('html-webpack-plugin');
-const CopyPlugin = require("copy-webpack-plugin");
+import CopyPlugin from "copy-webpack-plugin";
 
-const ReactRefresh = require("@pmmmwh/react-refresh-webpack-plugin");
-
-const proxy_matcher = (s: string) => s.match(/^\/(api|services)/)
+import ReactRefresh from "@pmmmwh/react-refresh-webpack-plugin";
 
 /*********************************************************************************************************************/
 /**********                                             Webpack                                             **********/
@@ -46,7 +44,11 @@ import TerserPlugin from "terser-webpack-plugin";
 import { CleanWebpackPlugin } from "clean-webpack-plugin";
 
 import fs from "fs";
-import path from "path";
+import path, { dirname } from "path";
+import { fileURLToPath } from 'url';
+
+const __dirname = fileURLToPath(dirname(import.meta.url))
+console.info("Directory is", __dirname)
 
 const mode = process.env.NODE_ENV ?? "development";
 const isProduction = mode === "production";
@@ -263,11 +265,12 @@ if (isProduction) {
 }
 
 // Parse as JSON5 to add support for comments in tsconfig.json parsing.
-require("require-json5").replace();
+// import { * as json5_replace } from 'require-json5'
+// json5_replace()
 
 // Load path aliases from the tsconfig.json file
 const tsconfigPath = path.resolve(__dirname, "tsconfig.json");
-const tsconfig = fs.existsSync(tsconfigPath) ? require(tsconfigPath) : {};
+const tsconfig = fs.existsSync(tsconfigPath) ? JSON.parse(fs.readFileSync(tsconfigPath, "utf-8")) : {};
 
 if ("compilerOptions" in tsconfig && "paths" in tsconfig.compilerOptions) {
   const aliases = tsconfig.compilerOptions.paths;

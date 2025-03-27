@@ -4,16 +4,14 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 from experimaestro import (
-    config,
     Param,
-    param,
     deprecate,
     Config,
     Constant,
     Meta,
     Option,
-    pathgenerator,
-    Annotated,
+    PathGenerator,
+    field,
     Task,
     LightweightTask,
 )
@@ -48,8 +46,7 @@ class Float(Config):
     value: Param[float]
 
 
-@config()
-class Values:
+class Values(Config):
     value1: Param[float]
     value2: Param[float]
 
@@ -66,50 +63,50 @@ def assert_notequal(a, b, message=""):
     assert getidentifier(a) != getidentifier(b), message
 
 
-def test_int():
+def test_param_int():
     assert_equal(A(a=1), A(a=1))
 
 
-def test_different_type():
+def test_param_different_type():
     assert_notequal(A(a=1), B(a=1))
 
 
-def test_order():
+def test_param_order():
     assert_equal(Values(value1=1, value2=2), Values(value2=2, value1=1))
 
 
-def test_default():
+def test_param_default():
     assert_equal(C(a=1, b=2), C(b=2))
 
 
-def test_inner_eq():
+def test_param_inner_eq():
     assert_equal(D(a=A(a=1)), D(a=A(a=1)))
 
 
-def test_float():
+def test_param_float():
     assert_equal(Float(value=1), Float(value=1))
 
 
-def test_float2():
+def test_param_float2():
     assert_equal(Float(value=1.0), Float(value=1))
 
 
 # --- Argument name
 
 
-def test_name():
+def test_param_name():
     """The identifier fully determines the hash code"""
 
-    @config("test.identifier.argumentname")
-    class Config0:
+    class Config0(Config):
+        __xpmid__ = "test.identifier.argumentname"
         a: Param[int]
 
-    @config("test.identifier.argumentname")
-    class Config1:
+    class Config1(Config):
+        __xpmid__ = "test.identifier.argumentname"
         b: Param[int]
 
-    @config("test.identifier.argumentname")
-    class Config3:
+    class Config3(Config):
+        __xpmid__ = "test.identifier.argumentname"
         a: Param[int]
 
     assert_notequal(Config0(a=2), Config1(b=2))
@@ -119,9 +116,9 @@ def test_name():
 # --- Test option
 
 
-def test_option():
-    @config("test.identifier.option")
-    class OptionConfig:
+def test_param_option():
+    class OptionConfig(Config):
+        __xpmid__ = "test.identifier.option"
         a: Param[int]
         b: Option[int] = 1
 
@@ -133,7 +130,7 @@ def test_option():
 # --- Dictionnary
 
 
-def test_identifier_dict():
+def test_param_identifier_dict():
     """Test identifiers of dictionary structures"""
 
     class B(Config):
@@ -152,13 +149,12 @@ def test_identifier_dict():
 # --- Ignore paths
 
 
-@config()
-class TypeWithPath:
+class TypeWithPath(Config):
     a: Param[int]
     path: Param[Path]
 
 
-def test_path():
+def test_param_identifier_path():
     """Path should be ignored"""
     assert_equal(TypeWithPath(a=1, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
     assert_notequal(TypeWithPath(a=2, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
@@ -167,23 +163,23 @@ def test_path():
 # --- Test with added arguments
 
 
-def test_pathoption():
+def test_param_identifier_pathoption():
     """Path arguments should be ignored"""
 
-    @config("pathoption_test")
-    class A_with_path:
+    class A_with_path(Config):
+        __xpmid__ = "pathoption_test"
         a: Param[int]
-        path: Annotated[Path, pathgenerator("path")]
+        path: Meta[Path] = field(default_factory=PathGenerator("path"))
 
-    @config("pathoption_test")
-    class A_without_path:
+    class A_without_path(Config):
+        __xpmid__ = "pathoption_test"
         a: Param[int]
 
     assert_equal(A_with_path(a=1), A_without_path(a=1))
 
 
-def test_identifier_enum():
-    """Path arguments should be ignored"""
+def test_param_identifier_enum():
+    """test enum parameters"""
     from enum import Enum
 
     class EnumParam(Enum):
@@ -197,7 +193,7 @@ def test_identifier_enum():
     assert_equal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.FIRST))
 
 
-def test_identifier_addnone():
+def test_param_identifier_addnone():
     """Test the case of new parameter (with None default)"""
 
     class B(Config):
@@ -214,25 +210,24 @@ def test_identifier_addnone():
     assert_notequal(A_with_b(b=B(x=1)), A())
 
 
-def test_defaultnew():
+def test_param_defaultnew():
     """Path arguments should be ignored"""
 
-    @param("b", type=int, default=1)
-    @param(name="a", type=int)
-    @config("defaultnew")
-    class A_with_b:
-        pass
+    class A_with_b(Config):
+        __xpmid__ = "defaultnew"
 
-    @param(name="a", type=int)
-    @config("defaultnew")
-    class A:
-        pass
+        a: Param[int]
+        b: Param[int] = 1
+
+    class A(Config):
+        __xpmid__ = "defaultnew"
+        a: Param[int]
 
     assert_equal(A_with_b(a=1, b=1), A(a=1))
     assert_equal(A_with_b(a=1), A(a=1))
 
 
-def test_taskconfigidentifier():
+def test_param_taskconfigidentifier():
     """Test whether the embedded task arguments make the configuration different"""
 
     class MyConfig(Config):
@@ -254,27 +249,27 @@ def test_taskconfigidentifier():
     )
 
 
-def test_constant():
+def test_param_constant():
     """Test if constants are taken into account for signature computation"""
 
-    @config("test.constant")
-    class A1:
+    class A1(Config):
+        __xpmid__ = "test.constant"
         version: Constant[int] = 1
 
-    @config("test.constant")
-    class A1bis:
+    class A1bis(Config):
+        __xpmid__ = "test.constant"
         version: Constant[int] = 1
 
     assert_equal(A1(), A1bis())
 
-    @config("test.constant")
-    class A2:
+    class A2(Config):
+        __xpmid__ = "test.constant"
         version: Constant[int] = 2
 
     assert_notequal(A1(), A2())
 
 
-def test_identifier_deprecated_class():
+def test_param_identifier_deprecated_class():
     """Test that when submitting the task, the computed identifier is the one of
     the new class"""
 
@@ -296,7 +291,7 @@ def test_identifier_deprecated_class():
     )
 
 
-def test_identifier_deprecated_attribute():
+def test_param_identifier_deprecated_attribute():
     class Values(Config):
         values: Param[List[int]] = []
 
@@ -311,7 +306,7 @@ class MetaA(Config):
     x: Param[int]
 
 
-def test_identifier_meta():
+def test_param_identifier_meta():
     """Test forced meta-parameter"""
 
     class B(Config):
@@ -350,7 +345,7 @@ def test_identifier_meta():
     )
 
 
-def test_identifier_meta_default_dict():
+def test_param_identifier_meta_default_dict():
     class DictConfig(Config):
         params: Param[Dict[str, MetaA]] = {}
 
@@ -366,7 +361,7 @@ def test_identifier_meta_default_dict():
     )
 
 
-def test_identifier_meta_default_array():
+def test_param_identifier_meta_default_array():
     class ArrayConfigWithDefault(Config):
         array: Param[List[MetaA]] = []
 
@@ -382,7 +377,7 @@ def test_identifier_meta_default_array():
     )
 
 
-def test_identifier_pre_task():
+def test_param_identifier_pre_task():
     class MyConfig(Config):
         pass
 
@@ -412,7 +407,7 @@ def test_identifier_pre_task():
     assert_equal(task_with_pre, task_with_pre_3, "Pre-tasks are order-less")
 
 
-def test_identifier_init_task():
+def test_param_identifier_init_task():
     class MyConfig(Config):
         pass
 
@@ -469,7 +464,7 @@ class IdentifierReloadConfig(Config):
     id: Param[str]
 
 
-def test_identifier_reload_config():
+def test_param_identifier_reload_config():
     # Creates the configuration
     check_reload(IdentifierReloadConfig(id="123"))
 
@@ -485,7 +480,7 @@ class IdentifierReloadDerived(Config):
     task: Param[IdentifierReloadConfig]
 
 
-def test_identifier_reload_taskoutput():
+def test_param_identifier_reload_taskoutput():
     """When using a task output, the identifier should not be different"""
 
     # Creates the configuration
@@ -507,7 +502,7 @@ class IdentifierReloadTaskDerived(Config):
     other: Param[IdentifierReloadTaskConfig]
 
 
-def test_identifier_reload_task_direct():
+def test_param_identifier_reload_task_direct():
     """When using a direct task output, the identifier should not be different"""
 
     # Creates the configuration
@@ -518,7 +513,7 @@ def test_identifier_reload_task_direct():
     check_reload(config)
 
 
-def test_identifier_reload_meta():
+def test_param_identifier_reload_meta():
     """Test identifier don't change when using meta"""
     # Creates the configuration
     task = IdentifierReloadTask(id="123").submit(run_mode=RunMode.DRY_RUN)
@@ -541,7 +536,7 @@ class LoopC(Config):
     param_b: Param["LoopB"]
 
 
-def test_identifier_loop():
+def test_param_identifier_loop():
     c = LoopC()
     b = LoopB(param_c=c)
     a = LoopA(param_b=b)

@@ -2,18 +2,9 @@
 
 import pytest
 from pathlib import Path
-from experimaestro import (
-    config,
-    Task,
-    Identifier,
-    argument,
-    pathoption,
-    ConstantParam,
-    Param,
-    Config,
-)
+from experimaestro import Task, field, Identifier, Constant, Param, Config, Meta
 from enum import Enum
-import experimaestro.core.types as types
+from experimaestro.generators import PathGenerator
 from experimaestro.scheduler import Job, JobContext
 from experimaestro.scheduler.workspace import RunMode
 from .utils import TemporaryExperiment
@@ -31,57 +22,50 @@ def expect_notvalidate(value):
         value.__xpm__.validate()
 
 
-@argument("value", type=int)
-@config()
-class A:
+class A(Config):
+    value: Param[int]
+
+
+class B(Config):
+    a: Param[A]
+
+
+class C(Config):
+    path: Meta[Path] = field(default_factory=PathGenerator("outdir"))
     pass
 
 
-@argument("a", type=A)
-@config()
-class B:
-    pass
-
-
-@pathoption("path", "outdir")
-@config()
-class C:
-    pass
-
-
-def test_simple():
+def test_validation_simple():
     expect_validate(A(value=1))
 
 
-def test_missing():
+def test_validation_missing():
     expect_notvalidate(A())
 
 
-def test_simple_nested():
+def test_validation_simple_nested():
     b = B()
     b.a = A(value=1)
     expect_validate(b)
 
 
-def test_missing_nested():
+def test_validation_missing_nested():
     b = B()
     b.a = A()
     expect_notvalidate(b)
 
 
-def test_type():
-    @config(valns.type.a)
-    class A:
+def test_validation_type():
+    class A(Config):
+        __xpmid__ = valns.type.a
         pass
 
-    @config(valns.type.b)
-    class B:
-        pass
+    class B(Config):
+        __xpmid__ = valns.type.b
 
-    @argument("a", A)
-    @config(valns.type.c)
-    class C:
-        pass
+    class C(Config):
+        a: Param[A]
+        __xpmid__ = valns.type.c
 
     with pytest.raises(ValueError):
         C(a=B())
@@ -91,30 +75,26 @@ def test_type():
         c.a = B()
 
 
-def test_subtype():
-    @config(valns.subtype.a)
-    class A:
-        pass
+def test_validation_subtype():
+    class A(Config):
+        __xpmid__ = valns.subtype.a
 
-    @config(valns.subtype.a1)
     class A1(A):
-        pass
+        __xpmid__ = valns.subtype.a1
 
-    @argument("a", A)
-    @config(valns.subtype.b)
-    class B:
-        pass
+    class B(Config):
+        __xpmid__ = valns.subtype.b
+        a: Param[A]
 
     expect_validate(B(a=A1()))
 
 
-def test_path():
-    """Test of @pathoption"""
+def test_validation_path_generator():
+    """Test of path generator"""
 
-    @pathoption("value", "file.txt")
-    @config(valns.path.a)
-    class A:
-        pass
+    class A(Config):
+        __xpmid__ = valns.path.a
+        value: Meta[Path] = field(default_factory=PathGenerator("file.txt"))
 
     a = A()
     a.__xpm__.validate()
@@ -129,13 +109,12 @@ def test_path():
         assert a.value.parents[3] == xp.workspace.path
 
 
-def test_constant():
-    """Test of @ConstantParam"""
+def test_validation_constant():
+    """Test of constant"""
 
-    @ConstantParam("value", 1)
-    @config(valns.constant.a)
-    class A:
-        pass
+    class A(Config):
+        __xpmid__ = valns.constant.a
+        value: Constant[int] = 1
 
     a = A()
     a.__xpm__.validate()
@@ -145,31 +124,26 @@ def test_constant():
         assert a.value == 1
 
 
-@argument("x", type=int)
-@config()
-class Parent:
-    pass
+class Parent(Config):
+    x: Param[int]
 
 
-@config()
 class Child(Parent):
     pass
 
 
-def test_child():
+def test_validation_child():
     expect_validate(Child(x=1))
 
 
 # --- Path argument checks
 
 
-@pathoption("x", "x")
-@config()
-class PathParent:
-    pass
+class PathParent(Config):
+    x: Meta[Path] = field(default_factory=PathGenerator("x"))
 
 
-def test_path_option():
+def test_validation_path_option():
     c = PathParent()
     expect_validate(c)
 
@@ -177,28 +151,11 @@ def test_path_option():
 # --- Default value
 
 
-@pytest.mark.parametrize(
-    "value,apitype",
-    [(1.5, types.FloatType), (1, types.IntType), (False, types.BoolType)],
-)
-def test_default(value, apitype):
-    @argument("default", default=value)
-    @config(valns.default[str(type(value))])
-    class Default:
-        pass
-
-    value = Default()
-    expect_validate(value)
-    assert Default.__xpmtype__.arguments["default"].type.__class__ == apitype
-
-
-def test_seal():
+def test_validation_seal():
     """Test value sealing"""
 
-    @argument("a", int)
-    @config()
-    class A:
-        pass
+    class A(Config):
+        a: Param[int]
 
     a = A(a=2)
     a.__xpm__.seal(EmptyContext())
@@ -207,7 +164,7 @@ def test_seal():
         a.a = 1
 
 
-def test_validation_enum():
+def test_validation_validation_enum():
     """Path arguments should be ignored"""
 
     class EnumParam(Enum):
@@ -241,7 +198,7 @@ class TaskConfigConsumer(Config):
     x: Param[TaskParentConfig]
 
 
-def test_taskargument():
+def test_validation_taskargument():
     x = taskconfig()
     with TemporaryExperiment("fake"):
         x.submit(run_mode=RunMode.DRY_RUN)

@@ -8,7 +8,7 @@ import experimaestro.core.objects as objects
 import experimaestro.core.types as types
 from experimaestro.generators import PathGenerator
 
-from .core.arguments import Argument as CoreArgument
+from .core.arguments import Argument as CoreArgument, field
 from .core.objects import Config
 from .core.types import Any, Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
@@ -134,11 +134,21 @@ class param:
         self.type = Type.fromType(type) if type else None
         self.help = help
         self.ignored = ignored
-        self.default = default
         self.required = required
-        self.generator = None
         self.checker = checker
         self.constant = constant
+
+        self.generator = None
+        self.default = None
+
+        # Set default or generator
+        if isinstance(default, field):
+            if default.default is not None:
+                self.default = default
+            elif default.default_factory is not None:
+                self.generator = default.default_factory
+        else:
+            self.default = default
 
     def __call__(self, tp):
         # Don't annotate in task mode

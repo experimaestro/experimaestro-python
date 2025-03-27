@@ -109,8 +109,6 @@ class ConfigWalk(ConfigProcessing):
     def map(self, k: str): ...
 
 def getqualattr(module, qualname): ...
-
-
 @define(frozen=True)
 class WatchedOutput:
     config: "Config"
@@ -239,7 +237,7 @@ class LightweightTask(Config):
     def execute(self) -> None: ...
 
 class Task(LightweightTask):
-    __tags__: Dict[str, str]
+    # __tags__: Dict[str, str]
 
     def submit(
         self,

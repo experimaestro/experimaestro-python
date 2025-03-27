@@ -13,12 +13,12 @@ from experimaestro.core.types import DictType, IntType, StrType
 from enum import Enum
 import pytest
 from experimaestro import (
-    config,
     Option,
     Constant,
     Param,
     Task,
     default,
+    field,
     Config,
     pathgenerator,
     Annotated,
@@ -29,25 +29,24 @@ from experimaestro.xpmutils import DirectoryContext
 # --- Test manual name for configuration
 
 
-@config("annotations.b")
-class B:
+class B(Config):
+    __xpmid__ = "annotations.b"
     pass
 
 
 def test_fullname():
-    assert str(B.__xpmtype__.identifier) == "annotations.b"
+    assert str(B.__getxpmtype__().identifier) == "annotations.b"
 
 
 # --- Automatic name for configuration
 
 
-@config()
-class A:
+class A(Config):
     pass
 
 
 def test_noname():
-    assert str(A.__xpmtype__.identifier) == "experimaestro.tests.test_param.a"
+    assert str(A.__getxpmtype__().identifier) == "experimaestro.tests.test_param.a"
 
 
 def serializeCycle(config: Config):
@@ -69,8 +68,7 @@ def ArgumentValue(default=None, *, help=""):
 def test_type_hinting():
     """Test for type hinting"""
 
-    @config()
-    class MyConfig:
+    class MyConfig(Config):
         """A configuration
 
         Attributes:
@@ -89,7 +87,7 @@ def test_type_hinting():
         path: Annotated[Path, pathgenerator("world")]
         option: Option[str]
 
-    ot = MyConfig.__xpmtype__
+    ot = MyConfig.__getxpmtype__()
 
     # Check required parameter
     arg_x = ot.getArgument("x")
@@ -179,8 +177,7 @@ def test_config_class():
 
 
 def test_constant():
-    @config()
-    class A:
+    class A(Config):
         x: Constant[int] = 2
 
     a = A()
@@ -224,16 +221,14 @@ def test_inheritance():
 
 
 def test_redefined_param():
-    @config()
-    class A:
+    class A(Config):
         x: Param[int]
 
-    @config()
-    class B:
+    class B(Config):
         x: Param[int] = 3
 
-    atx = A.C.__xpmtype__.getArgument("x")
-    btx = B.C.__xpmtype__.getArgument("x")
+    atx = A.C.__getxpmtype__().getArgument("x")
+    btx = B.C.__getxpmtype__().getArgument("x")
 
     assert atx.required
 
@@ -258,18 +253,39 @@ def test_param_dict():
         A(x={"wrong": 1.2})
 
 
+# --- Default
+
+
+class ConfigWithDefault(Config):
+    x: Param[int] = field(default=1)
+
+
+def test_param_default():
+    assert ConfigWithDefault().x == 1
+
+
+class ConfigWithDefaultFactory(Config):
+    x: Param[int] = field(default_factory=lambda: 1)
+
+
+def test_param_default_factory():
+    value = ConfigWithDefaultFactory()
+    context = DirectoryContext(Path("/__fakepath__"))
+    value.__xpm__.seal(context)
+    assert value.x == 1
+
+
 # --- Task annotations
 
 
 def test_default_mismatch():
     """Test mismatch between default and type"""
 
-    @config()
-    class A:
+    class A(Config):
         x: Param[int] = 0.2
 
     with pytest.raises(TypeError):
-        A.__xpmtype__.getArgument("x")
+        A.__getxpmtype__().getArgument("x")
 
 
 # --- Handling help annotations

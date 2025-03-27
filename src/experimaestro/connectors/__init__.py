@@ -9,6 +9,7 @@ This module contains :
 """
 
 import enum
+import logging
 from typing import Any, Dict, Mapping, Type, Union
 from pathlib import Path
 from experimaestro.utils import logger
@@ -86,12 +87,12 @@ class Process:
     @staticmethod
     def fromDefinition(connector: "Connector", definition: Dict[str, Any]) -> "Process":
         """Retrieves a process from a serialized definition"""
-        handler = Process.handler(definition["type"])
+        handler_type = definition["type"]
+        handler = Process.handler(handler_type)
+        assert handler is not None, f"No handler of type {handler_type}"
         try:
             return handler.fromspec(connector, definition)
         except Exception as e:
-            import logging
-
             logging.exception("Could not retrieve job from specification")
             raise e
 
@@ -101,7 +102,11 @@ class Process:
         if Process.HANDLERS is None:
             Process.HANDLERS = {}
             for ep in pkg_resources.iter_entry_points(group="experimaestro.process"):
-                Process.HANDLERS[ep.name] = ep.load()
+                logging.debug("Adding process handler for type %s", ep.name)
+                handler = ep.load()
+                Process.HANDLERS[ep.name] = handler
+                if handler is None:
+                    logging.error("Handler of type %s is null", ep.name)
 
         return Process.HANDLERS.get(key, None)
 

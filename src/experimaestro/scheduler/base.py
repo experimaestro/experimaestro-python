@@ -228,7 +228,10 @@ class WatchedOutputsMonitor(FileSystemEventHandler):
     def __exit__(self, *args, **kwargs):
         if self._handle is not None:
             with self._lock:
-                ipcom().fsunwatch(self._handle)
+                try:
+                    ipcom().fsunwatch(self._handle)
+                except KeyError:
+                    logging.warning("Handle was already removed...")
                 self._handle = None
 
 

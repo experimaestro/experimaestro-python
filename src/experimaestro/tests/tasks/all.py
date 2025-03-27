@@ -1,11 +1,13 @@
+from pathlib import Path
 import time
 from typing import List
 from experimaestro import (
-    param,
+    Meta,
     Param,
+    field,
     Task,
+    PathGenerator,
     Config,
-    pathoption,
     STDOUT,
     cache,
 )
@@ -18,8 +20,8 @@ class SimpleTask(Task):
         print(self.x)  # noqa: T201
 
 
-@pathoption("out", STDOUT)
 class Say(Task):
+    out: Meta[Path] = field(default_factory=PathGenerator(STDOUT))
     word: Param[str]
 
     def execute(self):
@@ -38,19 +40,20 @@ class Concat(Task):
         print(" ".join(says))  # noqa: T201
 
 
-@param("x", type=int)
 class ForeignClassB1(Config):
-    pass
+    x: Param[int]
 
 
-@param("b", type=ForeignClassB1)
 class ForeignTaskA(Task):
+    b: Param[ForeignClassB1]
+
     def execute(self):
         print(self.b.x)  # noqa: T201
 
 
-@pathoption("wait", "wait")
 class Fail(Task):
+    wait: Meta[Path] = field(default_factory=PathGenerator("wait"))
+
     def execute(self):
         while not self.wait.is_file():
             time.sleep(0.01)
@@ -64,14 +67,16 @@ class Fail(Task):
             out.write("hello")
 
 
-@param("fail", Fail)
 class FailConsumer(Task):
+    fail: Param[Fail]
+
     def execute(self):
         return True
 
 
-@param("a", int)
 class Method(Task):
+    a: Param[int]
+
     def execute(self):
         assert self.a == 1
 
@@ -92,7 +97,8 @@ class CacheConfig(Config):
         return path.read_text()
 
 
-@param("data", type=CacheConfig)
 class CacheConfigTask(Task):
+    data: Param[CacheConfig]
+
     def execute(self):
         assert self.data.get() == "hello"

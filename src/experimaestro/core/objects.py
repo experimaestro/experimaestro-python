@@ -742,9 +742,16 @@ class ConfigInformation:
                 # Generate values
                 for k, argument in config.__xpmtype__.arguments.items():
                     if argument.generator:
-                        config.__xpm__.set(
-                            k, argument.generator(self.context, config), bypass=True
-                        )
+                        sig = inspect.signature(argument.generator)
+                        if len(sig.parameters) == 2:
+                            value = argument.generator(self.context, config)
+                        elif len(sig.parameters) == 0:
+                            value = argument.generator()
+                        else:
+                            assert (
+                                False
+                            ), "generator has either two parameters (context and config), or none"
+                        config.__xpm__.set(k, value, bypass=True)
 
                 config.__xpm__._sealed = True
 
@@ -1821,6 +1828,10 @@ class classproperty(property):
 
 class Config:
     """Base type for all objects in python interface"""
+
+    __xpmid__: ClassVar[Optional[str]]
+    """Optional configuration ID, mostly useful when moving a class to another
+    package to avoid changes in computed task identifiers"""
 
     __xpmtype__: ClassVar[ObjectType]
     """The object type holds all the information about a specific subclass

@@ -1,12 +1,14 @@
 import time
+from pathlib import Path
 import sys
 from typing import Callable
-from experimaestro import Task, pathoption
+from experimaestro import Task, Meta, field, PathGenerator
 import psutil
 import logging
 import subprocess
 import json
 import signal
+
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tests.utils import TemporaryExperiment, is_posix
 from experimaestro.scheduler import JobState
@@ -26,9 +28,10 @@ if is_posix():
     TERMINATES_FUNC.append(sigint)
 
 
-@pathoption("touch", "touch")
-@pathoption("wait", "wait")
 class Restart(Task):
+    touch: Meta[Path] = field(default_factory=PathGenerator("touch"))
+    wait: Meta[Path] = field(default_factory=PathGenerator("wait"))
+
     def execute(self):
         # Write the file "touch" to notify that we started
         with open(self.touch, "w") as out:

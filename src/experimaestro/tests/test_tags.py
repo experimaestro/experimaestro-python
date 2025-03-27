@@ -3,8 +3,6 @@ from pathlib import Path
 from experimaestro import (
     tag,
     LightweightTask,
-    config,
-    argument,
     Config,
     Task,
     Param,
@@ -13,17 +11,13 @@ from experimaestro.scheduler.workspace import RunMode
 from experimaestro.xpmutils import DirectoryContext
 
 
-@argument("x", type=int)
-@config()
-class Config1:
-    pass
+class Config1(Config):
+    x: Param[int]
 
 
-@argument("x", type=int)
-@argument("c", type=Config1)
-@config()
-class Config2:
-    pass
+class Config2(Config):
+    x: Param[int]
+    c: Param[Config1]
 
 
 def test_tag():
