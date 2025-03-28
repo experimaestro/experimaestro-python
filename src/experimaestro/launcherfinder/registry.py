@@ -78,13 +78,16 @@ class LauncherRegistry:
 
             from importlib import util
 
-            spec = util.spec_from_file_location("xpm_launchers_conf", launchers_py)
-            module = util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            with launchers_py.__fspath__() as fp:
+                spec = util.spec_from_file_location("xpm_launchers_conf", fp)
+                module = util.module_from_spec(spec)
+                spec.loader.exec_module(module)
 
             self.find_launcher_fn = getattr(module, "find_launcher", None)
             if self.find_launcher_fn is None:
-                logger.warn("No find_launcher() function was found in %s", launchers_py)
+                logger.warning(
+                    "No find_launcher() function was found in %s", launchers_py
+                )
 
         # Read the configuration file
         self.connectors = load_yaml(

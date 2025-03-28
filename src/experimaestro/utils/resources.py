@@ -24,15 +24,19 @@ class ResourcePathWrapper(PathLike):
         parents = [s.name for s in reversed(self.path.parents)][1:]
         return ".".join(parents)
 
-    @property
+    @cached_property
     def name(self):
         return self.path.name
 
     def is_file(self):
-        return resources.is_resource(self.package, self.name)
+        return any(
+            traversable.name == self.name and traversable.is_file()
+            for traversable in resources.files(self.package).iterdir()
+        )
 
     def __fspath__(self):
-        return resources.path(self.package, self.name).__fspath__()
+        """Return the file system path representation of the object"""
+        return resources.as_file(resources.files(self.package) / self.name)
 
     @contextmanager
     def open(self, *args, **kwargs):
