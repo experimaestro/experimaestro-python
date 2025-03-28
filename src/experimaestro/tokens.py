@@ -59,6 +59,8 @@ class CounterTokenLock(Lock):
 
 
 class CounterTokenDependency(Dependency):
+    """A dependency onto a token"""
+
     def __init__(self, token: "CounterToken", count: int):
         super().__init__(token)
         self._token = token
@@ -66,6 +68,7 @@ class CounterTokenDependency(Dependency):
 
     @property
     def name(self):
+        """The (file) name for this dependency, when taken"""
         return f"{self.target.identifier}.token"
 
     def status(self) -> DependencyStatus:
@@ -165,7 +168,7 @@ class CounterToken(Token, FileSystemEventHandler):
     - TIMESTAMP.token contains (1) the number of tokens (2) the job URI
     """
 
-    """Maps paths to instances"""
+    """Maps token keys to CounterToken instances"""
     TOKENS: Dict[str, "CounterToken"] = {}
 
     @staticmethod
@@ -193,7 +196,7 @@ class CounterToken(Token, FileSystemEventHandler):
         """[summary]
 
         Arguments:
-            path {Path} -- The file path of the token file
+            path {Path} -- The file path of the token directory
             count {int} -- Number of tokens (overrides previous definitions)
             force --   If the token has already been created, force to write the maximum
                        number of tokens
@@ -298,6 +301,9 @@ class CounterToken(Token, FileSystemEventHandler):
                         tokenfile = TokenFile(path)
                         tokenfile.watch()
                         self.cache[path.name] = tokenfile
+        except FileNotFoundError:
+            # We did not find the token file... just ignore
+            pass
         except Exception:
             logger.exception("Uncaught exception in on_modified handler")
             raise
@@ -336,13 +342,18 @@ class CounterToken(Token, FileSystemEventHandler):
                         for dependency in dependents:
                             dependency.check()
 
+            # A modified dependency not in cache
             elif path.name.endswith(".token") and path.name not in self.cache:
                 with self.lock:
                     if path.name not in self.cache:
                         logger.debug("Token file not in cache %s", path.name)
-                        tokenfile = TokenFile(path)
-                        tokenfile.watch()
-                        self.cache[path.name] = tokenfile
+                        try:
+                            tokenfile = TokenFile(path)
+                            tokenfile.watch()
+                            self.cache[path.name] = tokenfile
+                        except FileNotFoundError:
+                            # Well, the file did not exist anymore...
+                            pass
         except Exception:
             logger.exception("Uncaught exception in on_modified handler")
             raise

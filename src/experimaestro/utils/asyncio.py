@@ -10,8 +10,12 @@ def asyncThreadcheck(name, func, *args, **kwargs) -> asyncio.Future:
 
     def dowait():
         logging.debug("Running %s", func)
-        result = func(*args, **kwargs)
-        logging.debug("Got result from %s", func)
+        try:
+            result = func(*args, **kwargs)
+            logging.debug("Got result from %s", func)
+        except Exception:
+            logging.exception("Got an error in the thread")
+            raise
         loop.call_soon_threadsafe(future.set_result, result)
 
     # Start thread

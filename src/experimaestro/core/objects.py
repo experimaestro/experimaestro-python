@@ -3,6 +3,10 @@
 from functools import cached_property
 import json
 
+from attr import define
+
+from experimaestro import taskglobals
+
 try:
     from types import NoneType
 except Exception:
@@ -21,6 +25,7 @@ import inspect
 import importlib
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterator,
@@ -135,6 +140,8 @@ class ConfigPath:
 
 
 hash_logger = logging.getLogger("xpm.hash")
+
+DependentMarker = Callable[["Config"], None]
 
 
 class HashComputer:
@@ -555,6 +562,14 @@ class ObjectStore:
         self.store[identifier] = stub
 
 
+@define()
+class WatchedOutput:
+    config: "ConfigInformation"
+    method_name: str
+    method: Callable
+    callback: Callable
+
+
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
@@ -594,6 +609,9 @@ class ConfigInformation:
 
         # Initialization tasks
         self.init_tasks: List["LightweightTask"] = []
+
+        # Watched outputs
+        self.watched_outputs: List[WatchedOutput] = []
 
         # Cached information
 
@@ -724,9 +742,16 @@ class ConfigInformation:
                 # Generate values
                 for k, argument in config.__xpmtype__.arguments.items():
                     if argument.generator:
-                        config.__xpm__.set(
-                            k, argument.generator(self.context, config), bypass=True
-                        )
+                        sig = inspect.signature(argument.generator)
+                        if len(sig.parameters) == 2:
+                            value = argument.generator(self.context, config)
+                        elif len(sig.parameters) == 0:
+                            value = argument.generator()
+                        else:
+                            assert (
+                                False
+                            ), "generator has either two parameters (context and config), or none"
+                        config.__xpm__.set(k, value, bypass=True)
 
                 config.__xpm__._sealed = True
 
@@ -899,6 +924,12 @@ class ConfigInformation:
         # Now, seal the object
         self.seal(context)
 
+    def watch_output(self, method, callback):
+        watched = WatchedOutput(method.__self__, method.__name__, method, callback)
+        self.watched_outputs.append(watched)
+        if self.job:
+            self.job.watch_output(watched)
+
     def submit(
         self,
         workspace: "Workspace",
@@ -1000,7 +1031,7 @@ class ConfigInformation:
 
                 print(file=sys.stderr)  # noqa: T201
 
-        # Handle an output configuration
+        # Handle an output configuration # FIXME: remove
         def mark_output(config: "Config"):
             """Sets a dependency on the job"""
             assert not isinstance(config, Task), "Cannot set a dependency on a task"
@@ -1011,11 +1042,17 @@ class ConfigInformation:
         self.task = self.pyobject
 
         if hasattr(self.pyobject, "task_outputs"):
-            self._taskoutput = self.pyobject.task_outputs(mark_output)
+            self._taskoutput = self.pyobject.task_outputs(self.mark_output)
         else:
             self._taskoutput = self.task = self.pyobject
 
         return self._taskoutput
+
+    def mark_output(self, config: "Config"):
+        """Sets a dependency on the job"""
+        assert not isinstance(config, Task), "Cannot set a dependency on a task"
+        config.__xpm__.task = self.pyobject
+        return config
 
     # --- Serialization
 
@@ -1345,7 +1382,9 @@ class ConfigInformation:
                     mod = importlib.import_module(module_name)
                 except ModuleNotFoundError:
                     # More hints on the nature of the error
-                    logging.warning("(1) Either the python path is wrong – %s", ":".join(sys.path))
+                    logging.warning(
+                        "(1) Either the python path is wrong – %s", ":".join(sys.path)
+                    )
                     logging.warning("(2) There is not __init__.py in your module")
                     raise
 
@@ -1790,6 +1829,10 @@ class classproperty(property):
 class Config:
     """Base type for all objects in python interface"""
 
+    __xpmid__: ClassVar[Optional[str]]
+    """Optional configuration ID, mostly useful when moving a class to another
+    package to avoid changes in computed task identifiers"""
+
     __xpmtype__: ClassVar[ObjectType]
     """The object type holds all the information about a specific subclass
     experimaestro metadata"""
@@ -1914,6 +1957,21 @@ class Config:
         """Access pre-tasks"""
         raise AssertionError("Pre-tasks can be accessed only during configuration")
 
+    def register_task_output(self, method, *args, **kwargs):
+        # Determine the path for this...
+        path = (
+            taskglobals.Env.instance().xpm_path
+            / "task-outputs"
+            / f"{self.__xpmidentifier__}"
+            / f"{method.__name__}.jsonl"
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = json.dumps({"args": args, "kwargs": kwargs})
+        with path.open("at") as fp:
+            fp.writelines([data, "\n"])
+            fp.flush()
+
 
 class LightweightTask(Config):
     """A task that can be run before or after a real task to modify its behaviour"""
@@ -1930,6 +1988,14 @@ class Task(LightweightTask):
 
     def submit(self):
         raise AssertionError("This method can only be used during configuration")
+
+    def watch_output(self, method, callback):
+        """Sets up a callback
+
+        :param method: a method within a configuration
+        :param callback: the callback
+        """
+        self.__xpm__.watch_output(method, callback)
 
 
 # --- Utility functions

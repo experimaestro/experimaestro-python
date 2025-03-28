@@ -1,6 +1,6 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
-from typing import Optional, TypeVar, TYPE_CHECKING
+from typing import Optional, TypeVar, TYPE_CHECKING, Callable, Any
 from experimaestro.typingutils import get_optional
 from pathlib import Path
 import sys
@@ -75,10 +75,21 @@ class Argument:
         self.constant = constant
         self.ignored = self.type.ignore if ignored is None else ignored
         self.required = required
-        self.default = default
-        self.generator = generator
         self.objecttype = None
         self.is_data = is_data
+
+        self.generator = generator
+        self.default = None
+
+        if default is not None:
+            assert self.generator is None, "generator and default are exclusive options"
+            if isinstance(default, field):
+                if default.default is not None:
+                    self.default = default.default
+                elif default.default_factory is not None:
+                    self.generator = default.default_factory
+            else:
+                self.default = default
 
         assert (
             not self.constant or self.default is not None
@@ -168,6 +179,18 @@ Meta = Annotated[T, optionHint]
 dataHint = _Param(ignored=True, is_data=True)
 DataPath = Annotated[Path, dataHint]
 """Annotates a path that should be kept to restore an object to its state"""
+
+
+class field:
+    """Extra information for a given experimaestro field (param or meta)"""
+
+    def __init__(self, *, default: Any = None, default_factory: Callable = None):
+        assert not (
+            (default is not None) and (default_factory is not None)
+        ), "default and default_factory are mutually exclusive options"
+
+        self.default_factory = default_factory
+        self.default = default
 
 
 class help(TypeAnnotation):

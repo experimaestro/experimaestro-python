@@ -8,12 +8,12 @@ A task is a special configuration that can be:
 !!! example "Defining a task"
 
     ```py3
-    from experimaestro import Config, Task, Param
+    from experimaestro import Config, Task, Param, Meta, PathGenerator, field
 
     class ModelLearn(Task):
         epochs: Param[int] = 100
         model: Param[Model]
-        parameters: Annotated[Path, pathgenerator("parameters.pth")]
+        parameters: Meta[Path] = field(default_factory=PathGenerator("parameters.pth"))
 
         def execute(self):
             """Called when this task is run"""

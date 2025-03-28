@@ -36,15 +36,17 @@ from .core.arguments import (
     DataPath,
     Annotated,
     Constant,
+    field,
     # Annotations helpers
     help,
     default,
 )
-from .generators import pathgenerator
+from .generators import pathgenerator, PathGenerator
 from .core.objects import (
     Config,
     copyconfig,
     setmeta,
+    DependentMarker,
     Task,
     LightweightTask,
     ObjectStore,

@@ -3,7 +3,7 @@ import pyparsing as pp
 from pathlib import Path
 import json
 from experimaestro.compat import cached_property
-import regex
+import re
 from experimaestro.scheduler import JobState
 
 
@@ -87,7 +87,7 @@ class NotInExpr(BaseInExpr):
 class RegexExpr:
     def __init__(self, tokens):
         self.var, expr = tokens
-        self.regex = regex.compile(expr)
+        self.regex = re.compile(expr)
 
     def __repr__(self):
         return f"""REGEX[{self.varname}, {self.value}]"""
@@ -103,7 +103,7 @@ class RegexExpr:
         if not value:
             return False
 
-        return self.regex.match(value)
+        return self.re.match(value)
 
 
 class ConstantString:

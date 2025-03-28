@@ -1,21 +1,18 @@
 from typing import Optional
-from experimaestro import config, Param, Config
+from experimaestro import Param, Config
 from experimaestro.core.objects import TypeConfig
 from experimaestro.core.serializers import SerializationLWTask
 
 
-@config()
-class A:
+class A(Config):
     x: Param[int] = 1
 
 
-@config()
 class A1(A):
     pass
 
 
-@config()
-class B:
+class B(Config):
     a: Param[A]
 
 

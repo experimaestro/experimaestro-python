@@ -1,4 +1,5 @@
 from abc import ABC
+from attrs import define
 import typing_extensions
 
 from experimaestro.core.types import ObjectType
@@ -108,6 +109,10 @@ class ConfigWalk(ConfigProcessing):
     def map(self, k: str): ...
 
 def getqualattr(module, qualname): ...
+@define(frozen=True)
+class WatchedOutput:
+    config: "Config"
+    method_name: str
 
 class ConfigInformation:
     LOADING: bool
@@ -116,6 +121,7 @@ class ConfigInformation:
     values: Dict[str, Any]
     job: Job
     dependencies: Incomplete
+    watched_outputs: List[WatchedOutput]
     def __init__(self, pyobject: TypeConfig) -> None: ...
     def set_meta(self, value: Optional[bool]): ...
     @property
@@ -231,7 +237,7 @@ class LightweightTask(Config):
     def execute(self) -> None: ...
 
 class Task(LightweightTask):
-    __tags__: Dict[str, str]
+    # __tags__: Dict[str, str]
 
     def submit(
         self,

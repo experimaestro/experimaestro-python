@@ -72,20 +72,21 @@ def takeback(launcher, datapath, txp1, txp2):
     touching = datapath / "touching"
     waiting = datapath / "waiting"
 
-    with txp1 as xp1:  # flake8: noqa: F841
+    with txp1:
         WaitUntilTouched(touching=touching, waiting=waiting).submit(launcher=launcher)
 
         logger.debug("Waiting for task to create 'touching' file")
         while not touching.is_file():
             time.sleep(0.01)
 
-        with txp2 as xp2:  # flake8: noqa: F841
+        with txp2:
             result = WaitUntilTouched(touching=touching, waiting=waiting).submit(
                 launcher=launcher
             )
 
-            logger.debug("Waiting for job to be in running mode")
+            logger.debug("Waiting for job to be running (scheduler)")
             while result.__xpm__.job.state != JobState.RUNNING:
                 time.sleep(0.1)
 
+            logger.debug("OK, no we can notify the task")
             waiting.touch()

@@ -26,6 +26,7 @@ if typing.TYPE_CHECKING:
 
 class Identifier:
     def __init__(self, name: str):
+        assert isinstance(name, str)
         self.name = name
 
     def __hash__(self):
@@ -223,7 +224,7 @@ class ObjectType(Type):
             __xpmid__ = getattr(tp, "__xpmid__")
             if isinstance(__xpmid__, Identifier):
                 identifier = __xpmid__
-            if inspect.ismethod(__xpmid__):
+            elif inspect.ismethod(__xpmid__):
                 identifier = Identifier(__xpmid__())
             elif "__xpmid__" in tp.__dict__:
                 identifier = Identifier(__xpmid__)
@@ -576,7 +577,7 @@ class PathType(Type):
             return Path(value.get("$value"))
 
         if not isinstance(value, (str, Path)):
-            raise TypeError("value is not a pathlike value")
+            raise TypeError(f"value is not a pathlike value ({type(value)})")
         return Path(value)
 
     @property

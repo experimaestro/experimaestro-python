@@ -1,17 +1,22 @@
 import inspect
 from pathlib import Path
+from abc import ABC, abstractmethod
 from typing import Callable, Union
 from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
 from experimaestro.core.objects import ConfigWalkContext, Config
 
 
-class Generator:
+class Generator(ABC):
     """Base class for all generators"""
 
     def isoutput(self):
         """Returns True if this generator is a task output (e.g. generates a
         path within the job folder)"""
         return False
+
+    @abstractmethod
+    def __call__(self, context: ConfigWalkContext, config: Config):
+        ...
 
 
 class PathGenerator(Generator):

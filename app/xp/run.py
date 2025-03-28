@@ -14,8 +14,9 @@ from experimaestro import (
     Config,
     Task,
     progress,
-    pathgenerator,
-    Annotated,
+    PathGenerator,
+    field,
+    Meta,
     tagspath,
 )
 from experimaestro.core.arguments import Param
@@ -26,7 +27,7 @@ from experimaestro.utils import cleanupdir
 class ControlledTask(Task):
     path: Param[Path]
     tensorboard: Param[bool]
-    logdir: Annotated[Path, pathgenerator("runs")]
+    logdir: Meta[Path] = field(default_factory=PathGenerator("runs"))
 
     def execute(self):
         self.path.unlink(missing_ok=True)

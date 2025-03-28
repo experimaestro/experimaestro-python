@@ -1,12 +1,12 @@
-from experimaestro import argument, Config
+from experimaestro import Param, Config
 from experimaestro.click import forwardoption
 import click
 
 
 def test_main():
-    @argument("epochs", type=int, default=100, help="Number of learning epochs")
     class MyModel(Config):
-        pass
+        epochs: Param[int] = 100
+        """Number of learning epochs"""
 
     @forwardoption.epochs(MyModel)
     @click.command()
@@ -18,9 +18,9 @@ def test_main():
 
 
 def test_rename():
-    @argument("epochs", type=int, default=100, help="Number of learning epochs")
     class MyModel(Config):
-        pass
+        epochs: Param[int] = 100
+        """Number of learning epochs"""
 
     @forwardoption.epochs(MyModel, "my-epochs")
     @click.command()
