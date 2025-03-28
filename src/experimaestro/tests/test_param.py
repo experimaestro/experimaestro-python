@@ -18,9 +18,11 @@ from experimaestro import (
     Param,
     Task,
     default,
-    field,
+    Meta,
     Config,
     pathgenerator,
+    PathGenerator,
+    field,
     Annotated,
 )
 import experimaestro.core.types as types
@@ -137,7 +139,7 @@ def test_type_hinting():
 
 def test_generatedpath():
     class A(Config):
-        path: Annotated[Path, pathgenerator("test.txt")]
+        path: Meta[Path] = field(default_factory=PathGenerator("test.txt"))
 
     class B(Config):
         a: Param[A]

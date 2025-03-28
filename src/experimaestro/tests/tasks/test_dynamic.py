@@ -4,6 +4,7 @@
 from functools import partial
 import sys
 import time
+import logging
 from experimaestro import (
     Config,
     Param,
@@ -70,6 +71,7 @@ class Learn(Task):
 
 def evaluate(evaluations, checkpoint: Checkpoint):
     # Makes this harder...
+    logging.warning("Evaluating checkpoint %s", checkpoint)
     time.sleep(0.05)
     task = Evaluate(model=checkpoint.model)
     checkpoint_loader = CheckpointLoader(checkpoint=checkpoint)
@@ -78,13 +80,6 @@ def evaluate(evaluations, checkpoint: Checkpoint):
 
 def test_task_dynamic_simple():
     evaluations = []
-
-    def evaluate(checkpoint: Checkpoint):
-        # Makes this harder...
-        time.sleep(0.05)
-        task = Evaluate(model=checkpoint.model)
-        checkpoint_loader = CheckpointLoader(checkpoint=checkpoint)
-        evaluations.append(task.submit(init_tasks=[checkpoint_loader]))
 
     with TemporaryDirectory() as workdir:
         with TemporaryExperiment("dynamic", maxwait=2, workdir=workdir):

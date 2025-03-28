@@ -84,7 +84,7 @@ Taking the configuration class `Adam` defined above, we have:
 
 # Tasks
 
-When it comes to actually running code, Experimaestro allows to define
+When it comes to actually running code, experimaestro allows to define
 [tasks](./experiments/task.md) that are special kinds of configurations. The
 task defined below learns a model. It also defines parameters which do not
  change the outcome but rather (1) the processing (e.g. number of GPUs to use)
@@ -127,7 +127,7 @@ class Learn(Task):
     gpus: Meta[int] = 2
     """Number of GPUs to use (note the `Meta`)"""
 
-    model_path: Annotated[Path, pathgenerator("model.pt")]
+    model_path: Meta[Path] = field(default_factory=PathGenerator("model.pth"))
     """A path relative to the task directory"""
 
 

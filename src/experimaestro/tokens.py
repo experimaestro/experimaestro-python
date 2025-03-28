@@ -301,6 +301,9 @@ class CounterToken(Token, FileSystemEventHandler):
                         tokenfile = TokenFile(path)
                         tokenfile.watch()
                         self.cache[path.name] = tokenfile
+        except FileNotFoundError:
+            # We did not find the token file... just ignore
+            pass
         except Exception:
             logger.exception("Uncaught exception in on_modified handler")
             raise

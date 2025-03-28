@@ -624,6 +624,7 @@ class TaskOutputsWorker(threading.Thread):
                 # end of processing
                 break
 
+            # Call all the listeners
             watcher, event = element
             for listener in watcher.listeners:
                 try:
