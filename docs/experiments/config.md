@@ -319,6 +319,7 @@ behavior of a configuration/task has changed, and thus that the signature should
 same (as the result of the processing will differ).
 
 ```py3
+from experimaestro import Constant
 class MyConfig(Config):
     # Constant
     version: Constant[str] = "2.1"

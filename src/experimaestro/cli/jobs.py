@@ -69,7 +69,7 @@ def process(
         if (p / "jobs.bak").is_dir():
             cprint(f"  Experiment {p.name} has not finished yet", "red")
             if (not perform) and (kill or clean):
-                cprint("  Preventing kill/clean (use --force if you want to)", "yellow")
+                cprint("  Preventing kill/clean (use --perform if you want to)", "yellow")
                 kill = False
                 clean = False
 
