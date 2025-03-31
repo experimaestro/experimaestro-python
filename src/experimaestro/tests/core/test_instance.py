@@ -68,3 +68,42 @@ def test_instance_optional():
     c = ConfigWithOptional().instance()
     assert c.x == 1
     assert c.y is None
+
+
+def test_instance_external():
+    class ExtValueConfig(Config):
+        # FIXME: move elsewhere
+        @classmethod
+        def value(cls):
+            def wrapped(value_class):
+                # Check that we have not already changed the value class
+                # TODO: here
+
+                # Check that we are the value class is a subclass
+                if not issubclass(value_class, cls):
+                    raise RuntimeError(f"{value_class} is not a subclass of {cls}")
+
+                # Check that the value class if a subclass of the parent
+                # configurations value class
+                # TODO: here
+
+                # Set the attribute
+                setattr(cls, "XPMValue", value_class)
+                return value_class
+
+            return wrapped
+
+    @ExtValueConfig.value()
+    class ValueConfig(ExtValueConfig):
+        pass
+
+    class ExtSubValueConfig(ExtValueConfig):
+        pass
+
+    @ExtSubValueConfig.value()
+    class ExtSubValueConfig(ExtSubValueConfig, ValueConfig):
+        pass
+
+    result = ExtValueConfig().instance()
+
+    assert result.__class__ is ValueConfig
