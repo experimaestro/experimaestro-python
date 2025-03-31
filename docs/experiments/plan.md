@@ -94,6 +94,8 @@ For each experiment (identified by its name), a folder is created automatically.
 can be used to store additional experimental results as shown in the example below:
 
 ```py3
+from experimaestro import tag, tagspath
+
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
     model = Model()
 

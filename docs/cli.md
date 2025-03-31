@@ -5,14 +5,36 @@
 Besides the web interface, it is possible to use the command line to check the job
 status and control jobs:
 
-- `experimaestro jobs clean`
-- ``experimaestro jobs kill` allows to kill running jobs
 - ``experimaestro jobs list` list jobs
+- `experimaestro jobs clean` cleans jobs 
+- ``experimaestro jobs kill` allows to kill running jobs
 - ``experimaestro jobs log` show the stdout/stderr of a given job
 - ``experimaestro jobs path` returns the full path for a given job
 
 
 Use `experimaestro jobs --help` for more details.
+
+
+## Filters 
+Printed jobs can be filtered in several ways, for instance:
+
+- Print only running jobs of given experiment:
+```bash
+experimaestro jobs list --filter '@state="RUNNING"' --tags --experiment EXPERIMENT_ID
+```
+
+- Clean all jobs that failed
+```bash
+experimaestro jobs clean --filter '@state="ERROR"' --tags
+```
+> (use `--perform` to really perform the cleaning after verification)
+
+## Tags 
+Using the `--tags` flag, lists all running jobs and show tagged arguments.
+
+```bash
+experimaestro jobs list --tags
+```
 
 ## Cleaning up
 
