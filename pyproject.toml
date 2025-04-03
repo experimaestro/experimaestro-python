@@ -17,7 +17,8 @@ classifiers = [
 include = [
     "src/experimaestro/server/data/*",
     "src/experimaestro/sphinx/static/experimaestro.css",
-    "src/experimaestro/mkdocs/style.css"
+    "src/experimaestro/mkdocs/style.css",
+    { path="src/experimaestro/server/data/*", format=['sdist', 'wheel']}
 ]
 version = "0.0.0"
 repository = "https://github.com/experimaestro/experimaestro-python"
