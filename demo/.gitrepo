@@ -6,7 +6,7 @@
 [subrepo]
 	remote = git@github.com:experimaestro/experimaestro-demo.git
 	branch = main
-	commit = 7ec952820252ea7cde0f81c1a0152fb288765730
-	parent = 5d33c1ee9c0cbea9ea0bca140e392eb7fbe69f6b
+	commit = 327189eed26065040d3772a2700bfb0ee485b336
+	parent = a3a3570a9e8de8e3f5fb067b042c5233ec34ca30
 	method = merge
 	cmdver = 0.4.8
