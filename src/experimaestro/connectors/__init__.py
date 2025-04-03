@@ -10,7 +10,7 @@ This module contains :
 
 import enum
 import logging
-from typing import Any, Dict, Mapping, Type, Union
+from typing import Any, Dict, Mapping, Type, Union, Optional
 from pathlib import Path
 from experimaestro.utils import logger
 from experimaestro.locking import Lock
@@ -122,8 +122,12 @@ class Process:
         """True is the process is truly running (I/O)"""
         return (await self.aio_state()).running
 
-    async def aio_code(self):
-        """Returns a future containing the returned code"""
+    async def aio_code(self) -> Optional[int]:
+        """Returns a future containing the returned code
+
+        Returns None if the process has already finished – and no information is
+        known about the process.
+        """
         code = await asyncThreadcheck("aio_code", self.wait)
         logger.debug("Got for return code %s: %s", self, code)
         return code

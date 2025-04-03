@@ -7,6 +7,7 @@ import sys
 import logging
 from .utils import logger
 from watchdog.observers import Observer
+from watchdog.observers.api import ObservedWatch
 from watchdog.events import FileSystemEventHandler
 
 
@@ -20,7 +21,9 @@ class IPCom:
         self.observer.start()
         self.pid = os.getpid()
 
-    def fswatch(self, watcher: FileSystemEventHandler, path: Path, recursive=False):
+    def fswatch(
+        self, watcher: FileSystemEventHandler, path: Path, recursive=False
+    ) -> ObservedWatch:
         if not self.observer.is_alive():
             logging.error("Observer is not alive")
 

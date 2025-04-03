@@ -68,6 +68,13 @@ class WaitUntilTouched(Task):
 
 
 def takeback(launcher, datapath, txp1, txp2):
+    """Launch two times the same task (with two experiments)
+
+    :param launcher: The launcher
+    :param datapath: The path containing the two files that control the task, namely (1) touching which is created by the task when starting, (2) waiting which is controlled here
+    :param txp1: The first experiment
+    :param txp2: The second experiment
+    """
     datapath.mkdir()
     touching = datapath / "touching"
     waiting = datapath / "waiting"

@@ -2,6 +2,7 @@
 """
 
 import subprocess
+from typing import Optional
 from pathlib import Path, WindowsPath, PosixPath
 import os
 import threading
@@ -29,11 +30,13 @@ class PsutilProcess(Process):
     def __init__(self, pid: int):
         self._process = psutil.Process(pid)
 
-    def wait(self) -> int:
+    def wait(self) -> Optional[int]:
         logger.debug("Waiting (psutil) for process with PID %s", self._process.pid)
         code = self._process.wait()
         logger.debug(
-            "Finished to wait (psutil) for process with PID %s", self._process.pid
+            "Finished to wait (psutil) for process with PID %s: code %s",
+            self._process.pid,
+            code,
         )
         return code
 
@@ -57,7 +60,9 @@ class LocalProcess(Process):
         logger.debug("Waiting (python) for process with PID %s", self._process.pid)
         code = self._process.wait()
         logger.debug(
-            "Finished to wait (python) for process with PID %s", self._process.pid
+            "Finished to wait (python) for process with PID %s: %s",
+            self._process.pid,
+            code,
         )
         return code
 

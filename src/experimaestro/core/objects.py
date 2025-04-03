@@ -564,9 +564,19 @@ class ObjectStore:
 
 @define()
 class WatchedOutput:
+    #: The enclosing job
+    job: "Job"
+
+    #: The configuration containing the watched output
     config: "ConfigInformation"
+
+    #: The watched output (name)
     method_name: str
+
+    #: The watched output method (called with the JSON event)
     method: Callable
+
+    #: The callback to call (with the output of the previous method)
     callback: Callable
 
 
@@ -925,7 +935,14 @@ class ConfigInformation:
         self.seal(context)
 
     def watch_output(self, method, callback):
-        watched = WatchedOutput(method.__self__, method.__name__, method, callback)
+        """Watch the task output linked with a given method
+
+        :param method: The method to watch
+        :param callback: The callback
+        """
+        watched = WatchedOutput(
+            self, method.__self__, method.__name__, method, callback
+        )
         self.watched_outputs.append(watched)
         if self.job:
             self.job.watch_output(watched)
@@ -1959,15 +1976,16 @@ class Config:
 
     def register_task_output(self, method, *args, **kwargs):
         # Determine the path for this...
-        path = (
-            taskglobals.Env.instance().xpm_path
-            / "task-outputs"
-            / f"{self.__xpmidentifier__}"
-            / f"{method.__name__}.jsonl"
-        )
+        path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        data = json.dumps({"args": args, "kwargs": kwargs})
+        data = json.dumps(
+            {
+                "key": f"{self.__xpmidentifier__}/{method.__name__}",
+                "args": args,
+                "kwargs": kwargs,
+            }
+        )
         with path.open("at") as fp:
             fp.writelines([data, "\n"])
             fp.flush()
