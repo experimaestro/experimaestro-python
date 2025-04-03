@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = git@github.com:experimaestro/experimaestro-demo.git
+	branch = main
+	commit = 7ec952820252ea7cde0f81c1a0152fb288765730
+	parent = 5d33c1ee9c0cbea9ea0bca140e392eb7fbe69f6b
+	method = merge
+	cmdver = 0.4.8
