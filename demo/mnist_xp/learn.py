@@ -25,6 +25,7 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+# --8<-- [start:cnn]
 class CNN(Config, nn.Module):
     """Defines a CNN model"""
 
@@ -36,6 +37,7 @@ class CNN(Config, nn.Module):
 
     kernel_size: Param[int] = 3
     """Kernel size of the CNN"""
+    # --8<-- [end:cnn]
 
     def __post_init__(self):
         """Simple CNN module with n_layers hidden layers and hidden_dim hidden

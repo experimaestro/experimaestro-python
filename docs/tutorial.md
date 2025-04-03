@@ -1,15 +1,28 @@
 # Introduction
 
-This tutorial will illustrate the different components of Experimaestro using a simple experimental
-project to illustrate the various aspects.
+This tutorial will illustrate the different components of Experimaestro using a
+simple experimental project to illustrate the various aspects.
 
-# Installation
+We will use experimaestro in a basic setup performing hyper-parameters search
+for a deep learning model (_here we will train CNN trained on the MNIST
+dataset_).
 
-First install the package using
+In this situation, people usually have to run a lot of different trainings with
+various hyper-parameters. This can rapidly become a pain to:
+- Launch training jobs in parallel on your cluster, and monitor them in real time.
+- Track the hyper-parameters already tested. And avoid launching a job with same parameters twice.
+- Save results in proper _unique and not conflicting directories_ for further loading and analysis.
 
-```sh
-pip install experimaestro
-```
+### Luckily, `experimaestro` can do all of that for you !
+
+By the end of this tutorial, you will understand the core structure of
+experimaestro. And you will be able to launch and monitor your own experiments.
+
+## Running the code
+
+The code for this tutorial can be found at this URL https://github.com/experimaestro/experimaestro-demo.git
+
+Follow the instructions in the readme to setup your environment
 
 # Configurations
 
@@ -26,60 +39,20 @@ A configuration object in Experimaestro serves as a structured template to defin
 
 In essence, configuration objects in Experimaestro facilitate the automation, and reproducibility of experiments by providing a detailed and validated framework for task parameters.
 
-An example of a configuration of an optimizer in machine learning:
+An example of a configuration of an a convolutional neural network (CNN) for our classification task.
 
-```py3
-from experimaestro import Config, Param
-
-class Optimizer(Config):
-    @abstractmethod
-    def__call__(self, parameters):
-        ...
-
-class Adam(Optimizer):
-    """Wrapper for Adam optimizer"""
-
-    lr: Param[float] = 1e-3
-    """Learning rate"""
-
-    weight_decay: Param[float] = 0.0
-    """Weight decay (L2)"""
-
-    eps: Param[float] = 1e-8
-
-    def __call__(self, parameters):
-        # Returns an optimizer for the given parameters
-        ...
+```py
+--8<-- "demo/mnist_xp/learn.py:cnn"
 ```
 
 ## Configuration identifiers
 
 
-Experimaestro has an automated process that generates a unique signature for
-each configuration depending on experimental parameters – this idea is used for
-instance in [PlanOut](https://github.com/facebookarchive/planout) to uniquely
-identify the system parameters in A/B testing. This identifier plays a crucial
-in identifying a unique set of parameters. Here's a detailed description:
+Experimaestro has an automated process that generates a [unique signature](./experiments/config.md#configuration-identifiers) for
+each configuration depending on experimental parameters. Taking the configuration class `CNN` defined above, we have:
 
-1. **Uniqueness**: A configuration identifier is unique for each configuration
-   instance. This uniqueness ensures that each configuration can be distinctly
-   identified and referenced, avoiding confusion or overlap with other
-   configurations.
-
-1. **MD5 Hashes**: Experimaestro utilizes MD5 hashes as configuration
-    identifiers. These hashes are unique to each configuration, ensuring a
-    distinct and consistent identifier for every set of parameters.
-
-1. **Run-Once Guarantee**: The unique MD5 hash identifiers ensure that each task
-   associated with a specific configuration is executed only once. This is
-   particularly important in avoiding redundant computations and ensuring the
-   efficiency of the workflow.
-
-Taking the configuration class `Adam` defined above, we have:
-
-- `Adam().__identifier__()` returns `261c5...`
-- `Adam(lr=1e-3).__identifier__()` returns the same identifier since `lr` has a default value of `1e-3`
-- `Adam(lr=1e-2).__identifier__()` returns `71848...` (different set of parameters)
+- `CNN().__identifier__()` and `CNN(n_layers=2).__identifier__()` return the same identifier since `n_layers` has a default value of `2`
+- `CNN(n_layers=3).__identifier__()` returns a different identifier since one experimental parameter changes.
 
 
 # Tasks

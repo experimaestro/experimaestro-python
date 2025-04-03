@@ -25,13 +25,11 @@ theme:
   name: readthedocs
 
 markdown_extensions:
-  # https://pypi.org/project/markdown-include
-  - markdown_include.include:
-      base_path: .
   - codehilite:
       linenums: false
   - admonition
   - pymdownx.superfences
+  # See https://facelessuser.github.io/pymdown-extensions/extensions/snippets/#snippets-notation
   - pymdownx.snippets:
       base_path: .
 
