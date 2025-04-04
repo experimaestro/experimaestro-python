@@ -129,7 +129,7 @@ class Process:
         known about the process.
         """
         code = await asyncThreadcheck("aio_code", self.wait)
-        logger.debug("Got for return code %s: %s", self, code)
+        logger.debug("Got return code %s for %s", code, self)
         return code
 
     def kill(self):

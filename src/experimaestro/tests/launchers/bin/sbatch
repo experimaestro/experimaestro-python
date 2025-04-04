@@ -10,7 +10,7 @@ if ! test -d "$XPM_SLURM_DIR"; then
 fi
 
 mkdir -p "$XPM_SLURM_DIR/jobs"
-echo "Slurm directory: $XPM_SLURM_DIR" >&2 
+echo "Slurm directory: $XPM_SLURM_DIR" >&2
 
 RED='\033[0;31m'
 NC='\033[0m' # No Color
@@ -28,7 +28,7 @@ lockpath() {
 
     echo "Locking $path..." 1>&2
     eval exec "$fid<>" $path
-    if ! flock --timeout 2 $fid; then 
+    if ! flock --timeout 2 $fid; then
         echo Could not lock "$path" - stopping 1>&2
         exit 017
     fi
@@ -47,12 +47,15 @@ while true; do
         -o) shift; stdout="$1"; shift;;
         -e) shift; stderr="$1"; shift;;
         --*) args+=("$1"); shift;;
-        *) break 2;;    
+        *) break 2;;
     esac
 done
 
 echo "Starting $@ ${args[@]} > $stdout" >&2
-(eval "$@" "${args[@]}"; echo $? > "$XPM_SLURM_DIR/jobs/$$.status") > $stdout 2> $stderr & 
+(
+    eval "$@" "${args[@]}"
+    echo $? > "$XPM_SLURM_DIR/jobs/$$.status"
+) > $stdout 2> $stderr &
 JOBID="$$"
 date > "$XPM_SLURM_DIR/jobs/$JOBID.start"
 disown

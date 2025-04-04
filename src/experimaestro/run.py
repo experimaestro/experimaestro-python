@@ -140,10 +140,10 @@ class TaskRunner:
                 run(workdir / "params.json")
 
                 # ... remove the handlers
-                logger.info("Task ended successfully")
                 remove_signal_handlers(remove_cleanup=False)
 
                 # Everything went OK
+                logger.info("Task ended successfully")
                 sys.exit(0)
         except Exception:
             logger.exception("Got exception while running")
