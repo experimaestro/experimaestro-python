@@ -15,7 +15,7 @@ from watchdog.events import FileSystemEventHandler
 from experimaestro.ipc import ipcom
 from experimaestro.utils import logger
 
-from .base import Job
+from .base import Job, experiment
 
 if TYPE_CHECKING:
     from experimaestro.core.objects import WatchedOutput
@@ -132,11 +132,12 @@ class TaskOutputs(FileSystemEventHandler):
 
 
 class TaskOutputsWorker(threading.Thread):
-    """This worker process dynamic output queue for an experiment"""
+    """This worker process dynamic output queue for one experiment"""
 
-    def __init__(self):
+    def __init__(self, xp: experiment):
         super().__init__(name="task outputs worker")
         self.queue = queue.Queue()
+        self.xp = xp
 
     def watch_output(self, watched: "WatchedOutput"):
         """Watch an output
@@ -158,14 +159,14 @@ class TaskOutputsWorker(threading.Thread):
     def run(self):
         logging.debug("Starting output listener queue")
         while True:
+            # Get the next element in the queue
             element = self.queue.get()
-            logging.debug("Got one event: %s", element)
-
             if element is None:
                 # end of processing
                 break
 
             # Call all the listeners
+            logging.debug("Got one event: %s", element)
             watcher, event = element
             for listener in watcher.listeners:
                 try:

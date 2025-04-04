@@ -482,7 +482,7 @@ class Scheduler:
         self.jobs: Dict[str, "Job"] = {}
 
         # List of jobs
-        self.waitingjobs = set()
+        self.waitingjobs: Set[Job] = set()
 
         # Listeners
         self.listeners: Set[Listener] = set()
@@ -550,8 +550,6 @@ class Scheduler:
         """Main scheduler function: submit a job, run it (if needed), and returns
         the status code
         """
-        from .dynamic_outputs import WatchedOutputsMonitor
-
         logger.info("Submitting job %s", job)
         job._readyEvent = asyncio.Event()
         job.submittime = time.time()
@@ -611,8 +609,7 @@ class Scheduler:
 
             # And now, we wait...
             logger.info("Got a process for job %s - waiting to complete", job)
-            with WatchedOutputsMonitor(self, job):
-                code = await process.aio_code()
+            code = await process.aio_code()
             logger.info("Job %s completed with code %s", job, code)
             job.state = JobState.DONE if code == 0 else JobState.ERROR
 
@@ -628,8 +625,7 @@ class Scheduler:
 
             if job.state == JobState.READY:
                 try:
-                    with WatchedOutputsMonitor(self, job):
-                        state = await self.aio_start(job)
+                    state = await self.aio_start(job)
                 except Exception:
                     logger.exception("Got an exception while starting the job")
                     raise
