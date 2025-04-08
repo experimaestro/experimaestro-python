@@ -36,14 +36,14 @@ requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.9"
 click = ">=8"
 omegaconf = "^2.3"
 typing-extensions = {version = ">=4.2", markers = "python_version < \"3.12\""}
 attrs = "^23.1.0"
 fasteners = "^0.19"
 pyyaml = "^6.0.1"
-psutil = "^5.9.5"
+psutil = ">=7"
 pytools = "^2023.1.1"
 tqdm = "^4.66.1"
 docstring-parser = "^0.15"
@@ -120,7 +120,7 @@ warn_unused_ignores = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "1.6.2"
+version = "1.7.0rc0"
 changelog_start_rev = "0.15.0"
 tag_format = "v$version"
 update_changelog_on_bump = true

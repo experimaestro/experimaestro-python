@@ -1,3 +1,16 @@
+## v1.7.0rc0 (2025-04-08)
+
+### Feat
+
+- dynamic outputs and field factory
+
+### Fix
+
+- npm audit
+- removed temporarly dynamic output
+- wheel includes server data files
+- launchers.py is a resource
+
 ## v1.6.2 (2025-01-24)
 
 ### Fix
