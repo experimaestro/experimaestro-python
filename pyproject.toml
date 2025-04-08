@@ -29,8 +29,15 @@ enable = true
 vcs = "git"
 style = "semver"
 dirty = true
-format-jinja = "{% if distance == 0 %}{{ base }}{% else %}{{ base }}+{{ distance }}.{{ commit }}{% if dirty %}.dirty{% endif %}{% endif %}"
-
+format-jinja = """
+    {%- if distance == 0 -%}
+        {{ serialize_semver(base, stage) }}
+    {%- elif revision is not none -%}
+        {{ serialize_pep440(base, stage, revision + 1, dev=distance, metadata=[commit]) }}
+    {%- else -%}
+        {{ serialize_pep440(bump_version(base), stage, revision, dev=distance, metadata=[commit]) }}
+    {%- endif -%}
+"""
 [build-system]
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
@@ -120,7 +127,7 @@ warn_unused_ignores = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "1.7.0rc4"
+version = "1.7.0rc0"
 changelog_start_rev = "0.15.0"
 tag_format = "v$version"
 update_changelog_on_bump = true
