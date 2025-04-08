@@ -1,5 +1,6 @@
 # Configuration registers
 
+from contextlib import contextmanager
 from typing import ClassVar, Dict, Optional, Set, Type, Union
 
 from pathlib import Path
@@ -34,6 +35,16 @@ def load_yaml(schema, path: Path):
         return OmegaConf.to_container(
             OmegaConf.merge(cfg, schema), structured_config_mode=SCMode.INSTANTIATE
         )
+
+
+@contextmanager
+def ensure_enter(fp):
+    """Behaves as a resource, whether it is one or not"""
+    if hasattr(fp, "__enter__"):
+        with fp as _fp:
+            yield _fp
+    else:
+        yield fp
 
 
 class LauncherRegistry:
@@ -78,7 +89,7 @@ class LauncherRegistry:
 
             from importlib import util
 
-            with launchers_py.__fspath__() as fp:
+            with ensure_enter(launchers_py.__fspath__()) as fp:
                 spec = util.spec_from_file_location("xpm_launchers_conf", fp)
                 module = util.module_from_spec(spec)
                 spec.loader.exec_module(module)
