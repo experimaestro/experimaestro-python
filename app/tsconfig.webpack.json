@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "module": "system",
+    "moduleResolution": "nodenext",
     "target": "es5",
     "esModuleInterop": true
   }

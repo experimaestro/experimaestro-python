@@ -33,6 +33,7 @@ jobs:
       - name: Build web app
         working-directory: ./app
         run: |
+          npm --version
           npm install --no-save
           npm run build
 
