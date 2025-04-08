@@ -78,7 +78,6 @@ class Reporter(threading.Thread):
 
         self.progress_threshold = 0.01
         self.cv = threading.Condition()
-        self.start()
 
     def stop(self):
         self.stopping = True
@@ -222,6 +221,7 @@ class Reporter(threading.Thread):
             taskpath = TaskEnv.instance().taskpath
             assert taskpath is not None, "Task path is not defined"
             Reporter.INSTANCE = Reporter(taskpath)
+            Reporter.INSTANCE.start()
         return Reporter.INSTANCE
 
 
