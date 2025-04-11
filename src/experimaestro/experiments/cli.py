@@ -194,7 +194,11 @@ def experiments_cli(  # noqa: C901
             xp_file = Path(xp_file)
             if not python_path:
                 python_path.append(xp_file.parent)
-            logging.info("Using python path: %s", ", ".join(str(s) for s in python_path))
+            logging.info(
+                "Using python path: %s", ", ".join(str(s) for s in python_path)
+            )
+    else:
+        xp_file = Path(xp_file)
 
     assert (
         module_name or xp_file
@@ -269,11 +273,11 @@ def experiments_cli(  # noqa: C901
 
     # Define the workspace
     ws_env = find_workspace(workdir=workdir, workspace=workspace)
-    
+
     workdir = ws_env.path
 
     logging.info("Using working directory %s", str(workdir.resolve()))
-    
+
     # --- Runs the experiment
     with experiment(
         ws_env, configuration.id, host=host, port=port, run_mode=run_mode
