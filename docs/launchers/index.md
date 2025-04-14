@@ -47,6 +47,7 @@ from experimaestro.launcherfinder import (
     CPUSpecification,
 )
 from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
+from experimaestro.launchers.direct import DirectLauncher
 from experimaestro.connectors.local import LocalConnector
 
 
@@ -55,7 +56,7 @@ def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
 
     if match := requirements.match(HostSpecification(cuda=[])):
         # No GPU: run directly
-        return LocalConnector.instance()
+        return DirectLauncher(connector=LocalConnector.instance())
 
     if match := requirements.match(
         HostSpecification(
