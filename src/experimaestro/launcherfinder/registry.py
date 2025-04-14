@@ -8,7 +8,6 @@ import typing
 from omegaconf import DictConfig, OmegaConf, SCMode
 import pkg_resources
 from experimaestro.utils import logger
-
 from .base import ConnectorConfiguration, TokenConfiguration
 from .specs import HostRequirement
 
@@ -158,6 +157,8 @@ class LauncherRegistry:
                 specs.append(spec)
 
         # Use launcher function
+        from experimaestro.launchers import Launcher
+
         if self.find_launcher_fn is not None:
             for spec in specs:
                 if launcher := self.find_launcher_fn(spec, tags):
