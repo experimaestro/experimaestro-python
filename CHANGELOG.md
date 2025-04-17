@@ -1,3 +1,20 @@
+## v1.7.0rc2 (2025-04-17)
+
+### Feat
+
+- use srun when launching slurm tasks
+
+### Fix
+
+- import Launcher
+- assert that the returned launcher is a launcher
+
+## v1.7.0rc2 (2025-04-11)
+
+### Fix
+
+- xp_file is changed into a Path if command line
+
 ## v1.7.0rc1 (2025-04-17)
 
 ### Feat
