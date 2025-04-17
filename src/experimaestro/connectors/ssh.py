@@ -200,7 +200,7 @@ class SshProcessBuilder(ProcessBuilder):
         super().__init__()
         self.connector = connector
 
-    def start(self):
+    def start(self, task_mode: bool = False):
         """Start the process"""
 
         trans = str.maketrans({'"': r"\"", "$": r"\$"})

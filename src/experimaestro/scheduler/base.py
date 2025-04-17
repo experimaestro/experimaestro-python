@@ -740,6 +740,7 @@ class Scheduler:
                     code = await process.aio_code()
                     logger.debug("Got return code %s for %s", code, job)
 
+                    # Check the file if there is no return code
                     if code is None:
                         # Case where we cannot retrieve the code right away
                         if job.donepath.is_file():
@@ -916,6 +917,7 @@ class experiment:
 
         async def awaitcompletion():
             assert self.central is not None
+            logger.debug("Waiting to exit scheduler...")
             async with self.central.exitCondition:
                 while True:
                     if self.exitMode:
@@ -1011,6 +1013,7 @@ class experiment:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        logger.debug("Exiting scheduler context")
         # If no exception and normal run mode, remove old "jobs"
         if self.workspace.run_mode == RunMode.NORMAL:
             if exc_type is None and self.jobsbakpath.is_dir():
@@ -1051,6 +1054,7 @@ class experiment:
             # Put back old experiment as current one
             experiment.CURRENT = self.old_experiment
             if self.server:
+                logger.info("Stopping web server")
                 self.server.stop()
 
     async def update_task_output_count(self, delta: int):

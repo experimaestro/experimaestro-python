@@ -154,8 +154,11 @@ class ProcessBuilder:
         self.environ: Mapping[str, str] = {}
         self.command = []
 
-    def start(self) -> Process:
-        """Start the process"""
+    def start(self, task_mode: bool = False) -> Process:
+        """Start the process
+
+        :param task_mode: True if the process is a job script
+        """
         raise NotImplementedError("Method not implemented in %s" % self.__class__)
 
 

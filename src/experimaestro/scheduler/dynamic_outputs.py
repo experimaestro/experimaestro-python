@@ -135,7 +135,7 @@ class TaskOutputsWorker(threading.Thread):
     """This worker process dynamic output queue for one experiment"""
 
     def __init__(self, xp: experiment):
-        super().__init__(name="task outputs worker")
+        super().__init__(name="task outputs worker", daemon=True)
         self.queue = queue.Queue()
         self.xp = xp
 

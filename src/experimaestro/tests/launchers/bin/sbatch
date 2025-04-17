@@ -2,8 +2,11 @@
 
 # slurm test suite
 
+pwd 1>&2
+CURDIR="$(realpath "$(dirname "$0")"/..)"
+
 # Where we store the jobs
-XPM_SLURM_DIR="$(realpath "$(dirname "$0")"/..)/slurm"
+XPM_SLURM_DIR="${CURDIR}/slurm"
 if ! test -d "$XPM_SLURM_DIR"; then
     echo "Directory $XPM_SLURM_DIR does not exist" 1>&2
     exit 1
@@ -51,8 +54,19 @@ while true; do
     esac
 done
 
-echo "Starting $@ ${args[@]} > $stdout" >&2
+chdir=$(pwd)
+while IFS= read -r line; do
+    case "$line" in
+        "#SBATCH --output="*)stdout=${line#*#SBATCH --output=};;
+        "#SBATCH --error="*) stderr=${line#*#SBATCH --error=};;
+        "#SBATCH --chdir="*) chdir=${line#*#SBATCH --chdir=};;
+    esac
+done < "$1"
+
+echo "Starting $@ ${args[@]} > $stdout 2> $stderr" >&2
 (
+    if test "$chdir"; then cd "$chdir"; fi
+    export PATH="${CURDIR}/bin:$PATH"
     eval "$@" "${args[@]}"
     echo $? > "$XPM_SLURM_DIR/jobs/$$.status"
 ) > $stdout 2> $stderr &

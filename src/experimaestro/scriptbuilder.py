@@ -51,6 +51,8 @@ class PythonScriptBuilder:
         self.lockfiles: List[Path] = []
         self.notificationURL: Optional[str] = None
         self.command: Optional[AbstractCommand] = None
+
+        # This is used to serialize the full process identifier on disk
         self.processtype = "local"
 
     def write(self, job: CommandLineJob):
@@ -63,7 +65,7 @@ class PythonScriptBuilder:
             job {CommandLineJob} -- [description]
 
         Returns:
-            [type] -- [description]
+            str -- The script path on disk
         """
         assert isinstance(
             job, CommandLineJob

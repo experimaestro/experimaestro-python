@@ -276,12 +276,6 @@ class CommandLineJob(Job):
 
         scriptbuilder = self.launcher.scriptbuilder()
         self.path.mkdir(parents=True, exist_ok=True)
-        donepath = self.donepath
-
-        # Check again if done (now that we have locked)
-        if not overwrite and donepath.is_file():
-            logger.info("Job %s is already done", self)
-            return JobState.DONE
 
         # Now we can write the script
         scriptbuilder.lockfiles.append(self.lockpath)
@@ -293,15 +287,17 @@ class CommandLineJob(Job):
         if self._process:
             return self._process
 
+        # Prepare the files to be run
         scriptPath = self.prepare()
 
+        # OK, now starts the process
         logger.info("Starting job %s", self.jobpath)
         processbuilder = self.launcher.processbuilder()
         processbuilder.environ = self.environ
         processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
         processbuilder.stderr = Redirect.file(self.stderr)
         processbuilder.stdout = Redirect.file(self.stdout)
-        self._process = processbuilder.start()
+        self._process = processbuilder.start(True)
 
         with self.pidpath.open("w") as fp:
             json.dump(self._process.tospec(), fp)

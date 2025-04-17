@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Just run the command
+
+eval "$@"

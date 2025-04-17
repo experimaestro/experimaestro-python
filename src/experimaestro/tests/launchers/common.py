@@ -80,10 +80,14 @@ def takeback(launcher, datapath, txp1, txp2):
     waiting = datapath / "waiting"
 
     with txp1:
-        WaitUntilTouched(touching=touching, waiting=waiting).submit(launcher=launcher)
+        task: WaitUntilTouched = WaitUntilTouched(
+            touching=touching, waiting=waiting
+        ).submit(launcher=launcher)
 
         logger.debug("Waiting for task to create 'touching' file")
         while not touching.is_file():
+            if task.__xpm__.job.state.finished():
+                raise Exception("Job has finished... too early")
             time.sleep(0.01)
 
         with txp2:

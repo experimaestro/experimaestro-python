@@ -1,5 +1,4 @@
-"""All classes related to localhost management
-"""
+"""All classes related to localhost management"""
 
 import subprocess
 from typing import Optional
@@ -107,8 +106,11 @@ def getstream(redirect: Redirect, write: bool):
 
 
 class LocalProcessBuilder(ProcessBuilder):
-    def start(self):
-        """Start the process"""
+    def start(self, task_mode=False):
+        """Start the process
+
+        :param task_mode: just ignored
+        """
         stdin = getstream(self.stdin, False)
         stdout = getstream(self.stdout, True)
         stderr = getstream(self.stderr, True)
@@ -199,7 +201,9 @@ class LocalConnector(Connector):
         return LocalProcessBuilder()
 
     def resolve(self, path: Path, basepath: Path = None) -> str:
-        assert isinstance(path, PosixPath) or isinstance(path, WindowsPath)
+        assert isinstance(path, PosixPath) or isinstance(
+            path, WindowsPath
+        ), f"Unrecognized path {type(path)}"
         if not basepath:
             return str(path.absolute())
         try:

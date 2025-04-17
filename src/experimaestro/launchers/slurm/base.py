@@ -11,6 +11,7 @@ from typing import (
 )
 from experimaestro.connectors.local import LocalConnector
 import re
+from shlex import quote as shquote
 from contextlib import contextmanager
 from dataclasses import dataclass
 from experimaestro.launcherfinder.registry import (
@@ -235,15 +236,15 @@ class SlurmProcessBuilder(ProcessBuilder):
         super().__init__()
         self.launcher = launcher
 
-    def start(self) -> BatchSlurmProcess:
+    def start(self, task_mode: bool = False) -> BatchSlurmProcess:
         """Start the process"""
         builder = self.launcher.connector.processbuilder()
-        builder.workingDirectory = self.workingDirectory
         builder.environ = self.launcher.launcherenv
         builder.detach = False
 
         if not self.detach:
             # Simplest case: we wait for the output
+            builder.workingDirectory = self.workingDirectory
             builder.command = [f"{self.launcher.binpath}/srun"]
             builder.command.extend(self.launcher.options.args())
             builder.command.extend(self.command)
@@ -255,11 +256,17 @@ class SlurmProcessBuilder(ProcessBuilder):
             return builder.start()
 
         builder.command = [f"{self.launcher.binpath}/sbatch", "--parsable"]
-        builder.command.extend(self.launcher.options.args())
 
-        addstream(builder.command, "-e", self.stderr)
-        addstream(builder.command, "-o", self.stdout)
-        addstream(builder.command, "-i", self.stdin)
+        if not task_mode:
+            # Use command line parameters when not running a task
+            builder.command.extend(self.launcher.options.args())
+
+            if self.workingDirectory:
+                workdir = self.launcher.connector.resolve(self.workingDirectory)
+                builder.command.append(f"--chdir={workdir}")
+            addstream(builder.command, "-e", self.stderr)
+            addstream(builder.command, "-o", self.stdout)
+            addstream(builder.command, "-i", self.stdin)
 
         builder.command.extend(self.command)
         logger.info(
@@ -427,12 +434,43 @@ class SlurmLauncher(Launcher):
 
         We assume *nix, but should be changed to PythonScriptBuilder when working
         """
-        builder = PythonScriptBuilder()
-        builder.processtype = "slurm"
-        return builder
+        return SlurmScriptBuilder(self)
 
     def processbuilder(self) -> SlurmProcessBuilder:
         """Returns the process builder for this launcher
 
         By default, returns the associated connector builder"""
         return SlurmProcessBuilder(self)
+
+
+class SlurmScriptBuilder(PythonScriptBuilder):
+    def __init__(self, launcher: SlurmLauncher, pythonpath=None):
+        super().__init__(pythonpath)
+        self.launcher = launcher
+        self.processtype = "slurm"
+
+    def write(self, job):
+        py_path = super().write(job)
+        main_path = py_path.parent
+
+        def relpath(path: Path):
+            return shquote(self.launcher.connector.resolve(path, main_path))
+
+        # Writes the sbatch shell script containing all the options
+        sh_path = job.jobpath / ("%s.sh" % job.name)
+        with sh_path.open("wt") as out:
+            out.write("""#!/bin/sh\n\n""")
+
+            workdir = self.launcher.connector.resolve(main_path)
+            out.write(f"#SBATCH --chdir={shquote(workdir)}\n")
+            out.write(f"""#SBATCH --error={relpath(job.stderr)}\n""")
+            out.write(f"""#SBATCH --output={relpath(job.stdout)}\n""")
+
+            for arg in self.launcher.options.args():
+                out.write(f"""#SBATCH {arg}\n""")
+
+            # We finish by the call to srun
+            out.write(f"""\nsrun ./{relpath(py_path)}\n\n""")
+
+        self.launcher.connector.setExecutable(sh_path, True)
+        return sh_path
