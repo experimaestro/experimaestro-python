@@ -124,5 +124,5 @@ warn_unused_ignores = true
 name = "cz_conventional_commits"
 version = "1.7.0rc3"
 changelog_start_rev = "0.15.0"
-tag_format = "v$version"
+tag_format = "v$major.$minor.$patch$prerelease"
 update_changelog_on_bump = true
