@@ -63,9 +63,9 @@ while IFS= read -r line; do
     esac
 done < "$1"
 
+cd "$chdir"
 echo "Starting $@ ${args[@]} > $stdout 2> $stderr" >&2
 (
-    if test "$chdir"; then cd "$chdir"; fi
     export PATH="${CURDIR}/bin:$PATH"
     eval "$@" "${args[@]}"
     echo $? > "$XPM_SLURM_DIR/jobs/$$.status"

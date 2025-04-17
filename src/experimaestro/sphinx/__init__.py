@@ -12,11 +12,8 @@ from sphinx import addnodes
 from sphinx.ext.autodoc import ClassDocumenter, Documenter, restify
 from sphinx.locale import _
 from sphinx.util import inspect, logging
-from sphinx.domains.python import (
-    PyClasslike,
-    PyAttribute,
-    directives,  # noqa: F401
-)
+from sphinx.domains.python import PyClasslike, PyAttribute, directives
+from sphinx.domains.python import PyObject  # noqa: F401
 from sphinx.addnodes import desc_signature
 from sphinx.util.typing import OptionSpec
 from docutils.statemachine import StringList
