@@ -1,4 +1,3 @@
-import imp
 import importlib
 import inspect
 import json
@@ -68,6 +67,12 @@ class ConfigurationLoader:
 
         with yaml_file.open("rt") as fp:
             _data = yaml.full_load(fp)
+
+        if "file" in _data:
+            path = Path(_data["file"])
+            if not path.is_absolute():
+                _data["file"] = str((yaml_file.parent / path).resolve())
+
         if parent := _data.get("parent", None):
             self.load(yaml_file.parent / parent)
 
@@ -193,7 +198,7 @@ def experiments_cli(  # noqa: C901
             ), "Module name and experiment file are mutually exclusive options"
             xp_file = Path(xp_file)
             if not python_path:
-                python_path.append(xp_file.parent)
+                python_path.append(xp_file.parent.absolute())
             logging.info(
                 "Using python path: %s", ", ".join(str(s) for s in python_path)
             )
@@ -220,14 +225,12 @@ def experiments_cli(  # noqa: C901
         if not xp_file.exists() and xp_file.suffix != ".py":
             xp_file = xp_file.with_suffix(".py")
         xp_file: Path = Path(yaml_file).parent / xp_file
-        with open(xp_file) as src:
-            module_name = xp_file.with_suffix("").name
-            mod = imp.load_module(
-                module_name,
-                src,
-                str(xp_file.absolute()),
-                (".py", "r", imp.PY_SOURCE),
-            )
+        module_name = xp_file.with_suffix("").name
+        spec = importlib.util.spec_from_file_location(
+            module_name, str(xp_file.absolute())
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
     else:
         # Module
         try:
