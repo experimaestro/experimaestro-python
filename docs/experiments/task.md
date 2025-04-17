@@ -1,6 +1,6 @@
 # Tasks
 
-A task is a special configuration that can be:
+A task is a special [configuration](./config.md) that can be:
 
 1. Submitted to the task scheduler using `submit` (preparation of the experiment)
 1. Executed with the method `execute` (running a specific task within the experiment)
@@ -22,9 +22,8 @@ A task is a special configuration that can be:
 
 ## Task lifecycle
 
-During task execution, the working directory
-is set to be the task directory, and
-some special variables are defined:
+During task execution, the working directory is set to be the task directory,
+and some special variables are defined:
 
 - tags can be accessed as a dictionary using `self.__tags__`
 - task directory can is `self.__taskdir__`
@@ -123,6 +122,27 @@ class Terms(Config):
 
         np.save(path, weights)
         return terms
-
-
 ```
+
+# Task directory
+
+When the task, submitted to the scheduler with `.submit(...)`,  is run,
+
+- `[EXPERIMENT_FOLDER]` is the main experiment folder
+- `[NAME]` is task name (by default, the python class name in lowercase)
+- `[QUALIFIED_NAME]` is the qualified task name (by default, the python
+  qualified name in lower case)
+- `[JOB_ID]` is the [unique identifier](./config.md#configuration-identifiers)
+
+
+All the task output should be located in the directory
+`[EXPERIMENT_FOLDER]/jobs/[QUALIFIED_NAME]/[JOB_ID]`
+
+
+Inside this directory, we have
+
+- `.experimaestro`, the folder that stores information about the process
+- `[NAME].py` that contains the code that will be executed (through a cluster
+  scheduler, e.g. slurm, or directly)
+- `[NAME].err` and `[NAME].out` that stores the standard output and error
+  streams

@@ -10,19 +10,16 @@ from docutils import nodes
 from sphinx.application import Sphinx
 from sphinx import addnodes
 from sphinx.ext.autodoc import ClassDocumenter, Documenter, restify
-from sphinx.locale import _, __
+from sphinx.locale import _
 from sphinx.util import inspect, logging
 from sphinx.domains.python import (
     PyClasslike,
     PyAttribute,
-    PyObject,
-    directives,
-    desc_signature,
-    _parse_annotation,
+    directives,  # noqa: F401
 )
+from sphinx.addnodes import desc_signature
 from sphinx.util.typing import OptionSpec
 from docutils.statemachine import StringList
-import logging
 import re
 
 from experimaestro import Config, Task
@@ -97,9 +94,6 @@ class ConfigDocumenter(ClassDocumenter):
         can_document = inspect.isclass(member) and issubclass(member, Config)
         return can_document
 
-    def add_directive_header(self, sig: str) -> None:
-        super().add_directive_header(sig)
-
     def get_object_members(self, want_all: bool):  # -> Tuple[bool, ObjectMembers]:
         r = super().get_object_members(want_all)
         return r
@@ -157,7 +151,7 @@ class ConfigDocumenter(ClassDocumenter):
 
         # Our specific code
         if issubclass(self.object, Task):
-            self.add_line(f"   :task:", sourcename)
+            self.add_line("   :task:", sourcename)
 
         # add inheritance info, if wanted
         if not self.doc_as_attr and self.options.show_inheritance:
@@ -196,7 +190,6 @@ class ConfigDocumenter(ClassDocumenter):
     def add_content(
         self, more_content: Optional[StringList], no_docstring: bool = False
     ) -> None:
-
         xpminfo = getxpminfo(self.object)
         source_name = self.get_sourcename()
 
@@ -214,9 +207,9 @@ class ConfigDocumenter(ClassDocumenter):
                     source_name,
                 )
             if argument.generator:
-                self.add_line(f"   :generated:", source_name)
+                self.add_line("   :generated:", source_name)
             elif argument.constant:
-                self.add_line(f"   :constant:", source_name)
+                self.add_line("   :constant:", source_name)
 
             # self.add_line("", source_name)
             if argument.help:
