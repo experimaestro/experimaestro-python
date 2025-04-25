@@ -51,6 +51,7 @@ By default, the task configuration is marked as a dependency as follows:
 For more complex cases, one can redefine the `task_outputs` method
 and explicitly declare the dependencies.
 
+
 !!! example "Task outputs"
 
     In this example, we sample from a dataset composed of composed of queries
@@ -75,8 +76,80 @@ and explicitly declare the dependencies.
                     topics=dep(Topics(path=self.topics)),
                     documents=self.dataset.documents,
                 ))
-
     ```
+
+## Common use case
+
+A common use case is when we want to use a `Path` which contains the output of
+the task A. Given how experimaestro works, just using it in a dependant task B
+**will not work** since the ID will be the same whatever the task A
+configuration. There are two ways to do so:
+
+1. Wrap the task A output into a configuration object
+2. Using initialization tasks
+
+
+### Wrapping the task output
+
+!!! example "Wrapping a task output"
+    ```py
+    from experimaestro import Config, Task, Param, Meta
+
+    class TaskA_Output(Config):
+        path: Meta[Path]
+
+    class TaskA(Task):
+        def task_outputs(self, dep) -> Task:
+            return dep(MyTaskOutput(path=self.jobpath))
+
+    class TaskB(Task):
+        task_a: Param[TaskA_Output]
+    ```
+
+### Initialization tasks
+
+The second solution is particularly suited when wanting to restore an object
+state from disk, and we want to separate the loading mechanism from the
+configuration logic; in that case, `LightweightTask` (a `Config` which must be
+subclassed) can be used.
+
+
+```py3
+    from experimaestro import Config, Param, Task, Meta, LightweightTask
+
+    class Model(Config):
+        ...
+
+    class ModelLoader(LightweightTask):
+        path: Meta[Path]
+        model: Param[Model]
+
+        def execute(self):
+            ...
+
+    def Evaluate(Task):
+        model: Param[Model]
+
+        def execute(self):
+            ...
+
+    class ModelLearner(Task):
+        model: Param[Model]
+
+        def task_outputs(self, dep):
+            return dep(ModelLoader(model=model, path=path))
+
+        def execute(self):
+            ...
+
+
+    # We learn the model...
+    model_loader = learner.submit()
+
+    # ... and evaluate it, using the learned parameters
+    Evaluate(model=model).submit(init_tasks=[model_loader])
+```
+
 
 
 ## Submit hooks
