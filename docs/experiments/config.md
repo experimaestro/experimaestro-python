@@ -217,6 +217,33 @@ class MyConfig(Config):
 - `type` is the type of the argument (more details below)
 - `value` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_. This allows to add new parameters without changing the signature of past experiments (if the configuration is equivalent with the default value of course, otherwise do not use a default value!).
 
+### Default Values 
+
+Adding a new parameter to a `Config` with a default value will not change the original `id`.
+
+For instance, if the original class is:
+
+```python
+class myConfig(Config):
+    a: Param[int]
+
+obj = myConfig(a = 2)
+id_old = obj.id
+```
+
+Then when using the deflaut value for parameter b will yield an object with the same identifier.
+```python
+class myConfig(Config):
+    a: Param[int]
+    b: Param[int] = 4
+
+obj = myConfig(a = 2)
+new_id = obj.id
+
+>>> new_id == old_id
+>>> True
+```
+
 ### Constants
 
 Constants are special parameters that cannot be modified. They are useful to note that the
