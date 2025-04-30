@@ -228,7 +228,7 @@ class myConfig(Config):
     a: Param[int]
 
 obj = myConfig(a = 2)
-id_old = obj.id
+id_old = obj.identifier()
 ```
 
 Then when using the deflaut value for parameter b will yield an object with the same identifier.
@@ -238,7 +238,7 @@ class myConfig(Config):
     b: Param[int] = 4
 
 obj = myConfig(a = 2)
-new_id = obj.id
+new_id = obj.identifier()
 
 >>> new_id == old_id
 >>> True
