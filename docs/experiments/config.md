@@ -224,21 +224,21 @@ Adding a new parameter to a `Config` with a default value will not change the or
 For instance, if the original class is:
 
 ```python
-class myConfig(Config):
+class MyConfig(Config):
     a: Param[int]
 
-obj = myConfig(a = 2)
-id_old = obj.identifier()
+obj = MyConfig(a = 2)
+id_old = obj.__identifier__()
 ```
 
-Then when using the deflaut value for parameter b will yield an object with the same identifier.
+Then when using the default value for parameter b will yield an object with the same identifier.
 ```python
 class myConfig(Config):
     a: Param[int]
     b: Param[int] = 4
 
 obj = myConfig(a = 2)
-new_id = obj.identifier()
+new_id = obj.__identifier__()
 
 >>> new_id == old_id
 >>> True
