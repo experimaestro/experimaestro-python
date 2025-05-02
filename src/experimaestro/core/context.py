@@ -1,22 +1,16 @@
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, UnsupportedOperation
 import shutil
 from typing import List, Optional, Protocol, Set, Union
 import os
-import sys
-
-has_hardlink_to = sys.version_info.major == 3 and sys.version_info.minor >= 10
 
 
 def shallow_copy(src_path: Path, dest_path: Path):
     """Copy a directory or file, trying to use hard links if possible"""
     if src_path.is_file():
         try:
-            if has_hardlink_to:
-                dest_path.hardlink_to(src_path)
-            else:
-                dest_path.link_to(src_path)
-        except OSError:
+            dest_path.hardlink_to(src_path)
+        except (NotImplementedError, UnsupportedOperation, OSError):
             shutil.copy(src_path, dest_path)
     else:
         if dest_path.exists():
