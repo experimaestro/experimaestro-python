@@ -59,6 +59,7 @@ class ConfigurationLoader:
     def __init__(self):
         self.yamls = []
         self.python_path = set()
+        self.yaml_module_file: None | Path = None
 
     def load(self, yaml_file: Path):
         """Loads a YAML file, and parents one if they exist"""
@@ -72,6 +73,10 @@ class ConfigurationLoader:
             path = Path(_data["file"])
             if not path.is_absolute():
                 _data["file"] = str((yaml_file.parent / path).resolve())
+
+        if "module" in _data:
+            # Keeps track of the YAML file where the module was defined
+            self.yaml_module_file = yaml_file
 
         if parent := _data.get("parent", None):
             self.load(yaml_file.parent / parent)
@@ -121,7 +126,10 @@ class ConfigurationLoader:
     help="Port for monitoring (can be defined in the settings.yaml file)",
 )
 @click.option(
-    "--file", "xp_file", help="The file containing the main experimental code"
+    "--file",
+    "xp_file",
+    type=Path,
+    help="The file containing the main experimental code",
 )
 @click.option(
     "--module-name", "module_name", help="Module containing the experimental code"
@@ -202,8 +210,6 @@ def experiments_cli(  # noqa: C901
             logging.info(
                 "Using python path: %s", ", ".join(str(s) for s in python_path)
             )
-    else:
-        xp_file = Path(xp_file)
 
     assert (
         module_name or xp_file
@@ -220,6 +226,19 @@ def experiments_cli(  # noqa: C901
     # Modifies the Python path
     for path in python_path:
         sys.path.append(str(path))
+
+    # --- Adds automatically the experiment module if not found
+    if module_name and conf_loader.yaml_module_file:
+        try:
+            importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            # Try to setup a path
+            path = conf_loader.yaml_module_file.resolve()
+            for _ in range(len(module_name.split("."))):
+                path = path.parent
+
+            logging.info("Appending %s to python path", path)
+            sys.path.append(str(path))
 
     if xp_file:
         if not xp_file.exists() and xp_file.suffix != ".py":
@@ -243,17 +262,20 @@ def experiments_cli(  # noqa: C901
 
     # --- ... and runs it
     if helper is None:
-        raise ValueError(f"Could not find run function in {xp_file}")
+        raise click.ClickException(
+            f"Could not find run function in {xp_file if xp_file else module_name}"
+        )
 
     if not isinstance(helper, ExperimentHelper):
         helper = ExperimentHelper(helper)
 
     parameters = inspect.signature(helper.callable).parameters
     list_parameters = list(parameters.values())
-    assert len(list_parameters) == 2, (
-        "Callable function should only "
-        f"have two arguments (got {len(list_parameters)})"
-    )
+    if len(list_parameters) != 2:
+        raise click.ClickException(
+            f"run in {xp_file if xp_file else module_name} function should only "
+            f"have two arguments (got {len(list_parameters)}), "
+        )
 
     schema = list_parameters[1].annotation
     omegaconf_schema = OmegaConf.structured(schema())
@@ -263,7 +285,7 @@ def experiments_cli(  # noqa: C901
             configuration = OmegaConf.merge(omegaconf_schema, configuration)
         except omegaconf.errors.ConfigKeyError as e:
             cprint(f"Error in configuration:\n\n{e}", "red", file=sys.stderr)
-            sys.exit(1)
+            raise click.ClickException("Error in configuration")
 
     if show:
         print(json.dumps(OmegaConf.to_container(configuration)))  # noqa: T201
