@@ -8,14 +8,7 @@ if sys.version_info.major == 3:
     else:
         from typing import _collect_parameters
 
-    if sys.version_info.minor < 9:
-        from typing_extensions import (
-            _AnnotatedAlias as AnnotatedAlias,
-            get_args,
-            get_origin,
-        )
-    else:
-        from typing import _AnnotatedAlias as AnnotatedAlias, get_args, get_origin
+    from typing import _AnnotatedAlias as AnnotatedAlias, get_args, get_origin
 
 GenericAlias = typing._GenericAlias
 
