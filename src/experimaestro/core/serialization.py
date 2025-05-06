@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from experimaestro.core.context import (
     SerializationContext,
     SerializedPath,
@@ -41,17 +41,20 @@ def state_dict(context: SerializationContext, obj: Any):
     return {"objects": objects, "data": data}
 
 
-def save(obj: Any, save_directory: Path):
+def save_definition(obj: Any, context: SerializationContext, path: Path):
+    data = state_dict(context, obj)
+    with path.open("wt") as out:
+        json.dump(data, out)
+
+
+def save(obj: Any, save_directory: Optional[Path]):
     """Saves an object into a disk file
 
     :param save_directory: The directory in which the object and its data will
         be saved (by default, the object is saved in "definition.json")
     """
     context = SerializationContext(save_directory=save_directory)
-
-    data = state_dict(context, obj)
-    with (save_directory / "definition.json").open("wt") as out:
-        json.dump(data, out)
+    save_definition(obj, context, save_directory / "definition.json")
 
 
 def get_data_loader(path: Union[str, Path, SerializedPathLoader]):

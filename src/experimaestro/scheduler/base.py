@@ -1057,6 +1057,15 @@ class experiment:
                 logger.info("Stopping web server")
                 self.server.stop()
 
+        if self.workspace.run_mode == RunMode.NORMAL:
+            # Write the state
+            logging.info("Saving the experiment state")
+            from experimaestro.scheduler.state import ExperimentState
+
+            ExperimentState.save(
+                self.workdir / "state.json", self.scheduler.jobs.values()
+            )
+
     async def update_task_output_count(self, delta: int):
         """Change in the number of task outputs to process"""
         async with self.central.exitCondition:

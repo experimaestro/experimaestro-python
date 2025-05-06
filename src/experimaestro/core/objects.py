@@ -1079,7 +1079,7 @@ class ConfigInformation:
         if value is None:
             return None
 
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             return [ConfigInformation._outputjsonvalue(el, context) for el in value]
 
         elif isinstance(value, dict):
@@ -1196,7 +1196,7 @@ class ConfigInformation:
         configurations if necessary"""
         if isinstance(value, Config):
             value.__xpm__.__get_objects__(objects, context)
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             for el in value:
                 ConfigInformation.__collect_objects__(el, objects, context)
         elif isinstance(value, dict):
