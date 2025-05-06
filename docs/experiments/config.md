@@ -217,9 +217,12 @@ class MyConfig(Config):
 - `type` is the type of the argument (more details below)
 - `value` default value of the argument (if any). _If the value equals to the default, the argument will not be included in the signature computation_. This allows to add new parameters without changing the signature of past experiments (if the configuration is equivalent with the default value of course, otherwise do not use a default value!).
 
-### Default Values 
+### Default Values
 
 Adding a new parameter to a `Config` with a default value will not change the original `id`.
+
+**Why?** The motivation is that with this behavior, you can add experimental parameters
+that were previously hard-coded.
 
 For instance, if the original class is:
 
