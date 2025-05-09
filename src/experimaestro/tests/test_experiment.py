@@ -41,10 +41,10 @@ def test_experiment_history():
             task_a = TaskA().submit()
             TaskB(task_a=task_a, x=tag(1)).submit()
 
-    # Look at the experiment
-    xp = get_experiment("experiment", workdir=workdir)
+        # Look at the experiment
+        xp = get_experiment("experiment", workdir=workdir)
 
-    (task_a_info,) = xp.get_jobs(TaskA)
-    (task_b_info,) = xp.get_jobs(TaskB)
-    assert task_b_info.tags == {"x": 1}
-    assert task_b_info.depends_on == [task_a_info]
+        (task_a_info,) = xp.get_jobs(TaskA)
+        (task_b_info,) = xp.get_jobs(TaskB)
+        assert task_b_info.tags == {"x": 1}
+        assert task_b_info.depends_on == [task_a_info]
