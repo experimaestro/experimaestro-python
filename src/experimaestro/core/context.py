@@ -1,5 +1,10 @@
 from contextlib import contextmanager
-from pathlib import Path, UnsupportedOperation
+from pathlib import Path
+
+try:
+    from pathlib import UnsupportedOperation
+except ImportError:
+    UnsupportedOperation = OSError
 import shutil
 from typing import List, Optional, Protocol, Set, Union
 import os
