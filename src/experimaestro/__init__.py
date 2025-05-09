@@ -55,8 +55,9 @@ from .core.context import SerializationContext
 from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
-from .scheduler.workspace import Workspace, RunMode
 from .scheduler import Scheduler, experiment, FailedExperiment
+from .scheduler.workspace import Workspace, RunMode
+from .scheduler.state import get_experiment
 from .notifications import progress, tqdm
 from .checkers import Choices
 from .xpmutils import DirectoryContext
