@@ -51,3 +51,6 @@ class ConfigurationBase:
 
     description: str = ""
     """Description of the experiment"""
+
+    add_timestamp: bool = False
+    """Adds a timestamp YYYY_MM_DD-HH_MM to the experiment ID"""

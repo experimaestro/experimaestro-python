@@ -1,3 +1,4 @@
+import datetime
 import importlib
 import inspect
 import json
@@ -292,7 +293,7 @@ def experiments_cli(  # noqa: C901
         sys.exit(0)
 
     # Move to an object container
-    configuration = OmegaConf.to_container(
+    xp_configuration: ConfigurationBase = OmegaConf.to_container(
         configuration, structured_config_mode=SCMode.INSTANTIATE
     )
 
@@ -301,11 +302,22 @@ def experiments_cli(  # noqa: C901
 
     workdir = ws_env.path
 
-    logging.info("Using working directory %s", str(workdir.resolve()))
+    # --- Sets up the experiment ID
 
     # --- Runs the experiment
+    if xp_configuration.add_timestamp:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+        experiment_id = f"""{xp_configuration.id}-{timestamp}"""
+    else:
+        experiment_id = xp_configuration.id
+
+    logging.info(
+        "Running experiment %s working directory %s",
+        experiment_id,
+        str(workdir.resolve()),
+    )
     with experiment(
-        ws_env, configuration.id, host=host, port=port, run_mode=run_mode
+        ws_env, experiment_id, host=host, port=port, run_mode=run_mode
     ) as xp:
         # Set up the environment
         # (1) global settings (2) workspace settings and (3) command line settings
@@ -318,7 +330,7 @@ def experiments_cli(  # noqa: C901
         try:
             # Run the experiment
             helper.xp = xp
-            helper.run(list(args), configuration)
+            helper.run(list(args), xp_configuration)
 
             # ... and wait
             xp.wait()

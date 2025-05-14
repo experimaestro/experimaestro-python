@@ -62,7 +62,7 @@ The experiment can be started with
     experimaestro run-experiment --run-mode normal full.yaml
 ```
 
-### Other options
+### Experiment code in a module
 
 The Python path can be set by the configuration file, and module be used instead
 of a file:
@@ -72,9 +72,18 @@ of a file:
     module: first_stage.experiment
 
     # Python paths relative to the directory containing this YAML file
+    # By default, the python path is based on the hypothesis that
+    # the YAML file is in the same folder as the loaded python module.
+    # For instance, for `first_stage.experiment`, the python path
+    # would be set automatically to the parent folder `..`. For `first_stage.sub.experiment`,
+    # this would be set to `../..`
     pythonpath:
-        - ../src
+        - ..
 ```
+
+### Other yaml options
+
+- `add_timestamp`: Adds a timestamp to the experiment ID.
 
 ### Common handling
 
