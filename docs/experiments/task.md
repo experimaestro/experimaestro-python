@@ -178,6 +178,12 @@ class IndexCollection(Config):
     ...
 ```
 
+## Handling task events
+
+Callbacks can be registered to accomplish some actions e.g. on task completion.
+
+- `task.on_completed(callback: Callable[[], None])` register a callback that is
+  called when the task terminates successfully
 
 ## Lightweights tasks using `@cache`
 

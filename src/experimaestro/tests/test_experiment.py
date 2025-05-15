@@ -48,3 +48,26 @@ def test_experiment_history():
         (task_b_info,) = xp.get_jobs(TaskB)
         assert task_b_info.tags == {"x": 1}
         assert task_b_info.depends_on == [task_a_info]
+
+
+class FlagHandler:
+    def __init__(self):
+        self.flag = False
+
+    def set(self):
+        self.flag = True
+
+    def is_set(self):
+        return self.flag
+
+
+def test_experiment_events():
+    """Test handlers"""
+
+    flag = FlagHandler()
+    with TemporaryExperiment("experiment"):
+        task_a = TaskA()
+        task_a.submit()
+        task_a.on_completed(flag.set)
+
+    assert flag.is_set()

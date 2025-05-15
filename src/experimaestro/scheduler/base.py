@@ -819,6 +819,7 @@ class experiment:
         """
 
         from experimaestro.server import Server
+        from experimaestro.scheduler import Listener
 
         settings = get_settings()
         if not isinstance(env, WorkspaceSettings):
@@ -835,6 +836,7 @@ class experiment:
         self.xplock = None
         self.old_experiment = None
         self.services: Dict[str, Service] = {}
+        self._job_listener: Optional[Listener] = None
 
         # Get configuration settings
 

@@ -47,6 +47,7 @@ from experimaestro.core.types import DeprecatedAttribute, ObjectType
 from .context import SerializationContext, SerializedPath, SerializedPathLoader
 
 if TYPE_CHECKING:
+    from .callbacks import TaskEventListener
     from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
     from experimaestro.launchers import Launcher
@@ -607,6 +608,7 @@ class ConfigInformation:
 
         # State information
         self.job = None
+        self._job_listener: "TaskEventListener" | None = None
 
         #: True when this configuration was loaded from disk
         self.loaded = False
@@ -947,6 +949,15 @@ class ConfigInformation:
         if self.job:
             self.job.watch_output(watched)
 
+    def on_completed(self, callback: Callable[[], None]):
+        """Call a method when the task is completed successfully
+
+        :param callback: _description_
+        """
+        from .callbacks import TaskEventListener
+
+        TaskEventListener.on_completed(self, callback)
+
     def submit(
         self,
         workspace: "Workspace",
@@ -957,6 +968,7 @@ class ConfigInformation:
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
+        from .callbacks import TaskEventListener
 
         # --- Prepare the object
 
@@ -1009,6 +1021,7 @@ class ConfigInformation:
             workspace.run_mode if run_mode is None else run_mode
         ) or RunMode.NORMAL
         if run_mode == RunMode.NORMAL:
+            TaskEventListener.connect(experiment.CURRENT)
             other = experiment.CURRENT.submit(self.job)
             if other:
                 # Just returns the other task
@@ -2014,6 +2027,9 @@ class Task(LightweightTask):
         :param callback: the callback
         """
         self.__xpm__.watch_output(method, callback)
+
+    def on_completed(self, callback: Callable[[], None]):
+        self.__xpm__.on_completed(callback)
 
 
 # --- Utility functions
