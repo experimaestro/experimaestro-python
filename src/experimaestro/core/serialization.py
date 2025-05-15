@@ -36,7 +36,7 @@ def state_dict(context: SerializationContext, obj: Any):
     :param context: The serialization context
     :param obj: the object to serialize
     """
-    objects = []
+    objects: list[Any] = []
     data = json_object(context, obj, objects)
     return {"objects": objects, "data": data}
 
@@ -50,11 +50,17 @@ def save_definition(obj: Any, context: SerializationContext, path: Path):
 def save(obj: Any, save_directory: Optional[Path]):
     """Saves an object into a disk file
 
+    The serialization process also stores in the given folder the different
+    files or folders that are registered as Path parameters (or
+    meta-parameters).
+
     :param save_directory: The directory in which the object and its data will
         be saved (by default, the object is saved in "definition.json")
     """
     context = SerializationContext(save_directory=save_directory)
-    save_definition(obj, context, save_directory / "definition.json")
+    save_definition(
+        obj, context, save_directory / "definition.json" if save_directory else None
+    )
 
 
 def get_data_loader(path: Union[str, Path, SerializedPathLoader]):
@@ -129,3 +135,47 @@ def from_task_dir(
     content["data"] = {"type": "python", "value": content["objects"][-1]["id"]}
 
     return from_state_dict(content, as_instance=as_instance)
+
+
+def serialize(
+    obj: Any, save_directory: Path, *, init_tasks: list["LightweightTask"] = []
+):
+    """Saves an object into a disk file, including initialization tasks
+
+    The serialization process also stores in the given folder the different
+    files or folders that are registered as Path parameters (or
+    meta-parameters).
+
+    :param save_directory: The directory in which the object and its data will
+        be saved (by default, the object is saved in "definition.json")
+    :param init_tasks: The optional
+    """
+    context = SerializationContext(save_directory=save_directory)
+    save_definition((obj, init_tasks), context, save_directory / "definition.json")
+
+
+def deserialize(
+    path: Union[str, Path, SerializedPathLoader],
+    as_instance: bool = False,
+) -> tuple[Any, List["LightweightTask"]] | Any:
+    """Load data from disk, and initialize the object
+
+    :param path: A directory or a function that transforms relative file path
+        into absolute ones
+    :param as_instance: returns instances instead of configuration objects
+    :returns: either the object (as_instance is true), or a tuple
+    """
+    data_loader = get_data_loader(path)
+
+    with data_loader("definition.json").open("rt") as fh:
+        content = json.load(fh)
+
+    object, init_tasks = from_state_dict(content, as_instance=as_instance)
+
+    if as_instance:
+        for init_task in init_tasks:
+            init_task.execute()
+
+        return object
+
+    return object, init_tasks

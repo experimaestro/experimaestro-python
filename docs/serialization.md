@@ -25,6 +25,14 @@ save([obj1, obj2, {key: obj3, key2: obj4}], "/my/folder")
 ::: experimaestro.load
 ::: experimaestro.save
 
+You can use `serialization` methods to include init_tasks
+in the deserialize process. This makes it easier to distribute
+configurations that need to be initialized in a special way.
+
+::: experimaestro.serialize
+::: experimaestro.deserialize
+
+
 A task configuration/instance can be loaded with
 
 ::: experimaestro.from_task_dir
