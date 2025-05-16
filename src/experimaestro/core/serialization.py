@@ -17,7 +17,7 @@ def json_object(context: SerializationContext, value: Any, objects=[]):
 
     if isinstance(value, Config):
         value.__xpm__.__get_objects__(objects, context)
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):
         for el in value:
             ConfigInformation.__collect_objects__(el, objects, context)
     elif isinstance(value, dict):
