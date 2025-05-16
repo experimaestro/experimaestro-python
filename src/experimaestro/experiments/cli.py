@@ -240,6 +240,7 @@ def experiments_cli(  # noqa: C901
 
             logging.info("Appending %s to python path", path)
             sys.path.append(str(path))
+            python_path.append(path)
 
     if xp_file:
         if not xp_file.exists() and xp_file.suffix != ".py":
