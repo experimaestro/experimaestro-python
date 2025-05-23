@@ -41,39 +41,7 @@ from typing_extensions import Self
 
 TConfig = TypeVar("TConfig", bound="Config")
 
-class Identifier:
-    main: Incomplete
-    sub: Incomplete
-    def __init__(self, main: bytes, sub: Optional[bytes] = ...) -> None: ...
-    def all(self): ...
-    def state_dict(self): ...
-    @staticmethod
-    def from_state_dict(data: Union[Dict[str, str], str]): ...
-
-def is_ignored(value): ...
-def remove_meta(value): ...
-
 class ObjectStore: ...
-
-class HashComputer:
-    OBJECT_ID: bytes
-    INT_ID: bytes
-    FLOAT_ID: bytes
-    STR_ID: bytes
-    PATH_ID: bytes
-    NAME_ID: bytes
-    NONE_ID: bytes
-    LIST_ID: bytes
-    TASK_ID: bytes
-    DICT_ID: bytes
-    ENUM_ID: bytes
-    def __init__(self) -> None: ...
-    def identifier(self) -> Identifier: ...
-    def update(self, value, myself: bool = ...): ...
-
-def updatedependencies(
-    dependencies, value: Config, path: List[str], taskids: Set[int]
-): ...
 
 class TaggedValue:
     value: Incomplete
