@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from experimaestro import Config, Task, Annotated, copyconfig, default
 from experimaestro.core.arguments import Param
-from experimaestro.core.objects import TypeConfig
+from experimaestro.core.objects import ConfigMixin
 from experimaestro.core.types import XPMValue
 from experimaestro.generators import pathgenerator
 from experimaestro.scheduler.workspace import RunMode
@@ -65,9 +65,9 @@ def test_hierarchy():
     assert issubclass(B, Config)
     assert issubclass(C, Config)
 
-    assert not issubclass(OA, TypeConfig)
-    assert not issubclass(OB, TypeConfig)
-    assert not issubclass(OC, TypeConfig)
+    assert not issubclass(OA, ConfigMixin)
+    assert not issubclass(OB, ConfigMixin)
+    assert not issubclass(OC, ConfigMixin)
 
     assert issubclass(C, B)
 

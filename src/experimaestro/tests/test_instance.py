@@ -1,6 +1,6 @@
 from typing import Optional
 from experimaestro import Param, Config
-from experimaestro.core.objects import TypeConfig
+from experimaestro.core.objects import ConfigMixin
 from experimaestro.core.serializers import SerializationLWTask
 
 
@@ -21,10 +21,10 @@ def test_simple_instance():
     b = B(a=a)
     b = b.instance()
 
-    assert not isinstance(b, TypeConfig)
+    assert not isinstance(b, ConfigMixin)
     assert isinstance(b, B.__xpmtype__.objecttype)
 
-    assert not isinstance(b.a, TypeConfig)
+    assert not isinstance(b.a, ConfigMixin)
     assert isinstance(b.a, A1.__xpmtype__.objecttype)
     assert isinstance(b.a, A.__xpmtype__.basetype)
 

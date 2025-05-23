@@ -590,7 +590,7 @@ class ConfigInformation:
     # Set to true when loading from JSON
     LOADING: ClassVar[bool] = False
 
-    def __init__(self, pyobject: "TypeConfig"):
+    def __init__(self, pyobject: "ConfigMixin"):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
         self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
@@ -1355,7 +1355,7 @@ class ConfigInformation:
         as_instance=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "TypeConfig":
+    ) -> "ConfigMixin":
         ...
 
     @overload
@@ -1677,7 +1677,7 @@ def cache(fn, name: str):
     return __call__
 
 
-class TypeConfig:
+class ConfigMixin:
     """Class for configuration objects"""
 
     __xpmtype__: ObjectType
@@ -1828,7 +1828,7 @@ class TypeConfig:
 
     def add_pretasks_from(self, *configs: "Config"):
         assert all(
-            [isinstance(config, TypeConfig) for config in configs]
+            [isinstance(config, ConfigMixin) for config in configs]
         ), "One of the parameters is not a configuration object"
         for config in configs:
             self.add_pretasks(*config.__xpm__.pre_tasks)
@@ -1873,18 +1873,14 @@ class Config:
 
     @classproperty
     def XPMConfig(cls):
-        if issubclass(cls, TypeConfig):
+        if issubclass(cls, ConfigMixin):
             return cls
         return cls.__getxpmtype__().configtype
 
     @classproperty
-    def C(cls):
-        return cls.XPMConfig
-
-    @classproperty
     def XPMValue(cls):
         """Returns the value object for this configuration"""
-        if issubclass(cls, TypeConfig):
+        if issubclass(cls, ConfigMixin):
             return cls.__xpmtype__.objecttype
 
         if value_cls := cls.__dict__.get("__XPMValue__", None):
@@ -1907,9 +1903,20 @@ class Config:
 
         return value_cls
 
+    @classproperty
+    def C(cls):
+        """Alias for XPMConfig"""
+        return cls.XPMConfig
+
+    @classproperty
+    def V(cls):
+        """Alias for XPMValue"""
+        return cls.XPMValue
+
     @classmethod
     def __getxpmtype__(cls) -> "ObjectType":
-        """Get (and create if necessary) the Object type of this"""
+        """Get (and create if necessary) the Object type associated
+        with thie Config object"""
         xpmtype = cls.__dict__.get("__xpmtype__", None)
         if xpmtype is None:
             from experimaestro.core.types import ObjectType
@@ -1923,8 +1930,12 @@ class Config:
         return xpmtype
 
     def __new__(cls: Type[T], *args, **kwargs) -> T:
-        """Returns an instance of a TypeConfig (for compatibility, use XPMConfig
-        or C if possible)"""
+        """Returns an instance of a ConfigMixin (for compatibility, use XPMConfig
+        or C if possible)
+
+        :deprecated: Use Config.C or Config.XPMConfig to construct a new
+            configuration, and Config.V (or Config.XPMValue) for a new value
+        """
 
         # If this is an XPMValue, just return a new instance
         from experimaestro.core.types import XPMValue
@@ -1934,11 +1945,11 @@ class Config:
 
         # If this is the XPMConfig, just return a new instance
         # __init__ will be called
-        if issubclass(cls, TypeConfig):
+        if issubclass(cls, ConfigMixin):
             return object.__new__(cls)
 
         # otherwise, we use the configuration type
-        o: TypeConfig = object.__new__(cls.__getxpmtype__().configtype)
+        o: ConfigMixin = object.__new__(cls.__getxpmtype__().configtype)
         try:
             o.__init__(*args, **kwargs)
         except Exception:
