@@ -8,7 +8,7 @@ from experimaestro import (
     from_state_dict,
 )
 from experimaestro.core.context import SerializationContext
-from experimaestro.core.objects import TypeConfig
+from experimaestro.core.objects import ConfigMixin
 from experimaestro.tests.utils import TemporaryExperiment
 
 
@@ -84,11 +84,11 @@ def test_serializers_serialization():
     data = state_dict(context, [obj1, obj2])
 
     [obj1, obj2] = from_state_dict(data)
-    assert isinstance(obj1, Object1) and isinstance(obj1, TypeConfig)
+    assert isinstance(obj1, Object1) and isinstance(obj1, ConfigMixin)
     assert isinstance(obj2, Object2)
     assert obj2.object is obj1
 
     [obj1, obj2] = from_state_dict(data, as_instance=True)
-    assert isinstance(obj1, Object1) and not isinstance(obj1, TypeConfig)
+    assert isinstance(obj1, Object1) and not isinstance(obj1, ConfigMixin)
     assert isinstance(obj2, Object2)
     assert obj2.object is obj1

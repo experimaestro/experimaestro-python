@@ -214,7 +214,7 @@ class ObjectType(Type):
         identifier: Union[str, Identifier] = None,
     ):
         """Creates a type"""
-        from .objects import Config, TypeConfig
+        from .objects import Config, ConfigMixin
 
         # Task related attributes
         self.taskcommandfactory = None
@@ -268,7 +268,7 @@ class ObjectType(Type):
             s.__getxpmtype__().configtype
             for s in tp.__bases__
             if issubclass(s, Config) and (s is not Config)
-        ) or (TypeConfig,)
+        ) or (ConfigMixin,)
 
         *tp_qual, tp_name = self.basetype.__qualname__.split(".")
         self.configtype = type(

@@ -88,12 +88,12 @@ When `__xpmid__` is missing, the qualified name is used.
 
 ## Object hierarchy
 
-When deriving `B` from `Config`, experimaestro creates two auxilliary types:
+When deriving `B` from `Config`, experimaestro creates two auxiliary types:
 
-1. A configuration object `A.Config` deriving from `TypeConfig` and `A`
-1. A value object deriving from `A`
+1. A configuration object `A.XPMConfig` (with a `A.C` alias) deriving from `ConfigMixin` and `A`
+1. A value object `A.XPMValue` (with `A.V` alias) deriving from `A`
 
-For a class `B` deriving from `A`, `B.Value` from `B` and `A.Value`
+For a class `B` deriving from `A`, `B.XPMValue` derives from `B` and `A.XPMValue`.
 
 ![object hierarchy](../img/xpm-objects.svg)
 

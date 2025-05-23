@@ -5,7 +5,7 @@ from experimaestro import Config, Param
 from typing import Union
 
 import pytest
-from experimaestro.core.objects import TypeConfig
+from experimaestro.core.objects import ConfigMixin
 
 
 def test_multiple_inheritance():
@@ -36,7 +36,7 @@ def test_multiple_inheritance():
         assert issubclass(C.__xpmtype__.objecttype, B1.__xpmtype__.basetype)
         assert issubclass(C.__xpmtype__.objecttype, B.__xpmtype__.basetype)
         assert issubclass(C.__xpmtype__.objecttype, A.__xpmtype__.basetype)
-        assert not issubclass(C.__xpmtype__.objecttype, TypeConfig)
+        assert not issubclass(C.__xpmtype__.objecttype, ConfigMixin)
 
 
 def test_missing_hierarchy():

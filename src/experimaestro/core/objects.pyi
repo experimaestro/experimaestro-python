@@ -122,7 +122,7 @@ class ConfigInformation:
     job: Job
     dependencies: Incomplete
     watched_outputs: List[WatchedOutput]
-    def __init__(self, pyobject: TypeConfig) -> None: ...
+    def __init__(self, pyobject: ConfigMixin) -> None: ...
     def set_meta(self, value: Optional[bool]): ...
     @property
     def meta(self): ...
@@ -162,7 +162,7 @@ class ConfigInformation:
         definitions: List[Dict],
         as_instance: bool = ...,
         save_directory: Optional[Path] = ...,
-    ) -> TypeConfig: ...
+    ) -> ConfigMixin: ...
     @overload
     @staticmethod
     def fromParameters(
@@ -183,7 +183,7 @@ class ConfigInformation:
 def clone(v): ...
 def cache(fn, name: str): ...
 
-class TypeConfig:
+class ConfigMixin:
     __xpmtype__: ObjectType
     __xpm__: Incomplete
     def __init__(self, **kwargs) -> None: ...
@@ -217,8 +217,8 @@ class Config:
     __use_xpmobject__: ClassVar[bool]
 
     XPMValue: Type[Self]
-    XPMConfig: Union[Type[Self], Type[TypeConfig[Self]]]
-    C: Union[Type[Self], Type[TypeConfig[Self]]]
+    XPMConfig: Union[Type[Self], Type[ConfigMixin[Self]]]
+    C: Union[Type[Self], Type[ConfigMixin[Self]]]
 
     @classmethod
     def __getxpmtype__(cls) -> ObjectType: ...
@@ -252,6 +252,6 @@ class Task(LightweightTask):
 def copyconfig(config_or_output: TConfig, **kwargs) -> TConfig: ...
 def setmeta(config: TConfig, flag: bool) -> TConfig: ...
 
-class TypeConfig(Generic[T]):
+class ConfigMixin(Generic[T]):
     def __validate__(self):
         pass
