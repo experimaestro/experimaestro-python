@@ -36,11 +36,11 @@ import experimaestro
 from experimaestro.utils import logger
 from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
-from .context import SerializationContext, SerializedPath, SerializedPathLoader
+from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
 if TYPE_CHECKING:
-    from .callbacks import TaskEventListener
-    from .identifier import Identifier
+    from ..callbacks import TaskEventListener
+    from ..identifier import Identifier
     from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
     from experimaestro.launchers import Launcher
@@ -378,7 +378,7 @@ class ConfigInformation:
 
     def identifiers(self, only_raw: bool):
         """Computes the unique identifier"""
-        from .identifier import IdentifierComputer, Identifier
+        from ..identifier import IdentifierComputer, Identifier
 
         raw_identifier = self._raw_identifier
         full_identifier = self._full_identifier
@@ -528,7 +528,7 @@ class ConfigInformation:
 
         :param callback: _description_
         """
-        from .callbacks import TaskEventListener
+        from ..callbacks import TaskEventListener
 
         TaskEventListener.on_completed(self, callback)
 
@@ -542,7 +542,7 @@ class ConfigInformation:
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
-        from .callbacks import TaskEventListener
+        from ..callbacks import TaskEventListener
 
         # --- Prepare the object
 
@@ -964,7 +964,7 @@ class ConfigInformation:
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
-        from .identifier import Identifier
+        from ..identifier import Identifier
 
         # Loop over all the definitions and create objects
         for definition in definitions:
@@ -1461,7 +1461,7 @@ class Config:
         if value_cls := cls.__dict__.get("__XPMValue__", None):
             pass
         else:
-            from .types import XPMValue
+            from ..types import XPMValue
 
             __objectbases__ = tuple(
                 s.XPMValue
