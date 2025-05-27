@@ -16,7 +16,7 @@ repos:
     - flake8-fixme
     id: flake8
   repo: https://github.com/pycqa/flake8
-  rev: 6.0.0
+  rev: 6.1.0
 - hooks:
   - id: commitizen
   - id: commitizen-branch
