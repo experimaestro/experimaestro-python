@@ -3,6 +3,7 @@
 import json
 
 from attr import define
+import fasteners
 
 from experimaestro import taskglobals
 
@@ -11,7 +12,6 @@ from pathlib import Path
 import hashlib
 import logging
 import io
-import fasteners
 from enum import Enum
 import inspect
 import importlib
@@ -34,17 +34,26 @@ from typing import (
 import sys
 import experimaestro
 from experimaestro.utils import logger
-from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
-from .context import SerializationContext, SerializedPath, SerializedPathLoader
+from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
 if TYPE_CHECKING:
-    from .callbacks import TaskEventListener
-    from .identifier import Identifier
+    from ..callbacks import TaskEventListener
+    from ..identifier import Identifier
     from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
     from experimaestro.launchers import Launcher
     from experimaestro.scheduler import Workspace
+
+from .config_walk import ConfigWalk, ConfigWalkContext
+from .config_utils import (
+    getqualattr,
+    add_to_path,
+    SealedError,
+    TaggedValue,
+    ObjectStore,
+    classproperty,
+)
 
 T = TypeVar("T", bound="Config")
 
@@ -80,197 +89,7 @@ def updatedependencies(
         raise NotImplementedError("update dependencies for type %s" % type(value))
 
 
-class SealedError(Exception):
-    """Exception when trying to modify a sealed configuration"""
-
-    pass
-
-
-class TaggedValue:
-    def __init__(self, value):
-        self.value = value
-
-
-@contextmanager
-def add_to_path(p):
-    """Temporarily add a path to sys.path"""
-    import sys
-
-    old_path = sys.path
-    sys.path = sys.path[:]
-    sys.path.insert(0, p)
-    try:
-        yield
-    finally:
-        sys.path = old_path
-
-
-class ConfigWalkContext:
-    """Context when generating values in configurations"""
-
-    @property
-    def path(self):
-        """Returns the path of the job directory"""
-        raise NotImplementedError()
-
-    def __init__(self):
-        self._configpath = None
-
-    @property
-    def task(self):
-        return None
-
-    def currentpath(self) -> Path:
-        """Returns the configuration folder"""
-        if self._configpath:
-            return self.path / self._configpath
-        return self.path
-
-    @contextmanager
-    def push(self, key: str):
-        """Push a new key to contextualize paths"""
-        p = self._configpath
-        try:
-            self._configpath = (Path("out") if p is None else p) / key
-            yield key
-        finally:
-            self._configpath = p
-
-
 NOT_SET = object()
-
-
-class ConfigWalk:
-    """Allows to perform an operation on all nested configurations"""
-
-    def __init__(self, context: ConfigWalkContext = None, recurse_task=False):
-        """
-
-        :param recurse_task: Recurse into linked tasks
-        :param context: The context, by default only tracks the position in the
-            config tree
-        """
-        self.recurse_task = recurse_task
-        self.context = ConfigWalkContext() if context is None else context
-
-        # Stores already visited nodes
-        self.visited = {}
-
-    def preprocess(self, config: "Config") -> Tuple[bool, Any]:
-        """Returns a tuple boolean/value
-
-        The boolean value is used to stop the processing if False.
-        The value is returned
-        """
-        return True, None
-
-    def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
-        return stub
-
-    def list(self, i: int):
-        return self.context.push(str(i))
-
-    def map(self, k: str):
-        return self.context.push(k)
-
-    def stub(self, config: "Config"):
-        return config
-
-    def __call__(self, x):
-        if isinstance(x, Config):
-            info = x.__xpm__  # type: ConfigInformation
-
-            # Avoid loops
-            xid = id(x)
-            if xid in self.visited:
-                return self.visited[xid]
-
-            # Get a stub
-            stub = self.stub(x)
-            self.visited[xid] = stub
-
-            # Pre-process
-            flag, value = self.preprocess(x)
-
-            if not flag:
-                # Stop processing and returns value
-                return value
-
-            # Process all the arguments
-            result = {}
-            for arg, v in info.xpmvalues():
-                if v is not None:
-                    with self.map(arg.name):
-                        result[arg.name] = self(v)
-                else:
-                    result[arg.name] = None
-
-            # Deals with pre-tasks
-            if info.pre_tasks:
-                with self.map("__pre_tasks__"):
-                    self(info.pre_tasks)
-
-            if info.init_tasks:
-                with self.map("__init_tasks__"):
-                    self(info.init_tasks)
-
-            # Process task if different
-            if (
-                x.__xpm__.task is not None
-                and self.recurse_task
-                and x.__xpm__.task is not x
-            ):
-                self(x.__xpm__.task)
-
-            processed = self.postprocess(stub, x, result)
-            self.visited[xid] = processed
-            return processed
-
-        if isinstance(x, list):
-            result = []
-            for i, sv in enumerate(x):
-                with self.list(i):
-                    result.append(self(sv))
-            return result
-
-        if isinstance(x, dict):
-            result = {}
-            for key, value in x.items():
-                assert isinstance(key, (str, float, int))
-                with self.map(key):
-                    result[key] = self(value)
-            return result
-
-        if isinstance(x, (float, int, str, Path, Enum)):
-            return x
-
-        raise NotImplementedError(f"Cannot handle a value of type {type(x)}")
-
-
-def getqualattr(module, qualname):
-    """Get a qualified attributed value"""
-    cls = module
-    for part in qualname.split("."):
-        cls = getattr(cls, part)
-    return cls
-
-
-class ObjectStore:
-    def __init__(self):
-        self.store: Dict[int, Any] = {}
-        self.constructed: Set[int] = set()
-
-    def set_constructed(self, identifier: int):
-        self.constructed.add(identifier)
-
-    def is_constructed(self, identifier: int):
-        return identifier in self.constructed
-
-    def retrieve(self, identifier: int):
-        return self.store.get(identifier, None)
-
-    def add_stub(self, identifier: int, stub: Any):
-        self.store[identifier] = stub
 
 
 @define()
@@ -515,7 +334,7 @@ class ConfigInformation:
 
     def identifiers(self, only_raw: bool):
         """Computes the unique identifier"""
-        from .identifier import IdentifierComputer, Identifier
+        from ..identifier import IdentifierComputer, Identifier
 
         raw_identifier = self._raw_identifier
         full_identifier = self._full_identifier
@@ -665,7 +484,7 @@ class ConfigInformation:
 
         :param callback: _description_
         """
-        from .callbacks import TaskEventListener
+        from ..callbacks import TaskEventListener
 
         TaskEventListener.on_completed(self, callback)
 
@@ -679,7 +498,7 @@ class ConfigInformation:
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
-        from .callbacks import TaskEventListener
+        from ..callbacks import TaskEventListener
 
         # --- Prepare the object
 
@@ -1101,7 +920,7 @@ class ConfigInformation:
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
-        from .identifier import Identifier
+        from ..identifier import Identifier
 
         # Loop over all the definitions and create objects
         for definition in definitions:
@@ -1368,27 +1187,6 @@ def clone(v):
     raise NotImplementedError("Clone not implemented for type %s" % type(v))
 
 
-def cache(fn, name: str):
-    def __call__(config, *args, **kwargs):
-        import experimaestro.taskglobals as taskglobals
-
-        # Get path and create directory if needed
-        hexid = config.__xpmidentifier__  # type: Identifier
-        typename = config.__xpmtypename__  # type: str
-        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid.all.hex()
-
-        if not dir.exists():
-            dir.mkdir(parents=True, exist_ok=True)
-
-        path = dir / name
-        ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
-        with ipc_lock:
-            r = fn(config, path, *args, **kwargs)
-            return r
-
-    return __call__
-
-
 class ConfigMixin:
     """Class for configuration objects"""
 
@@ -1563,11 +1361,6 @@ class ConfigMixin:
         self.__xpm__.add_dependencies(*other.__xpm__.dependencies)
 
 
-class classproperty(property):
-    def __get__(self, owner_self, owner_cls):
-        return self.fget(owner_cls)
-
-
 class Config:
     """Base type for all objects in python interface"""
 
@@ -1598,7 +1391,7 @@ class Config:
         if value_cls := cls.__dict__.get("__XPMValue__", None):
             pass
         else:
-            from .types import XPMValue
+            from ..types import XPMValue
 
             __objectbases__ = tuple(
                 s.XPMValue
@@ -1792,3 +1585,24 @@ def setmeta(config: Config, flag: bool):
     """Flags the configuration as a meta-parameter"""
     config.__xpm__.set_meta(flag)
     return config
+
+
+def cache(fn, name: str):
+    def __call__(config, *args, **kwargs):
+        import experimaestro.taskglobals as taskglobals
+
+        # Get path and create directory if needed
+        hexid = config.__xpmidentifier__  # type: Identifier
+        typename = config.__xpmtypename__  # type: str
+        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid.all.hex()
+
+        if not dir.exists():
+            dir.mkdir(parents=True, exist_ok=True)
+
+        path = dir / name
+        ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
+        with ipc_lock:
+            r = fn(config, path, *args, **kwargs)
+            return r
+
+    return __call__

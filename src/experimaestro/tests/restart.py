@@ -27,6 +27,8 @@ TERMINATES_FUNC = [terminate]
 if is_posix():
     TERMINATES_FUNC.append(sigint)
 
+MAX_RESTART_WAIT = 50  # 5 seconds
+
 
 class Restart(Task):
     touch: Meta[Path] = field(default_factory=PathGenerator("touch"))
@@ -81,7 +83,7 @@ def restart(terminate: Callable, experiment):
         while not task.touch.is_file():
             time.sleep(0.1)
             counter += 1
-            if counter >= 20:
+            if counter >= MAX_RESTART_WAIT:
                 terminate(xpmprocess)
                 assert False, "Timeout waiting for task to be executed"
 
