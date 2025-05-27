@@ -3,6 +3,7 @@
 import json
 
 from attr import define
+import fasteners
 
 from experimaestro import taskglobals
 
@@ -11,7 +12,6 @@ from pathlib import Path
 import hashlib
 import logging
 import io
-import fasteners
 from enum import Enum
 import inspect
 import importlib
@@ -34,7 +34,6 @@ from typing import (
 import sys
 import experimaestro
 from experimaestro.utils import logger
-from contextlib import contextmanager
 from experimaestro.core.types import DeprecatedAttribute, ObjectType
 from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
@@ -47,6 +46,14 @@ if TYPE_CHECKING:
     from experimaestro.scheduler import Workspace
 
 from .config_walk import ConfigWalk, ConfigWalkContext
+from .config_utils import (
+    getqualattr,
+    add_to_path,
+    SealedError,
+    TaggedValue,
+    ObjectStore,
+    classproperty,
+)
 
 T = TypeVar("T", bound="Config")
 
@@ -82,58 +89,7 @@ def updatedependencies(
         raise NotImplementedError("update dependencies for type %s" % type(value))
 
 
-class SealedError(Exception):
-    """Exception when trying to modify a sealed configuration"""
-
-    pass
-
-
-class TaggedValue:
-    def __init__(self, value):
-        self.value = value
-
-
-@contextmanager
-def add_to_path(p):
-    """Temporarily add a path to sys.path"""
-    import sys
-
-    old_path = sys.path
-    sys.path = sys.path[:]
-    sys.path.insert(0, p)
-    try:
-        yield
-    finally:
-        sys.path = old_path
-
-
 NOT_SET = object()
-
-
-def getqualattr(module, qualname):
-    """Get a qualified attributed value"""
-    cls = module
-    for part in qualname.split("."):
-        cls = getattr(cls, part)
-    return cls
-
-
-class ObjectStore:
-    def __init__(self):
-        self.store: Dict[int, Any] = {}
-        self.constructed: Set[int] = set()
-
-    def set_constructed(self, identifier: int):
-        self.constructed.add(identifier)
-
-    def is_constructed(self, identifier: int):
-        return identifier in self.constructed
-
-    def retrieve(self, identifier: int):
-        return self.store.get(identifier, None)
-
-    def add_stub(self, identifier: int, stub: Any):
-        self.store[identifier] = stub
 
 
 @define()
@@ -1231,27 +1187,6 @@ def clone(v):
     raise NotImplementedError("Clone not implemented for type %s" % type(v))
 
 
-def cache(fn, name: str):
-    def __call__(config, *args, **kwargs):
-        import experimaestro.taskglobals as taskglobals
-
-        # Get path and create directory if needed
-        hexid = config.__xpmidentifier__  # type: Identifier
-        typename = config.__xpmtypename__  # type: str
-        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid.all.hex()
-
-        if not dir.exists():
-            dir.mkdir(parents=True, exist_ok=True)
-
-        path = dir / name
-        ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
-        with ipc_lock:
-            r = fn(config, path, *args, **kwargs)
-            return r
-
-    return __call__
-
-
 class ConfigMixin:
     """Class for configuration objects"""
 
@@ -1424,11 +1359,6 @@ class ConfigMixin:
 
         # Add other dependencies
         self.__xpm__.add_dependencies(*other.__xpm__.dependencies)
-
-
-class classproperty(property):
-    def __get__(self, owner_self, owner_cls):
-        return self.fget(owner_cls)
 
 
 class Config:
@@ -1655,3 +1585,24 @@ def setmeta(config: Config, flag: bool):
     """Flags the configuration as a meta-parameter"""
     config.__xpm__.set_meta(flag)
     return config
+
+
+def cache(fn, name: str):
+    def __call__(config, *args, **kwargs):
+        import experimaestro.taskglobals as taskglobals
+
+        # Get path and create directory if needed
+        hexid = config.__xpmidentifier__  # type: Identifier
+        typename = config.__xpmtypename__  # type: str
+        dir = taskglobals.Env.instance().wspath / "config" / typename / hexid.all.hex()
+
+        if not dir.exists():
+            dir.mkdir(parents=True, exist_ok=True)
+
+        path = dir / name
+        ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
+        with ipc_lock:
+            r = fn(config, path, *args, **kwargs)
+            return r
+
+    return __call__

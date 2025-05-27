@@ -5,18 +5,22 @@ from .config import (
     ConfigInformation,
     Task,
     LightweightTask,
-    ObjectStore,
     WatchedOutput,
-    SealedError,
     DependentMarker,
-    TaggedValue,
-    getqualattr,
     copyconfig,
     setmeta,
+    cache,
+    logger,
 )
 
-# re-exported objects
-from .config import cache, logger  # noqa: F401
+from .config_utils import (
+    getqualattr,
+    add_to_path,
+    ObjectStore,
+    SealedError,
+    TaggedValue,
+)
+
 
 __all__ = [
     "ConfigMixin",
@@ -34,4 +38,7 @@ __all__ = [
     "getqualattr",
     "copyconfig",
     "setmeta",
+    "cache",
+    "add_to_path",
+    "logger",
 ]
