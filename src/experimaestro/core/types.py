@@ -718,6 +718,10 @@ class GenericType(Type):
     def __repr__(self):
         return repr(self.type)
 
+    def identifier(self):
+        """Returns the identifier of the type"""
+        return Identifier(f"{self.origin}.{self.type}")
+
     def validate(self, value):
         # Now, let's check generics...
         mros = typingutils.generic_mro(type(value))
