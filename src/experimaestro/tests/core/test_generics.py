@@ -4,6 +4,8 @@ from typing import Generic, TypeVar
 
 import pytest
 from experimaestro import Config, Param
+from experimaestro.core.arguments import Argument
+from experimaestro.core.types import TypeVarType
 
 T = TypeVar("T")
 
@@ -18,6 +20,19 @@ class SimpleConfigChild(Config):
 
 class SimpleGenericConfig(Config, Generic[T]):
     x: Param[T]
+
+
+def test_core_generics_typevar():
+    a = SimpleGenericConfig.C(x=1)
+
+    x_arg = a.__xpmtype__.arguments["x"]
+
+    # Check correct interpretation of typevar
+    assert type(x_arg) is Argument
+    assert isinstance(x_arg.type, TypeVarType)
+    assert x_arg.type.typevar == T
+
+    assert isinstance(a.x, int)
 
 
 def test_core_generics_simple():
