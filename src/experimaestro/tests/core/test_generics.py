@@ -190,3 +190,17 @@ def test_core_generics_recursive_child():
 
     with pytest.raises(TypeError):
         a.left.x = "a string"
+
+
+U = TypeVar("U", bound=SimpleConfigChild)
+
+
+class BoundGenericConfig(Config, Generic[U]):
+    x: Param[U]
+
+
+def test_core_generics_bound_typevar():
+    a = BoundGenericConfig.C(x=SimpleConfigChild.C())
+    assert isinstance(a.x, SimpleConfigChild)
+    with pytest.raises(TypeError):
+        a.x = SimpleConfig.C()

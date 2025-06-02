@@ -235,8 +235,17 @@ class ConfigInformation:
             return
 
         concrete_typevar = self.concrete_typevars[typevar]
+        bound = typevar.__bound__
         # Check that v is a subclass of the typevar OR that typevar is a subclass of v
         # Then set the concrete type variable to the most generic type
+
+        # First, limiting to the specified bound
+        if bound is not None:
+            if not issubclass(v, bound):
+                raise TypeError(
+                    f"Type variable {typevar} is bound to {bound}, but tried to set it to {v}"
+                )
+
         if issubclass(v, concrete_typevar):
             # v is a subclass of the typevar, keep the typevar
             return
