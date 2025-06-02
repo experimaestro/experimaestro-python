@@ -1489,7 +1489,6 @@ class Config:
         :deprecated: Use Config.C or Config.XPMConfig to construct a new
             configuration, and Config.V (or Config.XPMValue) for a new value
         """
-
         # If this is an XPMValue, just return a new instance
         from experimaestro.core.types import XPMValue
 
@@ -1501,12 +1500,21 @@ class Config:
         if issubclass(cls, ConfigMixin):
             return object.__new__(cls)
 
+        # Log a deprecation warning for this way of creating a configuration
+        caller = inspect.getframeinfo(inspect.stack()[1][0])
+        logger.warning(
+            "Creating a configuration using Config.__new__ is deprecated, and will be removed in a future version. "
+            "Use Config.C or Config.XPMConfig to create a new configuration. "
+            "Issue created at %s:%s",
+            str(Path(caller.filename).absolute()),
+            caller.lineno,
+        )
+
         # otherwise, we use the configuration type
         o: ConfigMixin = object.__new__(cls.__getxpmtype__().configtype)
         try:
             o.__init__(*args, **kwargs)
         except Exception:
-            caller = inspect.getframeinfo(inspect.stack()[1][0])
             logger.error(
                 "Init error in %s:%s"
                 % (str(Path(caller.filename).absolute()), caller.lineno)
