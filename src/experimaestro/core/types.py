@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import inspect
 import sys
-from typing import Set, Union, Dict, Iterator, List, get_args, get_origin
+from typing import Set, TypeVar, Union, Dict, Iterator, List, get_args, get_origin
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -130,9 +130,12 @@ class Type:
         if union_t := typingutils.get_union(key):
             return UnionType([Type.fromType(t) for t in union_t])
 
-        # Takes care of generics
+        # Takes care of generics, like List[int], not List
         if get_origin(key):
             return GenericType(key)
+
+        if isinstance(key, TypeVar):
+            return TypeVarType(key)
 
         raise Exception("No type found for %s", key)
 
@@ -597,6 +600,23 @@ class AnyType(Type):
         return value
 
 
+class TypeVarType(Type):
+    def __init__(self, typevar: TypeVar):
+        self.typevar = typevar
+
+    def name(self):
+        return str(self.typevar)
+
+    def validate(self, value):
+        return value
+
+    def __str__(self):
+        return f"TypeVar({self.typevar})"
+
+    def __repr__(self):
+        return f"TypeVar({self.typevar})"
+
+
 Any = AnyType()
 
 
@@ -697,6 +717,10 @@ class GenericType(Type):
 
     def __repr__(self):
         return repr(self.type)
+
+    def identifier(self):
+        """Returns the identifier of the type"""
+        return Identifier(f"{self.origin}.{self.type}")
 
     def validate(self, value):
         # Now, let's check generics...

@@ -34,7 +34,7 @@ from typing import (
 import sys
 import experimaestro
 from experimaestro.utils import logger
-from experimaestro.core.types import DeprecatedAttribute, ObjectType
+from experimaestro.core.types import DeprecatedAttribute, ObjectType, TypeVarType
 from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
 if TYPE_CHECKING:
@@ -145,6 +145,10 @@ class ConfigInformation:
         # Explicitely added dependencies
         self.dependencies = []
 
+        # Concrete type variables resolutions
+        # This is used to check typevars coherence
+        self.concrete_typevars: Dict[TypeVar, type] = {}
+
         # Lightweight tasks
         self.pre_tasks: List["LightweightTask"] = []
 
@@ -199,6 +203,13 @@ class ConfigInformation:
                     raise AttributeError("Property %s is read-only" % (k))
                 if v is not None:
                     self.values[k] = argument.validate(v)
+                    # Check for type variables
+                    if type(argument.type) is TypeVarType:
+                        self.check_typevar(argument.type.typevar, type(v))
+                    if isinstance(v, Config):
+                        # If the value is a Config, fuse type variables
+                        v.__xpm__.fuse_concrete_typevars(self.concrete_typevars)
+                        self.fuse_concrete_typevars(v.__xpm__.concrete_typevars)
                 elif argument.required:
                     raise AttributeError("Cannot set required attribute to None")
                 else:
@@ -210,6 +221,43 @@ class ConfigInformation:
         except Exception:
             logger.error("Error while setting value %s in %s", k, self.xpmtype)
             raise
+
+    def fuse_concrete_typevars(self, typevars: Dict[TypeVar, type]):
+        """Fuses concrete type variables with the current ones"""
+        for typevar, v in typevars.items():
+            self.check_typevar(typevar, v)
+
+    def check_typevar(self, typevar: TypeVar, v: type):
+        """Check if a type variable is coherent with the current typevars bindings,
+        updates the bindings if necessary"""
+        if typevar not in self.concrete_typevars:
+            self.concrete_typevars[typevar] = v
+            return
+
+        concrete_typevar = self.concrete_typevars[typevar]
+        bound = typevar.__bound__
+        # Check that v is a subclass of the typevar OR that typevar is a subclass of v
+        # Then set the concrete type variable to the most generic type
+
+        # First, limiting to the specified bound
+        if bound is not None:
+            if not issubclass(v, bound):
+                raise TypeError(
+                    f"Type variable {typevar} is bound to {bound}, but tried to set it to {v}"
+                )
+
+        if issubclass(v, concrete_typevar):
+            # v is a subclass of the typevar, keep the typevar
+            return
+        if issubclass(concrete_typevar, v):
+            # typevar is a subclass of v, keep v
+            self.concrete_typevars[typevar] = v
+            return
+        raise TypeError(
+            f"Type variable {typevar} is already set to {self.concrete_typevars[typevar]}, "
+            f"but tried to set it to {v}"
+            f" (current typevars bindings: {self.concrete_typevars})"
+        )
 
     def addtag(self, name, value):
         self._tags[name] = value
