@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -91,3 +92,18 @@ def test_copyconfig(xp):
 
     assert copy_b.x == b.x
     assert "path" not in copy_b.__xpm__.values
+
+
+def test_direct_config_warns(caplog):
+    """Test that using a building Config directly raises a warning"""
+    message = "Config.__new__ is deprecated"
+
+    with caplog.at_level(logging.WARNING):
+        A(x=3)
+        assert message in caplog.text
+
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING):
+        A.C(x=3)
+        assert message not in caplog.text
