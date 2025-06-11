@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "module": "system",
+    "module": "CommonJS",
     "moduleResolution": "nodenext",
     "target": "es5",
     "esModuleInterop": true
