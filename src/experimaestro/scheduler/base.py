@@ -515,6 +515,7 @@ class Scheduler:
             return other
 
         job._future = asyncio.run_coroutine_threadsafe(self.aio_submit(job), self.loop)
+        return None
 
     def prepare(self, job: Job):
         """Prepares the job for running"""

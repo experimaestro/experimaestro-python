@@ -109,6 +109,7 @@ class Reporter(threading.Thread):
         return any(level.modified(self) for level in self.levels)
 
     def check_urls(self):
+        """Check whether we have new schedulers to notify"""
         mtime = os.path.getmtime(self.path)
         if mtime > self.lastcheck:
             for f in self.path.iterdir():

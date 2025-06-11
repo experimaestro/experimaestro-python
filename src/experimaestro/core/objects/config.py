@@ -188,6 +188,8 @@ class ConfigInformation:
         return object.__getattribute__(self.pyobject, name)
 
     def set(self, k, v, bypass=False):
+        from experimaestro.generators import Generator
+
         # Not an argument, bypass
         if k not in self.xpmtype.arguments:
             setattr(self.pyobject, k, v)
@@ -199,7 +201,9 @@ class ConfigInformation:
         try:
             argument = self.xpmtype.arguments.get(k, None)
             if argument:
-                if not bypass and (argument.generator or argument.constant):
+                if not bypass and (
+                    (isinstance(argument.generator, Generator)) or argument.constant
+                ):
                     raise AttributeError("Property %s is read-only" % (k))
                 if v is not None:
                     self.values[k] = argument.validate(v)
@@ -329,18 +333,29 @@ class ConfigInformation:
 
             def postprocess(self, stub, config: Config, values):
                 # Generate values
+                from experimaestro.generators import Generator
+
                 for k, argument in config.__xpmtype__.arguments.items():
-                    if argument.generator:
-                        sig = inspect.signature(argument.generator)
-                        if len(sig.parameters) == 2:
-                            value = argument.generator(self.context, config)
-                        elif len(sig.parameters) == 0:
-                            value = argument.generator()
-                        else:
-                            assert (
-                                False
-                            ), "generator has either two parameters (context and config), or none"
-                        config.__xpm__.set(k, value, bypass=True)
+                    try:
+                        if argument.generator:
+                            if not isinstance(argument.generator, Generator):
+                                value = argument.generator()
+                            else:
+                                sig = inspect.signature(argument.generator)
+                                if len(sig.parameters) == 0:
+                                    value = argument.generator()
+                                elif len(sig.parameters) == 2:
+                                    value = argument.generator(self.context, config)
+                                else:
+                                    assert (
+                                        False
+                                    ), "generator has either two parameters (context and config), or none"
+                            config.__xpm__.set(k, value, bypass=True)
+                    except Exception:
+                        logger.error(
+                            "While setting %s of %s", argument.name, config.__xpmtype__
+                        )
+                        raise
 
                 config.__xpm__._sealed = True
 
