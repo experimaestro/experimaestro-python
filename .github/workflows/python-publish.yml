@@ -35,7 +35,7 @@ jobs:
         run: |
           npm --version
           npm install --no-save
-          npm run build
+          NODE_OPTIONS="--loader ts-node/esm" npm run build
 
       - name: Build python
         run: |
