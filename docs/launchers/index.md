@@ -1,14 +1,18 @@
 # Launchers
 
+Launchers, together with the [Connector](../connectors/index.md), specify how a task should be launched.
+There exist two types of launchers at the moment, [direct launcher](#direct) (starting
+a new process) or through [slurm](#slurm)
+
 ## Types
 
-### direct (default)
+### Direct
 
 By default, jobs are launched directly by the scheduler using python scripts.
 
 ::: experimaestro.launchers.direct.DirectLauncher
 
-### Slurm (since 0.8.7)
+### Slurm
 
 The [Slurm](https://slurm.schedmd.com/documentation.html) workload manager launcher is supported.
 It is possible to use different settings for different jobs by using the `config`

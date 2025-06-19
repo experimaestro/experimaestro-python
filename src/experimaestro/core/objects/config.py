@@ -339,6 +339,9 @@ class ConfigInformation:
                     try:
                         if argument.generator:
                             if not isinstance(argument.generator, Generator):
+                                # Don't set if already set
+                                if config.__xpm__.values.get(k) is not None:
+                                    continue
                                 value = argument.generator()
                             else:
                                 sig = inspect.signature(argument.generator)

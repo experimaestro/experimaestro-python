@@ -290,6 +290,26 @@ def test_default_mismatch():
         A.__getxpmtype__().getArgument("x")
 
 
+# --- Handling default with field
+
+
+def test_param_default_set():
+    """Test that the default setting is well set"""
+
+    class A0(Config):
+        x: Param[int] = 2
+
+    assert A0().instance().x == 2
+    assert A0(x=3).instance().x == 3
+
+    class A(Config):
+        x: Param[int] = field(default_factory=lambda: 2)
+
+    assert A().instance().x == 2
+
+    assert A(x=3).instance().x == 3
+
+
 # --- Handling help annotations
 
 

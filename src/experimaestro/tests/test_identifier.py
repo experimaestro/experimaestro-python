@@ -38,6 +38,11 @@ class C(Config):
     b: Param[int]
 
 
+class CField(Config):
+    a: Param[int] = field(default_factory=lambda: 1)
+    b: Param[int]
+
+
 class D(Config):
     a: Param[A]
 
@@ -77,6 +82,10 @@ def test_param_order():
 
 def test_param_default():
     assert_equal(C(a=1, b=2), C(b=2))
+
+
+def test_identifier_default_field():
+    assert_equal(CField(a=1, b=2), CField(b=2))
 
 
 def test_param_inner_eq():

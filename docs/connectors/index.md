@@ -1,6 +1,8 @@
 # Connectors
 
-- Localhost connector (default)
+Connectors define how to access a computer (file and process management). There are two types at the moment in experimaestro:
+
+- Localhost connector (by default)
 - SSH (alpha)
 
 
