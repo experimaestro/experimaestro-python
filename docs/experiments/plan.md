@@ -12,8 +12,8 @@ the config/task instance, as in the example below:
 
     ```py3 linenums="1"
 
-    model = Model1(layers=3)
-    learnedmodel = Learn(epochs=100)
+    model = Model1.C(layers=3)
+    learnedmodel = Learn.C(epochs=100)
     learnedmodel.model = model
     learnedmodel.submit()
     ```
@@ -66,7 +66,7 @@ tag(value: Union[str, int, float, bool])
 For example,
 
 ```py3
-model = MyModel(epochs=tag(100))
+model = MyModel.C(epochs=tag(100))
 ```
 
 will create a tag with key "epochs" and value "100"./
@@ -97,13 +97,13 @@ can be used to store additional experimental results as shown in the example bel
 from experimaestro import tag, tagspath
 
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
-    model = Model()
+    model = Model.C()
 
     # Experimental plan
     models = {}
     for dlen_max, n_tokens in product([50, 200], [100, 1000]):
-        data = Data(n_tokens=tag(n_tokens))
-        learn = Learn(data=data, model=model, dlen_max=tag(dlen_max))
+        data = Data.C(n_tokens=tag(n_tokens))
+        learn = Learn.C(data=data, model=model, dlen_max=tag(dlen_max))
         learn.add_dependencies(token.dependency(1))
         models[tagspath(learn)] = learn.submit().jobpath
 
@@ -124,15 +124,12 @@ with experiment("...main experimental folder path...", "experiment ID", port=123
 
 ## Event handlers
 
-_Planned_
 
-Sometimes, it can be useful to wait until a task completes - for instance, when exploring the hyperparameter
-space, one can wait to launch new tasks based on the outcome. This can be achieved using the `on_completed` callback:
+Callbacks can be registered to accomplish some actions e.g. on task completion.
 
-```py3
+- `task.on_completed(callback: Callable[[], None])` register a callback that is
+  called when the task terminates successfully
 
-task.on_completed(check_results).submit()
-```
 
 ## Misc
 
@@ -154,7 +151,7 @@ class MyModel(Config):
 @forwardoption(arguments(MyModel).epochs)
 @click.command()
 def cli(epochs):
-    model = MyModel(epochs=epochs)
+    model = MyModel.C(epochs=epochs)
 ```
 
 This will automatically use the type, help and default value of the matching option

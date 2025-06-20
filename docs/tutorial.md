@@ -77,9 +77,9 @@ in identifying a unique set of parameters. Here's a detailed description:
 
 Taking the configuration class `Adam` defined above, we have:
 
-- `Adam().__identifier__()` returns `261c5...`
-- `Adam(lr=1e-3).__identifier__()` returns the same identifier since `lr` has a default value of `1e-3`
-- `Adam(lr=1e-2).__identifier__()` returns `71848...` (different set of parameters)
+- `Adam.C().__identifier__()` returns `261c5...`
+- `Adam.C(lr=1e-3).__identifier__()` returns the same identifier since `lr` has a default value of `1e-3`
+- `Adam.C(lr=1e-2).__identifier__()` returns `71848...` (different set of parameters)
 
 
 # Tasks
@@ -192,14 +192,14 @@ def run(
     helper: ExperimentHelper, cfg: Configuration
 ):
     # Experimental code
-    optimizer = Adam(lr=1e-4)
-    dataset = MyDataset()
-    models = [AwesomeModel(layers=tag(n_layer)) for n_layer in cfg.n_layers]
+    optimizer = Adam.C(lr=1e-4)
+    dataset = MyDataset.C()
+    models = [AwesomeModel.C(layers=tag(n_layer)) for n_layer in cfg.n_layers]
     learned = {}
 
     for model in models:
         # Learn the model
-        learner = Learner(optimizer=optimizer, dataset=dataset.train, model=model)
+        learner = Learner.C(optimizer=optimizer, dataset=dataset.train, model=model)
         learned_model = learner.submit(launcher=learn_launcher, epochs=cfg.epochs)
 
         # Keeps track of the learned models
@@ -207,7 +207,7 @@ def run(
         learned[tagspath(learned_model)] = learned_model
 
         # and evaluate (another task, not shown here)
-        Evaluate(dataset=dataset.test, model=learned_model).submit(launcher=evaluation_launcher)
+        Evaluate.C(dataset=dataset.test, model=learned_model).submit(launcher=evaluation_launcher)
 ```
 
 With `debug.yaml` located in the same folder as `experiment.py`

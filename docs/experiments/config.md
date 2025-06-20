@@ -230,7 +230,7 @@ For instance, if the original class is:
 class MyConfig(Config):
     a: Param[int]
 
-obj = MyConfig(a = 2)
+obj = MyConfig.C(a = 2)
 id_old = obj.__identifier__()
 ```
 
@@ -240,7 +240,7 @@ class myConfig(Config):
     a: Param[int]
     b: Param[int] = 4
 
-obj = myConfig(a = 2)
+obj = myConfig.C(a = 2)
 new_id = obj.__identifier__()
 
 >>> new_id == old_id
