@@ -73,7 +73,7 @@ class SerializationContext:
 
 
 class SerializedPathLoader(Protocol):
-    def __call__(path: Union[Path, str, SerializedPath]) -> Path:
+    def __call__(self, path: Union[Path, str, SerializedPath]) -> Path:
         """Get a filesystem path from a relative path
 
         :param path: The relative path

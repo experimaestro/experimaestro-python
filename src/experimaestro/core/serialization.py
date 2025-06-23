@@ -66,7 +66,8 @@ def save(obj: Any, save_directory: Optional[Path]):
 def get_data_loader(path: Union[str, Path, SerializedPathLoader]):
     if path is None:
 
-        def data_loader():
+        def data_loader(_: Union[str, Path, SerializedPathLoader]):
+            # Just raise an exception
             raise RuntimeError("No serialization path was given")
 
         return data_loader
@@ -170,7 +171,7 @@ def deserialize(
     with data_loader("definition.json").open("rt") as fh:
         content = json.load(fh)
 
-    object, init_tasks = from_state_dict(content, as_instance=as_instance)
+    object, init_tasks = from_state_dict(content, data_loader, as_instance=as_instance)
 
     if as_instance:
         for init_task in init_tasks:
