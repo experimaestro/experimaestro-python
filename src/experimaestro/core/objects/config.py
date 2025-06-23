@@ -803,6 +803,9 @@ class ConfigInformation:
     def __collect_objects__(value, objects: List[Dict], context: SerializationContext):
         """Serialize all needed configuration objects, looking at sub
         configurations if necessary"""
+        if value is None:
+            return
+
         if isinstance(value, Config):
             value.__xpm__.__get_objects__(objects, context)
         elif isinstance(value, (list, tuple)):

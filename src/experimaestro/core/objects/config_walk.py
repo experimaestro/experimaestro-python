@@ -129,6 +129,9 @@ class ConfigWalk:
             self.visited[xid] = processed
             return processed
 
+        if x is None:
+            return None
+
         if isinstance(x, list):
             result = []
             for i, sv in enumerate(x):

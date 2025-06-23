@@ -1,3 +1,4 @@
+from typing import Optional
 from experimaestro import (
     Config,
     Task,
@@ -78,8 +79,8 @@ class Object2(Config):
 def test_serializers_serialization():
     context = SerializationContext(save_directory=None)
 
-    obj1 = Object1()
-    obj2 = Object2(object=obj1)
+    obj1 = Object1.C()
+    obj2 = Object2.C(object=obj1)
 
     data = state_dict(context, [obj1, obj2])
 
@@ -92,3 +93,21 @@ def test_serializers_serialization():
     assert isinstance(obj1, Object1) and not isinstance(obj1, ConfigMixin)
     assert isinstance(obj2, Object2)
     assert obj2.object is obj1
+
+
+class SubConfig(Config):
+    pass
+
+
+class MultiParamObject(Config):
+    opt_a: Param[Optional[int]]
+
+    x: Param[dict[str, Optional[SubConfig]]]
+
+
+def test_serializers_types():
+    context = SerializationContext(save_directory=None)
+
+    config = MultiParamObject.C(x={"a": None})
+    config.__xpm__.seal(context)
+    state_dict(context, config)
