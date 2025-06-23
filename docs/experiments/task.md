@@ -68,7 +68,7 @@ and explicitly declare the dependencies.
             dataset: Param[Dataset]
             """The source dataset"""
 
-            topics: Annotated[Path, pathgenerator("topics.tsv")]
+            topics: Param[Path] = field(default_factory=PathGenerator("topics.tsv"))
             """Generated topics"""
 
             def task_outputs(self, dep) -> Adhoc:
@@ -137,7 +137,7 @@ subclassed) can be used.
         model: Param[Model]
 
         def task_outputs(self, dep):
-            return dep(ModelLoader(model=model, path=path))
+            return dep(ModelLoader.C(model=model, path=path))
 
         def execute(self):
             ...
@@ -147,7 +147,7 @@ subclassed) can be used.
     model_loader = learner.submit()
 
     # ... and evaluate it, using the learned parameters
-    Evaluate(model=model).submit(init_tasks=[model_loader])
+    Evaluate.C(model=model).submit(init_tasks=[model_loader])
 ```
 
 
@@ -221,7 +221,7 @@ All the task output should be located in the directory
 Inside this directory, we have
 
 - `.experimaestro`, the folder that stores information about the process
-- `[NAME].py` that contains the code that will be executed (through a cluster
+- `[NAME].py` and (for some launchers) `[NAME].sh`  that contains the code that will be executed (through a cluster
   scheduler, e.g. slurm, or directly)
 - `[NAME].err` and `[NAME].out` that stores the standard output and error
   streams
