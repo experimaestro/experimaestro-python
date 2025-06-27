@@ -95,6 +95,7 @@ class HostRequirement:
     """A requirement must be a disjunction of host requirements"""
 
     requirements: List["HostSimpleRequirement"]
+    """List of requirements (by order of priority)"""
 
     def __init__(self) -> None:
         self.requirements = []
@@ -133,7 +134,10 @@ class HostSimpleRequirement(HostRequirement):
     """Simple host requirement"""
 
     cuda_gpus: List["CudaSpecification"]
+    """Specification for CUDA gpus"""
+
     cpu: "CPUSpecification"
+    """Specification for CPU"""
 
     duration: int
     """Requested duration (in seconds)"""

@@ -37,7 +37,20 @@ with experiment(launcher=launcher):
 
 ::: experimaestro.launchers.slurm.SlurmLauncher
 
-## Launcher file (since 1.2.4)
+## Launcher file
+
+The `launchers.py` file dictates how a given *requirement* (e.g., 2 CPU with
+64Go of memory) is mapped to a given `Launcher` configuration.
+
+### Requirements
+
+::: experimaestro.launcherfinder.specs.HostRequirement
+::: experimaestro.launcherfinder.specs.HostSimpleRequirement
+::: experimaestro.launcherfinder.specs.CudaSpecification
+::: experimaestro.launcherfinder.specs.CPUSpecification
+
+
+### Example
 
 To construct launchers given a specification, you have to use a `launchers.py`
 file within the configuration directory.

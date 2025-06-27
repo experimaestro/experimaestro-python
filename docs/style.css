@@ -1,15 +1,20 @@
 .doc-class > .doc.doc-heading > code:first-child:before {
-  content: "class "
+  content: "🎯 class "
 }
 
 
 .doc.doc-heading > code:first-child {
   /* font-family: Arial, Helvetica, sans-serif; */
   color: black;
-  font-weight: normal;
+  font-weight: bold;
   border: none;
-  background: #eee;
+  /* background: #eee; */
   padding: 5px 0px;
+  color: darkblue;
+}
+
+.doc.doc-function .doc.doc-heading > code:first-child {
+  font-weight: normal;
 }
 
 .doc.doc-object {
@@ -21,4 +26,8 @@
 .doc.doc-object .doc {
   margin: 0;
   border-left: 0;
+}
+
+.doc.doc-class {
+  margin-top: 10px;
 }
