@@ -20,9 +20,6 @@ class CudaSpecification:
     min_memory: int = 0
     """Minimum request memory (in bytes)"""
 
-    def __lt__(self, other: "CudaSpecification"):
-        return self.memory < other.memory
-
     def match(self, spec: "CudaSpecification"):
         """Returns True if the specification matches this host"""
         return (self.memory >= spec.memory) and (self.min_memory <= spec.memory)
@@ -30,7 +27,7 @@ class CudaSpecification:
     def __repr__(self):
         return (
             f"CUDA({self.model} "
-            f"{format_size(self.memory)}/{format_size(self.min_memory)})"
+            f"max={format_size(self.memory)}/min={format_size(self.min_memory)})"
         )
 
 
@@ -48,8 +45,8 @@ class CPUSpecification:
     cpu_per_gpu: int = 0
     """Number of CPU per GPU (0 if not defined)"""
 
-    def __lt__(self, other: "CPUSpecification"):
-        return self.memory < other.memory and self.cores < other.cores
+    def match(self, other: "CPUSpecification"):
+        return (self.memory >= other.memory) and (self.cores >= other.cores)
 
     def total_memory(self, gpus: int = 0):
         return max(
@@ -162,7 +159,7 @@ class HostSimpleRequirement(HostRequirement):
         self.cpu.cores = max(req.cpu.cores, self.cpu.cores)
         self.duration = max(req.duration, self.duration)
         self.cuda_gpus.extend(req.cuda_gpus)
-        self.cuda_gpus.sort()
+        self.cuda_gpus.sort(key=lambda cuda: -cuda.memory)
 
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         if self.cuda_gpus:
@@ -186,7 +183,7 @@ class HostSimpleRequirement(HostRequirement):
             )
             return None
 
-        if host.cpu < self.cpu:
+        if not host.cpu.match(self.cpu):
             return None
 
         if host.max_duration > 0 and self.duration > host.max_duration:
@@ -201,7 +198,7 @@ class HostSimpleRequirement(HostRequirement):
         _self = deepcopy(self)
         for _ in range(count - 1):
             _self.cuda_gpus.extend(self.cuda_gpus)
-        _self.cuda_gpus.sort()
+        _self.cuda_gpus.sort(key=lambda cuda: -cuda.memory)
 
         return _self
 
