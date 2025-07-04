@@ -23,7 +23,7 @@ class SuppressStrMatch(StrMatch):
 
 
 def mem_spec():
-    return "mem", "=", RegExMatch(r"\d+(G|M)?")
+    return "mem", "=", RegExMatch(r"\d+(GiB|MiB|G|M)?")
 
 
 def cores_spec():
