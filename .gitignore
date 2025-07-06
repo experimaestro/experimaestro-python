@@ -3,6 +3,7 @@ dist
 *.egg-info
 .vscode/
 .tox
+**/.DS_Store
 
 __pycache__/
 .mypy_cache/
