@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Callable, Dict, List, Optional
 import pyparsing as pp
 from pathlib import Path
@@ -8,9 +9,10 @@ from experimaestro.scheduler import JobState
 
 
 class JobInformation:
-    def __init__(self, path: Path, scriptname: str):
+    def __init__(self, path: Path, scriptname: str, check: bool = False):
         self.path = path
         self.scriptname = scriptname
+        self.check = check
 
     @cached_property
     def params(self):
@@ -27,6 +29,11 @@ class JobInformation:
         if (self.path / f"{self.scriptname}.failed").is_file():
             return JobState.ERROR
         if (self.path / f"{self.scriptname}.pid").is_file():
+            if self.check:
+                process = self.getprocess()
+                state = asyncio.run(process.aio_state(0))
+                if state.finished:
+                    return JobState.ERROR
             return JobState.RUNNING
         else:
             return None

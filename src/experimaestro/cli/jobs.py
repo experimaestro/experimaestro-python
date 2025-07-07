@@ -1,4 +1,5 @@
 # flake8: noqa: T201
+import asyncio
 import subprocess
 from typing import Optional
 from shutil import rmtree
@@ -49,6 +50,7 @@ def process(
     filter="",
     perform=False,
     fullpath=False,
+    check=False,
 ):
     from .filter import createFilter, JobInformation
     from experimaestro.scheduler import JobState
@@ -69,7 +71,9 @@ def process(
         if (p / "jobs.bak").is_dir():
             cprint(f"  Experiment {p.name} has not finished yet", "red")
             if (not perform) and (kill or clean):
-                cprint("  Preventing kill/clean (use --perform if you want to)", "yellow")
+                cprint(
+                    "  Preventing kill/clean (use --perform if you want to)", "yellow"
+                )
                 kill = False
                 clean = False
 
@@ -83,7 +87,7 @@ def process(
             if experiment and experiment not in xps:
                 continue
 
-            info = JobInformation(p, scriptname)
+            info = JobInformation(p, scriptname, check=check)
             job_str = (
                 (str(job.resolve()) if fullpath else f"{job.parent.name}/{job.name}")
                 + " "
@@ -151,6 +155,7 @@ def process(
 @click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
 @click.option("--filter", default="", help="Filter expression")
 @click.option("--fullpath", is_flag=True, help="Prints full paths")
+@click.option("--no-check", is_flag=True, help="Check that running jobs")
 @jobs.command()
 @click.pass_context
 def list(
@@ -160,6 +165,7 @@ def list(
     tags: bool,
     ready: bool,
     fullpath: bool,
+    no_check: bool,
 ):
     process(
         ctx.obj.workspace,
@@ -168,6 +174,7 @@ def list(
         tags=tags,
         ready=ready,
         fullpath=fullpath,
+        check=not no_check,
     )
 
 
@@ -187,6 +194,7 @@ def kill(
     ready: bool,
     fullpath: bool,
     perform: bool,
+    check: bool,
 ):
     process(
         ctx.obj.workspace,
