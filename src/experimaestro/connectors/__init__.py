@@ -114,8 +114,11 @@ class Process:
         """Wait until the process finishes and returns the error code"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
 
-    async def aio_state(self) -> ProcessState:
-        """Returns the job state"""
+    async def aio_state(self, timeout: float | None = None) -> ProcessState:
+        """Returns the job state
+
+        :param timeout: maximum waiting time for a refresh
+        """
         raise NotImplementedError(f"Not implemented: {self.__class__}.aio_state")
 
     async def aio_isrunning(self):

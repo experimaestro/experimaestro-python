@@ -39,7 +39,7 @@ class PsutilProcess(Process):
         )
         return code
 
-    async def aio_state(self):
+    async def aio_state(self, timeout: float | None = None) -> ProcessState:
         if self._process.is_running():
             return ProcessState.RUNNING
         return ProcessState.FINISHED
@@ -65,7 +65,7 @@ class LocalProcess(Process):
         )
         return code
 
-    async def aio_state(self):
+    async def aio_state(self, timeout: float | None = None) -> ProcessState:
         code = self._process.poll()
         if code is None:
             return ProcessState.RUNNING

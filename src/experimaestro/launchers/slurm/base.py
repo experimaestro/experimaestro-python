@@ -87,7 +87,7 @@ class SlurmProcessWatcher(threading.Thread):
     WATCHERS: Dict[Tuple[Tuple[str, Any]], "SlurmProcessWatcher"] = {}
 
     def __init__(self, launcher: "SlurmLauncher"):
-        super().__init__()
+        super().__init__(daemon=True)
         self.launcher = launcher
         self.count = 1
         self.jobs: Dict[str, SlurmJobState] = {}
@@ -184,10 +184,10 @@ class BatchSlurmProcess(Process):
                 if state and state.finished():
                     return 0 if state.slurm_state == "COMPLETED" else 1
 
-    async def aio_state(self):
+    async def aio_state(self, timeout: float | None = None) -> ProcessState:
         def check():
             with SlurmProcessWatcher.get(self.launcher) as watcher:
-                jobinfo = watcher.getjob(self.jobid)
+                jobinfo = watcher.getjob(self.jobid, timeout=timeout)
                 return jobinfo.state if jobinfo else ProcessState.SCHEDULED
 
         return await asyncThreadcheck("slurm.aio_isrunning", check)
@@ -212,7 +212,7 @@ class BatchSlurmProcess(Process):
 
         # Checks that the process is running
         with SlurmProcessWatcher.get(launcher) as watcher:
-            logger.info("Checking SLURM job %s", process.jobid)
+            logger.debug("Checking SLURM job %s", process.jobid)
             jobinfo = watcher.getjob(process.jobid, timeout=0.1)
             if jobinfo and jobinfo.state.running:
                 logger.debug(
