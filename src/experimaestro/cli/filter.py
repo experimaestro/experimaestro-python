@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Any, Callable, Dict, List, Optional
 import pyparsing as pp
 from pathlib import Path
@@ -16,7 +17,11 @@ class JobInformation:
 
     @cached_property
     def params(self):
-        return json.loads((self.path / "params.json").read_text())
+        try:
+            return json.loads((self.path / "params.json").read_text())
+        except Exception:
+            logging.warning("Could not load params.json in %s", self.path)
+            return {"tags": {}}
 
     @cached_property
     def tags(self) -> List[str]:
