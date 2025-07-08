@@ -30,9 +30,11 @@ class JobInformation:
             return JobState.ERROR
         if (self.path / f"{self.scriptname}.pid").is_file():
             if self.check:
-                process = self.getprocess()
-                state = asyncio.run(process.aio_state(0))
-                if state.finished:
+                if process := self.getprocess():
+                    state = asyncio.run(process.aio_state(0))
+                    if state is None or state.finished:
+                        return JobState.ERROR
+                else:
                     return JobState.ERROR
             return JobState.RUNNING
         else:

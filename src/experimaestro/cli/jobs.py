@@ -65,8 +65,7 @@ def process(
         for job in p.glob("jobs/*/*"):
             job_path = job.resolve()
             if job_path.is_dir():
-                *_, scriptname = job_path.parent.name.rsplit(".", 1)
-                job2xp.setdefault(scriptname, set()).add(p.name)
+                job2xp.setdefault(job_path.name, set()).add(p.name)
 
         if (p / "jobs.bak").is_dir():
             cprint(f"  Experiment {p.name} has not finished yet", "red")
@@ -83,7 +82,7 @@ def process(
         p = job.resolve()
         if p.is_dir():
             *_, scriptname = p.parent.name.rsplit(".", 1)
-            xps = job2xp.get(scriptname, set())
+            xps = job2xp.get(job.name, set())
             if experiment and experiment not in xps:
                 continue
 
