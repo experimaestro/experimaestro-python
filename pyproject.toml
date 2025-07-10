@@ -64,6 +64,7 @@ watchdog = "^2"
 marshmallow = "^3.20"
 decorator = "^5"
 rpyc = ">=5,<7"
+mkdocs = ">=1.5"
 
 [tool.poetry.group.ssh]
 optional = true
