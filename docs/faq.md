@@ -52,5 +52,5 @@ In `.vscode/launch.json` :
                 "CUDA_VISIBLE_DEVICES": "1",
             }
 }
-- NOTE: if the task needs GPU support, you may need to open VS-Code on a node with access to a GPU.
 ```
+- NOTE: if the task needs GPU support, you may need to open VS-Code on a node with access to a GPU.
