@@ -1,4 +1,6 @@
+from abc import ABC, abstractmethod
 import logging
+import math
 from attr import Factory
 from attrs import define
 from copy import copy, deepcopy
@@ -88,7 +90,7 @@ class MatchRequirement:
     requirement: "HostSimpleRequirement"
 
 
-class HostRequirement:
+class HostRequirement(ABC):
     """A requirement must be a disjunction of host requirements"""
 
     requirements: List["HostSimpleRequirement"]
@@ -103,6 +105,12 @@ class HostRequirement:
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         raise NotImplementedError()
 
+    @abstractmethod
+    def multiply_duration(self, coefficient: float) -> "HostRequirement":
+        """Returns a new HostRequirement with a duration multiplied by the
+        provided coefficient"""
+        ...
+
 
 class RequirementUnion(HostRequirement):
     """Ordered list of simple host requirements -- the first one is the priority"""
@@ -111,6 +119,16 @@ class RequirementUnion(HostRequirement):
 
     def __init__(self, *requirements: "HostSimpleRequirement"):
         self.requirements = list(requirements)
+
+    def add(self, requirement: "HostRequirement"):
+        match requirement:
+            case HostSimpleRequirement():
+                self.requirements.extend(*requirement.requirements)
+            case RequirementUnion():
+                self.requirements.append(requirement)
+            case _:
+                raise RuntimeError("Cannot handle type %s", type(requirement))
+        return self
 
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
         """Returns the matched requirement (if any)"""
@@ -125,6 +143,14 @@ class RequirementUnion(HostRequirement):
                     argmax = MatchRequirement(match.score, req)
 
         return argmax
+
+    def multiply_duration(self, coefficient: float) -> "RequirementUnion":
+        return RequirementUnion(
+            *[r.multiply_duration(coefficient) for r in self.requirements]
+        )
+
+    def __repr__(self):
+        return " | ".join(repr(r) for r in self.requirements)
 
 
 class HostSimpleRequirement(HostRequirement):
@@ -141,6 +167,11 @@ class HostSimpleRequirement(HostRequirement):
 
     def __repr__(self):
         return f"Req(cpu={self.cpu}, cuda={self.cuda_gpus}, duration={self.duration})"
+
+    def multiply_duration(self, coefficient: float) -> "HostSimpleRequirement":
+        r = HostSimpleRequirement(self)
+        r.duration = math.ceil(self.duration * coefficient)
+        return r
 
     def __init__(self, *reqs: "HostSimpleRequirement"):
         self.cuda_gpus = []

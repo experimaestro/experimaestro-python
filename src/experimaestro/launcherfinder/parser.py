@@ -67,7 +67,7 @@ def grammar():
 
 class Visitor(PTNodeVisitor):
     def visit_grammar(self, node, children):
-        return [child for child in children]
+        return specs.RequirementUnion(*[child for child in children])
 
     def visit_one_spec(self, node, children):
         return reduce(lambda x, el: x & el, children)
