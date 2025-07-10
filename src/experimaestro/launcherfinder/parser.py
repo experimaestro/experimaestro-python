@@ -51,7 +51,12 @@ def cpu():
 
 
 def duration():
-    return "duration", "=", RegExMatch(r"\d+"), RegExMatch(r"h(ours)?|d(ays)?")
+    return (
+        "duration",
+        "=",
+        RegExMatch(r"\d+"),
+        RegExMatch(r"h(ours?)?|d(ays?)?|m(ins?)?"),
+    )
 
 
 def one_spec():
