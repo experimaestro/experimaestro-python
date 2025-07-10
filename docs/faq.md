@@ -34,7 +34,7 @@ If the task is already generated, you can run it with the [python debugger](http
 - Run the dubugger Using the following configuration:
 
 In `.vscode/launch.json` :
-```json
+```json5
  {
             "name": "Python: XPM Task",
             "type": "debugpy",
