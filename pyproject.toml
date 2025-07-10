@@ -16,12 +16,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-include = [
-    "src/experimaestro/server/data/*",
-    "src/experimaestro/sphinx/static/experimaestro.css",
-    "src/experimaestro/mkdocs/style.css",
-    { path="src/experimaestro/server/data/*", format=['sdist', 'wheel']}
-]
 repository = "https://github.com/experimaestro/experimaestro-python"
 documentation = "https://experimaestro-python.readthedocs.io/"
 dynamic = ["version"]
@@ -66,6 +60,12 @@ format-jinja = """{%- set pre = [] -%}{%- set metadata = [] -%}
 {{ serialize_semver(base, pre, metadata)}}"""
 
 [tool.poetry]
+include = [
+    "src/experimaestro/server/data/*",
+    "src/experimaestro/sphinx/static/experimaestro.css",
+    "src/experimaestro/mkdocs/style.css",
+    { path="src/experimaestro/server/data/*", format=['sdist', 'wheel']}
+]
 version = "0.0.0"
 
 [tool.poetry-dynamic-versioning.files."src/experimaestro/version.py"]
