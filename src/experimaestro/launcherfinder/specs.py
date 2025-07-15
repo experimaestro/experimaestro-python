@@ -27,7 +27,7 @@ class CudaSpecification:
     def __repr__(self):
         return (
             f"CUDA({self.model} "
-            f"max={format_size(self.memory)}/min={format_size(self.min_memory)})"
+            f"max={format_size(self.memory, binary=True)}/min={format_size(self.min_memory, binary=True)})"
         )
 
 
@@ -44,6 +44,13 @@ class CPUSpecification:
 
     cpu_per_gpu: int = 0
     """Number of CPU per GPU (0 if not defined)"""
+
+    def __repr__(self):
+        return (
+            f"CPU("
+            f"mem={format_size(self.memory, binary=True)}, cores={self.cores}"
+            ")"
+        )
 
     def match(self, other: "CPUSpecification"):
         return (self.memory >= other.memory) and (self.cores >= other.cores)
