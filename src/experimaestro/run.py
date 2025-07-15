@@ -8,6 +8,7 @@ import json
 from typing import List
 import fasteners
 from experimaestro.notifications import progress, report_eoj
+from experimaestro.utils.multiprocessing import delayed_shutdown
 from .core.types import ObjectType
 from experimaestro.utils import logger
 from experimaestro.core.objects import ConfigInformation
@@ -96,6 +97,7 @@ class TaskRunner:
         self.failedpath.write_text(str(code))
         self.cleanup()
         logger.info("Exiting")
+        delayed_shutdown(60, exit_code=code)
         sys.exit(1)
 
     def run(self):
