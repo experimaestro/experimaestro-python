@@ -24,9 +24,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          # 1. Fresh tooling
+          python -m pip install -U pip setuptools wheel
+          # 2. Install pytest etc.
           pip install flake8 pytest pytest-timeout
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # 3. Install our package
           TEST_WORKFLOW=ON pip install .
       - name: Lint with flake8
         if: false

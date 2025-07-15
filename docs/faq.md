@@ -24,3 +24,33 @@ task.instance(context).execute()
 ```
 
 The main problem with this approach is that resources are shared between experimaestro and the task
+
+### How to Debug a failed task ?
+If a task failed, you can rerun it with [debugpy](https://github.com/microsoft/debugpy). 
+
+#### Using vsCode
+If the task is already generated, you can run it with the [python debugger](https://code.visualstudio.com/docs/python/debugging) directly within vsCode.
+- open the task python file `.../HASHID/task_name.py`.
+- Run the dubugger Using the following configuration:
+
+In `.vscode/launch.json` :
+```json5
+ {
+            "name": "Python: XPM Task",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "experimaestro",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "run",
+                "params.json"
+            ],
+            // "python": "${workspaceFolder}/.venv/bin/python",
+            "cwd": "${fileDirname}",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "1",
+            }
+}
+```
+- NOTE: if the task needs GPU support, you may need to open VS-Code on a node with access to a GPU.

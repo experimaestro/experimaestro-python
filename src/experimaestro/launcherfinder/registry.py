@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf, SCMode
 import pkg_resources
 from experimaestro.utils import logger
 from .base import ConnectorConfiguration, TokenConfiguration
-from .specs import HostRequirement
+from .specs import HostRequirement, RequirementUnion
 
 if typing.TYPE_CHECKING:
     from experimaestro.launchers import Launcher
@@ -150,18 +150,18 @@ class LauncherRegistry:
         # Parse specs
         from .parser import parse
 
-        specs = []
+        specs = RequirementUnion()
         for spec in input_specs:
             if isinstance(spec, str):
-                specs.extend(parse(spec))
+                specs.add(parse(spec))
             else:
-                specs.append(spec)
+                specs.add(spec)
 
         # Use launcher function
         from experimaestro.launchers import Launcher
 
         if self.find_launcher_fn is not None:
-            for spec in specs:
+            for spec in specs.requirements:
                 if launcher := self.find_launcher_fn(spec, tags):
                     assert isinstance(
                         launcher, Launcher

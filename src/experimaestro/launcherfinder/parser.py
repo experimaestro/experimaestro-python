@@ -51,7 +51,12 @@ def cpu():
 
 
 def duration():
-    return "duration", "=", RegExMatch(r"\d+"), RegExMatch(r"h(ours)?|d(ays)?")
+    return (
+        "duration",
+        "=",
+        RegExMatch(r"\d+"),
+        RegExMatch(r"h(ours?)?|d(ays?)?|m(ins?)?"),
+    )
 
 
 def one_spec():
@@ -67,7 +72,7 @@ def grammar():
 
 class Visitor(PTNodeVisitor):
     def visit_grammar(self, node, children):
-        return [child for child in children]
+        return specs.RequirementUnion(*[child for child in children])
 
     def visit_one_spec(self, node, children):
         return reduce(lambda x, el: x & el, children)

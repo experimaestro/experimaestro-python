@@ -3,9 +3,9 @@ from experimaestro.launcherfinder.specs import (
     CPUSpecification,
     CudaSpecification,
     HostSpecification,
+    RequirementUnion,
     cpu,
     cuda_gpu,
-    HostSimpleRequirement,
 )
 from experimaestro.launcherfinder import parse
 from humanfriendly import parse_size, parse_timespan
@@ -39,6 +39,11 @@ def test_findlauncher_specs():
     assert m is not None
     assert m.requirement is req2
 
+    # Multiply
+    req2 = req.multiply_duration(2)
+    for i in range(2):
+        assert req2.requirements[i].duration == req.requirements[i].duration * 2
+
 
 def test_findlauncher_specs_gpu_mem():
     host = HostSpecification(
@@ -60,8 +65,10 @@ def test_findlauncher_specs_gpu_mem():
 
 
 def test_findlauncher_parse():
-    (r,) = parse("""duration=4 d & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
-    assert isinstance(r, HostSimpleRequirement)
+    r = parse("""duration=4 d & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""")
+    assert isinstance(r, RequirementUnion)
+
+    r = r.requirements[0]
 
     assert len(r.cuda_gpus) == 2
     assert r.cuda_gpus[0].memory == parse_size("4G")
@@ -79,7 +86,7 @@ def slurm_constraint_split(constraint: str):
 
 
 def test_findlauncher_slurm():
-    path = ResourcePathWrapper.create(f"{__package__ }.launchers", "config_slurm")
+    path = ResourcePathWrapper.create(f"{__package__}.launchers", "config_slurm")
 
     assert (path / "launchers.py").is_file()
 

@@ -49,6 +49,23 @@ The `launchers.py` file dictates how a given *requirement* (e.g., 2 CPU with
 ::: experimaestro.launcherfinder.specs.CudaSpecification
 ::: experimaestro.launcherfinder.specs.CPUSpecification
 
+#### Parsing requirements
+
+::: experimaestro.launcherfinder.parser.parse
+
+```py3
+from experimaestro.launcherfinder.parse
+
+req = parse("""duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 8 | duration=50h & cpu(mem=700GiB) & cuda(mem=32GiB) * 4""")
+```
+
+Requirements can be manipulated:
+
+- duration can be multiplied by a given coefficient using
+  `req.multiply_duration`. For instance,  `req.multiply_duration(2)` multiplies
+  all the duration by 2.
+
+
 
 ### Example
 
