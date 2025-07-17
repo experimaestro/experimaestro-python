@@ -20,16 +20,6 @@ from experimaestro.settings import find_workspace
 logging.basicConfig(level=logging.INFO)
 
 
-def pass_cfg(f):
-    """Pass configuration information"""
-
-    @click.pass_context
-    def new_func(ctx, *args, **kwargs):
-        return ctx.invoke(f, ctx.obj, *args, **kwargs)
-
-    return update_wrapper(new_func, f)
-
-
 def check_xp_path(ctx, self, path: Path):
     if not (path / ".__experimaestro__").is_file():
         cprint(f"{path} is not an experimaestro working directory", "red")
@@ -142,7 +132,6 @@ def diff(path: Path):
     """Show the reason of the identifier change for a job"""
     from experimaestro.tools.jobs import load_job
     from experimaestro import Config
-    from experimaestro.core.objects import ConfigWalkContext
 
     _, job = load_job(path / "params.json", discard_id=False)
     _, new_job = load_job(path / "params.json")
@@ -289,6 +278,16 @@ class Launchers(click.MultiCommand):
 cli.add_command(Launchers("launchers", help="Launcher specific commands"))
 cli.add_command(Launchers("connectors", help="Connector specific commands"))
 cli.add_command(Launchers("tokens", help="Token specific commands"))
+
+# Import and add progress commands
+from .progress import progress as progress_cli
+
+cli.add_command(progress_cli)
+
+# Import and add jobs commands
+from .jobs import jobs as jobs_cli
+
+cli.add_command(jobs_cli)
 
 
 @cli.group()

@@ -12,6 +12,7 @@ from tqdm.auto import tqdm as std_tqdm
 
 from .utils import logger
 from experimaestro.taskglobals import Env as TaskEnv
+from .progress import FileBasedProgressReporter
 
 # --- Progress and other notifications
 
@@ -41,7 +42,7 @@ class LevelInformation:
         return result
 
     def __repr__(self) -> str:
-        return f"[{self.level}] {self.desc} {int(self.progress*1000)/10}%"
+        return f"[{self.level}] {self.desc} {int(self.progress * 1000) / 10}%"
 
 
 class ListenerInformation:
@@ -79,10 +80,14 @@ class Reporter(threading.Thread):
         self.progress_threshold = 0.01
         self.cv = threading.Condition()
 
+        # File-based progress reporter
+        self.file_reporter = FileBasedProgressReporter(task_path=path)
+
     def stop(self):
         self.stopping = True
         with self.cv:
-            self.cv.notifyAll()
+            # self.cv.notifyAll()
+            self.cv.notify_all()
 
     @staticmethod
     def isfatal_httperror(e: Exception, info: ListenerInformation) -> bool:
@@ -186,13 +191,15 @@ class Reporter(threading.Thread):
                     try:
                         with urlopen(url) as _:
                             logger.debug(
-                                "EOJ botification sent for %s",
+                                "EOJ notification sent for %s",
                                 baseurl,
                             )
                     except Exception:
                         logger.warning(
                             "Could not report EOJ",
                         )
+
+            self.file_reporter.eoj()
 
     def set_progress(
         self, progress: float, level: int, desc: Optional[str], console=False
@@ -211,6 +218,8 @@ class Reporter(threading.Thread):
                 if desc:
                     self.levels[level].desc = desc
                 self.levels[level].progress = progress
+
+                self.file_reporter.set_progress(progress, level, desc)
 
                 self.cv.notify_all()
 
