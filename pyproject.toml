@@ -83,6 +83,11 @@ poetry-dynamic-versioning = { version = ">=1.0.0,<2.0.0", extras = ["plugin"] }
 requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
 
+[dependency-groups]
+dev = [
+    "mypy>=1.17.0",
+]
+
 [tool.poetry.group.ssh]
 optional = true
 
@@ -137,6 +142,7 @@ extend-ignore = "E203"
 [tool.mypy]
 python_version = "3.10"
 warn_unused_ignores = true
+plugins = ["experimaestro.mypy"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
