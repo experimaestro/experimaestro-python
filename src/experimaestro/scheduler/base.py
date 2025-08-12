@@ -547,6 +547,22 @@ class Scheduler:
 
         return None
 
+    def notify_job_submitted(self, job: Job):
+        """Notify the listeners that a job has been submitted"""
+        for listener in self.listeners:
+            try:
+                listener.job_submitted(job)
+            except Exception:
+                logger.exception("Got an error with listener %s", listener)
+
+    def notify_job_state(self, job: Job):
+        """Notify the listeners that a job has changed state"""
+        for listener in self.listeners:
+            try:
+                listener.job_state(job)
+            except Exception:
+                logger.exception("Got an error with listener %s", listener)
+
     async def aio_submit(self, job: Job) -> JobState:  # noqa: C901
         """Main scheduler function: submit a job, run it (if needed), and returns
         the status code
@@ -571,11 +587,8 @@ class Scheduler:
         path.symlink_to(job.path)
 
         job.state = JobState.WAITING
-        for listener in self.listeners:
-            try:
-                listener.job_submitted(job)
-            except Exception:
-                logger.exception("Got an error with listener %s", listener)
+
+        self.notify_job_submitted(job)
 
         # Add dependencies, and add to blocking resources
         if job.dependencies:
@@ -598,11 +611,8 @@ class Scheduler:
         if process is not None:
             # Yep! First we notify the listeners
             job.state = JobState.RUNNING
-            for listener in self.listeners:
-                try:
-                    listener.job_state(job)
-                except Exception:
-                    logger.exception("Got an error with listener %s", listener)
+            # Notify the listeners
+            self.notify_job_state(job)
 
             # Adds to the listeners
             if self.xp.server is not None:
@@ -637,11 +647,7 @@ class Scheduler:
 
                 job.state = state
 
-        for listener in self.listeners:
-            try:
-                listener.job_state(job)
-            except Exception as e:
-                logger.exception("Listener %s did raise an exception", e)
+        self.notify_job_state(job)
 
         # Job is finished
         if job.state != JobState.DONE:
@@ -705,8 +711,7 @@ class Scheduler:
                                 dependency.check()
                                 return JobState.WAITING
 
-                    for listener in self.listeners:
-                        listener.job_state(job)
+                    self.notify_job_state(job)
 
                     job.starttime = time.time()
 
