@@ -432,45 +432,16 @@ class SignalHandler:
 SIGNAL_HANDLER = SignalHandler()
 
 
-class SchedulerCentral(threading.Thread):
-    loop: asyncio.AbstractEventLoop
-
-    """The event loop thread used by the scheduler"""
-
-    def __init__(self, name: str):
-        # Daemon thread so it is non blocking
-        super().__init__(name=f"Scheduler EL ({name})", daemon=True)
-
-        self._ready = threading.Event()
-
-    def run(self):
-        logger.debug("Starting event loop thread")
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-
-        # Set loop-dependent variables
-        self.exitCondition = asyncio.Condition()
-        self.dependencyLock = asyncio.Lock()
-
-        # Start the event loop
-        self._ready.set()
-        self.loop.run_forever()
-
-    @staticmethod
-    def create(name: str):
-        instance = SchedulerCentral(name)
-        instance.start()
-        instance._ready.wait()
-        return instance
-
-
-class Scheduler:
+class Scheduler(threading.Thread):
     """A job scheduler
 
     The scheduler is based on asyncio for easy concurrency handling
     """
 
     def __init__(self, xp: "experiment", name: str):
+        super().__init__(name=f"Scheduler ({name})", daemon=True)
+        self._ready = threading.Event()
+
         # Name of the experiment
         self.name = name
         self.xp = xp
@@ -487,9 +458,36 @@ class Scheduler:
         # Listeners
         self.listeners: Set[Listener] = set()
 
-    @property
-    def loop(self):
-        return self.xp.loop
+    @staticmethod
+    def create(xp: "experiment", name: str):
+        instance = Scheduler(xp, name)
+        instance.start()
+        instance._ready.wait()
+        return instance
+
+    def run(self):
+        """Run the event loop forever"""
+        logger.debug("Starting event loop thread")
+        # Ported from SchedulerCentral
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        # Set loop-dependent variables
+        self.exitCondition = asyncio.Condition()
+        self.dependencyLock = asyncio.Lock()
+        self._ready.set()
+        self.loop.run_forever()
+
+    def start_scheduler(self):
+        """Start the scheduler event loop in a thread"""
+        if not self.is_alive():
+            self.start()
+            self._ready.wait()
+        else:
+            logger.warning("Scheduler already started")
+
+    # @property
+    # def loop(self):
+    #     return self.xp.loop
 
     def addlistener(self, listener: Listener):
         self.listeners.add(listener)
@@ -498,6 +496,13 @@ class Scheduler:
         self.listeners.remove(listener)
 
     def getJobState(self, job: Job) -> "concurrent.futures.Future[JobState]":
+        # Check if the job belongs to this scheduler
+        if job.identifier not in self.jobs:
+            # If job is not in this scheduler, return its current state directly
+            future = concurrent.futures.Future()
+            future.set_result(job.state)
+            return future
+
         return asyncio.run_coroutine_threadsafe(self.aio_getjobstate(job), self.loop)
 
     async def aio_getjobstate(self, job: Job):
@@ -658,9 +663,12 @@ class Scheduler:
 
         # Decrement the number of unfinished jobs and notify
         self.xp.unfinishedJobs -= 1
-        async with self.xp.central.exitCondition:
+        # async with self.xp.central.exitCondition:
+        #     logging.debug("Updated number of unfinished jobs")
+        #     self.xp.central.exitCondition.notify_all()
+        async with self.exitCondition:
             logging.debug("Updated number of unfinished jobs")
-            self.xp.central.exitCondition.notify_all()
+            self.exitCondition.notify_all()
 
         job.endtime = time.time()
         if job in self.waitingjobs:
@@ -683,7 +691,7 @@ class Scheduler:
 
         # We first lock the job before proceeding
         assert job.launcher is not None
-        assert self.xp.central is not None
+        # assert self.xp.central is not None
 
         with Locks() as locks:
             logger.debug("[starting] Locking job %s", job)
@@ -698,7 +706,8 @@ class Scheduler:
                         len(job.dependencies),
                     )
 
-                    async with self.xp.central.dependencyLock:
+                    # async with self.xp.central.dependencyLock:
+                    async with self.dependencyLock:
                         for dependency in job.dependencies:
                             try:
                                 locks.append(dependency.lock().acquire())
@@ -766,7 +775,6 @@ class Scheduler:
                     "Error while running job (in experimaestro)", exc_info=True
                 )
                 state = JobState.ERROR
-
         return state
 
 
@@ -776,7 +784,7 @@ ServiceClass = TypeVar("ServiceClass", bound=Service)
 class experiment:
     """Main experiment object
 
-    It is a context object, i.e. experiments is run with
+    It is a context object, i.e. an experiment is run with
 
     ```py
         with experiment(...) as xp:
@@ -856,7 +864,8 @@ class experiment:
             settings.server.token = token
 
         # Create the scheduler
-        self.scheduler = Scheduler(self, name)
+        # self.scheduler = Scheduler(self, name)
+        self.scheduler = Scheduler.create(self, name)
         self.server = (
             Server(self.scheduler, settings.server)
             if (settings.server.port is not None and settings.server.port >= 0)
@@ -883,8 +892,11 @@ class experiment:
 
     @property
     def loop(self):
-        assert self.central is not None
-        return self.central.loop
+        # assert self.central is not None
+        # return self.central.loop
+        # loop has moved from SchedulerCentral to Scheduler
+        assert self.scheduler is not None, "No scheduler defined"
+        return self.scheduler.loop
 
     @property
     def resultspath(self):
@@ -911,22 +923,31 @@ class experiment:
         """Stop the experiment as soon as possible"""
 
         async def doStop():
-            assert self.central is not None
-            async with self.central.exitCondition:
+            # assert self.central is not None
+            # async with self.central.exitCondition:
+            #     self.exitMode = True
+            #     logging.debug("Setting exit mode to true")
+            #     self.central.exitCondition.notify_all()
+            assert self.scheduler is not None
+            async with self.scheduler.exitCondition:
                 self.exitMode = True
                 logging.debug("Setting exit mode to true")
-                self.central.exitCondition.notify_all()
+                self.scheduler.exitCondition.notify_all()
 
-        assert self.central is not None and self.central.loop is not None
-        asyncio.run_coroutine_threadsafe(doStop(), self.central.loop)
+        # assert self.central is not None and self.central.loop is not None
+        # asyncio.run_coroutine_threadsafe(doStop(), self.central.loop)
+        assert self.scheduler is not None and self.scheduler.loop is not None
+        asyncio.run_coroutine_threadsafe(doStop(), self.scheduler.loop)
 
     def wait(self):
         """Wait until the running processes have finished"""
 
         async def awaitcompletion():
-            assert self.central is not None
+            # assert self.central is not None
+            assert self.scheduler is not None, "No scheduler defined"
             logger.debug("Waiting to exit scheduler...")
-            async with self.central.exitCondition:
+            # async with self.central.exitCondition:
+            async with self.scheduler.exitCondition:
                 while True:
                     if self.exitMode:
                         break
@@ -941,7 +962,8 @@ class experiment:
                         break
 
                     # Wait for more news...
-                    await self.central.exitCondition.wait()
+                    # await self.central.exitCondition.wait()
+                    await self.scheduler.exitCondition.wait()
 
                 if self.failedJobs:
                     # Show some more information
@@ -1010,7 +1032,8 @@ class experiment:
         # Exit mode when catching signals
         self.exitMode = False
 
-        self.central = SchedulerCentral.create(self.scheduler.name)
+        # self.central = SchedulerCentral.create(self.scheduler.name)
+        self.scheduler.start_scheduler()
         self.taskOutputsWorker = TaskOutputsWorker(self)
         self.taskOutputsWorker.start()
 
@@ -1046,15 +1069,17 @@ class experiment:
                 logger.info("Closing service %s", service.description())
                 service.stop()
 
-            if self.central is not None:
+            # if self.central is not None:
+            if self.scheduler is not None:
                 logger.info("Stopping scheduler event loop")
-                self.central.loop.stop()
+                # self.central.loop.stop()
+                self.scheduler.loop.stop()
 
             if self.taskOutputsWorker is not None:
                 logger.info("Stopping tasks outputs worker")
                 self.taskOutputsWorker.queue.put(None)
 
-            self.central = None
+            # self.central = None
             self.workspace.__exit__(exc_type, exc_value, traceback)
             if self.xplock:
                 self.xplock.__exit__(exc_type, exc_value, traceback)
@@ -1076,13 +1101,15 @@ class experiment:
 
     async def update_task_output_count(self, delta: int):
         """Change in the number of task outputs to process"""
-        async with self.central.exitCondition:
+        # async with self.central.exitCondition:
+        async with self.scheduler.exitCondition:
             self.taskOutputQueueSize += delta
             logging.debug(
                 "Updating queue size with %d => %d", delta, self.taskOutputQueueSize
             )
             if self.taskOutputQueueSize == 0:
-                self.central.exitCondition.notify_all()
+                # self.central.exitCondition.notify_all()
+                self.scheduler.exitCondition.notify_all()
 
     def watch_output(self, watched: "WatchedOutput"):
         """Watch an output

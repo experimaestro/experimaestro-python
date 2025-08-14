@@ -64,7 +64,7 @@ def restart(terminate: Callable, experiment):
     try:
         with TemporaryExperiment("restart", maxwait=20) as xp:
             # Create the task with dry_run and so we can get the file paths
-            task = Restart()
+            task = Restart.C()
             task.submit(run_mode=RunMode.DRY_RUN)
 
         # Start the experiment with another process, and kill the job

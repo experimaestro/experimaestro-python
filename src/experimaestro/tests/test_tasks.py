@@ -111,7 +111,7 @@ def test_done():
 
 
 def restart_function(xp):
-    restart.Restart().submit()
+    restart.Restart.C().submit()
 
 
 @pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)
