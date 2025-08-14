@@ -3,16 +3,18 @@ import logging
 import os
 from pathlib import Path
 from shutil import rmtree
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, TypeVar, Union
 
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
-from experimaestro.scheduler.base import Scheduler, ServiceClass
+
 from experimaestro.scheduler.jobs import Job, JobFailureStatus
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.settings import WorkspaceSettings, get_settings
 from experimaestro.utils import logger
+
+ServiceClass = TypeVar("ServiceClass", bound=Service)
 
 
 class FailedExperiment(HandledException):
@@ -73,7 +75,7 @@ class experiment:
         """
 
         from experimaestro.server import Server
-        from experimaestro.scheduler import Listener
+        from experimaestro.scheduler import Listener, Scheduler
 
         settings = get_settings()
         if not isinstance(env, WorkspaceSettings):
@@ -131,9 +133,6 @@ class experiment:
 
     @property
     def loop(self):
-        # assert self.central is not None
-        # return self.central.loop
-        # loop has moved from SchedulerCentral to Scheduler
         assert self.scheduler is not None, "No scheduler defined"
         return self.scheduler.loop
 
@@ -162,19 +161,12 @@ class experiment:
         """Stop the experiment as soon as possible"""
 
         async def doStop():
-            # assert self.central is not None
-            # async with self.central.exitCondition:
-            #     self.exitMode = True
-            #     logging.debug("Setting exit mode to true")
-            #     self.central.exitCondition.notify_all()
             assert self.scheduler is not None
             async with self.scheduler.exitCondition:
                 self.exitMode = True
                 logging.debug("Setting exit mode to true")
                 self.scheduler.exitCondition.notify_all()
 
-        # assert self.central is not None and self.central.loop is not None
-        # asyncio.run_coroutine_threadsafe(doStop(), self.central.loop)
         assert self.scheduler is not None and self.scheduler.loop is not None
         asyncio.run_coroutine_threadsafe(doStop(), self.scheduler.loop)
 
@@ -182,10 +174,8 @@ class experiment:
         """Wait until the running processes have finished"""
 
         async def awaitcompletion():
-            # assert self.central is not None
             assert self.scheduler is not None, "No scheduler defined"
             logger.debug("Waiting to exit scheduler...")
-            # async with self.central.exitCondition:
             async with self.scheduler.exitCondition:
                 while True:
                     if self.exitMode:
@@ -201,7 +191,6 @@ class experiment:
                         break
 
                     # Wait for more news...
-                    # await self.central.exitCondition.wait()
                     await self.scheduler.exitCondition.wait()
 
                 if self.failedJobs:
@@ -271,7 +260,6 @@ class experiment:
         # Exit mode when catching signals
         self.exitMode = False
 
-        # self.central = SchedulerCentral.create(self.scheduler.name)
         self.scheduler.start_scheduler()
         self.taskOutputsWorker = TaskOutputsWorker(self)
         self.taskOutputsWorker.start()
@@ -308,17 +296,14 @@ class experiment:
                 logger.info("Closing service %s", service.description())
                 service.stop()
 
-            # if self.central is not None:
             if self.scheduler is not None:
                 logger.info("Stopping scheduler event loop")
-                # self.central.loop.stop()
                 self.scheduler.loop.stop()
 
             if self.taskOutputsWorker is not None:
                 logger.info("Stopping tasks outputs worker")
                 self.taskOutputsWorker.queue.put(None)
 
-            # self.central = None
             self.workspace.__exit__(exc_type, exc_value, traceback)
             if self.xplock:
                 self.xplock.__exit__(exc_type, exc_value, traceback)
@@ -340,14 +325,12 @@ class experiment:
 
     async def update_task_output_count(self, delta: int):
         """Change in the number of task outputs to process"""
-        # async with self.central.exitCondition:
         async with self.scheduler.exitCondition:
             self.taskOutputQueueSize += delta
             logging.debug(
                 "Updating queue size with %d => %d", delta, self.taskOutputQueueSize
             )
             if self.taskOutputQueueSize == 0:
-                # self.central.exitCondition.notify_all()
                 self.scheduler.exitCondition.notify_all()
 
     def watch_output(self, watched: "WatchedOutput"):
@@ -398,3 +381,7 @@ class experiment:
 
         path = self.workspace.experimentspath / reference / "data" / name
         return load(path)
+
+
+# re-export at the module level
+current = experiment.current
