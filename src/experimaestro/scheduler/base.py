@@ -4,9 +4,7 @@ import time
 from typing import (
     Optional,
     Set,
-    TypeVar,
 )
-import signal
 import asyncio
 from typing import Dict
 
@@ -31,34 +29,6 @@ class Listener:
     def service_add(self, service: Service):
         """Notify when a new service is added"""
         pass
-
-
-class SignalHandler:
-    def __init__(self):
-        self.experiments: Set["experiment"] = set()
-        self.original_sigint_handler = None
-
-    def add(self, xp: "experiment"):
-        if not self.experiments:
-            self.original_sigint_handler = signal.getsignal(signal.SIGINT)
-
-            signal.signal(signal.SIGINT, self)
-
-        self.experiments.add(xp)
-
-    def remove(self, xp):
-        self.experiments.remove(xp)
-        if not self.experiments:
-            signal.signal(signal.SIGINT, self.original_sigint_handler)
-
-    def __call__(self, signum, frame):
-        """SIGINT signal handler"""
-        logger.warning("Signal received")
-        for xp in self.experiments:
-            xp.stop()
-
-
-SIGNAL_HANDLER = SignalHandler()
 
 
 class Scheduler(threading.Thread):
@@ -405,6 +375,3 @@ class Scheduler(threading.Thread):
                 )
                 state = JobState.ERROR
         return state
-
-
-ServiceClass = TypeVar("ServiceClass", bound=Service)

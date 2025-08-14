@@ -11,7 +11,8 @@ import concurrent
 
 from experimaestro.core.objects import Config, ConfigWalkContext, WatchedOutput
 from experimaestro.notifications import LevelInformation, Reporter
-from experimaestro.scheduler.base import Scheduler
+
+# from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.dependencies import Dependency, DependencyStatus, Resource
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.utils import logger
@@ -109,6 +110,8 @@ class Job(Resource):
         launcher: "Launcher" = None,
         run_mode: RunMode = RunMode.NORMAL,
     ):
+        from experimaestro.scheduler.base import Scheduler
+
         super().__init__()
 
         self.workspace = workspace or Workspace.CURRENT
