@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, TypeVar, Union
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
 
+from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
 from experimaestro.scheduler.jobs import Job, JobFailureStatus
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
@@ -249,7 +250,7 @@ class experiment:
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()
 
-        global SIGNAL_HANDLER
+        # global SIGNAL_HANDLER
         # Number of unfinished jobs
         self.unfinishedJobs = 0
         self.taskOutputQueueSize = 0
