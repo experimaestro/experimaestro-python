@@ -28,6 +28,11 @@ def test_generators_reuse():
         # OK, the path is generated depending on Learner with x=1
         Learner(x=1, validation=validation).submit(workspace=workspace)
 
-        # Here we have a problem...
-        # the path is still the previous one
+        # Here we may have a problem...
+        # if the path is still the previous one
         Learner(x=2, validation=validation).submit(workspace=workspace)
+
+    other_validation = Validation()
+    Learner(x=3, validation=other_validation).submit(workspace=workspace)
+
+    assert validation.best_checkpoint != other_validation.best_checkpoint
