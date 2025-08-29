@@ -31,3 +31,8 @@ def test_generators_reuse():
         # Here we have a problem...
         # the path is still the previous one
         Learner.C(x=2, validation=validation).submit(workspace=workspace)
+
+    other_validation = Validation()
+    Learner.C(x=3, validation=other_validation).submit(workspace=workspace)
+
+    assert validation.best_checkpoint != other_validation.best_checkpoint

@@ -157,6 +157,8 @@ class ConfigInformation:
         # Watched outputs
         self.watched_outputs: List[WatchedOutput] = []
 
+        self.generators_contexts: Dict[str, ConfigWalkContext] = {}
+
         # Cached information
 
         self._full_identifier = None
@@ -301,9 +303,23 @@ class ConfigInformation:
                 return self.tags
 
         return TagFinder()(self.pyobject)
+    
+    def validate_generators_contexts(self, context: Optional[ConfigWalkContext] = None):
+        """Validate generator contexts
+        Generators are validated against a specific context for their generation
+        """
+        for k, argument in self.xpmtype.arguments.items():
+            if argument.generator:
+                gen_context = self.generators_contexts.get(k)
+                if gen_context is None and context is not None:
+                    self.generators_contexts[k] = context
+                elif gen_context != context:
+                    raise ValueError(f"Generator context mismatch for {k}, expected {gen_context}, got {context}")
 
-    def validate(self):
+    def validate(self, context: Optional[ConfigWalkContext] = None):
         """Validate a value"""
+        self.validate_generators_contexts(context)
+
         if not self._validated:
             self._validated = True
 
@@ -312,7 +328,7 @@ class ConfigInformation:
                 value = self.values.get(k)
                 if value is not None:
                     if isinstance(value, Config):
-                        value.__xpm__.validate()
+                        value.__xpm__.validate(context)
                 elif argument.required:
                     if not argument.generator:
                         raise ValueError(
@@ -550,7 +566,7 @@ class ConfigInformation:
 
     def validate_and_seal(self, context: ConfigWalkContext):
         try:
-            self.validate()
+            self.validate(context)
         except Exception as e:
             logger.error(
                 "Error while validating object of type %s, defined %s",
