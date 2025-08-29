@@ -32,6 +32,7 @@ def test_generators_reuse():
         # if the path is still the previous one
         Learner(x=2, validation=validation).submit(workspace=workspace)
 
+    # But if we use a different validation, it should be fine
     other_validation = Validation()
     Learner(x=3, validation=other_validation).submit(workspace=workspace)
 

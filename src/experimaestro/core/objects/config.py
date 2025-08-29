@@ -285,7 +285,7 @@ class ConfigInformation:
                 return self.tags
 
         return TagFinder()(self.pyobject)
-    
+
     def validate_generators_contexts(self, context: Optional[ConfigWalkContext] = None):
         """Validate generator contexts
         Generators are validated against a specific context for their generation
@@ -296,10 +296,14 @@ class ConfigInformation:
                 if gen_context is None and context is not None:
                     self.generators_contexts[k] = context
                 elif gen_context != context:
-                    raise ValueError(f"Generator context mismatch for {k}, expected {gen_context}, got {context}")
+                    raise ValueError(
+                        f"Generator context mismatch for {k}, expected {gen_context}, got {context}"
+                    )
 
     def validate(self, context: Optional[ConfigWalkContext] = None):
         """Validate a value"""
+        # Whether or not we already validated,
+        # we need to re-validate all generators against registered contexts
         self.validate_generators_contexts(context)
 
         if not self._validated:
