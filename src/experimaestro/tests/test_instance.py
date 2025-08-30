@@ -17,16 +17,16 @@ class B(Config):
 
 
 def test_simple_instance():
-    a = A1(x=1)
-    b = B(a=a)
+    a = A1.C(x=1)
+    b = B.C(a=a)
     b = b.instance()
 
     assert not isinstance(b, ConfigMixin)
-    assert isinstance(b, B.__xpmtype__.objecttype)
+    assert isinstance(b, B.__xpmtype__.value_type)
 
     assert not isinstance(b.a, ConfigMixin)
-    assert isinstance(b.a, A1.__xpmtype__.objecttype)
-    assert isinstance(b.a, A.__xpmtype__.basetype)
+    assert isinstance(b.a, A1.__xpmtype__.value_type)
+    assert isinstance(b.a, A.__xpmtype__.value_type)
 
 
 # --- Test pre tasks
@@ -47,9 +47,9 @@ class LoadModel(SerializationLWTask):
 
 
 def test_instance_serialized():
-    model = Model()
-    model.add_pretasks(LoadModel(value=model))
-    trainer = Evaluator(model=model)
+    model = Model.C()
+    model.add_pretasks(LoadModel.C(value=model))
+    trainer = Evaluator.C(model=model)
     instance = trainer.instance()
 
     assert isinstance(
@@ -65,6 +65,6 @@ class ConfigWithOptional(Config):
 
 def test_instance_optional():
     """Test that optional parameters are set to None when calling instance"""
-    c = ConfigWithOptional().instance()
+    c = ConfigWithOptional.C().instance()
     assert c.x == 1
     assert c.y is None

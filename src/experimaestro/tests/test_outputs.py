@@ -32,17 +32,17 @@ class MainB(Task):
 
 
 def test_output_taskoutput():
-    a = A(b=B())
-    output, ioutput = Main(a=a).submit(run_mode=RunMode.DRY_RUN)
+    a = A.C(b=B.C())
+    output, ioutput = Main.C(a=a).submit(run_mode=RunMode.DRY_RUN)
 
     # Direct
-    Main(a=output)
+    Main.C(a=output)
 
     # Via getattr
-    Main(a=A(b=output.b))
+    Main.C(a=A.C(b=output.b))
 
     # Via getitem
-    Main(a=ioutput["a"])
+    Main.C(a=ioutput["a"])
 
     # Now, submits
-    Main(a=output).submit(run_mode=RunMode.DRY_RUN)
+    Main.C(a=output).submit(run_mode=RunMode.DRY_RUN)

@@ -32,7 +32,7 @@ def token_experiment(xp, token, ntasks=3):
 
     tasks = []
     for it in range(ntasks):
-        task = TokenTask(path=path, x=it)
+        task = TokenTask.C(path=path, x=it)
         if token:
             task.add_dependencies(token.dependency(1))
         tasks.append(task.submit())
@@ -86,7 +86,7 @@ def test_token_cleanup():
     with TemporaryExperiment("token_cleanup", maxwait=20) as xp:
         token = CounterToken("token-cleanup", xp.workdir / "token-cleanup", 1)
 
-        task = dummy_task(x=1)
+        task = dummy_task.C(x=1)
         dependency = token.dependency(1)
         task.add_dependencies(dependency)
         # Just to create the directory
@@ -98,7 +98,7 @@ def test_token_cleanup():
         # The absence of process should be detected right away
         logging.info("Lock without process")
         TokenFile.create(dependency)
-        task2 = dummy_task(x=2)
+        task2 = dummy_task.C(x=2)
         task2.add_dependencies(token.dependency(1)).submit()
         xp.wait()
 
@@ -118,7 +118,7 @@ def test_token_cleanup():
             p1 = subprocess.Popen(command)
             job.pidpath.write_text(json.dumps({"pid": p1.pid, "type": "local"}))
 
-            task3 = dummy_task(x=3)
+            task3 = dummy_task.C(x=3)
             task3.add_dependencies(token.dependency(1)).submit()
 
             # Ends the script "waitforfile.py"
@@ -136,7 +136,9 @@ def test_token_monitor():
 
     def run(xp, x, path):
         token = xp.workspace.connector.createtoken("test-token-monitor", 1)
-        task = TokenTask(path=path, x=x).add_dependencies(token.dependency(1)).submit()
+        task = (
+            TokenTask.C(path=path, x=x).add_dependencies(token.dependency(1)).submit()
+        )
         return task
 
     with TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1, TemporaryExperiment(
@@ -241,7 +243,7 @@ def test_token_process():
 
 def restart_function(xp):
     token = CounterToken("restart-token", xp.workdir / "token", 1)
-    token(1, restart.Restart()).submit()
+    token(1, restart.Restart.C()).submit()
 
 
 @pytest.mark.parametrize("terminate", restart.TERMINATES_FUNC)

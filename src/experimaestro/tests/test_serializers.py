@@ -36,7 +36,7 @@ class Trainer(Task):
 
     def task_outputs(self, dep):
         model = copyconfig(self.model)
-        return model.add_pretasks(dep(LoadModel(value=model)))
+        return model.add_pretasks(dep(LoadModel.C(value=model)))
 
     def execute(self):
         assert not self.model.initialized, "Model not initialized"
@@ -56,14 +56,14 @@ class Evaluate(Task):
 
 def test_serializers_xp():
     with TemporaryExperiment("serializers", maxwait=20, port=0):
-        model = Model(submodel=SubModel())
-        trained_model: Model = Trainer(model=model).submit()
+        model = Model.C(submodel=SubModel.C())
+        trained_model: Model = Trainer.C(model=model).submit()
 
         # Use the model itself
-        Evaluate(model=trained_model).submit()
+        Evaluate.C(model=trained_model).submit()
 
         # Use a submodel
-        Evaluate(model=trained_model.submodel, is_submodel=True).add_pretasks_from(
+        Evaluate.C(model=trained_model.submodel, is_submodel=True).add_pretasks_from(
             trained_model
         ).submit()
 

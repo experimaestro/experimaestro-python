@@ -203,18 +203,14 @@ class ObjectType(Type):
     """ObjectType contains class-level information about
     experimaestro configurations and tasks
 
-    :param objecttype: The python Type of the associated object
-    :param configtype: The python Type of the configuration object that uses
-        property for arguments
+    :param value_type: The Python type of the associated object
+    :param config_type: The Python type of the configuration object
     """
-
-    # Those entries should not be copied in the __dict__
-    FORBIDDEN_KEYS = set(("__dict__", "__weakref__"))
 
     def __init__(
         self,
         tp: type,
-        identifier: Union[str, Identifier] = None,
+        identifier: Union[str, Identifier, None] = None,
     ):
         """Creates a type"""
         from .objects import Config, ConfigMixin
@@ -225,7 +221,7 @@ class ObjectType(Type):
         self._title = None
         self.submit_hooks = set()
 
-        # Get the identifier
+        # --- Get the identifier
         if identifier is None and hasattr(tp, "__xpmid__"):
             __xpmid__ = getattr(tp, "__xpmid__")
             if isinstance(__xpmid__, Identifier):
@@ -250,58 +246,40 @@ class ObjectType(Type):
         # --- Creates the config type and not config type
 
         self.originaltype = tp
-        if not issubclass(tp, Config):
-            # Adds Config as a base class if not present
-            __bases__ = () if tp.__bases__ == (object,) else tp.__bases__
-            __dict__ = dict(tp.__dict__)
-
-            __dict__ = {
-                key: value
-                for key, value in tp.__dict__.items()
-                if key not in ObjectType.FORBIDDEN_KEYS
-            }
-            self.basetype = type(tp.__name__, (Config,) + __bases__, __dict__)
-            self.basetype.__module__ = tp.__module__
-            self.basetype.__qualname__ = tp.__qualname__
-        else:
-            self.basetype = tp
+        assert issubclass(tp, Config)
+        self.value_type = tp
 
         # --- Create the type-specific configuration class (XPMConfig)
         __configbases__ = tuple(
-            s.__getxpmtype__().configtype
+            s.__getxpmtype__().config_type
             for s in tp.__bases__
             if issubclass(s, Config) and (s is not Config)
         ) or (ConfigMixin,)
 
-        *tp_qual, tp_name = self.basetype.__qualname__.split(".")
-        self.configtype = type(
-            f"{tp_name}.XPMConfig", __configbases__ + (self.basetype,), {}
+        *tp_qual, tp_name = self.value_type.__qualname__.split(".")
+        self.config_type = type(
+            f"{tp_name}.XPMConfig", __configbases__ + (self.value_type,), {}
         )
-        self.configtype.__qualname__ = ".".join(tp_qual + [self.configtype.__name__])
-        self.configtype.__module__ = tp.__module__
+        self.config_type.__qualname__ = ".".join(tp_qual + [self.config_type.__name__])
+        self.config_type.__module__ = tp.__module__
 
-        # Return type is used by tasks to change the output
-        if hasattr(self.basetype, "task_outputs") or False:
+        # --- Get the return type
+        if hasattr(self.value_type, "task_outputs") or False:
             self.returntype = get_type_hints(
-                getattr(self.basetype, "task_outputs")
+                getattr(self.value_type, "task_outputs")
             ).get("return", typing.Any)
         else:
-            self.returntype = self.basetype
+            self.returntype = self.value_type
 
-        # Registers ourselves
-        self.basetype.__xpmtype__ = self
-        self.configtype.__xpmtype__ = self
+        # --- Registers ourselves
+        self.value_type.__xpmtype__ = self
+        self.config_type.__xpmtype__ = self
 
-        # Other initializations
+        # --- Other initializations
         self.__initialized__ = False
         self._runtype = None
         self.annotations = []
         self._deprecated = False
-
-    @property
-    def objecttype(self):
-        """Returns the object type"""
-        return self.basetype.XPMValue
 
     def addAnnotation(self, annotation):
         assert not self.__initialized__
@@ -357,15 +335,15 @@ class ObjectType(Type):
         # Add task
         if self.taskcommandfactory is not None:
             self.task = self.taskcommandfactory(self)
-        elif issubclass(self.basetype, Task):
+        elif issubclass(self.value_type, Task):
             self.task = self.getpythontaskcommand()
 
         # Add arguments from type hints
         from .arguments import TypeAnnotation
 
-        if hasattr(self.basetype, "__annotations__"):
-            typekeys = set(self.basetype.__dict__.get("__annotations__", {}).keys())
-            hints = get_type_hints(self.basetype, include_extras=True)
+        if hasattr(self.value_type, "__annotations__"):
+            typekeys = set(self.value_type.__dict__.get("__annotations__", {}).keys())
+            hints = get_type_hints(self.value_type, include_extras=True)
             for key, typehint in hints.items():
                 # Filter out hints from parent classes
                 if key in typekeys:
@@ -378,19 +356,19 @@ class ObjectType(Type):
                             try:
                                 self.addArgument(
                                     options.create(
-                                        key, self.objecttype, typehint.__args__[0]
+                                        key, self.value_type, typehint.__args__[0]
                                     )
                                 )
                             except Exception:
                                 logger.error(
                                     "while adding argument %s of %s",
                                     key,
-                                    self.objecttype,
+                                    self.value_type,
                                 )
                                 raise
 
     def name(self):
-        return f"{self.basetype.__module__}.{self.basetype.__qualname__}"
+        return f"{self.value_type.__module__}.{self.value_type.__qualname__}"
 
     def __parsedoc__(self):
         """Parse the documentation"""
@@ -400,7 +378,7 @@ class ObjectType(Type):
         self.__initialize__()
 
         # Get description from documentation
-        __doc__ = self.basetype.__dict__.get("__doc__", None)
+        __doc__ = self.value_type.__dict__.get("__doc__", None)
         if __doc__:
             parseddoc = parse(__doc__)
             self._title = parseddoc.short_description
@@ -430,7 +408,7 @@ class ObjectType(Type):
                 argname = None
 
     def deprecate(self):
-        if len(self.basetype.__bases__) != 1:
+        if len(self.value_type.__bases__) != 1:
             raise RuntimeError(
                 "Deprecated configurations must have "
                 "only one parent (the new configuration)"
@@ -439,7 +417,7 @@ class ObjectType(Type):
 
         # Uses the parent identifier (and saves the deprecated one for path updates)
         self._deprecated_identifier = self.identifier
-        parent = self.basetype.__bases__[0].__getxpmtype__()
+        parent = self.value_type.__bases__[0].__getxpmtype__()
         self.identifier = parent.identifier
         self._deprecated = True
 
@@ -454,7 +432,7 @@ class ObjectType(Type):
         return self._description
 
     @property
-    def title(self) -> Dict[str, Argument]:
+    def title(self) -> str:
         self.__parsedoc__()
         return self._title or str(self.identifier)
 
@@ -469,7 +447,7 @@ class ObjectType(Type):
 
         # The the attribute for the config type
         setattr(
-            self.configtype,
+            self.config_type,
             argument.name,
             property(
                 lambda _self: _self.__xpm__.get(argument.name),
@@ -488,7 +466,7 @@ class ObjectType(Type):
     def parents(self) -> Iterator["ObjectType"]:
         from .objects import Config, Task
 
-        for tp in self.basetype.__bases__:
+        for tp in self.value_type.__bases__:
             if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpmtype__
 
@@ -504,7 +482,7 @@ class ObjectType(Type):
         if not isinstance(value, Config):
             raise ValueError(f"{value} is not an experimaestro type or task")
 
-        types = self.basetype
+        types = self.value_type
 
         if not isinstance(value, types):
             raise ValueError(
@@ -519,7 +497,7 @@ class ObjectType(Type):
 
     def fullyqualifiedname(self) -> str:
         """Returns the fully qualified (Python) name"""
-        return f"{self.basetype.__module__}.{self.basetype.__qualname__}"
+        return f"{self.value_type.__module__}.{self.value_type.__qualname__}"
 
 
 class TypeProxy:

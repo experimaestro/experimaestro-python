@@ -80,7 +80,7 @@ def takeback(launcher, datapath, txp1, txp2):
     waiting = datapath / "waiting"
 
     with txp1:
-        task: WaitUntilTouched = WaitUntilTouched(
+        task: WaitUntilTouched = WaitUntilTouched.C(
             touching=touching, waiting=waiting
         ).submit(launcher=launcher)
 
@@ -91,7 +91,7 @@ def takeback(launcher, datapath, txp1, txp2):
             time.sleep(0.01)
 
         with txp2:
-            result = WaitUntilTouched(touching=touching, waiting=waiting).submit(
+            result = WaitUntilTouched.C(touching=touching, waiting=waiting).submit(
                 launcher=launcher
             )
 

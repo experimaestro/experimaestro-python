@@ -25,7 +25,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -197,6 +196,11 @@ class ConfigInformation:
 
         if self._sealed and not bypass:
             raise AttributeError(f"Object is read-only (trying to set {k})")
+
+        if not isinstance(v, ConfigMixin) and isinstance(v, Config):
+            raise AttributeError(
+                "Configuration (and not objects) should be used. Consider using .C(...)"
+            )
 
         try:
             argument = self.xpmtype.arguments.get(k, None)
@@ -677,6 +681,9 @@ class ConfigInformation:
     def mark_output(self, config: "Config"):
         """Sets a dependency on the job"""
         assert not isinstance(config, Task), "Cannot set a dependency on a task"
+        assert isinstance(
+            config, ConfigMixin
+        ), "Only configurations can be marked as dependent on a task"
         config.__xpm__.task = self.pyobject
         return config
 
@@ -762,7 +769,7 @@ class ConfigInformation:
         state_dict = {
             "id": id(self.pyobject),
             "module": self.xpmtype._module,
-            "type": self.xpmtype.basetype.__qualname__,
+            "type": self.xpmtype.value_type.__qualname__,
             "typename": self.xpmtype.name(),
             "identifier": self.identifier.state_dict(),
         }
@@ -1022,7 +1029,7 @@ class ConfigInformation:
 
             # Creates an object (or a config)
             if as_instance:
-                o = cls.XPMValue.__new__(cls.XPMValue)
+                o = cls.__new__(cls)
             else:
                 o = cls.XPMConfig.__new__(cls.XPMConfig)
             assert definition["id"] not in objects, "Duplicate id %s" % definition["id"]
@@ -1183,7 +1190,7 @@ class ConfigInformation:
 
             if o is None:
                 # Creates an object (and not a config)
-                o = config.XPMValue()
+                o = config.__xpmtype__.value_type()
 
                 # Store in cache
                 self.objects.add_stub(id(config), o)
@@ -1310,8 +1317,8 @@ class ConfigMixin:
             [f"{key}={value}" for key, value in self.__xpm__.values.items()]
         )
         return (
-            f"{self.__xpmtype__.basetype.__module__}."
-            f"{self.__xpmtype__.basetype.__qualname__}({params})"
+            f"{self.__xpmtype__.value_type.__module__}."
+            f"{self.__xpmtype__.value_type.__qualname__}({params})"
         )
 
     def tag(self, name, value):
@@ -1398,6 +1405,9 @@ class ConfigMixin:
 
     def add_pretasks(self, *tasks: "LightweightTask"):
         assert all(
+            [isinstance(task, ConfigMixin) for task in tasks]
+        ), "One of the parameters is not a configuration object"
+        assert all(
             [isinstance(task, LightweightTask) for task in tasks]
         ), "One of the pre-tasks are not lightweight tasks"
         if self.__xpm__._sealed:
@@ -1449,43 +1459,12 @@ class Config:
     def XPMConfig(cls):
         if issubclass(cls, ConfigMixin):
             return cls
-        return cls.__getxpmtype__().configtype
-
-    @classproperty
-    def XPMValue(cls):
-        """Returns the value object for this configuration"""
-        if issubclass(cls, ConfigMixin):
-            return cls.__xpmtype__.objecttype
-
-        if value_cls := cls.__dict__.get("__XPMValue__", None):
-            pass
-        else:
-            from ..types import XPMValue
-
-            __objectbases__ = tuple(
-                s.XPMValue
-                for s in cls.__bases__
-                if issubclass(s, Config) and (s is not Config)
-            ) or (XPMValue,)
-
-            *tp_qual, tp_name = cls.__qualname__.split(".")
-            value_cls = type(f"{tp_name}.XPMValue", (cls,) + __objectbases__, {})
-            value_cls.__qualname__ = ".".join(tp_qual + [value_cls.__name__])
-            value_cls.__module__ = cls.__module__
-
-            setattr(cls, "__XPMValue__", value_cls)
-
-        return value_cls
+        return cls.__getxpmtype__().config_type
 
     @classproperty
     def C(cls):
         """Alias for XPMConfig"""
         return cls.XPMConfig
-
-    @classproperty
-    def V(cls):
-        """Alias for XPMValue"""
-        return cls.XPMValue
 
     @classmethod
     def __getxpmtype__(cls) -> "ObjectType":
@@ -1502,46 +1481,6 @@ class Config:
                 logger.error("Error while creating object type for %s", cls)
                 raise
         return xpmtype
-
-    def __new__(cls: Type[T], *args, **kwargs) -> T:
-        """Returns an instance of a ConfigMixin (for compatibility, use XPMConfig
-        or C if possible)
-
-        :deprecated: Use Config.C or Config.XPMConfig to construct a new
-            configuration, and Config.V (or Config.XPMValue) for a new value
-        """
-        # If this is an XPMValue, just return a new instance
-        from experimaestro.core.types import XPMValue
-
-        if issubclass(cls, XPMValue):
-            return object.__new__(cls)
-
-        # If this is the XPMConfig, just return a new instance
-        # __init__ will be called
-        if issubclass(cls, ConfigMixin):
-            return object.__new__(cls)
-
-        # Log a deprecation warning for this way of creating a configuration
-        caller = inspect.getframeinfo(inspect.stack()[1][0])
-        logger.warning(
-            "Creating a configuration using Config.__new__ is deprecated, and will be removed in a future version. "
-            "Use Config.C or Config.XPMConfig to create a new configuration. "
-            "Issue created at %s:%s",
-            str(Path(caller.filename).absolute()),
-            caller.lineno,
-        )
-
-        # otherwise, we use the configuration type
-        o: ConfigMixin = object.__new__(cls.__getxpmtype__().configtype)
-        try:
-            o.__init__(*args, **kwargs)
-        except Exception:
-            logger.error(
-                "Init error in %s:%s"
-                % (str(Path(caller.filename).absolute()), caller.lineno)
-            )
-            raise
-        return o
 
     def __validate__(self):
         """Validate the values"""

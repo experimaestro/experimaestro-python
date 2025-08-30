@@ -35,21 +35,21 @@ class TaskB(Task):
 
 
 def test_dependencies_simple(xp):
-    a = TaskA().submit()
-    b = TaskB(a=a).submit()
+    a = TaskA.C().submit()
+    b = TaskB.C(a=a).submit()
     check_dependencies(b, a)
 
 
 def test_dependencies_implicit(xp):
-    a = TaskA().submit()
-    b = TaskB(a=a)
+    a = TaskA.C().submit()
+    b = TaskB.C(a=a)
     b.submit()
     check_dependencies(b, a)
 
 
 class TaskC(Task):
     def task_outputs(self, dep: Callable[[Config], None]) -> Any:
-        return dep(ConfigC(param_c=self))
+        return dep(ConfigC.C(param_c=self))
 
 
 class ConfigC(Config):
@@ -61,15 +61,15 @@ class TaskD(Task):
 
 
 def test_dependencies_task_output(xp):
-    task_c = TaskC()
+    task_c = TaskC.C()
     c = task_c.submit()
-    d = TaskD(param_c=c).submit()
+    d = TaskD.C(param_c=c).submit()
     check_dependencies(d, task_c)
 
 
 class Inner_TaskA(Task):
     def task_outputs(self, dep: Callable[[Config], None]) -> Any:
-        return dep(Inner_OutputTaskA())
+        return dep(Inner_OutputTaskA.C())
 
 
 class Inner_OutputTaskA(Config):
@@ -81,13 +81,13 @@ class Inner_TaskB(Task):
 
 
 def test_dependencies_inner_task_output(xp):
-    task_a = Inner_TaskA()
+    task_a = Inner_TaskA.C()
     a = task_a.submit()
-    b = Inner_TaskB(param_a=a).submit()
+    b = Inner_TaskB.C(param_a=a).submit()
     check_dependencies(b, task_a)
 
 
 def test_dependencies_pre_task(xp):
-    a = TaskA().submit()
-    a2 = TaskA().add_pretasks(a).submit()
+    a = TaskA.C().submit()
+    a2 = TaskA.C().add_pretasks(a).submit()
     check_dependencies(a2, a)

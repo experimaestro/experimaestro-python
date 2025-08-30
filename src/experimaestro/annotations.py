@@ -71,7 +71,7 @@ class config:
         assert inspect.isclass(tp), f"{tp} is not a class"
 
         # Adds to xpminfo for on demand creation of information
-        return ObjectType(tp, identifier=self.identifier).basetype
+        return ObjectType(tp, identifier=self.identifier).valuetype
 
 
 class Array(TypeProxy):

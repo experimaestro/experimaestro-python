@@ -148,7 +148,7 @@ def test_generatedpath():
         b: Param[B]
 
     basepath = Path("/tmp/testconflict")
-    c = C(b=B(a=A())).instance(DirectoryContext(basepath))
+    c = C.C(b=B.C(a=A.C())).instance(DirectoryContext(basepath))
     assert c.b.a.path.relative_to(basepath) == Path("out/b/a/test.txt")
 
 
@@ -158,13 +158,13 @@ def test_config_class():
     class A(Config):
         x: Param[int]
 
-    a = A(x=1)
+    a = A.C(x=1)
     assert a.x == 1
 
     class B(A):
         y: Param[int]
 
-    b = B(x=1, y=2)
+    b = B.C(x=1, y=2)
     assert b.x == 1
     assert b.y == 2
 
@@ -174,7 +174,7 @@ def test_config_class():
     class C(Config):
         d: Param[D]
 
-    c = C(d=D(x=1))
+    c = C.C(d=D.C(x=1))
     assert c.d.x == 1
 
 
@@ -182,7 +182,7 @@ def test_constant():
     class A(Config):
         x: Constant[int] = 2
 
-    a = A()
+    a = A.C()
     assert a.x == 2, "Constant value not set"
 
     # We should not be able to change the value
@@ -202,7 +202,7 @@ class EnumConfig(Config):
 def test_param_enum():
     """Test for enum values"""
 
-    a = EnumConfig(x=EnumParam.OTHER)
+    a = EnumConfig.C(x=EnumParam.OTHER)
     _a = serializeCycle(a)
 
     assert isinstance(_a, EnumConfig)
@@ -216,7 +216,7 @@ def test_inheritance():
     class B(A):
         y: Param[int] = 3
 
-    b = B()
+    b = B.C()
     b.x = 2
     assert b.__xpm__.values["y"] == 3
     assert b.__xpm__.values["x"] == 2
@@ -247,7 +247,7 @@ def test_param_dict():
     assert isinstance(xarg.keytype, StrType)
     assert isinstance(xarg.valuetype, IntType)
 
-    A(x={"OK": 1})
+    A.C(x={"OK": 1})
 
     with pytest.raises(TypeError):
         A(x={"wrong": "string"})
@@ -263,7 +263,7 @@ class ConfigWithDefault(Config):
 
 
 def test_param_default():
-    assert ConfigWithDefault().x == 1
+    assert ConfigWithDefault.C().x == 1
 
 
 class ConfigWithDefaultFactory(Config):
@@ -271,7 +271,7 @@ class ConfigWithDefaultFactory(Config):
 
 
 def test_param_default_factory():
-    value = ConfigWithDefaultFactory()
+    value = ConfigWithDefaultFactory.C()
     context = DirectoryContext(Path("/__fakepath__"))
     value.__xpm__.seal(context)
     assert value.x == 1
@@ -299,15 +299,15 @@ def test_param_default_set():
     class A0(Config):
         x: Param[int] = 2
 
-    assert A0().instance().x == 2
-    assert A0(x=3).instance().x == 3
+    assert A0.C().instance().x == 2
+    assert A0.C(x=3).instance().x == 3
 
     class A(Config):
         x: Param[int] = field(default_factory=lambda: 2)
 
-    assert A().instance().x == 2
+    assert A.C().instance().x == 2
 
-    assert A(x=3).instance().x == 3
+    assert A.C(x=3).instance().x == 3
 
 
 # --- Handling help annotations

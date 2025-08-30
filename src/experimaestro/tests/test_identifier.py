@@ -69,35 +69,35 @@ def assert_notequal(a, b, message=""):
 
 
 def test_param_int():
-    assert_equal(A(a=1), A(a=1))
+    assert_equal(A.C(a=1), A.C(a=1))
 
 
 def test_param_different_type():
-    assert_notequal(A(a=1), B(a=1))
+    assert_notequal(A.C(a=1), B.C(a=1))
 
 
 def test_param_order():
-    assert_equal(Values(value1=1, value2=2), Values(value2=2, value1=1))
+    assert_equal(Values.C(value1=1, value2=2), Values.C(value2=2, value1=1))
 
 
 def test_param_default():
-    assert_equal(C(a=1, b=2), C(b=2))
+    assert_equal(C.C(a=1, b=2), C.C(b=2))
 
 
 def test_identifier_default_field():
-    assert_equal(CField(a=1, b=2), CField(b=2))
+    assert_equal(CField.C(a=1, b=2), CField.C(b=2))
 
 
 def test_param_inner_eq():
-    assert_equal(D(a=A(a=1)), D(a=A(a=1)))
+    assert_equal(D.C(a=A.C(a=1)), D.C(a=A.C(a=1)))
 
 
 def test_param_float():
-    assert_equal(Float(value=1), Float(value=1))
+    assert_equal(Float.C(value=1), Float.C(value=1))
 
 
 def test_param_float2():
-    assert_equal(Float(value=1.0), Float(value=1))
+    assert_equal(Float.C(value=1.0), Float.C(value=1))
 
 
 # --- Argument name
@@ -118,8 +118,8 @@ def test_param_name():
         __xpmid__ = "test.identifier.argumentname"
         a: Param[int]
 
-    assert_notequal(Config0(a=2), Config1(b=2))
-    assert_equal(Config0(a=2), Config3(a=2))
+    assert_notequal(Config0.C(a=2), Config1.C(b=2))
+    assert_equal(Config0.C(a=2), Config3.C(a=2))
 
 
 # --- Test option
@@ -131,9 +131,9 @@ def test_param_option():
         a: Param[int]
         b: Option[int] = 1
 
-    assert_notequal(OptionConfig(a=2), OptionConfig(a=1))
-    assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1))
-    assert_equal(OptionConfig(a=1, b=2), OptionConfig(a=1, b=2))
+    assert_notequal(OptionConfig.C(a=2), OptionConfig.C(a=1))
+    assert_equal(OptionConfig.C(a=1, b=2), OptionConfig.C(a=1))
+    assert_equal(OptionConfig.C(a=1, b=2), OptionConfig.C(a=1, b=2))
 
 
 # --- Dictionnary
@@ -148,11 +148,14 @@ def test_param_identifier_dict():
     class A(Config):
         bs: Param[Dict[str, B]]
 
-    assert_equal(A(bs={"b1": B(x=1)}), A(bs={"b1": B(x=1)}))
-    assert_equal(A(bs={"b1": B(x=1), "b2": B(x=2)}), A(bs={"b2": B(x=2), "b1": B(x=1)}))
+    assert_equal(A.C(bs={"b1": B.C(x=1)}), A.C(bs={"b1": B.C(x=1)}))
+    assert_equal(
+        A.C(bs={"b1": B.C(x=1), "b2": B.C(x=2)}),
+        A.C(bs={"b2": B.C(x=2), "b1": B.C(x=1)}),
+    )
 
-    assert_notequal(A(bs={"b1": B(x=1)}), A(bs={"b1": B(x=2)}))
-    assert_notequal(A(bs={"b1": B(x=1)}), A(bs={"b2": B(x=1)}))
+    assert_notequal(A.C(bs={"b1": B.C(x=1)}), A.C(bs={"b1": B.C(x=2)}))
+    assert_notequal(A.C(bs={"b1": B.C(x=1)}), A.C(bs={"b2": B.C(x=1)}))
 
 
 # --- Ignore paths
@@ -165,8 +168,8 @@ class TypeWithPath(Config):
 
 def test_param_identifier_path():
     """Path should be ignored"""
-    assert_equal(TypeWithPath(a=1, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
-    assert_notequal(TypeWithPath(a=2, path="/a/b"), TypeWithPath(a=1, path="/c/d"))
+    assert_equal(TypeWithPath.C(a=1, path="/a/b"), TypeWithPath.C(a=1, path="/c/d"))
+    assert_notequal(TypeWithPath.C(a=2, path="/a/b"), TypeWithPath.C(a=1, path="/c/d"))
 
 
 # --- Test with added arguments
@@ -184,7 +187,7 @@ def test_param_identifier_pathoption():
         __xpmid__ = "pathoption_test"
         a: Param[int]
 
-    assert_equal(A_with_path(a=1), A_without_path(a=1))
+    assert_equal(A_with_path.C(a=1), A_without_path.C(a=1))
 
 
 def test_param_identifier_enum():
@@ -198,8 +201,8 @@ def test_param_identifier_enum():
     class EnumConfig(Config):
         a: Param[EnumParam]
 
-    assert_notequal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.SECOND))
-    assert_equal(EnumConfig(a=EnumParam.FIRST), EnumConfig(a=EnumParam.FIRST))
+    assert_notequal(EnumConfig.C(a=EnumParam.FIRST), EnumConfig.C(a=EnumParam.SECOND))
+    assert_equal(EnumConfig.C(a=EnumParam.FIRST), EnumConfig.C(a=EnumParam.FIRST))
 
 
 def test_param_identifier_addnone():
@@ -215,8 +218,8 @@ def test_param_identifier_addnone():
     class A(Config):
         __xpmid__ = "defaultnone"
 
-    assert_equal(A_with_b(), A())
-    assert_notequal(A_with_b(b=B(x=1)), A())
+    assert_equal(A_with_b.C(), A.C())
+    assert_notequal(A_with_b.C(b=B.C(x=1)), A.C())
 
 
 def test_param_defaultnew():
@@ -232,8 +235,8 @@ def test_param_defaultnew():
         __xpmid__ = "defaultnew"
         a: Param[int]
 
-    assert_equal(A_with_b(a=1, b=1), A(a=1))
-    assert_equal(A_with_b(a=1), A(a=1))
+    assert_equal(A_with_b.C(a=1, b=1), A.C(a=1))
+    assert_equal(A_with_b.C(a=1), A.C(a=1))
 
 
 def test_param_taskconfigidentifier():
@@ -246,15 +249,15 @@ def test_param_taskconfigidentifier():
         x: Param[int]
 
         def task_outputs(self, dep):
-            return dep(MyConfig(a=1))
+            return dep(MyConfig.C(a=1))
 
     assert_equal(
-        MyTask(x=1).submit(run_mode=RunMode.DRY_RUN),
-        MyTask(x=1).submit(run_mode=RunMode.DRY_RUN),
+        MyTask.C(x=1).submit(run_mode=RunMode.DRY_RUN),
+        MyTask.C(x=1).submit(run_mode=RunMode.DRY_RUN),
     )
     assert_notequal(
-        MyTask(x=2).submit(run_mode=RunMode.DRY_RUN),
-        MyTask(x=1).submit(run_mode=RunMode.DRY_RUN),
+        MyTask.C(x=2).submit(run_mode=RunMode.DRY_RUN),
+        MyTask.C(x=1).submit(run_mode=RunMode.DRY_RUN),
     )
 
 
@@ -269,13 +272,13 @@ def test_param_constant():
         __xpmid__ = "test.constant"
         version: Constant[int] = 1
 
-    assert_equal(A1(), A1bis())
+    assert_equal(A1.C(), A1bis.C())
 
     class A2(Config):
         __xpmid__ = "test.constant"
         version: Constant[int] = 2
 
-    assert_notequal(A1(), A2())
+    assert_notequal(A1.C(), A2.C())
 
 
 def test_param_identifier_deprecated_class():
@@ -293,10 +296,12 @@ def test_param_identifier_deprecated_class():
         __xpmid__ = "derived"
 
     assert_notequal(
-        NewConfig(), DerivedConfig(), "A derived configuration has another ID"
+        NewConfig.C(), DerivedConfig.C(), "A derived configuration has another ID"
     )
     assert_equal(
-        NewConfig(), OldConfig(), "Deprecated and new configuration have the same ID"
+        NewConfig.C(),
+        OldConfig.C(),
+        "Deprecated and new configuration have the same ID",
     )
 
 
@@ -308,7 +313,7 @@ def test_param_identifier_deprecated_attribute():
         def value(self, x):
             self.values = [x]
 
-    assert_equal(Values(values=[1]), Values(value=1))
+    assert_equal(Values.C(values=[1]), Values.C(value=1))
 
 
 class MetaA(Config):
@@ -331,26 +336,30 @@ def test_param_identifier_meta():
         params: Param[Dict[str, MetaA]]
 
     # As meta
-    assert_notequal(B(a=MetaA(x=1)), B(a=MetaA(x=2)))
-    assert_equal(B(a=setmeta(MetaA(x=1), True)), B(a=setmeta(MetaA(x=2), True)))
+    assert_notequal(B.C(a=MetaA.C(x=1)), B.C(a=MetaA.C(x=2)))
+    assert_equal(B.C(a=setmeta(MetaA.C(x=1), True)), B.C(a=setmeta(MetaA.C(x=2), True)))
 
     # As parameter
-    assert_equal(C(a=MetaA(x=1)), C(a=MetaA(x=2)))
-    assert_notequal(C(a=setmeta(MetaA(x=1), False)), C(a=setmeta(MetaA(x=2), False)))
+    assert_equal(C.C(a=MetaA.C(x=1)), C.C(a=MetaA.C(x=2)))
+    assert_notequal(
+        C.C(a=setmeta(MetaA.C(x=1), False)), C.C(a=setmeta(MetaA.C(x=2), False))
+    )
 
     # Array with mixed
     assert_equal(
-        ArrayConfig(array=[MetaA(x=1)]),
-        ArrayConfig(array=[MetaA(x=1), setmeta(MetaA(x=2), True)]),
+        ArrayConfig.C(array=[MetaA.C(x=1)]),
+        ArrayConfig.C(array=[MetaA.C(x=1), setmeta(MetaA.C(x=2), True)]),
     )
 
     # Array with empty list
-    assert_equal(ArrayConfig(array=[]), ArrayConfig(array=[setmeta(MetaA(x=2), True)]))
+    assert_equal(
+        ArrayConfig.C(array=[]), ArrayConfig.C(array=[setmeta(MetaA.C(x=2), True)])
+    )
 
     # Dict with mixed
     assert_equal(
-        DictConfig(params={"a": MetaA(x=1)}),
-        DictConfig(params={"a": MetaA(x=1), "b": setmeta(MetaA(x=2), True)}),
+        DictConfig.C(params={"a": MetaA.C(x=1)}),
+        DictConfig.C(params={"a": MetaA.C(x=1), "b": setmeta(MetaA.C(x=2), True)}),
     )
 
 
@@ -359,14 +368,14 @@ def test_param_identifier_meta_default_dict():
         params: Param[Dict[str, MetaA]] = {}
 
     assert_equal(
-        DictConfig(params={}),
-        DictConfig(params={"b": setmeta(MetaA(x=2), True)}),
+        DictConfig.C(params={}),
+        DictConfig.C(params={"b": setmeta(MetaA.C(x=2), True)}),
     )
 
     # Dict with mixed
     assert_equal(
-        DictConfig(params={"a": MetaA(x=1)}),
-        DictConfig(params={"a": MetaA(x=1), "b": setmeta(MetaA(x=2), True)}),
+        DictConfig.C(params={"a": MetaA.C(x=1)}),
+        DictConfig.C(params={"a": MetaA.C(x=1), "b": setmeta(MetaA.C(x=2), True)}),
     )
 
 
@@ -376,13 +385,13 @@ def test_param_identifier_meta_default_array():
 
     # Array (with default) with mixed
     assert_equal(
-        ArrayConfigWithDefault(array=[MetaA(x=1)]),
-        ArrayConfigWithDefault(array=[MetaA(x=1), setmeta(MetaA(x=2), True)]),
+        ArrayConfigWithDefault.C(array=[MetaA.C(x=1)]),
+        ArrayConfigWithDefault.C(array=[MetaA.C(x=1), setmeta(MetaA.C(x=2), True)]),
     )
     # Array (with default) with empty list
     assert_equal(
-        ArrayConfigWithDefault(array=[]),
-        ArrayConfigWithDefault(array=[setmeta(MetaA(x=2), True)]),
+        ArrayConfigWithDefault.C(array=[]),
+        ArrayConfigWithDefault.C(array=[setmeta(MetaA.C(x=2), True)]),
     )
 
 
@@ -396,19 +405,19 @@ def test_param_identifier_pre_task():
     class IdentifierPreTask(Task):
         x: Param[MyConfig]
 
-    task = IdentifierPreTask(x=MyConfig()).submit(run_mode=RunMode.DRY_RUN)
+    task = IdentifierPreTask.C(x=MyConfig.C()).submit(run_mode=RunMode.DRY_RUN)
     task_with_pre = (
-        IdentifierPreTask(x=MyConfig())
-        .add_pretasks(IdentifierPreLightTask())
+        IdentifierPreTask.C(x=MyConfig.C())
+        .add_pretasks(IdentifierPreLightTask.C())
         .submit(run_mode=RunMode.DRY_RUN)
     )
     task_with_pre_2 = (
-        IdentifierPreTask(x=MyConfig())
-        .add_pretasks(IdentifierPreLightTask())
+        IdentifierPreTask.C(x=MyConfig.C())
+        .add_pretasks(IdentifierPreLightTask.C())
         .submit(run_mode=RunMode.DRY_RUN)
     )
-    task_with_pre_3 = IdentifierPreTask(
-        x=MyConfig().add_pretasks(IdentifierPreLightTask())
+    task_with_pre_3 = IdentifierPreTask.C(
+        x=MyConfig.C().add_pretasks(IdentifierPreLightTask.C())
     ).submit(run_mode=RunMode.DRY_RUN)
 
     assert_notequal(task, task_with_pre, "No pre-task")
@@ -429,18 +438,18 @@ def test_param_identifier_init_task():
     class IdentierTask(Task):
         x: Param[MyConfig]
 
-    task = IdentierTask(x=MyConfig()).submit(run_mode=RunMode.DRY_RUN)
-    task_with_pre = IdentierTask(x=MyConfig()).submit(
+    task = IdentierTask.C(x=MyConfig.C()).submit(run_mode=RunMode.DRY_RUN)
+    task_with_pre = IdentierTask.C(x=MyConfig.C()).submit(
         run_mode=RunMode.DRY_RUN,
-        init_tasks=[IdentifierInitTask(), IdentifierInitTask2()],
+        init_tasks=[IdentifierInitTask.C(), IdentifierInitTask2.C()],
     )
-    task_with_pre_2 = IdentierTask(x=MyConfig()).submit(
+    task_with_pre_2 = IdentierTask.C(x=MyConfig.C()).submit(
         run_mode=RunMode.DRY_RUN,
-        init_tasks=[IdentifierInitTask(), IdentifierInitTask2()],
+        init_tasks=[IdentifierInitTask.C(), IdentifierInitTask2.C()],
     )
-    task_with_pre_3 = IdentierTask(x=MyConfig()).submit(
+    task_with_pre_3 = IdentierTask.C(x=MyConfig.C()).submit(
         run_mode=RunMode.DRY_RUN,
-        init_tasks=[IdentifierInitTask2(), IdentifierInitTask()],
+        init_tasks=[IdentifierInitTask2.C(), IdentifierInitTask.C()],
     )
 
     assert_notequal(task, task_with_pre, "No pre-task")
@@ -475,14 +484,14 @@ class IdentifierReloadConfig(Config):
 
 def test_param_identifier_reload_config():
     # Creates the configuration
-    check_reload(IdentifierReloadConfig(id="123"))
+    check_reload(IdentifierReloadConfig.C(id="123"))
 
 
 class IdentifierReload(Task):
     id: Param[str]
 
-    def task_outputs(self, dep):
-        return IdentifierReloadConfig(id=self.id)
+    def task_outputs(self, dep) -> IdentifierReloadConfig.C:
+        return IdentifierReloadConfig.C(id=self.id)
 
 
 class IdentifierReloadDerived(Config):
@@ -493,8 +502,8 @@ def test_param_identifier_reload_taskoutput():
     """When using a task output, the identifier should not be different"""
 
     # Creates the configuration
-    task = IdentifierReload(id="123").submit(run_mode=RunMode.DRY_RUN)
-    config = IdentifierReloadDerived(task=task)
+    task = IdentifierReload.C(id="123").submit(run_mode=RunMode.DRY_RUN)
+    config = IdentifierReloadDerived.C(task=task)
     check_reload(config)
 
 
@@ -515,9 +524,9 @@ def test_param_identifier_reload_task_direct():
     """When using a direct task output, the identifier should not be different"""
 
     # Creates the configuration
-    task = IdentifierReloadTask(id="123").submit(run_mode=RunMode.DRY_RUN)
-    config = IdentifierReloadTaskDerived(
-        task=task, other=IdentifierReloadTaskConfig(x=2)
+    task = IdentifierReloadTask.C(id="123").submit(run_mode=RunMode.DRY_RUN)
+    config = IdentifierReloadTaskDerived.C(
+        task=task, other=IdentifierReloadTaskConfig.C(x=2)
     )
     check_reload(config)
 
@@ -525,9 +534,9 @@ def test_param_identifier_reload_task_direct():
 def test_param_identifier_reload_meta():
     """Test identifier don't change when using meta"""
     # Creates the configuration
-    task = IdentifierReloadTask(id="123").submit(run_mode=RunMode.DRY_RUN)
-    config = IdentifierReloadTaskDerived(
-        task=task, other=setmeta(IdentifierReloadTaskConfig(x=2), True)
+    task = IdentifierReloadTask.C(id="123").submit(run_mode=RunMode.DRY_RUN)
+    config = IdentifierReloadTaskDerived.C(
+        task=task, other=setmeta(IdentifierReloadTaskConfig.C(x=2), True)
     )
     check_reload(config)
 
@@ -546,9 +555,9 @@ class LoopC(Config):
 
 
 def test_param_identifier_loop():
-    c = LoopC()
-    b = LoopB(param_c=c)
-    a = LoopA(param_b=b)
+    c = LoopC.C()
+    b = LoopB.C(param_c=c)
+    a = LoopA.C(param_b=b)
     c.param_a = a
     c.param_b = b
 

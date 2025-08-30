@@ -31,7 +31,7 @@ if __name__ == "__main__":
         logging.info("Reschedule with token [%s]: starting task in %s", x, workdir)
         token = xp.workspace.connector.createtoken("test-token-reschedule", 1)
         task = (
-            TokenTask(path=lockingpath, x=int(x))
+            TokenTask.C(path=lockingpath, x=int(x))
             .add_dependencies(token.dependency(1))
             .submit()
         )

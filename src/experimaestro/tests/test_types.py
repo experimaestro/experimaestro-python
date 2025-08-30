@@ -26,17 +26,17 @@ def test_multiple_inheritance():
 
     for C in (C1, C2):
         logging.info("Testing %s", C)
-        ctype = C.__xpmtype__
+        ctype = C.__getxpmtype__()
         assert issubclass(C, A)
         assert issubclass(C, B)
         assert issubclass(C, B1)
 
-        assert ctype.objecttype == C.__xpmtype__.objecttype
+        assert ctype.value_type == C.__getxpmtype__().value_type
 
-        assert issubclass(C.__xpmtype__.objecttype, B1.__xpmtype__.basetype)
-        assert issubclass(C.__xpmtype__.objecttype, B.__xpmtype__.basetype)
-        assert issubclass(C.__xpmtype__.objecttype, A.__xpmtype__.basetype)
-        assert not issubclass(C.__xpmtype__.objecttype, ConfigMixin)
+        assert issubclass(C.__getxpmtype__().value_type, B1.__getxpmtype__().value_type)
+        assert issubclass(C.__getxpmtype__().value_type, B.__getxpmtype__().value_type)
+        assert issubclass(C.__getxpmtype__().value_type, A.__getxpmtype__().value_type)
+        assert not issubclass(C.__getxpmtype__().value_type, ConfigMixin)
 
 
 def test_missing_hierarchy():
@@ -49,7 +49,7 @@ def test_missing_hierarchy():
     class B(A1):
         pass
 
-    B.__xpmtype__
+    B.__getxpmtype__()
 
     assert issubclass(B, A)
     assert issubclass(B, A1)
@@ -59,7 +59,7 @@ def test_types_union():
     class A(Config):
         x: Param[Union[int, str]]
 
-    A(x=1)
-    A(x="hello")
+    A.C(x=1)
+    A.C(x="hello")
     with pytest.raises(ValueError):
-        A(x=[])
+        A.C(x=[])

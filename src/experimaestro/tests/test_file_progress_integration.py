@@ -162,7 +162,7 @@ def test_file_progress_basic():
         xp.scheduler.addlistener(listener)
 
         # Submit task
-        out = SimpleProgressTask().submit()
+        out = SimpleProgressTask.C().submit()
         path = out.path
         job = out.__xpm__.job
 
@@ -221,7 +221,7 @@ def test_file_progress_multilevel():
         xp.scheduler.addlistener(listener)
 
         # Submit task
-        out = MultiLevelProgressTask().submit()
+        out = MultiLevelProgressTask.C().submit()
         job = out.__xpm__.job
 
         # Wait for job to start
@@ -267,7 +267,7 @@ def test_file_progress_tqdm():
         xp.scheduler.addlistener(listener)
 
         # Submit task
-        out = TqdmProgressTask().submit()
+        out = TqdmProgressTask.C().submit()
         job = out.__xpm__.job
 
         # Wait for job to start
@@ -311,7 +311,7 @@ def test_file_progress_concurrent_experiments():
         xp1.scheduler.addlistener(listener1)
 
         # Submit first task
-        out1 = SimpleProgressTask().submit()
+        out1 = SimpleProgressTask.C().submit()
         job1 = out1.__xpm__.job
         path1 = out1.path
 
@@ -329,7 +329,7 @@ def test_file_progress_concurrent_experiments():
             xp2.scheduler.addlistener(listener2)
 
             # Submit second task
-            out2 = SimpleProgressTask().submit()
+            out2 = SimpleProgressTask.C().submit()
             job2 = out2.__xpm__.job
             path2 = out2.path
 
@@ -384,7 +384,7 @@ def test_file_progress_concurrent_experiments():
 def test_file_progress_persistence():
     """Test that file-based progress persists during experiment execution"""
     with TemporaryExperiment("file-progress-persistence", maxwait=10, port=0):
-        out = MultiLevelProgressTask().submit()
+        out = MultiLevelProgressTask.C().submit()
         job = out.__xpm__.job
         job_path = job.path
 
@@ -425,7 +425,7 @@ def test_file_progress_error_handling():
         xp.scheduler.addlistener(listener)
 
         # Submit task
-        out = SimpleProgressTask().submit()
+        out = SimpleProgressTask.C().submit()
         job = out.__xpm__.job
         path = out.path
 
