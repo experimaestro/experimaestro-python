@@ -38,8 +38,8 @@ def test_experiment_history():
     """Test retrieving experiment history"""
     with TemporaryDirectory() as workdir:
         with TemporaryExperiment("experiment", workdir=workdir):
-            task_a = TaskA().submit()
-            TaskB(task_a=task_a, x=tag(1)).submit()
+            task_a = TaskA.C().submit()
+            TaskB.C(task_a=task_a, x=tag(1)).submit()
 
         # Look at the experiment
         xp = get_experiment("experiment", workdir=workdir)
@@ -66,7 +66,7 @@ def test_experiment_events():
 
     flag = FlagHandler()
     with TemporaryExperiment("experiment"):
-        task_a = TaskA()
+        task_a = TaskA.C()
         task_a.submit()
         task_a.on_completed(flag.set)
 

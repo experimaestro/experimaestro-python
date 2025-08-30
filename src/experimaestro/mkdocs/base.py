@@ -4,12 +4,11 @@ See https://www.mkdocs.org/user-guide/plugins/ for plugin API documentation
 """
 
 from collections import defaultdict
-import functools
 import re
 from experimaestro.mkdocs.annotations import shoulddocument
 import requests
 from urllib.parse import urljoin
-from experimaestro.core.types import ObjectType, Type
+from experimaestro.core.types import ObjectType
 import mkdocs
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Type as TypingType
@@ -76,7 +75,7 @@ class ObjectLatticeNode:
         return f"node({self.objecttype.identifier})"
 
     def isAncestor(self, other):
-        return issubclass(self.objecttype.configtype, other.objecttype.configtype)
+        return issubclass(self.objecttype.config_type, other.objecttype.config_type)
 
     def _addChild(self, child: "ObjectLatticeNode"):
         child.parents.add(self)
@@ -321,7 +320,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
 
             for node in self.lattice.iter_all():
                 if node.objecttype is not None:
-                    member = node.objecttype.basetype
+                    member = node.objecttype.value_type
                     qname = f"{member.__module__}.{member.__qualname__}"
                     path = self.type2path[qname]
 
@@ -354,7 +353,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
         # Now, sort according to descendant/ascendant relationship or name
         nodes = set()
         for _node in cfgs:
-            if issubclass(_node.objecttype.configtype, xpmtype.configtype):
+            if issubclass(_node.objecttype.config_type, xpmtype.config_type):
                 nodes.add(_node)
 
         # Removes so they are not generated twice
@@ -443,11 +442,10 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 lines.append("\n\n")
 
             for name, argument in xpminfo.arguments.items():
-
                 if isinstance(argument.type, ObjectType):
-                    basetype = argument.type.basetype
+                    value_type = argument.type.value_type
                     typestr = self.getlink(
-                        page.url, f"{basetype.__module__}.{basetype.__qualname__}"
+                        page.url, f"{value_type.__module__}.{value_type.__qualname__}"
                     )
                 else:
                     typestr = argument.type.name()

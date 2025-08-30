@@ -72,7 +72,7 @@ def test_progress_basic():
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
-        out = ProgressingTask().submit()
+        out = ProgressingTask.C().submit()
         path = out.path  # type: Path
         job = out.__xpm__.job
 
@@ -103,7 +103,7 @@ def test_progress_multiple():
         listener1 = ProgressListener()
         xp1.scheduler.addlistener(listener1)
 
-        out = ProgressingTask().submit()
+        out = ProgressingTask.C().submit()
         path = out.path  # type: Path
         job = out.__xpm__.job
 
@@ -122,7 +122,7 @@ def test_progress_multiple():
             listener2 = ProgressListener()
             xp2.scheduler.addlistener(listener2)
 
-            out = ProgressingTask().submit()
+            out = ProgressingTask.C().submit()
             job = out.__xpm__.job  # type: CommandLineJob
             logger.info("Waiting for job to start (2)")
             while job.state.notstarted():
@@ -217,7 +217,7 @@ def test_progress_nested():
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
-        out = NestedProgressingTask().submit()
+        out = NestedProgressingTask.C().submit()
         job = out.__xpm__.job
         path = out.path  # type: Path
 

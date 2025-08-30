@@ -36,22 +36,22 @@ class C(Config):
 
 
 def test_validation_simple():
-    expect_validate(A(value=1))
+    expect_validate(A.C(value=1))
 
 
 def test_validation_missing():
-    expect_notvalidate(A())
+    expect_notvalidate(A.C())
 
 
 def test_validation_simple_nested():
-    b = B()
-    b.a = A(value=1)
+    b = B.C()
+    b.a = A.C(value=1)
     expect_validate(b)
 
 
 def test_validation_missing_nested():
-    b = B()
-    b.a = A()
+    b = B.C()
+    b.a = A.C()
     expect_notvalidate(b)
 
 
@@ -68,11 +68,11 @@ def test_validation_type():
         __xpmid__ = valns.type.c
 
     with pytest.raises(ValueError):
-        C(a=B())
+        C.C(a=B.C())
 
     with pytest.raises(ValueError):
-        c = C()
-        c.a = B()
+        c = C.C()
+        c.a = B.C()
 
 
 def test_validation_subtype():
@@ -86,7 +86,7 @@ def test_validation_subtype():
         __xpmid__ = valns.subtype.b
         a: Param[A]
 
-    expect_validate(B(a=A1()))
+    expect_validate(B.C(a=A1.C()))
 
 
 def test_validation_path_generator():
@@ -96,7 +96,7 @@ def test_validation_path_generator():
         __xpmid__ = valns.path.a
         value: Meta[Path] = field(default_factory=PathGenerator("file.txt"))
 
-    a = A()
+    a = A.C()
     a.__xpm__.validate()
     with TemporaryExperiment("constant") as xp:
         jobcontext = Job(a)
@@ -116,7 +116,7 @@ def test_validation_constant():
         __xpmid__ = valns.constant.a
         value: Constant[int] = 1
 
-    a = A()
+    a = A.C()
     a.__xpm__.validate()
     with TemporaryExperiment("constant"):
         joba = Job(a)
@@ -133,7 +133,7 @@ class Child(Parent):
 
 
 def test_validation_child():
-    expect_validate(Child(x=1))
+    expect_validate(Child.C(x=1))
 
 
 # --- Path argument checks
@@ -144,7 +144,7 @@ class PathParent(Config):
 
 
 def test_validation_path_option():
-    c = PathParent()
+    c = PathParent.C()
     expect_validate(c)
 
 
@@ -157,7 +157,7 @@ def test_validation_seal():
     class A(Config):
         a: Param[int]
 
-    a = A(a=2)
+    a = A.C(a=2)
     a.__xpm__.seal(EmptyContext())
 
     with pytest.raises(AttributeError):
@@ -174,10 +174,10 @@ def test_validation_validation_enum():
     class EnumConfig(Config):
         a: Param[EnumParam]
 
-    expect_validate(EnumConfig(a=EnumParam.FIRST))
+    expect_validate(EnumConfig.C(a=EnumParam.FIRST))
 
     try:
-        EnumConfig(a=1)
+        EnumConfig.C(a=1)
         assert False, "Enum value should be rejected"
     except AssertionError:
         pass
@@ -199,7 +199,7 @@ class TaskConfigConsumer(Config):
 
 
 def test_validation_taskargument():
-    x = taskconfig()
+    x = taskconfig.C()
     with TemporaryExperiment("fake"):
         x.submit(run_mode=RunMode.DRY_RUN)
-        expect_validate(TaskConfigConsumer(x=x))
+        expect_validate(TaskConfigConsumer.C(x=x))
