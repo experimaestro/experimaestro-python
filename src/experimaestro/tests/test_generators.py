@@ -16,7 +16,7 @@ class Learner(Task):
 
 def test_generators_reuse():
     # We have one way to select the best model
-    validation = Validation()
+    validation = Validation.C()
 
     workspace = Workspace(
         Settings(),
@@ -26,8 +26,8 @@ def test_generators_reuse():
 
     with pytest.raises((ValueError, KeyError)):
         # OK, the path is generated depending on Learner with x=1
-        Learner(x=1, validation=validation).submit(workspace=workspace)
+        Learner.C(x=1, validation=validation).submit(workspace=workspace)
 
         # Here we have a problem...
         # the path is still the previous one
-        Learner(x=2, validation=validation).submit(workspace=workspace)
+        Learner.C(x=2, validation=validation).submit(workspace=workspace)
