@@ -170,7 +170,7 @@ class IdentifierComputer:
             self._hashupdate(IdentifierComputer.ENUM_ID)
             k = value.__class__
             self._hashupdate(
-                f"{k.__module__}.{k.__qualname__ }:{value.name}".encode("utf-8"),
+                f"{k.__module__}.{k.__qualname__}:{value.name}".encode("utf-8"),
             )
         elif isinstance(value, dict):
             self._hashupdate(IdentifierComputer.DICT_ID)
@@ -235,7 +235,16 @@ class IdentifierComputer:
                 # Skip if the argument is not a constant, and
                 # - optional argument: both value and default are None
                 # - the argument value is equal to the default value
-                argvalue = getattr(value, argument.name, None)
+                try:
+                    argvalue = getattr(value, argument.name, None)
+                except KeyError:
+                    logging.warning(
+                        "Parameter %s has not been set in %s created at %s",
+                        argument.name,
+                        value,
+                        value.__xpm__._initinfo,
+                    )
+                    raise
                 if not argument.constant and (
                     (
                         not argument.required
