@@ -1249,6 +1249,9 @@ def clone(v):
     if isinstance(v, Enum):
         return v
 
+    if isinstance(v, tuple):
+        return tuple(clone(x) for x in v)
+    
     if isinstance(v, Config):
         # Create a new instance
         kwargs = {
@@ -1256,7 +1259,7 @@ def clone(v):
             for argument, value in v.__xpm__.xpmvalues()
             if argument.generator is None and not argument.constant
         }
-
+    
         config = type(v)(**kwargs)
         return config
 
