@@ -59,8 +59,10 @@ With `full.yaml` located in the same folder as `experiment.py`
 The experiment can be started with
 
 ```sh
-    experimaestro run-experiment --run-mode normal full.yaml
+    experimaestro run-experiment --run-mode NORMAL full.yaml
 ```
+
+See the [CLI documentation](cli.md#running-experiments) for more details
 
 ### Experiment code in a module
 

@@ -1,18 +1,37 @@
 # Command Line Interface
 
+## Running Experiments
+
+here is the general command used to launch experiments: 
+
+`experimaestro run-experiment --run-mode NORMAL --workspace workspace-id some_xp_params.yaml`
+
+Use `experimaestro jobs --help` for more details.
+
+Let's detail some important parts:
+
+### Run modes
+
+`experimaestro run-experiment --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY] `
+
+Several run modes are possible:
+- `DRY_RUN` will not launch any Task, but display task hashes and dependencies
+- `GENERATE_ONLY` will generate jobs folder without [launching](./launchers/index.md) tasks.
+- `NORMAL` will both generate and launch the jobs, effectively running the experiment.
+
+Use `experimaestro run-experiment --help` for more details.
+
 ## Job Control
 
 Besides the web interface, it is possible to use the command line to check the job
 status and control jobs:
 
-- ``experimaestro jobs list` list jobs
+- `experimaestro jobs list` list jobs
 - `experimaestro jobs clean` cleans jobs 
-- ``experimaestro jobs kill` allows to kill running jobs
-- ``experimaestro jobs log` show the stdout/stderr of a given job
-- ``experimaestro jobs path` returns the full path for a given job
+- `experimaestro jobs kill` allows to kill running jobs
+- `experimaestro jobs log` show the stdout/stderr of a given job
+- `experimaestro jobs path` returns the full path for a given job
 
-
-Use `experimaestro jobs --help` for more details.
 
 
 ## Filters 
