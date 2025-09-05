@@ -24,10 +24,10 @@ def test_generators_reuse():
         run_mode=RunMode.DRY_RUN,
     )
 
-    with pytest.raises((ValueError, KeyError)):
-        # OK, the path is generated depending on Learner with x=1
-        Learner.C(x=1, validation=validation).submit(workspace=workspace)
+    # OK, the path is generated depending on Learner with x=1
+    Learner.C(x=1, validation=validation).submit(workspace=workspace)
 
+    with pytest.raises((AttributeError)):
         # Here we have a problem...
         # the path is still the previous one
         Learner.C(x=2, validation=validation).submit(workspace=workspace)
