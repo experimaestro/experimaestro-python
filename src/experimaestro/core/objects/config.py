@@ -122,11 +122,11 @@ class ConfigInformation:
     def __init__(self, pyobject: "ConfigMixin"):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
-        self.xpmtype = pyobject.__xpmtype__  # type: ObjectType
+        self.xpmtype: "ObjectType" = pyobject.__xpmtype__
         self.values = {}
 
         # Meta-informations
-        self._tags = {}
+        self._tags: dict[str, Any] = {}
         self._initinfo = ""
 
         self._taskoutput = None
@@ -142,7 +142,7 @@ class ConfigInformation:
         #: True when this configuration was loaded from disk
         self.loaded = False
 
-        # Explicitely added dependencies
+        # Explicitly added dependencies
         self.dependencies = []
 
         # Concrete type variables resolutions
@@ -169,6 +169,11 @@ class ConfigInformation:
         self._validated = False
         self._sealed = False
         self._meta = None
+
+        #: This flags is True when a value in this configuration,
+        #: or any sub-configuration, is generated. This prevents problem
+        #: when a configuration with generated values is re-used
+        self._has_generated_value = False
 
     def set_meta(self, value: Optional[bool]):
         """Sets the meta flag"""
@@ -197,6 +202,20 @@ class ConfigInformation:
 
         if self._sealed and not bypass:
             raise AttributeError(f"Object is read-only (trying to set {k})")
+
+        if not isinstance(v, ConfigMixin) and isinstance(v, Config):
+            raise AttributeError(
+                "Configuration (and not objects) should be used. Consider using .C(...)"
+            )
+
+        if (
+            isinstance(v, ConfigMixin)
+            and v.__xpm__._has_generated_value
+            and v.__xpm__.task is None
+        ):
+            raise AttributeError(
+                f"Cannot set {k} to a configuration with generated values"
+            )
 
         try:
             argument = self.xpmtype.arguments.get(k, None)
@@ -328,10 +347,10 @@ class ConfigInformation:
         """
 
         class Sealer(ConfigWalk):
-            def preprocess(self, config: Config):
+            def preprocess(self, config: ConfigMixin):
                 return not config.__xpm__._sealed, config
 
-            def postprocess(self, stub, config: Config, values):
+            def postprocess(self, stub, config: ConfigMixin, values):
                 # Generate values
                 from experimaestro.generators import Generator
 
@@ -344,6 +363,7 @@ class ConfigInformation:
                                     continue
                                 value = argument.generator()
                             else:
+                                # Generate a value
                                 sig = inspect.signature(argument.generator)
                                 if len(sig.parameters) == 0:
                                     value = argument.generator()
@@ -354,11 +374,22 @@ class ConfigInformation:
                                         False
                                     ), "generator has either two parameters (context and config), or none"
                             config.__xpm__.set(k, value, bypass=True)
+                            config.__xpm__._has_generated_value = True
+                        else:
+                            value = config.__xpm__.values.get(k)
                     except Exception:
                         logger.error(
                             "While setting %s of %s", argument.name, config.__xpmtype__
                         )
                         raise
+
+                    # Propagate the generated value flag
+                    if (
+                        (value is not None)
+                        and isinstance(value, ConfigMixin)
+                        and value.__xpm__._has_generated_value
+                    ):
+                        self._has_generated_value = True
 
                 config.__xpm__._sealed = True
 
@@ -656,13 +687,6 @@ class ConfigInformation:
                     cprint(f"   [Dependency] {dep}", color, file=sys.stderr)
 
                 print(file=sys.stderr)  # noqa: T201
-
-        # Handle an output configuration # FIXME: remove
-        def mark_output(config: "Config"):
-            """Sets a dependency on the job"""
-            assert not isinstance(config, Task), "Cannot set a dependency on a task"
-            config.__xpm__.task = self.pyobject
-            return config
 
         # Mark this configuration also
         self.task = self.pyobject
@@ -1242,6 +1266,9 @@ def clone(v):
     if isinstance(v, Enum):
         return v
 
+    if isinstance(v, tuple):
+        return tuple(clone(x) for x in v)
+
     if isinstance(v, Config):
         # Create a new instance
         kwargs = {
@@ -1260,6 +1287,11 @@ class ConfigMixin:
     """Class for configuration objects"""
 
     __xpmtype__: ObjectType
+    """The associated XPM type"""
+
+    __xpm__: ConfigInformation
+    """The __xpm__ object contains all instance specific information about a
+    configuration/task"""
 
     def __init__(self, **kwargs):
         """Initialize the configuration with the given parameters"""
@@ -1440,10 +1472,6 @@ class Config:
     __xpmtype__: ClassVar[ObjectType]
     """The object type holds all the information about a specific subclass
     experimaestro metadata"""
-
-    __xpm__: ConfigInformation
-    """The __xpm__ object contains all instance specific information about a
-    configuration/task"""
 
     @classproperty
     def XPMConfig(cls):
