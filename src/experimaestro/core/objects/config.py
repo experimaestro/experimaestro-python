@@ -344,6 +344,14 @@ class ConfigInformation:
         Arguments:
             - context: the generation context
         """
+        subconfigs = [
+            v.__xpm__
+            for v in self.values.values()
+            if isinstance(v, Config) and v.__xpm__.task is None
+        ]
+
+        if any(v._has_generated_value for v in subconfigs):
+            raise AttributeError("Cannot seal a configuration with generated values")
 
         class Sealer(ConfigWalk):
             def preprocess(self, config: ConfigMixin):
