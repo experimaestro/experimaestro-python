@@ -1407,7 +1407,7 @@ class ConfigMixin:
 
         instance = self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
         if keep:
-            instance.__config__ = self
+            object.__setattr__(instance, "__config__", self)
         return instance
 
     def submit(
