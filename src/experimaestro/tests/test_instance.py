@@ -68,3 +68,8 @@ def test_instance_optional():
     c = ConfigWithOptional.C().instance()
     assert c.x == 1
     assert c.y is None
+
+
+def test_instance_keep_config():
+    evaluator = Evaluator.C(model=Model.C())
+    evaluator.instance()

@@ -55,7 +55,7 @@ vcs = "git"
 style = "semver"
 dirty = true
 format-jinja = """{%- set pre = [] -%}{%- set metadata = [] -%}
-{%- if revision is not none -%}{{ pre.append("rc" + revision|string) or "" }}{%- endif -%}
+{%- if revision is not none -%}{{ pre.append(stage|string + revision|string) or "" }}{%- endif -%}
 {%- if distance > 0 -%}{{ metadata.append(distance|string) or "" }}{%- endif -%}
 {{ serialize_semver(base, pre, metadata)}}"""
 
