@@ -72,4 +72,6 @@ def test_instance_optional():
 
 def test_instance_keep_config():
     evaluator = Evaluator.C(model=Model.C())
-    evaluator.instance()
+    instance = evaluator.instance(keep=True)
+
+    assert instance.__config__ is evaluator

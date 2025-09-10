@@ -1382,9 +1382,20 @@ class ConfigMixin:
         return self
 
     def instance(
-        self, context: ConfigWalkContext = None, *, objects: ObjectStore = None
+        self,
+        context: ConfigWalkContext = None,
+        *,
+        objects: ObjectStore = None,
+        keep: bool = True,
     ) -> T:
-        """Return an instance with the current values"""
+        """Return an instance with the current values
+
+        :param context: The context when computing the instance
+        :param objects: The previously built objects (so that we avoid
+            re-creating instances of past configurations)
+        :param keep: register a configuration in the __config__ field of the
+            instance
+        """
         if context is None:
             from experimaestro.xpmutils import EmptyContext
 
@@ -1393,7 +1404,11 @@ class ConfigMixin:
             assert isinstance(
                 context, ConfigWalkContext
             ), f"{context.__class__} is not an instance of ConfigWalkContext"
-        return self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
+
+        instance = self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
+        if keep:
+            instance.__config__ = self
+        return instance
 
     def submit(
         self,
