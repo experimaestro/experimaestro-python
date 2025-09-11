@@ -65,7 +65,7 @@ class MyConfig(Config):
 if __name__ == "__main__":
     # Saving configurations
     with experiment("/tmp/load_save", "xp1", port=-1) as xp:
-        cfg = MyConfig(a=1)
+        cfg = MyConfig.C(a=1)
         xp.save([cfg])
 
 

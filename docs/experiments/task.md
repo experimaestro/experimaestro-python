@@ -72,8 +72,8 @@ and explicitly declare the dependencies.
             """Generated topics"""
 
             def task_outputs(self, dep) -> Adhoc:
-                return dep(Dataset(
-                    topics=dep(Topics(path=self.topics)),
+                return dep(Dataset.C(
+                    topics=dep(Topics.C(path=self.topics)),
                     documents=self.dataset.documents,
                 ))
     ```
@@ -100,7 +100,7 @@ configuration. There are two ways to do so:
 
     class TaskA(Task):
         def task_outputs(self, dep) -> Task:
-            return dep(MyTaskOutput(path=self.jobpath))
+            return dep(MyTaskOutput.C(path=self.jobpath))
 
     class TaskB(Task):
         task_a: Param[TaskA_Output]
