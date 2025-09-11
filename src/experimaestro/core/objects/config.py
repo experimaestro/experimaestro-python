@@ -169,10 +169,33 @@ class ConfigInformation:
         self._sealed = False
         self._meta = None
 
-        #: This flags is True when a value in this configuration,
-        #: or any sub-configuration, is generated. This prevents problem
-        #: when a configuration with generated values is re-used
-        self._has_generated_value = False
+        # This contains the list of generated values (using context) in this
+        # configuration or any sub-configuration, is generated. This prevents
+        # problem when a configuration with generated values is re-used.
+        self._generated_values = []
+
+    def get_generated_paths(
+        self, path: list[str] = None, paths: list[str] = None
+    ) -> list[str]:
+        """Get the list of generated paths, useful to track down those
+
+        :param path: The current path
+        :param paths: The list of generated paths so far, defaults to None
+        :return: The full list of generated paths
+        """
+        paths = [] if paths is None else paths
+        path = [] if path is None else path
+
+        for key in self._generated_values:
+            value = self.values[key]
+            if isinstance(value, ConfigMixin) and value.__xpm__._generated_values:
+                path.append(key)
+                value.__xpm__.get_generated_paths(path, paths)
+                path.pop()
+            else:
+                paths.append(".".join(path + [key]))
+
+        return paths
 
     def set_meta(self, value: Optional[bool]):
         """Sets the meta flag"""
@@ -209,11 +232,13 @@ class ConfigInformation:
 
         if (
             isinstance(v, ConfigMixin)
-            and v.__xpm__._has_generated_value
+            and v.__xpm__._generated_values
             and v.__xpm__.task is None
         ):
             raise AttributeError(
-                f"Cannot set {k} to a configuration with generated values"
+                f"Cannot set {k} to a configuration with generated values. "
+                "Here is the list of paths to help you: "
+                f"""{', '.join(v.__xpm__.get_generated_paths([k]))}"""
             )
 
         try:
@@ -344,14 +369,17 @@ class ConfigInformation:
         Arguments:
             - context: the generation context
         """
-        subconfigs = [
-            v.__xpm__
-            for v in self.values.values()
-            if isinstance(v, Config) and v.__xpm__.task is None
-        ]
-
-        if any(v._has_generated_value for v in subconfigs):
-            raise AttributeError("Cannot seal a configuration with generated values")
+        if generated_keys := [
+            k
+            for k, v in self.values.items()
+            if isinstance(v, Config)
+            and v.__xpm__.task is None
+            and v.__xpm__._generated_values
+        ]:
+            raise AttributeError(
+                "Cannot seal a configuration with generated values:"
+                f"""{",".join(generated_keys)} in {context.currentpath}"""
+            )
 
         class Sealer(ConfigWalk):
             def preprocess(self, config: ConfigMixin):
@@ -375,13 +403,15 @@ class ConfigInformation:
                                 if len(sig.parameters) == 0:
                                     value = argument.generator()
                                 elif len(sig.parameters) == 2:
+                                    # Only in that case do we need to flag this configuration
+                                    # as containing generated values
+                                    config.__xpm__._generated_values.append(k)
                                     value = argument.generator(self.context, config)
                                 else:
                                     assert (
                                         False
                                     ), "generator has either two parameters (context and config), or none"
                             config.__xpm__.set(k, value, bypass=True)
-                            config.__xpm__._has_generated_value = True
                         else:
                             value = config.__xpm__.values.get(k)
                     except Exception:
@@ -394,9 +424,9 @@ class ConfigInformation:
                     if (
                         (value is not None)
                         and isinstance(value, ConfigMixin)
-                        and value.__xpm__._has_generated_value
+                        and value.__xpm__._generated_values
                     ):
-                        self._has_generated_value = True
+                        config.__xpm__._generated_values.append(k)
 
                 config.__xpm__._sealed = True
 
