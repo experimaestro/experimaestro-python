@@ -230,20 +230,21 @@ class ConfigInformation:
                 "Configuration (and not objects) should be used. Consider using .C(...)"
             )
 
-        if (
-            isinstance(v, ConfigMixin)
-            and v.__xpm__._generated_values
-            and v.__xpm__.task is None
-        ):
-            raise AttributeError(
-                f"Cannot set {k} to a configuration with generated values. "
-                "Here is the list of paths to help you: "
-                f"""{', '.join(v.__xpm__.get_generated_paths([k]))}"""
-            )
-
         try:
             argument = self.xpmtype.arguments.get(k, None)
             if argument:
+                if (
+                    isinstance(v, ConfigMixin)
+                    and v.__xpm__._generated_values
+                    and v.__xpm__.task is None
+                    and not argument.ignore_generated
+                ):
+                    raise AttributeError(
+                        f"Cannot set {k} to a configuration with generated values. "
+                        "Here is the list of paths to help you: "
+                        f"""{', '.join(v.__xpm__.get_generated_paths([k]))}"""
+                    )
+
                 if not bypass and (
                     (isinstance(argument.generator, Generator)) or argument.constant
                 ):
@@ -405,7 +406,10 @@ class ConfigInformation:
                                 elif len(sig.parameters) == 2:
                                     # Only in that case do we need to flag this configuration
                                     # as containing generated values
-                                    config.__xpm__._generated_values.append(k)
+                                    if not argument.ignore_generated:
+                                        config.__xpm__._generated_values.append(k)
+                                    else:
+                                        logging.warning("Ignoring %s", k)
                                     value = argument.generator(self.context, config)
                                 else:
                                     assert (
@@ -422,11 +426,14 @@ class ConfigInformation:
 
                     # Propagate the generated value flag
                     if (
-                        (value is not None)
+                        value is not None
                         and isinstance(value, ConfigMixin)
                         and value.__xpm__._generated_values
                     ):
-                        config.__xpm__._generated_values.append(k)
+                        if not argument.ignore_generated:
+                            config.__xpm__._generated_values.append(k)
+                        else:
+                            logging.warning("Ignoring %s", k)
 
                 config.__xpm__._sealed = True
 

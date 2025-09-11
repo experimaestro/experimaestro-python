@@ -14,6 +14,10 @@ class Learner(Task):
     x: Param[int]
 
 
+class ModuleLoader(Task):
+    validation: Param[Validation] = field(ignore_generated=True)
+
+
 def test_generators_reuse_on_submit():
     # We have one way to select the best model
     validation = Validation.C()
@@ -59,3 +63,6 @@ def test_generators_reuse_on_set():
         # We should not be able to *create* a second task with the same validation,
         # even without submitting it
         Learner.C(x=2, validation=validation)
+
+    # This should run OK
+    ModuleLoader.C(validation=validation)
