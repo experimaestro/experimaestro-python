@@ -5,7 +5,7 @@ from typing import Iterable, Optional, Type
 from experimaestro import Task
 
 from experimaestro.core.context import SerializationContext
-from experimaestro.scheduler.base import Job, JobDependency
+from experimaestro.scheduler.jobs import Job, JobDependency
 from experimaestro.settings import find_workspace
 from experimaestro.core.serialization import from_state_dict, save_definition
 

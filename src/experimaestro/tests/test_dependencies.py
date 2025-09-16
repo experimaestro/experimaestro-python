@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import pytest
 from experimaestro import Config, Param, Task, RunMode
-from experimaestro.scheduler.base import JobDependency
+from experimaestro.scheduler.jobs import JobDependency
 from experimaestro.tests.utils import TemporaryExperiment
 
 
