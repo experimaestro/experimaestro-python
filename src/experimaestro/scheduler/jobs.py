@@ -1,4 +1,3 @@
-from asyncio import Lock
 import asyncio
 from collections import ChainMap
 import enum
@@ -15,6 +14,7 @@ from experimaestro.notifications import LevelInformation, Reporter
 # from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.dependencies import Dependency, DependencyStatus, Resource
 from experimaestro.scheduler.workspace import RunMode, Workspace
+from experimaestro.locking import Lock
 from experimaestro.utils import logger
 
 if TYPE_CHECKING:
