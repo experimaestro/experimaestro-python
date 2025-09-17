@@ -16,7 +16,7 @@ from experimaestro.utils import logger
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
 from experimaestro.utils.asyncio import asyncThreadcheck
-import pkg_resources
+from importlib.metadata import entry_points
 
 
 class RedirectType(enum.Enum):
@@ -101,7 +101,7 @@ class Process:
         """Get a handler"""
         if Process.HANDLERS is None:
             Process.HANDLERS = {}
-            for ep in pkg_resources.iter_entry_points(group="experimaestro.process"):
+            for ep in entry_points(group="experimaestro.process"):
                 logging.debug("Adding process handler for type %s", ep.name)
                 handler = ep.load()
                 Process.HANDLERS[ep.name] = handler
