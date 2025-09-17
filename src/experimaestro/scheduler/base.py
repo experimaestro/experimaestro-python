@@ -283,9 +283,15 @@ class Scheduler(threading.Thread):
     async def aio_start(self, job: Job) -> Optional[JobState]:
         """Start a job (scheduler coordination layer)
 
-        Returns:
-            JobState.WAITING: If dependencies could not be locked
-            JobState.DONE/ERROR: Depending on the job execution outcome
+        This method serves as a coordination layer that delegates the actual
+        job starting logic to the job itself while handling scheduler-specific
+        concerns like state notifications and providing coordination context.
+
+        :param job: The job to start
+        :return: JobState.WAITING if dependencies could not be locked, JobState.DONE
+            if job completed successfully, JobState.ERROR if job failed during execution,
+            or None (should not occur in normal operation)
+        :raises Exception: Various exceptions during scheduler coordination
         """
 
         # Assert preconditions

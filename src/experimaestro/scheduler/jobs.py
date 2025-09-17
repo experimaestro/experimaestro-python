@@ -281,13 +281,20 @@ class Job(Resource):
     async def aio_start(self, sched_dependency_lock, notification_server=None):
         """Start the job with core job starting logic
 
-        Returns:
-            JobState.DONE: Job completed successfully
-            JobState.ERROR: Job failed during execution
-            None: Dependencies couldn't be locked (signals WAITING to scheduler)
+        This method contains the core logic for starting a job that was previously
+        located in Scheduler.aio_start(). It handles job locking, dependency
+        acquisition, directory setup, and job execution while using the scheduler's
+        coordination lock to prevent race conditions between multiple jobs.
 
-        Raises:
-            Exception: Various exceptions during job execution
+        :param sched_dependency_lock: The scheduler's dependency lock for coordination
+            between jobs to prevent race conditions during dependency acquisition
+        :param notification_server: Optional notification server from the experiment
+            for job progress reporting
+        :return: JobState.DONE if job completed successfully, JobState.ERROR if job
+            failed during execution, or None if dependencies couldn't be locked
+            (signals WAITING state to scheduler)
+        :raises Exception: Various exceptions during job execution, dependency locking,
+            or process creation
         """
         # We first lock the job before proceeding
         assert self.launcher is not None
