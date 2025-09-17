@@ -83,10 +83,6 @@ class Scheduler(threading.Thread):
         else:
             logger.warning("Scheduler already started")
 
-    # @property
-    # def loop(self):
-    #     return self.xp.loop
-
     def addlistener(self, listener: Listener):
         self.listeners.add(listener)
 
@@ -261,9 +257,6 @@ class Scheduler(threading.Thread):
 
         # Decrement the number of unfinished jobs and notify
         self.xp.unfinishedJobs -= 1
-        # async with self.xp.central.exitCondition:
-        #     logging.debug("Updated number of unfinished jobs")
-        #     self.xp.central.exitCondition.notify_all()
         async with self.exitCondition:
             logging.debug("Updated number of unfinished jobs")
             self.exitCondition.notify_all()
