@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections import ChainMap
 import enum
 from functools import cached_property
@@ -14,7 +15,7 @@ from experimaestro.notifications import LevelInformation, Reporter
 # from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.dependencies import Dependency, DependencyStatus, Resource
 from experimaestro.scheduler.workspace import RunMode, Workspace
-from experimaestro.locking import Lock
+from experimaestro.locking import Lock, LockError, Locks
 from experimaestro.utils import logger
 
 if TYPE_CHECKING:
@@ -276,6 +277,104 @@ class Job(Resource):
         :param overwrite: if True, overwrite files even if the task has been run
         """
         pass
+
+    async def aio_start(self, sched_dependency_lock, notification_server=None):
+        """Start the job with core job starting logic
+
+        Returns:
+            JobState.DONE: Job completed successfully
+            JobState.ERROR: Job failed during execution
+            None: Dependencies couldn't be locked (signals WAITING to scheduler)
+
+        Raises:
+            Exception: Various exceptions during job execution
+        """
+        # We first lock the job before proceeding
+        assert self.launcher is not None
+
+        with Locks() as locks:
+            logger.debug("[starting] Locking job %s", self)
+            async with self.launcher.connector.lock(self.lockpath):
+                logger.debug("[starting] Locked job %s", self)
+
+                state = None
+                try:
+                    logger.debug(
+                        "Starting job %s with %d dependencies",
+                        self,
+                        len(self.dependencies),
+                    )
+
+                    # Individual dependency lock acquisition
+                    # We use the scheduler-wide lock to avoid cross-jobs race conditions
+                    async with sched_dependency_lock:
+                        for dependency in self.dependencies:
+                            try:
+                                locks.append(dependency.lock().acquire())
+                            except LockError:
+                                logger.warning(
+                                    "Could not lock %s, aborting start for job %s",
+                                    dependency,
+                                    self,
+                                )
+                                dependency.check()
+                                return None  # Signal to scheduler that dependencies couldn't be locked
+
+                    # Dependencies have been locked, we can start the job
+                    self.starttime = time.time()
+
+                    # Creates the main directory
+                    directory = self.path
+                    logger.debug("Making directories job %s...", directory)
+                    if not directory.is_dir():
+                        directory.mkdir(parents=True, exist_ok=True)
+
+                    # Sets up the notification URL
+                    if notification_server is not None:
+                        self.add_notification_server(notification_server)
+
+                except Exception:
+                    logger.warning("Error while locking job", exc_info=True)
+                    return None  # Signal waiting state to scheduler
+
+                try:
+                    # Runs the job
+                    process = await self.aio_run()
+                except Exception:
+                    logger.warning("Error while starting job", exc_info=True)
+                    return JobState.ERROR
+
+            try:
+                if isinstance(process, JobState):
+                    state = process
+                    logger.debug("Job %s ended (state %s)", self, state)
+                else:
+                    logger.debug("Waiting for job %s process to end", self)
+
+                    code = await process.aio_code()
+                    logger.debug("Got return code %s for %s", code, self)
+
+                    # Check the file if there is no return code
+                    if code is None:
+                        # Case where we cannot retrieve the code right away
+                        if self.donepath.is_file():
+                            code = 0
+                        else:
+                            code = int(self.failedpath.read_text())
+
+                    logger.debug("Job %s ended with code %s", self, code)
+                    state = JobState.DONE if code == 0 else JobState.ERROR
+
+            except JobError:
+                logger.warning("Error while running job")
+                state = JobState.ERROR
+
+            except Exception:
+                logger.warning(
+                    "Error while running job (in experimaestro)", exc_info=True
+                )
+                state = JobState.ERROR
+        return state
 
     async def aio_run(self):
         """Actually run the code"""
