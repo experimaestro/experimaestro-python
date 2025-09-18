@@ -6,10 +6,10 @@ from pathlib import Path, WindowsPath, PosixPath
 import os
 import threading
 from experimaestro.launcherfinder import LauncherRegistry
-import fasteners
+from fasteners import InterProcessLock as FastenersInterProcessLock
 import psutil
 
-from experimaestro.locking import Lock
+from asyncio import Lock
 
 from . import (
     Connector,
@@ -93,7 +93,7 @@ class LocalProcess(Process):
 
 
 def getstream(redirect: Redirect, write: bool):
-    if redirect.type == RedirectType.FILE:
+    if redirect.type == RedirectType.FILE and redirect.path:
         return redirect.path.open("w" if write else "r")
 
     if redirect.type == RedirectType.PIPE:
@@ -145,25 +145,35 @@ class LocalProcessBuilder(ProcessBuilder):
         return process
 
 
-class InterProcessLock(fasteners.InterProcessLock, Lock):
+class InterProcessLock(FastenersInterProcessLock, Lock):
     def __init__(self, path, max_delay=-1):
-        super().__init__(path)
+        FastenersInterProcessLock.__init__(self, path)
         self.max_delay = max_delay
 
     def __enter__(self):
         logger.debug("Locking %s", self.path)
-        if not super().acquire(blocking=True, max_delay=self.max_delay, timeout=None):
+        if not FastenersInterProcessLock.acquire(
+            self, blocking=True, max_delay=self.max_delay, timeout=None
+        ):
             raise threading.ThreadError("Could not acquire lock")
         logger.debug("Locked %s", self.path)
         return self
+
+    def __aenter__(self):
+        # use the synchronous __enter__ method in async context
+        return self.__enter__()
 
     def __exit__(self, *args):
         logger.debug("Unlocking %s", self.path)
         super().__exit__(*args)
 
+    def __aexit__(self, *args):
+        # use the synchronous __exit__ method in async context
+        return self.__exit__(*args)
+
 
 class LocalConnector(Connector):
-    INSTANCE: Connector = None
+    INSTANCE: Optional[Connector] = None
 
     @staticmethod
     def instance():
@@ -175,7 +185,7 @@ class LocalConnector(Connector):
     def init_registry(registry: LauncherRegistry):
         pass
 
-    def __init__(self, localpath: Path = None):
+    def __init__(self, localpath: Optional[Path] = None):
         localpath = localpath
         if not localpath:
             localpath = Path(
@@ -200,7 +210,7 @@ class LocalConnector(Connector):
     def processbuilder(self) -> ProcessBuilder:
         return LocalProcessBuilder()
 
-    def resolve(self, path: Path, basepath: Path = None) -> str:
+    def resolve(self, path: Path, basepath: Optional[Path] = None) -> str:
         assert isinstance(path, PosixPath) or isinstance(
             path, WindowsPath
         ), f"Unrecognized path {type(path)}"

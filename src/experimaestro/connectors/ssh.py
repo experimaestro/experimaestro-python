@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import io
 import os
 import re
+from asyncio import Lock
 from experimaestro.launcherfinder import LauncherRegistry
 from urllib.parse import urlparse
 from itertools import chain
@@ -19,7 +20,6 @@ from . import (
     RedirectType,
     Redirect,
 )
-from experimaestro.locking import Lock
 from experimaestro.tokens import Token
 
 try:

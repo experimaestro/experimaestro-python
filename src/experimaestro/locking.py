@@ -1,46 +1,5 @@
-from experimaestro.utils.asyncio import asyncThreadcheck
+from asyncio import Lock
 from .utils import logger
-
-
-class Lock:
-    """A lock"""
-
-    def __init__(self):
-        self._level = 0
-        self.detached = False
-
-    def detach(self):
-        self.detached = True
-
-    def acquire(self):
-        if self._level == 0:
-            self._level += 1
-            self._acquire()
-        return self
-
-    def release(self):
-        if not self.detached and self._level == 1:
-            self._level -= 1
-            self._release()
-
-    def __enter__(self):
-        self.acquire()
-        return self
-
-    def __exit__(self, *args):
-        self.release()
-
-    async def __aenter__(self):
-        return await asyncThreadcheck("lock (aenter)", self.__enter__)
-
-    async def __aexit__(self, *args):
-        return await asyncThreadcheck("lock (aexit)", self.__exit__, *args)
-
-    def _acquire(self):
-        raise NotImplementedError()
-
-    def _release(self):
-        raise NotImplementedError()
 
 
 class LockError(Exception):
@@ -48,21 +7,36 @@ class LockError(Exception):
 
 
 class Locks(Lock):
-    """A set of locks"""
+    """A set of locks that can be acquired/released together"""
 
     def __init__(self):
         super().__init__()
         self.locks = []
 
     def append(self, lock):
+        """Add a lock to the collection"""
         self.locks.append(lock)
 
-    def _acquire(self):
-        for lock in self.locks:
-            lock.acquire()
+    async def acquire(self):
+        """Acquire all locks in order"""
+        if not self.locked():
+            for lock in self.locks:
+                await lock.acquire()
+            self._acquired = True
+        await super().acquire()
+        return self
 
-    def _release(self):
-        logger.debug("Releasing %d locks", len(self.locks))
-        for lock in self.locks:
-            logger.debug("[locks] Releasing %s", lock)
-            lock.release()
+    def release(self):
+        """Release all locks in reverse order"""
+        if self.locked():
+            # if not self.detached and self._acquired:
+            logger.debug("Releasing %d locks", len(self.locks))
+            # Release in reverse order to prevent deadlocks
+            for lock in reversed(self.locks):
+                logger.debug("[locks] Releasing %s", lock)
+                lock.release()
+            super().release()
+
+    async def __aenter__(self):
+        await super().__aenter__()
+        return self

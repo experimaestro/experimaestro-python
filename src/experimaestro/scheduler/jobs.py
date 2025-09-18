@@ -74,10 +74,18 @@ class JobLock(Lock):
         super().__init__()
         self.job = job
 
-    def _acquire(self):
+    # def _acquire(self):
+    #     return self.job.state == JobState.DONE
+
+    async def acquire(self):
+        await super().acquire()
         return self.job.state == JobState.DONE
 
-    def _release(self):
+    # def _release(self):
+    #     return False
+
+    def release(self):
+        super().release()
         return False
 
 
@@ -299,9 +307,9 @@ class Job(Resource):
         # We first lock the job before proceeding
         assert self.launcher is not None
 
-        with Locks() as locks:
+        async with Locks() as locks:
             logger.debug("[starting] Locking job %s", self)
-            async with self.launcher.connector.lock(self.lockpath):
+            with self.launcher.connector.lock(self.lockpath):
                 logger.debug("[starting] Locked job %s", self)
 
                 state = None
@@ -317,7 +325,10 @@ class Job(Resource):
                     async with sched_dependency_lock:
                         for dependency in self.dependencies:
                             try:
-                                locks.append(dependency.lock().acquire())
+                                lock = dependency.lock()
+                                await lock.acquire()
+                                # locks.append(dependency.lock().acquire())
+                                locks.append(lock)
                             except LockError:
                                 logger.warning(
                                     "Could not lock %s, aborting start for job %s",
