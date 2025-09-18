@@ -5,7 +5,7 @@ from typing import Optional, Set, TYPE_CHECKING
 import asyncio
 from enum import Enum
 from ..utils import logger
-from ..locking import Lock
+
 
 if TYPE_CHECKING:
     from . import Job
@@ -60,7 +60,7 @@ class Dependency:
     def status(self) -> DependencyStatus:
         raise NotImplementedError()
 
-    def lock(self) -> Lock:
+    def lock(self) -> asyncio.Lock:
         raise NotImplementedError()
 
     def __repr__(self) -> str:
