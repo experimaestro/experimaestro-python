@@ -12,13 +12,14 @@ import fasteners
 import threading
 import os.path
 from watchdog.events import FileSystemEventHandler
+from asyncio import Lock
 from typing import Dict
 from experimaestro.launcherfinder.base import TokenConfiguration
 
 from experimaestro.launcherfinder.registry import LauncherRegistry
 
 from .ipc import ipcom
-from .locking import Lock, LockError
+from .locking import LockError
 from .scheduler.dependencies import Dependency, DependencyStatus, Resource
 import logging
 import json
@@ -51,8 +52,16 @@ class CounterTokenLock(Lock):
     def _acquire(self):
         self.dependency.token.acquire(self.dependency)
 
+    async def acquire(self):
+        self._acquire()
+        return await super().acquire()
+
     def _release(self):
         self.dependency.token.release(self.dependency)
+
+    def release(self):
+        self._release()
+        return super().release()
 
     def __str__(self):
         return "Lock(%s)" % self.dependency
