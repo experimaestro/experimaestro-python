@@ -926,6 +926,7 @@ class ConfigInformation:
                 "workspace": str(context.workspace.path.absolute()),
                 "tags": {key: value for key, value in self.tags().items()},
                 "version": 2,
+                "experimaestro": experimaestro.__version__,
                 "objects": self.__get_objects__([], context),
             },
             out,
