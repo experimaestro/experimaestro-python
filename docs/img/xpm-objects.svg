@@ -2,13 +2,13 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="86.254013mm"
+   width="59.460693mm"
    height="71.96032mm"
-   viewBox="0 0 86.254013 71.96032"
+   viewBox="0 0 59.460693 71.96032"
    version="1.1"
    id="svg1"
    sodipodi:docname="xpm-objects.svg"
-   inkscape:version="1.4 (e7c3feb1, 2024-10-09)"
+   inkscape:version="1.4.2 (ebf0e940, 2025-05-08)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -23,15 +23,15 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="1.5902642"
-     inkscape:cx="172.92724"
-     inkscape:cy="170.72635"
+     inkscape:zoom="1.1359209"
+     inkscape:cx="70.42744"
+     inkscape:cy="157.14123"
      inkscape:window-width="1312"
      inkscape:window-height="826"
      inkscape:window-x="0"
-     inkscape:window-y="38"
+     inkscape:window-y="34"
      inkscape:window-maximized="0"
-     inkscape:current-layer="g4" />
+     inkscape:current-layer="g5" />
   <defs
      id="defs1">
     <inkscape:path-effect
@@ -129,7 +129,12 @@
            id="tspan3"
            style="stroke-width:0.1"
            x="18.540915"
-           y="39.658554">XPMConfig</tspan></text>
+           y="39.658554">XPMConfig</tspan><tspan
+           sodipodi:role="line"
+           style="stroke-width:0.1"
+           x="18.540915"
+           y="43.627304"
+           id="tspan4" /></text>
       <text
          xml:space="preserve"
          style="font-size:6.35px;font-family:Arial;-inkscape-font-specification:Arial;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke-width:1;stroke-dashoffset:0.124724"
@@ -140,7 +145,7 @@
            id="tspan5"
            style="stroke-width:1"
            x="13.955626"
-           y="53.067951"></tspan></text>
+           y="53.067951" /></text>
     </g>
     <g
        id="g6"
@@ -172,39 +177,6 @@
        inkscape:connector-curvature="0"
        inkscape:connection-start="#g6"
        inkscape:connection-end="#g5" />
-    <g
-       id="g4"
-       transform="translate(1.48082,-4.2794008)">
-      <rect
-         style="fill:#cdc8ff;fill-opacity:1;stroke:#000000;stroke-width:0.216351;stroke-linejoin:bevel;stroke-miterlimit:4.9;stroke-dashoffset:0.0755906"
-         id="rect1-2"
-         width="22.370131"
-         height="14.310738"
-         x="54.762173"
-         y="37.808517" />
-      <text
-         xml:space="preserve"
-         style="font-size:5.82458px;line-height:normal;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-decoration-color:#000000;fill:#000000;stroke:#000000;stroke-width:0.183451;-inkscape-stroke:none;stop-color:#000000"
-         x="63.706852"
-         y="46.249378"
-         id="text1-2"><tspan
-           sodipodi:role="line"
-           id="tspan1-6"
-           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.183451"
-           x="63.706852"
-           y="46.249378">A</tspan></text>
-      <text
-         xml:space="preserve"
-         style="font-size:3.175px;line-height:normal;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-decoration-color:#000000;fill:#000000;stroke:#000000;stroke-width:0.1;-inkscape-stroke:none;stop-color:#000000"
-         x="57.924618"
-         y="50.305"
-         id="text4"><tspan
-           sodipodi:role="line"
-           id="tspan4"
-           style="stroke-width:0.1"
-           x="57.924618"
-           y="50.305">XPMValue</tspan></text>
-    </g>
     <path
        style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        d="M 39.362993,29.360953 34.8979,34.028248"
@@ -213,14 +185,6 @@
        inkscape:connector-curvature="0"
        inkscape:connection-start="#g1"
        inkscape:connection-end="#g5" />
-    <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       d="m 53.649953,28.685995 5.561453,4.843122"
-       id="path9"
-       inkscape:connector-type="polyline"
-       inkscape:connector-curvature="0"
-       inkscape:connection-start="#g1"
-       inkscape:connection-end="#g4" />
     <g
        id="g2"
        transform="matrix(1.834512,0,0,1.834512,-47.555807,-4.3460654)">
@@ -276,39 +240,6 @@
            x="19.871931"
            y="40.520473">XPMConfig</tspan></text>
     </g>
-    <g
-       id="g4-7"
-       transform="translate(0.4825582,34.674926)">
-      <rect
-         style="fill:#cdc8ff;fill-opacity:1;stroke:#000000;stroke-width:0.216351;stroke-linejoin:bevel;stroke-miterlimit:4.9;stroke-dashoffset:0.0755906"
-         id="rect1-2-5"
-         width="23.701147"
-         height="14.310738"
-         x="54.762173"
-         y="37.808517" />
-      <text
-         xml:space="preserve"
-         style="font-size:5.82458px;line-height:normal;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-decoration-color:#000000;fill:#000000;stroke:#000000;stroke-width:0.183451;-inkscape-stroke:none;stop-color:#000000"
-         x="65.037865"
-         y="46.582134"
-         id="text1-2-6"><tspan
-           sodipodi:role="line"
-           id="tspan1-6-5"
-           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:5.64444px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.183451"
-           x="65.037865"
-           y="46.582134">B</tspan></text>
-      <text
-         xml:space="preserve"
-         style="font-size:3.175px;line-height:normal;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';text-decoration-color:#000000;fill:#000000;stroke:#000000;stroke-width:0.1;-inkscape-stroke:none;stop-color:#000000"
-         x="58.590126"
-         y="50.970509"
-         id="text4-3"><tspan
-           sodipodi:role="line"
-           id="tspan4-0"
-           style="stroke-width:0.1"
-           x="58.590126"
-           y="50.970509">XPMValue</tspan></text>
-    </g>
     <path
        style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        d="M 46.208369,29.360953 V 53.339034"
@@ -317,22 +248,6 @@
        inkscape:connector-curvature="0"
        inkscape:connection-start="#g1"
        inkscape:connection-end="#g2" />
-    <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       d="M 67.366936,47.839854 67.156427,72.483443"
-       id="path1"
-       inkscape:connector-type="polyline"
-       inkscape:connector-curvature="0"
-       inkscape:connection-start="#g4"
-       inkscape:connection-end="#g4-7" />
-    <path
-       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-       d="m 53.649953,67.315161 5.6387,5.168282"
-       id="path6"
-       inkscape:connector-type="polyline"
-       inkscape:connector-curvature="0"
-       inkscape:connection-start="#g2"
-       inkscape:connection-end="#g4-7" />
     <path
        style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
        d="M 39.641477,67.649772 35.20534,72.483443"

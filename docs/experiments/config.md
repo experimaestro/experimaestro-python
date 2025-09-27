@@ -88,12 +88,11 @@ When `__xpmid__` is missing, the qualified name is used.
 
 ## Object hierarchy
 
-When deriving `B` from `Config`, experimaestro creates two auxiliary types:
-
-1. A configuration object `A.XPMConfig` (with a `A.C` alias) deriving from `ConfigMixin` and `A`
-1. A value object `A.XPMValue` (with `A.V` alias) deriving from `A`
-
-For a class `B` deriving from `A`, `B.XPMValue` derives from `B` and `A.XPMValue`.
+When deriving `B` from `Config`, experimaestro creates a **configuration
+object** `A.XPMConfig` from `ConfigMixin` and `A`. When calling the
+configuration constructor `A.C(...)` or (`B.C(...)`), the returned object is of
+type `A.XPMConfig` or `B.XPMConfig`, which extends the original object with a
+configuration specific behavior.
 
 ![object hierarchy](../img/xpm-objects.svg)
 
@@ -200,6 +199,7 @@ class MyConfig(Config):
         y: The parameter y
     """
     # With default value
+    # (warning: changing the default value CAN change the identifier)
     x: Param[type] = value
 
     # Alternative syntax, useful to avoid class properties
@@ -219,6 +219,11 @@ class MyConfig(Config):
 
 ### Default Values
 
+!!! warning
+
+    When changing a default value, the identifier of configurations
+    **might** change. The reason is explained below.
+
 Adding a new parameter to a `Config` with a default value will not change the original `id`.
 
 **Why?** The motivation is that with this behavior, you can add experimental parameters
@@ -234,18 +239,43 @@ obj = MyConfig.C(a = 2)
 id_old = obj.__identifier__()
 ```
 
-Then when using the default value for parameter b will yield an object with the same identifier.
+Then when using the default value for parameter b will yield an object with the
+same identifier.
 ```python
 class myConfig(Config):
     a: Param[int]
     b: Param[int] = 4
 
+
+# When not setting `b`, the identifier
+# is the same
 obj = myConfig.C(a = 2)
 new_id = obj.__identifier__()
+assert new_id == old_id
 
->>> new_id == old_id
->>> True
+# When setting `b` to the default value,
+# the same
+obj = myConfig.C(a = 2, b = 4)
+new_id = obj.__identifier__()
+assert new_id == old_id
 ```
+
+!!! warning
+
+    The identifier can be different if only the default value is changed. In particular,
+    if the default value is 2 (and not 4)
+
+    ```python
+    class myConfig(Config):
+        a: Param[int]
+        b: Param[int] = 2
+
+    # Here, `b` is not the default value
+    obj = myConfig.C(a = 4, b = 4)
+    new_id = obj.__identifier__()
+    assert new_id != old_id
+    ```
+
 
 ### Constants
 
