@@ -222,7 +222,7 @@ class ConfigInformation:
         if value is None:
             return False
 
-        if isinstance(value, (int, str, float, bool, Path)):
+        if isinstance(value, (int, str, float, bool, Enum, Path)):
             return False
 
         if isinstance(value, ConfigMixin):
@@ -237,7 +237,7 @@ class ConfigInformation:
                 for x in value.values()
             )
 
-        assert False, f"Cannot handle values of type {type(value)}"
+        return False
 
     def set(self, k, v, bypass=False):
         from experimaestro.generators import Generator
