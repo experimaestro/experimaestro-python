@@ -80,10 +80,12 @@ class Argument:
 
         self.generator = generator
         self.default = None
+        self.ignore_generated = False
 
         if default is not None:
             assert self.generator is None, "generator and default are exclusive options"
             if isinstance(default, field):
+                self.ignore_generated = default.ignore_generated
                 if default.default is not None:
                     self.default = default.default
                 elif default.default_factory is not None:
@@ -184,13 +186,20 @@ DataPath = Annotated[Path, dataHint]
 class field:
     """Extra information for a given experimaestro field (param or meta)"""
 
-    def __init__(self, *, default: Any = None, default_factory: Callable = None):
+    def __init__(
+        self,
+        *,
+        default: Any = None,
+        default_factory: Callable = None,
+        ignore_generated=False,
+    ):
         assert not (
             (default is not None) and (default_factory is not None)
         ), "default and default_factory are mutually exclusive options"
 
         self.default_factory = default_factory
         self.default = default
+        self.ignore_generated = ignore_generated
 
 
 class help(TypeAnnotation):

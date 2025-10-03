@@ -192,6 +192,31 @@ class ConfigInformation:
         # Not an argument, bypass
         return object.__getattribute__(self.pyobject, name)
 
+    @staticmethod
+    def is_generated_value(argument, value):
+        if argument.ignore_generated:
+            return False
+
+        if value is None:
+            return False
+
+        if isinstance(value, (int, str, float, bool, Path)):
+            return False
+
+        if isinstance(value, ConfigMixin):
+            return value.__xpm__._generated_values and value.__xpm__.task is None
+
+        if isinstance(value, list):
+            return any(ConfigInformation.is_generated_value(argument, x) for x in value)
+
+        if isinstance(value, dict):
+            return any(
+                ConfigInformation.is_generated_value(argument, x)
+                for x in value.values()
+            )
+
+        assert False, f"Cannot handle values of type {type(value)}"
+
     def set(self, k, v, bypass=False):
         from experimaestro.generators import Generator
 
@@ -220,6 +245,13 @@ class ConfigInformation:
         try:
             argument = self.xpmtype.arguments.get(k, None)
             if argument:
+                if ConfigInformation.is_generated_value(argument, v):
+                    raise AttributeError(
+                        f"Cannot set {k} to a configuration with generated values. "
+                        "Here is the list of paths to help you: "
+                        f"""{', '.join(v.__xpm__.get_generated_paths([k]))}"""
+                    )
+
                 if not bypass and (
                     (isinstance(argument.generator, Generator)) or argument.constant
                 ):
@@ -345,6 +377,15 @@ class ConfigInformation:
         Arguments:
             - context: the generation context
         """
+        if generated_keys := [
+            k
+            for k, v in self.values.items()
+            if ConfigInformation.is_generated_value(self.xpmtype.arguments[k], v)
+        ]:
+            raise AttributeError(
+                "Cannot seal a configuration with generated values:"
+                f"""{",".join(generated_keys)} in {context.currentpath}"""
+            )
 
         class Sealer(ConfigWalk):
             def preprocess(self, config: ConfigMixin):
