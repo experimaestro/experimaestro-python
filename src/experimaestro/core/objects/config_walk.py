@@ -71,6 +71,7 @@ class ConfigWalk:
         return self.context.push(str(i))
 
     def map(self, k: str):
+        """Provides a path context when processing a tree"""
         return self.context.push(k)
 
     def stub(self, config):
@@ -123,7 +124,8 @@ class ConfigWalk:
                 and self.recurse_task
                 and x.__xpm__.task is not x
             ):
-                self(x.__xpm__.task)
+                with self.map("__task__"):
+                    self(x.__xpm__.task)
 
             processed = self.postprocess(stub, x, result)
             self.visited[xid] = processed
