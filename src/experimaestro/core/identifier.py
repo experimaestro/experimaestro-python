@@ -6,7 +6,7 @@ import logging
 import os
 import struct
 from typing import Optional
-from experimaestro.core.objects import Config
+from experimaestro.core.objects import Config, ConfigMixin
 
 
 class ConfigPath:
@@ -116,7 +116,7 @@ class IdentifierComputer:
     CYCLE_REFERENCE = b"\x0b"
     INIT_TASKS = b"\x0c"
 
-    def __init__(self, config: "Config", config_path: ConfigPath, *, version=None):
+    def __init__(self, config: "ConfigMixin", config_path: ConfigPath, *, version=None):
         # Hasher for parameters
         self._hasher = hashlib.sha256()
         self.config = config
@@ -183,7 +183,7 @@ class IdentifierComputer:
                 self.update(value)
 
         # Handles configurations
-        elif isinstance(value, Config):
+        elif isinstance(value, ConfigMixin):
             # Encodes the identifier
             self._hashupdate(IdentifierComputer.OBJECT_ID)
 
@@ -273,12 +273,17 @@ class IdentifierComputer:
                 self._hashupdate(IdentifierComputer.NAME_ID)
                 self.update(argvalue)
 
+            # Add init tasks
+            if value.__xpm__.init_tasks:
+                self._hashupdate(IdentifierComputer.INIT_TASKS)
+                for init_task in value.__xpm__.init_tasks:
+                    self.update(init_task)
         else:
             raise NotImplementedError("Cannot compute hash of type %s" % type(value))
 
     @staticmethod
     def compute(
-        config: "Config", config_path: ConfigPath | None = None, version=None
+        config: "ConfigMixin", config_path: ConfigPath | None = None, version=None
     ) -> Identifier:
         """Compute the identifier for a configuration
 
@@ -290,7 +295,7 @@ class IdentifierComputer:
         # Try to use the cached value first
         # (if there are no loops)
         if config.__xpm__._sealed:
-            identifier = config.__xpm__._raw_identifier
+            identifier = config.__xpm__._identifier
             if identifier is not None and not identifier.has_loops:
                 return identifier
 

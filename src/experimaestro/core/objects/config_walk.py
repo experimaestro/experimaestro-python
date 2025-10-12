@@ -109,11 +109,7 @@ class ConfigWalk:
                 else:
                     result[arg.name] = None
 
-            # Deals with pre-tasks
-            if info.pre_tasks:
-                with self.map("__pre_tasks__"):
-                    self(info.pre_tasks)
-
+            # Deals with init tasks
             if info.init_tasks:
                 with self.map("__init_tasks__"):
                     self(info.init_tasks)
