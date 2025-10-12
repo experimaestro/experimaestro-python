@@ -9,7 +9,6 @@ from experimaestro import taskglobals
 
 from termcolor import cprint
 from pathlib import Path
-import hashlib
 import logging
 import io
 from enum import Enum
@@ -20,7 +19,6 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
-    Iterator,
     List,
     Optional,
     Set,
@@ -49,7 +47,6 @@ from .config_walk import ConfigWalk, ConfigWalkContext
 from .config_utils import (
     getqualattr,
     add_to_path,
-    SealedError,
     TaggedValue,
     ObjectStore,
     classproperty,
@@ -149,9 +146,6 @@ class ConfigInformation:
         # This is used to check typevars coherence
         self.concrete_typevars: Dict[TypeVar, type] = {}
 
-        # Lightweight tasks
-        self.pre_tasks: List["LightweightTask"] = []
-
         # Initialization tasks
         self.init_tasks: List["LightweightTask"] = []
 
@@ -160,11 +154,8 @@ class ConfigInformation:
 
         # Cached information
 
-        self._full_identifier = None
-        """The full identifier (with pre-tasks)"""
-
-        self._raw_identifier = None
-        """The identifier without taking into account pre-tasks"""
+        self._identifier = None
+        """The configuration identifier (cached when sealed)"""
 
         self._validated = False
         self._sealed = False
@@ -367,10 +358,6 @@ class ConfigInformation:
                             % (k, self.xpmtype, self._initinfo)
                         )
 
-            # Validate pre-tasks
-            for pre_task in self.pre_tasks:
-                pre_task.__xpm__.validate()
-
             # Validate init tasks
             for init_task in self.init_tasks:
                 init_task.__xpm__.validate()
@@ -460,90 +447,29 @@ class ConfigInformation:
         context = ConfigWalkContext()
 
         class Unsealer(ConfigWalk):
-            def preprocess(self, config: Config):
+            def preprocess(self, config: ConfigMixin):
                 return config.__xpm__._sealed, config
 
-            def postprocess(self, stub, config: Config, values):
+            def postprocess(self, stub, config: ConfigMixin, values):
                 config.__xpm__._sealed = False
                 config.__xpm__._identifier = None
 
         Unsealer(context, recurse_task=True)(self.pyobject)
 
-    def collect_pre_tasks(self) -> Iterator["Config"]:
-        context = ConfigWalkContext()
-        pre_tasks: Dict[int, "Config"] = {}
-
-        class PreTaskCollect(ConfigWalk):
-            def preprocess(self, config: Config):
-                # Do not cross tasks
-                return not isinstance(config.__xpm__, Task), config
-
-            def postprocess(self, stub, config: Config, values):
-                pre_tasks.update(
-                    {id(pre_task): pre_task for pre_task in config.__xpm__.pre_tasks}
-                )
-
-        PreTaskCollect(context, recurse_task=True)(self.pyobject)
-        return pre_tasks.values()
-
-    def identifiers(self, only_raw: bool):
+    @property
+    def identifier(self):
         """Computes the unique identifier"""
-        from ..identifier import IdentifierComputer, Identifier
-
-        raw_identifier = self._raw_identifier
-        full_identifier = self._full_identifier
+        from ..identifier import IdentifierComputer
 
         # Computes raw identifier if needed
-        if raw_identifier is None or not self._sealed:
-            # Get the main identifier
-            raw_identifier = IdentifierComputer.compute(self.pyobject)
-            if self._sealed:
-                self._raw_identifier = raw_identifier
+        if self._identifier is not None:
+            return self._identifier
 
-        if only_raw:
-            return raw_identifier, full_identifier
-
-        # OK, let's compute the full identifier
-        if full_identifier is None or not self._sealed:
-            # Compute the full identifier by including the pre-tasks
-            hasher = hashlib.sha256()
-            hasher.update(raw_identifier.all)
-            pre_tasks_ids = [
-                pre_task.__xpm__.raw_identifier.all
-                for pre_task in self.collect_pre_tasks()
-            ]
-            for task_id in sorted(pre_tasks_ids):
-                hasher.update(task_id)
-
-            # Adds init tasks
-            if self.init_tasks:
-                hasher.update(IdentifierComputer.INIT_TASKS)
-                for init_task in self.init_tasks:
-                    hasher.update(init_task.__xpm__.raw_identifier.all)
-
-            full_identifier = Identifier(hasher.digest())
-            full_identifier.has_loops = raw_identifier.has_loops
-
-            # Only cache the identifier if sealed
-            if self._sealed:
-                self._full_identifier = full_identifier
-
-        return raw_identifier, full_identifier
-
-    @property
-    def raw_identifier(self) -> "Identifier":
-        """Computes the unique identifier (without task modifiers)"""
-        raw_identifier, _ = self.identifiers(True)
-        return raw_identifier
-
-    @property
-    def full_identifier(self) -> "Identifier":
-        """Computes the unique identifier (with task modifiers)"""
-        _, full_identifier = self.identifiers(False)
-        return full_identifier
-
-    identifier = full_identifier
-    """Deprecated: use full_identifier"""
+        # Get the main identifier
+        identifier = IdentifierComputer.compute(self.pyobject)
+        if self._sealed:
+            self._identifier = identifier
+        return identifier
 
     def dependency(self):
         """Returns a dependency"""
@@ -558,12 +484,6 @@ class ConfigInformation:
         path: List[str],
         taskids: Set[int],
     ):
-        # Add pre-tasks
-        for pre_task in self.pre_tasks:
-            pre_task.__xpm__.updatedependencies(
-                dependencies, path + ["__pre_tasks__"], taskids
-            )
-
         # Add initialization tasks
         for init_task in self.init_tasks:
             init_task.__xpm__.updatedependencies(
@@ -833,9 +753,6 @@ class ConfigInformation:
         if self.task is not None and self.task is not self:
             ConfigInformation.__collect_objects__(self.task, objects, context)
 
-        # Serialize pre-tasks
-        ConfigInformation.__collect_objects__(self.pre_tasks, objects, context)
-
         # Serialize initialization tasks
         ConfigInformation.__collect_objects__(self.init_tasks, objects, context)
 
@@ -849,8 +766,6 @@ class ConfigInformation:
         }
 
         # Add pre/init tasks
-        if self.pre_tasks:
-            state_dict["pre-tasks"] = [id(pre_task) for pre_task in self.pre_tasks]
         if self.init_tasks:
             state_dict["init-tasks"] = [id(init_task) for init_task in self.init_tasks]
 
@@ -1182,12 +1097,6 @@ class ConfigInformation:
                 o.__post_init__()
 
             else:
-                # Sets pre-tasks
-                o.__xpm__.pre_tasks = [
-                    objects[pre_task_id]
-                    for pre_task_id in definition.get("pre-tasks", [])
-                ]
-
                 if task_id := definition.get("task", None):
                     o.__xpm__.task = objects[task_id]
 
@@ -1221,15 +1130,6 @@ class ConfigInformation:
 
         # Run pre-task (or returns them)
         if as_instance or return_tasks:
-            # Collect pre-tasks (just once)
-            completed_pretasks = set()
-            pre_tasks = []
-            for definition in definitions:
-                for pre_task_id in definition.get("pre-tasks", []):
-                    if pre_task_id not in completed_pretasks:
-                        completed_pretasks.add(pre_task_id)
-                        pre_tasks.append(objects[pre_task_id])
-
             # Collect init tasks
             init_tasks = []
             for init_task_id in definitions[-1].get("init-tasks", []):
@@ -1237,14 +1137,11 @@ class ConfigInformation:
                 init_tasks.append(init_task)
 
             if as_instance:
-                for pre_task in pre_tasks:
-                    logger.info("Executing pre-task %s", type(pre_task))
-                    pre_task.execute()
                 for init_task in init_tasks:
                     logger.info("Executing init task %s", type(init_task))
                     init_task.execute()
             else:
-                return o, pre_tasks, pre_task + init_tasks
+                return o, init_tasks
 
         return o
 
@@ -1252,7 +1149,6 @@ class ConfigInformation:
         def __init__(self, context: ConfigWalkContext, *, objects: ObjectStore = None):
             super().__init__(context)
             self.objects = ObjectStore() if objects is None else objects
-            self.pre_tasks = {}
 
         def preprocess(self, config: "Config"):
             if self.objects.is_constructed(id(config)):
@@ -1279,10 +1175,6 @@ class ConfigInformation:
             # Call __post_init__
             stub.__post_init__()
 
-            # Gather pre-tasks
-            for pre_task in config.__xpm__.pre_tasks:
-                self.pre_tasks[id(pre_task)] = self.stub(pre_task)
-
             self.objects.set_constructed(id(config))
             return stub
 
@@ -1295,10 +1187,6 @@ class ConfigInformation:
 
         processor = ConfigInformation.FromPython(context, objects=objects)
         last_object = processor(self.pyobject)
-
-        # Execute pre-tasks
-        for pre_task in processor.pre_tasks.values():
-            pre_task.execute()
 
         return last_object
 
@@ -1485,29 +1373,7 @@ class ConfigMixin:
         attributes)"""
         return clone(self)
 
-    def add_pretasks(self, *tasks: "LightweightTask"):
-        assert all(
-            [isinstance(task, LightweightTask) for task in tasks]
-        ), "One of the pre-tasks are not lightweight tasks"
-        if self.__xpm__._sealed:
-            raise SealedError("Cannot add pre-tasks to a sealed configuration")
-        self.__xpm__.pre_tasks.extend(tasks)
-        return self
-
-    def add_pretasks_from(self, *configs: "Config"):
-        assert all(
-            [isinstance(config, ConfigMixin) for config in configs]
-        ), "One of the parameters is not a configuration object"
-        for config in configs:
-            self.add_pretasks(*config.__xpm__.pre_tasks)
-        return self
-
-    @property
-    def pre_tasks(self) -> List["LightweightTask"]:
-        """Access pre-tasks"""
-        return self.__xpm__.pre_tasks
-
-    def copy_dependencies(self, other: "Config"):
+    def copy_dependencies(self, other: "ConfigMixin"):
         """Add all the dependencies from other configuration"""
 
         # Add task dependency
@@ -1644,26 +1510,11 @@ class Config:
     def __identifier__(self) -> "Identifier":
         return self.__xpm__.full_identifier
 
-    def add_pretasks(self, *tasks: "LightweightTask"):
-        """Add pre-tasks"""
-        raise AssertionError("This method can only be used during configuration")
-
-    def add_pretasks_from(self, *configs: "Config"):
-        """Add pre-tasks from the listed configurations"""
-        raise AssertionError(
-            "The 'add_pretasks_from' can only be used during configuration"
-        )
-
     def copy_dependencies(self, other: "Config"):
         """Add pre-tasks from the listed configurations"""
         raise AssertionError(
             "The 'copy_dependencies' method can only be used during configuration"
         )
-
-    @property
-    def pre_tasks(self) -> List["LightweightTask"]:
-        """Access pre-tasks"""
-        raise AssertionError("Pre-tasks can be accessed only during configuration")
 
     def register_task_output(self, method, *args, **kwargs):
         # Determine the path for this...

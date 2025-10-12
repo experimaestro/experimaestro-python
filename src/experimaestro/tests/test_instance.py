@@ -46,18 +46,6 @@ class LoadModel(SerializationLWTask):
         self.value.initialized = True
 
 
-def test_instance_serialized():
-    model = Model()
-    model.add_pretasks(LoadModel(value=model))
-    trainer = Evaluator(model=model)
-    instance = trainer.instance()
-
-    assert isinstance(
-        instance.model, Model
-    ), f"The model is not a Model but a {type(instance.model).__qualname__}"
-    assert instance.model.initialized, "The model was not initialized"
-
-
 class ConfigWithOptional(Config):
     x: Param[int] = 1
     y: Param[Optional[int]]

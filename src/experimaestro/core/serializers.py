@@ -1,10 +1,8 @@
-from typing import List, TypeVar, Callable, Any
-from pathlib import Path
+from typing import List, TypeVar
 from experimaestro import Param
 
 from .objects import Config, LightweightTask
 from .arguments import DataPath
-from experimaestro import copyconfig
 
 
 class SerializationLWTask(LightweightTask):
@@ -39,8 +37,3 @@ class PathSerializationLWTask(SerializationLWTask):
 
     path: DataPath
     """Path containing the data"""
-
-    @classmethod
-    def construct(cls, value: T, path: Path, dep: Callable[[Config], Any]) -> T:
-        value = copyconfig(value)
-        return value.add_pretasks(dep(cls(value=value, path=path)))

@@ -299,26 +299,6 @@ class MyLightweightTask(Task):
         assert self.x.data == 1
 
 
-def test_task_lightweight():
-    with TemporaryExperiment("lightweight", maxwait=20):
-        x = LightweightConfig()
-        lwtask = LightweightTask(x=x)
-        assert (
-            MyLightweightTask(x=x).add_pretasks(lwtask).submit().__xpm__.job.wait()
-            == JobState.DONE
-        ), "Pre-tasks should be executed"
-
-        x_2 = LightweightConfig()
-        lwtask_2 = LightweightTask(x=x)
-        assert (
-            MyLightweightTask(x=x_2.add_pretasks(lwtask_2))
-            .add_pretasks(lwtask_2)
-            .submit()
-            .__xpm__.job.wait()
-            == JobState.DONE
-        ), "Pre-tasks should be run just once"
-
-
 def test_task_lightweight_init():
     with TemporaryExperiment("lightweight_init", maxwait=20):
         x = LightweightConfig()
