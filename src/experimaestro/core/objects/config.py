@@ -1508,7 +1508,7 @@ class Config:
         return self.__xpm__.__json__()
 
     def __identifier__(self) -> "Identifier":
-        return self.__xpm__.full_identifier
+        return self.__xpm__.identifier
 
     def copy_dependencies(self, other: "Config"):
         """Add pre-tasks from the listed configurations"""
