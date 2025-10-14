@@ -106,6 +106,42 @@ class WatchedOutput:
     callback: Callable
 
 
+def get_generated_paths(
+    v: Union["ConfigMixin", list, dict],
+    path: list[str] | None = None,
+    paths: list[str] | None = None,
+) -> list[str]:
+    """Get the list of generated paths, useful to track down those
+
+    :param path: The current path
+    :param paths: The list of generated paths so far, defaults to None
+    :return: The full list of generated paths
+    """
+    paths = [] if paths is None else paths
+    path = [] if path is None else path
+
+    if isinstance(v, list):
+        for ix, element in enumerate(v):
+            get_generated_paths(element, path + [f"[{ix}]"], paths)
+
+    elif isinstance(v, dict):
+        for key, element in v.items():
+            get_generated_paths(element, path + [f"[{key}]"], paths)
+
+    elif isinstance(v, ConfigMixin):
+        for key in v.__xpm__._generated_values:
+            value = v.__xpm__.values[key]
+            if isinstance(value, ConfigMixin) and value.__xpm__._generated_values:
+                path.append(key)
+                get_generated_paths(value, path, paths)
+                path.pop()
+            else:
+                paths.append(".".join(path + [key]))
+    else:
+        raise ValueError(f"Cannot handle type {type(v)}")
+    return paths
+
+
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
@@ -164,29 +200,6 @@ class ConfigInformation:
         # configuration or any sub-configuration, is generated. This prevents
         # problem when a configuration with generated values is re-used.
         self._generated_values = []
-
-    def get_generated_paths(
-        self, path: list[str] = None, paths: list[str] = None
-    ) -> list[str]:
-        """Get the list of generated paths, useful to track down those
-
-        :param path: The current path
-        :param paths: The list of generated paths so far, defaults to None
-        :return: The full list of generated paths
-        """
-        paths = [] if paths is None else paths
-        path = [] if path is None else path
-
-        for key in self._generated_values:
-            value = self.values[key]
-            if isinstance(value, ConfigMixin) and value.__xpm__._generated_values:
-                path.append(key)
-                value.__xpm__.get_generated_paths(path, paths)
-                path.pop()
-            else:
-                paths.append(".".join(path + [key]))
-
-        return paths
 
     def set_meta(self, value: Optional[bool]):
         """Sets the meta flag"""
@@ -253,7 +266,7 @@ class ConfigInformation:
                     raise AttributeError(
                         f"Cannot set {k} to a configuration with generated values. "
                         "Here is the list of paths to help you: "
-                        f"""{', '.join(v.__xpm__.get_generated_paths([k]))}"""
+                        f"""{', '.join(get_generated_paths(v, [k]))}"""
                     )
 
                 if not bypass and (
