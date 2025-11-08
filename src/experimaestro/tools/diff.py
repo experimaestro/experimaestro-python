@@ -1,7 +1,9 @@
+import importlib
 from itertools import chain
 from typing import Dict, Any
 from pathlib import Path
 import json
+from src.experimaestro.core.objects.config_utils import getqualattr
 from termcolor import colored
 
 
@@ -42,6 +44,11 @@ def build_value(data, store: Store):
         elif t == "path.serialized":
             # Again, do not return anything (won't change the identifier)
             return None
+        elif t == "enum":
+            module = importlib.import_module(data["module"])
+            enumClass = getqualattr(module, data["enum"])
+            return enumClass[data["value"]]
+
         elif t is None:
             return {key: build_value(value, store) for key, value in data.items()}
         assert False, f"Data type {t} not handled"
@@ -71,7 +78,7 @@ def load(path: Path):
 
 
 def print_diff(path: str, conf1: Any, conf2: Any):
-    if type(conf1) != type(conf2):
+    if type(conf1) is not type(conf2):
         print(f"[{colored(path, 'red')}] {conf1} and {conf2} of different types")
 
     if isinstance(conf1, ObjectProxy) and isinstance(conf2, ObjectProxy):
