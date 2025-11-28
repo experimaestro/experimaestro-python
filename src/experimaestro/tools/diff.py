@@ -3,7 +3,7 @@ from itertools import chain
 from typing import Dict, Any
 from pathlib import Path
 import json
-from src.experimaestro.core.objects.config_utils import getqualattr
+from experimaestro.core.objects.config_utils import getqualattr
 from termcolor import colored
 
 
