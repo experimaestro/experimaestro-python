@@ -19,6 +19,13 @@ class SimpleTask(Task):
     def execute(self):
         print(self.x)  # noqa: T201
 
+    def task_outputs(self, dep):
+        return dep(SimpleTaskOutput.C(task=self))
+
+
+class SimpleTaskOutput(Config):
+    task: Param[SimpleTask]
+
 
 class Say(Task):
     out: Meta[Path] = field(default_factory=PathGenerator(STDOUT))
