@@ -626,10 +626,11 @@ class ConfigInformation:
         ) or RunMode.NORMAL
         if run_mode == RunMode.NORMAL:
             TaskEventListener.connect(experiment.CURRENT)
+            experiment.CURRENT.submit(self.job)
             other = experiment.CURRENT.submit(self.job)
             if other:
-                # Just returns the other task
-                return other.config.__xpm__._taskoutput
+                # Our job = previously submitted job
+                self.job = other
         else:
             # Show a warning
             if run_mode == RunMode.GENERATE_ONLY:
@@ -945,34 +946,31 @@ class ConfigInformation:
 
     @overload
     @staticmethod
-    def fromParameters(
+    def fromParameters(  # noqa: E704
         definitions: List[Dict],
         as_instance=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "ConfigMixin":
-        ...
+    ) -> "ConfigMixin": ...
 
     @overload
     @staticmethod
-    def fromParameters(
+    def fromParameters(  # noqa: E704
         definitions: List[Dict],
         as_instance=False,
         return_tasks=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> Tuple["Config", List["LightweightTask"]]:
-        ...
+    ) -> Tuple["Config", List["LightweightTask"]]: ...
 
     @overload
     @staticmethod
-    def fromParameters(
+    def fromParameters(  # noqa: E704
         definitions: List[Dict],
         as_instance=False,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
-    ) -> "Config":
-        ...
+    ) -> "Config": ...
 
     @staticmethod
     def load_objects(  # noqa: C901
