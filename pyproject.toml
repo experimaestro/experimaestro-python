@@ -149,7 +149,7 @@ warn_unused_ignores = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "2.0.0a8"
+version = "2.0.0a9"
 changelog_start_rev = "v1.0.0"
 tag_format = "v$major.$minor.$patch$prerelease"
 # update_changelog_on_bump = true
