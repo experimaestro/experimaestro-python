@@ -8,6 +8,7 @@ from typing import Dict, List
 from experimaestro import (
     Param,
     Config,
+    InstanceConfig,
     Task,
     LightweightTask,
     Option,
@@ -200,6 +201,24 @@ class CycleB(Config):
     a: Param["CycleA"]
 
 
+# --- InstanceConfig ---
+
+
+class SubModel(InstanceConfig):
+    """InstanceConfig for testing instance identity"""
+
+    __xpmid__ = "test.stability.SubModel"
+    value: Param[int] = 100
+
+
+class ModelContainer(Config):
+    """Config that contains SubModel instances"""
+
+    __xpmid__ = "test.stability.ModelContainer"
+    m1: Param[SubModel]
+    m2: Param[SubModel]
+
+
 def get_configurations():
     """Return all test configurations with their identifiers
 
@@ -287,6 +306,21 @@ def get_configurations():
     cycle_b = CycleB.C(a=cycle_a)
     cycle_a.b = cycle_b
     configs["cycle_simple"] = cycle_a
+
+    # InstanceConfig - test instance identity
+    # Single instance used twice (shared) - backwards compatible with regular Config
+    sm_single = SubModel.C(value=100)
+    configs["instance_shared"] = ModelContainer.C(m1=sm_single, m2=sm_single)
+
+    # Two separate instances with same parameters - different identifiers
+    sm1 = SubModel.C(value=100)
+    sm2 = SubModel.C(value=100)
+    configs["instance_separate"] = ModelContainer.C(m1=sm1, m2=sm2)
+
+    # InstanceConfig with different parameter values
+    sm3 = SubModel.C(value=200)
+    sm4 = SubModel.C(value=300)
+    configs["instance_different_values"] = ModelContainer.C(m1=sm3, m2=sm4)
 
     return configs
 
