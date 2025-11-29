@@ -1497,6 +1497,30 @@ class Config:
             fp.flush()
 
 
+class InstanceConfig(Config):
+    """Base class for configurations where instance identity matters.
+
+    When a Config class derives from InstanceConfig instead of Config,
+    each instance will have a unique identifier even if all parameters
+    are identical. This is useful when the same configuration is used
+    multiple times but needs to be distinguished (e.g., shared vs separate
+    model instances).
+
+    Example:
+        >>> class SubModel(InstanceConfig):
+        ...     pass
+        >>> sm1 = SubModel()
+        >>> sm2 = SubModel()
+        >>> # These will have different identifiers
+        >>> sm1.__identifier__() != sm2.__identifier__()
+
+    The instance order is determined by the traversal order during
+    identifier computation, ensuring reproducibility.
+    """
+
+    pass
+
+
 class LightweightTask(Config):
     """A task that can be run before or after a real task to modify its behaviour"""
 

@@ -2,6 +2,7 @@ from .config_walk import ConfigWalkContext, ConfigWalk
 from .config import (
     ConfigMixin,
     Config,
+    InstanceConfig,
     ConfigInformation,
     Task,
     LightweightTask,
@@ -25,6 +26,7 @@ from .config_utils import (
 __all__ = [
     "ConfigMixin",
     "Config",
+    "InstanceConfig",
     "ConfigInformation",
     "ConfigWalkContext",
     "ConfigWalk",

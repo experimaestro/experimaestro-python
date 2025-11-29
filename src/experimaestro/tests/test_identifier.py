@@ -7,6 +7,7 @@ from experimaestro import (
     Param,
     deprecate,
     Config,
+    InstanceConfig,
     Constant,
     Meta,
     Option,
@@ -590,3 +591,95 @@ def test_identifier_loop():
     for i in range(len(configs)):
         for j in range(1, len(configs)):
             assert identifiers[i][0] == identifiers[i][j]
+
+
+# --- Test InstanceConfig
+
+
+class SubModel(InstanceConfig):
+    """Test InstanceConfig - instances are distinguished even with same params"""
+
+    pass
+
+
+class SubModelAsConfig(Config):
+    """Same as SubModel but as regular Config for backwards compat testing"""
+
+    __xpmid__ = "test.SubModel"
+    pass
+
+
+class Model(Config):
+    """Model that can contain SubModel instances"""
+
+    m1: Param[SubModel]
+    m2: Param[SubModel]
+
+
+class ModelWithRegularConfig(Config):
+    """Model using regular Config instead of InstanceConfig"""
+
+    __xpmid__ = "test.Model"
+    m1: Param[SubModelAsConfig]
+    m2: Param[SubModelAsConfig]
+
+
+def test_instanceconfig_backwards_compat():
+    """Model using single InstanceConfig should have same ID as with regular Config"""
+    # Using InstanceConfig (first occurrence only, no instance marker added)
+    sm1 = SubModel.C()
+    sm1.__xpmtype__.identifier.name = "test.SubModel"  # Match the __xpmid__
+    m_instance = Model.C(m1=sm1, m2=sm1)
+    m_instance.__xpmtype__.identifier.name = "test.Model"
+
+    # Using regular Config
+    sc1 = SubModelAsConfig.C()
+    m_regular = ModelWithRegularConfig.C(m1=sc1, m2=sc1)
+
+    # Should have same identifier (backwards compatible)
+    assert_equal(
+        m_instance, m_regular, "Single InstanceConfig should be backwards compatible"
+    )
+
+
+def test_instanceconfig_same_params_different_instances():
+    """Model with separate InstanceConfig instances should differ from shared"""
+    sm1 = SubModel.C()
+    sm2 = SubModel.C()
+
+    # Using the same instance twice (shared)
+    m1 = Model.C(m1=sm1, m2=sm1)
+
+    # Using different instances (separate)
+    m2 = Model.C(m1=sm1, m2=sm2)
+
+    # These should be different because sm2 is a second instance with same params
+    assert_notequal(m1, m2, "Models with shared vs separate instances should differ")
+
+
+def test_instanceconfig_reused_instance():
+    """Reusing the same InstanceConfig instance should give same ID"""
+    sm1 = SubModel.C()
+
+    # Using the same instance object multiple times should be OK
+    m1 = Model.C(m1=sm1, m2=sm1)
+    m2 = Model.C(m1=sm1, m2=sm1)
+
+    # These should be the same because we're reusing the exact same objects
+    assert_equal(m1, m2, "Models with same instance objects should be equal")
+
+
+def test_instanceconfig_serialization():
+    """InstanceConfig identifiers should be stable after serialization"""
+    sm1 = SubModel.C()
+    sm2 = SubModel.C()
+
+    # Create a model with two different instances
+    m1 = Model.C(m1=sm1, m2=sm2)
+    original_id = getidentifier(m1)
+
+    # Serialize and reload
+    check_reload(m1)
+
+    # The identifier should remain the same
+    assert getidentifier(m1) == original_id

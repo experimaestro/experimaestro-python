@@ -19,6 +19,9 @@ class ConfigPath:
         self.config2index = {}
         """Associate an index in the list with a configuration"""
 
+        self.instance_order: dict[bytes, list[int]] = {}
+        """Maps InstanceConfig base identifier to list of object ids in encounter order"""
+
     def detect_loop(self, config) -> Optional[int]:
         """If there is a loop, return the relative index and update the path"""
         index = self.config2index.get(id(config), None)
@@ -115,6 +118,7 @@ class IdentifierComputer:
     ENUM_ID = b"\x0a"
     CYCLE_REFERENCE = b"\x0b"
     INIT_TASKS = b"\x0c"
+    INSTANCE_ID = b"\x0d"
 
     def __init__(self, config: "ConfigMixin", config_path: ConfigPath, *, version=None):
         # Hasher for parameters
@@ -200,6 +204,33 @@ class IdentifierComputer:
                         value, version=self.version, config_path=self.config_path
                     )
                     self._hashupdate(value_id.all)
+
+                    # Handle InstanceConfig: add instance order only if duplicate detected
+                    from experimaestro.core.objects import InstanceConfig
+
+                    if isinstance(value, InstanceConfig):
+                        # Use the base identifier to track instances
+                        base_id = value_id.all
+                        obj_id = id(value)
+
+                        # Track instances with this base identifier
+                        if base_id not in self.config_path.instance_order:
+                            # First occurrence - just record it (NO-OP for backwards compatibility)
+                            self.config_path.instance_order[base_id] = [obj_id]
+                        else:
+                            # Check if this specific object was already seen
+                            instances = self.config_path.instance_order[base_id]
+                            if obj_id not in instances:
+                                # New instance with same params - add to list
+                                instances.append(obj_id)
+
+                            # Get position in the list
+                            position = instances.index(obj_id)
+
+                            # Only add instance order if not the first (position > 0)
+                            if position > 0:
+                                self._hashupdate(IdentifierComputer.INSTANCE_ID)
+                                self._hashupdate(struct.pack("!q", position))
 
                 # And that's it!
                 return

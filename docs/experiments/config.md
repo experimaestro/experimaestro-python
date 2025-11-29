@@ -86,6 +86,63 @@ defines a configuration with name `my.model` and one argument `gamma` that has t
 `__xpmid__` can also be a class method to generate dynamic ids for all descendant configurations
 When `__xpmid__` is missing, the qualified name is used.
 
+## Instance-based configurations
+
+By default, two `Config` instances with identical parameters will have the same identifier. This is the desired behavior in most cases, as it ensures task deduplication and caching. However, in some scenarios, you need to distinguish between different instances even when their parameters are identical.
+
+This is where `InstanceConfig` comes in. When a class derives from `InstanceConfig` instead of `Config`, each instance will have a unique identifier based on the order it appears during identifier computation.
+
+### When to use InstanceConfig
+
+Use `InstanceConfig` when:
+
+- **Shared vs. Separate Resources**: You need to distinguish between shared and separate instances of the same configuration (e.g., shared model weights vs. separate model instances)
+- **Multiple Identical Configurations**: The same configuration appears multiple times in a workflow, and each occurrence should be treated as distinct
+
+!!! example "Shared vs Separate Model Instances"
+
+    ```python
+    from experimaestro import Param, Config, InstanceConfig
+
+    class SubModel(InstanceConfig):  # Use InstanceConfig instead of Config
+        """A model component that can be shared or separate"""
+        hidden_size: Param[int] = 128
+
+    class Ensemble(Config):
+        """An ensemble using multiple models"""
+        model1: Param[SubModel]
+        model2: Param[SubModel]
+
+    # Create two instances with identical parameters
+    sm1 = SubModel.C(hidden_size=128)
+    sm2 = SubModel.C(hidden_size=128)
+
+    # Shared instance: both parameters point to the same instance
+    shared = Ensemble.C(model1=sm1, model2=sm1)
+
+    # Separate instances: each parameter has its own instance
+    separate = Ensemble.C(model1=sm1, model2=sm2)
+
+    # These will have DIFFERENT identifiers
+    assert shared.__identifier__() != separate.__identifier__()
+    ```
+
+### Backwards compatibility
+
+`InstanceConfig` is designed to be backwards compatible with existing experiments. The first occurrence of an `InstanceConfig` instance (with a given set of parameters) will have the same identifier as a regular `Config` would have. Only when a second instance with identical parameters is encountered does the instance order marker get added to the identifier.
+
+This means you can migrate existing configurations to `InstanceConfig` without invalidating previous experiments, as long as you were only using a single instance of each configuration.
+
+!!! warning
+
+    Be careful when migrating to `InstanceConfig` if your workflow previously created multiple instances with the same parameters. The identifiers will change for the second and subsequent instances.
+
+### How it works
+
+During identifier computation, Experimaestro tracks `InstanceConfig` instances by their base identifier (computed from parameters). When the same base identifier is encountered multiple times (but with different Python object instances), each occurrence after the first gets a unique instance order marker added to its identifier.
+
+The instance order is deterministic and based on the traversal order during identifier computation, ensuring reproducibility across runs.
+
 ## Object hierarchy
 
 When deriving `B` from `Config`, experimaestro creates a **configuration

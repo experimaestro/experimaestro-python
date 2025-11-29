@@ -52,6 +52,7 @@ from .core.arguments import (
 from .generators import pathgenerator, PathGenerator
 from .core.objects import (
     Config,
+    InstanceConfig,
     copyconfig,
     setmeta,
     DependentMarker,
