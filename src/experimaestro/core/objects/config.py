@@ -1501,18 +1501,28 @@ class InstanceConfig(Config):
     """Base class for configurations where instance identity matters.
 
     When a Config class derives from InstanceConfig instead of Config,
-    each instance will have a unique identifier even if all parameters
-    are identical. This is useful when the same configuration is used
-    multiple times but needs to be distinguished (e.g., shared vs separate
-    model instances).
+    instances are distinguished based on their object identity when used
+    in containers. This enables distinguishing between shared and separate
+    instances even when all parameters are identical.
 
     Example:
         >>> class SubModel(InstanceConfig):
-        ...     pass
-        >>> sm1 = SubModel()
-        >>> sm2 = SubModel()
-        >>> # These will have different identifiers
-        >>> sm1.__identifier__() != sm2.__identifier__()
+        ...     value: Param[int] = 100
+        >>> class MainModel(Config):
+        ...     m1: Param[SubModel]
+        ...     m2: Param[SubModel]
+        >>>
+        >>> sm1 = SubModel.C()
+        >>> sm2 = SubModel.C()  # Same params, different instance
+        >>>
+        >>> # Shared instance (same object used twice)
+        >>> shared = MainModel.C(m1=sm1, m2=sm1)
+        >>>
+        >>> # Separate instances (different objects)
+        >>> separate = MainModel.C(m1=sm1, m2=sm2)
+        >>>
+        >>> # Different identifiers: shared vs separate
+        >>> shared.__identifier__() != separate.__identifier__()
 
     The instance order is determined by the traversal order during
     identifier computation, ensuring reproducibility.

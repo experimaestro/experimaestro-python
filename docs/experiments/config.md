@@ -117,14 +117,21 @@ Use `InstanceConfig` when:
     sm1 = SubModel.C(hidden_size=128)
     sm2 = SubModel.C(hidden_size=128)
 
-    # Shared instance: both parameters point to the same instance
-    shared = Ensemble.C(model1=sm1, model2=sm1)
+    # Case 1: Shared instance - the same SubModel is used for both parameters
+    # This means model1 and model2 share weights/state
+    shared_ensemble = Ensemble.C(model1=sm1, model2=sm1)
 
-    # Separate instances: each parameter has its own instance
-    separate = Ensemble.C(model1=sm1, model2=sm2)
+    # Case 2: Separate instances - different SubModel instances for each parameter
+    # This means model1 and model2 have independent weights/state
+    separate_ensemble = Ensemble.C(model1=sm1, model2=sm2)
 
-    # These will have DIFFERENT identifiers
-    assert shared.__identifier__() != separate.__identifier__()
+    # The Ensemble configurations will have DIFFERENT identifiers
+    # Even though both use SubModel instances with hidden_size=128
+    assert shared_ensemble.__identifier__() != separate_ensemble.__identifier__()
+
+    # This distinction is important: with regular Config, both would have
+    # the same identifier since the parameters are identical. With InstanceConfig,
+    # the framework can distinguish between shared and separate instances.
     ```
 
 ### Backwards compatibility
