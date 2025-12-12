@@ -92,8 +92,16 @@ class JobDependency(Dependency):
             return DependencyStatus.FAIL
         return DependencyStatus.WAIT
 
-    def lock(self):
-        return JobLock(self.origin)
+    async def aio_lock(self):
+        """Acquire lock on job dependency by waiting for job to complete"""
+        # Wait for the job to finish
+        if self.origin._future is None:
+            raise RuntimeError(f"Job {self.origin} has no future - not submitted")
+        await asyncio.wrap_future(self.origin._future)
+        # Job is done, acquire and return the lock
+        lock = JobLock(self.origin)
+        lock.acquire()
+        return lock
 
 
 class Job(Resource):

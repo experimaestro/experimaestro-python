@@ -19,7 +19,12 @@ from experimaestro.launcherfinder.registry import LauncherRegistry
 
 from .ipc import ipcom
 from .locking import Lock, LockError
-from .scheduler.dependencies import Dependency, DependencyStatus, Resource
+from .scheduler.dependencies import (
+    Dependency,
+    DynamicDependency,
+    DependencyStatus,
+    Resource,
+)
 import logging
 import json
 
@@ -58,8 +63,8 @@ class CounterTokenLock(Lock):
         return "Lock(%s)" % self.dependency
 
 
-class CounterTokenDependency(Dependency):
-    """A dependency onto a token"""
+class CounterTokenDependency(DynamicDependency):
+    """A dependency onto a token (dynamic - availability can change)"""
 
     def __init__(self, token: "CounterToken", count: int):
         super().__init__(token)
@@ -76,8 +81,11 @@ class CounterTokenDependency(Dependency):
             return DependencyStatus.OK
         return DependencyStatus.WAIT
 
-    def lock(self) -> "Lock":
-        return CounterTokenLock(self)
+    async def aio_lock(self) -> "Lock":
+        """Acquire lock on token (may raise LockError if not available)"""
+        lock = CounterTokenLock(self)
+        lock.acquire()
+        return lock
 
     @property
     def token(self):

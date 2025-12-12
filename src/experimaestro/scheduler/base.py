@@ -357,7 +357,7 @@ class Scheduler(threading.Thread):
 
         return job.state
 
-    async def aio_start(self, job: Job) -> Optional[JobState]:
+    async def aio_start(self, job: Job) -> Optional[JobState]:  # noqa: C901
         """Start a job with full job starting logic
 
         This method handles job locking, dependency acquisition, directory setup,
@@ -390,20 +390,52 @@ class Scheduler(threading.Thread):
                         len(job.dependencies),
                     )
 
-                    # Individual dependency lock acquisition
-                    # We use the scheduler-wide lock to avoid cross-jobs race conditions
-                    async with self.dependencyLock:
-                        for dependency in job.dependencies:
-                            try:
-                                locks.append(dependency.lock().acquire())
-                            except LockError:
-                                logger.warning(
-                                    "Could not lock %s, aborting start for job %s",
-                                    dependency,
-                                    job,
-                                )
-                                dependency.check()
-                                return JobState.WAITING
+                    # Separate static and dynamic dependencies
+                    static_deps = [d for d in job.dependencies if not d.is_dynamic()]
+                    dynamic_deps = [d for d in job.dependencies if d.is_dynamic()]
+
+                    # First, wait for all static dependencies (jobs) to complete
+                    # These don't need the dependency lock as they can't change state
+                    # Static dependency locks don't need to be added to locks list
+                    logger.debug("Waiting for %d static dependencies", len(static_deps))
+                    for dependency in static_deps:
+                        logger.debug("Waiting for static dependency %s", dependency)
+                        await dependency.aio_lock()
+
+                    # Now handle dynamic dependencies (tokens) with retry logic
+                    # Try to acquire locks, retrying if any fail
+                    if dynamic_deps:
+                        logger.debug(
+                            "Locking %d dynamic dependencies (tokens)",
+                            len(dynamic_deps),
+                        )
+                        while True:
+                            all_locked = True
+                            for dependency in dynamic_deps:
+                                try:
+                                    # Acquire the lock (this might block on IPC locks)
+                                    lock = await dependency.aio_lock()
+                                    locks.append(lock)
+                                except LockError:
+                                    logger.debug(
+                                        "Could not lock %s, retrying", dependency
+                                    )
+                                    # Release all locks and restart
+                                    for lock in locks.locks:
+                                        lock.release()
+                                    locks.locks.clear()
+                                    # Put failed dependency first
+                                    dynamic_deps.remove(dependency)
+                                    dynamic_deps.insert(0, dependency)
+                                    all_locked = False
+                                    break
+
+                            if all_locked:
+                                # All locks acquired successfully
+                                break
+
+                            # Yield to other async tasks before retrying
+                            await asyncio.sleep(0.01)
 
                     # Dependencies have been locked, we can start the job
                     job.starttime = time.time()

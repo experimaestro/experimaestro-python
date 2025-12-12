@@ -48,6 +48,12 @@ class DependencyStatus(Enum):
 
 
 class Dependency:
+    """Base class for dependencies
+
+    Static dependencies (like jobs) have a fixed state once resolved - they cannot
+    go from DONE back to WAIT. This is the default behavior.
+    """
+
     # Dependency status
     loop: asyncio.AbstractEventLoop
 
@@ -57,10 +63,15 @@ class Dependency:
         self.target: Optional["Job"] = None
         self.currentstatus = DependencyStatus.WAIT
 
+    def is_dynamic(self) -> bool:
+        """Returns True if this is a dynamic dependency (can change state)"""
+        return False
+
     def status(self) -> DependencyStatus:
         raise NotImplementedError()
 
-    def lock(self) -> Lock:
+    async def aio_lock(self) -> Lock:
+        """Acquire a lock on this dependency asynchronously"""
         raise NotImplementedError()
 
     def __repr__(self) -> str:
@@ -76,3 +87,16 @@ class Dependency:
             )
             self.target.dependencychanged(self, self.currentstatus, status)
             self.currentstatus = status
+
+
+class DynamicDependency(Dependency):
+    """Base class for dynamic dependencies
+
+    Dynamic dependencies (like tokens) can change state at any time - availability
+    can go from OK to WAIT and back. These require special handling during lock
+    acquisition with retry logic.
+    """
+
+    def is_dynamic(self) -> bool:
+        """Returns True - this is a dynamic dependency"""
+        return True
