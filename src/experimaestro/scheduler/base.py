@@ -11,7 +11,7 @@ import asyncio
 from typing import Dict
 
 from experimaestro.scheduler import experiment
-from experimaestro.scheduler.jobs import Job, JobState
+from experimaestro.scheduler.jobs import Job, JobState, JobError
 from experimaestro.scheduler.services import Service
 
 
@@ -358,37 +358,108 @@ class Scheduler(threading.Thread):
         return job.state
 
     async def aio_start(self, job: Job) -> Optional[JobState]:
-        """Start a job (scheduler coordination layer)
+        """Start a job with full job starting logic
 
-        This method serves as a coordination layer that delegates the actual
-        job starting logic to the job itself while handling scheduler-specific
-        concerns like state notifications and providing coordination context.
+        This method handles job locking, dependency acquisition, directory setup,
+        and job execution while using the scheduler's coordination lock to prevent
+        race conditions between multiple jobs.
 
         :param job: The job to start
         :return: JobState.WAITING if dependencies could not be locked, JobState.DONE
             if job completed successfully, JobState.ERROR if job failed during execution,
             or None (should not occur in normal operation)
-        :raises Exception: Various exceptions during scheduler coordination
+        :raises Exception: Various exceptions during job execution, dependency locking,
+            or process creation
         """
+        from experimaestro.locking import Locks, LockError
 
         # Assert preconditions
         assert job.launcher is not None
 
-        try:
-            # Call job's start method with scheduler context
-            state = await job.aio_start(
-                sched_dependency_lock=self.dependencyLock,
-                notification_server=self.server,
-            )
+        # We first lock the job before proceeding
+        with Locks() as locks:
+            logger.debug("[starting] Locking job %s", job)
+            async with job.launcher.connector.lock(job.lockpath):
+                logger.debug("[starting] Locked job %s", job)
 
-            if state is None:
-                # Dependencies couldn't be locked, return WAITING state
-                return JobState.WAITING
+                state = None
+                try:
+                    logger.debug(
+                        "Starting job %s with %d dependencies",
+                        job,
+                        len(job.dependencies),
+                    )
 
-            # Notify scheduler listeners of job state after successful start
-            self.notify_job_state(job)
-            return state
+                    # Individual dependency lock acquisition
+                    # We use the scheduler-wide lock to avoid cross-jobs race conditions
+                    async with self.dependencyLock:
+                        for dependency in job.dependencies:
+                            try:
+                                locks.append(dependency.lock().acquire())
+                            except LockError:
+                                logger.warning(
+                                    "Could not lock %s, aborting start for job %s",
+                                    dependency,
+                                    job,
+                                )
+                                dependency.check()
+                                return JobState.WAITING
 
-        except Exception:
-            logger.warning("Error in scheduler job coordination", exc_info=True)
-            return JobState.ERROR
+                    # Dependencies have been locked, we can start the job
+                    job.starttime = time.time()
+
+                    # Creates the main directory
+                    directory = job.path
+                    logger.debug("Making directories job %s...", directory)
+                    if not directory.is_dir():
+                        directory.mkdir(parents=True, exist_ok=True)
+
+                    # Sets up the notification URL
+                    if self.server is not None:
+                        job.add_notification_server(self.server)
+
+                except Exception:
+                    logger.warning("Error while locking job", exc_info=True)
+                    return JobState.WAITING
+
+                try:
+                    # Runs the job
+                    process = await job.aio_run()
+                except Exception:
+                    logger.warning("Error while starting job", exc_info=True)
+                    return JobState.ERROR
+
+            try:
+                if isinstance(process, JobState):
+                    state = process
+                    logger.debug("Job %s ended (state %s)", job, state)
+                else:
+                    logger.debug("Waiting for job %s process to end", job)
+
+                    code = await process.aio_code()
+                    logger.debug("Got return code %s for %s", code, job)
+
+                    # Check the file if there is no return code
+                    if code is None:
+                        # Case where we cannot retrieve the code right away
+                        if job.donepath.is_file():
+                            code = 0
+                        else:
+                            code = int(job.failedpath.read_text())
+
+                    logger.debug("Job %s ended with code %s", job, code)
+                    state = JobState.DONE if code == 0 else JobState.ERROR
+
+            except JobError:
+                logger.warning("Error while running job")
+                state = JobState.ERROR
+
+            except Exception:
+                logger.warning(
+                    "Error while running job (in experimaestro)", exc_info=True
+                )
+                state = JobState.ERROR
+
+        # Notify scheduler listeners of job state after job completes
+        self.notify_job_state(job)
+        return state
