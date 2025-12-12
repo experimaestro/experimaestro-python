@@ -644,7 +644,6 @@ class ConfigInformation:
         ) or RunMode.NORMAL
         if run_mode == RunMode.NORMAL:
             TaskEventListener.connect(experiment.CURRENT)
-            experiment.CURRENT.submit(self.job)
             other = experiment.CURRENT.submit(self.job)
             if other:
                 # Our job = previously submitted job
