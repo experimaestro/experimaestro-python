@@ -75,7 +75,6 @@ class experiment:
             files, dry run)
         """
 
-        from experimaestro.server import Server
         from experimaestro.scheduler import Listener, Scheduler
 
         settings = get_settings()
@@ -106,14 +105,14 @@ class experiment:
         if token is not None:
             settings.server.token = token
 
-        # Create the scheduler
-        self.scheduler = Scheduler.create(self, name)
-        self.server = (
-            Server(self.scheduler, settings.server)
-            if (settings.server.port is not None and settings.server.port >= 0)
-            and self.workspace.run_mode == RunMode.NORMAL
-            else None
-        )
+        # Use singleton scheduler
+        self.scheduler = Scheduler.instance()
+
+        # Determine if we need a server
+        self._needs_server = (
+            settings.server.port is not None and settings.server.port >= 0
+        ) and self.workspace.run_mode == RunMode.NORMAL
+        self._server_settings = settings.server if self._needs_server else None
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
             import faulthandler
@@ -136,6 +135,11 @@ class experiment:
     def loop(self):
         assert self.scheduler is not None, "No scheduler defined"
         return self.scheduler.loop
+
+    @property
+    def server(self):
+        """Access the server via the scheduler"""
+        return self.scheduler.server if self.scheduler else None
 
     @property
     def resultspath(self):
@@ -244,8 +248,12 @@ class experiment:
                         target.parent.mkdir(parents=True, exist_ok=True)
                         p.rename(target)
 
-        if self.server:
-            self.server.start()
+        # Register experiment with scheduler
+        self.scheduler.register_experiment(self)
+
+        # Start server via scheduler if needed
+        if self._needs_server:
+            self.scheduler.start_server(self._server_settings)
 
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()
@@ -260,7 +268,7 @@ class experiment:
         # Exit mode when catching signals
         self.exitMode = False
 
-        self.scheduler.start_scheduler()
+        # Note: scheduler is already running as singleton
         self.taskOutputsWorker = TaskOutputsWorker(self)
         self.taskOutputsWorker.start()
 
@@ -296,9 +304,11 @@ class experiment:
                 logger.info("Closing service %s", service.description())
                 service.stop()
 
-            if self.scheduler is not None:
-                logger.info("Stopping scheduler event loop")
-                self.scheduler.loop.stop()
+            # Unregister experiment from scheduler
+            self.scheduler.unregister_experiment(self)
+
+            # Note: Don't stop scheduler - it's shared!
+            # Note: Don't stop server - it runs in daemon mode until program exit
 
             if self.taskOutputsWorker is not None:
                 logger.info("Stopping tasks outputs worker")
@@ -310,9 +320,6 @@ class experiment:
 
             # Put back old experiment as current one
             experiment.CURRENT = self.old_experiment
-            if self.server:
-                logger.info("Stopping web server")
-                self.server.stop()
 
         if self.workspace.run_mode == RunMode.NORMAL:
             # Write the state

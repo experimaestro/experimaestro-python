@@ -90,54 +90,6 @@ def test_progress_basic():
                 assert info.progress == v
 
 
-def test_progress_multiple():
-    """Test that even with two schedulers, we get notified"""
-    max_wait = 5
-
-    with TemporaryExperiment(
-        "progress-progress-multiple-1", maxwait=max_wait, port=0
-    ) as xp1:
-        assert xp1.server is not None
-        assert xp1.server.port > 0
-
-        listener1 = ProgressListener()
-        xp1.scheduler.addlistener(listener1)
-
-        out = ProgressingTask.C().submit()
-        path = out.path  # type: Path
-        job = out.__xpm__.job
-
-        logger.info("Waiting for job to start (1)")
-        while job.state.notstarted():
-            time.sleep(1e-2)
-
-        with TemporaryExperiment(
-            "progress-progress-multiple-2",
-            workdir=xp1.workdir,
-            maxwait=max_wait,
-            port=0,
-        ) as xp2:
-            assert xp2.server is not None
-            assert xp2.server.port > 0
-            listener2 = ProgressListener()
-            xp2.scheduler.addlistener(listener2)
-
-            out = ProgressingTask.C().submit()
-            job = out.__xpm__.job  # type: CommandLineJob
-            logger.info("Waiting for job to start (2)")
-            while job.state.notstarted():
-                time.sleep(1e-2)
-
-            # Both schedulers should receive the job progress information
-            logger.info("Checking job progress")
-            progresses = [i / 10.0 for i in range(11)]
-            for v in progresses:
-                writeprogress(path, v)
-                if v < 1:
-                    assert listener1.progresses.get()[0].progress == v
-                    assert listener2.progresses.get()[0].progress == v
-
-
 NestedTasks = Tuple[str, Union[int, List["NestedTasks"]]]
 
 

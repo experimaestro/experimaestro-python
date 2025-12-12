@@ -8,7 +8,7 @@ from experimaestro.scheduler.base import Job
 import sys
 import http
 import threading
-from typing import Optional, Tuple
+from typing import Optional, Tuple, ClassVar
 
 if sys.version_info >= (3, 9):
     from importlib.resources import files
@@ -72,13 +72,15 @@ def job_create(job: Job):
 
 
 class Listener(BaseListener, ServiceListener):
-    def __init__(self, scheduler: Scheduler, socketio):
-        self.scheduler = scheduler
+    def __init__(self, socketio):
         self.socketio = socketio
+        self.scheduler = Scheduler.instance()
         self.scheduler.addlistener(self)
         self.services = {}
-        for service in self.scheduler.xp.services.values():
-            self.service_add(service)
+        # Initialize services from all registered experiments
+        for xp in self.scheduler.experiments.values():
+            for service in xp.services.values():
+                self.service_add(service)
 
     def job_submitted(self, job):
         self.socketio.emit("job.add", job_create(job))
@@ -165,7 +167,7 @@ def start_app(server: "Server"):
 
     logging.debug("Starting Flask server (SocketIO)...")
     socketio = SocketIO(app, path="/api", async_mode="gevent")
-    listener = Listener(server.scheduler, socketio)
+    listener = Listener(socketio)
 
     logging.debug("Starting Flask server (setting up socketio)...")
 
@@ -197,10 +199,9 @@ def start_app(server: "Server"):
 
     @socketio.on("job.kill")
     def handle_job_kill(jobid: str):
-        job = server.scheduler.jobs[jobid]
-        future = asyncio.run_coroutine_threadsafe(
-            job.aio_process(), server.scheduler.loop
-        )
+        scheduler = Scheduler.instance()
+        job = scheduler.jobs[jobid]
+        future = asyncio.run_coroutine_threadsafe(job.aio_process(), scheduler.loop)
         process = future.result()
         if process is not None:
             process.kill()
@@ -213,7 +214,15 @@ def start_app(server: "Server"):
         if not path:
             return redirect(f"/services/{service}/", http.HTTPStatus.PERMANENT_REDIRECT)
 
-        service = server.scheduler.xp.services.get(service, None)
+        # Get service from all registered experiments
+        scheduler = Scheduler.instance()
+        service_obj = None
+        for xp in scheduler.experiments.values():
+            service_obj = xp.services.get(service, None)
+            if service_obj:
+                break
+
+        service = service_obj
         if service is None:
             return Response(f"Service {service} not found", http.HTTPStatus.NOT_FOUND)
 
@@ -226,7 +235,8 @@ def start_app(server: "Server"):
         progress = float(request.args.get("progress", 0.0))
 
         try:
-            server.scheduler.jobs[jobid].set_progress(
+            scheduler = Scheduler.instance()
+            scheduler.jobs[jobid].set_progress(
                 level,
                 progress,
                 request.args.get("desc", None),
@@ -323,7 +333,23 @@ def start_app(server: "Server"):
 
 
 class Server:
-    def __init__(self, scheduler: Scheduler, settings: ServerSettings):
+    _instance: ClassVar[Optional["Server"]] = None
+    _lock: ClassVar[threading.Lock] = threading.Lock()
+
+    @staticmethod
+    def instance(settings: ServerSettings = None) -> "Server":
+        """Get or create the global server instance"""
+        if Server._instance is None:
+            with Server._lock:
+                if Server._instance is None:
+                    if settings is None:
+                        from experimaestro.settings import get_settings
+
+                        settings = get_settings().server
+                    Server._instance = Server(settings)
+        return Server._instance
+
+    def __init__(self, settings: ServerSettings):
         if settings.autohost == "fqdn":
             settings.host = socket.getfqdn()
             logging.info("Auto host name (fqdn): %s", settings.host)
@@ -338,7 +364,6 @@ class Server:
 
         self.host = settings.host or "127.0.0.1"
         self.port = settings.port
-        self.scheduler = scheduler
         self.token = settings.token or uuid.uuid4().hex
         self.instance = None
         self.running = False
@@ -362,13 +387,14 @@ class Server:
                 pass
 
     def start(self):
-        """Start the websocket server in a new process process"""
+        """Start the websocket server in a daemon thread"""
         logging.info("Starting the web server")
 
         # Avoids clutering
         logging.getLogger("geventwebsocket.handler").setLevel(logging.WARNING)
 
-        self.thread = threading.Thread(target=start_app, args=(self,)).start()
+        self.thread = threading.Thread(target=start_app, args=(self,), daemon=True)
+        self.thread.start()
 
         # Wait until we really started
         while True:

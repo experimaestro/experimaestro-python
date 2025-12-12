@@ -4,6 +4,8 @@ import time
 from typing import (
     Optional,
     Set,
+    ClassVar,
+    TYPE_CHECKING,
 )
 import asyncio
 from typing import Dict
@@ -16,6 +18,10 @@ from experimaestro.scheduler.services import Service
 from experimaestro.utils import logger
 from experimaestro.utils.asyncio import asyncThreadcheck
 import concurrent.futures
+
+if TYPE_CHECKING:
+    from experimaestro.server import Server
+    from experimaestro.settings import ServerSettings
 
 
 class Listener:
@@ -31,18 +37,24 @@ class Listener:
 
 
 class Scheduler(threading.Thread):
-    """A job scheduler
+    """A job scheduler (singleton)
 
-    The scheduler is based on asyncio for easy concurrency handling
+    The scheduler is based on asyncio for easy concurrency handling.
+    This is a singleton - only one scheduler instance exists per process.
     """
 
-    def __init__(self, xp: "experiment", name: str):
+    _instance: ClassVar[Optional["Scheduler"]] = None
+    _lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init__(self, name: str = "Global"):
         super().__init__(name=f"Scheduler ({name})", daemon=True)
         self._ready = threading.Event()
 
-        # Name of the experiment
+        # Name of the scheduler
         self.name = name
-        self.xp = xp
+
+        # Track experiments (simple dict for now)
+        self.experiments: Dict[str, "experiment"] = {}
 
         # Exit mode activated
         self.exitmode = False
@@ -56,12 +68,70 @@ class Scheduler(threading.Thread):
         # Listeners
         self.listeners: Set[Listener] = set()
 
+        # Server (managed by scheduler)
+        self.server: Optional["Server"] = None
+
     @staticmethod
-    def create(xp: "experiment", name: str):
-        instance = Scheduler(xp, name)
+    def instance() -> "Scheduler":
+        """Get or create the global scheduler instance"""
+        if Scheduler._instance is None:
+            with Scheduler._lock:
+                if Scheduler._instance is None:
+                    Scheduler._instance = Scheduler._create()
+        return Scheduler._instance
+
+    @staticmethod
+    def _create(name: str = "Global"):
+        """Internal method to create and start scheduler"""
+        instance = Scheduler(name)
         instance.start()
         instance._ready.wait()
         return instance
+
+    @staticmethod
+    def create(xp: "experiment" = None, name: str = "Global"):
+        """Create or get the scheduler instance
+
+        Args:
+            xp: (Deprecated) Experiment reference, ignored
+            name: Name for the scheduler (only used on first creation)
+
+        Returns:
+            The global scheduler instance
+        """
+        return Scheduler.instance()
+
+    def register_experiment(self, xp: "experiment"):
+        """Register an experiment with the scheduler"""
+        # Use experiment name as key for now
+        key = xp.workdir.name
+        self.experiments[key] = xp
+
+        logger.debug("Registered experiment %s with scheduler", key)
+
+    def unregister_experiment(self, xp: "experiment"):
+        """Unregister an experiment from the scheduler"""
+        key = xp.workdir.name
+        if key in self.experiments:
+            del self.experiments[key]
+            logger.debug("Unregistered experiment %s from scheduler", key)
+
+    def start_server(self, settings: "ServerSettings" = None):
+        """Start the notification server (if not already running)"""
+        if self.server is None:
+            from experimaestro.server import Server
+
+            self.server = Server.instance(settings)
+            self.server.start()
+            logger.info("Server started by scheduler")
+        else:
+            logger.debug("Server already running")
+
+    def stop_server(self):
+        """Stop the notification server"""
+        if self.server is not None:
+            self.server.stop()
+            logger.info("Server stopped by scheduler")
 
     def run(self):
         """Run the event loop forever"""
@@ -104,7 +174,7 @@ class Scheduler(threading.Thread):
 
     def submit(self, job: Job) -> Optional[Job]:
         # Wait for the future containing the submitted job
-        logger.debug("Registering the job %s within the scheduler", job)
+        logger.debug("Submit job %s to the scheduler", job)
         otherFuture = asyncio.run_coroutine_threadsafe(
             self.aio_registerJob(job), self.loop
         )
@@ -133,6 +203,13 @@ class Scheduler(threading.Thread):
         elif job.identifier in self.jobs:
             other = self.jobs[job.identifier]
             assert job.type == other.type
+
+            # Add current experiment to the existing job's experiments list
+            xp = experiment.current()
+            if xp not in other.experiments:
+                other.experiments.append(xp)
+                xp.unfinishedJobs += 1
+
             if other.state == JobState.ERROR:
                 logger.info("Re-submitting job")
             else:
@@ -141,8 +218,12 @@ class Scheduler(threading.Thread):
 
         else:
             # Register this job
-            self.xp.unfinishedJobs += 1
+            xp = experiment.current()
+            xp.unfinishedJobs += 1
             self.jobs[job.identifier] = job
+            # Track which experiments this job belongs to
+            if xp not in job.experiments:
+                job.experiments.append(xp)
 
         return None
 
@@ -214,8 +295,8 @@ class Scheduler(threading.Thread):
             self.notify_job_state(job)
 
             # Adds to the listeners
-            if self.xp.server is not None:
-                job.add_notification_server(self.xp.server)
+            if self.server is not None:
+                job.add_notification_server(self.server)
 
             # And now, we wait...
             logger.info("Got a process for job %s - waiting to complete", job)
@@ -248,15 +329,18 @@ class Scheduler(threading.Thread):
 
         self.notify_job_state(job)
 
-        # Job is finished
-        if job.state != JobState.DONE:
-            self.xp.failedJobs[job.identifier] = job
+        # Job is finished - update all experiments tracking this job
+        for xp in job.experiments:
+            if job.state != JobState.DONE:
+                xp.failedJobs[job.identifier] = job
 
         # Process all remaining tasks outputs
         await asyncThreadcheck("End of job processing", job.done_handler)
 
-        # Decrement the number of unfinished jobs and notify
-        self.xp.unfinishedJobs -= 1
+        # Decrement the number of unfinished jobs for all experiments and notify
+        for xp in job.experiments:
+            xp.unfinishedJobs -= 1
+
         async with self.exitCondition:
             logging.debug("Updated number of unfinished jobs")
             self.exitCondition.notify_all()
@@ -294,7 +378,7 @@ class Scheduler(threading.Thread):
             # Call job's start method with scheduler context
             state = await job.aio_start(
                 sched_dependency_lock=self.dependencyLock,
-                notification_server=self.xp.server if self.xp else None,
+                notification_server=self.server,
             )
 
             if state is None:

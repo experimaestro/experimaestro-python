@@ -21,6 +21,7 @@ from experimaestro.utils import logger
 if TYPE_CHECKING:
     from experimaestro.connectors import Process
     from experimaestro.launchers import Launcher
+    from experimaestro.scheduler.experiment import experiment
 
 
 class JobState(enum.Enum):
@@ -128,6 +129,7 @@ class Job(Resource):
         self.name = str(self.type.identifier).rsplit(".", 1)[-1]
 
         self.scheduler: Optional["Scheduler"] = None
+        self.experiments: List["experiment"] = []  # Experiments this job belongs to
         self.config = config
         self.state: JobState = JobState.UNSCHEDULED
 
