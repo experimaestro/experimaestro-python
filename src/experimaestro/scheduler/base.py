@@ -372,15 +372,18 @@ class Scheduler(threading.Thread):
             or process creation
         """
         from experimaestro.locking import Locks, LockError
+        from experimaestro.scheduler.jobs import JobFailureStatus
 
         # Assert preconditions
         assert job.launcher is not None
 
-        # We first lock the job before proceeding
-        with Locks() as locks:
-            logger.debug("[starting] Locking job %s", job)
-            async with job.launcher.connector.lock(job.lockpath):
-                logger.debug("[starting] Locked job %s", job)
+        # Restart loop for resumable tasks that timeout
+        while True:
+            # We first lock the job before proceeding
+            with Locks() as locks:
+                logger.debug("[starting] Locking job %s", job)
+                async with job.launcher.connector.lock(job.lockpath):
+                    logger.debug("[starting] Locked job %s", job)
 
                 state = None
                 try:
@@ -443,6 +446,15 @@ class Scheduler(threading.Thread):
                     # Creates the main directory
                     directory = job.path
                     logger.debug("Making directories job %s...", directory)
+
+                    # Warn about directory cleanup for non-resumable tasks
+                    if directory.is_dir() and not job.resumable:
+                        logger.info(
+                            "In a future version, directory will be cleaned up for "
+                            "non-resumable tasks. Use ResumableTask if you want to "
+                            "preserve the directory contents."
+                        )
+
                     if not directory.is_dir():
                         directory.mkdir(parents=True, exist_ok=True)
 
@@ -476,10 +488,8 @@ class Scheduler(threading.Thread):
                         code = int(job.failedpath.read_text())
 
                 logger.debug("Job %s ended with code %s", job, code)
-                if code == 0:
-                    state = JobState.DONE
-                else:
-                    state = JobState.ERROR
+                # Let the process determine the job state (handles launcher-specific details)
+                state = process.get_job_state(code)
 
             except JobError:
                 logger.warning("Error while running job")
@@ -491,6 +501,19 @@ class Scheduler(threading.Thread):
                 )
                 state = JobState.ERROR
 
-        # Notify scheduler listeners of job state after job completes
-        self.notify_job_state(job)
-        return state
+            # Check if we should restart a resumable task that timed out
+            from experimaestro.scheduler.jobs import JobStateError
+
+            if (
+                isinstance(state, JobStateError)
+                and state.failure_reason == JobFailureStatus.TIMEOUT
+                and job.resumable
+            ):
+                logger.info("Resumable task %s timed out - restarting", job)
+                # Continue the loop to restart
+                continue
+
+            # Job finished (success or non-recoverable error)
+            # Notify scheduler listeners of job state after job completes
+            self.notify_job_state(job)
+            return state

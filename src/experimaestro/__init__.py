@@ -57,6 +57,7 @@ from .core.objects import (
     setmeta,
     DependentMarker,
     Task,
+    ResumableTask,
     LightweightTask,
     ObjectStore,
 )

@@ -7,6 +7,7 @@ from typing import (
     List,
     Optional,
     Tuple,
+    TYPE_CHECKING,
     get_type_hints,
 )
 from experimaestro.connectors.local import LocalConnector
@@ -31,6 +32,9 @@ from experimaestro.connectors import (
     Redirect,
     RedirectType,
 )
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.jobs import JobState
 
 logger = logging.getLogger("xpm.slurm")
 
@@ -176,13 +180,33 @@ class BatchSlurmProcess(Process):
     def __init__(self, launcher: "SlurmLauncher", jobid: str):
         self.launcher = launcher
         self.jobid = jobid
+        self._last_state: Optional[SlurmJobState] = None
 
     def wait(self):
         with SlurmProcessWatcher.get(self.launcher) as watcher:
             while True:
                 state = watcher.getjob(self.jobid)
                 if state and state.finished():
+                    self._last_state = state
                     return 0 if state.slurm_state == "COMPLETED" else 1
+
+    def get_job_state(self, code: int) -> "JobState":
+        """Convert SLURM exit code to JobState, detecting timeouts"""
+        from experimaestro.scheduler.jobs import (
+            JobState,
+            JobStateError,
+            JobFailureStatus,
+        )
+
+        if code == 0:
+            return JobState.DONE
+
+        # Check if this was a SLURM timeout
+        if self._last_state and self._last_state.slurm_state == "TIMEOUT":
+            logger.info("SLURM job %s timed out", self.jobid)
+            return JobStateError(JobFailureStatus.TIMEOUT)
+
+        return JobState.ERROR
 
     async def aio_state(self, timeout: float | None = None) -> ProcessState:
         def check():

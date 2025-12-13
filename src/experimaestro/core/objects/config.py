@@ -1597,6 +1597,17 @@ def setmeta(config: Config, flag: bool):
     return config
 
 
+class ResumableTask(Task):
+    """Base class for resumable/checkpointable tasks
+
+    Resumable tasks can be restarted if they are stopped by a time limit
+    (e.g., SLURM job timeout). The task directory and dynamic outputs are
+    preserved across restarts to allow checkpoint recovery.
+    """
+
+    pass
+
+
 def cache(fn, name: str):
     def __call__(config, *args, **kwargs):
         import experimaestro.taskglobals as taskglobals

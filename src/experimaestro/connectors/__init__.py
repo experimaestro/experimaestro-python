@@ -10,13 +10,16 @@ This module contains :
 
 import enum
 import logging
-from typing import Any, Dict, Mapping, Type, Union, Optional
+from typing import Any, Dict, Mapping, Type, Union, Optional, TYPE_CHECKING
 from pathlib import Path
 from experimaestro.utils import logger
 from experimaestro.locking import Lock
 from experimaestro.tokens import Token
 from experimaestro.utils.asyncio import asyncThreadcheck
 from importlib.metadata import entry_points
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.jobs import JobState
 
 
 class RedirectType(enum.Enum):
@@ -134,6 +137,22 @@ class Process:
         code = await asyncThreadcheck("aio_code", self.wait)
         logger.debug("Got return code %s for %s", code, self)
         return code
+
+    def get_job_state(self, code: int) -> "JobState":
+        """Convert a process exit code to a JobState
+
+        This method allows process implementations to provide additional
+        information about failures (e.g., timeout detection for SLURM jobs).
+
+        Args:
+            code: The process exit code
+
+        Returns:
+            JobState instance (JobState.DONE for success, JobStateError for failures)
+        """
+        from experimaestro.scheduler.jobs import JobState
+
+        return JobState.DONE if code == 0 else JobState.ERROR
 
     def kill(self):
         raise NotImplementedError(f"Not implemented: {self.__class__}.kill")

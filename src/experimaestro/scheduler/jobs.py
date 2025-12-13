@@ -228,6 +228,11 @@ class Job(Resource):
         # Dependencies
         self.dependencies: Set[Dependency] = set()  # as target
 
+        # Check if this is a resumable task
+        from experimaestro.core.objects import ResumableTask
+
+        self.resumable = isinstance(config, ResumableTask)
+
         # Watched outputs
         self.watched_outputs = {}
         for watched in config.__xpm__.watched_outputs:
