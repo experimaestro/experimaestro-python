@@ -23,50 +23,135 @@ if TYPE_CHECKING:
     from experimaestro.scheduler.experiment import experiment
 
 
-class JobState(enum.Enum):
-    # Job is not yet scheduled
-    UNSCHEDULED = 0
+class JobState:
+    """Base class for job states
 
-    # Job is waiting for dependencies to be done
-    WAITING = 1
+    Job states are represented as instances of JobState subclasses.
+    Singleton instances are available as class attributes (e.g., JobState.DONE)
+    for backward compatibility.
+    """
 
-    # Job is ready to run
-    READY = 2
-
-    # Job is scheduled (e.g. slurm)
-    SCHEDULED = 3
-
-    # Job is running
-    RUNNING = 4
-
-    # Job is done (finished)
-    DONE = 5
-
-    # Job failed (finished)
-    ERROR = 6
+    value: int  # Numeric value for ordering comparisons
 
     def notstarted(self):
-        return self.value <= JobState.READY.value
+        """Returns True if the job hasn't started yet"""
+        return self.value <= 2  # READY
 
     def running(self):
-        return (
-            self.value == JobState.RUNNING.value
-            or self.value == JobState.SCHEDULED.value
-        )
+        """Returns True if the job is currently running or scheduled"""
+        return self.value == 4 or self.value == 3  # RUNNING or SCHEDULED
 
     def finished(self):
-        return self.value >= JobState.DONE.value
+        """Returns True if the job has finished (success or error)"""
+        return self.value >= 5  # DONE or ERROR
+
+    def __eq__(self, other):
+        """Compare job states by their numeric value"""
+        if isinstance(other, JobState):
+            return self.value == other.value
+        return False
+
+    def __hash__(self):
+        """Allow JobState instances to be used as dict keys"""
+        return hash(self.value)
+
+    def __repr__(self):
+        """String representation of the job state"""
+        return f"{self.__class__.__name__}()"
+
+
+class JobStateUnscheduled(JobState):
+    """Job is not yet scheduled"""
+
+    value = 0
+
+
+class JobStateWaiting(JobState):
+    """Job is waiting for dependencies to be done"""
+
+    value = 1
+
+
+class JobStateReady(JobState):
+    """Job is ready to run"""
+
+    value = 2
+
+
+class JobStateScheduled(JobState):
+    """Job is scheduled (e.g., in SLURM queue)"""
+
+    value = 3
+
+
+class JobStateRunning(JobState):
+    """Job is currently running"""
+
+    value = 4
+
+
+class JobStateDone(JobState):
+    """Job has completed successfully"""
+
+    value = 5
+
+
+class JobStateError(JobState):
+    """Job has failed
+
+    This state carries information about the failure reason via JobFailureStatus enum.
+    """
+
+    value = 6
+
+    def __init__(self, failure_reason: Optional["JobFailureStatus"] = None):
+        """Create an error state, optionally with failure details
+
+        Args:
+            failure_reason: Optional reason for the failure (JobFailureStatus enum value)
+        """
+        self.failure_reason = failure_reason
+
+    def __repr__(self):
+        if self.failure_reason:
+            return f"JobStateError(failure_reason={self.failure_reason})"
+        return "JobStateError()"
+
+    def __eq__(self, other):
+        """Error states are equal if they have the same value
+
+        Note: We intentionally ignore failure_reason in equality comparison
+        to maintain backward compatibility with code that does:
+        if job.state == JobState.ERROR: ...
+        """
+        if isinstance(other, JobState):
+            return self.value == other.value
+        return False
+
+
+# Create singleton instances for backward compatibility
+# These can be used in comparisons: if state == JobState.DONE: ...
+JobState.UNSCHEDULED = JobStateUnscheduled()
+JobState.WAITING = JobStateWaiting()
+JobState.READY = JobStateReady()
+JobState.SCHEDULED = JobStateScheduled()
+JobState.RUNNING = JobStateRunning()
+JobState.DONE = JobStateDone()
+JobState.ERROR = JobStateError()  # default error without failure details
 
 
 class JobFailureStatus(enum.Enum):
-    #: Job failed
+    #: Job dependency failed
     DEPENDENCY = 0
 
-    #: Job dependency failed
+    #: Job failed
     FAILED = 1
 
     #: Memory
     MEMORY = 2
+
+    #: Timeout (can retry for resumable tasks)
+    TIMEOUT = 3
 
 
 class JobLock(Lock):
@@ -139,9 +224,6 @@ class Job(Resource):
         self.experiments: List["experiment"] = []  # Experiments this job belongs to
         self.config = config
         self.state: JobState = JobState.UNSCHEDULED
-
-        #: If a job has failed, indicates the failure status
-        self.failure_status: JobFailureStatus = None
 
         # Dependencies
         self.dependencies: Set[Dependency] = set()  # as target
@@ -287,8 +369,12 @@ class Job(Resource):
         """
         pass
 
-    async def aio_run(self):
-        """Actually run the code"""
+    async def aio_run(self) -> "Process":
+        """Actually run the code
+
+        Returns:
+            A Process instance representing the running job
+        """
         raise NotImplementedError(f"Method aio_run not implemented in {self.__class__}")
 
     async def aio_process(self) -> Optional["Process"]:
@@ -339,10 +425,9 @@ class Job(Resource):
         logger.debug("Job %s: unsatisfied %d", self, self.unsatisfied)
 
         if status == DependencyStatus.FAIL:
-            # Job completed
+            # Job completed with dependency failure
             if not self.state.finished():
-                self.state = JobState.ERROR
-                self.failure_status = JobFailureStatus.DEPENDENCY
+                self.state = JobStateError(JobFailureStatus.DEPENDENCY)
                 self._readyEvent.set()
 
         if self.unsatisfied == 0:

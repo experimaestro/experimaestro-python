@@ -9,7 +9,7 @@ from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
 
 from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
-from experimaestro.scheduler.jobs import Job, JobFailureStatus
+from experimaestro.scheduler.jobs import Job
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.settings import WorkspaceSettings, get_settings
@@ -200,9 +200,24 @@ class experiment:
 
                 if self.failedJobs:
                     # Show some more information
+                    from experimaestro.scheduler.jobs import (
+                        JobStateError,
+                        JobFailureStatus,
+                    )
+
                     count = 0
                     for job in self.failedJobs.values():
-                        if job.failure_status != JobFailureStatus.DEPENDENCY:
+                        # Skip dependency failures - only log direct failures
+                        if isinstance(job.state, JobStateError):
+                            if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
+                                count += 1
+                                logger.error(
+                                    "Job %s failed, check the log file %s",
+                                    job.relpath,
+                                    job.stderr,
+                                )
+                        else:
+                            # Should not happen, but count it anyway
                             count += 1
                             logger.error(
                                 "Job %s failed, check the log file %s",

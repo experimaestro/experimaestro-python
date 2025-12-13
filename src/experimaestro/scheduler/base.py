@@ -462,25 +462,24 @@ class Scheduler(threading.Thread):
                     return JobState.ERROR
 
             try:
-                if isinstance(process, JobState):
-                    state = process
-                    logger.debug("Job %s ended (state %s)", job, state)
+                logger.debug("Waiting for job %s process to end", job)
+
+                code = await process.aio_code()
+                logger.debug("Got return code %s for %s", code, job)
+
+                # Check the file if there is no return code
+                if code is None:
+                    # Case where we cannot retrieve the code right away
+                    if job.donepath.is_file():
+                        code = 0
+                    else:
+                        code = int(job.failedpath.read_text())
+
+                logger.debug("Job %s ended with code %s", job, code)
+                if code == 0:
+                    state = JobState.DONE
                 else:
-                    logger.debug("Waiting for job %s process to end", job)
-
-                    code = await process.aio_code()
-                    logger.debug("Got return code %s for %s", code, job)
-
-                    # Check the file if there is no return code
-                    if code is None:
-                        # Case where we cannot retrieve the code right away
-                        if job.donepath.is_file():
-                            code = 0
-                        else:
-                            code = int(job.failedpath.read_text())
-
-                    logger.debug("Job %s ended with code %s", job, code)
-                    state = JobState.DONE if code == 0 else JobState.ERROR
+                    state = JobState.ERROR
 
             except JobError:
                 logger.warning("Error while running job")
