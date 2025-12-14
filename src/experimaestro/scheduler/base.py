@@ -435,7 +435,7 @@ class Scheduler(threading.Thread):
 
                     # Warn about directory cleanup for non-resumable tasks
                     if directory.is_dir() and not job.resumable:
-                        logger.info(
+                        logger.warning(
                             "In a future version, directory will be cleaned up for "
                             "non-resumable tasks. Use ResumableTask if you want to "
                             "preserve the directory contents."

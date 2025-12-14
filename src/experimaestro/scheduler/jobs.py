@@ -31,6 +31,7 @@ class JobState:
     for backward compatibility.
     """
 
+    name: str  # Readable name
     value: int  # Numeric value for ordering comparisons
 
     def notstarted(self):
@@ -63,36 +64,42 @@ class JobState:
 class JobStateUnscheduled(JobState):
     """Job is not yet scheduled"""
 
+    name = "unscheduled"
     value = 0
 
 
 class JobStateWaiting(JobState):
     """Job is waiting for dependencies to be done"""
 
+    name = "waiting"
     value = 1
 
 
 class JobStateReady(JobState):
     """Job is ready to run"""
 
+    name = "ready"
     value = 2
 
 
 class JobStateScheduled(JobState):
     """Job is scheduled (e.g., in SLURM queue)"""
 
+    name = "scheduled"
     value = 3
 
 
 class JobStateRunning(JobState):
     """Job is currently running"""
 
+    name = "running"
     value = 4
 
 
 class JobStateDone(JobState):
     """Job has completed successfully"""
 
+    name = "done"
     value = 5
 
 
@@ -102,6 +109,7 @@ class JobStateError(JobState):
     This state carries information about the failure reason via JobFailureStatus enum.
     """
 
+    name = "error"
     value = 6
 
     def __init__(self, failure_reason: Optional["JobFailureStatus"] = None):

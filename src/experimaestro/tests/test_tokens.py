@@ -71,6 +71,7 @@ def test_token_ok():
     with TemporaryExperiment("tokens", maxwait=20) as xp:
         token = CounterToken("token-ok", xp.workdir / "token", 1)
         token_experiment(xp, token)
+
     logging.info("Finished token_ok test")
 
 
@@ -141,9 +142,10 @@ def test_token_monitor():
         )
         return task
 
-    with TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1, TemporaryExperiment(
-        "tokens2", maxwait=20
-    ) as xp2:
+    with (
+        TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1,
+        TemporaryExperiment("tokens2", maxwait=20) as xp2,
+    ):
         path = xp1.workspace.path / "test_token.file"
         task1 = run(xp1, 1, path)
         task2 = run(xp2, 2, path)

@@ -5,6 +5,7 @@ a computational resource (e.g. number of launched jobs, etc.)
 from dataclasses import dataclass
 import sys
 from pathlib import Path
+import weakref
 
 from omegaconf import DictConfig
 from experimaestro.core.objects import Config
@@ -116,7 +117,14 @@ class CounterTokenDependency(DynamicDependency):
 
 
 class TokenFile:
-    """Represents a token file"""
+    """Represents a token file
+
+    The token file (whose name refers to the corresponding job) is composed of
+    two lines:
+
+    1. The number of tokens taken by the job
+    2. The URI reference of the job directory
+    """
 
     def __init__(self, path: Path):
         try:
@@ -124,6 +132,11 @@ class TokenFile:
             with path.open("rt") as fp:
                 count, self.uri = [line.strip() for line in fp.readlines()]
                 self.count = int(count)
+
+        except FileNotFoundError:
+            # Case where the file was deleted
+            self.count = 0
+            self.uri = None
         except Exception:
             logging.exception("Error while reading %s", self.path)
             raise
@@ -150,6 +163,11 @@ class TokenFile:
 
     def watch(self):
         """Watch the matching process"""
+
+        # No need to watch if there was no token file...
+        if self.uri is None:
+            return
+
         logger.debug(
             "Watching process for %s (%s, taken %d)", self.path, self.uri, self.count
         )
@@ -186,6 +204,29 @@ class TokenFile:
             self.delete()
 
         threading.Thread(target=run).start()
+
+
+class CounterTokenProxy(FileSystemEventHandler):
+    """Hold a weak reference to the counter token to handle gracefully deleted
+    counter tokens"""
+
+    def __init__(self, token: "CounterToken"):
+        self._token_ref = weakref.ref(token)
+
+    def on_modified(self, event):
+        token = self._token_ref()
+        if token is not None:
+            return token.on_modified(event)
+
+    def on_deleted(self, event):
+        token = self._token_ref()
+        if token is not None:
+            return token.on_deleted(event)
+
+    def on_created(self, event):
+        token = self._token_ref()
+        if token is not None:
+            return token.on_created(event)
 
 
 class CounterToken(Token, FileSystemEventHandler):
@@ -261,8 +302,16 @@ class CounterToken(Token, FileSystemEventHandler):
 
         # Watched path
         self.watchedpath = str(path.absolute())
-        self.watcher = ipcom().fswatch(self, self.path, recursive=True)
+        self.proxy = CounterTokenProxy(self)
+        self.watcher = ipcom().fswatch(self.proxy, self.path, recursive=True)
         logger.info("Watching %s", self.watchedpath)
+
+    def __del__(self):
+        # Remove the watcher
+        if self.watcher is not None:
+            logging.info("Removing watcher on %s", self.watchedpath)
+            ipcom().fsunwatch(self.watcher)
+            self.watcher = None
 
     def _update(self):
         """Update the state by reading all the information from disk
