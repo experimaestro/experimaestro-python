@@ -223,6 +223,7 @@ class Job(Resource):
         workspace: Workspace = None,
         launcher: "Launcher" = None,
         run_mode: RunMode = RunMode.NORMAL,
+        max_retries: Optional[int] = None,
     ):
         from experimaestro.scheduler.base import Scheduler
 
@@ -252,6 +253,13 @@ class Job(Resource):
         from experimaestro.core.objects import ResumableTask
 
         self.resumable = isinstance(config, ResumableTask)
+
+        # Retry configuration for resumable tasks
+        # Use workspace setting if max_retries is not specified
+        if max_retries is None and self.workspace:
+            max_retries = self.workspace.workspace_settings.max_retries
+        self.max_retries = max_retries if max_retries is not None else 3
+        self.retry_count = 0
 
         # Watched outputs
         self.watched_outputs = {}

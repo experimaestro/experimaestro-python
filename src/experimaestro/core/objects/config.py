@@ -587,6 +587,7 @@ class ConfigInformation:
         *,
         run_mode=None,
         init_tasks: List["LightweightTask"] = [],
+        max_retries: Optional[int] = None,
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
@@ -606,7 +607,11 @@ class ConfigInformation:
 
         # Creates a new job
         self.job = self.xpmtype.task(
-            self.pyobject, launcher=launcher, workspace=workspace, run_mode=run_mode
+            self.pyobject,
+            launcher=launcher,
+            workspace=workspace,
+            run_mode=run_mode,
+            max_retries=max_retries,
         )
 
         # Validate the object
@@ -1371,16 +1376,22 @@ class ConfigMixin:
         launcher=None,
         run_mode: "RunMode" = None,
         init_tasks: List["LightweightTask"] = [],
+        max_retries: Optional[int] = None,
     ):
         """Submit this task
 
         :param workspace: the workspace, defaults to None
         :param launcher: The launcher, defaults to None
         :param run_mode: Run mode (if None, uses the workspace default)
+        :param max_retries: Maximum number of retries for resumable tasks that timeout (default: from workspace settings or 3)
         :return: an object object
         """
         return self.__xpm__.submit(
-            workspace, launcher, run_mode=run_mode, init_tasks=init_tasks
+            workspace,
+            launcher,
+            run_mode=run_mode,
+            init_tasks=init_tasks,
+            max_retries=max_retries,
         )
 
     def stdout(self):

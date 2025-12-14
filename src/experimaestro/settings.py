@@ -38,6 +38,9 @@ class WorkspaceSettings:
     alt_workspaces: List[str] = field(default_factory=list)
     """Alternative workspaces to find jobs or experiments"""
 
+    max_retries: int = 3
+    """Maximum number of retries for resumable tasks that timeout (default: 3)"""
+
     def __post_init__(self):
         self.path = self.path.expanduser().resolve()
 

@@ -178,6 +178,56 @@ class IndexCollection(Config):
     ...
 ```
 
+## Resumable Tasks
+
+For long-running tasks that may be interrupted by scheduler timeouts (e.g., SLURM job time limits), you can use `ResumableTask` instead of `Task`. Resumable tasks can automatically retry when they fail due to timeouts, allowing them to resume from checkpoints.
+
+!!! example "Defining a resumable task"
+
+    ```py3
+    from experimaestro import ResumableTask, Param, Meta, PathGenerator, field
+    from pathlib import Path
+
+    class LongTraining(ResumableTask):
+        epochs: Param[int] = 1000
+        checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
+
+        def execute(self):
+            # Check if we're resuming from a checkpoint
+            start_epoch = 0
+            if self.checkpoint.exists():
+                start_epoch = load_checkpoint(self.checkpoint)
+
+            # Continue training from where we left off
+            for epoch in range(start_epoch, self.epochs):
+                train_one_epoch()
+                save_checkpoint(self.checkpoint, epoch)
+    ```
+
+### Automatic Retry on Timeout
+
+When a resumable task times out (e.g., reaches SLURM walltime limit), the scheduler automatically restarts it up to a maximum number of retries. The retry limit can be configured:
+
+1. **Globally**: Set `max_retries` in workspace settings (`~/.config/experimaestro/settings.yaml`):
+   ```yaml
+   workspaces:
+     - id: my_workspace
+       path: /path/to/workspace
+       max_retries: 5  # Default is 3
+   ```
+
+2. **Per-task**: Override when submitting:
+   ```py3
+   task = LongTraining.C(epochs=1000).submit(max_retries=10)
+   ```
+
+### Important Considerations
+
+- **Checkpointing**: Your task should save progress to checkpoints and check for existing checkpoints on startup
+- **Idempotency**: The task should produce the same results whether run once or restarted multiple times
+- **Directory preservation**: Unlike regular tasks, the task directory is preserved between retries to maintain checkpoints
+- **Non-timeout failures**: Only timeout failures trigger retries. Other errors (out of memory, bugs, etc.) will not retry
+
 ## Handling task events
 
 Callbacks can be registered to accomplish some actions e.g. on task completion.

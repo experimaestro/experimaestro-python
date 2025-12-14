@@ -504,9 +504,23 @@ class Scheduler(threading.Thread):
                 and state.failure_reason == JobFailureStatus.TIMEOUT
                 and job.resumable
             ):
-                logger.info("Resumable task %s timed out - restarting", job)
-                # Continue the loop to restart
-                continue
+                job.retry_count += 1
+                if job.retry_count <= job.max_retries:
+                    logger.info(
+                        "Resumable task %s timed out - restarting (attempt %d/%d)",
+                        job,
+                        job.retry_count,
+                        job.max_retries,
+                    )
+                    # Continue the loop to restart
+                    continue
+                else:
+                    logger.warning(
+                        "Resumable task %s exceeded max retries (%d), marking as failed",
+                        job,
+                        job.max_retries,
+                    )
+                    # Fall through to return the error state
 
             # Job finished (success or non-recoverable error)
             # Notify scheduler listeners of job state after job completes

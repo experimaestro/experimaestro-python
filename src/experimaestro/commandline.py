@@ -232,9 +232,14 @@ class CommandLineJob(Job):
         workspace: Optional[Workspace] = None,
         launcher=None,
         run_mode: RunMode = None,
+        max_retries=None,
     ):
         super().__init__(
-            parameters, workspace=workspace, launcher=launcher, run_mode=run_mode
+            parameters,
+            workspace=workspace,
+            launcher=launcher,
+            run_mode=run_mode,
+            max_retries=max_retries,
         )
         self.commandline = commandline
 
@@ -312,7 +317,13 @@ class CommandLineTask:
         self.commandline = commandline
 
     def __call__(
-        self, pyobject, *, launcher=None, workspace=None, run_mode=None
+        self,
+        pyobject,
+        *,
+        launcher=None,
+        workspace=None,
+        run_mode=None,
+        max_retries=None,
     ) -> Job:
         return CommandLineJob(
             self.commandline,
@@ -320,4 +331,5 @@ class CommandLineTask:
             launcher=launcher,
             workspace=workspace,
             run_mode=run_mode,
+            max_retries=max_retries,
         )
