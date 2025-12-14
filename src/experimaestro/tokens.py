@@ -19,12 +19,7 @@ from experimaestro.launcherfinder.registry import LauncherRegistry
 
 from .ipc import ipcom
 from .locking import Lock, LockError
-from .scheduler.dependencies import (
-    Dependency,
-    DynamicDependency,
-    DependencyStatus,
-    Resource,
-)
+from .scheduler.dependencies import DynamicDependency, Resource
 import logging
 import json
 
@@ -36,16 +31,6 @@ class Token(Resource):
     """Base class for all token-based resources"""
 
     available: int
-
-    def aio_notify(self):
-        # Notifying
-        def check(dependency: Dependency):
-            if self.available > 0:
-                dependency.check()
-
-        with self.dependents as dependents:
-            for _dependency in dependents:
-                _dependency.loop.call_soon_threadsafe(check, _dependency)
 
 
 class CounterTokenLock(Lock):
@@ -76,16 +61,54 @@ class CounterTokenDependency(DynamicDependency):
         """The (file) name for this dependency, when taken"""
         return f"{self.target.identifier}.token"
 
-    def status(self) -> DependencyStatus:
-        if self.count <= self.token.available:
-            return DependencyStatus.OK
-        return DependencyStatus.WAIT
+    async def aio_lock(self, timeout: float = 0) -> "Lock":
+        """Acquire lock on token with event-driven waiting
 
-    async def aio_lock(self) -> "Lock":
-        """Acquire lock on token (may raise LockError if not available)"""
-        lock = CounterTokenLock(self)
-        lock.acquire()
-        return lock
+        Args:
+            timeout: Timeout in seconds (0 = wait indefinitely)
+
+        Returns:
+            Lock object
+
+        Raises:
+            LockError: If lock cannot be acquired within timeout
+        """
+        from experimaestro.utils.asyncio import asyncThreadcheck
+        import time
+
+        start_time = time.time()
+
+        while True:
+            try:
+                lock = CounterTokenLock(self)
+                lock.acquire()
+                return lock
+            except LockError:
+                # Wait for token availability notification
+                def wait_for_available():
+                    with self.token.available_condition:
+                        # Calculate remaining timeout
+                        if timeout == 0:
+                            wait_timeout = None  # Wait indefinitely
+                        else:
+                            elapsed = time.time() - start_time
+                            if elapsed >= timeout:
+                                return False  # Timeout exceeded
+                            wait_timeout = timeout - elapsed
+
+                        # Wait for notification
+                        return self.token.available_condition.wait(timeout=wait_timeout)
+
+                # Wait in a thread (since condition is threading-based)
+                result = await asyncThreadcheck(
+                    "token availability", wait_for_available
+                )
+
+                # If wait returned False, we timed out
+                if result is False:
+                    raise LockError("Timeout waiting for tokens")
+
+                # Otherwise, loop back to try acquiring again
 
     @property
     def token(self):
@@ -221,6 +244,9 @@ class CounterToken(Token, FileSystemEventHandler):
         self.ipc_lock = fasteners.InterProcessLock(path / "token.lock")
         self.lock = threading.Lock()
 
+        # Condition variable for waiting on token availability
+        self.available_condition = threading.Condition(self.lock)
+
         self.name = name
 
         # Set the new number of tokens
@@ -289,9 +315,8 @@ class CounterToken(Token, FileSystemEventHandler):
                         self.available,
                     )
 
-            # Do not lock here (notify only)
-            if self.available > 0:
-                self.aio_notify()
+                    # Notify waiting tasks that tokens are available
+                    self.available_condition.notify_all()
 
     def on_created(self, event):
         logger.debug(
@@ -329,26 +354,29 @@ class CounterToken(Token, FileSystemEventHandler):
 
             if event.src_path == str(self.infopath):
                 logger.debug("Token information modified")
-                timestamp = os.path.getmtime(self.infopath)
-                if timestamp <= self.timestamp:
+                with self.lock:
+                    timestamp = os.path.getmtime(self.infopath)
+                    if timestamp <= self.timestamp:
+                        logger.debug(
+                            "Not reading token file [%f <= %f]",
+                            timestamp,
+                            self.timestamp,
+                        )
+                        return
+
+                    total = int(self.infopath.read_text())
+                    delta = total - self.total
+                    self.total = total
+                    self.available += delta
                     logger.debug(
-                        "Not reading token file [%f <= %f]", timestamp, self.timestamp
+                        "Token information modified: available %d, total %d",
+                        self.available,
+                        self.total,
                     )
 
-                total = int(self.infopath.read_text())
-                delta = total - self.total
-                self.total = total
-                self.available += delta
-                logger.debug(
-                    "Token information modified: available %d, total %d",
-                    self.available,
-                    self.total,
-                )
-
-                if delta > 0 and self.available > 0:
-                    with self.dependents as dependents:
-                        for dependency in dependents:
-                            dependency.check()
+                    # Notify waiting tasks if tokens became available
+                    if delta > 0:
+                        self.available_condition.notify_all()
 
             # A modified dependency not in cache
             elif path.name.endswith(".token") and path.name not in self.cache:
@@ -414,9 +442,11 @@ class CounterToken(Token, FileSystemEventHandler):
             del self.cache[dependency.name]
             self.available += tf.count
             logging.debug("%s: available %d", self, self.available)
-            tf.delete()
 
-        self.aio_notify()
+            # Notify waiting tasks that tokens are available
+            self.available_condition.notify_all()
+
+            tf.delete()
 
 
 class ProcessCounterToken(Token):
@@ -463,8 +493,6 @@ class ProcessCounterToken(Token):
                 dependency.count,
                 self.available,
             )
-
-        self.aio_notify()
 
 
 if sys.platform != "win32":

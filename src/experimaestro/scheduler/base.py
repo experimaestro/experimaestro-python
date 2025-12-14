@@ -225,6 +225,11 @@ class Scheduler(threading.Thread):
             if xp not in job.experiments:
                 job.experiments.append(xp)
 
+            # Set up dependencies
+            for dependency in job.dependencies:
+                dependency.target = job
+                dependency.origin.dependents.add(dependency)
+
         return None
 
     def notify_job_submitted(self, job: Job):
@@ -243,12 +248,11 @@ class Scheduler(threading.Thread):
             except Exception:
                 logger.exception("Got an error with listener %s", listener)
 
-    async def aio_submit(self, job: Job) -> JobState:  # noqa: C901
+    async def aio_submit(self, job: Job) -> JobState:
         """Main scheduler function: submit a job, run it (if needed), and returns
         the status code
         """
         logger.info("Submitting job %s", job)
-        job._readyEvent = asyncio.Event()
         job.submittime = time.time()
         job.scheduler = self
         self.waitingjobs.add(job)
@@ -270,62 +274,46 @@ class Scheduler(threading.Thread):
 
         self.notify_job_submitted(job)
 
-        # Add dependencies, and add to blocking resources
-        if job.dependencies:
-            job.unsatisfied = len(job.dependencies)
-
-            for dependency in job.dependencies:
-                dependency.target = job
-                dependency.loop = self.loop
-                dependency.origin.dependents.add(dependency)
-                dependency.check()
-        else:
-            job._readyEvent.set()
-            job.state = JobState.READY
-
+        # Check if already done
         if job.donepath.exists():
             job.state = JobState.DONE
 
         # Check if we have a running process
-        process = await job.aio_process()
-        if process is not None:
-            # Yep! First we notify the listeners
-            job.state = JobState.RUNNING
-            # Notify the listeners
-            self.notify_job_state(job)
+        if not job.state.finished():
+            process = await job.aio_process()
+            if process is not None:
+                # Yep! First we notify the listeners
+                job.state = JobState.RUNNING
+                # Notify the listeners
+                self.notify_job_state(job)
 
-            # Adds to the listeners
-            if self.server is not None:
-                job.add_notification_server(self.server)
+                # Adds to the listeners
+                if self.server is not None:
+                    job.add_notification_server(self.server)
 
-            # And now, we wait...
-            logger.info("Got a process for job %s - waiting to complete", job)
-            code = await process.aio_code()
-            logger.info("Job %s completed with code %s", job, code)
-            job.state = JobState.DONE if code == 0 else JobState.ERROR
+                # And now, we wait...
+                logger.info("Got a process for job %s - waiting to complete", job)
+                code = await process.aio_code()
+                logger.info("Job %s completed with code %s", job, code)
 
-        # Check if done
-        if job.donepath.exists():
-            job.state = JobState.DONE
+                # Check the file if there is no return code
+                if code is None:
+                    # Case where we cannot retrieve the code right away
+                    if job.donepath.is_file():
+                        code = 0
+                    else:
+                        code = int(job.failedpath.read_text())
 
-        # OK, not done; let's start the job for real
-        while not job.state.finished():
-            # Wait that the job is ready
-            await job._readyEvent.wait()
-            job._readyEvent.clear()
+                job.state = process.get_job_state(code)
 
-            if job.state == JobState.READY:
-                try:
-                    state = await self.aio_start(job)
-                except Exception:
-                    logger.exception("Got an exception while starting the job")
-                    raise
-
-                if state is None:
-                    # State is None if this is not the main thread
-                    return JobState.ERROR
-
+        # If not done or running, start the job
+        if not job.state.finished():
+            try:
+                state = await self.aio_start(job)
                 job.state = state
+            except Exception:
+                logger.exception("Got an exception while starting the job")
+                raise
 
         self.notify_job_state(job)
 
@@ -348,12 +336,6 @@ class Scheduler(threading.Thread):
         job.endtime = time.time()
         if job in self.waitingjobs:
             self.waitingjobs.remove(job)
-
-        with job.dependents as dependents:
-            logger.info("Processing %d dependent jobs", len(dependents))
-            for dependency in dependents:
-                logger.debug("Checking dependency %s", dependency)
-                self.loop.call_soon(dependency.check)
 
         return job.state
 
@@ -406,39 +388,43 @@ class Scheduler(threading.Thread):
                         await dependency.aio_lock()
 
                     # Now handle dynamic dependencies (tokens) with retry logic
-                    # Try to acquire locks, retrying if any fail
+                    # CRITICAL: Only one task at a time can acquire dynamic dependencies
+                    # to prevent deadlocks (e.g., Task A holds Token1 waiting for Token2,
+                    # Task B holds Token2 waiting for Token1)
                     if dynamic_deps:
-                        logger.debug(
-                            "Locking %d dynamic dependencies (tokens)",
-                            len(dynamic_deps),
-                        )
-                        while True:
-                            all_locked = True
-                            for dependency in dynamic_deps:
-                                try:
-                                    # Acquire the lock (this might block on IPC locks)
-                                    lock = await dependency.aio_lock()
-                                    locks.append(lock)
-                                except LockError:
-                                    logger.debug(
-                                        "Could not lock %s, retrying", dependency
-                                    )
-                                    # Release all locks and restart
-                                    for lock in locks.locks:
-                                        lock.release()
-                                    locks.locks.clear()
-                                    # Put failed dependency first
-                                    dynamic_deps.remove(dependency)
-                                    dynamic_deps.insert(0, dependency)
-                                    all_locked = False
+                        async with self.dependencyLock:
+                            logger.debug(
+                                "Locking %d dynamic dependencies (tokens)",
+                                len(dynamic_deps),
+                            )
+                            while True:
+                                all_locked = True
+                                for idx, dependency in enumerate(dynamic_deps):
+                                    try:
+                                        # Use timeout=0 for first dependency, 0.1s for subsequent
+                                        timeout = 0 if idx == 0 else 0.1
+                                        # Acquire the lock (this might block on IPC locks)
+                                        lock = await dependency.aio_lock(
+                                            timeout=timeout
+                                        )
+                                        locks.append(lock)
+                                    except LockError:
+                                        logger.debug(
+                                            "Could not lock %s, retrying", dependency
+                                        )
+                                        # Release all locks and restart
+                                        for lock in locks.locks:
+                                            lock.release()
+                                        locks.locks.clear()
+                                        # Put failed dependency first
+                                        dynamic_deps.remove(dependency)
+                                        dynamic_deps.insert(0, dependency)
+                                        all_locked = False
+                                        break
+
+                                if all_locked:
+                                    # All locks acquired successfully
                                     break
-
-                            if all_locked:
-                                # All locks acquired successfully
-                                break
-
-                            # Yield to other async tasks before retrying
-                            await asyncio.sleep(0.01)
 
                     # Dependencies have been locked, we can start the job
                     job.starttime = time.time()
@@ -462,6 +448,12 @@ class Scheduler(threading.Thread):
                     if self.server is not None:
                         job.add_notification_server(self.server)
 
+                except RuntimeError as e:
+                    # Dependency failed - mark job as failed due to dependency
+                    from experimaestro.scheduler.jobs import JobStateError
+
+                    logger.warning("Dependency failed: %s", e)
+                    return JobStateError(JobFailureStatus.DEPENDENCY)
                 except Exception:
                     logger.warning("Error while locking job", exc_info=True)
                     return JobState.WAITING
@@ -473,33 +465,36 @@ class Scheduler(threading.Thread):
                     logger.warning("Error while starting job", exc_info=True)
                     return JobState.ERROR
 
-            try:
-                logger.debug("Waiting for job %s process to end", job)
+                # Wait for job to complete while holding locks
+                try:
+                    logger.debug("Waiting for job %s process to end", job)
 
-                code = await process.aio_code()
-                logger.debug("Got return code %s for %s", code, job)
+                    code = await process.aio_code()
+                    logger.debug("Got return code %s for %s", code, job)
 
-                # Check the file if there is no return code
-                if code is None:
-                    # Case where we cannot retrieve the code right away
-                    if job.donepath.is_file():
-                        code = 0
-                    else:
-                        code = int(job.failedpath.read_text())
+                    # Check the file if there is no return code
+                    if code is None:
+                        # Case where we cannot retrieve the code right away
+                        if job.donepath.is_file():
+                            code = 0
+                        else:
+                            code = int(job.failedpath.read_text())
 
-                logger.debug("Job %s ended with code %s", job, code)
-                # Let the process determine the job state (handles launcher-specific details)
-                state = process.get_job_state(code)
+                    logger.debug("Job %s ended with code %s", job, code)
+                    # Let the process determine the job state (handles launcher-specific details)
+                    state = process.get_job_state(code)
 
-            except JobError:
-                logger.warning("Error while running job")
-                state = JobState.ERROR
+                except JobError:
+                    logger.warning("Error while running job")
+                    state = JobState.ERROR
 
-            except Exception:
-                logger.warning(
-                    "Error while running job (in experimaestro)", exc_info=True
-                )
-                state = JobState.ERROR
+                except Exception:
+                    logger.warning(
+                        "Error while running job (in experimaestro)", exc_info=True
+                    )
+                    state = JobState.ERROR
+
+            # Locks are released here after job completes
 
             # Check if we should restart a resumable task that timed out
             from experimaestro.scheduler.jobs import JobStateError

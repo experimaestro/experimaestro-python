@@ -1,14 +1,10 @@
 """Dependency between tasks and tokens"""
 
 import threading
-from typing import Optional, Set, TYPE_CHECKING
-import asyncio
+from typing import Set
+from abc import ABC, abstractmethod
 from enum import Enum
-from ..utils import logger
 from ..locking import Lock
-
-if TYPE_CHECKING:
-    from . import Job
 
 
 class Dependents:
@@ -47,46 +43,41 @@ class DependencyStatus(Enum):
     """Dependency won't be availabe in the foreseeable future"""
 
 
-class Dependency:
+class Dependency(ABC):
     """Base class for dependencies
 
     Static dependencies (like jobs) have a fixed state once resolved - they cannot
     go from DONE back to WAIT. This is the default behavior.
     """
 
-    # Dependency status
-    loop: asyncio.AbstractEventLoop
-
     def __init__(self, origin):
-        # Origin and target are two resources
+        # Origin is the resource this dependency points to
         self.origin = origin
-        self.target: Optional["Job"] = None
-        self.currentstatus = DependencyStatus.WAIT
+        # Target will be set by scheduler when registering the job
+        self.target = None
 
     def is_dynamic(self) -> bool:
         """Returns True if this is a dynamic dependency (can change state)"""
         return False
 
-    def status(self) -> DependencyStatus:
-        raise NotImplementedError()
+    @abstractmethod
+    async def aio_lock(self, timeout: float = 0) -> Lock:
+        """Acquire a lock on this dependency asynchronously
 
-    async def aio_lock(self) -> Lock:
-        """Acquire a lock on this dependency asynchronously"""
-        raise NotImplementedError()
+        Args:
+            timeout: Timeout in seconds (0 = wait indefinitely)
+
+        Returns:
+            Lock object
+
+        Raises:
+            LockError: If lock cannot be acquired within timeout
+            RuntimeError: If dependency failed
+        """
+        pass
 
     def __repr__(self) -> str:
-        return "Dep[{origin}->{target}]/{currentstatus}".format(**self.__dict__)
-
-    def check(self):
-        assert self.target is not None
-        status = self.status()
-        logger.debug("Dependency check: %s", self)
-        if status != self.currentstatus:
-            logger.debug(
-                "Dependency %s is %s (was: %s)", self, status, self.currentstatus
-            )
-            self.target.dependencychanged(self, self.currentstatus, status)
-            self.currentstatus = status
+        return f"Dep[{self.origin}]"
 
 
 class DynamicDependency(Dependency):

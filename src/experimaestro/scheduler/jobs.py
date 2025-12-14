@@ -12,7 +12,7 @@ from experimaestro.core.objects import Config, ConfigWalkContext, WatchedOutput
 from experimaestro.notifications import LevelInformation, Reporter
 
 # from experimaestro.scheduler.base import Scheduler
-from experimaestro.scheduler.dependencies import Dependency, DependencyStatus, Resource
+from experimaestro.scheduler.dependencies import Dependency, Resource
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.locking import Lock
 from experimaestro.utils import logger
@@ -170,20 +170,33 @@ class JobDependency(Dependency):
     def __init__(self, job):
         super().__init__(job)
 
-    def status(self) -> DependencyStatus:
-        if self.origin.state == JobState.DONE:
-            return DependencyStatus.OK
-        elif self.origin.state == JobState.ERROR:
-            return DependencyStatus.FAIL
-        return DependencyStatus.WAIT
+    async def aio_lock(self, timeout: float = 0):
+        """Acquire lock on job dependency by waiting for job to complete
 
-    async def aio_lock(self):
-        """Acquire lock on job dependency by waiting for job to complete"""
+        Args:
+            timeout: Must be 0 (wait indefinitely) for job dependencies
+
+        Raises:
+            ValueError: If timeout is not 0
+            RuntimeError: If the job has not been submitted or if it failed
+        """
+        if timeout != 0:
+            raise ValueError(
+                "Job dependencies only support timeout=0 (wait indefinitely)"
+            )
+
         # Wait for the job to finish
         if self.origin._future is None:
             raise RuntimeError(f"Job {self.origin} has no future - not submitted")
         await asyncio.wrap_future(self.origin._future)
-        # Job is done, acquire and return the lock
+
+        # Check if the job succeeded
+        if self.origin.state != JobState.DONE:
+            raise RuntimeError(
+                f"Dependency job {self.origin.identifier} failed with state {self.origin.state}"
+            )
+
+        # Job succeeded, acquire and return the lock
         lock = JobLock(self.origin)
         lock.acquire()
         return lock
@@ -193,7 +206,6 @@ class Job(Resource):
     """A job is a resource that is produced by the execution of some code"""
 
     # Set by the scheduler
-    _readyEvent: Optional[asyncio.Event]
     _future: Optional["concurrent.futures.Future"]
 
     def __init__(
@@ -240,7 +252,6 @@ class Job(Resource):
 
         # Process
         self._process = None
-        self.unsatisfied = 0
 
         # Meta-information
         self.starttime: Optional[float] = None
@@ -418,28 +429,6 @@ class Job(Resource):
     @property
     def basepath(self) -> Path:
         return self.jobpath / self.name
-
-    def dependencychanged(self, dependency, oldstatus, status):
-        """Called when a dependency has changed"""
-
-        def value(s):
-            return 1 if s == DependencyStatus.OK else 0
-
-        self.unsatisfied -= value(status) - value(oldstatus)
-
-        logger.debug("Job %s: unsatisfied %d", self, self.unsatisfied)
-
-        if status == DependencyStatus.FAIL:
-            # Job completed with dependency failure
-            if not self.state.finished():
-                self.state = JobStateError(JobFailureStatus.DEPENDENCY)
-                self._readyEvent.set()
-
-        if self.unsatisfied == 0:
-            logger.info("Job %s is ready to run", self)
-            # We are ready
-            self.state = JobState.READY
-            self._readyEvent.set()
 
     def finalState(self) -> "concurrent.futures.Future[JobState]":
         assert self._future is not None
