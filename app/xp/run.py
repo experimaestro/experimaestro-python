@@ -132,7 +132,7 @@ def cli(keep: bool, debug: bool, port: int, tensorboard: bool, token: Optional[s
             socketpath = maindir / "socket1"
             logging.info("Controlled task with %s", socketpath)
             task = (
-                ControlledTask(path=socketpath, tensorboard=tensorboard)
+                ControlledTask.C(path=socketpath, tensorboard=tensorboard)
                 .tag("model", "mine")
                 .submit()
             )
