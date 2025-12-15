@@ -1,24 +1,26 @@
 # Configurations
 
-The most important concept in Experimaestro is that of a configuration. In Experimaestro, a configuration object is a fundamental concept used to specify parameters and settings for tasks and experiments. It acts as a structured way to input the necessary details to execute a task or a series of tasks. Here's a general description of what a configuration object in Experimaestro might encompass:
+In Experimaestro, a configuration object is a fundamental concept used to specify parameters and settings for tasks and experiments:
 
-1. **Parameter Definition**: The configuration object defines the parameters needed for a task or experiment. These parameters can include data file paths, numerical values, strings, and other types of inputs that are essential for the execution of the task.
-
-2. **Parameter Types and Validation**: Each parameter in the configuration object can have a specific type, such as integer, float, string, or more complex data types. The configuration object can include validation rules to ensure that the parameters provided are in the correct format and within expected ranges.
-
-3. **Default Values**: For some parameters, the configuration object can specify default values. This is useful in cases where a parameter is optional or where a common default value is typically used.
-
-4. **Documentation**: The configuration object can include documentation for each parameter, explaining its purpose and how it should be used. This documentation is crucial for making the configuration user-friendly, especially in complex experiments.
-
-5. **Hierarchy and Nesting**: In complex tasks, the configuration object can be hierarchical or nested. This means that a configuration object can contain other configuration objects, allowing for the organization of parameters in a structured manner.
-
-6. **Linking to Tasks**: The configuration object is typically linked to specific tasks or experiments. When a task is executed, it retrieves the necessary parameters from the associated configuration object.
-
-7. **Flexibility and Extensibility**: Configuration objects are designed to be flexible and extensible, allowing users to add new parameters or modify existing ones as the requirements of the task evolve.
-
-8. **Serialization**: Configuration objects are often serializable, meaning they can be saved to a file and loaded back. This is important for reproducibility and for sharing configurations between users or for future use.
-
-In practical use, a configuration object acts as a bridge between the user (or another system) and the execution environment, ensuring that all the necessary inputs are provided and validated before the task is run. This structured approach aids in automating and scaling experiments, as well as in ensuring their reproducibility.
+1. **Parameter Definition**: The configuration object defines the parameters
+   needed for a task or experiment. These parameters can include data file
+   paths, numerical values, strings, list and dictionaries. Configuration can be
+   nested for more flexibility.
+2. **Configuration identifier**: Different configurations yield different
+   identifiers. This ensures that each folder name is associated with a unique
+   configuration.
+3. **Parameter Validation**: A dynamic type checkers ensure configuration values
+   are compatible with their types. The configuration object can include
+   validation rules to ensure that the parameters provided are in the correct
+   format and within expected ranges.
+4. **Documentation**: The configuration object can include documentation for
+   each parameter, explaining its purpose and how it should be used. This
+   documentation can be output (e.g., [experimaestro IR learning
+   configurations](https://experimaestro-ir.readthedocs.io/en/latest/learning/index.html)).
+5. **Flexibility and Extensibility**: Configuration objects are designed to be
+   flexible and extensible, allowing users to add new parameters or modify
+   existing ones as the requirements of the task evolve. In particular,
+   *default* values can be introduced.
 
 
 ## Configuration identifiers
@@ -29,38 +31,12 @@ This identifier plays a crucial role in managing and referencing configurations,
 especially in complex systems where multiple configurations are used. Here's a
 detailed description:
 
-1. **Uniqueness**: A configuration identifier is unique for each configuration
-   instance. This uniqueness ensures that each configuration can be distinctly
-   identified and referenced, avoiding confusion or overlap with other
-   configurations.
+1. **Uniqueness**: A configuration identifier (MD5 hash) is unique for each set
+   of distinct experimental parameters.
 
-1. **MD5 Hashes**: Experimaestro utilizes MD5 hashes as configuration
-    identifiers. These hashes are unique to each configuration, ensuring a
-    distinct and consistent identifier for every set of parameters.
-
-1. **Run-Once Guarantee**: The unique MD5 hash identifiers ensure that each task
-   associated with a specific configuration is executed only once. This is
-   particularly important in avoiding redundant computations and ensuring the
-   efficiency of the workflow.
-
-**How is the identifier computed?**
-
-The principale is the following. Any value can be associated with a unique byte
-string: the byte string is obtained by outputting the type of the value (e.g.
-string, ir.adhoc.dataset) and the value itself as a binary string. A special
-handling of configurations and tasks (objects) is performed by sorting keys in
-ascending lexicographic order, thus ensuring the uniqueness of the
-representation.
-
- Moreover
-
-- Default values are removed (e.g. k1 when set to 0.9). This allows to
-  handle the situation where one adds a new experimental parameter
-  (e.g. a new loss component). In that case, using a default parameter
-  allows to add this parameter without invalidating all the previously
-  ran experiments.
-- Ignored values are removed (e.g. the number of threads when
-  indexing, the path where the index is stored)
+2. **Run-Once Guarantee**: The unique identifiers ensure that each task is
+   executed only once. This is particularly important in avoiding redundant
+   computations and ensuring the efficiency of the workflow.
 
 
 ## Defining a configuration
@@ -356,7 +332,11 @@ class MyConfig(Config):
 
 ### Metadata
 
-Metadata are parameters which are ignored during the signature computation. For instance, the human readable name of a model would be a metadata. They are declared as parameters, but using the `Meta` type hint
+Metadata are parameters which are ignored during the signature computation. For
+instance, the human readable name of a model would be a metadata. They are
+declared as parameters, but using the `Meta` type hint.
+
+Example
 
 ```py3
 class MyConfig(Config):
@@ -386,16 +366,18 @@ It is possible to define special options that will be set
 to paths relative to the task directory. For instance,
 
 ```py3
+from experimaestro import Config, Meta, PathGenerator, field
+from pathlib import Path
+
 class MyConfig(Config):
-    output: Annotated[Path, pathgenerator("output.txt")]
+    output: Meta[Path] = field(default_factory=PathGenerator("output.txt"))
 ```
 
-defines the instance variable `path` as a path `.../output.txt` within
-the task directory. To ensure there are no conflicts, paths
-are defined by following the config/task path, i.e. if the executed
-task has a parameter `model`, `model` has a parameter `optimization`,
-and optimization a path parameter `loss.txt`, then the file will be
-`./out/model/optimization/loss.txt`.
+defines the instance variable `path` as a path `.../output.txt` within the task
+directory. To ensure there are no conflicts, paths are defined by following the
+config/task path, i.e. if the executed task has a parameter `model`, `model` has
+a parameter `optimization`, and optimization a path parameter `loss.txt`, then
+the file will be `./out/model/optimization/loss.txt`.
 
 ## Validation
 
@@ -404,11 +386,30 @@ the values before a task is submitted. This allows to fail fast when parameters
 are not valid.
 
 ```py3
+from experimaestro import Param, Config
+
 class ModelLearn(Config):
     batch_size: Param[int] = 100
     micro_batch_size: Param[int] = 100
-    parameters: Annotated[Path, pathgenerator("parameters.pth")]
 
     def __validate__(self):
         assert self.batch_size % self.micro_batch_size == 0
 ```
+
+# How is a configuration identifier computed?
+
+The principale is the following. Any value can be associated with a unique byte
+string: the byte string is obtained by outputting the type of the value (e.g.
+string, `ir.adhoc.dataset`) and the value itself as a binary string. A special
+handling of configurations and tasks (objects) is performed by sorting keys in
+ascending lexicographic order, thus ensuring the uniqueness of the
+representation.
+
+ Moreover:
+
+- **Default values are removed** (e.g. `k1` when set to 0.9). This allows to handle
+  the situation where one adds a new experimental parameter (e.g. a new loss
+  component). In that case, using a default parameter allows to add this
+  parameter without invalidating all the previously ran experiments.
+- **Ignored values** are removed (e.g. the number of threads when
+  indexing, the path where the index is stored)
