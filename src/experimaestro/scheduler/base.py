@@ -512,6 +512,11 @@ class Scheduler(threading.Thread):
                         job.retry_count,
                         job.max_retries,
                     )
+                    # Clear cached process so aio_run() will create a new one
+                    job._process = None
+                    # Delete PID file so the job will be resubmitted
+                    if job.pidpath.exists():
+                        job.pidpath.unlink()
                     # Continue the loop to restart
                     continue
                 else:

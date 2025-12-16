@@ -13,9 +13,13 @@ fi
 find "$XPM_SLURM_DIR/jobs" -name "*.start" | while read name; do
     jobid=${name%.start}
     sf="$jobid.status"
+    timeout_marker="$jobid.timeout"
     if test -f "$sf"; then
         exitcode="$(cat $sf)"
-        if test "$exitcode" == 0; then
+        # Check for timeout marker file
+        if test -f "$timeout_marker"; then
+            status=TIMEOUT
+        elif test "$exitcode" == 0; then
             status=COMPLETED
         else
             status=FAILED

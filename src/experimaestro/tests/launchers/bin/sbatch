@@ -65,12 +65,14 @@ done < "$1"
 
 cd "$chdir"
 echo "Starting $@ ${args[@]} > $stdout 2> $stderr" >&2
+# Get job ID before forking
+JOBID="$$"
 (
     export PATH="${CURDIR}/bin:$PATH"
+    export SLURM_JOB_ID="$JOBID"
     eval "$@" "${args[@]}"
-    echo $? > "$XPM_SLURM_DIR/jobs/$$.status"
+    echo $? > "$XPM_SLURM_DIR/jobs/$JOBID.status"
 ) > $stdout 2> $stderr &
-JOBID="$$"
 date > "$XPM_SLURM_DIR/jobs/$JOBID.start"
 disown
 
