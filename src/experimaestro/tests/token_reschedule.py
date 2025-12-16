@@ -19,9 +19,9 @@ if __name__ == "__main__":
     handler = logging.StreamHandler()
     bf = logging.Formatter(
         f"[XP{x}] "
-        "[%(levelname)s] %(asctime)s %(name)s "
+        "[%(levelname)s] %(asctime)s.%(msecs)03d %(name)s "
         "[%(process)d/%(threadName)s]: %(message)s",
-        datefmt="%H:%M:%S.%f",
+        datefmt="%H:%M:%S",
     )
     handler.setFormatter(bf)
     root.handlers.clear()
@@ -46,4 +46,6 @@ if __name__ == "__main__":
         # Wait until the experiment
         task.__xpm__.task.job.wait()
         logging.info("Reschedule with token [%s]: finished", x)
+
+        # Write the timestamp from the task so the test can retrieve them easily
         Path(timepath).write_text(Path(task.stdout()).read_text())

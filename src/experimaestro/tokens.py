@@ -179,9 +179,11 @@ class TokenFile:
         def run():
             logger.debug("Locking job lock path %s", lockpath)
             process = None
+            # Acquire the job lock - blocks if scheduler is still starting the job
+            # Once we get the lock, the job has either started or finished
             with fasteners.InterProcessLock(lockpath):
                 if not pidpath.is_file():
-                    logger.debug("Job already finished (no PID file)")
+                    logger.debug("Job already finished (no PID file %s)", pidpath)
                 else:
                     s = ""
                     while s == "":
@@ -393,7 +395,7 @@ class CounterToken(Token, FileSystemEventHandler):
     def on_modified(self, event):
         try:
             logger.debug(
-                "Watched path notification %s [watched %s]",
+                "on modified path: %s [watched %s]",
                 event.src_path,
                 self.watchedpath,
             )

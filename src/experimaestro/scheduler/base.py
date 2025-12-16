@@ -361,109 +361,111 @@ class Scheduler(threading.Thread):
 
         # Restart loop for resumable tasks that timeout
         while True:
-            # We first lock the job before proceeding
-            with Locks() as locks:
-                logger.debug("[starting] Locking job %s", job)
-                async with job.launcher.connector.lock(job.lockpath):
-                    logger.debug("[starting] Locked job %s", job)
+            logger.debug(
+                "Starting job %s with %d dependencies",
+                job,
+                len(job.dependencies),
+            )
 
-                state = None
+            # Separate static and dynamic dependencies
+            static_deps = [d for d in job.dependencies if not d.is_dynamic()]
+            dynamic_deps = [d for d in job.dependencies if d.is_dynamic()]
+
+            # First, wait for all static dependencies (jobs) to complete
+            # These don't need the dependency lock as they can't change state
+            # Static dependency locks don't need to be added to locks list
+            logger.debug("Waiting for %d static dependencies", len(static_deps))
+            for dependency in static_deps:
+                logger.debug("Waiting for static dependency %s", dependency)
                 try:
-                    logger.debug(
-                        "Starting job %s with %d dependencies",
-                        job,
-                        len(job.dependencies),
-                    )
-
-                    # Separate static and dynamic dependencies
-                    static_deps = [d for d in job.dependencies if not d.is_dynamic()]
-                    dynamic_deps = [d for d in job.dependencies if d.is_dynamic()]
-
-                    # First, wait for all static dependencies (jobs) to complete
-                    # These don't need the dependency lock as they can't change state
-                    # Static dependency locks don't need to be added to locks list
-                    logger.debug("Waiting for %d static dependencies", len(static_deps))
-                    for dependency in static_deps:
-                        logger.debug("Waiting for static dependency %s", dependency)
-                        await dependency.aio_lock()
-
-                    # Now handle dynamic dependencies (tokens) with retry logic
-                    # CRITICAL: Only one task at a time can acquire dynamic dependencies
-                    # to prevent deadlocks (e.g., Task A holds Token1 waiting for Token2,
-                    # Task B holds Token2 waiting for Token1)
-                    if dynamic_deps:
-                        async with self.dependencyLock:
-                            logger.debug(
-                                "Locking %d dynamic dependencies (tokens)",
-                                len(dynamic_deps),
-                            )
-                            while True:
-                                all_locked = True
-                                for idx, dependency in enumerate(dynamic_deps):
-                                    try:
-                                        # Use timeout=0 for first dependency, 0.1s for subsequent
-                                        timeout = 0 if idx == 0 else 0.1
-                                        # Acquire the lock (this might block on IPC locks)
-                                        lock = await dependency.aio_lock(
-                                            timeout=timeout
-                                        )
-                                        locks.append(lock)
-                                    except LockError:
-                                        logger.debug(
-                                            "Could not lock %s, retrying", dependency
-                                        )
-                                        # Release all locks and restart
-                                        for lock in locks.locks:
-                                            lock.release()
-                                        locks.locks.clear()
-                                        # Put failed dependency first
-                                        dynamic_deps.remove(dependency)
-                                        dynamic_deps.insert(0, dependency)
-                                        all_locked = False
-                                        break
-
-                                if all_locked:
-                                    # All locks acquired successfully
-                                    break
-
-                    # Dependencies have been locked, we can start the job
-                    job.starttime = time.time()
-
-                    # Creates the main directory
-                    directory = job.path
-                    logger.debug("Making directories job %s...", directory)
-
-                    # Warn about directory cleanup for non-resumable tasks
-                    if directory.is_dir() and not job.resumable:
-                        logger.warning(
-                            "In a future version, directory will be cleaned up for "
-                            "non-resumable tasks. Use ResumableTask if you want to "
-                            "preserve the directory contents."
-                        )
-
-                    if not directory.is_dir():
-                        directory.mkdir(parents=True, exist_ok=True)
-
-                    # Sets up the notification URL
-                    if self.server is not None:
-                        job.add_notification_server(self.server)
-
+                    await dependency.aio_lock()
                 except RuntimeError as e:
                     # Dependency failed - mark job as failed due to dependency
                     from experimaestro.scheduler.jobs import JobStateError
 
                     logger.warning("Dependency failed: %s", e)
                     return JobStateError(JobFailureStatus.DEPENDENCY)
-                except Exception:
-                    logger.warning("Error while locking job", exc_info=True)
-                    return JobState.WAITING
 
-                try:
-                    # Runs the job
-                    process = await job.aio_run()
-                except Exception:
-                    logger.warning("Error while starting job", exc_info=True)
-                    return JobState.ERROR
+            # We first lock the job before proceeding
+            with Locks() as locks:
+                logger.debug("[starting] Locking job %s", job)
+                async with job.launcher.connector.lock(job.lockpath):
+                    logger.debug("[starting] Locked job %s", job)
+
+                    state = None
+                    try:
+                        # Now handle dynamic dependencies (tokens) with retry logic
+                        # CRITICAL: Only one task at a time can acquire dynamic dependencies
+                        # to prevent deadlocks (e.g., Task A holds Token1 waiting for Token2,
+                        # Task B holds Token2 waiting for Token1)
+                        if dynamic_deps:
+                            async with self.dependencyLock:
+                                logger.debug(
+                                    "Locking %d dynamic dependencies (tokens)",
+                                    len(dynamic_deps),
+                                )
+                                while True:
+                                    all_locked = True
+                                    for idx, dependency in enumerate(dynamic_deps):
+                                        try:
+                                            # Use timeout=0 for first dependency, 0.1s for subsequent
+                                            timeout = 0 if idx == 0 else 0.1
+                                            # Acquire the lock (this might block on IPC locks)
+                                            lock = await dependency.aio_lock(
+                                                timeout=timeout
+                                            )
+                                            locks.append(lock)
+                                        except LockError:
+                                            logger.debug(
+                                                "Could not lock %s, retrying",
+                                                dependency,
+                                            )
+                                            # Release all locks and restart
+                                            for lock in locks.locks:
+                                                lock.release()
+                                            locks.locks.clear()
+                                            # Put failed dependency first
+                                            dynamic_deps.remove(dependency)
+                                            dynamic_deps.insert(0, dependency)
+                                            all_locked = False
+                                            break
+
+                                    if all_locked:
+                                        # All locks acquired successfully
+                                        break
+
+                        # Dependencies have been locked, we can start the job
+                        job.starttime = time.time()
+
+                        # Creates the main directory
+                        directory = job.path
+                        logger.debug("Making directories job %s...", directory)
+
+                        # Warn about directory cleanup for non-resumable tasks
+                        if directory.is_dir() and not job.resumable:
+                            logger.warning(
+                                "In a future version, directory will be cleaned up for "
+                                "non-resumable tasks. Use ResumableTask if you want to "
+                                "preserve the directory contents."
+                            )
+
+                        if not directory.is_dir():
+                            directory.mkdir(parents=True, exist_ok=True)
+
+                        # Sets up the notification URL
+                        if self.server is not None:
+                            job.add_notification_server(self.server)
+
+                    except Exception:
+                        logger.warning("Error while locking job", exc_info=True)
+                        return JobState.WAITING
+
+                    try:
+                        # Runs the job
+                        process = await job.aio_run()
+                    except Exception:
+                        logger.warning("Error while starting job", exc_info=True)
+                        return JobState.ERROR
 
                 # Wait for job to complete while holding locks
                 try:

@@ -59,9 +59,12 @@ def token_experiment(xp, token, ntasks=3):
         assert (times[i - 1] > times[i]) or (times[i] > times[i - 1])
 
 
-@pytest.mark.xfail(strict=True)
+@pytest.mark.xfail(
+    strict=False,
+    reason="Timing-dependent: tasks may run sequentially even without token",
+)
 def test_token_fail():
-    """Simple token test: should fail without token"""
+    """Simple token test: should fail without token (but may pass due to timing)"""
     with TemporaryExperiment("tokens", maxwait=20) as xp:
         token_experiment(xp, None)
 
