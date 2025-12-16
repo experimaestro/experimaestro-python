@@ -5,6 +5,7 @@ a computational resource (e.g. number of launched jobs, etc.)
 from dataclasses import dataclass
 import sys
 from pathlib import Path
+import time
 import weakref
 
 from omegaconf import DictConfig
@@ -127,19 +128,28 @@ class TokenFile:
     """
 
     def __init__(self, path: Path):
-        try:
-            self.path = path
-            with path.open("rt") as fp:
-                count, self.uri = [line.strip() for line in fp.readlines()]
-                self.count = int(count)
+        # Case where the file was deleted
+        self.count = 0
+        self.uri = None
 
-        except FileNotFoundError:
-            # Case where the file was deleted
-            self.count = 0
-            self.uri = None
-        except Exception:
-            logging.exception("Error while reading %s", self.path)
-            raise
+        retries = 0
+        while retries < 5:
+            retries += 1
+            try:
+                self.path = path
+                with path.open("rt") as fp:
+                    count, self.uri = [line.strip() for line in fp.readlines()]
+                    self.count = int(count)
+            except FileNotFoundError:
+                # Case where the file was deleted
+                self.count = 0
+                self.uri = None
+            except Exception:
+                logging.exception("Error while reading %s", self.path)
+                time.sleep(0.1)
+                continue
+
+            break
 
     @staticmethod
     def create(dependency: CounterTokenDependency):
