@@ -121,7 +121,7 @@ class Scheduler(threading.Thread):
         if self.server is None:
             from experimaestro.server import Server
 
-            self.server = Server.instance(settings)
+            self.server = Server.instance(settings, self.state_provider)
             self.server.start()
             logger.info("Server started by scheduler")
         else:
@@ -142,6 +142,12 @@ class Scheduler(threading.Thread):
         # Set loop-dependent variables
         self.exitCondition = asyncio.Condition()
         self.dependencyLock = asyncio.Lock()
+
+        # Create state provider for experiment monitoring
+        from experimaestro.scheduler.state_provider import SchedulerStateProvider
+
+        self.state_provider = SchedulerStateProvider(self)
+
         self._ready.set()
         self.loop.run_forever()
 

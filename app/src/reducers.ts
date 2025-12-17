@@ -2,8 +2,19 @@ import { combineReducers, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { messageSlice } from "./ui/messages";
 import _ from "lodash";
 
-type Experiment = {
-  name: string;
+export type Experiment = {
+  experiment_id: string;
+  workdir?: string;
+  total_jobs: number;
+  finished_jobs: number;
+  failed_jobs: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type Experiments = {
+  byId: { [key: string]: Experiment };
+  ids: Array<string>;
 };
 
 type JobStatus = "running" | "done" | "error" | "ready" | "waiting";
@@ -26,6 +37,8 @@ export type Job = {
     desc: string | null;
     progress: number;
   }>;
+
+  experimentIds?: Array<string>;  // Jobs can belong to multiple experiments
 };
 
 export type Jobs = {
@@ -74,7 +87,9 @@ const jobComparator = (jobs: { [key: string]: Job }) => {
 
 export type State = {
   connected: boolean;
-  experiment: string;
+  experiment: string;  // Kept for backward compatibility
+  currentExperiment: string | null;  // Currently selected experiment filter (null = all)
+  experiments: Experiments;  // All experiments
   jobs: Jobs;
   services: Services;
 };
@@ -86,6 +101,8 @@ export const slice = createSlice({
   initialState: {
     connected: false,
     experiment: "",
+    currentExperiment: null,
+    experiments: { byId: {}, ids: [] },
     jobs: { byId: {}, ids: [] },
     services: { byId: {}, ids: [] }
   } as State,
@@ -126,6 +143,33 @@ export const slice = createSlice({
 
     setConnected(draft, action: PayloadAction<boolean>) {
       draft.connected = action.payload;
+    },
+
+    addExperiment(draft, action: PayloadAction<Experiment>) {
+      const exp = action.payload;
+      if (draft.experiments.byId[exp.experiment_id] === undefined) {
+        draft.experiments.ids.push(exp.experiment_id);
+      }
+      draft.experiments.byId[exp.experiment_id] = exp;
+
+      // Set as current experiment if it's the first one
+      if (draft.experiments.ids.length === 1) {
+        draft.currentExperiment = exp.experiment_id;
+        draft.experiment = exp.experiment_id;  // Backward compatibility
+      }
+    },
+
+    updateExperiment(draft, action: PayloadAction<Partial<Experiment> & { experiment_id: string }>) {
+      const exp = action.payload;
+      if (draft.experiments.byId[exp.experiment_id] !== undefined) {
+        _.merge(draft.experiments.byId[exp.experiment_id], exp);
+      }
+    },
+
+    selectExperiment(draft, action: PayloadAction<string | null>) {
+      draft.currentExperiment = action.payload;
+      // Update backward compatibility field
+      draft.experiment = action.payload || "";
     },
   },
 });

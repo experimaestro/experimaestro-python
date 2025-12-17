@@ -19,6 +19,7 @@ export default () => {
   const [killJob, setKillJob] = useState<Job>();
   const { info } = useMessages();
   const jobs = useAppSelector((state) => state.db.jobs);
+  const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
 
   function updateTagSearch(tag: string) {
     let re = /(\S+):(?:([^"]\S*)|"([^"]+)")\s*/g;
@@ -39,6 +40,13 @@ export default () => {
     }
 
     function filter(job: Job) {
+      // Filter by experiment if one is selected
+      if (currentExperiment !== null) {
+        if (!job.experimentIds || !job.experimentIds.includes(currentExperiment)) {
+          return false;
+        }
+      }
+
       if (re_task && job.taskId.match(re_task) === null) return false;
 
       mainloop: for (let { tag, value } of tagFilters) {
@@ -53,7 +61,7 @@ export default () => {
     }
 
     return jobs.ids.map((id) => jobs.byId[id]).filter(filter);
-  }, [jobs.ids, jobs.byId, tagFilters, taskFilter]);
+  }, [jobs.ids, jobs.byId, tagFilters, taskFilter, currentExperiment]);
 
   function cancelKill() {
     setKillJob(undefined);

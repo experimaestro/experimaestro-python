@@ -254,6 +254,7 @@ dependencies = [
     { name = "marshmallow" },
     { name = "mkdocs" },
     { name = "omegaconf" },
+    { name = "peewee" },
     { name = "psutil" },
     { name = "pyparsing" },
     { name = "pytools" },
@@ -293,6 +294,7 @@ requires-dist = [
     { name = "marshmallow", specifier = ">=3.20,<4" },
     { name = "mkdocs", specifier = ">=1.5,<2" },
     { name = "omegaconf", specifier = ">=2.3,<3" },
+    { name = "peewee", specifier = ">=3.17,<4" },
     { name = "psutil", specifier = ">=7,<8" },
     { name = "pyparsing", specifier = ">=3.1,<4" },
     { name = "pytools", specifier = ">=2023.1.1,<2024" },
@@ -898,6 +900,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/ca/bc/f35b8446f4531a7cb
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/20/ff623b09d963f88bfde16306a54e12ee5ea43e9b597108672ff3a408aad6/pathspec-0.12.1-py3-none-any.whl", hash = "sha256:a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08", size = 31191, upload-time = "2023-12-10T22:30:43.14Z" },
 ]
+
+[[package]]
+name = "peewee"
+version = "3.18.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6f/60/58e7a307a24044e0e982b99042fcd5a58d0cd928d9c01829574d7553ee8d/peewee-3.18.3.tar.gz", hash = "sha256:62c3d93315b1a909360c4b43c3a573b47557a1ec7a4583a71286df2a28d4b72e", size = 3026296, upload-time = "2025-11-03T16:43:46.678Z" }
 
 [[package]]
 name = "platformdirs"

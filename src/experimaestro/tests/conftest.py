@@ -38,8 +38,26 @@ def reset_scheduler():
         scheduler.jobs.clear()
         scheduler.waitingjobs.clear()
         scheduler.experiments.clear()
+        # Clear state provider experiment providers to avoid stale references
+        if (
+            hasattr(scheduler, "state_provider")
+            and scheduler.state_provider is not None
+        ):
+            # Close all experiment providers
+            for provider in scheduler.state_provider.experiment_providers.values():
+                provider.close()
+            scheduler.state_provider.experiment_providers.clear()
+            logging.debug("FIXTURE: Cleared state provider experiment providers")
+
         # Also clear listeners to prevent stale listeners
         scheduler.listeners.clear()
+
+        # Re-add state_provider as listener if it exists
+        if (
+            hasattr(scheduler, "state_provider")
+            and scheduler.state_provider is not None
+        ):
+            scheduler.addlistener(scheduler.state_provider)
 
     # Reset server instance too
     if Server._instance is not None:
@@ -60,7 +78,21 @@ def reset_scheduler():
         scheduler.jobs.clear()
         scheduler.waitingjobs.clear()
         scheduler.experiments.clear()
+        # Clear state provider experiment providers
+        if (
+            hasattr(scheduler, "state_provider")
+            and scheduler.state_provider is not None
+        ):
+            for provider in scheduler.state_provider.experiment_providers.values():
+                provider.close()
+            scheduler.state_provider.experiment_providers.clear()
         scheduler.listeners.clear()
+        # Re-add state_provider as listener if it exists
+        if (
+            hasattr(scheduler, "state_provider")
+            and scheduler.state_provider is not None
+        ):
+            scheduler.addlistener(scheduler.state_provider)
 
     # Reset server after test
     if Server._instance is not None:

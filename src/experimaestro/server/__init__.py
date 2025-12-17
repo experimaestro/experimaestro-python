@@ -61,6 +61,9 @@ def job_details(job):
 
 
 def job_create(job: Job):
+    # Get experiment IDs from job.experiments list
+    experiment_ids = [xp.workdir.name for xp in job.experiments]
+
     return {
         "jobId": job.identifier,
         "taskId": job.name,
@@ -68,30 +71,42 @@ def job_create(job: Job):
         "status": job.state.name.lower(),
         "tags": list(job.tags.items()),
         "progress": progress_state(job),
+        "experimentIds": experiment_ids,  # Add experiment IDs
     }
 
 
 class Listener(BaseListener, ServiceListener):
-    def __init__(self, socketio):
+    def __init__(self, socketio, state_provider):
+        from experimaestro.scheduler.state_provider import SchedulerStateProvider
+
         self.socketio = socketio
-        self.scheduler = Scheduler.instance()
-        self.scheduler.addlistener(self)
-        self.services = {}
-        # Initialize services from all registered experiments
-        for xp in self.scheduler.experiments.values():
-            for service in xp.services.values():
-                self.service_add(service)
+        self.state_provider = state_provider
+
+        # Only register with scheduler if using SchedulerStateProvider
+        if isinstance(state_provider, SchedulerStateProvider):
+            self.scheduler = state_provider.scheduler
+            self.scheduler.addlistener(self)
+            self.services = {}
+            # Initialize services from all registered experiments
+            for xp in self.scheduler.experiments.values():
+                for service in xp.services.values():
+                    self.service_add(service)
+        else:
+            self.scheduler = None
+            self.services = {}
 
     def job_submitted(self, job):
         self.socketio.emit("job.add", job_create(job))
 
     def job_state(self, job):
+        experiment_ids = [xp.workdir.name for xp in job.experiments]
         self.socketio.emit(
             "job.update",
             {
                 "jobId": job.identifier,
                 "status": job.state.name.lower(),
                 "progress": progress_state(job),
+                "experimentIds": experiment_ids,
             },
         )
 
@@ -167,7 +182,7 @@ def start_app(server: "Server"):
 
     logging.debug("Starting Flask server (SocketIO)...")
     socketio = SocketIO(app, path="/api", async_mode="gevent")
-    listener = Listener(socketio)
+    listener = Listener(socketio, server.state_provider)
 
     logging.debug("Starting Flask server (setting up socketio)...")
 
@@ -177,13 +192,47 @@ def start_app(server: "Server"):
             raise ConnectionRefusedError("invalid token")
 
     @socketio.on("refresh")
-    def handle_refresh():
-        for job in listener.scheduler.jobs.values():
-            emit("job.add", job_create(job))
+    def handle_refresh(experiment_id=None):
+        """Refresh jobs for an experiment (or all experiments if None)"""
+        if experiment_id:
+            # Refresh specific experiment
+            jobs = listener.state_provider.get_jobs(experiment_id)
+            for job_data in jobs:
+                emit("job.add", job_data)
+        else:
+            # Refresh all experiments - only works with SchedulerStateProvider
+            if listener.scheduler:
+                for job in listener.scheduler.jobs.values():
+                    emit("job.add", job_create(job))
+            else:
+                # For non-scheduler providers, refresh all experiments
+                for exp in listener.state_provider.get_experiments():
+                    exp_id = exp["experiment_id"]
+                    jobs = listener.state_provider.get_jobs(exp_id)
+                    for job_data in jobs:
+                        emit("job.add", job_data)
+
+    @socketio.on("experiments")
+    def handle_experiments():
+        """List all experiments"""
+        experiments = listener.state_provider.get_experiments()
+        for exp in experiments:
+            emit("experiment.add", exp)
 
     @socketio.on("job.details")
-    def handle_details(jobid):
-        emit("job.update", job_details(listener.scheduler.jobs[jobid]))
+    def handle_details(data):
+        """Get job details - expects {experimentId, jobId} or just jobId (backward compat)"""
+        # Backward compatibility: if data is a string, treat it as jobId
+        if isinstance(data, str):
+            jobid = data
+            if listener.scheduler:
+                emit("job.update", job_details(listener.scheduler.jobs[jobid]))
+        else:
+            experiment_id = data.get("experimentId")
+            job_id = data.get("jobId")
+            job_data = listener.state_provider.get_job(experiment_id, job_id)
+            if job_data:
+                emit("job.update", job_data)
 
     @socketio.on("services")
     def handle_services_list():
@@ -198,13 +247,26 @@ def start_app(server: "Server"):
             )
 
     @socketio.on("job.kill")
-    def handle_job_kill(jobid: str):
-        scheduler = Scheduler.instance()
-        job = scheduler.jobs[jobid]
-        future = asyncio.run_coroutine_threadsafe(job.aio_process(), scheduler.loop)
-        process = future.result()
-        if process is not None:
-            process.kill()
+    def handle_job_kill(data):
+        """Kill a job - expects {experimentId, jobId} or just jobId (backward compat)"""
+        # Backward compatibility: if data is a string, treat it as jobId
+        if isinstance(data, str):
+            jobid = data
+            if listener.scheduler:
+                job = listener.scheduler.jobs[jobid]
+                future = asyncio.run_coroutine_threadsafe(
+                    job.aio_process(), listener.scheduler.loop
+                )
+                process = future.result()
+                if process is not None:
+                    process.kill()
+        else:
+            experiment_id = data.get("experimentId")
+            job_id = data.get("jobId")
+            try:
+                listener.state_provider.kill_job(experiment_id, job_id)
+            except NotImplementedError:
+                logging.warning("kill_job not supported for this state provider")
 
     logging.debug("Starting Flask server (setting up routes)...")
 
@@ -337,8 +399,13 @@ class Server:
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
     @staticmethod
-    def instance(settings: ServerSettings = None) -> "Server":
-        """Get or create the global server instance"""
+    def instance(settings: ServerSettings = None, state_provider=None) -> "Server":
+        """Get or create the global server instance
+
+        Args:
+            settings: Server settings (optional)
+            state_provider: StateProvider instance (optional, will use scheduler's if None)
+        """
         if Server._instance is None:
             with Server._lock:
                 if Server._instance is None:
@@ -346,10 +413,18 @@ class Server:
                         from experimaestro.settings import get_settings
 
                         settings = get_settings().server
-                    Server._instance = Server(settings)
+
+                    # Get state provider from scheduler if not provided
+                    if state_provider is None:
+                        from experimaestro.scheduler import Scheduler
+
+                        scheduler = Scheduler.instance()
+                        state_provider = scheduler.state_provider
+
+                    Server._instance = Server(settings, state_provider)
         return Server._instance
 
-    def __init__(self, settings: ServerSettings):
+    def __init__(self, settings: ServerSettings, state_provider):
         if settings.autohost == "fqdn":
             settings.host = socket.getfqdn()
             logging.info("Auto host name (fqdn): %s", settings.host)
@@ -365,6 +440,7 @@ class Server:
         self.host = settings.host or "127.0.0.1"
         self.port = settings.port
         self.token = settings.token or uuid.uuid4().hex
+        self.state_provider = state_provider
         self.instance = None
         self.running = False
         self.cv_running = threading.Condition()

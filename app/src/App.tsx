@@ -8,6 +8,7 @@ import NavDropdown from 'react-bootstrap/NavDropdown';
 
 import Tasks from "./Tasks";
 import Services from "./Services";
+import { ExperimentSelector } from "./ExperimentSelector";
 
 import { useAppSelector } from "./store";
 
@@ -34,6 +35,7 @@ export default () => {
             <Nav.Link href="/">Tasks</Nav.Link>
             <Services/>
           </Nav>
+          <ExperimentSelector />
           <i
             className={`fab fa-staylinked ws-status ${
               connected ? "ws-link" : "ws-no-link"

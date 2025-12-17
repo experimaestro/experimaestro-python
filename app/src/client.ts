@@ -11,6 +11,7 @@ class Client {
     const socket = this.socket;
     this.socket.on('connect', function() {
       store.dispatch(actions.setConnected(true))
+      socket.emit('experiments')  // Request experiment list
       socket.emit('refresh')
       socket.emit('services')
     });
@@ -18,6 +19,10 @@ class Client {
     socket.on("disconnect", () => {
       store.dispatch(actions.setConnected(false))
     });
+
+    this.socket.on('experiment.add', function(data) {
+      store.dispatch(actions.addExperiment(data))
+    })
 
     this.socket.on('service.add', function(data) {
       store.dispatch(actions.addService(data))
@@ -45,11 +50,20 @@ class Client {
 
   }
 
-  job_details(jobid: string) {
-    this.socket.emit('job.details', jobid)
+  job_details(jobid: string, experimentId?: string) {
+    if (experimentId) {
+      this.socket.emit('job.details', { experimentId, jobId: jobid })
+    } else {
+      this.socket.emit('job.details', jobid)  // Backward compatibility
+    }
   }
-  job_kill(jobid: string) {
-    this.socket.emit('job.kill', jobid)
+
+  job_kill(jobid: string, experimentId?: string) {
+    if (experimentId) {
+      this.socket.emit('job.kill', { experimentId, jobId: jobid })
+    } else {
+      this.socket.emit('job.kill', jobid)  // Backward compatibility
+    }
   }
 }
 
