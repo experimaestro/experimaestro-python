@@ -1,7 +1,6 @@
 # flake8: noqa: T201
 import sys
 from typing import Set, Optional
-import pkg_resources
 from itertools import chain
 from shutil import rmtree
 import click
@@ -10,6 +9,7 @@ from functools import cached_property, update_wrapper
 from pathlib import Path
 import subprocess
 from termcolor import cprint
+from importlib.metadata import entry_points
 
 import experimaestro
 from experimaestro.experiments.cli import experiments_cli
@@ -263,7 +263,7 @@ class Launchers(click.MultiCommand):
     @cached_property
     def commands(self):
         map = {}
-        for ep in pkg_resources.iter_entry_points(f"experimaestro.{self.name}"):
+        for ep in entry_points(f"experimaestro.{self.name}"):
             if get_cli := getattr(ep.load(), "get_cli", None):
                 map[ep.name] = get_cli()
         return map
