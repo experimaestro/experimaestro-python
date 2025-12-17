@@ -270,7 +270,7 @@ All the task output should be located in the directory
 
 Inside this directory, we have
 
-- `.experimaestro`, the folder that stores information about the process
+- `__xpm__`, the folder that stores information about the process
 - `[NAME].py` and (for some launchers) `[NAME].sh`  that contains the code that will be executed (through a cluster
   scheduler, e.g. slurm, or directly)
 - `[NAME].err` and `[NAME].out` that stores the standard output and error
