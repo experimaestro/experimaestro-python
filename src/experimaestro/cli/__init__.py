@@ -14,7 +14,7 @@ from importlib.metadata import entry_points
 import experimaestro
 from experimaestro.experiments.cli import experiments_cli
 import experimaestro.launcherfinder.registry as launcher_registry
-from experimaestro.settings import find_workspace
+from experimaestro.settings import ServerSettings, find_workspace
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -309,3 +309,41 @@ def list(workdir: Path):
             cprint(f"[unfinished] {p.name}", "yellow")
         else:
             cprint(p.name, "cyan")
+
+
+@experiments.command()
+@click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
+@click.option(
+    "--port", type=int, default=12345, help="Port for web server (default: 12345)"
+)
+@pass_cfg
+def monitor(workdir: Path, console: bool, port: int):
+    """Monitor experiments with web UI or console TUI"""
+    if console:
+        # Use Textual TUI
+        from experimaestro.tui import ExperimentTUI
+
+        app = ExperimentTUI(workdir, watch=True)
+        app.run()
+    else:
+        # Use React web server
+        from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+        from experimaestro.server import Server
+
+        cprint(f"Starting experiment monitor on http://localhost:{port}", "green")
+        cprint("Press Ctrl+C to stop", "yellow")
+
+        state_provider = WorkspaceStateProvider(workdir, watch=True)
+        settings = ServerSettings()
+        settings.port = port
+        server = Server.instance(settings, state_provider=state_provider)
+        server.start()
+
+        try:
+            import time
+
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            cprint("\nShutting down...", "yellow")
+            state_provider.close()

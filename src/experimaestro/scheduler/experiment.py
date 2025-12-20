@@ -57,6 +57,7 @@ class experiment:
         token: Optional[str] = None,
         run_mode: Optional[RunMode] = None,
         launcher=None,
+        register_signals: bool = True,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -73,6 +74,9 @@ class experiment:
 
         :param run_mode: The run mode for the experiment (normal, generate run
             files, dry run)
+
+        :param register_signals: Whether to register signal handlers (default: True).
+            Set to False when running in a background thread.
         """
 
         from experimaestro.scheduler import Listener, Scheduler
@@ -93,6 +97,7 @@ class experiment:
         self.old_experiment = None
         self.services: Dict[str, Service] = {}
         self._job_listener: Optional[Listener] = None
+        self._register_signals = register_signals
 
         # Get configuration settings
 
@@ -287,7 +292,8 @@ class experiment:
         self.taskOutputsWorker = TaskOutputsWorker(self)
         self.taskOutputsWorker.start()
 
-        SIGNAL_HANDLER.add(self)
+        if self._register_signals:
+            SIGNAL_HANDLER.add(self)
 
         self.old_experiment = experiment.CURRENT
         experiment.CURRENT = self
@@ -312,7 +318,8 @@ class experiment:
             else:
                 self.wait()
         finally:
-            SIGNAL_HANDLER.remove(self)
+            if self._register_signals:
+                SIGNAL_HANDLER.remove(self)
 
             # Stop services
             for service in self.services.values():

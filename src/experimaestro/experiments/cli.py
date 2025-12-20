@@ -52,8 +52,7 @@ class ExperimentHelper:
 class ExperimentCallable(Protocol):
     """Protocol for the run function"""
 
-    def __call__(self, helper: ExperimentHelper, configuration: Any):
-        ...
+    def __call__(self, helper: ExperimentHelper, configuration: Any): ...  # noqa: E704
 
 
 class ConfigurationLoader:
@@ -127,6 +126,11 @@ class ConfigurationLoader:
     help="Port for monitoring (can be defined in the settings.yaml file)",
 )
 @click.option(
+    "--tui",
+    is_flag=True,
+    help="Launch Textual TUI for monitoring with logs",
+)
+@click.option(
     "--file",
     "xp_file",
     type=Path,
@@ -162,6 +166,7 @@ def experiments_cli(  # noqa: C901
     xp_file: str,
     host: str,
     port: int,
+    tui: bool,
     xpm_config_dir: Path,
     workdir: Optional[Path],
     workspace: Optional[str],
@@ -317,24 +322,102 @@ def experiments_cli(  # noqa: C901
         experiment_id,
         str(workdir.resolve()),
     )
-    with experiment(
-        ws_env, experiment_id, host=host, port=port, run_mode=run_mode
-    ) as xp:
-        # Set up the environment
-        # (1) global settings (2) workspace settings and (3) command line settings
-        for key, value in env:
-            xp.setenv(key, value)
 
-        # Sets the python path
-        xp.workspace.python_path.extend(python_path)
-
+    # Define the experiment execution function
+    def run_experiment_code(xp_holder=None, xp_ready_event=None, register_signals=True):
+        """Run the experiment code - optionally storing xp in xp_holder"""
         try:
-            # Run the experiment
-            helper.xp = xp
-            helper.run(list(args), xp_configuration)
+            with experiment(
+                ws_env,
+                experiment_id,
+                host=host,
+                port=port,
+                run_mode=run_mode,
+                register_signals=register_signals,
+            ) as xp:
+                if xp_holder is not None:
+                    xp_holder["xp"] = xp
+                if xp_ready_event is not None:
+                    xp_ready_event.set()  # Signal that xp is ready
 
-            # ... and wait
-            xp.wait()
+                # Test logging from experiment thread
+                logging.info("Experiment started in background thread")
+                print("Experiment thread started - print test")
+
+                # Set up the environment
+                for key, value in env:
+                    xp.setenv(key, value)
+
+                # Sets the python path
+                xp.workspace.python_path.extend(python_path)
+
+                # Run the experiment
+                helper.xp = xp
+                helper.run(list(args), xp_configuration)
+
+                # ... and wait
+                xp.wait()
 
         except HandledException:
             sys.exit(1)
+
+    if tui:
+        # Run experiment in background thread, TUI in main thread
+        import threading
+        from experimaestro.tui import ExperimentTUI
+
+        xp_holder = {"xp": None}
+        exception_holder = {"exception": None}
+        xp_ready = threading.Event()
+
+        def run_in_thread():
+            try:
+                # Don't register signals in background thread
+                run_experiment_code(xp_holder, xp_ready, register_signals=False)
+                # Add a test message after experiment completes
+                logging.info("Experiment thread completed")
+                print("Experiment thread print test")
+            except Exception as e:
+                exception_holder["exception"] = e
+                xp_ready.set()  # Signal even on error
+
+        # Start experiment in background thread
+        exp_thread = threading.Thread(target=run_in_thread, daemon=True)
+        exp_thread.start()
+
+        # Wait for experiment to start (up to 30 seconds)
+        if not xp_ready.wait(timeout=30.0):
+            cprint("Timeout waiting for experiment to start", "red", file=sys.stderr)
+            sys.exit(1)
+
+        if xp_holder["xp"] is None:
+            cprint("Failed to start experiment", "red", file=sys.stderr)
+            if exception_holder["exception"]:
+                raise exception_holder["exception"]
+            sys.exit(1)
+
+        # Run TUI in main thread (handles signals via Textual)
+        tui_app = ExperimentTUI(
+            workdir=workdir,
+            state_provider=xp_holder["xp"].scheduler.state_provider,
+            show_logs=True,
+        )
+
+        try:
+            # Textual automatically captures stdout/stderr via Print events
+            tui_app.run()
+        finally:
+            # TUI exited (user pressed q or Ctrl+C) - stop the experiment
+            if xp_holder["xp"]:
+                xp_holder["xp"].stop()
+
+            # Wait for experiment thread to finish
+            exp_thread.join(timeout=5.0)
+
+        # Handle exceptions
+        if exception_holder["exception"]:
+            raise exception_holder["exception"]
+
+    else:
+        # Normal mode without TUI - run directly
+        run_experiment_code()

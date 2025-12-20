@@ -45,6 +45,7 @@ dependencies = [
     "rpyc >=5,<7",
     "sortedcontainers >=2.4,<3",
     "termcolor >=2.3,<3",
+    "textual >=6",
     "tqdm >=4.66.1,<5",
     "typing-extensions >=4.2; python_version < \"3.12\"",
     "watchdog >=2"
@@ -91,6 +92,7 @@ dev = [
     "pymdown-extensions>=10.16.1",
     "pytest>=8.4.1",
     "pytest-timeout>=2.4.0",
+    "textual-dev>=1.8.0",
 ]
 
 [tool.poetry.group.ssh]

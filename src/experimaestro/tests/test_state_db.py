@@ -117,53 +117,6 @@ def test_experiment_state_provider_basic(tmp_path: Path):
     provider.close()
 
 
-def test_state_json_migration(tmp_path: Path):
-    """Test migration from legacy state.json to database"""
-    workdir = tmp_path / "workspace"
-    experiment_dir = workdir / "xp" / "test_exp"
-    experiment_dir.mkdir(parents=True)
-
-    # Create a mock state.json
-    state_json_path = experiment_dir / "state.json"
-
-    # Create a simple task instance for the state
-    task = SimpleTask.C(x=42)
-
-    # Write state.json using experimaestro's serialization format
-    from experimaestro.core.serialization import save_definition
-    from experimaestro.core.context import SerializationContext
-
-    state_data = [
-        {
-            "id": "job_1",
-            "path": str(tmp_path / "job_1"),
-            "task": task,
-            "tags": {"test": "value"},
-            "depends_on": [],
-        }
-    ]
-
-    save_definition(state_data, SerializationContext(), state_json_path)
-
-    # Create provider in read-only mode (should trigger migration)
-    provider = ExperimentStateProvider(workdir, "test_exp", read_only=True)
-
-    # Verify database was created
-    db_path = experiment_dir / "experiment.db"
-    assert db_path.exists()
-
-    # Verify job was migrated
-    jobs = provider.get_jobs()
-    assert len(jobs) == 1
-    assert jobs[0]["jobId"] == "job_1"  # Changed to camelCase
-    assert (
-        jobs[0]["status"] == "done"
-    )  # Migrated jobs assumed complete (changed from "state")
-
-    # Cleanup
-    provider.close()
-
-
 def test_read_only_mode(tmp_path: Path):
     """Test that read-only mode prevents writes"""
     workdir = tmp_path / "workspace"

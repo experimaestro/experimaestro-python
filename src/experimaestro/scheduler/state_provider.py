@@ -7,7 +7,6 @@ state from different sources (active scheduler, offline databases, SSH remotes).
 import abc
 import json
 import logging
-import fasteners
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -142,92 +141,32 @@ class ExperimentStateProvider:
         # Database path: workdir/xp/{experiment_name}/experiment.db
         self.experiment_dir = workdir / "xp" / experiment_name
         self.db_path = self.experiment_dir / "experiment.db"
-        self.state_json_path = self.experiment_dir / "state.json"
-        self.lock_path = self.experiment_dir / "state.lock"
-
         # Initialize database connection
         self.db = None
         if self.db_path.exists() or not read_only:
             self._open_database()
-        elif read_only and self.state_json_path.exists():
-            # Migrate from legacy state.json
-            logger.info(
-                "Migrating experiment %s from state.json to database",
-                experiment_name,
-            )
-            self._migrate_from_state_json()
-            self._open_database()
 
     def _open_database(self):
         """Open database connection"""
+        from experimaestro.scheduler.state_db import JobModel
+
         self.db = initialize_database(self.db_path, read_only=self.read_only)
+
+        # Check if tables exist (they might not if database was created but not initialized)
+        if self.read_only and not JobModel.table_exists():
+            logger.warning(
+                "Database exists but tables not found for experiment %s, ignoring",
+                self.experiment_name,
+            )
+            close_database()
+            self.db = None
+            return
+
         logger.debug(
             "Opened database for experiment %s (read_only=%s)",
             self.experiment_name,
             self.read_only,
         )
-
-    def _migrate_from_state_json(self):
-        """Migrate from legacy state.json to database
-
-        This reads the state.json file and populates the database with job information.
-        Uses file locking to prevent race conditions with active experiments.
-        """
-        if not self.state_json_path.exists():
-            logger.warning(
-                "No state.json found for migration at %s", self.state_json_path
-            )
-            return
-
-        # Ensure lock directory exists
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            # Lock the experiment directory to prevent concurrent access
-            with fasteners.InterProcessLock(self.lock_path):
-                # Check again if state.json still exists (might have been deleted)
-                if not self.state_json_path.exists():
-                    logger.warning("state.json disappeared during lock acquisition")
-                    return
-
-                # Temporarily open database in write mode for migration
-                initialize_database(self.db_path, read_only=False)
-
-                # Read state.json
-                from experimaestro.core.serialization import from_state_dict
-
-                with self.state_json_path.open("rt") as fh:
-                    content = json.load(fh)
-
-                # Parse job information
-                job_states = from_state_dict(content, as_instance=False)
-
-                # Create job records in database
-                for job_dict in job_states:
-                    # Extract dependency job IDs
-                    dep_ids = job_dict.get("depends_on", [])
-
-                    JobModel.create(
-                        job_id=job_dict["id"],
-                        task_id=job_dict["task"].__xpmtype__.identifier,
-                        locator=job_dict["id"],
-                        path=str(job_dict["path"]),
-                        state="done",  # Assume completed since in state.json
-                        tags=json.dumps(job_dict.get("tags", {})),
-                        dependencies=json.dumps(dep_ids),
-                    )
-
-                logger.info("Migrated %d jobs from state.json", len(job_states))
-
-                # Close temporary database
-                close_database()
-
-        except Exception as e:
-            logger.exception("Failed to migrate from state.json: %s", e)
-            # Clean up partial database on error
-            if self.db_path.exists():
-                self.db_path.unlink()
-            raise
 
     def close(self):
         """Close database connection"""
@@ -243,10 +182,21 @@ class ExperimentStateProvider:
         Returns:
             Dictionary with experiment information
         """
-        # Count jobs by state
-        total_jobs = JobModel.select().count()
-        finished_jobs = JobModel.select().where((JobModel.state == "done")).count()
-        failed_jobs = JobModel.select().where((JobModel.state == "error")).count()
+        logging.info("Getting experiment info %s, %s", self.db is None, self.db_path)
+        if self.db is None:
+            return {
+                "experiment_id": self.experiment_name,
+                "workdir": str(self.workdir),
+                "total_jobs": 0,
+                "finished_jobs": 0,
+                "failed_jobs": 0,
+            }
+
+        # Count jobs by state using the database instance directly
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            total_jobs = JobModel.select().count()
+            finished_jobs = JobModel.select().where((JobModel.state == "done")).count()
+            failed_jobs = JobModel.select().where((JobModel.state == "error")).count()
 
         return {
             "experiment_id": self.experiment_name,
@@ -265,13 +215,17 @@ class ExperimentStateProvider:
         Returns:
             List of job dictionaries
         """
-        query = JobModel.select()
-        if task_id:
-            query = query.where(JobModel.task_id == task_id)
+        if self.db is None:
+            return []
 
-        jobs = []
-        for job_model in query:
-            jobs.append(self._job_model_to_dict(job_model))
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            query = JobModel.select()
+            if task_id:
+                query = query.where(JobModel.task_id == task_id)
+
+            jobs = []
+            for job_model in query:
+                jobs.append(self._job_model_to_dict(job_model))
 
         return jobs
 
@@ -284,11 +238,15 @@ class ExperimentStateProvider:
         Returns:
             Job dictionary or None if not found
         """
-        try:
-            job_model = JobModel.get(JobModel.job_id == job_id)
-            return self._job_model_to_dict(job_model)
-        except JobModel.DoesNotExist:
+        if self.db is None:
             return None
+
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            try:
+                job_model = JobModel.get(JobModel.job_id == job_id)
+                return self._job_model_to_dict(job_model)
+            except JobModel.DoesNotExist:
+                return None
 
     def get_services(self) -> List[Dict]:
         """Get all services for this experiment
@@ -296,17 +254,21 @@ class ExperimentStateProvider:
         Returns:
             List of service dictionaries
         """
-        services = []
-        for service_model in ServiceModel.select():
-            services.append(
-                {
-                    "service_id": service_model.service_id,
-                    "description": service_model.description,
-                    "state": service_model.state,
-                    "created_at": service_model.created_at.isoformat(),
-                    "updated_at": service_model.updated_at.isoformat(),
-                }
-            )
+        if self.db is None:
+            return []
+
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            services = []
+            for service_model in ServiceModel.select():
+                services.append(
+                    {
+                        "service_id": service_model.service_id,
+                        "description": service_model.description,
+                        "state": service_model.state,
+                        "created_at": service_model.created_at.isoformat(),
+                        "updated_at": service_model.updated_at.isoformat(),
+                    }
+                )
         return services
 
     def _job_model_to_dict(self, job_model: JobModel) -> Dict:
@@ -375,22 +337,23 @@ class ExperimentStateProvider:
         ]
 
         # Create or update job record
-        JobModel.insert(
-            job_id=job.identifier,
-            task_id=str(job.type.identifier),
-            locator=job.identifier,
-            path=str(job.path),
-            state=job.state.name,
-            submitted_time=job.submittime,
-            tags=json.dumps(job.tags),
-            dependencies=json.dumps(dep_ids),
-        ).on_conflict(
-            conflict_target=[JobModel.job_id],
-            update={
-                JobModel.state: job.state.name,
-                JobModel.submitted_time: job.submittime,
-            },
-        ).execute()
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            JobModel.insert(
+                job_id=job.identifier,
+                task_id=str(job.type.identifier),
+                locator=job.identifier,
+                path=str(job.path),
+                state=job.state.name,
+                submitted_time=job.submittime,
+                tags=json.dumps(job.tags),
+                dependencies=json.dumps(dep_ids),
+            ).on_conflict(
+                conflict_target=[JobModel.job_id],
+                update={
+                    JobModel.state: job.state.name,
+                    JobModel.submitted_time: job.submittime,
+                },
+            ).execute()
 
         logger.debug("Recorded job submission: %s", job.identifier)
 
@@ -433,7 +396,10 @@ class ExperimentStateProvider:
             )
 
         # Update the job record
-        JobModel.update(update_data).where(JobModel.job_id == job.identifier).execute()
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            JobModel.update(update_data).where(
+                JobModel.job_id == job.identifier
+            ).execute()
 
         logger.debug("Updated job state: %s -> %s", job.identifier, job.state.name)
 
@@ -451,20 +417,21 @@ class ExperimentStateProvider:
 
         from datetime import datetime
 
-        ServiceModel.insert(
-            service_id=service.id,
-            description=service.description(),
-            state=service.state.name,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-        ).on_conflict(
-            conflict_target=[ServiceModel.service_id],
-            update={
-                ServiceModel.description: service.description(),
-                ServiceModel.state: service.state.name,
-                ServiceModel.updated_at: datetime.now(),
-            },
-        ).execute()
+        with self.db.bind_ctx([JobModel, ServiceModel]):
+            ServiceModel.insert(
+                service_id=service.id,
+                description=service.description(),
+                state=service.state.name,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            ).on_conflict(
+                conflict_target=[ServiceModel.service_id],
+                update={
+                    ServiceModel.description: service.description(),
+                    ServiceModel.state: service.state.name,
+                    ServiceModel.updated_at: datetime.now(),
+                },
+            ).execute()
 
         logger.debug("Updated service: %s", service.id)
 
@@ -734,12 +701,10 @@ class WorkspaceStateProvider(StateProvider):
 
             experiment_name = exp_dir.name
 
-            # Check if experiment has state.json or experiment.db
-            has_state = (exp_dir / "state.json").exists() or (
-                exp_dir / "experiment.db"
-            ).exists()
+            # Check if experiment has experiment.db
+            has_db = (exp_dir / "experiment.db").exists()
 
-            if has_state and experiment_name not in self.experiment_providers:
+            if has_db and experiment_name not in self.experiment_providers:
                 try:
                     provider = ExperimentStateProvider(
                         self.workdir, experiment_name, read_only=True
