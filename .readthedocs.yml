@@ -16,6 +16,8 @@ build:
     - pip install -r docs/requirements.txt
     # Install the package (pip will use hatch as build backend)
     - pip install .
+    # Build the MkDocs site
+    - mkdocs build --site-dir $READTHEDOCS_OUTPUT/html
 
 # Build documentation with MkDocs
 mkdocs:
