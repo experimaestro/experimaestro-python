@@ -10,7 +10,8 @@ on:
 jobs:
   deploy:
     permissions:
-      id-token: write
+      contents: write  # Required to update release notes
+      id-token: write  # Required for PyPI trusted publishing
     runs-on: ubuntu-latest
 
     steps:
