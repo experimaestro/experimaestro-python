@@ -2,8 +2,12 @@ from collections import ChainMap
 from enum import Enum
 from functools import cached_property
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Optional
 from experimaestro.settings import WorkspaceSettings, Settings
+
+
+# Current workspace version
+WORKSPACE_VERSION = 0
 
 
 class RunMode(str, Enum):
@@ -54,6 +58,45 @@ class Workspace:
         self.env = ChainMap({}, workspace_settings.env, settings.env)
 
     def __enter__(self):
+        # Check and update workspace version
+        version_file = self.path / ".__experimaestro__"
+
+        if version_file.exists():
+            # Read existing version
+            content = version_file.read_text().strip()
+            if content == "":
+                # Empty file = v0
+                workspace_version = 0
+            else:
+                try:
+                    workspace_version = int(content)
+                except ValueError:
+                    raise RuntimeError(
+                        f"Invalid workspace version file at {version_file}: "
+                        f"expected integer, got '{content}'"
+                    )
+
+            # Check if workspace version is supported
+            if workspace_version > WORKSPACE_VERSION:
+                raise RuntimeError(
+                    f"Workspace version {workspace_version} is not supported by "
+                    f"this version of experimaestro (supports up to version "
+                    f"{WORKSPACE_VERSION}). Please upgrade experimaestro."
+                )
+            if workspace_version < WORKSPACE_VERSION:
+                raise RuntimeError(
+                    f"Workspace version {workspace_version} is not supported by "
+                    "this version of experimaestro (please upgrade the experimaestro "
+                    "workspace)"
+                )
+        else:
+            # New workspace - create the file
+            workspace_version = WORKSPACE_VERSION
+
+        # Write current version to file (update empty v0 workspaces)
+        if not version_file.exists() or version_file.read_text().strip() == "":
+            version_file.write_text(str(WORKSPACE_VERSION))
+
         self.old_workspace = Workspace.CURRENT
         Workspace.CURRENT = self
 

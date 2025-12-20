@@ -992,9 +992,7 @@ class experiment:
             self.server.start()
 
         self.workspace.__enter__()
-        (self.workspace.path / ".__experimaestro__").touch()
 
-        global SIGNAL_HANDLER
         # Number of unfinished jobs
         self.unfinishedJobs = 0
         self.taskOutputQueueSize = 0
