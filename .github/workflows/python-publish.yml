@@ -3,15 +3,14 @@
 
 name: Upload Python Package
 
-permissions:
-  id-token: write
-
 on:
   release:
     types: [created]
 
 jobs:
   deploy:
+    permissions:
+      id-token: write
     runs-on: ubuntu-latest
 
     steps:
