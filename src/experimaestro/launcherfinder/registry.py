@@ -6,10 +6,10 @@ from typing import ClassVar, Dict, Optional, Set, Type, Union
 from pathlib import Path
 import typing
 from omegaconf import DictConfig, OmegaConf, SCMode
-import pkg_resources
 from experimaestro.utils import logger
 from .base import ConnectorConfiguration, TokenConfiguration
 from .specs import HostRequirement, RequirementUnion
+from importlib.metadata import entry_points
 
 if typing.TYPE_CHECKING:
     from experimaestro.launchers import Launcher
@@ -59,9 +59,9 @@ class LauncherRegistry:
             ).expanduser()
 
         if LauncherRegistry.CURRENT_CONFIG_DIR not in LauncherRegistry.INSTANCES:
-            LauncherRegistry.INSTANCES[
-                LauncherRegistry.CURRENT_CONFIG_DIR
-            ] = LauncherRegistry(LauncherRegistry.CURRENT_CONFIG_DIR)
+            LauncherRegistry.INSTANCES[LauncherRegistry.CURRENT_CONFIG_DIR] = (
+                LauncherRegistry(LauncherRegistry.CURRENT_CONFIG_DIR)
+            )
 
         return LauncherRegistry.INSTANCES[LauncherRegistry.CURRENT_CONFIG_DIR]
 
@@ -75,10 +75,10 @@ class LauncherRegistry:
         self.find_launcher_fn = None
 
         # Use entry points for connectors and launchers
-        for entry_point in pkg_resources.iter_entry_points("experimaestro.connectors"):
+        for entry_point in entry_points(group="experimaestro.connectors"):
             entry_point.load().init_registry(self)
 
-        for entry_point in pkg_resources.iter_entry_points("experimaestro.tokens"):
+        for entry_point in entry_points(group="experimaestro.tokens"):
             entry_point.load().init_registry(self)
 
         # Register the find launcher function if it exists

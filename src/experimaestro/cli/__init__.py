@@ -1,7 +1,6 @@
 # flake8: noqa: T201
 import sys
 from typing import Set, Optional
-import pkg_resources
 from itertools import chain
 from shutil import rmtree
 import click
@@ -15,6 +14,7 @@ import experimaestro
 from experimaestro.experiments.cli import experiments_cli
 import experimaestro.launcherfinder.registry as launcher_registry
 from experimaestro.settings import find_workspace
+from importlib.metadata import entry_points
 
 # --- Command line main options
 logging.basicConfig(level=logging.INFO)
@@ -274,7 +274,7 @@ class Launchers(click.MultiCommand):
     @cached_property
     def commands(self):
         map = {}
-        for ep in pkg_resources.iter_entry_points(f"experimaestro.{self.name}"):
+        for ep in entry_points(group=f"experimaestro.{self.name}"):
             if get_cli := getattr(ep.load(), "get_cli", None):
                 map[ep.name] = get_cli()
         return map

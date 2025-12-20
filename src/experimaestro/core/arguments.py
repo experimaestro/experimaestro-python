@@ -3,16 +3,10 @@
 from typing import Optional, TypeVar, TYPE_CHECKING, Callable, Any
 from experimaestro.typingutils import get_optional
 from pathlib import Path
-import sys
+from typing import Annotated
 
 if TYPE_CHECKING:
-    from typing_extensions import Annotated
     import experimaestro.core.types
-else:
-    if sys.version_info.major == 3 and sys.version_info.minor < 9:
-        from typing_extensions import Annotated
-    else:
-        from typing import Annotated
 
 
 class Argument:

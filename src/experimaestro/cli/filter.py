@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List, Optional
 import pyparsing as pp
 from pathlib import Path
 import json
-from experimaestro.compat import cached_property
+from functools import cached_property
 import re
 from experimaestro.scheduler import JobState
 

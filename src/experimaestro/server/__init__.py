@@ -5,7 +5,7 @@ import platform
 import socket
 import uuid
 from experimaestro.scheduler.base import Job
-import pkg_resources
+from importlib.metadata import files
 import http
 import threading
 from typing import Optional, Tuple
@@ -143,7 +143,7 @@ def proxy_response(base_url: str, request: Request, path: str):
     return flask_response
 
 
-def start_app(server: "Server"):
+def start_app(server: "Server"):  # noqa: C901
     logging.debug("Starting Flask server...")
     app = Flask("experimaestro")
 
@@ -256,10 +256,16 @@ def start_app(server: "Server"):
 
         datapath = "data/%s" % path
         logging.debug("Looking for %s", datapath)
-        if pkg_resources.resource_exists("experimaestro.server", datapath):
-            mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
-            content = pkg_resources.resource_string("experimaestro.server", datapath)
-            return Response(content, mimetype=mimetype)
+        try:
+            package_files = files("experimaestro.server")
+            resource_file = package_files / datapath
+            if resource_file.is_file():
+                mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
+                content = resource_file.read_bytes()
+                return Response(content, mimetype=mimetype)
+        except (FileNotFoundError, KeyError):
+            pass
+
         return Response("Page not found", status=404)
 
     # Start the app
