@@ -21,7 +21,7 @@ from experimaestro.launcherfinder.registry import (
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from experimaestro.utils.asyncio import asyncThreadcheck
-from experimaestro.compat import cached_property
+from functools import cached_property
 from experimaestro.launchers import Launcher
 from experimaestro.scriptbuilder import PythonScriptBuilder
 from experimaestro.connectors import (

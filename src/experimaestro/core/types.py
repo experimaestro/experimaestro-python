@@ -13,10 +13,7 @@ from enum import Enum
 import ast
 import textwrap
 
-if sys.version_info.major == 3 and sys.version_info.minor < 9:
-    from typing_extensions import _AnnotatedAlias, get_type_hints
-else:
-    from typing import _AnnotatedAlias, get_type_hints
+from typing import _AnnotatedAlias, get_type_hints
 
 if typing.TYPE_CHECKING:
     from experimaestro.scheduler.base import Job

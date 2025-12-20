@@ -3,7 +3,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Union
 from importlib import resources
-from experimaestro.compat import cached_property
+from functools import cached_property
 
 
 class ResourcePathWrapper(PathLike):

@@ -263,7 +263,7 @@ class Launchers(click.MultiCommand):
     @cached_property
     def commands(self):
         map = {}
-        for ep in entry_points(f"experimaestro.{self.name}"):
+        for ep in entry_points(group=f"experimaestro.{self.name}"):
             if get_cli := getattr(ep.load(), "get_cli", None):
                 map[ep.name] = get_cli()
         return map

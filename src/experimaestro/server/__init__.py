@@ -10,20 +10,7 @@ import http
 import threading
 from typing import Optional, Tuple, ClassVar
 
-if sys.version_info >= (3, 9):
-    from importlib.resources import files
-
-    pkg_resources = None
-else:
-    try:
-        from importlib_resources import files
-
-        pkg_resources = None
-    except ImportError:
-        # Fallback to pkg_resources if importlib_resources not available
-        import pkg_resources
-
-        files = None
+from importlib.resources import files
 from experimaestro.scheduler import Scheduler, Listener as BaseListener
 from experimaestro.scheduler.services import Service, ServiceListener
 from experimaestro.settings import ServerSettings
@@ -345,24 +332,16 @@ def start_app(server: "Server"):
         datapath = "data/%s" % path
         logging.debug("Looking for %s", datapath)
 
-        if files is not None:
-            try:
-                package_files = files("experimaestro.server")
-                resource_file = package_files / datapath
-                if resource_file.is_file():
-                    mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
-                    content = resource_file.read_bytes()
-                    return Response(content, mimetype=mimetype)
-            except (FileNotFoundError, KeyError):
-                pass
-        elif pkg_resources is not None:
-            # Fallback to pkg_resources
-            if pkg_resources.resource_exists("experimaestro.server", datapath):
+        try:
+            package_files = files("experimaestro.server")
+            resource_file = package_files / datapath
+            if resource_file.is_file():
                 mimetype = MIMETYPES[datapath.rsplit(".", 1)[1]]
-                content = pkg_resources.resource_string(
-                    "experimaestro.server", datapath
-                )
+                content = resource_file.read_bytes()
                 return Response(content, mimetype=mimetype)
+        except (FileNotFoundError, KeyError):
+            pass
+
         return Response("Page not found", status=404)
 
     # Start the app
