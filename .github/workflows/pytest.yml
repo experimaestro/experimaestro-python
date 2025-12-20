@@ -31,6 +31,10 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Create an empty server data (editable build)
+        run: |
+          mkdir -p src/experimaestro/server/data
+
       - name: Install dependencies
         run: |
           uv sync --all-extras
