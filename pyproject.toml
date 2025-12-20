@@ -1,11 +1,15 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
 name = "experimaestro"
 authors = [
     {name = "Benjamin Piwowarski", email = "benjamin@piwowarski.fr"}
 ]
-description = '"Experimaestro is a computer science experiment manager"'
+description = "Experimaestro is a computer science experiment manager"
 readme = "README.md"
-license = "GPL-3"
+license = {text = "GPL-3.0-or-later"}
 keywords = ["experiment manager"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,12 +18,13 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-repository = "https://github.com/experimaestro/experimaestro-python"
-documentation = "https://experimaestro-python.readthedocs.io/"
-dynamic = ["version"]
 requires-python = ">=3.10"
+dynamic = ["version"]
 dependencies = [
     "arpeggio >=2,<3",
     "attrs >=23.1.0,<24",
@@ -48,44 +53,10 @@ dependencies = [
     "textual >=6",
     "tqdm >=4.66.1,<5",
     "typing-extensions >=4.2; python_version < \"3.12\"",
-    "watchdog >=2"
+    "watchdog >=2",
 ]
 
-[tool.poetry-dynamic-versioning]
-enable = true
-vcs = "git"
-style = "semver"
-dirty = true
-format-jinja = """{%- set pre = [] -%}{%- set metadata = [] -%}
-{%- if revision is not none -%}{{ pre.append(stage|string + revision|string) or "" }}{%- endif -%}
-{%- if distance > 0 -%}{{ metadata.append(distance|string) or "" }}{%- endif -%}
-{{ serialize_semver(base, pre, metadata)}}"""
-
-[tool.poetry]
-include = [
-    "src/experimaestro/server/data/*",
-    "src/experimaestro/sphinx/static/experimaestro.css",
-    "src/experimaestro/mkdocs/style.css",
-    { path="src/experimaestro/server/data/*", format=['sdist', 'wheel']}
-]
-version = "0.0.0"
-
-[tool.poetry-dynamic-versioning.files."src/experimaestro/version.py"]
-persistent-substitution = true
-initial-content = """
-  # These version placeholders will be replaced later during substitution.
-  __version__ = "0.0.0"
-  __version_tuple__ = (0, 0, 0)
-"""
-
-[tool.poetry.requires-plugins]
-poetry-dynamic-versioning = { version = ">=1.0.0,<2.0.0", extras = ["plugin"] }
-
-[build-system]
-requires = ["poetry-core>=1.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
-build-backend = "poetry_dynamic_versioning.backend"
-
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "markdown-include>=0.8.1",
     "mkdocstrings[python]>=0.30.1",
@@ -93,21 +64,19 @@ dev = [
     "pytest>=8.4.1",
     "pytest-timeout>=2.4.0",
     "textual-dev>=1.8.0",
+    "docutils>=0.18",
+    "Pygments>=2.15",
+]
+ssh = [
+    "paramiko>=3.3",
+    "fabric>=3",
 ]
 
-[tool.poetry.group.ssh]
-optional = true
-
-[tool.poetry.group.ssh.dependencies]
-paramiko = "^3.3"
-fabric = "^3"
-
-[tool.poetry.group.dev]
-optional = true
-
-[tool.poetry.group.dev.dependencies]
-docutils = "^0.18"
-Pygments = "^2.15"
+[project.urls]
+Homepage = "https://github.com/experimaestro/experimaestro-python"
+Documentation = "https://experimaestro-python.readthedocs.io/"
+Repository = "https://github.com/experimaestro/experimaestro-python"
+"Bug Tracker" = "https://github.com/experimaestro/experimaestro-python/issues"
 
 [project.scripts]
 experimaestro = "experimaestro.__main__:main"
@@ -126,33 +95,49 @@ ssh = "experimaestro.connectors.ssh:SshConnector"
 [project.entry-points."experimaestro.tokens"]
 unix = "experimaestro.tokens:CounterToken"
 
+[tool.hatch.version]
+source = "vcs"
 
-[tool.distutils.bdist_wheel]
-universal = true
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
 
-[tool.distutils.sdist]
-formats = "zip"
+[tool.hatch.build.hooks.vcs]
+version-file = "src/experimaestro/version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/experimaestro"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/experimaestro/server/data" = "experimaestro/server/data"
+"src/experimaestro/sphinx/static/experimaestro.css" = "experimaestro/sphinx/static/experimaestro.css"
+"src/experimaestro/mkdocs/style.css" = "experimaestro/mkdocs/style.css"
 
 [tool.pydocstyle]
 match-dir = '(?!tests)(?!resources)(?!docs)[^\.].*'
 match = '(?!test)(?!setup)[^\._].*\.py'
-inherit = "false"
-ignore = "D200, D203, D213, D406, D407   # Google conventions"
-
-[tool.flake8]
-doctests = "True"
-exclude = ".git, .eggs, __pycache__, tests/, docs/, build/, dist/, app/"
-max-line-length = "88"
-# See https://github.com/PyCQA/pycodestyle/issues/373
-extend-ignore = "E203"
+inherit = false
+ignore = "D200,D203,D213,D406,D407"
 
 [tool.mypy]
 python_version = "3.10"
 warn_unused_ignores = true
 
-[tool.commitizen]
-name = "cz_conventional_commits"
-version = "2.0.0a9"
-changelog_start_rev = "v1.0.0"
-tag_format = "v$major.$minor.$patch$prerelease"
-# update_changelog_on_bump = true
+[tool.pytest.ini_options]
+junit_family = "xunit2"
+testpaths = ["src/experimaestro"]
+norecursedirs = ["node_modules"]
+log_format = "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]: %(message)s"
+log_date_format = "%H:%M:%S"
+
+[dependency-groups]
+dev = [
+    "flake8>=7.3.0",
+]

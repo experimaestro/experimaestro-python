@@ -12,23 +12,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Install Node.JS and Python
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for hatch-vcs to determine version
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
-      # Install the package
-      - uses: actions/checkout@v2
-      - name: Install dependencies
+      - name: Install hatch
         run: |
           python -m pip install --upgrade pip
-          pip install poetry "poetry-dynamic-versioning<2"
+          pip install hatch
 
-      # Build and publish
+      - name: Generate changelog for this release
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
+
+      - name: Update release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
 
       - name: Build web app
         working-directory: ./app
@@ -37,12 +50,9 @@ jobs:
           npm install --no-save
           NODE_OPTIONS="--loader ts-node/esm" npm run build
 
-      - name: Build python
+      - name: Build python package
         run: |
-          poetry build
+          hatch build
 
-      - name: Publish package
-        env:
-          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          poetry publish
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

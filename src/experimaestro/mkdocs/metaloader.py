@@ -2,7 +2,6 @@
 # when building documentation
 
 import sys
-import re
 import importlib.abc
 import importlib.machinery
 

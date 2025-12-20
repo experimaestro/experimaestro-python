@@ -1,5 +1,4 @@
 import atexit
-import shutil
 import tempfile
 from pathlib import Path
 from subprocess import Popen, PIPE, run
