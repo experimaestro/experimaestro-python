@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, List
 import logging
+import fnmatch
 
 
 @dataclass
@@ -40,6 +41,9 @@ class WorkspaceSettings:
 
     max_retries: int = 3
     """Maximum number of retries for resumable tasks that timeout (default: 3)"""
+
+    triggers: List[str] = field(default_factory=list)
+    """Glob patterns to automatically select this workspace based on experiment ID"""
 
     def __post_init__(self):
         self.path = self.path.expanduser().resolve()
@@ -87,9 +91,21 @@ def get_workspace(id: Optional[str] = None) -> Optional[WorkspaceSettings]:
 
 
 def find_workspace(
-    *, workspace: Optional[str] = None, workdir: Optional[Path] = None
+    *,
+    workspace: Optional[str] = None,
+    workdir: Optional[Path] = None,
+    experiment_id: Optional[str] = None,
 ) -> WorkspaceSettings:
-    """Find workspace"""
+    """Find workspace
+
+    Args:
+        workspace: Explicit workspace ID to use
+        workdir: Explicit working directory path
+        experiment_id: Experiment ID to match against workspace triggers
+
+    Returns:
+        WorkspaceSettings object
+    """
     workdir = Path(workdir) if workdir else None
 
     if workspace:
@@ -106,8 +122,28 @@ def find_workspace(
         logging.info("Using workdir %s", workdir)
         ws_env = WorkspaceSettings("", workdir)
     else:
-        ws_env = get_workspace()
-        assert ws_env is not None, "No workdir or workspace defined, and no default"
-        logging.info("Using default workspace %s", ws_env.id)
+        # Try to match experiment_id against workspace triggers
+        matched_workspace = None
+        if experiment_id:
+            workspaces = get_settings().workspaces
+            for ws in workspaces:
+                for trigger in ws.triggers:
+                    if fnmatch.fnmatch(experiment_id, trigger):
+                        matched_workspace = ws
+                        logging.info(
+                            "Auto-selected workspace %s (matched trigger '%s')",
+                            ws.id,
+                            trigger,
+                        )
+                        break
+                if matched_workspace:
+                    break
+
+        if matched_workspace:
+            ws_env = matched_workspace
+        else:
+            ws_env = get_workspace()
+            assert ws_env is not None, "No workdir or workspace defined, and no default"
+            logging.info("Using default workspace %s", ws_env.id)
 
     return ws_env

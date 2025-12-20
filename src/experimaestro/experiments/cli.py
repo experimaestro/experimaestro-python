@@ -303,19 +303,19 @@ def experiments_cli(  # noqa: C901
         configuration, structured_config_mode=SCMode.INSTANTIATE
     )
 
-    # Define the workspace
-    ws_env = find_workspace(workdir=workdir, workspace=workspace)
-
-    workdir = ws_env.path
-
     # --- Sets up the experiment ID
-
-    # --- Runs the experiment
     if xp_configuration.add_timestamp:
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
         experiment_id = f"""{xp_configuration.id}-{timestamp}"""
     else:
         experiment_id = xp_configuration.id
+
+    # Define the workspace (may auto-select based on experiment_id triggers)
+    ws_env = find_workspace(
+        workdir=workdir, workspace=workspace, experiment_id=experiment_id
+    )
+
+    workdir = ws_env.path
 
     logging.info(
         "Running experiment %s working directory %s",
