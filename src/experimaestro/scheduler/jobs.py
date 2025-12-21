@@ -3,6 +3,8 @@ from collections import ChainMap
 import enum
 from functools import cached_property
 import itertools
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, List, Optional, Set
 
@@ -210,7 +212,139 @@ class JobDependency(Dependency):
         return lock
 
 
-class Job(Resource):
+class JobMetadata:
+    """Mixin class for managing job metadata files
+
+    Handles reading/writing of job-related files:
+    - .xpm_metadata.json: Timing and process information
+    - .pid: Process ID file
+    - .done: Success marker
+    - .failed: Failure marker with exit code
+
+    Classes using this mixin must provide:
+    - path: Path to the job directory
+    - identifier: Job identifier
+    - type: Job type with identifier attribute
+    - state: Current JobState
+    - submittime, starttime, endtime: Timing information
+    - exit_code: Process exit code (optional)
+    - retry_count: Number of retries (optional)
+    """
+
+    # Expected attributes (implemented by Job class)
+    path: Path
+    identifier: str
+    type: any  # Has .identifier attribute
+    state: JobState
+    submittime: Optional[float]
+    starttime: Optional[float]
+    endtime: Optional[float]
+    exit_code: Optional[int]
+    retry_count: int
+
+    def write_metadata(self, **extra_fields) -> None:
+        """Write or update job metadata in .xpm_metadata.json file
+
+        Automatically extracts metadata from job attributes (identifier, state,
+        submittime, starttime, endtime, retry_count) and writes to .xpm_metadata.json.
+
+        Performs atomic write using temp file + rename. If metadata exists,
+        new fields are merged with existing ones. Updates last_updated timestamp.
+
+        Args:
+            **extra_fields: Optional extra fields (e.g., launcher, launcher_job_id, exit_code)
+        """
+        metadata_path = self.path / ".xpm_metadata.json"
+
+        # Read existing metadata
+        existing = {}
+        if metadata_path.exists():
+            try:
+                with metadata_path.open("r") as f:
+                    existing = json.load(f)
+            except Exception as e:
+                logger.warning(
+                    "Failed to read existing metadata from %s: %s", metadata_path, e
+                )
+
+        # Build metadata from job attributes
+        fields = {
+            "job_id": self.identifier,
+            "task_id": str(self.type.identifier),
+            "state": self.state.name if self.state else None,
+        }
+
+        # Add timing information if available
+        if self.submittime is not None:
+            fields["submitted_time"] = self.submittime
+        if self.starttime is not None:
+            fields["started_time"] = self.starttime
+        if self.endtime is not None:
+            fields["ended_time"] = self.endtime
+
+        # Add exit code if available
+        if self.exit_code is not None:
+            fields["exit_code"] = self.exit_code
+
+        # Add retry count
+        fields["retry_count"] = self.retry_count
+
+        # Merge with extra fields (for launcher info, exit_code, etc.)
+        fields.update(extra_fields)
+
+        # Merge with existing and update timestamp
+        existing.update(fields)
+        existing["last_updated"] = datetime.now().timestamp()
+
+        # Atomic write
+        temp_path = metadata_path.with_suffix(".json.tmp")
+        try:
+            with temp_path.open("w") as f:
+                json.dump(existing, f, indent=2)
+            temp_path.replace(metadata_path)
+            logger.debug("Wrote metadata to %s: %s", metadata_path, list(fields.keys()))
+        except Exception as e:
+            logger.error("Failed to write metadata to %s: %s", metadata_path, e)
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+
+    def read_metadata(self) -> Optional[dict]:
+        """Read job metadata from .xpm_metadata.json file
+
+        Returns:
+            Dictionary of metadata fields, or None if file doesn't exist
+        """
+        metadata_path = self.path / ".xpm_metadata.json"
+        if not metadata_path.exists():
+            return None
+
+        try:
+            with metadata_path.open("r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Failed to read metadata from %s: %s", metadata_path, e)
+            return None
+
+    @property
+    def pidfile(self) -> Path:
+        """Path to the .pid file"""
+        # The actual name will be determined by the scriptname
+        # For now, return a generic path - subclasses can override
+        return self.path / f"{self.path.name}.pid"
+
+    @property
+    def donefile(self) -> Path:
+        """Path to the .done file"""
+        return self.path / f"{self.path.name}.done"
+
+    @property
+    def failedfile(self) -> Path:
+        """Path to the .failed file"""
+        return self.path / f"{self.path.name}.failed"
+
+
+class Job(JobMetadata, Resource):
     """A job is a resource that is produced by the execution of some code"""
 
     # Set by the scheduler
@@ -273,6 +407,7 @@ class Job(Resource):
         self.starttime: Optional[float] = None
         self.submittime: Optional[float] = None
         self.endtime: Optional[float] = None
+        self.exit_code: Optional[int] = None
         self._progress: List[LevelInformation] = []
         self.tags = config.tags()
 

@@ -64,21 +64,29 @@ def job_create(job: Job):
 
 class Listener(BaseListener, ServiceListener):
     def __init__(self, socketio, state_provider):
-        from experimaestro.scheduler.state_provider import SchedulerStateProvider
-
         self.socketio = socketio
         self.state_provider = state_provider
 
-        # Only register with scheduler if using SchedulerStateProvider
-        if isinstance(state_provider, SchedulerStateProvider):
-            self.scheduler = state_provider.scheduler
-            self.scheduler.addlistener(self)
-            self.services = {}
-            # Initialize services from all registered experiments
-            for xp in self.scheduler.experiments.values():
-                for service in xp.services.values():
-                    self.service_add(service)
-        else:
+        # Try to get the scheduler (if one is running for active experiments)
+        # Otherwise we're in monitoring mode and don't need scheduler events
+        try:
+            from experimaestro.scheduler import Scheduler
+
+            # Check if a scheduler instance exists (would be created if experiments are running)
+            if Scheduler._instance is not None:
+                self.scheduler = Scheduler._instance
+                self.scheduler.addlistener(self)
+                self.services = {}
+                # Initialize services from all registered experiments
+                for xp in self.scheduler.experiments.values():
+                    for service in xp.services.values():
+                        self.service_add(service)
+            else:
+                # No scheduler running - monitoring mode
+                self.scheduler = None
+                self.services = {}
+        except Exception:
+            # Scheduler not available - monitoring mode
             self.scheduler = None
             self.services = {}
 
@@ -393,12 +401,12 @@ class Server:
 
                         settings = get_settings().server
 
-                    # Get state provider from scheduler if not provided
+                    # State provider is required - it should be passed explicitly
                     if state_provider is None:
-                        from experimaestro.scheduler import Scheduler
-
-                        scheduler = Scheduler.instance()
-                        state_provider = scheduler.state_provider
+                        raise ValueError(
+                            "state_provider parameter is required. "
+                            "Get it from workspace.state_provider"
+                        )
 
                     Server._instance = Server(settings, state_provider)
         return Server._instance

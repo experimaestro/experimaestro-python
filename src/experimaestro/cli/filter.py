@@ -21,11 +21,14 @@ class JobInformation:
             return json.loads((self.path / "params.json").read_text())
         except Exception:
             logging.warning("Could not load params.json in %s", self.path)
-            return {"tags": {}}
+            return {}
 
     @cached_property
     def tags(self) -> List[str]:
-        return self.params["tags"]
+        # Tags are no longer stored in params.json
+        # They are now experiment-run-dependent and stored in the workspace database
+        # For backward compatibility with old params.json files
+        return self.params.get("tags", {})
 
     @cached_property
     def state(self) -> Optional[JobState]:

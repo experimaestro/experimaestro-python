@@ -347,3 +347,71 @@ def monitor(workdir: Path, console: bool, port: int):
         except KeyboardInterrupt:
             cprint("\nShutting down...", "yellow")
             state_provider.close()
+
+
+@experiments.command()
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Don't write to database, only show what would be synced",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Force sync even if recently synced (bypasses time throttling)",
+)
+@click.option(
+    "--no-wait",
+    is_flag=True,
+    help="Don't wait for lock, fail immediately if unavailable",
+)
+@pass_cfg
+def sync(workdir: Path, dry_run: bool, force: bool, no_wait: bool):
+    """Synchronize workspace database from disk state
+
+    Scans experiment directories and job marker files to update the workspace
+    database. Uses exclusive locking to prevent conflicts with running experiments.
+    """
+    from experimaestro.scheduler.state_sync import sync_workspace_from_disk
+    from experimaestro.scheduler.workspace import Workspace
+    from experimaestro.settings import Settings
+
+    # Get settings and workspace settings
+    settings = Settings.instance()
+    ws_settings = find_workspace(workdir=workdir)
+
+    # Create workspace instance (manages database lifecycle)
+    workspace = Workspace(
+        settings=settings,
+        workspace_settings=ws_settings,
+        sync_on_init=False,  # Don't sync on init since we're explicitly syncing
+    )
+
+    try:
+        # Enter workspace context to initialize database
+        with workspace:
+            cprint(f"Syncing workspace: {workspace.path}", "cyan")
+            if dry_run:
+                cprint("DRY RUN MODE: No changes will be written", "yellow")
+            if force:
+                cprint("FORCE MODE: Bypassing time throttling", "yellow")
+
+            # Run sync
+            sync_workspace_from_disk(
+                workspace=workspace,
+                write_mode=not dry_run,
+                force=force,
+                blocking=not no_wait,
+            )
+
+            cprint("Sync completed successfully", "green")
+
+    except RuntimeError as e:
+        cprint(f"Sync failed: {e}", "red")
+        sys.exit(1)
+    except Exception as e:
+        cprint(f"Unexpected error during sync: {e}", "red")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)

@@ -115,14 +115,27 @@ class Reporter(threading.Thread):
 
     def check_urls(self):
         """Check whether we have new schedulers to notify"""
-        mtime = os.path.getmtime(self.path)
+        # Check if path exists (it might have been deleted during cleanup)
+        if not self.path.exists():
+            return
+
+        try:
+            mtime = os.path.getmtime(self.path)
+        except (OSError, FileNotFoundError):
+            # Path was deleted while we were checking
+            return
+
         if mtime > self.lastcheck:
             for f in self.path.iterdir():
                 self.urls[f.name] = ListenerInformation(f.read_text().strip())
                 logger.info("Added new notification URL: %s", self.urls[f.name].url)
                 f.unlink()
 
-            self.lastcheck = os.path.getmtime(self.path)
+            try:
+                self.lastcheck = os.path.getmtime(self.path)
+            except (OSError, FileNotFoundError):
+                # Path was deleted during iteration
+                return
 
     def run(self):
         logger.info("Running notification thread")
@@ -279,13 +292,11 @@ class xpm_tqdm(std_tqdm):
 
 
 @overload
-def tqdm(**kwargs) -> xpm_tqdm:
-    ...
+def tqdm(**kwargs) -> xpm_tqdm: ...
 
 
 @overload
-def tqdm(iterable: Optional[Iterator[T]] = None, **kwargs) -> Iterator[T]:
-    ...
+def tqdm(iterable: Optional[Iterator[T]] = None, **kwargs) -> Iterator[T]: ...
 
 
 def tqdm(*args, **kwargs):

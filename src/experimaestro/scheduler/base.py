@@ -22,6 +22,7 @@ import concurrent.futures
 if TYPE_CHECKING:
     from experimaestro.server import Server
     from experimaestro.settings import ServerSettings
+    from experimaestro.scheduler.workspace import Workspace
 
 
 class Listener:
@@ -116,12 +117,22 @@ class Scheduler(threading.Thread):
             del self.experiments[key]
             logger.debug("Unregistered experiment %s from scheduler", key)
 
-    def start_server(self, settings: "ServerSettings" = None):
-        """Start the notification server (if not already running)"""
+    def start_server(
+        self, settings: "ServerSettings" = None, workspace: "Workspace" = None
+    ):
+        """Start the notification server (if not already running)
+
+        Args:
+            settings: Server settings
+            workspace: Workspace instance (required to access state provider)
+        """
         if self.server is None:
             from experimaestro.server import Server
 
-            self.server = Server.instance(settings, self.state_provider)
+            if workspace is None:
+                raise ValueError("workspace parameter is required to start server")
+
+            self.server = Server.instance(settings, workspace.state_provider)
             self.server.start()
             logger.info("Server started by scheduler")
         else:
@@ -143,10 +154,8 @@ class Scheduler(threading.Thread):
         self.exitCondition = asyncio.Condition()
         self.dependencyLock = asyncio.Lock()
 
-        # Create state provider for experiment monitoring
-        from experimaestro.scheduler.state_provider import SchedulerStateProvider
-
-        self.state_provider = SchedulerStateProvider(self)
+        # Note: State provider removed - now managed at workspace level
+        # Each experiment has its own workspace with database
 
         self._ready.set()
         self.loop.run_forever()
@@ -263,6 +272,8 @@ class Scheduler(threading.Thread):
         job.scheduler = self
         self.waitingjobs.add(job)
 
+        # Note: Job metadata will be written after directory is created in aio_start
+
         # Check that we don't have a completed job in
         # alternate directories
         for jobspath in experiment.current().alt_jobspaths:
@@ -310,6 +321,7 @@ class Scheduler(threading.Thread):
                     else:
                         code = int(job.failedpath.read_text())
 
+                job.exit_code = code
                 job.state = process.get_job_state(code)
 
         # If not done or running, start the job
@@ -340,6 +352,10 @@ class Scheduler(threading.Thread):
             self.exitCondition.notify_all()
 
         job.endtime = time.time()
+
+        # Write final metadata with end time and final state
+        job.write_metadata()
+
         if job in self.waitingjobs:
             self.waitingjobs.remove(job)
 
@@ -458,6 +474,9 @@ class Scheduler(threading.Thread):
                         if not directory.is_dir():
                             directory.mkdir(parents=True, exist_ok=True)
 
+                        # Write metadata with submit and start time (after directory creation)
+                        job.write_metadata()
+
                         # Sets up the notification URL
                         if self.server is not None:
                             job.add_notification_server(self.server)
@@ -489,6 +508,7 @@ class Scheduler(threading.Thread):
                             code = int(job.failedpath.read_text())
 
                     logger.debug("Job %s ended with code %s", job, code)
+                    job.exit_code = code
                     # Let the process determine the job state (handles launcher-specific details)
                     state = process.get_job_state(code)
 

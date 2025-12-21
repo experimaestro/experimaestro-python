@@ -273,7 +273,7 @@ class experiment:
 
         # Start server via scheduler if needed
         if self._needs_server:
-            self.scheduler.start_server(self._server_settings)
+            self.scheduler.start_server(self._server_settings, workspace=self.workspace)
 
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()

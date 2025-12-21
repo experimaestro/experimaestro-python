@@ -1,49 +1,130 @@
 """Database models for experiment state persistence
 
 This module provides peewee ORM models for storing job and service state
-in SQLite databases. Each experiment gets its own database file (experiment.db)
-with WAL mode enabled for concurrent read access.
+in a workspace-level SQLite database. The workspace has a single database
+file (workspace.db) with WAL mode enabled for concurrent read/write access.
 
 Key design:
-- One database per experiment at: workdir/xp/{experiment_name}/experiment.db
-- No ExperimentModel needed - the database file itself represents the experiment
-- Jobs can belong to multiple experiments and will appear in each experiment's database
+- One database per workspace at: workdir/workspace.db
+- Experiments can be run multiple times, each run tracked separately
+- Jobs and services are scoped to (experiment_id, run_id)
+- Tags are scoped to (job_id, experiment_id, run_id) - fixes GH #128
 - Current state and progress stored in JobModel - no history tracking
+- Database instance is passed explicitly to avoid global state
 """
 
 from pathlib import Path
 from peewee import (
     Model,
-    Proxy,
     SqliteDatabase,
     CharField,
     FloatField,
+    IntegerField,
     TextField,
     DateTimeField,
+    CompositeKey,
+    IntegrityError,
+    OperationalError,
 )
 from datetime import datetime
-
-
-# Database proxy - will be bound to specific file per experiment
-database_proxy = Proxy()
+import fasteners
 
 
 class BaseModel(Model):
-    """Base model with common configuration"""
+    """Base model for workspace database tables
+
+    Models are unbound by default. Use database.bind_ctx() when querying:
+
+        with workspace.workspace_db.bind_ctx([ExperimentModel, JobModel, ...]):
+            experiments = ExperimentModel.select()
+
+    Or use the convenience method bind_models() defined below.
+    """
 
     class Meta:
-        database = database_proxy
+        database = None  # Unbound - will be bound when used
+
+
+class ExperimentModel(BaseModel):
+    """Experiment metadata - tracks experiment definitions
+
+    An experiment can be run multiple times. This table tracks the experiment
+    itself and points to the current/latest run.
+
+    Fields:
+        experiment_id: Unique identifier for the experiment
+        workdir_path: Path to experiment directory
+        current_run_id: Points to the current/latest run (null if no runs yet)
+        created_at: When experiment was first created
+    """
+
+    experiment_id = CharField(primary_key=True)
+    workdir_path = CharField()
+    current_run_id = CharField(null=True)
+    created_at = DateTimeField(default=datetime.now)
+
+    class Meta:
+        table_name = "experiments"
+
+
+class ExperimentRunModel(BaseModel):
+    """Individual experiment runs
+
+    Each time an experiment is executed, a new run is created.
+    Runs are identified by (experiment_id, run_id) composite key.
+
+    run_id format: timestamp-based like "20250120_143022" or sequential counter
+
+    Fields:
+        experiment_id: ID of the experiment this run belongs to
+        run_id: Unique ID for this run (timestamp or sequential)
+        started_at: When this run started
+        ended_at: When this run completed (null if still active)
+        status: Run status (active, completed, failed, abandoned)
+    """
+
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
+    started_at = DateTimeField(default=datetime.now)
+    ended_at = DateTimeField(null=True)
+    status = CharField(default="active", index=True)
+
+    class Meta:
+        table_name = "experiment_runs"
+        primary_key = CompositeKey("experiment_id", "run_id")
+        indexes = ((("experiment_id", "started_at"), False),)  # For finding latest run
+
+
+class WorkspaceSyncMetadata(BaseModel):
+    """Workspace-level metadata for disk sync tracking
+
+    Single-row table to track when the last disk sync occurred.
+    Used to throttle sync operations and prevent excessive disk scanning.
+
+    Fields:
+        id: Always "workspace" (single row table)
+        last_sync_time: When last sync completed
+        sync_interval_minutes: Minimum interval between syncs
+    """
+
+    id = CharField(primary_key=True, default="workspace")
+    last_sync_time = DateTimeField(null=True)
+    sync_interval_minutes = IntegerField(default=5)
+
+    class Meta:
+        table_name = "workspace_sync_metadata"
 
 
 class JobModel(BaseModel):
-    """Job information
+    """Job information linked to specific experiment run
 
-    Jobs can belong to multiple experiments. Each experiment database contains
-    rows only for jobs associated with that experiment. The job_id is globally
-    unique across all experiments.
+    Jobs are tied to a specific run of an experiment via (experiment_id, run_id).
+    The same job can appear in multiple runs with different states/tags.
 
     Fields:
         job_id: Unique identifier for the job (from task identifier)
+        experiment_id: ID of the experiment this job belongs to
+        run_id: ID of the run this job belongs to
         task_id: Task class identifier
         locator: Full task locator (identifier)
         path: Path to job directory
@@ -53,11 +134,14 @@ class JobModel(BaseModel):
         started_time: When job started running (Unix timestamp)
         ended_time: When job finished (Unix timestamp)
         progress: JSON-encoded list of progress updates
-        tags: JSON-encoded tag dictionary
-        dependencies: JSON-encoded list of dependency job IDs
+
+    Note: Tags are stored in separate JobTagModel table (run-scoped)
+    Note: Dependencies are NOT stored in DB (available in state.json only)
     """
 
-    job_id = CharField(primary_key=True)
+    job_id = CharField(index=True)
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
     task_id = CharField(index=True)
     locator = CharField()
     path = CharField()
@@ -66,29 +150,81 @@ class JobModel(BaseModel):
     submitted_time = FloatField(null=True)
     started_time = FloatField(null=True)
     ended_time = FloatField(null=True)
-    progress = TextField(default="[]")  # JSON list of progress updates
-    tags = TextField(default="{}")  # JSON
-    dependencies = TextField(default="[]")  # JSON list of job IDs
+    progress = TextField(default="[]")
 
     class Meta:
         table_name = "jobs"
+        primary_key = CompositeKey("job_id", "experiment_id", "run_id")
+        indexes = (
+            (
+                ("experiment_id", "run_id", "state"),
+                False,
+            ),  # Query jobs by run and state
+            (
+                ("experiment_id", "run_id", "task_id"),
+                False,
+            ),  # Query jobs by run and task
+        )
+
+
+class JobTagModel(BaseModel):
+    """Job tags for efficient searching (fixes GH #128)
+
+    **FIX FOR GH ISSUE #128**: Tags are now experiment-run-dependent, not job-dependent.
+    The same job in different experiment runs can have different tags, because tags
+    are scoped to the (job_id, experiment_id, run_id) combination.
+
+    Tags are stored as key-value pairs in a separate table for efficient indexing.
+    Each job can have multiple tags within an experiment run context.
+
+    Key change from old behavior:
+    - OLD: Tags were global per job_id (broken - same job in different experiments/runs shared tags)
+    - NEW: Tags are scoped per (job_id, experiment_id, run_id) - same job can have different tags in different runs
+
+    Fields:
+        job_id: ID of the job
+        experiment_id: ID of the experiment
+        run_id: ID of the run
+        tag_key: Tag name
+        tag_value: Tag value
+    """
+
+    job_id = CharField(index=True)
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
+    tag_key = CharField(index=True)
+    tag_value = CharField(index=True)
+
+    class Meta:
+        table_name = "job_tags"
+        primary_key = CompositeKey("job_id", "experiment_id", "run_id", "tag_key")
+        indexes = (
+            (("tag_key", "tag_value"), False),  # For tag-based queries
+            (
+                ("experiment_id", "run_id", "tag_key"),
+                False,
+            ),  # For experiment run tag queries
+        )
 
 
 class ServiceModel(BaseModel):
-    """Service information
+    """Service information linked to specific experiment run
 
-    Services are associated with experiments. Each experiment database contains
-    only the services for that experiment.
+    Services are tied to a specific run of an experiment via (experiment_id, run_id).
 
     Fields:
         service_id: Unique identifier for the service
+        experiment_id: ID of the experiment this service belongs to
+        run_id: ID of the run this service belongs to
         description: Human-readable description
         state: Service state (e.g., "running", "stopped")
         created_at: When service was created
         updated_at: Timestamp of last update
     """
 
-    service_id = CharField(primary_key=True)
+    service_id = CharField()
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
     description = TextField(default="")
     state = CharField()
     created_at = DateTimeField(default=datetime.now)
@@ -96,13 +232,33 @@ class ServiceModel(BaseModel):
 
     class Meta:
         table_name = "services"
+        primary_key = CompositeKey("service_id", "experiment_id", "run_id")
 
 
-def initialize_database(db_path: Path, read_only: bool = False) -> SqliteDatabase:
-    """Initialize a database connection with proper configuration
+# List of all models for binding
+ALL_MODELS = [
+    ExperimentModel,
+    ExperimentRunModel,
+    WorkspaceSyncMetadata,
+    JobModel,
+    JobTagModel,
+    ServiceModel,
+]
+
+
+def initialize_workspace_database(
+    db_path: Path, read_only: bool = False
+) -> SqliteDatabase:
+    """Initialize a workspace database connection with proper configuration
+
+    Creates and configures a SQLite database connection for the workspace.
+    Models must be bound to this database before querying.
+
+    Uses file-based locking to prevent multiple processes from initializing
+    the database simultaneously, which could cause SQLite locking issues.
 
     Args:
-        db_path: Path to the SQLite database file
+        db_path: Path to the workspace SQLite database file
         read_only: If True, open database in read-only mode
 
     Returns:
@@ -112,33 +268,55 @@ def initialize_database(db_path: Path, read_only: bool = False) -> SqliteDatabas
     if not read_only:
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create database connection
-    db = SqliteDatabase(
-        str(db_path),
-        pragmas={
-            "journal_mode": "wal",  # Write-Ahead Logging for concurrent reads
-            "foreign_keys": 1,  # Enable foreign key constraints
-            "ignore_check_constraints": 0,
-            "synchronous": 1,  # NORMAL mode (balance safety/speed)
-        },
-    )
+    # Use file-based lock to prevent concurrent initialization from multiple processes
+    # This prevents SQLite locking issues during table creation
+    lock_path = db_path.parent / f".{db_path.name}.init.lock"
+    lock = fasteners.InterProcessLock(str(lock_path))
 
-    if read_only:
-        # Set query-only mode for read-only access
-        db.execute_sql("PRAGMA query_only = ON")
+    # Acquire lock (blocking) - only one process can initialize at a time
+    with lock:
+        # Create database connection
+        db = SqliteDatabase(
+            str(db_path),
+            pragmas={
+                "journal_mode": "wal",  # Write-Ahead Logging for concurrent reads
+                "foreign_keys": 1,  # Enable foreign key constraints
+                "ignore_check_constraints": 0,
+                "synchronous": 1,  # NORMAL mode (balance safety/speed)
+                "busy_timeout": 5000,  # Wait up to 5 seconds for locks
+            },
+        )
 
-    # Bind database to models
-    database_proxy.initialize(db)
+        if read_only:
+            # Set query-only mode for read-only access
+            db.execute_sql("PRAGMA query_only = ON")
 
-    # Create tables if they don't exist (only in write mode)
-    if not read_only:
-        db.create_tables([JobModel, ServiceModel], safe=True)
+        # Bind all models to this database
+        db.bind(ALL_MODELS)
+
+        # Create tables if they don't exist (only in write mode)
+        if not read_only:
+            db.create_tables(ALL_MODELS, safe=True)
+
+            # Initialize WorkspaceSyncMetadata with default row if not exists
+            # Use try/except to handle race condition (shouldn't happen with lock, but be safe)
+            try:
+                WorkspaceSyncMetadata.get_or_create(
+                    id="workspace",
+                    defaults={"last_sync_time": None, "sync_interval_minutes": 5},
+                )
+            except (IntegrityError, OperationalError):
+                # If get_or_create fails, the row likely already exists
+                pass
 
     return db
 
 
-def close_database():
-    """Close the current database connection"""
-    if database_proxy.obj is not None:
-        database_proxy.close()
-        database_proxy.initialize(None)
+def close_workspace_database(db: SqliteDatabase):
+    """Close a workspace database connection
+
+    Args:
+        db: The database connection to close
+    """
+    if db and not db.is_closed():
+        db.close()

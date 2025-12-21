@@ -848,7 +848,6 @@ class ConfigInformation:
 
         The format is an array of objects
         {
-            "tags: [ LIST_OF_TAGS ],
             "workspace": FOLDERPATH,
             "version": 2,
             "objects": [
@@ -868,6 +867,10 @@ class ConfigInformation:
 
         The last object is the one that is serialized
 
+        Note: Tags are no longer stored in params.json. They are managed by the
+        experiment state provider (scoped to job_id, experiment_id, run_id) and
+        also stored in experiment state.json for full experiment details.
+
         Arguments:
             out {io.TextIOBase} -- The output stream
             context {[type]} -- the command context
@@ -875,7 +878,6 @@ class ConfigInformation:
         json.dump(
             {
                 "workspace": str(context.workspace.path.absolute()),
-                "tags": {key: value for key, value in self.tags().items()},
                 "version": 2,
                 "experimaestro": experimaestro.__version__,
                 "objects": self.__get_objects__([], context),

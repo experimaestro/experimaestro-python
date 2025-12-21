@@ -41,9 +41,6 @@ def run(parameters: Path):
         task = ConfigInformation.fromParameters(params["objects"])
         task.__taskdir__ = Path.cwd()
 
-        # Set the tags
-        task.__tags__ = params["tags"]
-
         # Notify that the task has started
         progress(0)
 

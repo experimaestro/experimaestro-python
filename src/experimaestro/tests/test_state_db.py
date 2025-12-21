@@ -1,185 +1,325 @@
-"""Tests for database models and ExperimentStateProvider"""
+"""Tests for workspace-level database models"""
 
-import json
 import pytest
 from pathlib import Path
 from experimaestro.scheduler.state_db import (
+    ExperimentModel,
+    ExperimentRunModel,
     JobModel,
+    JobTagModel,
     ServiceModel,
-    initialize_database,
-    close_database,
+    WorkspaceSyncMetadata,
+    initialize_workspace_database,
+    close_workspace_database,
+    ALL_MODELS,
 )
-from experimaestro.scheduler.state_provider import ExperimentStateProvider
-from experimaestro import Task, Param
-
-
-class SimpleTask(Task):
-    """Simple task for testing"""
-
-    x: Param[int]
-
-    def execute(self):
-        pass
 
 
 def test_database_initialization(tmp_path: Path):
-    """Test that database is initialized correctly"""
-    db_path = tmp_path / "test.db"
+    """Test that workspace database is initialized correctly"""
+    db_path = tmp_path / "workspace.db"
 
     # Initialize database
-    _ = initialize_database(db_path, read_only=False)
+    db = initialize_workspace_database(db_path, read_only=False)
 
-    # Verify tables were created
+    # Verify all tables were created
+    assert ExperimentModel.table_exists()
+    assert ExperimentRunModel.table_exists()
     assert JobModel.table_exists()
+    assert JobTagModel.table_exists()
     assert ServiceModel.table_exists()
+    assert WorkspaceSyncMetadata.table_exists()
 
-    # Cleanup
-    close_database()
-
-
-def test_job_model_crud(tmp_path: Path):
-    """Test creating, reading, updating, and deleting jobs"""
-    db_path = tmp_path / "test.db"
-    _ = initialize_database(db_path, read_only=False)
-
-    # Create a job
-    job = JobModel.create(
-        job_id="test_job_1",
-        task_id="SimpleTask",
-        locator="test_job_1",
-        path="/tmp/test/job1",
-        state="running",
-        tags=json.dumps({"env": "test"}),
-        dependencies=json.dumps(["dep1", "dep2"]),
+    # Verify WorkspaceSyncMetadata was initialized
+    metadata = WorkspaceSyncMetadata.get_or_none(
+        WorkspaceSyncMetadata.id == "workspace"
     )
-
-    # Read the job
-    retrieved = JobModel.get(JobModel.job_id == "test_job_1")
-    assert retrieved.job_id == "test_job_1"
-    assert retrieved.state == "running"
-    assert json.loads(retrieved.tags) == {"env": "test"}
-    assert json.loads(retrieved.dependencies) == ["dep1", "dep2"]
-
-    # Update the job
-    JobModel.update(state="done").where(JobModel.job_id == "test_job_1").execute()
-    retrieved = JobModel.get(JobModel.job_id == "test_job_1")
-    assert retrieved.state == "done"
-
-    # Delete the job
-    job.delete_instance()
-    assert JobModel.select().where(JobModel.job_id == "test_job_1").count() == 0
+    assert metadata is not None
+    assert metadata.sync_interval_minutes == 5
 
     # Cleanup
-    close_database()
+    close_workspace_database(db)
 
 
-def test_experiment_state_provider_basic(tmp_path: Path):
-    """Test basic ExperimentStateProvider functionality"""
-    workdir = tmp_path / "workspace"
-    experiment_dir = workdir / "xp" / "test_exp"
-    experiment_dir.mkdir(parents=True)
+def test_experiment_and_run_models(tmp_path: Path):
+    """Test creating experiments and runs"""
+    db_path = tmp_path / "workspace.db"
+    db = initialize_workspace_database(db_path, read_only=False)
 
-    # Create provider
-    provider = ExperimentStateProvider(workdir, "test_exp", read_only=False)
+    with db.bind_ctx(ALL_MODELS):
+        # Create an experiment
+        ExperimentModel.create(
+            experiment_id="test_exp", workdir_path="/tmp/xp/test_exp"
+        )
 
-    # Initially no jobs
-    info = provider.get_experiment_info()
-    assert info["experiment_id"] == "test_exp"
-    assert info["total_jobs"] == 0
-    assert info["finished_jobs"] == 0
+        # Create a run for this experiment
+        ExperimentRunModel.create(
+            experiment_id="test_exp", run_id="run_001", status="active"
+        )
 
-    # Manually insert a job
-    JobModel.create(
-        job_id="job1",
-        task_id="SimpleTask",
-        locator="job1",
-        path="/tmp/job1",
-        state="done",
-    )
+        # Update experiment to point to this run
+        ExperimentModel.update(current_run_id="run_001").where(
+            ExperimentModel.experiment_id == "test_exp"
+        ).execute()
 
-    # Check job count
-    info = provider.get_experiment_info()
-    assert info["total_jobs"] == 1
-    assert info["finished_jobs"] == 1
+        # Verify
+        retrieved_exp = ExperimentModel.get(ExperimentModel.experiment_id == "test_exp")
+        assert retrieved_exp.current_run_id == "run_001"
 
-    # Get jobs
-    jobs = provider.get_jobs()
-    assert len(jobs) == 1
-    assert jobs[0]["jobId"] == "job1"  # Changed to camelCase
+        retrieved_run = ExperimentRunModel.get(
+            (ExperimentRunModel.experiment_id == "test_exp")
+            & (ExperimentRunModel.run_id == "run_001")
+        )
+        assert retrieved_run.status == "active"
 
-    # Get specific job
-    job = provider.get_job("job1")
-    assert job is not None
-    assert job["jobId"] == "job1"  # Changed to camelCase
-    assert job["status"] == "done"  # Changed from "state" to "status"
+    close_workspace_database(db)
 
-    # Cleanup
-    provider.close()
+
+def test_job_model_with_composite_key(tmp_path: Path):
+    """Test job model with composite primary key (job_id, experiment_id, run_id)"""
+    db_path = tmp_path / "workspace.db"
+    db = initialize_workspace_database(db_path, read_only=False)
+
+    with db.bind_ctx(ALL_MODELS):
+        # Create experiment and run first
+        ExperimentModel.create(
+            experiment_id="exp1", workdir_path="/tmp/exp1", current_run_id="run1"
+        )
+        ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
+
+        # Create a job
+        JobModel.create(
+            job_id="job_abc",
+            experiment_id="exp1",
+            run_id="run1",
+            task_id="MyTask",
+            locator="",
+            path="/tmp/jobs/MyTask/abc",
+            state="running",
+            submitted_time=1234567890.0,
+        )
+
+        # Same job in different run
+        ExperimentRunModel.create(experiment_id="exp1", run_id="run2")
+        JobModel.create(
+            job_id="job_abc",
+            experiment_id="exp1",
+            run_id="run2",
+            task_id="MyTask",
+            locator="",
+            path="/tmp/jobs/MyTask/abc",
+            state="done",
+            submitted_time=1234567891.0,
+        )
+
+        # Both should exist independently
+        jobs = list(JobModel.select().where(JobModel.job_id == "job_abc"))
+        assert len(jobs) == 2
+
+        # Can update one without affecting the other
+        JobModel.update(state="done").where(
+            (JobModel.job_id == "job_abc")
+            & (JobModel.experiment_id == "exp1")
+            & (JobModel.run_id == "run1")
+        ).execute()
+
+        job_run1 = JobModel.get(
+            (JobModel.job_id == "job_abc")
+            & (JobModel.experiment_id == "exp1")
+            & (JobModel.run_id == "run1")
+        )
+        assert job_run1.state == "done"
+
+    close_workspace_database(db)
+
+
+def test_job_tags_model(tmp_path: Path):
+    """Test run-scoped job tags (fixes GH #128)"""
+    db_path = tmp_path / "workspace.db"
+    db = initialize_workspace_database(db_path, read_only=False)
+
+    with db.bind_ctx(ALL_MODELS):
+        # Create experiment and runs
+        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+        ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
+        ExperimentRunModel.create(experiment_id="exp1", run_id="run2")
+
+        # Create job in both runs
+        JobModel.create(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run1",
+            task_id="Task",
+            locator="",
+            path="/tmp/job1",
+            state="done",
+        )
+        JobModel.create(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run2",
+            task_id="Task",
+            locator="",
+            path="/tmp/job1",
+            state="done",
+        )
+
+        # Add different tags to same job in different runs
+        JobTagModel.create(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run1",
+            tag_key="env",
+            tag_value="production",
+        )
+
+        JobTagModel.create(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run2",
+            tag_key="env",
+            tag_value="testing",
+        )
+
+        # Verify tags are independent per run
+        run1_tags = list(
+            JobTagModel.select().where(
+                (JobTagModel.job_id == "job1")
+                & (JobTagModel.experiment_id == "exp1")
+                & (JobTagModel.run_id == "run1")
+            )
+        )
+        assert len(run1_tags) == 1
+        assert run1_tags[0].tag_value == "production"
+
+        run2_tags = list(
+            JobTagModel.select().where(
+                (JobTagModel.job_id == "job1")
+                & (JobTagModel.experiment_id == "exp1")
+                & (JobTagModel.run_id == "run2")
+            )
+        )
+        assert len(run2_tags) == 1
+        assert run2_tags[0].tag_value == "testing"
+
+    close_workspace_database(db)
+
+
+def test_multiple_experiments_same_workspace(tmp_path: Path):
+    """Test that multiple experiments can coexist in same workspace database"""
+    db_path = tmp_path / "workspace.db"
+    db = initialize_workspace_database(db_path, read_only=False)
+
+    with db.bind_ctx(ALL_MODELS):
+        # Create two experiments
+        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+        ExperimentModel.create(experiment_id="exp2", workdir_path="/tmp/exp2")
+
+        # Create runs for each
+        ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
+        ExperimentRunModel.create(experiment_id="exp2", run_id="run1")
+
+        # Create jobs for each experiment
+        JobModel.create(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run1",
+            task_id="Task",
+            locator="",
+            path="/tmp/job1",
+            state="done",
+        )
+        JobModel.create(
+            job_id="job2",
+            experiment_id="exp2",
+            run_id="run1",
+            task_id="Task",
+            locator="",
+            path="/tmp/job2",
+            state="running",
+        )
+
+        # Query jobs for specific experiment
+        exp1_jobs = list(JobModel.select().where(JobModel.experiment_id == "exp1"))
+        assert len(exp1_jobs) == 1
+        assert exp1_jobs[0].job_id == "job1"
+
+        exp2_jobs = list(JobModel.select().where(JobModel.experiment_id == "exp2"))
+        assert len(exp2_jobs) == 1
+        assert exp2_jobs[0].job_id == "job2"
+
+    close_workspace_database(db)
 
 
 def test_read_only_mode(tmp_path: Path):
     """Test that read-only mode prevents writes"""
-    workdir = tmp_path / "workspace"
-    experiment_dir = workdir / "xp" / "test_exp"
-    experiment_dir.mkdir(parents=True)
+    db_path = tmp_path / "workspace.db"
 
-    # Create a database first
-    db_path = experiment_dir / "experiment.db"
-    _ = initialize_database(db_path, read_only=False)
-    close_database()
+    # Create database with write mode
+    db_write = initialize_workspace_database(db_path, read_only=False)
+    with db_write.bind_ctx(ALL_MODELS):
+        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+    close_workspace_database(db_write)
 
     # Open in read-only mode
-    provider = ExperimentStateProvider(workdir, "test_exp", read_only=True)
+    db_read = initialize_workspace_database(db_path, read_only=True)
 
-    # Create a mock job object
-    class MockState:
-        name = "running"
+    with db_read.bind_ctx(ALL_MODELS):
+        # Can read
+        exp = ExperimentModel.get(ExperimentModel.experiment_id == "exp1")
+        assert exp.experiment_id == "exp1"
 
-    class MockType:
-        identifier = "MockTask"
+        # Cannot write (SQLite will raise OperationalError)
+        with pytest.raises(Exception):  # Could be OperationalError or similar
+            ExperimentModel.create(experiment_id="exp2", workdir_path="/tmp/exp2")
 
-    class MockJob:
-        identifier = "test_job"
-        type = MockType()
-        state = MockState()
-        submittime = 1234567890.0
-        tags = {}
-        dependencies = []
-
-    # Attempt to write should raise error
-    with pytest.raises(RuntimeError, match="read-only mode"):
-        provider.update_job_submitted(MockJob())
-
-    # Cleanup
-    provider.close()
+    close_workspace_database(db_read)
 
 
-def test_concurrent_read_access(tmp_path: Path):
-    """Test that WAL mode allows concurrent reads"""
-    workdir = tmp_path / "workspace"
-    experiment_dir = workdir / "xp" / "test_exp"
-    experiment_dir.mkdir(parents=True)
+def test_upsert_on_conflict(tmp_path: Path):
+    """Test that on_conflict works for updating existing records"""
+    db_path = tmp_path / "workspace.db"
+    db = initialize_workspace_database(db_path, read_only=False)
 
-    # Create and populate a database
-    provider1 = ExperimentStateProvider(workdir, "test_exp", read_only=False)
-    JobModel.create(
-        job_id="job1",
-        task_id="SimpleTask",
-        locator="job1",
-        path="/tmp/job1",
-        state="done",
-    )
+    with db.bind_ctx(ALL_MODELS):
+        # Create experiment and run
+        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+        ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
 
-    # Open second provider in read-only mode while first is still open
-    provider2 = ExperimentStateProvider(workdir, "test_exp", read_only=True)
+        # Create job
+        JobModel.insert(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run1",
+            task_id="Task",
+            locator="",
+            path="/tmp/job1",
+            state="running",
+        ).execute()
 
-    # Both should be able to read
-    jobs1 = provider1.get_jobs()
-    jobs2 = provider2.get_jobs()
+        # Upsert with different state (disk wins)
+        JobModel.insert(
+            job_id="job1",
+            experiment_id="exp1",
+            run_id="run1",
+            task_id="Task",
+            locator="",
+            path="/tmp/job1",
+            state="done",
+        ).on_conflict(
+            conflict_target=[JobModel.job_id, JobModel.experiment_id, JobModel.run_id],
+            update={JobModel.state: "done"},
+        ).execute()
 
-    assert len(jobs1) == 1
-    assert len(jobs2) == 1
+        # Verify state was updated
+        job = JobModel.get(
+            (JobModel.job_id == "job1")
+            & (JobModel.experiment_id == "exp1")
+            & (JobModel.run_id == "run1")
+        )
+        assert job.state == "done"
 
-    # Cleanup
-    provider1.close()
-    provider2.close()
+        # Only one job should exist
+        assert JobModel.select().where(JobModel.job_id == "job1").count() == 1
+
+    close_workspace_database(db)
