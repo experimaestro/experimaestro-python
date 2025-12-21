@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
+import time
 from shutil import rmtree
 from typing import Any, Dict, Optional, TypeVar, Union
 
@@ -166,6 +168,33 @@ class experiment:
     def jobsbakpath(self):
         """Return the directory in which results can be stored for this experiment"""
         return self.workdir / "jobs.bak"
+
+    @property
+    def jobs_jsonl_path(self):
+        """Return the path to the jobs.jsonl file for this experiment"""
+        return self.workdir / "jobs.jsonl"
+
+    def add_job(self, job: "Job"):
+        """Register a job and its tags to jobs.jsonl file"""
+        if self in job.experiments:
+            # Do not double register
+            return
+
+        # We have one more job to do
+        self.unfinishedJobs += 1
+
+        # Track which experiments this job belongs to
+        job.experiments.append(self)
+
+        record = {
+            "job_id": job.identifier,
+            "task_id": str(job.type.identifier),
+            "tags": dict(job.tags.items()) if job.tags else {},
+            "timestamp": time.time(),
+        }
+
+        with self.jobs_jsonl_path.open("a") as f:
+            f.write(json.dumps(record) + "\n")
 
     def stop(self):
         """Stop the experiment as soon as possible"""

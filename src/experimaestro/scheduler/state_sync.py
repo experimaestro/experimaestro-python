@@ -26,6 +26,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger("xpm.state_sync")
 
 
+def read_jobs_jsonl(exp_dir: Path) -> Dict[str, Dict]:
+    """Read jobs.jsonl file and return a mapping of job_id -> record
+
+    Args:
+        exp_dir: Path to the experiment directory
+
+    Returns:
+        Dictionary mapping job_id to record (with tags, task_id, timestamp)
+    """
+    jobs_jsonl_path = exp_dir / "jobs.jsonl"
+    job_records = {}
+
+    if not jobs_jsonl_path.exists():
+        logger.debug("No jobs.jsonl found in %s", exp_dir)
+        return job_records
+
+    try:
+        with jobs_jsonl_path.open("r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                    job_id = record.get("job_id")
+                    if job_id:
+                        job_records[job_id] = record
+                except json.JSONDecodeError as e:
+                    logger.warning("Failed to parse line in jobs.jsonl: %s", e)
+    except Exception as e:
+        logger.warning("Failed to read jobs.jsonl from %s: %s", jobs_jsonl_path, e)
+
+    logger.debug("Read %d job records from jobs.jsonl", len(job_records))
+    return job_records
+
+
 def acquire_sync_lock(
     workspace_path: Path, blocking: bool = True
 ) -> Optional[fasteners.InterProcessLock]:
@@ -299,6 +334,9 @@ def sync_workspace_from_disk(  # noqa: C901
                 experiment_id = exp_dir.name
                 experiments_found += 1
 
+                # Read jobs.jsonl to get tags for each job
+                job_records = read_jobs_jsonl(exp_dir)
+
                 if write_mode:
                     # Ensure experiment exists in database
                     ExperimentModel.insert(
@@ -449,6 +487,32 @@ def sync_workspace_from_disk(  # noqa: C901
                         ).execute()
 
                         jobs_updated += 1
+
+                        # Sync tags from jobs.jsonl
+                        job_id = job_state["job_id"]
+                        if job_id in job_records:
+                            tags = job_records[job_id].get("tags", {})
+                            if tags:
+                                # Delete existing tags for this job+experiment+run
+                                JobTagModel.delete().where(
+                                    (JobTagModel.job_id == job_id)
+                                    & (JobTagModel.experiment_id == experiment_id)
+                                    & (JobTagModel.run_id == current_run_id)
+                                ).execute()
+
+                                # Insert new tags
+                                for tag_key, tag_value in tags.items():
+                                    JobTagModel.insert(
+                                        job_id=job_id,
+                                        experiment_id=experiment_id,
+                                        run_id=current_run_id,
+                                        tag_key=tag_key,
+                                        tag_value=str(tag_value),
+                                    ).on_conflict_ignore().execute()
+
+                                logger.debug(
+                                    "Synced %d tags for job %s", len(tags), job_id
+                                )
 
                         logger.debug(
                             "Synced job %s for experiment %s run %s: state=%s",

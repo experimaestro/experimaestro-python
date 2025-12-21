@@ -222,8 +222,7 @@ class Scheduler(threading.Thread):
             # Add current experiment to the existing job's experiments list
             xp = experiment.current()
             if xp not in other.experiments:
-                other.experiments.append(xp)
-                xp.unfinishedJobs += 1
+                xp.add_job(other)
 
             if other.state == JobState.ERROR:
                 logger.info("Re-submitting job")
@@ -234,11 +233,8 @@ class Scheduler(threading.Thread):
         else:
             # Register this job
             xp = experiment.current()
-            xp.unfinishedJobs += 1
             self.jobs[job.identifier] = job
-            # Track which experiments this job belongs to
-            if xp not in job.experiments:
-                job.experiments.append(xp)
+            xp.add_job(job)
 
             # Set up dependencies
             for dependency in job.dependencies:

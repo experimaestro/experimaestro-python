@@ -13,6 +13,11 @@ from experimaestro.scheduler.state_db import (
     close_workspace_database,
     ALL_MODELS,
 )
+from experimaestro.scheduler.state_sync import sync_workspace_from_disk
+from experimaestro.scheduler.workspace import Workspace, RunMode
+from experimaestro.settings import WorkspaceSettings, get_settings
+from experimaestro import Task, Param
+from experimaestro.tests.utils import TemporaryExperiment
 
 
 def test_database_initialization(tmp_path: Path):
@@ -323,3 +328,120 @@ def test_upsert_on_conflict(tmp_path: Path):
         assert JobModel.select().where(JobModel.job_id == "job1").count() == 1
 
     close_workspace_database(db)
+
+
+# Define test task
+class SimpleTask(Task):
+    value: Param[int]
+
+    def execute(self):
+        # Write a marker file to indicate completion
+        (self.__taskdir__ / "output.txt").write_text(f"value={self.value}")
+
+
+def test_database_recovery_from_disk(tmp_path: Path):
+    """Test recovering database from jobs.jsonl and disk state"""
+
+    # Step 1: Run experiment with tasks and tags
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+
+    with TemporaryExperiment("recovery", maxwait=0, workdir=workdir):
+        # Submit first task with tags
+        task1 = SimpleTask.C(value=42).tag("priority", "high").tag("env", "test")
+        task1.submit()
+
+        # Submit second task with different tags
+        task2 = SimpleTask.C(value=100).tag("priority", "low").tag("env", "prod")
+        task2.submit()
+
+    # Step 2: Verify jobs.jsonl was created
+    jobs_jsonl_path = workdir / "xp" / "recovery" / "jobs.jsonl"
+    assert jobs_jsonl_path.exists(), "jobs.jsonl should have been created"
+
+    # Verify database exists
+    workspace_db_path = workdir / "workspace.db"
+    assert workspace_db_path.exists()
+
+    # Reopen workspace to access database and check state
+    settings = get_settings()
+    ws_settings = WorkspaceSettings(id="test", path=workdir)
+    workspace = Workspace(settings, ws_settings, run_mode=RunMode.NORMAL)
+
+    with workspace:
+        db = workspace.workspace_db
+        with db.bind_ctx(ALL_MODELS):
+            # Get original state
+            original_jobs = list(JobModel.select())
+
+            # If no jobs in DB yet, sync from disk first
+            if len(original_jobs) == 0:
+                sync_workspace_from_disk(workspace, write_mode=True, force=True)
+                original_jobs = list(JobModel.select())
+
+            assert len(original_jobs) == 2
+
+            original_job_ids = {job.job_id for job in original_jobs}
+            assert len(original_job_ids) == 2
+
+            # Get original tags
+            original_tags = {}
+            for job in original_jobs:
+                job_tags = list(
+                    JobTagModel.select().where(
+                        (JobTagModel.job_id == job.job_id)
+                        & (JobTagModel.experiment_id == job.experiment_id)
+                        & (JobTagModel.run_id == job.run_id)
+                    )
+                )
+                original_tags[job.job_id] = {
+                    tag.tag_key: tag.tag_value for tag in job_tags
+                }
+
+            assert len(original_tags) == 2
+            # Verify we have tags for both jobs
+            for job_id, tags in original_tags.items():
+                assert "priority" in tags
+                assert "env" in tags
+
+    # Step 3: Delete the database
+    workspace_db_path.unlink()
+    assert not workspace_db_path.exists()
+
+    # Step 4: Recover from disk by syncing
+    workspace2 = Workspace(settings, ws_settings, run_mode=RunMode.NORMAL)
+    with workspace2:
+        sync_workspace_from_disk(
+            workspace2, write_mode=True, force=True, sync_interval_minutes=0
+        )
+
+        # Step 5: Verify recovered state matches original
+        db = workspace2.workspace_db
+        with db.bind_ctx(ALL_MODELS):
+            # Check jobs were recovered
+            recovered_jobs = list(JobModel.select())
+            assert len(recovered_jobs) == 2
+
+            recovered_job_ids = {job.job_id for job in recovered_jobs}
+            assert recovered_job_ids == original_job_ids
+
+            # Check tags were recovered
+            recovered_tags = {}
+            for job in recovered_jobs:
+                job_tags = list(
+                    JobTagModel.select().where(
+                        (JobTagModel.job_id == job.job_id)
+                        & (JobTagModel.experiment_id == job.experiment_id)
+                        & (JobTagModel.run_id == job.run_id)
+                    )
+                )
+                recovered_tags[job.job_id] = {
+                    tag.tag_key: tag.tag_value for tag in job_tags
+                }
+
+            assert len(recovered_tags) == 2
+
+            # Verify tags match
+            for job_id in original_job_ids:
+                assert job_id in recovered_tags
+                assert recovered_tags[job_id] == original_tags[job_id]
