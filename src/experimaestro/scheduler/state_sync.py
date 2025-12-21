@@ -8,7 +8,7 @@ excessive disk scanning and conflicts with running experiments.
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, Optional, Tuple
 from datetime import datetime
 import fasteners
 
@@ -19,9 +19,6 @@ from experimaestro.scheduler.state_db import (
     JobTagModel,
     WorkspaceSyncMetadata,
 )
-
-if TYPE_CHECKING:
-    from experimaestro.scheduler.workspace import Workspace
 
 logger = logging.getLogger("xpm.state_sync")
 
@@ -84,17 +81,22 @@ def acquire_sync_lock(
         return None
 
 
-def get_last_sync_time(workspace: "Workspace") -> Optional[datetime]:
+def get_last_sync_time(workspace_path: Path) -> Optional[datetime]:
     """Get the timestamp of the last successful sync
 
     Args:
-        workspace: Workspace instance with database connection
+        workspace_path: Path to workspace directory
 
     Returns:
         datetime of last sync, or None if never synced
     """
     try:
-        with workspace.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
+        from .state_provider import WorkspaceStateProvider
+
+        provider = WorkspaceStateProvider.get_instance(
+            workspace_path, read_only=True, sync_on_start=False
+        )
+        with provider.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
             metadata = WorkspaceSyncMetadata.get_or_none(
                 WorkspaceSyncMetadata.id == "workspace"
             )
@@ -106,14 +108,19 @@ def get_last_sync_time(workspace: "Workspace") -> Optional[datetime]:
     return None
 
 
-def update_last_sync_time(workspace: "Workspace") -> None:
+def update_last_sync_time(workspace_path: Path) -> None:
     """Update the last sync timestamp to now
 
     Args:
-        workspace: Workspace instance with database connection
+        workspace_path: Path to workspace directory
     """
     try:
-        with workspace.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
+        from .state_provider import WorkspaceStateProvider
+
+        provider = WorkspaceStateProvider.get_instance(
+            workspace_path, read_only=False, sync_on_start=False
+        )
+        with provider.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
             WorkspaceSyncMetadata.insert(
                 id="workspace", last_sync_time=datetime.now()
             ).on_conflict(
@@ -126,12 +133,12 @@ def update_last_sync_time(workspace: "Workspace") -> None:
 
 
 def should_sync(
-    workspace: "Workspace", min_interval_minutes: int = 5
+    workspace_path: Path, min_interval_minutes: int = 5
 ) -> Tuple[bool, Optional[fasteners.InterProcessLock]]:
     """Determine if sync should be performed based on locking and timing
 
     Args:
-        workspace: Workspace instance with database connection
+        workspace_path: Path to workspace directory
         min_interval_minutes: Minimum minutes between syncs (default: 5)
 
     Returns:
@@ -140,14 +147,14 @@ def should_sync(
         If should_sync is False, lock is None
     """
     # Try to acquire exclusive lock (non-blocking)
-    lock = acquire_sync_lock(workspace.path, blocking=False)
+    lock = acquire_sync_lock(workspace_path, blocking=False)
     if lock is None:
         # Other experiments running - skip sync
         logger.info("Skipping sync: other experiments are running")
         return False, None
 
     # Check last sync time
-    last_sync_time = get_last_sync_time(workspace)
+    last_sync_time = get_last_sync_time(workspace_path)
     if last_sync_time is None:
         # First sync ever
         logger.info("Performing first sync")
@@ -267,7 +274,7 @@ def scan_job_state_from_disk(job_path: Path, scriptname: str) -> Optional[Dict]:
 
 
 def sync_workspace_from_disk(  # noqa: C901
-    workspace: "Workspace",
+    workspace_path: Path,
     write_mode: bool = True,
     force: bool = False,
     blocking: bool = True,
@@ -279,7 +286,7 @@ def sync_workspace_from_disk(  # noqa: C901
     Uses exclusive locking and time-based throttling to prevent conflicts.
 
     Args:
-        workspace: Workspace instance with database connection
+        workspace_path: Path to workspace directory
         write_mode: If True, update database; if False, dry-run mode
         force: If True, bypass time throttling (still requires lock)
         blocking: If True, wait for lock; if False, fail if lock unavailable
@@ -288,14 +295,19 @@ def sync_workspace_from_disk(  # noqa: C901
     Raises:
         RuntimeError: If lock unavailable in non-blocking mode
     """
+    # Normalize path
+    if not isinstance(workspace_path, Path):
+        workspace_path = Path(workspace_path)
+    workspace_path = workspace_path.absolute()
+
     # Check if sync should proceed (unless force=True)
     if not force:
-        should_proceed, lock = should_sync(workspace, sync_interval_minutes)
+        should_proceed, lock = should_sync(workspace_path, sync_interval_minutes)
         if not should_proceed:
             return
     else:
         # Force mode: skip time check but still require lock
-        lock = acquire_sync_lock(workspace.path, blocking=blocking)
+        lock = acquire_sync_lock(workspace_path, blocking=blocking)
         if lock is None:
             if blocking:
                 raise RuntimeError("Failed to acquire sync lock in blocking mode")
@@ -303,7 +315,16 @@ def sync_workspace_from_disk(  # noqa: C901
                 raise RuntimeError("Sync lock unavailable (other experiments running)")
 
     try:
-        logger.info("Starting workspace sync from disk: %s", workspace.path)
+        logger.info("Starting workspace sync from disk: %s", workspace_path)
+
+        # Get the workspace state provider to access the database
+        from .state_provider import WorkspaceStateProvider
+
+        provider = WorkspaceStateProvider.get_instance(
+            workspace_path,
+            read_only=not write_mode,
+            sync_on_start=False,  # Don't sync recursively
+        )
 
         experiments_found = 0
         runs_found = 0
@@ -311,7 +332,7 @@ def sync_workspace_from_disk(  # noqa: C901
         jobs_updated = 0
 
         # Use database context binding for all queries
-        with workspace.workspace_db.bind_ctx(
+        with provider.workspace_db.bind_ctx(
             [
                 ExperimentModel,
                 ExperimentRunModel,
@@ -321,7 +342,7 @@ def sync_workspace_from_disk(  # noqa: C901
             ]
         ):
             # Scan experiments directory - this is the source of truth
-            xp_dir = workspace.path / "xp"
+            xp_dir = workspace_path / "xp"
 
             if not xp_dir.exists():
                 logger.info("No experiments directory found")
@@ -532,7 +553,7 @@ def sync_workspace_from_disk(  # noqa: C901
 
             # Update last sync time if in write mode
             if write_mode:
-                update_last_sync_time(workspace)
+                update_last_sync_time(workspace_path)
 
     finally:
         # Always release lock

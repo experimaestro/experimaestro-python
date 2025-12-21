@@ -412,10 +412,18 @@ class ExperimentTUI(App):
         # Initialize state provider before compose
         if state_provider:
             self.state_provider = state_provider
+            self.owns_provider = False  # Don't close external provider
         else:
             from experimaestro.scheduler.state_provider import WorkspaceStateProvider
 
-            self.state_provider = WorkspaceStateProvider(self.workdir, watch=self.watch)
+            # Get singleton provider instance for this workspace
+            self.state_provider = WorkspaceStateProvider.get_instance(
+                self.workdir,
+                read_only=True,
+                sync_on_start=True,
+                sync_interval_minutes=5,
+            )
+            self.owns_provider = False  # Provider is singleton, don't close
 
     def compose(self) -> ComposeResult:
         """Compose the TUI layout"""

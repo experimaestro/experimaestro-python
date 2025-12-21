@@ -14,6 +14,7 @@ Key features:
 
 import json
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -34,18 +35,17 @@ logger = logging.getLogger("xpm.state")
 
 
 class WorkspaceStateProvider:
-    """Unified state provider for workspace-level database
+    """Unified state provider for workspace-level database (singleton per workspace path)
 
     Provides access to experiment and job state from a single workspace database.
     Supports both read-only (monitoring) and read-write (scheduler) modes.
 
-    The database connection is managed externally via thread-local storage.
-    Workspace.__enter__ must have been called to initialize the database before
-    creating this provider.
+    Only one WorkspaceStateProvider instance exists per workspace path. Subsequent
+    requests for the same path return the existing instance.
 
     Thread safety:
     - Database connections are thread-local (managed by state_db module)
-    - Multiple WorkspaceStateProvider instances can safely coexist
+    - Singleton registry is protected by a lock
     - Each thread gets its own database connection
 
     Run tracking:
@@ -54,41 +54,131 @@ class WorkspaceStateProvider:
     - Tags are scoped to (job_id, experiment_id, run_id) - fixes GH #128
     """
 
-    def __init__(
-        self,
+    # Registry of state provider instances by absolute path
+    _instances: Dict[Path, "WorkspaceStateProvider"] = {}
+    _lock = threading.Lock()
+
+    @classmethod
+    def get_instance(
+        cls,
         workspace_path: Path,
         read_only: bool = False,
         sync_on_start: bool = False,
-    ):
-        """Initialize workspace state provider
+        sync_interval_minutes: int = 5,
+    ) -> "WorkspaceStateProvider":
+        """Get or create WorkspaceStateProvider instance for a workspace path
 
         Args:
             workspace_path: Root workspace directory
             read_only: If True, database is in read-only mode
             sync_on_start: If True, sync from disk on initialization
-                          (only for read-only mode, requires state_sync module)
+            sync_interval_minutes: Minimum interval between syncs (default: 5)
 
-        Note:
-            The workspace database must already be initialized via
-            initialize_workspace_database() before creating this provider.
-            Typically this is done automatically by Workspace.__enter__.
+        Returns:
+            WorkspaceStateProvider instance (singleton per path)
         """
+        # Normalize path
+        if isinstance(workspace_path, Path):
+            workspace_path = workspace_path.absolute()
+        else:
+            workspace_path = Path(workspace_path).absolute()
+
+        # Check if instance already exists
+        with cls._lock:
+            if workspace_path in cls._instances:
+                return cls._instances[workspace_path]
+
+            # Create new instance
+            instance = cls(
+                workspace_path, read_only, sync_on_start, sync_interval_minutes
+            )
+            cls._instances[workspace_path] = instance
+            return instance
+
+    def __init__(
+        self,
+        workspace_path: Path,
+        read_only: bool = False,
+        sync_on_start: bool = False,
+        sync_interval_minutes: int = 5,
+    ):
+        """Initialize workspace state provider (called by get_instance())
+
+        Args:
+            workspace_path: Root workspace directory
+            read_only: If True, database is in read-only mode
+            sync_on_start: If True, sync from disk on initialization
+            sync_interval_minutes: Minimum interval between syncs (default: 5)
+        """
+        # Normalize path
+        if isinstance(workspace_path, Path):
+            workspace_path = workspace_path.absolute()
+        else:
+            workspace_path = Path(workspace_path).absolute()
+
         self.workspace_path = workspace_path
         self.read_only = read_only
+        self.sync_interval_minutes = sync_interval_minutes
 
-        # Note: Database initialization happens in Workspace.__enter__
-        # This provider will be used with explicit database binding via bind_ctx()
+        # Check and update workspace version
+        from .workspace import WORKSPACE_VERSION
 
-        # Optionally sync from disk on start (read-only monitoring mode)
-        if sync_on_start and read_only:
-            # TODO: Uncomment once state_sync is implemented in Phase 5
-            # from .state_sync import sync_workspace_from_disk
-            # sync_workspace_from_disk(
-            #     workspace_path,
-            #     write_mode=False,
-            #     force=False
-            # )
-            pass
+        version_file = self.workspace_path / ".__experimaestro__"
+
+        if version_file.exists():
+            # Read existing version
+            content = version_file.read_text().strip()
+            if content == "":
+                # Empty file = v0
+                workspace_version = 0
+            else:
+                try:
+                    workspace_version = int(content)
+                except ValueError:
+                    raise RuntimeError(
+                        f"Invalid workspace version file at {version_file}: "
+                        f"expected integer, got '{content}'"
+                    )
+
+            # Check if workspace version is supported
+            if workspace_version > WORKSPACE_VERSION:
+                raise RuntimeError(
+                    f"Workspace version {workspace_version} is not supported by "
+                    f"this version of experimaestro (supports up to version "
+                    f"{WORKSPACE_VERSION}). Please upgrade experimaestro."
+                )
+            if workspace_version < WORKSPACE_VERSION:
+                raise RuntimeError(
+                    f"Workspace version {workspace_version} is not supported by "
+                    "this version of experimaestro (please upgrade the experimaestro "
+                    "workspace)"
+                )
+        else:
+            # New workspace - create the file
+            workspace_version = WORKSPACE_VERSION
+
+        # Write current version to file (update empty v0 workspaces)
+        if not read_only and (
+            not version_file.exists() or version_file.read_text().strip() == ""
+        ):
+            version_file.write_text(str(WORKSPACE_VERSION))
+
+        # Initialize workspace database
+        from .state_db import initialize_workspace_database
+
+        db_path = self.workspace_path / "workspace.db"
+        self.workspace_db = initialize_workspace_database(db_path, read_only=read_only)
+
+        # Optionally sync from disk on start
+        if sync_on_start:
+            from .state_sync import sync_workspace_from_disk
+
+            sync_workspace_from_disk(
+                self.workspace_path,
+                write_mode=not read_only,
+                force=False,
+                sync_interval_minutes=sync_interval_minutes,
+            )
 
         logger.info(
             "WorkspaceStateProvider initialized (read_only=%s, workspace=%s)",
@@ -727,12 +817,23 @@ class WorkspaceStateProvider:
     # Utility methods
 
     def close(self):
-        """Close any open connections or resources
+        """Close the database connection and remove from registry
 
-        Note: Database connection is managed externally by Workspace,
-        so this is a no-op. Included for compatibility with old StateProvider API.
+        This should be called when done with the workspace to free resources.
         """
-        logger.debug("WorkspaceStateProvider.close() called (no-op)")
+        # Close database connection
+        if hasattr(self, "workspace_db") and self.workspace_db is not None:
+            from .state_db import close_workspace_database
+
+            close_workspace_database(self.workspace_db)
+            self.workspace_db = None
+
+        # Remove from registry
+        with WorkspaceStateProvider._lock:
+            if self.workspace_path in WorkspaceStateProvider._instances:
+                del WorkspaceStateProvider._instances[self.workspace_path]
+
+        logger.debug("WorkspaceStateProvider closed for %s", self.workspace_path)
 
     # Helper methods
 

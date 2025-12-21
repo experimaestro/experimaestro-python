@@ -307,6 +307,15 @@ class experiment:
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()
 
+        # Initialize workspace state provider (singleton per workspace path)
+        from .state_provider import WorkspaceStateProvider
+
+        self.state_provider = WorkspaceStateProvider.get_instance(
+            self.workspace.path,
+            read_only=False,
+            sync_on_start=False,  # Experiments don't sync on start
+        )
+
         # Number of unfinished jobs
         self.unfinishedJobs = 0
         self.taskOutputQueueSize = 0

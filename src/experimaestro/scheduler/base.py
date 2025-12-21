@@ -124,15 +124,21 @@ class Scheduler(threading.Thread):
 
         Args:
             settings: Server settings
-            workspace: Workspace instance (required to access state provider)
+            workspace: Workspace instance (required to get workspace path)
         """
         if self.server is None:
             from experimaestro.server import Server
+            from experimaestro.scheduler.state_provider import WorkspaceStateProvider
 
             if workspace is None:
                 raise ValueError("workspace parameter is required to start server")
 
-            self.server = Server.instance(settings, workspace.state_provider)
+            # Get the workspace state provider singleton
+            state_provider = WorkspaceStateProvider.get_instance(
+                workspace.path, read_only=False, sync_on_start=False
+            )
+
+            self.server = Server.instance(settings, state_provider)
             self.server.start()
             logger.info("Server started by scheduler")
         else:
