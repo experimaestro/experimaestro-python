@@ -2,10 +2,11 @@
 
 This module provides peewee ORM models for storing job and service state
 in a workspace-level SQLite database. The workspace has a single database
-file (workspace.db) with WAL mode enabled for concurrent read/write access.
+file (.experimaestro/workspace.db) with WAL mode enabled for concurrent
+read/write access.
 
 Key design:
-- One database per workspace at: workdir/workspace.db
+- One database per workspace at: workdir/.experimaestro/workspace.db
 - Experiments can be run multiple times, each run tracked separately
 - Jobs and services are scoped to (experiment_id, run_id)
 - Tags are scoped to (job_id, experiment_id, run_id) - fixes GH #128

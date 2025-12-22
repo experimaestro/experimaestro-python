@@ -13,11 +13,14 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
     RichLog,
+    Button,
+    Static,
 )
 from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.message import Message
+from textual.screen import ModalScreen
 from textual import events
 from experimaestro.scheduler.state_provider import (
     WorkspaceStateProvider,
@@ -25,6 +28,77 @@ from experimaestro.scheduler.state_provider import (
     StateEventType,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
+
+
+class QuitConfirmScreen(ModalScreen[bool]):
+    """Modal screen for quit confirmation"""
+
+    CSS = """
+    QuitConfirmScreen {
+        align: center middle;
+    }
+
+    #quit-dialog {
+        width: 60;
+        height: auto;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #quit-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #quit-message {
+        margin-bottom: 1;
+    }
+
+    #quit-warning {
+        color: $warning;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    #quit-buttons {
+        width: 100%;
+        height: auto;
+        align: center middle;
+    }
+
+    #quit-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, has_active_experiment: bool = False):
+        super().__init__()
+        self.has_active_experiment = has_active_experiment
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="quit-dialog"):
+            yield Static("Quit Experimaestro?", id="quit-title")
+
+            if self.has_active_experiment:
+                yield Static(
+                    "⚠️  The experiment is still in progress.\n"
+                    "Quitting will prevent new jobs from being launched.",
+                    id="quit-warning",
+                )
+            else:
+                yield Static("Are you sure you want to quit?", id="quit-message")
+
+            with Horizontal(id="quit-buttons"):
+                yield Button("Quit", variant="error", id="quit-yes")
+                yield Button("Cancel", variant="primary", id="quit-no")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "quit-yes":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
 
 
 def get_status_text(status: str):
@@ -626,6 +700,7 @@ class ExperimentTUI(App):
         if state_provider:
             self.state_provider = state_provider
             self.owns_provider = False  # Don't close external provider
+            self._has_active_experiment = True  # External provider = active experiment
         else:
             from experimaestro.scheduler.state_provider import WorkspaceStateProvider
 
@@ -637,6 +712,7 @@ class ExperimentTUI(App):
                 sync_interval_minutes=5,
             )
             self.owns_provider = False  # Provider is singleton, don't close
+            self._has_active_experiment = False  # Just viewing, no active experiment
 
     def compose(self) -> ComposeResult:
         """Compose the TUI layout"""
@@ -850,6 +926,18 @@ class ExperimentTUI(App):
             else:
                 experiments_table.focus()
 
+    def action_quit(self) -> None:
+        """Show quit confirmation dialog"""
+
+        def handle_quit_response(confirmed: bool) -> None:
+            if confirmed:
+                self.exit()
+
+        self.push_screen(
+            QuitConfirmScreen(has_active_experiment=self._has_active_experiment),
+            handle_quit_response,
+        )
+
     def on_unmount(self) -> None:
         """Clean up when closing"""
         # Unregister listener
@@ -858,5 +946,6 @@ class ExperimentTUI(App):
             self._listener_registered = False
             self.log("Unregistered state listener")
 
-        if self.state_provider:
+        # Only close state provider if we own it (not external/active experiment)
+        if self.state_provider and self.owns_provider:
             self.state_provider.close()

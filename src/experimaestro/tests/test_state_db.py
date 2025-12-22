@@ -346,7 +346,7 @@ def test_database_recovery_from_disk(tmp_path: Path):
     assert jobs_jsonl_path.exists(), "jobs.jsonl should have been created"
 
     # Verify database exists
-    workspace_db_path = workdir / "workspace.db"
+    workspace_db_path = workdir / ".experimaestro" / "workspace.db"
     assert workspace_db_path.exists()
 
     # Get workspace state provider and access database

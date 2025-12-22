@@ -1,11 +1,11 @@
 """Unified workspace state provider for accessing experiment and job information
 
 This module provides a single WorkspaceStateProvider class that accesses state
-from the workspace-level database (workspace.db). This replaces the previous
-multi-provider architecture with a unified approach.
+from the workspace-level database (.experimaestro/workspace.db). This replaces
+the previous multi-provider architecture with a unified approach.
 
 Key features:
-- Single workspace.db database shared across all experiments
+- Single .experimaestro/workspace.db database shared across all experiments
 - Support for multiple runs per experiment
 - Run-scoped tags (fixes GH #128)
 - Thread-safe database access via thread-local connections
@@ -74,53 +74,88 @@ class StateEvent:
 StateListener = Callable[[StateEvent], None]
 
 
-class _DatabaseFileHandler(FileSystemEventHandler):
-    """Watchdog handler for SQLite database file changes
+class _DatabaseChangeDetector:
+    """Background thread that detects database changes and notifies listeners
 
-    Watches the workspace.db and workspace.db-wal files for modifications
-    and detects what changed to send proper events.
+    Uses a semaphore pattern so that the watchdog event handler never blocks.
+    The watchdog just signals the semaphore, and this thread does the actual
+    database queries and listener notifications.
+
+    Thread safety:
+    - Uses a lock to protect start/stop transitions
+    - Once stop() is called, the stop event cannot be cleared by start()
+    - Uses a Condition for atomic wait-and-clear of change notifications
     """
 
     def __init__(self, state_provider: "WorkspaceStateProvider"):
-        super().__init__()
         self.state_provider = state_provider
-        self._last_event_time = 0.0
-        self._debounce_seconds = 0.5  # Debounce rapid file changes
         self._last_check_time: Optional[datetime] = None
+        self._change_condition = threading.Condition()
+        self._change_pending = False  # Protected by _change_condition
+        self._thread: Optional[threading.Thread] = None
+        self._debounce_seconds = 0.5  # Wait before processing to batch rapid changes
+        self._state_lock = threading.Lock()  # Protects start/stop transitions
+        self._stopped = False  # Once True, cannot be restarted
 
-    def on_any_event(self, event) -> None:
-        """Handle all file system events
+    def start(self) -> None:
+        """Start the change detection thread"""
+        with self._state_lock:
+            # Once stopped, cannot restart
+            if self._stopped:
+                logger.debug("Cannot start change detector - already stopped")
+                return
 
-        We use on_any_event instead of on_modified because different
-        platforms may report events differently.
-        """
-        # Only handle modification-like events
-        if event.event_type not in ("modified", "created", "moved"):
-            return
+            if self._thread is not None and self._thread.is_alive():
+                return  # Already running
 
-        if event.is_directory:
-            return
+            self._thread = threading.Thread(
+                target=self._run,
+                daemon=True,
+                name="DBChangeDetector",
+            )
+            self._thread.start()
+            logger.debug("Started database change detector thread")
 
-        # Only react to database files
-        path = Path(event.src_path)
-        if path.name not in ("workspace.db", "workspace.db-wal"):
-            return
+    def stop(self) -> None:
+        """Stop the change detection thread"""
+        with self._state_lock:
+            self._stopped = True  # Mark as permanently stopped
 
-        # Debounce - ignore events that come too quickly
-        now = time.time()
-        if now - self._last_event_time < self._debounce_seconds:
-            return
-        self._last_event_time = now
+        # Wake up the thread so it can exit
+        with self._change_condition:
+            self._change_condition.notify_all()
 
-        logger.debug(
-            "Database file changed: %s (event: %s)", path.name, event.event_type
-        )
+        # Join outside the lock to avoid deadlock
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        logger.debug("Stopped database change detector thread")
 
-        # Trigger change detection in a thread to avoid blocking watchdog
-        threading.Thread(
-            target=self._detect_and_notify_changes,
-            daemon=True,
-        ).start()
+    def signal_change(self) -> None:
+        """Signal that a database change was detected (non-blocking)"""
+        with self._change_condition:
+            self._change_pending = True
+            self._change_condition.notify()
+
+    def _run(self) -> None:
+        """Main loop: wait for changes and process them"""
+        while not self._stopped:
+            # Wait for a change signal and clear it atomically
+            with self._change_condition:
+                while not self._change_pending and not self._stopped:
+                    self._change_condition.wait()
+
+                if self._stopped:
+                    break
+
+                # Clear the pending flag atomically while holding the lock
+                self._change_pending = False
+
+            # Debounce - wait a bit for more changes to accumulate
+            time.sleep(self._debounce_seconds)
+
+            # Process all accumulated changes
+            self._detect_and_notify_changes()
 
     def _detect_and_notify_changes(self) -> None:
         """Query the database to detect what changed and send events"""
@@ -165,6 +200,39 @@ class _DatabaseFileHandler(FileSystemEventHandler):
 
         except Exception as e:
             logger.warning("Error detecting database changes: %s", e)
+
+
+class _DatabaseFileHandler(FileSystemEventHandler):
+    """Watchdog handler for SQLite database file changes
+
+    Simply signals the change detector when database files are modified.
+    Does not block - all processing happens in the detector thread.
+    """
+
+    def __init__(self, change_detector: _DatabaseChangeDetector):
+        super().__init__()
+        self.change_detector = change_detector
+
+    def on_any_event(self, event) -> None:
+        """Handle all file system events"""
+        # Only handle modification-like events
+        if event.event_type not in ("modified", "created", "moved"):
+            return
+
+        if event.is_directory:
+            return
+
+        # Only react to database files
+        path = Path(event.src_path)
+        if path.name not in ("workspace.db", "workspace.db-wal"):
+            return
+
+        logger.debug(
+            "Database file changed: %s (event: %s)", path.name, event.event_type
+        )
+
+        # Signal the detector thread (non-blocking)
+        self.change_detector.signal_change()
 
 
 class MockJob(BaseJob):
@@ -410,6 +478,7 @@ class WorkspaceStateProvider:
         self._listeners_lock = threading.Lock()
 
         # File watcher for database changes (started when listeners are added)
+        self._change_detector: Optional[_DatabaseChangeDetector] = None
         self._db_file_handler: Optional[_DatabaseFileHandler] = None
         self._db_file_watch: Optional[ObservedWatch] = None
 
@@ -456,11 +525,16 @@ class WorkspaceStateProvider:
         ):
             version_file.write_text(str(WORKSPACE_VERSION))
 
-        # Initialize workspace database
+        # Initialize workspace database in hidden .experimaestro directory
         from .state_db import initialize_workspace_database
 
-        db_path = self.workspace_path / "workspace.db"
+        experimaestro_dir = self.workspace_path / ".experimaestro"
+        if not read_only:
+            experimaestro_dir.mkdir(parents=True, exist_ok=True)
+
+        db_path = experimaestro_dir / "workspace.db"
         self.workspace_db = initialize_workspace_database(db_path, read_only=read_only)
+        self._db_dir = experimaestro_dir  # Store for file watcher
 
         # Optionally sync from disk on start (only in write mode)
         # Syncing requires write access to update the database and sync timestamp
@@ -1326,18 +1400,23 @@ class WorkspaceStateProvider:
     def _start_file_watcher(self) -> None:
         """Start watching the database file for changes"""
         if self._db_file_watch is not None:
-            logger.info("File watcher already running for %s", self.workspace_path)
+            logger.info("File watcher already running for %s", self._db_dir)
             return  # Already watching
 
         from experimaestro.ipc import ipcom
 
-        self._db_file_handler = _DatabaseFileHandler(self)
+        # Create and start the change detector thread
+        self._change_detector = _DatabaseChangeDetector(self)
+        self._change_detector.start()
+
+        # Create the file handler that signals the detector
+        self._db_file_handler = _DatabaseFileHandler(self._change_detector)
         self._db_file_watch = ipcom().fswatch(
             self._db_file_handler,
-            self.workspace_path,
+            self._db_dir,
             recursive=False,
         )
-        logger.info("Started database file watcher for %s", self.workspace_path)
+        logger.info("Started database file watcher for %s", self._db_dir)
 
     def _stop_file_watcher(self) -> None:
         """Stop watching the database file"""
@@ -1346,9 +1425,16 @@ class WorkspaceStateProvider:
 
         from experimaestro.ipc import ipcom
 
+        # Stop the file watcher first
         ipcom().fsunwatch(self._db_file_watch)
         self._db_file_watch = None
         self._db_file_handler = None
+
+        # Stop the change detector thread
+        if self._change_detector is not None:
+            self._change_detector.stop()
+            self._change_detector = None
+
         logger.debug("Stopped database file watcher for %s", self.workspace_path)
 
     def _notify_listeners(self, event: StateEvent) -> None:
