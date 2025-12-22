@@ -1507,6 +1507,68 @@ class Config:
         """Alias for XPMConfig"""
         return cls.XPMConfig
 
+    @classproperty
+    def XPMValue(cls):
+        """Get the value class for this configuration.
+
+        Returns the explicitly registered value class, or the base config class
+        if no value class was registered.
+        """
+        return cls.__getxpmtype__().value_type
+
+    @classmethod
+    def value_class(cls):
+        """Decorator to register an external value class for this configuration.
+
+        This allows declaring a separate class that will be used when creating
+        instances, which is useful to avoid initializing resources (e.g., PyTorch)
+        when only configuring.
+
+        Example:
+            class Model(Config):
+                hidden_size: Param[int]
+
+            @Model.value_class()
+            class TorchModel(Model, nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer = nn.Linear(self.hidden_size, self.hidden_size)
+
+        The value class must:
+        1. Be a subclass of the configuration class
+        2. Be a subclass of parent configuration value classes (if any)
+        """
+
+        def decorator(value_class: type) -> type:
+            xpmtype = cls.__getxpmtype__()
+
+            # Check that value class is a subclass of the config class
+            if not issubclass(value_class, cls):
+                raise TypeError(
+                    f"Value class {value_class.__name__} must be a subclass of "
+                    f"{cls.__name__}"
+                )
+
+            # Check that value class inherits from parent value classes
+            for base in cls.__bases__:
+                if base is Config or not issubclass(base, Config):
+                    continue
+                parent_xpmtype = base.__getxpmtype__()
+                # Check if parent has an explicit value type (different from original)
+                if parent_xpmtype.value_type is not parent_xpmtype._original_type:
+                    parent_value = parent_xpmtype.value_type
+                    if not issubclass(value_class, parent_value):
+                        raise TypeError(
+                            f"Value class {value_class.__name__} must be a subclass of "
+                            f"parent value class {parent_value.__name__}"
+                        )
+
+            # Register the value class
+            xpmtype.set_value_type(value_class)
+            return value_class
+
+        return decorator
+
     @classmethod
     def __getxpmtype__(cls) -> "ObjectType":
         """Get (and create if necessary) the Object type associated

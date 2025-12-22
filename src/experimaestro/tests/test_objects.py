@@ -208,3 +208,186 @@ def test_composition_operator_exact_match():
 
     assert e.base is a
     assert e.base.x == 1
+
+
+# --- Value class decorator tests (GH #99) ---
+
+# Test 1: Basic value class registration
+
+
+class ValueBasicModel(Config):
+    x: Param[int] = 1
+
+
+@ValueBasicModel.value_class()
+class ValueBasicModelImpl(ValueBasicModel):
+    def compute(self):
+        return self.x * 2
+
+
+# Test 2: Subclass without explicit value class
+
+
+class ValueInheritBase(Config):
+    x: Param[int] = 1
+
+
+@ValueInheritBase.value_class()
+class ValueInheritBaseImpl(ValueInheritBase):
+    pass
+
+
+class ValueInheritSubNoExplicit(ValueInheritBase):
+    """Subclass without explicit value class"""
+
+    y: Param[int] = 2
+
+
+# Test 3: Value class with proper inheritance
+
+
+class ValueInheritParent(Config):
+    x: Param[int] = 1
+
+
+@ValueInheritParent.value_class()
+class ValueInheritParentImpl(ValueInheritParent):
+    def compute(self):
+        return self.x * 2
+
+
+class ValueInheritChild(ValueInheritParent):
+    y: Param[int] = 2
+
+
+@ValueInheritChild.value_class()
+class ValueInheritChildImpl(ValueInheritChild, ValueInheritParentImpl):
+    def compute_both(self):
+        return self.x + self.y
+
+
+# Test 4: Skip intermediate class (A -> B -> C, only A and C have value classes)
+
+
+class ValueSkipBase(Config):
+    x: Param[int] = 1
+
+
+@ValueSkipBase.value_class()
+class ValueSkipBaseImpl(ValueSkipBase):
+    def compute(self):
+        return self.x * 2
+
+
+class ValueSkipIntermediate(ValueSkipBase):
+    """Intermediate class without explicit value class"""
+
+    y: Param[int] = 2
+
+
+class ValueSkipDeep(ValueSkipIntermediate):
+    """Deep subclass with value class"""
+
+    z: Param[int] = 3
+
+
+@ValueSkipDeep.value_class()
+class ValueSkipDeepImpl(ValueSkipDeep, ValueSkipBaseImpl):
+    def compute_all(self):
+        return self.x + self.y + self.z
+
+
+# --- Value class tests ---
+
+
+def test_value_decorator_basic():
+    """Test basic value class registration"""
+    # XPMValue should return the registered value class
+    assert ValueBasicModel.XPMValue is ValueBasicModelImpl
+
+    # Creating an instance should use the value class
+    config = ValueBasicModel.C(x=5)
+    instance = config.instance()
+
+    assert isinstance(instance, ValueBasicModelImpl)
+    assert instance.x == 5
+    assert instance.compute() == 10
+
+
+def test_value_decorator_inheritance_no_explicit():
+    """Test that subclass without value class uses config class as value"""
+    # SubModel has no explicit value class, XPMValue returns the config class
+    assert ValueInheritSubNoExplicit.XPMValue is ValueInheritSubNoExplicit
+
+    config = ValueInheritSubNoExplicit.C(x=3, y=4)
+    instance = config.instance()
+
+    # Instance is created from the config class (no explicit value type)
+    assert isinstance(instance, ValueInheritSubNoExplicit)
+    assert instance.x == 3
+    assert instance.y == 4
+
+
+def test_value_decorator_inheritance_with_explicit():
+    """Test value class with proper inheritance from parent value class"""
+    assert ValueInheritChild.XPMValue is ValueInheritChildImpl
+
+    config = ValueInheritChild.C(x=3, y=4)
+    instance = config.instance()
+
+    assert isinstance(instance, ValueInheritChildImpl)
+    assert isinstance(instance, ValueInheritParentImpl)
+    assert instance.x == 3
+    assert instance.y == 4
+    assert instance.compute() == 6  # From parent value class
+    assert instance.compute_both() == 7  # From this value class
+
+
+def test_value_decorator_must_be_subclass():
+    """Test that value class must be subclass of config"""
+
+    class LocalModel(Config):
+        x: Param[int]
+
+    class OtherConfig(Config):
+        z: Param[int]
+
+    with pytest.raises(TypeError, match="must be a subclass of"):
+
+        @LocalModel.value_class()
+        class InvalidValue(OtherConfig):  # Not a subclass of LocalModel
+            pass
+
+
+def test_value_decorator_must_inherit_parent_value():
+    """Test that value class must inherit from parent value class"""
+
+    class LocalBase(Config):
+        x: Param[int] = 1
+
+    @LocalBase.value_class()
+    class LocalBaseImpl(LocalBase):
+        pass
+
+    class LocalChild(LocalBase):
+        y: Param[int] = 2
+
+    with pytest.raises(TypeError, match="must be a subclass of.*parent value class"):
+
+        @LocalChild.value_class()
+        class InvalidChildValue(LocalChild):  # Missing LocalBaseImpl inheritance
+            pass
+
+
+def test_value_decorator_skip_intermediate():
+    """Test value class when intermediate class has no value class"""
+    # ValueSkipBase has impl, ValueSkipIntermediate has none, ValueSkipDeep has impl
+    assert ValueSkipDeep.XPMValue is ValueSkipDeepImpl
+
+    config = ValueSkipDeep.C(x=1, y=2, z=3)
+    instance = config.instance()
+
+    assert isinstance(instance, ValueSkipDeepImpl)
+    assert isinstance(instance, ValueSkipBaseImpl)
+    assert instance.compute() == 2  # From ValueSkipBaseImpl
+    assert instance.compute_all() == 6  # From ValueSkipDeepImpl

@@ -278,6 +278,16 @@ class ObjectType(Type):
         self.annotations = []
         self._deprecated = False
 
+        # --- Value class (for external value types, e.g., nn.Module subclasses)
+        self._original_type: type = tp  # Keep reference to original config class
+
+    def set_value_type(self, value_class: type) -> None:
+        """Register an explicit value class for this configuration.
+
+        The value class will be used when creating instances via .instance().
+        """
+        self.value_type = value_class
+
     def addAnnotation(self, annotation):
         assert not self.__initialized__
         self.annotations.append(annotation)
@@ -332,15 +342,18 @@ class ObjectType(Type):
         # Add task
         if self.taskcommandfactory is not None:
             self.task = self.taskcommandfactory(self)
-        elif issubclass(self.value_type, Task):
+        elif issubclass(self._original_type, Task):
             self.task = self.getpythontaskcommand()
 
         # Add arguments from type hints
+        # Use _original_type since value_type may have been overridden by set_value_type
         from .arguments import TypeAnnotation
 
-        if hasattr(self.value_type, "__annotations__"):
-            typekeys = set(self.value_type.__dict__.get("__annotations__", {}).keys())
-            hints = get_type_hints(self.value_type, include_extras=True)
+        if hasattr(self._original_type, "__annotations__"):
+            typekeys = set(
+                self._original_type.__dict__.get("__annotations__", {}).keys()
+            )
+            hints = get_type_hints(self._original_type, include_extras=True)
             for key, typehint in hints.items():
                 # Filter out hints from parent classes
                 if key in typekeys:
@@ -353,14 +366,14 @@ class ObjectType(Type):
                             try:
                                 self.addArgument(
                                     options.create(
-                                        key, self.value_type, typehint.__args__[0]
+                                        key, self._original_type, typehint.__args__[0]
                                     )
                                 )
                             except Exception:
                                 logger.error(
                                     "while adding argument %s of %s",
                                     key,
-                                    self.value_type,
+                                    self._original_type,
                                 )
                                 raise
 
@@ -375,7 +388,8 @@ class ObjectType(Type):
         self.__initialize__()
 
         # Get description from documentation
-        __doc__ = self.value_type.__dict__.get("__doc__", None)
+        # Use _original_type since value_type may have been overridden
+        __doc__ = self._original_type.__dict__.get("__doc__", None)
         if __doc__:
             parseddoc = parse(__doc__)
             self._title = parseddoc.short_description
@@ -463,7 +477,10 @@ class ObjectType(Type):
     def parents(self) -> Iterator["ObjectType"]:
         from .objects import Config, Task
 
-        for tp in self.value_type.__bases__:
+        # Use _original_type to avoid issues when value_type has been
+        # overridden by set_value_type (the value class would create
+        # circular references since it inherits from the config class)
+        for tp in self._original_type.__bases__:
             if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpmtype__
 

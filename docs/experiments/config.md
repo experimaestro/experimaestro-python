@@ -402,6 +402,108 @@ class ModelLearn(Config):
     def __validate__(self):
         assert self.batch_size % self.micro_batch_size == 0
 ```
+
+## Value classes
+
+By default, the configuration class itself is used to create instances. However,
+you may want to use a different class for the runtime instance, especially when:
+
+- You want to avoid importing heavy dependencies (like PyTorch) during configuration
+- The runtime class needs to inherit from external classes (like `nn.Module`)
+- You want to separate configuration logic from implementation logic
+
+The `@Config.value_class()` decorator allows registering an external value class:
+
+```python
+from experimaestro import Config, Param
+
+class Model(Config):
+    hidden_size: Param[int]
+    num_layers: Param[int] = 3
+
+@Model.value_class()
+class TorchModel(Model):
+    """The actual PyTorch implementation"""
+
+    def __post_init__(self):
+        import torch.nn as nn
+        # Now we can safely import PyTorch
+        self.layers = nn.ModuleList([
+            nn.Linear(self.hidden_size, self.hidden_size)
+            for _ in range(self.num_layers)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+```
+
+### Value class requirements
+
+The value class must:
+
+1. **Be a subclass of the configuration class**: This ensures type compatibility
+2. **Inherit from parent value classes**: If the parent configuration has a value class,
+   the child value class must inherit from it
+
+```python
+class BaseModel(Config):
+    base_param: Param[int]
+
+@BaseModel.value_class()
+class BaseModelImpl(BaseModel):
+    def base_method(self):
+        return self.base_param * 2
+
+class ChildModel(BaseModel):
+    child_param: Param[int]
+
+# Must inherit from BOTH ChildModel AND BaseModelImpl
+@ChildModel.value_class()
+class ChildModelImpl(ChildModel, BaseModelImpl):
+    def child_method(self):
+        return self.base_method() + self.child_param
+```
+
+### Accessing the value class
+
+You can access the value class through the `XPMValue` property:
+
+```python
+# Returns TorchModel if registered, or Model itself otherwise
+Model.XPMValue
+
+# Creating instances uses the value class automatically
+config = Model.C(hidden_size=256)
+instance = config.instance()  # Returns a TorchModel instance
+```
+
+### Skipping intermediate classes
+
+If an intermediate class in the hierarchy doesn't have a value class,
+child classes can still define their own:
+
+```python
+class Base(Config):
+    x: Param[int]
+
+@Base.value_class()
+class BaseImpl(Base):
+    pass
+
+class Middle(Base):  # No value class defined
+    y: Param[int]
+
+class Leaf(Middle):
+    z: Param[int]
+
+# LeafImpl must inherit from BaseImpl (skipping Middle which has no impl)
+@Leaf.value_class()
+class LeafImpl(Leaf, BaseImpl):
+    pass
+```
+
 ## Instance-based configurations
 
 By default, two `Config` instances with identical parameters will have the same identifier. This is the desired behavior in most cases, as it ensures task deduplication and caching. However, in some scenarios, you need to distinguish between different instances even when their parameters are identical.
