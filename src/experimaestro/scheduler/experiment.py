@@ -26,6 +26,26 @@ class FailedExperiment(HandledException):
     pass
 
 
+class DatabaseListener:
+    """Listener that updates job state in the database"""
+
+    def __init__(self, state_provider, experiment_id: str, run_id: str):
+        self.state_provider = state_provider
+        self.experiment_id = experiment_id
+        self.run_id = run_id
+
+    def job_submitted(self, job):
+        # Already handled in experiment.add_job()
+        pass
+
+    def job_state(self, job):
+        """Update job state in database"""
+        self.state_provider.update_job_state(job, self.experiment_id, self.run_id)
+
+    def service_add(self, service):
+        pass
+
+
 class experiment:
     """Main experiment object
 
@@ -175,7 +195,7 @@ class experiment:
         return self.workdir / "jobs.jsonl"
 
     def add_job(self, job: "Job"):
-        """Register a job and its tags to jobs.jsonl file"""
+        """Register a job and its tags to jobs.jsonl file and database"""
         if self in job.experiments:
             # Do not double register
             return
@@ -195,6 +215,10 @@ class experiment:
 
         with self.jobs_jsonl_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
+
+        # Also register in database for TUI/monitoring
+        experiment_id = self.workdir.name
+        self.state_provider.update_job_submitted(job, experiment_id, self.run_id)
 
     def stop(self):
         """Stop the experiment as soon as possible"""
@@ -316,6 +340,17 @@ class experiment:
             sync_on_start=False,  # Experiments don't sync on start
         )
 
+        # Register experiment in database and create a run
+        experiment_id = self.workdir.name
+        self.state_provider.ensure_experiment(experiment_id)
+        self.run_id = self.state_provider.create_run(experiment_id)
+
+        # Add database listener to update job state in database
+        self._db_listener = DatabaseListener(
+            self.state_provider, experiment_id, self.run_id
+        )
+        self.scheduler.listeners.add(self._db_listener)
+
         # Number of unfinished jobs
         self.unfinishedJobs = 0
         self.taskOutputQueueSize = 0
@@ -366,6 +401,14 @@ class experiment:
 
             # Unregister experiment from scheduler
             self.scheduler.unregister_experiment(self)
+
+            # Remove database listener
+            self.scheduler.listeners.discard(self._db_listener)
+
+            # Mark run as completed in database
+            experiment_id = self.workdir.name
+            status = "failed" if exc_type else "completed"
+            self.state_provider.complete_run(experiment_id, self.run_id, status)
 
             # Note: Don't stop scheduler - it's shared!
             # Note: Don't stop server - it runs in daemon mode until program exit

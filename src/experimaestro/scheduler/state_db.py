@@ -53,15 +53,17 @@ class ExperimentModel(BaseModel):
 
     Fields:
         experiment_id: Unique identifier for the experiment
-        workdir_path: Path to experiment directory
         current_run_id: Points to the current/latest run (null if no runs yet)
         created_at: When experiment was first created
+        updated_at: When experiment was last modified (for incremental queries)
+
+    Note: Experiment path is derivable: {workspace}/xp/{experiment_id}
     """
 
     experiment_id = CharField(primary_key=True)
-    workdir_path = CharField()
     current_run_id = CharField(null=True)
     created_at = DateTimeField(default=datetime.now)
+    updated_at = DateTimeField(default=datetime.now, index=True)
 
     class Meta:
         table_name = "experiments"
@@ -127,14 +129,15 @@ class JobModel(BaseModel):
         run_id: ID of the run this job belongs to
         task_id: Task class identifier
         locator: Full task locator (identifier)
-        path: Path to job directory
         state: Current job state (e.g., "unscheduled", "waiting", "running", "done", "error")
         failure_reason: Optional failure reason for error states (e.g., "TIMEOUT", "DEPENDENCY")
         submitted_time: When job was submitted (Unix timestamp)
         started_time: When job started running (Unix timestamp)
         ended_time: When job finished (Unix timestamp)
         progress: JSON-encoded list of progress updates
+        updated_at: When job was last modified (for incremental queries)
 
+    Note: Job path is derivable: {workspace}/jobs/{task_id}/{job_id}
     Note: Tags are stored in separate JobTagModel table (run-scoped)
     Note: Dependencies are NOT stored in DB (available in state.json only)
     """
@@ -144,13 +147,13 @@ class JobModel(BaseModel):
     run_id = CharField(index=True)
     task_id = CharField(index=True)
     locator = CharField()
-    path = CharField()
     state = CharField(default="unscheduled", index=True)
     failure_reason = CharField(null=True)
     submitted_time = FloatField(null=True)
     started_time = FloatField(null=True)
     ended_time = FloatField(null=True)
     progress = TextField(default="[]")
+    updated_at = DateTimeField(default=datetime.now, index=True)
 
     class Meta:
         table_name = "jobs"
@@ -164,6 +167,10 @@ class JobModel(BaseModel):
                 ("experiment_id", "run_id", "task_id"),
                 False,
             ),  # Query jobs by run and task
+            (
+                ("experiment_id", "run_id", "updated_at"),
+                False,
+            ),  # Query jobs by run and update time
         )
 
 
@@ -276,6 +283,8 @@ def initialize_workspace_database(
     # Acquire lock (blocking) - only one process can initialize at a time
     with lock:
         # Create database connection
+        # check_same_thread=False allows the connection to be used from multiple threads
+        # This is safe with WAL mode and proper locking
         db = SqliteDatabase(
             str(db_path),
             pragmas={
@@ -285,6 +294,7 @@ def initialize_workspace_database(
                 "synchronous": 1,  # NORMAL mode (balance safety/speed)
                 "busy_timeout": 5000,  # Wait up to 5 seconds for locks
             },
+            check_same_thread=False,
         )
 
         if read_only:

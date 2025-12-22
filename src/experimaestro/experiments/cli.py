@@ -399,7 +399,7 @@ def experiments_cli(  # noqa: C901
         # Run TUI in main thread (handles signals via Textual)
         tui_app = ExperimentTUI(
             workdir=workdir,
-            state_provider=xp_holder["xp"].scheduler.state_provider,
+            state_provider=xp_holder["xp"].state_provider,
             show_logs=True,
         )
 

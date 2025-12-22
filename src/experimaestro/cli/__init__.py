@@ -333,7 +333,9 @@ def monitor(workdir: Path, console: bool, port: int):
         cprint(f"Starting experiment monitor on http://localhost:{port}", "green")
         cprint("Press Ctrl+C to stop", "yellow")
 
-        state_provider = WorkspaceStateProvider(workdir, watch=True)
+        state_provider = WorkspaceStateProvider.get_instance(
+            workdir, sync_on_start=True
+        )
         settings = ServerSettings()
         settings.port = port
         server = Server.instance(settings, state_provider=state_provider)

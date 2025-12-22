@@ -8,9 +8,12 @@ excessive disk scanning and conflicts with running experiments.
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import fasteners
+
+if TYPE_CHECKING:
+    from .state_provider import WorkspaceStateProvider
 
 from experimaestro.scheduler.state_db import (
     ExperimentModel,
@@ -81,63 +84,15 @@ def acquire_sync_lock(
         return None
 
 
-def get_last_sync_time(workspace_path: Path) -> Optional[datetime]:
-    """Get the timestamp of the last successful sync
-
-    Args:
-        workspace_path: Path to workspace directory
-
-    Returns:
-        datetime of last sync, or None if never synced
-    """
-    try:
-        from .state_provider import WorkspaceStateProvider
-
-        provider = WorkspaceStateProvider.get_instance(
-            workspace_path, read_only=True, sync_on_start=False
-        )
-        with provider.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
-            metadata = WorkspaceSyncMetadata.get_or_none(
-                WorkspaceSyncMetadata.id == "workspace"
-            )
-            if metadata and metadata.last_sync_time:
-                return metadata.last_sync_time
-    except Exception as e:
-        logger.warning("Failed to get last sync time: %s", e)
-
-    return None
-
-
-def update_last_sync_time(workspace_path: Path) -> None:
-    """Update the last sync timestamp to now
-
-    Args:
-        workspace_path: Path to workspace directory
-    """
-    try:
-        from .state_provider import WorkspaceStateProvider
-
-        provider = WorkspaceStateProvider.get_instance(
-            workspace_path, read_only=False, sync_on_start=False
-        )
-        with provider.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
-            WorkspaceSyncMetadata.insert(
-                id="workspace", last_sync_time=datetime.now()
-            ).on_conflict(
-                conflict_target=[WorkspaceSyncMetadata.id],
-                update={WorkspaceSyncMetadata.last_sync_time: datetime.now()},
-            ).execute()
-            logger.debug("Updated last sync time")
-    except Exception as e:
-        logger.error("Failed to update last sync time: %s", e)
-
-
 def should_sync(
-    workspace_path: Path, min_interval_minutes: int = 5
+    provider: "WorkspaceStateProvider",
+    workspace_path: Path,
+    min_interval_minutes: int = 5,
 ) -> Tuple[bool, Optional[fasteners.InterProcessLock]]:
     """Determine if sync should be performed based on locking and timing
 
     Args:
+        provider: WorkspaceStateProvider instance (used to check last sync time)
         workspace_path: Path to workspace directory
         min_interval_minutes: Minimum minutes between syncs (default: 5)
 
@@ -153,8 +108,8 @@ def should_sync(
         logger.info("Skipping sync: other experiments are running")
         return False, None
 
-    # Check last sync time
-    last_sync_time = get_last_sync_time(workspace_path)
+    # Check last sync time using the provider
+    last_sync_time = provider.get_last_sync_time()
     if last_sync_time is None:
         # First sync ever
         logger.info("Performing first sync")
@@ -300,9 +255,21 @@ def sync_workspace_from_disk(  # noqa: C901
         workspace_path = Path(workspace_path)
     workspace_path = workspace_path.absolute()
 
+    # Get the workspace state provider FIRST (before should_sync)
+    # This ensures consistent read_only mode throughout the sync process
+    from .state_provider import WorkspaceStateProvider
+
+    provider = WorkspaceStateProvider.get_instance(
+        workspace_path,
+        read_only=not write_mode,
+        sync_on_start=False,  # Don't sync recursively
+    )
+
     # Check if sync should proceed (unless force=True)
     if not force:
-        should_proceed, lock = should_sync(workspace_path, sync_interval_minutes)
+        should_proceed, lock = should_sync(
+            provider, workspace_path, sync_interval_minutes
+        )
         if not should_proceed:
             return
     else:
@@ -316,15 +283,6 @@ def sync_workspace_from_disk(  # noqa: C901
 
     try:
         logger.info("Starting workspace sync from disk: %s", workspace_path)
-
-        # Get the workspace state provider to access the database
-        from .state_provider import WorkspaceStateProvider
-
-        provider = WorkspaceStateProvider.get_instance(
-            workspace_path,
-            read_only=not write_mode,
-            sync_on_start=False,  # Don't sync recursively
-        )
 
         experiments_found = 0
         runs_found = 0
@@ -360,11 +318,15 @@ def sync_workspace_from_disk(  # noqa: C901
 
                 if write_mode:
                     # Ensure experiment exists in database
+                    now = datetime.now()
                     ExperimentModel.insert(
-                        experiment_id=experiment_id, workdir_path=str(exp_dir)
+                        experiment_id=experiment_id,
+                        updated_at=now,
                     ).on_conflict(
                         conflict_target=[ExperimentModel.experiment_id],
-                        update={ExperimentModel.workdir_path: str(exp_dir)},
+                        update={
+                            ExperimentModel.updated_at: now,
+                        },
                     ).execute()
 
                 # Determine or create run_id for experiment
@@ -391,7 +353,10 @@ def sync_workspace_from_disk(  # noqa: C901
                         ).on_conflict_ignore().execute()
 
                         # Update experiment's current_run_id
-                        ExperimentModel.update(current_run_id=current_run_id).where(
+                        ExperimentModel.update(
+                            current_run_id=current_run_id,
+                            updated_at=datetime.now(),
+                        ).where(
                             ExperimentModel.experiment_id == experiment_id
                         ).execute()
 
@@ -468,25 +433,23 @@ def sync_workspace_from_disk(  # noqa: C901
                             "retry_count": 0,
                             "process": None,
                         }
-                        job_path_str = str(job_path) if job_path else str(symlink_path)
-                    else:
-                        job_path_str = str(job_path)
 
                     # Update database
                     if write_mode and job_state and job_state["job_id"]:
+                        job_now = datetime.now()
                         JobModel.insert(
                             job_id=job_state["job_id"],
                             experiment_id=experiment_id,
                             run_id=current_run_id,
                             task_id=job_state["task_id"],
                             locator="",  # Not available from disk
-                            path=job_path_str,
                             state=job_state["state"],
                             failure_reason=job_state.get("failure_reason"),
                             submitted_time=job_state.get("submitted_time"),
                             started_time=job_state.get("started_time"),
                             ended_time=job_state.get("ended_time"),
                             progress="[]",
+                            updated_at=job_now,
                         ).on_conflict(
                             conflict_target=[
                                 JobModel.job_id,
@@ -503,7 +466,7 @@ def sync_workspace_from_disk(  # noqa: C901
                                 ),
                                 JobModel.started_time: job_state.get("started_time"),
                                 JobModel.ended_time: job_state.get("ended_time"),
-                                JobModel.path: job_path_str,
+                                JobModel.updated_at: job_now,
                             },
                         ).execute()
 
@@ -553,7 +516,7 @@ def sync_workspace_from_disk(  # noqa: C901
 
             # Update last sync time if in write mode
             if write_mode:
-                update_last_sync_time(workspace_path)
+                provider.update_last_sync_time()
 
     finally:
         # Always release lock

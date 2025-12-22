@@ -51,9 +51,7 @@ def test_experiment_and_run_models(tmp_path: Path):
 
     with db.bind_ctx(ALL_MODELS):
         # Create an experiment
-        ExperimentModel.create(
-            experiment_id="test_exp", workdir_path="/tmp/xp/test_exp"
-        )
+        ExperimentModel.create(experiment_id="test_exp")
 
         # Create a run for this experiment
         ExperimentRunModel.create(
@@ -85,9 +83,7 @@ def test_job_model_with_composite_key(tmp_path: Path):
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and run first
-        ExperimentModel.create(
-            experiment_id="exp1", workdir_path="/tmp/exp1", current_run_id="run1"
-        )
+        ExperimentModel.create(experiment_id="exp1", current_run_id="run1")
         ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
 
         # Create a job
@@ -97,7 +93,6 @@ def test_job_model_with_composite_key(tmp_path: Path):
             run_id="run1",
             task_id="MyTask",
             locator="",
-            path="/tmp/jobs/MyTask/abc",
             state="running",
             submitted_time=1234567890.0,
         )
@@ -110,7 +105,6 @@ def test_job_model_with_composite_key(tmp_path: Path):
             run_id="run2",
             task_id="MyTask",
             locator="",
-            path="/tmp/jobs/MyTask/abc",
             state="done",
             submitted_time=1234567891.0,
         )
@@ -143,7 +137,7 @@ def test_job_tags_model(tmp_path: Path):
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and runs
-        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+        ExperimentModel.create(experiment_id="exp1")
         ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
         ExperimentRunModel.create(experiment_id="exp1", run_id="run2")
 
@@ -154,7 +148,6 @@ def test_job_tags_model(tmp_path: Path):
             run_id="run1",
             task_id="Task",
             locator="",
-            path="/tmp/job1",
             state="done",
         )
         JobModel.create(
@@ -163,7 +156,6 @@ def test_job_tags_model(tmp_path: Path):
             run_id="run2",
             task_id="Task",
             locator="",
-            path="/tmp/job1",
             state="done",
         )
 
@@ -215,8 +207,8 @@ def test_multiple_experiments_same_workspace(tmp_path: Path):
 
     with db.bind_ctx(ALL_MODELS):
         # Create two experiments
-        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
-        ExperimentModel.create(experiment_id="exp2", workdir_path="/tmp/exp2")
+        ExperimentModel.create(experiment_id="exp1")
+        ExperimentModel.create(experiment_id="exp2")
 
         # Create runs for each
         ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
@@ -229,7 +221,6 @@ def test_multiple_experiments_same_workspace(tmp_path: Path):
             run_id="run1",
             task_id="Task",
             locator="",
-            path="/tmp/job1",
             state="done",
         )
         JobModel.create(
@@ -238,7 +229,6 @@ def test_multiple_experiments_same_workspace(tmp_path: Path):
             run_id="run1",
             task_id="Task",
             locator="",
-            path="/tmp/job2",
             state="running",
         )
 
@@ -261,7 +251,7 @@ def test_read_only_mode(tmp_path: Path):
     # Create database with write mode
     db_write = initialize_workspace_database(db_path, read_only=False)
     with db_write.bind_ctx(ALL_MODELS):
-        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+        ExperimentModel.create(experiment_id="exp1")
     close_workspace_database(db_write)
 
     # Open in read-only mode
@@ -286,7 +276,7 @@ def test_upsert_on_conflict(tmp_path: Path):
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and run
-        ExperimentModel.create(experiment_id="exp1", workdir_path="/tmp/exp1")
+        ExperimentModel.create(experiment_id="exp1")
         ExperimentRunModel.create(experiment_id="exp1", run_id="run1")
 
         # Create job
@@ -296,7 +286,6 @@ def test_upsert_on_conflict(tmp_path: Path):
             run_id="run1",
             task_id="Task",
             locator="",
-            path="/tmp/job1",
             state="running",
         ).execute()
 
@@ -307,7 +296,6 @@ def test_upsert_on_conflict(tmp_path: Path):
             run_id="run1",
             task_id="Task",
             locator="",
-            path="/tmp/job1",
             state="done",
         ).on_conflict(
             conflict_target=[JobModel.job_id, JobModel.experiment_id, JobModel.run_id],

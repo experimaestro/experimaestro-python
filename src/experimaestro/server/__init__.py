@@ -195,12 +195,13 @@ def start_app(server: "Server"):
             for job_data in jobs:
                 emit("job.add", job_data)
         else:
-            # Refresh all experiments - only works with SchedulerStateProvider
+            # Refresh all experiments
             if listener.scheduler:
+                # Active experiments: get jobs from scheduler
                 for job in listener.scheduler.jobs.values():
                     emit("job.add", job_create(job))
             else:
-                # For non-scheduler providers, refresh all experiments
+                # Monitoring mode: get jobs from WorkspaceStateProvider
                 for exp in listener.state_provider.get_experiments():
                     exp_id = exp["experiment_id"]
                     jobs = listener.state_provider.get_jobs(exp_id)
@@ -391,7 +392,7 @@ class Server:
 
         Args:
             settings: Server settings (optional)
-            state_provider: StateProvider instance (optional, will use scheduler's if None)
+            state_provider: WorkspaceStateProvider instance (required)
         """
         if Server._instance is None:
             with Server._lock:
@@ -405,7 +406,7 @@ class Server:
                     if state_provider is None:
                         raise ValueError(
                             "state_provider parameter is required. "
-                            "Get it from workspace.state_provider"
+                            "Get it via WorkspaceStateProvider.get_instance(workspace.path)"
                         )
 
                     Server._instance = Server(settings, state_provider)

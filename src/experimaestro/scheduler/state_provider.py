@@ -10,14 +10,17 @@ Key features:
 - Run-scoped tags (fixes GH #128)
 - Thread-safe database access via thread-local connections
 - Real-time updates via scheduler listener interface
+- Push notifications via listener callbacks (for reactive UI)
 """
 
 import json
 import logging
 import threading
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 from experimaestro.scheduler.state_db import (
     ExperimentModel,
@@ -25,6 +28,13 @@ from experimaestro.scheduler.state_db import (
     JobModel,
     JobTagModel,
     ServiceModel,
+    ALL_MODELS,
+)
+from experimaestro.scheduler.interfaces import (
+    BaseJob,
+    BaseExperiment,
+    JobState,
+    STATE_NAME_TO_JOBSTATE,
 )
 
 if TYPE_CHECKING:
@@ -32,6 +42,166 @@ if TYPE_CHECKING:
     from experimaestro.scheduler.services import Service
 
 logger = logging.getLogger("xpm.state")
+
+
+# Event types for state provider notifications
+class StateEventType(Enum):
+    """Types of state change events"""
+
+    EXPERIMENT_UPDATED = auto()
+    RUN_UPDATED = auto()
+    JOB_UPDATED = auto()
+
+
+@dataclass
+class StateEvent:
+    """Base class for state change events
+
+    Attributes:
+        event_type: Type of the event
+        data: Event-specific data dictionary
+    """
+
+    event_type: StateEventType
+    data: Dict
+
+
+# Type alias for listener callbacks
+StateListener = Callable[[StateEvent], None]
+
+
+class MockJob(BaseJob):
+    """Concrete implementation of BaseJob for database-loaded jobs
+
+    This class is used when loading job information from the database,
+    as opposed to live Job instances which are created during experiment runs.
+    """
+
+    def __init__(
+        self,
+        identifier: str,
+        task_id: str,
+        locator: str,
+        path: Path,
+        state: str,  # State name string from DB
+        submittime: Optional[float],
+        starttime: Optional[float],
+        endtime: Optional[float],
+        progress: List[Dict],
+        tags: Dict[str, str],
+        experiment_id: str,
+        run_id: str,
+        updated_at: str,
+        exit_code: Optional[int] = None,
+        retry_count: int = 0,
+    ):
+        self.identifier = identifier
+        self.task_id = task_id
+        self.locator = locator
+        self.path = path
+        # Convert state name to JobState instance
+        self.state = STATE_NAME_TO_JOBSTATE.get(state, JobState.UNSCHEDULED)
+        self.submittime = submittime
+        self.starttime = starttime
+        self.endtime = endtime
+        self.progress = progress
+        self.tags = tags
+        self.experiment_id = experiment_id
+        self.run_id = run_id
+        self.updated_at = updated_at
+        self.exit_code = exit_code
+        self.retry_count = retry_count
+
+    @classmethod
+    def from_disk(cls, path: Path) -> Optional["MockJob"]:
+        """Create a MockJob by reading metadata from disk
+
+        Args:
+            path: Path to the job directory
+
+        Returns:
+            MockJob instance if metadata exists, None otherwise
+        """
+        metadata_path = path / ".xpm_metadata.json"
+        if not metadata_path.exists():
+            return None
+
+        try:
+            import json
+
+            with metadata_path.open("r") as f:
+                metadata = json.load(f)
+
+            return cls(
+                identifier=metadata.get("job_id", path.name),
+                task_id=metadata.get(
+                    "task_id", path.parent.name if path.parent else "unknown"
+                ),
+                locator=metadata.get("job_id", path.name),
+                path=path,
+                state=metadata.get("state", "unscheduled"),
+                submittime=metadata.get("submitted_time"),
+                starttime=metadata.get("started_time"),
+                endtime=metadata.get("ended_time"),
+                progress=[],  # Progress not stored in metadata
+                tags={},  # Tags come from jobs.jsonl, not metadata
+                experiment_id="",  # Not stored in job metadata
+                run_id="",  # Not stored in job metadata
+                updated_at=str(metadata.get("last_updated", "")),
+                exit_code=metadata.get("exit_code"),
+                retry_count=metadata.get("retry_count", 0),
+            )
+        except Exception as e:
+            logger.warning("Failed to read job metadata from %s: %s", path, e)
+            return None
+
+
+class MockExperiment(BaseExperiment):
+    """Concrete implementation of BaseExperiment for database-loaded experiments
+
+    This class is used when loading experiment information from the database,
+    as opposed to live experiment instances which are created during runs.
+    """
+
+    def __init__(
+        self,
+        workdir: Path,
+        current_run_id: Optional[str],
+        total_jobs: int,
+        finished_jobs: int,
+        failed_jobs: int,
+        updated_at: str,
+    ):
+        self.workdir = workdir
+        self.current_run_id = current_run_id
+        self.total_jobs = total_jobs
+        self.finished_jobs = finished_jobs
+        self.failed_jobs = failed_jobs
+        self.updated_at = updated_at
+
+    @property
+    def experiment_id(self) -> str:
+        """Experiment identifier derived from workdir name"""
+        return self.workdir.name
+
+
+def _with_db_context(func):
+    """Decorator to wrap method in database bind context
+
+    This ensures all database queries have the models bound to the database.
+    """
+    from functools import wraps
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            with self.workspace_db.bind_ctx(ALL_MODELS):
+                return func(self, *args, **kwargs)
+        except Exception as e:
+            logger.exception("Error in %s with database context: %s", func.__name__, e)
+            raise
+
+    return wrapper
 
 
 class WorkspaceStateProvider:
@@ -86,14 +256,32 @@ class WorkspaceStateProvider:
         # Check if instance already exists
         with cls._lock:
             if workspace_path in cls._instances:
-                return cls._instances[workspace_path]
+                existing = cls._instances[workspace_path]
+                # Fail if requesting different read_only mode than cached instance
+                if existing.read_only != read_only:
+                    raise RuntimeError(
+                        f"WorkspaceStateProvider for {workspace_path} already exists "
+                        f"with read_only={existing.read_only}, cannot open with "
+                        f"read_only={read_only}. Close the existing instance first."
+                    )
+                return existing
 
-            # Create new instance
-            instance = cls(
+            # Create new instance - register BEFORE __init__ to handle
+            # nested get_instance calls during sync_on_start
+            instance = object.__new__(cls)
+            cls._instances[workspace_path] = instance
+
+        # Initialize outside the lock to avoid deadlock during sync
+        try:
+            instance.__init__(
                 workspace_path, read_only, sync_on_start, sync_interval_minutes
             )
-            cls._instances[workspace_path] = instance
-            return instance
+        except Exception:
+            # Remove from registry if initialization fails
+            with cls._lock:
+                cls._instances.pop(workspace_path, None)
+            raise
+        return instance
 
     def __init__(
         self,
@@ -119,6 +307,10 @@ class WorkspaceStateProvider:
         self.workspace_path = workspace_path
         self.read_only = read_only
         self.sync_interval_minutes = sync_interval_minutes
+
+        # Listeners for push notifications
+        self._listeners: Set[StateListener] = set()
+        self._listeners_lock = threading.Lock()
 
         # Check and update workspace version
         from .workspace import WORKSPACE_VERSION
@@ -169,13 +361,14 @@ class WorkspaceStateProvider:
         db_path = self.workspace_path / "workspace.db"
         self.workspace_db = initialize_workspace_database(db_path, read_only=read_only)
 
-        # Optionally sync from disk on start
-        if sync_on_start:
+        # Optionally sync from disk on start (only in write mode)
+        # Syncing requires write access to update the database and sync timestamp
+        if sync_on_start and not read_only:
             from .state_sync import sync_workspace_from_disk
 
             sync_workspace_from_disk(
                 self.workspace_path,
-                write_mode=not read_only,
+                write_mode=True,
                 force=False,
                 sync_interval_minutes=sync_interval_minutes,
             )
@@ -188,27 +381,44 @@ class WorkspaceStateProvider:
 
     # Experiment management methods
 
-    def ensure_experiment(self, experiment_id: str, workdir_path: Path):
+    @_with_db_context
+    def ensure_experiment(self, experiment_id: str):
         """Create or update experiment record
 
         Args:
             experiment_id: Unique identifier for the experiment
-            workdir_path: Path to experiment directory
         """
         if self.read_only:
             raise RuntimeError("Cannot modify experiments in read-only mode")
 
+        now = datetime.now()
         ExperimentModel.insert(
             experiment_id=experiment_id,
-            workdir_path=str(workdir_path),
-            created_at=datetime.now(),
+            created_at=now,
+            updated_at=now,
         ).on_conflict(
             conflict_target=[ExperimentModel.experiment_id],
-            update={ExperimentModel.workdir_path: str(workdir_path)},
+            update={
+                ExperimentModel.updated_at: now,
+            },
         ).execute()
 
         logger.debug("Ensured experiment: %s", experiment_id)
 
+        # Notify listeners
+        exp_path = str(self.workspace_path / "xp" / experiment_id)
+        self._notify_listeners(
+            StateEvent(
+                event_type=StateEventType.EXPERIMENT_UPDATED,
+                data={
+                    "experiment_id": experiment_id,
+                    "workdir_path": exp_path,
+                    "updated_at": now.isoformat(),
+                },
+            )
+        )
+
+    @_with_db_context
     def create_run(self, experiment_id: str, run_id: Optional[str] = None) -> str:
         """Create a new run for an experiment
 
@@ -237,14 +447,31 @@ class WorkspaceStateProvider:
             status="active",
         ).execute()
 
-        # Update experiment's current_run_id
-        ExperimentModel.update(current_run_id=run_id).where(
-            ExperimentModel.experiment_id == experiment_id
-        ).execute()
+        # Update experiment's current_run_id and updated_at
+        now = datetime.now()
+        ExperimentModel.update(
+            current_run_id=run_id,
+            updated_at=now,
+        ).where(ExperimentModel.experiment_id == experiment_id).execute()
 
         logger.info("Created run %s for experiment %s", run_id, experiment_id)
+
+        # Notify listeners
+        self._notify_listeners(
+            StateEvent(
+                event_type=StateEventType.RUN_UPDATED,
+                data={
+                    "experiment_id": experiment_id,
+                    "run_id": run_id,
+                    "status": "active",
+                    "started_at": now.isoformat(),
+                },
+            )
+        )
+
         return run_id
 
+    @_with_db_context
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current/latest run_id for an experiment
 
@@ -262,21 +489,30 @@ class WorkspaceStateProvider:
         except ExperimentModel.DoesNotExist:
             return None
 
-    def get_experiments(self) -> List[Dict]:
+    @_with_db_context
+    def get_experiments(self, since: Optional[datetime] = None) -> List[MockExperiment]:
         """Get list of all experiments
 
+        Args:
+            since: If provided, only return experiments updated after this timestamp
+
         Returns:
-            List of experiment dictionaries with keys:
-            - experiment_id: Unique identifier
-            - workdir_path: Workspace directory path
+            List of MockExperiment objects with attributes:
+            - workdir: Path to experiment directory
+            - experiment_id: Unique identifier (property derived from workdir.name)
             - current_run_id: Current/latest run ID
             - total_jobs: Total number of jobs (for current run)
             - finished_jobs: Number of completed jobs (for current run)
             - failed_jobs: Number of failed jobs (for current run)
+            - updated_at: When experiment was last modified
         """
         experiments = []
 
-        for exp_model in ExperimentModel.select():
+        query = ExperimentModel.select()
+        if since is not None:
+            query = query.where(ExperimentModel.updated_at > since)
+
+        for exp_model in query:
             # Count jobs for current run
             total_jobs = 0
             finished_jobs = 0
@@ -310,27 +546,31 @@ class WorkspaceStateProvider:
                     .count()
                 )
 
+            # Compute experiment path from workspace_path and experiment_id
+            exp_path = self.workspace_path / "xp" / exp_model.experiment_id
+
             experiments.append(
-                {
-                    "experiment_id": exp_model.experiment_id,
-                    "workdir_path": exp_model.workdir_path,
-                    "current_run_id": exp_model.current_run_id,
-                    "total_jobs": total_jobs,
-                    "finished_jobs": finished_jobs,
-                    "failed_jobs": failed_jobs,
-                }
+                MockExperiment(
+                    workdir=exp_path,
+                    current_run_id=exp_model.current_run_id,
+                    total_jobs=total_jobs,
+                    finished_jobs=finished_jobs,
+                    failed_jobs=failed_jobs,
+                    updated_at=exp_model.updated_at.isoformat(),
+                )
             )
 
         return experiments
 
-    def get_experiment(self, experiment_id: str) -> Optional[Dict]:
+    @_with_db_context
+    def get_experiment(self, experiment_id: str) -> Optional[MockExperiment]:
         """Get a specific experiment by ID
 
         Args:
             experiment_id: Experiment identifier
 
         Returns:
-            Experiment dictionary or None if not found
+            MockExperiment object or None if not found
         """
         try:
             exp_model = ExperimentModel.get(
@@ -372,15 +612,19 @@ class WorkspaceStateProvider:
                 .count()
             )
 
-        return {
-            "experiment_id": exp_model.experiment_id,
-            "workdir_path": exp_model.workdir_path,
-            "current_run_id": exp_model.current_run_id,
-            "total_jobs": total_jobs,
-            "finished_jobs": finished_jobs,
-            "failed_jobs": failed_jobs,
-        }
+        # Compute experiment path from workspace_path and experiment_id
+        exp_path = self.workspace_path / "xp" / exp_model.experiment_id
 
+        return MockExperiment(
+            workdir=exp_path,
+            current_run_id=exp_model.current_run_id,
+            total_jobs=total_jobs,
+            finished_jobs=finished_jobs,
+            failed_jobs=failed_jobs,
+            updated_at=exp_model.updated_at.isoformat(),
+        )
+
+    @_with_db_context
     def get_experiment_runs(self, experiment_id: str) -> List[Dict]:
         """Get all runs for an experiment
 
@@ -414,6 +658,7 @@ class WorkspaceStateProvider:
             )
         return runs
 
+    @_with_db_context
     def complete_run(self, experiment_id: str, run_id: str, status: str = "completed"):
         """Mark a run as completed
 
@@ -437,6 +682,7 @@ class WorkspaceStateProvider:
 
     # Job operations
 
+    @_with_db_context
     def get_jobs(
         self,
         experiment_id: Optional[str] = None,
@@ -444,7 +690,8 @@ class WorkspaceStateProvider:
         task_id: Optional[str] = None,
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
-    ) -> List[Dict]:
+        since: Optional[datetime] = None,
+    ) -> List[MockJob]:
         """Query jobs with optional filters
 
         Args:
@@ -453,12 +700,17 @@ class WorkspaceStateProvider:
             task_id: Filter by task class identifier
             state: Filter by job state
             tags: Filter by tags (all tags must match)
+            since: If provided, only return jobs updated after this timestamp
 
         Returns:
-            List of job dictionaries (UI format with camelCase keys)
+            List of MockJob objects
         """
         # Build base query
         query = JobModel.select()
+
+        # Apply since filter for incremental updates
+        if since is not None:
+            query = query.where(JobModel.updated_at > since)
 
         # Apply experiment filter
         if experiment_id is not None:
@@ -508,9 +760,10 @@ class WorkspaceStateProvider:
 
         return jobs
 
+    @_with_db_context
     def get_job(
         self, job_id: str, experiment_id: str, run_id: Optional[str] = None
-    ) -> Optional[Dict]:
+    ) -> Optional[MockJob]:
         """Get a specific job
 
         Args:
@@ -519,7 +772,7 @@ class WorkspaceStateProvider:
             run_id: Run identifier (None = current run)
 
         Returns:
-            Job dictionary or None if not found
+            MockJob object or None if not found
         """
         # Use current run if not specified
         if run_id is None:
@@ -541,6 +794,7 @@ class WorkspaceStateProvider:
 
         return self._job_model_to_dict(job_model, job_tags)
 
+    @_with_db_context
     def update_job_submitted(self, job: "Job", experiment_id: str, run_id: str):
         """Record that a job has been submitted
 
@@ -556,20 +810,22 @@ class WorkspaceStateProvider:
             raise RuntimeError("Cannot update jobs in read-only mode")
 
         # Create or update job record
+        now = datetime.now()
         JobModel.insert(
             job_id=job.identifier,
             experiment_id=experiment_id,
             run_id=run_id,
             task_id=str(job.type.identifier),
             locator=job.identifier,
-            path=str(job.path),
             state=job.state.name,
             submitted_time=job.submittime,
+            updated_at=now,
         ).on_conflict(
             conflict_target=[JobModel.job_id, JobModel.experiment_id, JobModel.run_id],
             update={
                 JobModel.state: job.state.name,
                 JobModel.submitted_time: job.submittime,
+                JobModel.updated_at: now,
             },
         ).execute()
 
@@ -583,6 +839,26 @@ class WorkspaceStateProvider:
             run_id,
         )
 
+        # Notify listeners
+        job_path = str(
+            self.workspace_path / "jobs" / str(job.type.identifier) / job.identifier
+        )
+        self._notify_listeners(
+            StateEvent(
+                event_type=StateEventType.JOB_UPDATED,
+                data={
+                    "jobId": job.identifier,
+                    "taskId": str(job.type.identifier),
+                    "experimentId": experiment_id,
+                    "runId": run_id,
+                    "status": job.state.name,
+                    "path": job_path,
+                    "updatedAt": now.isoformat(),
+                },
+            )
+        )
+
+    @_with_db_context
     def update_job_state(self, job: "Job", experiment_id: str, run_id: str):
         """Update the state of a job
 
@@ -597,9 +873,11 @@ class WorkspaceStateProvider:
         if self.read_only:
             raise RuntimeError("Cannot update jobs in read-only mode")
 
-        # Build update dict
+        # Build update dict with updated_at timestamp
+        now = datetime.now()
         update_data = {
             JobModel.state: job.state.name,
+            JobModel.updated_at: now,
         }
 
         # Add failure reason if available
@@ -638,6 +916,26 @@ class WorkspaceStateProvider:
             run_id,
         )
 
+        # Notify listeners
+        job_path = str(
+            self.workspace_path / "jobs" / str(job.type.identifier) / job.identifier
+        )
+        self._notify_listeners(
+            StateEvent(
+                event_type=StateEventType.JOB_UPDATED,
+                data={
+                    "jobId": job.identifier,
+                    "taskId": str(job.type.identifier),
+                    "experimentId": experiment_id,
+                    "runId": run_id,
+                    "status": job.state.name,
+                    "path": job_path,
+                    "updatedAt": now.isoformat(),
+                },
+            )
+        )
+
+    @_with_db_context
     def update_job_tags(
         self, job_id: str, experiment_id: str, run_id: str, tags_dict: Dict[str, str]
     ):
@@ -688,6 +986,7 @@ class WorkspaceStateProvider:
             tags_dict,
         )
 
+    @_with_db_context
     def delete_job(self, job_id: str, experiment_id: str, run_id: str):
         """Remove a job and its tags
 
@@ -722,6 +1021,7 @@ class WorkspaceStateProvider:
 
     # Service operations
 
+    @_with_db_context
     def update_service(
         self,
         service_id: str,
@@ -773,6 +1073,7 @@ class WorkspaceStateProvider:
             run_id,
         )
 
+    @_with_db_context
     def get_services(
         self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
     ) -> List[Dict]:
@@ -814,6 +1115,44 @@ class WorkspaceStateProvider:
             )
         return services
 
+    # Sync metadata methods
+
+    @_with_db_context
+    def get_last_sync_time(self) -> Optional[datetime]:
+        """Get the timestamp of the last successful sync
+
+        Returns:
+            datetime of last sync, or None if never synced
+        """
+        from .state_db import WorkspaceSyncMetadata
+
+        metadata = WorkspaceSyncMetadata.get_or_none(
+            WorkspaceSyncMetadata.id == "workspace"
+        )
+        if metadata and metadata.last_sync_time:
+            return metadata.last_sync_time
+        return None
+
+    @_with_db_context
+    def update_last_sync_time(self) -> None:
+        """Update the last sync timestamp to now
+
+        Raises:
+            RuntimeError: If in read-only mode
+        """
+        if self.read_only:
+            raise RuntimeError("Cannot update sync time in read-only mode")
+
+        from .state_db import WorkspaceSyncMetadata
+
+        WorkspaceSyncMetadata.insert(
+            id="workspace", last_sync_time=datetime.now()
+        ).on_conflict(
+            conflict_target=[WorkspaceSyncMetadata.id],
+            update={WorkspaceSyncMetadata.last_sync_time: datetime.now()},
+        ).execute()
+        logger.debug("Updated last sync time")
+
     # Utility methods
 
     def close(self):
@@ -835,8 +1174,53 @@ class WorkspaceStateProvider:
 
         logger.debug("WorkspaceStateProvider closed for %s", self.workspace_path)
 
+    # Listener methods for push notifications
+
+    def add_listener(self, listener: StateListener) -> None:
+        """Register a listener for state change notifications
+
+        Listeners are called synchronously when state changes occur.
+        For UI applications, listeners should queue updates for their
+        own event loop to avoid blocking database operations.
+
+        Args:
+            listener: Callback function that receives StateEvent objects
+        """
+        with self._listeners_lock:
+            self._listeners.add(listener)
+        logger.debug("Added state listener: %s", listener)
+
+    def remove_listener(self, listener: StateListener) -> None:
+        """Unregister a state change listener
+
+        Args:
+            listener: Previously registered callback function
+        """
+        with self._listeners_lock:
+            self._listeners.discard(listener)
+        logger.debug("Removed state listener: %s", listener)
+
+    def _notify_listeners(self, event: StateEvent) -> None:
+        """Notify all registered listeners of a state change
+
+        This is called internally by state-modifying methods.
+        Listeners are called synchronously - they should be fast.
+
+        Args:
+            event: State change event to broadcast
+        """
+        with self._listeners_lock:
+            listeners = list(self._listeners)
+
+        for listener in listeners:
+            try:
+                listener(event)
+            except Exception as e:
+                logger.warning("Listener %s raised exception: %s", listener, e)
+
     # Helper methods
 
+    @_with_db_context
     def _get_job_tags(
         self, job_id: str, experiment_id: str, run_id: str
     ) -> Dict[str, str]:
@@ -859,35 +1243,37 @@ class WorkspaceStateProvider:
             tags[tag_model.tag_key] = tag_model.tag_value
         return tags
 
-    def _job_model_to_dict(self, job_model: JobModel, tags: Dict[str, str]) -> Dict:
-        """Convert a JobModel to a dictionary in UI format
+    def _job_model_to_dict(self, job_model: JobModel, tags: Dict[str, str]) -> MockJob:
+        """Convert a JobModel to a MockJob object
 
         Args:
             job_model: JobModel instance
             tags: Dictionary of tags for this job
 
         Returns:
-            Job dictionary compatible with UI expectations (camelCase keys)
+            MockJob object
         """
         # Parse progress JSON
         progress_list = json.loads(job_model.progress)
 
-        return {
-            # UI expects camelCase keys
-            "jobId": job_model.job_id,
-            "taskId": job_model.task_id,
-            "locator": job_model.locator,
-            "status": job_model.state,  # UI expects "status" not "state"
-            "submitted": self._format_time(job_model.submitted_time),
-            "start": self._format_time(job_model.started_time),
-            "end": self._format_time(job_model.ended_time),
-            "progress": progress_list,
-            "tags": list(tags.items()),  # UI expects list of [key, value] tuples
-            "experimentIds": [
-                job_model.experiment_id
-            ],  # Job belongs to this experiment
-            "runId": job_model.run_id,  # Include run information
-        }
+        # Compute job path from workspace_path, task_id, and job_id
+        job_path = self.workspace_path / "jobs" / job_model.task_id / job_model.job_id
+
+        return MockJob(
+            identifier=job_model.job_id,
+            task_id=job_model.task_id,
+            locator=job_model.locator,
+            path=job_path,
+            state=job_model.state,
+            submittime=job_model.submitted_time,
+            starttime=job_model.started_time,
+            endtime=job_model.ended_time,
+            progress=progress_list,
+            tags=tags,
+            experiment_id=job_model.experiment_id,
+            run_id=job_model.run_id,
+            updated_at=job_model.updated_at.isoformat(),
+        )
 
     def _format_time(self, timestamp: Optional[float]) -> str:
         """Format timestamp for UI
@@ -924,6 +1310,7 @@ class SchedulerListener:
 
         logger.info("SchedulerListener initialized")
 
+    @_with_db_context
     def job_submitted(self, job: "Job", experiment_id: str, run_id: str):
         """Called when a job is submitted
 
@@ -943,6 +1330,7 @@ class SchedulerListener:
                 "Error updating job submission for %s: %s", job.identifier, e
             )
 
+    @_with_db_context
     def job_state(self, job: "Job"):
         """Called when a job's state changes
 
@@ -965,6 +1353,7 @@ class SchedulerListener:
         except Exception as e:
             logger.exception("Error updating job state for %s: %s", job.identifier, e)
 
+    @_with_db_context
     def service_add(self, service: "Service", experiment_id: str, run_id: str):
         """Called when a service is added
 

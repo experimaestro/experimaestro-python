@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, Widget
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import (
     Header,
     Footer,
@@ -14,11 +14,28 @@ from textual.widgets import (
     TabPane,
     RichLog,
 )
+from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.message import Message
 from textual import events, work
-from experimaestro.scheduler.state_provider import StateProvider
+from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+from experimaestro.tui.log_viewer import LogViewerScreen
+
+
+def get_status_text(status: str):
+    if status == "done":
+        status_text = "✓ Done"
+    elif status == "error":
+        status_text = "❌ Failed"
+    elif status == "running":
+        status_text = "⏳ Running"
+    elif status == "unscheduled":
+        status_text = "📆 Unscheduled"
+    else:
+        status_text = status
+
+    return status_text
 
 
 class CaptureLog(RichLog):
@@ -40,7 +57,7 @@ class ExperimentsList(Widget):
     current_experiment: reactive[Optional[str]] = reactive(None)
     collapsed: reactive[bool] = reactive(False)
 
-    def __init__(self, state_provider: StateProvider) -> None:
+    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.experiments = []
@@ -65,7 +82,7 @@ class ExperimentsList(Widget):
 
         # If there's only one experiment, automatically select it
         if len(self.experiments) == 1:
-            exp_id = self.experiments[0]["experiment_id"]
+            exp_id = self.experiments[0].experiment_id
             self.current_experiment = exp_id
             self.collapse_to_experiment(exp_id)
             self.post_message(ExperimentSelected(exp_id))
@@ -74,19 +91,29 @@ class ExperimentsList(Widget):
         """Refresh the experiments list from state provider"""
         table = self.query_one("#experiments-table", DataTable)
 
-        self.experiments = self.state_provider.get_experiments()
-        self.log("Refreshing experiments", len(self.experiments))
+        try:
+            self.experiments = self.state_provider.get_experiments()
+            self.log(
+                f"Refreshing experiments: found {len(self.experiments)} experiments"
+            )
+        except Exception as e:
+            self.log(f"ERROR refreshing experiments: {e}")
+            import traceback
+
+            self.log(traceback.format_exc())
+            self.experiments = []
+            return
 
         # Get existing row keys
         existing_keys = set(table.rows.keys())
         current_exp_ids = set()
 
         for exp in self.experiments:
-            exp_id = exp["experiment_id"]
+            exp_id = exp.experiment_id
             current_exp_ids.add(exp_id)
-            total = exp["total_jobs"]
-            finished = exp["finished_jobs"]
-            failed = exp["failed_jobs"]
+            total = exp.total_jobs
+            finished = exp.finished_jobs
+            failed = exp.failed_jobs
 
             # Determine status
             if failed > 0:
@@ -123,16 +150,16 @@ class ExperimentsList(Widget):
         """Collapse the experiments list to show only the selected experiment"""
         # Find experiment info
         exp_info = next(
-            (exp for exp in self.experiments if exp["experiment_id"] == experiment_id),
+            (exp for exp in self.experiments if exp.experiment_id == experiment_id),
             None,
         )
         if not exp_info:
             return
 
         # Update collapsed header
-        total = exp_info["total_jobs"]
-        finished = exp_info["finished_jobs"]
-        failed = exp_info["failed_jobs"]
+        total = exp_info.total_jobs
+        finished = exp_info.finished_jobs
+        failed = exp_info.failed_jobs
 
         if failed > 0:
             status = f"❌ {failed} failed"
@@ -184,10 +211,158 @@ class ExperimentDeselected(Message):
     pass
 
 
+class JobSelected(Message):
+    """Message sent when a job is selected"""
+
+    def __init__(self, job_id: str, experiment_id: str) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.experiment_id = experiment_id
+
+
+class JobDeselected(Message):
+    """Message sent when returning from job detail view"""
+
+    pass
+
+
+class ViewJobLogs(Message):
+    """Message sent when user wants to view job logs"""
+
+    def __init__(self, job_path: str, task_id: str) -> None:
+        super().__init__()
+        self.job_path = job_path
+        self.task_id = task_id
+
+
+class JobDetailView(Widget):
+    """Widget displaying detailed job information"""
+
+    BINDINGS = [
+        Binding("l", "view_logs", "View Logs", priority=True),
+    ]
+
+    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+        super().__init__()
+        self.state_provider = state_provider
+        self.current_job_id: Optional[str] = None
+        self.current_experiment_id: Optional[str] = None
+        self.job_data: Optional[dict] = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("Job Details", classes="section-title")
+        with Vertical(id="job-detail-content"):
+            yield Label("", id="job-id-label")
+            yield Label("", id="job-task-label")
+            yield Label("", id="job-status-label")
+            yield Label("", id="job-path-label")
+            yield Label("", id="job-times-label")
+            yield Label("Tags:", classes="subsection-title")
+            yield Label("", id="job-tags-label")
+            yield Label("Progress:", classes="subsection-title")
+            yield Label("", id="job-progress-label")
+            yield Label("", id="job-logs-hint")
+
+    def action_view_logs(self) -> None:
+        """View job logs with toolong"""
+        if self.job_data and self.job_data.path and self.job_data.task_id:
+            self.post_message(
+                ViewJobLogs(str(self.job_data.path), self.job_data.task_id)
+            )
+
+    def set_job(self, job_id: str, experiment_id: str) -> None:
+        """Set the job to display"""
+        self.current_job_id = job_id
+        self.current_experiment_id = experiment_id
+        self.refresh_job_detail()
+
+    def refresh_job_detail(self) -> None:
+        """Refresh job details from state provider"""
+        if not self.current_job_id or not self.current_experiment_id:
+            return
+
+        job = self.state_provider.get_job(
+            self.current_job_id, self.current_experiment_id
+        )
+        if not job:
+            self.log(f"Job not found: {self.current_job_id}")
+            return
+
+        self.job_data = job
+
+        # Update labels
+        self.query_one("#job-id-label", Label).update(f"Job ID: {job.identifier}")
+        self.query_one("#job-task-label", Label).update(f"Task: {job.task_id}")
+
+        # Format status
+        status_text = get_status_text(job.state.name if job.state else "unknown")
+
+        self.query_one("#job-status-label", Label).update(f"Status: {status_text}")
+
+        # Path (from locator)
+        locator = job.locator or "-"
+        self.query_one("#job-path-label", Label).update(f"Locator: {locator}")
+
+        # Times - format timestamps
+        from datetime import datetime
+
+        def format_time(ts):
+            if ts:
+                return datetime.fromtimestamp(ts).isoformat()
+            return "-"
+
+        submitted = format_time(job.submittime)
+        start = format_time(job.starttime)
+        end = format_time(job.endtime)
+        times_text = f"Submitted: {submitted} | Start: {start} | End: {end}"
+        self.query_one("#job-times-label", Label).update(times_text)
+
+        # Tags - job.tags is now a dict
+        tags = job.tags
+        if tags:
+            tags_text = ", ".join(f"{k}={v}" for k, v in tags.items())
+        else:
+            tags_text = "(no tags)"
+        self.query_one("#job-tags-label", Label).update(tags_text)
+
+        # Progress
+        progress_list = job.progress or []
+        if progress_list:
+            progress_lines = []
+            for p in progress_list:
+                level = p.get("level", 0)
+                pct = p.get("progress", 0) * 100
+                desc = p.get("desc", "")
+                indent = "  " * level
+                progress_lines.append(f"{indent}{pct:.1f}% {desc}")
+            progress_text = "\n".join(progress_lines) if progress_lines else "-"
+        else:
+            progress_text = "-"
+        self.query_one("#job-progress-label", Label).update(progress_text)
+
+        # Log files hint - log files are named after the last part of the task ID
+        job_path = job.path
+        task_id = job.task_id
+        if job_path and task_id:
+            # Extract the last component of the task ID (e.g., "evaluate" from "mnist_xp.learn.evaluate")
+            task_name = task_id.split(".")[-1]
+            stdout_path = job_path / f"{task_name}.out"
+            stderr_path = job_path / f"{task_name}.err"
+            logs_exist = stdout_path.exists() or stderr_path.exists()
+            if logs_exist:
+                self.query_one("#job-logs-hint", Label).update(
+                    "[bold cyan]Press 'l' to view logs[/bold cyan]"
+                )
+            else:
+                self.query_one("#job-logs-hint", Label).update("(no log files found)")
+        else:
+            self.query_one("#job-logs-hint", Label).update("")
+
+
 class JobsTable(Widget):
     """Widget displaying jobs for selected experiment"""
 
-    def __init__(self, state_provider: StateProvider) -> None:
+    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.current_experiment: Optional[str] = None
@@ -227,23 +402,16 @@ class JobsTable(Widget):
         current_job_ids = set()
 
         for job in jobs:
-            job_id = job["jobId"]
+            job_id = job.identifier
             current_job_ids.add(job_id)
-            task_id = job["taskId"]
-            status = job["status"]
+            task_id = job.task_id
+            status = job.state.name if job.state else "unknown"
 
             # Format status with icon
-            if status == "done":
-                status_text = "✓ Done"
-            elif status == "failed":
-                status_text = "❌ Failed"
-            elif status == "running":
-                status_text = "⏳ Running"
-            else:
-                status_text = status
+            status_text = get_status_text(status)
 
             # Format progress
-            progress_list = job.get("progress", [])
+            progress_list = job.progress or []
             if progress_list:
                 # Get the last progress entry
                 last_progress = progress_list[-1]
@@ -253,17 +421,19 @@ class JobsTable(Widget):
                 progress_text = "-"
 
             # Format timestamps
-            submitted = job.get("submitted", "-")
-            if submitted and submitted != "-":
-                submitted = submitted.split("T")[0]  # Just the date
+            from datetime import datetime
+
+            submitted = "-"
+            if job.submittime:
+                submitted = datetime.fromtimestamp(job.submittime).strftime("%Y-%m-%d")
 
             # Calculate duration
-            start = job.get("start")
-            end = job.get("end")
-            if start and end and start != "-" and end != "-":
-                # Simple duration display (would need proper parsing for accurate calculation)
+            start = job.starttime
+            end = job.endtime
+            if start and end:
+                # Simple duration display
                 duration = "completed"
-            elif start and start != "-":
+            elif start:
                 duration = "running"
             else:
                 duration = "-"
@@ -295,6 +465,12 @@ class JobsTable(Widget):
             table.remove_row(old_job_id)
 
         self.log(f"Jobs table now has {table.row_count} rows")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle job selection"""
+        if event.row_key and self.current_experiment:
+            job_id = str(event.row_key.value)
+            self.post_message(JobSelected(job_id, self.current_experiment))
 
 
 class ExperimentTUI(App):
@@ -381,19 +557,51 @@ class ExperimentTUI(App):
     TabbedContent {
         height: 100%;
     }
+
+    #job-detail-container {
+        width: 100%;
+        height: 1fr;
+        border: solid magenta;
+        padding: 1;
+    }
+
+    JobDetailView {
+        width: 100%;
+        height: 100%;
+    }
+
+    #job-detail-content {
+        padding: 1;
+    }
+
+    #job-detail-content Label {
+        margin-bottom: 1;
+    }
+
+    .subsection-title {
+        background: $surface;
+        padding: 0 1;
+        text-style: italic;
+        margin-top: 1;
+    }
+
+    #job-logs-hint {
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
-        Binding("escape", "back_to_experiments", "Back to Experiments", priority=True),
+        Binding("escape", "go_back", "Back", priority=True),
+        Binding("l", "view_logs", "View Logs"),
     ]
 
     def __init__(
         self,
         workdir: Optional[Path] = None,
         watch: bool = True,
-        state_provider: Optional[StateProvider] = None,
+        state_provider: Optional[WorkspaceStateProvider] = None,
         show_logs: bool = False,
     ):
         """Initialize the TUI
@@ -419,7 +627,7 @@ class ExperimentTUI(App):
             # Get singleton provider instance for this workspace
             self.state_provider = WorkspaceStateProvider.get_instance(
                 self.workdir,
-                read_only=True,
+                read_only=False,
                 sync_on_start=True,
                 sync_interval_minutes=5,
             )
@@ -444,11 +652,14 @@ class ExperimentTUI(App):
         yield Footer()
 
     def _compose_monitor_view(self):
-        """Compose the monitor view with experiments and jobs"""
+        """Compose the monitor view with experiments, jobs, and job details"""
         yield ExperimentsList(self.state_provider)
         # Jobs view (hidden initially)
         with Vertical(id="jobs-container", classes="hidden"):
             yield JobsTable(self.state_provider)
+        # Job detail view (hidden initially)
+        with Vertical(id="job-detail-container", classes="hidden"):
+            yield JobDetailView(self.state_provider)
 
     def on_mount(self) -> None:
         """Initialize the application"""
@@ -482,6 +693,37 @@ class ExperimentTUI(App):
         """Handle experiment deselection - hide jobs view"""
         jobs_container = self.query_one("#jobs-container")
         jobs_container.add_class("hidden")
+        # Also hide job detail if visible
+        job_detail_container = self.query_one("#job-detail-container")
+        job_detail_container.add_class("hidden")
+
+    def on_job_selected(self, message: JobSelected) -> None:
+        """Handle job selection - show job detail view"""
+        self.log(f"Job selected: {message.job_id} from {message.experiment_id}")
+
+        # Hide jobs table, show job detail
+        jobs_container = self.query_one("#jobs-container")
+        jobs_container.add_class("hidden")
+
+        job_detail_container = self.query_one("#job-detail-container")
+        job_detail_container.remove_class("hidden")
+
+        # Set the job to display
+        job_detail_view = self.query_one(JobDetailView)
+        job_detail_view.set_job(message.job_id, message.experiment_id)
+
+    def on_job_deselected(self, message: JobDeselected) -> None:
+        """Handle job deselection - go back to jobs view"""
+        # Hide job detail, show jobs table
+        job_detail_container = self.query_one("#job-detail-container")
+        job_detail_container.add_class("hidden")
+
+        jobs_container = self.query_one("#jobs-container")
+        jobs_container.remove_class("hidden")
+
+        # Focus the jobs table
+        jobs_table = self.query_one("#jobs-table", DataTable)
+        jobs_table.focus()
 
     def action_refresh(self) -> None:
         """Manually refresh the data"""
@@ -491,13 +733,60 @@ class ExperimentTUI(App):
         experiments_list.refresh_experiments()
         jobs_table.refresh_jobs()
 
-    def action_back_to_experiments(self) -> None:
-        """Switch back to experiments view from jobs view"""
-        experiments_list = self.query_one(ExperimentsList)
-        if experiments_list.collapsed:
-            experiments_list.expand_experiments()
-            jobs_container = self.query_one("#jobs-container")
-            jobs_container.add_class("hidden")
+        # Also refresh job detail if visible
+        job_detail_container = self.query_one("#job-detail-container")
+        if not job_detail_container.has_class("hidden"):
+            job_detail_view = self.query_one(JobDetailView)
+            job_detail_view.refresh_job_detail()
+
+    def action_go_back(self) -> None:
+        """Go back one level in the navigation hierarchy"""
+        # Check if job detail is visible -> go back to jobs
+        job_detail_container = self.query_one("#job-detail-container")
+        if not job_detail_container.has_class("hidden"):
+            self.post_message(JobDeselected())
+            return
+
+        # Check if jobs list is visible -> go back to experiments
+        jobs_container = self.query_one("#jobs-container")
+        if not jobs_container.has_class("hidden"):
+            experiments_list = self.query_one(ExperimentsList)
+            if experiments_list.collapsed:
+                experiments_list.expand_experiments()
+                jobs_container.add_class("hidden")
+
+    def action_view_logs(self) -> None:
+        """View logs for the current job (if job detail is visible)"""
+        job_detail_container = self.query_one("#job-detail-container")
+        if not job_detail_container.has_class("hidden"):
+            job_detail_view = self.query_one(JobDetailView)
+            job_detail_view.action_view_logs()
+
+    def on_view_job_logs(self, message: ViewJobLogs) -> None:
+        """Handle request to view job logs - push LogViewerScreen"""
+        job_path = Path(message.job_path)
+        # Log files are named after the last part of the task ID
+        task_name = message.task_id.split(".")[-1]
+        stdout_path = job_path / f"{task_name}.out"
+        stderr_path = job_path / f"{task_name}.err"
+
+        # Collect existing log files
+        log_files = []
+        if stdout_path.exists():
+            log_files.append(str(stdout_path))
+        if stderr_path.exists():
+            log_files.append(str(stderr_path))
+
+        if not log_files:
+            self.notify(
+                f"No log files found: {task_name}.out/.err in {job_path}",
+                severity="warning",
+            )
+            return
+
+        # Push the log viewer screen
+        job_id = job_path.name
+        self.push_screen(LogViewerScreen(log_files, job_id))
 
     def action_switch_focus(self) -> None:
         """Switch focus between experiments and jobs tables"""
