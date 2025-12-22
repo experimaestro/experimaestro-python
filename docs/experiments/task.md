@@ -228,6 +228,50 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
 - **Directory preservation**: Unlike regular tasks, the task directory is preserved between retries to maintain checkpoints
 - **Non-timeout failures**: Only timeout failures trigger retries. Other errors (out of memory, bugs, etc.) will not retry
 
+### Graceful Timeout
+
+Sometimes a task knows it won't have enough time to complete another processing step before the scheduler kills it (e.g., SLURM walltime). In this case, the task can raise `GracefulTimeout` to stop cleanly and trigger a retry.
+
+!!! example "Using GracefulTimeout"
+
+    ```py3
+    from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+    from pathlib import Path
+    import time
+
+    class LongTraining(ResumableTask):
+        epochs: Param[int] = 1000
+        checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
+        time_limit: Param[float] = 3600  # 1 hour
+
+        def execute(self):
+            start_time = time.time()
+            start_epoch = 0
+            if self.checkpoint.exists():
+                start_epoch = load_checkpoint(self.checkpoint)
+
+            for epoch in range(start_epoch, self.epochs):
+                # Check if we have enough time for another epoch
+                elapsed = time.time() - start_time
+                if elapsed > self.time_limit - 300:  # 5 min buffer
+                    raise GracefulTimeout("Not enough time for another epoch")
+
+                train_one_epoch()
+                save_checkpoint(self.checkpoint, epoch)
+    ```
+
+When `GracefulTimeout` is raised:
+
+1. The task is marked as failed with reason "timeout"
+2. If `retry_count < max_retries`, the task is automatically resubmitted
+3. The task directory is preserved, allowing the task to resume from its checkpoint
+
+This is useful when:
+
+- Training epochs have variable duration and you want to stop before being killed
+- You're monitoring remaining walltime via scheduler environment variables (e.g., `SLURM_JOB_END_TIME`)
+- You want to ensure checkpoints are saved cleanly before termination
+
 ## Handling task events
 
 Callbacks can be registered to accomplish some actions e.g. on task completion.

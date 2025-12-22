@@ -9,6 +9,7 @@ from typing import List
 import fasteners
 from experimaestro.notifications import progress, report_eoj
 from experimaestro.utils.multiprocessing import delayed_shutdown
+from experimaestro.exceptions import GracefulTimeout
 from .core.types import ObjectType
 from experimaestro.utils import logger
 from experimaestro.core.objects import ConfigInformation
@@ -89,9 +90,20 @@ class TaskRunner:
                 report_eoj()
             logger.info("Finished cleanup")
 
-    def handle_error(self, code, frame_type):
-        logger.info("Error handler: finished with code %d", code)
-        self.failedpath.write_text(str(code))
+    def handle_error(self, code, frame_type, reason: str = "failed", message: str = ""):
+        """Handle task error and write failure information.
+
+        Args:
+            code: Exit code
+            frame_type: Signal frame type (unused)
+            reason: Failure reason (e.g., "failed", "timeout")
+            message: Optional message with details
+        """
+        logger.info("Error handler: finished with code %d, reason=%s", code, reason)
+        failure_info = {"code": code, "reason": reason}
+        if message:
+            failure_info["message"] = message
+        self.failedpath.write_text(json.dumps(failure_info))
         self.cleanup()
         logger.info("Exiting")
         delayed_shutdown(60, exit_code=code)
@@ -144,6 +156,10 @@ class TaskRunner:
                 # Everything went OK
                 logger.info("Task ended successfully")
                 sys.exit(0)
+        except GracefulTimeout as e:
+            logger.info("Task requested graceful timeout: %s", e.message)
+            self.handle_error(1, None, reason="timeout", message=e.message)
+
         except Exception:
             logger.exception("Got exception while running")
             self.handle_error(1, None)

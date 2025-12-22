@@ -1,10 +1,12 @@
 """Tests for ResumableTask with timeout retry logic"""
 
+import json
 from pathlib import Path
-from experimaestro import ResumableTask, Task, Param
+from experimaestro import ResumableTask, Task, Param, GracefulTimeout
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.scheduler import JobState, JobFailureStatus
 from experimaestro.scheduler.jobs import JobStateError
+from experimaestro.scheduler.interfaces import JobState as JobStateClass
 from experimaestro.connectors import Process, ProcessState
 from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.direct import DirectLauncher
@@ -272,3 +274,128 @@ def test_resumable_task_fails_after_max_retries():
     assert job.retry_count == 4
     # Checkpoint should show 4 executions
     assert int(checkpoint_file.read_text()) == 4
+
+
+# =============================================================================
+# Tests for JobState.from_path and .failed file format
+# =============================================================================
+
+
+def test_job_state_from_path_json_timeout(tmp_path):
+    """Test JobState.from_path reads JSON format with timeout reason"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(
+        json.dumps({"code": 1, "reason": "timeout", "message": "Graceful"})
+    )
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.TIMEOUT
+
+
+def test_job_state_from_path_json_memory(tmp_path):
+    """Test JobState.from_path reads JSON format with memory reason"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(json.dumps({"code": 1, "reason": "memory"}))
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.MEMORY
+
+
+def test_job_state_from_path_json_dependency(tmp_path):
+    """Test JobState.from_path reads JSON format with dependency reason"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(json.dumps({"code": 1, "reason": "dependency"}))
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.DEPENDENCY
+
+
+def test_job_state_from_path_json_failed(tmp_path):
+    """Test JobState.from_path reads JSON format with failed reason"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(json.dumps({"code": 1, "reason": "failed"}))
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.FAILED
+
+
+def test_job_state_from_path_json_unknown_reason(tmp_path):
+    """Test JobState.from_path handles unknown reason gracefully"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(json.dumps({"code": 1, "reason": "unknown_reason"}))
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.FAILED  # Falls back to FAILED
+
+
+def test_job_state_from_path_legacy_integer_nonzero(tmp_path):
+    """Test JobState.from_path reads legacy integer format (non-zero = error)"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text("1")
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.FAILED
+
+
+def test_job_state_from_path_legacy_integer_zero(tmp_path):
+    """Test JobState.from_path reads legacy integer format (zero = done)"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text("0")
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert state == JobState.DONE
+
+
+def test_job_state_from_path_done_file(tmp_path):
+    """Test JobState.from_path reads .done file"""
+    done_file = tmp_path / "test.done"
+    done_file.touch()
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert state == JobState.DONE
+
+
+def test_job_state_from_path_no_file(tmp_path):
+    """Test JobState.from_path returns None when no file exists"""
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert state is None
+
+
+def test_job_state_from_path_done_takes_precedence(tmp_path):
+    """Test JobState.from_path prefers .done over .failed"""
+    done_file = tmp_path / "test.done"
+    done_file.touch()
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(json.dumps({"code": 1, "reason": "failed"}))
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert state == JobState.DONE
+
+
+# =============================================================================
+# Tests for GracefulTimeout exception
+# =============================================================================
+
+
+class GracefulTimeoutTask(ResumableTask):
+    """Task that raises GracefulTimeout"""
+
+    checkpoint: Param[Path]
+    should_timeout: Param[bool] = True
+
+    def execute(self):
+        # Count attempts in checkpoint file
+        attempt = 1
+        if self.checkpoint.exists():
+            attempt = int(self.checkpoint.read_text()) + 1
+        self.checkpoint.write_text(str(attempt))
+
+        # Raise GracefulTimeout on first attempt if should_timeout is True
+        if self.should_timeout and attempt == 1:
+            raise GracefulTimeout("Not enough time for another epoch")

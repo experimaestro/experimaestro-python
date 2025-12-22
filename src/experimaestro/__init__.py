@@ -66,6 +66,7 @@ from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
 from .scheduler import Scheduler, experiment, FailedExperiment
+from .exceptions import GracefulTimeout
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler.state import get_experiment
 from .notifications import progress, tqdm

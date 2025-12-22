@@ -288,6 +288,8 @@ class Scheduler(threading.Thread):
         """Main scheduler function: submit a job, run it (if needed), and returns
         the status code
         """
+        from experimaestro.scheduler.jobs import JobStateError, JobFailureStatus
+
         logger.info("Submitting job %s", job)
         job.submittime = time.time()
         job.scheduler = self
@@ -335,16 +337,37 @@ class Scheduler(threading.Thread):
                 code = await process.aio_code()
                 logger.info("Job %s completed with code %s", job, code)
 
-                # Check the file if there is no return code
-                if code is None:
-                    # Case where we cannot retrieve the code right away
-                    if job.donepath.is_file():
-                        code = 0
-                    else:
-                        code = int(job.failedpath.read_text())
+                # Record exit code if available
+                if code is not None:
+                    job.exit_code = code
 
-                job.exit_code = code
-                job.set_state(process.get_job_state(code))
+                # Read state from .done/.failed files (contains detailed failure reason)
+                state = JobState.from_path(job.path, job.name)
+
+                # If state is a generic FAILED error, let the process determine
+                # the state (it may detect launcher-specific failures like SLURM timeout)
+                if (
+                    state is not None
+                    and isinstance(state, JobStateError)
+                    and state.failure_reason == JobFailureStatus.FAILED
+                    and code is not None
+                ):
+                    process_state = process.get_job_state(code)
+                    if (
+                        isinstance(process_state, JobStateError)
+                        and process_state.failure_reason != JobFailureStatus.FAILED
+                    ):
+                        # Process detected a more specific failure reason
+                        state = process_state
+
+                if state is None:
+                    if code is not None:
+                        # Fall back to process-specific state detection
+                        state = process.get_job_state(code)
+                    else:
+                        logger.error("No .done or .failed file found for job %s", job)
+                        state = JobState.ERROR
+                job.set_state(state)
 
         # If not done or running, start the job
         if not job.state.finished():
@@ -387,6 +410,7 @@ class Scheduler(threading.Thread):
         :raises Exception: Various exceptions during job execution, dependency locking,
             or process creation
         """
+        from experimaestro.scheduler.jobs import JobStateError
         from experimaestro.locking import Locks, LockError
         from experimaestro.scheduler.jobs import JobFailureStatus
 
@@ -415,8 +439,6 @@ class Scheduler(threading.Thread):
                     await dependency.aio_lock()
                 except RuntimeError as e:
                     # Dependency failed - mark job as failed due to dependency
-                    from experimaestro.scheduler.jobs import JobStateError
-
                     logger.warning("Dependency failed: %s", e)
                     return JobStateError(JobFailureStatus.DEPENDENCY)
 
@@ -511,18 +533,41 @@ class Scheduler(threading.Thread):
                     code = await process.aio_code()
                     logger.debug("Got return code %s for %s", code, job)
 
-                    # Check the file if there is no return code
-                    if code is None:
-                        # Case where we cannot retrieve the code right away
-                        if job.donepath.is_file():
-                            code = 0
-                        else:
-                            code = int(job.failedpath.read_text())
+                    # Record exit code if available
+                    if code is not None:
+                        logger.info("Job %s ended with code %s", job, code)
+                        job.exit_code = code
+                    else:
+                        logger.info("Job %s ended, reading state from files", job)
 
-                    logger.info("Job %s ended with code %s", job, code)
-                    job.exit_code = code
-                    # Let the process determine the job state (handles launcher-specific details)
-                    state = process.get_job_state(code)
+                    # Read state from .done/.failed files (contains detailed failure reason)
+                    state = JobState.from_path(job.path, job.name)
+
+                    # If state is a generic FAILED error, let the process determine
+                    # the state (it may detect launcher-specific failures like SLURM timeout)
+                    if (
+                        state is not None
+                        and isinstance(state, JobStateError)
+                        and state.failure_reason == JobFailureStatus.FAILED
+                        and code is not None
+                    ):
+                        process_state = process.get_job_state(code)
+                        if (
+                            isinstance(process_state, JobStateError)
+                            and process_state.failure_reason != JobFailureStatus.FAILED
+                        ):
+                            # Process detected a more specific failure reason
+                            state = process_state
+
+                    if state is None:
+                        if code is not None:
+                            # Fall back to process-specific state detection
+                            state = process.get_job_state(code)
+                        else:
+                            logger.error(
+                                "No .done or .failed file found for job %s", job
+                            )
+                            state = JobState.ERROR
 
                 except JobError:
                     logger.warning("Error while running job")

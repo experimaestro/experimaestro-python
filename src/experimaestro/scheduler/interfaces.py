@@ -68,6 +68,57 @@ class JobState:
         """String representation of the job state"""
         return f"{self.__class__.__name__}()"
 
+    @staticmethod
+    def from_path(basepath: Path, name: str) -> "JobState":
+        """Read job state from .done or .failed files
+
+        Args:
+            basepath: The job directory path
+            name: The job name (used for file naming)
+
+        Returns:
+            JobState.DONE if .done exists, JobStateError with details if .failed exists,
+            or None if neither exists.
+        """
+        donepath = basepath / f"{name}.done"
+        failedpath = basepath / f"{name}.failed"
+
+        if donepath.is_file():
+            return JobState.DONE
+
+        if failedpath.is_file():
+            content = failedpath.read_text().strip()
+
+            # Try JSON first
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict):
+                    reason = data.get("reason")
+                    if reason:
+                        # Use enum name directly (case-insensitive)
+                        try:
+                            failure_status = JobFailureStatus[reason.upper()]
+                            return JobStateError(failure_status)
+                        except KeyError:
+                            pass
+                    return JobStateError(JobFailureStatus.FAILED)
+            except json.JSONDecodeError:
+                pass
+
+            # Fall back to legacy integer format
+            try:
+                code = int(content)
+                if code == 0:
+                    return JobState.DONE
+                return JobStateError(JobFailureStatus.FAILED)
+            except ValueError:
+                logger.warning(
+                    "Could not parse failed file %s: %s", failedpath, content
+                )
+                return JobStateError(JobFailureStatus.FAILED)
+
+        return None
+
 
 class JobStateUnscheduled(JobState):
     """Job is not yet scheduled"""
