@@ -342,7 +342,6 @@ def experiments_cli(  # noqa: C901
 
                 # Test logging from experiment thread
                 logging.info("Experiment started in background thread")
-                print("Experiment thread started - print test")
 
                 # Set up the environment
                 for key, value in env:

@@ -18,8 +18,12 @@ from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.message import Message
-from textual import events, work
-from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+from textual import events
+from experimaestro.scheduler.state_provider import (
+    WorkspaceStateProvider,
+    StateEvent,
+    StateEventType,
+)
 from experimaestro.tui.log_viewer import LogViewerScreen
 
 
@@ -616,6 +620,7 @@ class ExperimentTUI(App):
         self.workdir = workdir
         self.watch = watch
         self.show_logs = show_logs
+        self._listener_registered = False
 
         # Initialize state provider before compose
         if state_provider:
@@ -670,8 +675,53 @@ class ExperimentTUI(App):
         experiments_list = self.query_one(ExperimentsList)
         experiments_list.refresh_experiments()
 
-        # Start auto-refresh
-        self.start_auto_refresh()
+        # Register as listener for push notifications from state provider
+        if self.state_provider:
+            self.state_provider.add_listener(self._on_state_event)
+            self._listener_registered = True
+            self.log("Registered state listener for push notifications")
+
+    def _on_state_event(self, event: StateEvent) -> None:
+        """Handle state change events from the state provider
+
+        This is called from the state provider's thread, so we use
+        call_from_thread to safely update the UI.
+        """
+        self.call_from_thread(self._handle_state_event, event)
+
+    def _handle_state_event(self, event: StateEvent) -> None:
+        """Process state event on the main thread"""
+        self.log(f"State event received: {event.event_type.name}")
+
+        if event.event_type == StateEventType.EXPERIMENT_UPDATED:
+            # Refresh experiments list
+            experiments_list = self.query_one(ExperimentsList)
+            experiments_list.refresh_experiments()
+
+        elif event.event_type == StateEventType.JOB_UPDATED:
+            # Refresh jobs table if we're viewing the affected experiment
+            jobs_table = self.query_one(JobsTable)
+            event_exp_id = event.data.get("experimentId")
+
+            if jobs_table.current_experiment == event_exp_id:
+                jobs_table.refresh_jobs()
+
+            # Also refresh job detail if we're viewing the affected job
+            job_detail_container = self.query_one("#job-detail-container")
+            if not job_detail_container.has_class("hidden"):
+                job_detail_view = self.query_one(JobDetailView)
+                event_job_id = event.data.get("jobId")
+                if job_detail_view.current_job_id == event_job_id:
+                    job_detail_view.refresh_job_detail()
+
+            # Also update the experiment stats in the experiments list
+            experiments_list = self.query_one(ExperimentsList)
+            experiments_list.refresh_experiments()
+
+        elif event.event_type == StateEventType.RUN_UPDATED:
+            # Refresh experiments list to show updated run info
+            experiments_list = self.query_one(ExperimentsList)
+            experiments_list.refresh_experiments()
 
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
         """Handle experiment selection - show jobs view"""
@@ -800,16 +850,13 @@ class ExperimentTUI(App):
             else:
                 experiments_table.focus()
 
-    @work(thread=True)
-    async def start_auto_refresh(self) -> None:
-        """Auto-refresh the display every 5 seconds"""
-        import asyncio
-
-        while True:
-            await asyncio.sleep(5)
-            self.call_from_thread(self.action_refresh)
-
     def on_unmount(self) -> None:
         """Clean up when closing"""
+        # Unregister listener
+        if self._listener_registered and self.state_provider:
+            self.state_provider.remove_listener(self._on_state_event)
+            self._listener_registered = False
+            self.log("Unregistered state listener")
+
         if self.state_provider:
             self.state_provider.close()

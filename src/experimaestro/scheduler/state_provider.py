@@ -16,11 +16,15 @@ Key features:
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
+
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers.api import ObservedWatch
 
 from experimaestro.scheduler.state_db import (
     ExperimentModel,
@@ -68,6 +72,99 @@ class StateEvent:
 
 # Type alias for listener callbacks
 StateListener = Callable[[StateEvent], None]
+
+
+class _DatabaseFileHandler(FileSystemEventHandler):
+    """Watchdog handler for SQLite database file changes
+
+    Watches the workspace.db and workspace.db-wal files for modifications
+    and detects what changed to send proper events.
+    """
+
+    def __init__(self, state_provider: "WorkspaceStateProvider"):
+        super().__init__()
+        self.state_provider = state_provider
+        self._last_event_time = 0.0
+        self._debounce_seconds = 0.5  # Debounce rapid file changes
+        self._last_check_time: Optional[datetime] = None
+
+    def on_any_event(self, event) -> None:
+        """Handle all file system events
+
+        We use on_any_event instead of on_modified because different
+        platforms may report events differently.
+        """
+        # Only handle modification-like events
+        if event.event_type not in ("modified", "created", "moved"):
+            return
+
+        if event.is_directory:
+            return
+
+        # Only react to database files
+        path = Path(event.src_path)
+        if path.name not in ("workspace.db", "workspace.db-wal"):
+            return
+
+        # Debounce - ignore events that come too quickly
+        now = time.time()
+        if now - self._last_event_time < self._debounce_seconds:
+            return
+        self._last_event_time = now
+
+        logger.debug(
+            "Database file changed: %s (event: %s)", path.name, event.event_type
+        )
+
+        # Trigger change detection in a thread to avoid blocking watchdog
+        threading.Thread(
+            target=self._detect_and_notify_changes,
+            daemon=True,
+        ).start()
+
+    def _detect_and_notify_changes(self) -> None:
+        """Query the database to detect what changed and send events"""
+        try:
+            since = self._last_check_time
+            self._last_check_time = datetime.now()
+
+            # Query for changed experiments
+            with self.state_provider.workspace_db.bind_ctx([ExperimentModel]):
+                query = ExperimentModel.select()
+                if since:
+                    query = query.where(ExperimentModel.updated_at > since)
+
+                for exp in query:
+                    self.state_provider._notify_listeners(
+                        StateEvent(
+                            event_type=StateEventType.EXPERIMENT_UPDATED,
+                            data={
+                                "experiment_id": exp.experiment_id,
+                            },
+                        )
+                    )
+
+            # Query for changed jobs
+            with self.state_provider.workspace_db.bind_ctx([JobModel]):
+                query = JobModel.select()
+                if since:
+                    query = query.where(JobModel.updated_at > since)
+
+                for job in query:
+                    self.state_provider._notify_listeners(
+                        StateEvent(
+                            event_type=StateEventType.JOB_UPDATED,
+                            data={
+                                "jobId": job.job_id,
+                                "experimentId": job.experiment_id,
+                                "runId": job.run_id,
+                                "status": job.state,
+                            },
+                        )
+                    )
+
+        except Exception as e:
+            logger.warning("Error detecting database changes: %s", e)
 
 
 class MockJob(BaseJob):
@@ -311,6 +408,10 @@ class WorkspaceStateProvider:
         # Listeners for push notifications
         self._listeners: Set[StateListener] = set()
         self._listeners_lock = threading.Lock()
+
+        # File watcher for database changes (started when listeners are added)
+        self._db_file_handler: Optional[_DatabaseFileHandler] = None
+        self._db_file_watch: Optional[ObservedWatch] = None
 
         # Check and update workspace version
         from .workspace import WORKSPACE_VERSION
@@ -1160,6 +1261,9 @@ class WorkspaceStateProvider:
 
         This should be called when done with the workspace to free resources.
         """
+        # Stop file watcher if running
+        self._stop_file_watcher()
+
         # Close database connection
         if hasattr(self, "workspace_db") and self.workspace_db is not None:
             from .state_db import close_workspace_database
@@ -1183,22 +1287,69 @@ class WorkspaceStateProvider:
         For UI applications, listeners should queue updates for their
         own event loop to avoid blocking database operations.
 
+        When the first listener is added, starts watching the database
+        file for changes to enable push notifications.
+
         Args:
             listener: Callback function that receives StateEvent objects
         """
         with self._listeners_lock:
+            was_empty = len(self._listeners) == 0
             self._listeners.add(listener)
-        logger.debug("Added state listener: %s", listener)
+
+        # Start file watcher when first listener is added
+        if was_empty:
+            self._start_file_watcher()
+
+        logger.info(
+            "Added state listener: %s (total: %d)", listener, len(self._listeners)
+        )
 
     def remove_listener(self, listener: StateListener) -> None:
         """Unregister a state change listener
+
+        When the last listener is removed, stops watching the database file.
 
         Args:
             listener: Previously registered callback function
         """
         with self._listeners_lock:
             self._listeners.discard(listener)
+            is_empty = len(self._listeners) == 0
+
+        # Stop file watcher when last listener is removed
+        if is_empty:
+            self._stop_file_watcher()
+
         logger.debug("Removed state listener: %s", listener)
+
+    def _start_file_watcher(self) -> None:
+        """Start watching the database file for changes"""
+        if self._db_file_watch is not None:
+            logger.info("File watcher already running for %s", self.workspace_path)
+            return  # Already watching
+
+        from experimaestro.ipc import ipcom
+
+        self._db_file_handler = _DatabaseFileHandler(self)
+        self._db_file_watch = ipcom().fswatch(
+            self._db_file_handler,
+            self.workspace_path,
+            recursive=False,
+        )
+        logger.info("Started database file watcher for %s", self.workspace_path)
+
+    def _stop_file_watcher(self) -> None:
+        """Stop watching the database file"""
+        if self._db_file_watch is None:
+            return  # Not watching
+
+        from experimaestro.ipc import ipcom
+
+        ipcom().fsunwatch(self._db_file_watch)
+        self._db_file_watch = None
+        self._db_file_handler = None
+        logger.debug("Stopped database file watcher for %s", self.workspace_path)
 
     def _notify_listeners(self, event: StateEvent) -> None:
         """Notify all registered listeners of a state change
