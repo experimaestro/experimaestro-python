@@ -73,6 +73,77 @@ configuration specific behavior.
 ![object hierarchy](../img/xpm-objects.svg)
 
 
+## Composition operator
+
+The `@` operator provides a concise syntax for composing configurations. When
+a configuration has a parameter that accepts another configuration type, you
+can use `@` instead of explicitly naming the parameter.
+
+!!! example "Basic composition"
+
+    ```python
+    from experimaestro import Config, Param
+
+    class Inner(Config):
+        x: Param[int]
+
+    class Outer(Config):
+        inner: Param[Inner]
+
+    # These two are equivalent:
+    outer1 = Outer.C(inner=Inner.C(x=42))
+    outer2 = Outer.C() @ Inner.C(x=42)
+    ```
+
+The operator finds the unique parameter in the outer configuration that can
+accept the inner configuration's type. If there are multiple matching
+parameters or none, a `ValueError` is raised.
+
+### Chaining compositions
+
+When chaining multiple `@` operations, each configuration is added to the
+**same** outer configuration (left-associative behavior):
+
+```python
+class Multi(Config):
+    a: Param[TypeA]
+    b: Param[TypeB]
+
+# Adds both TypeA and TypeB to Multi
+result = Multi.C() @ TypeA.C(...) @ TypeB.C(...)
+```
+
+For **nested** structures, use parentheses to compose from inside out:
+
+```python
+class Outer(Config):
+    middle: Param[Middle]
+
+class Middle(Config):
+    inner: Param[Inner]
+
+# Creates Outer(middle=Middle(inner=Inner(x=1)))
+result = Outer.C() @ (Middle.C() @ Inner.C(x=1))
+```
+
+### Ambiguity and errors
+
+The composition operator raises `ValueError` in two cases:
+
+1. **No matching parameter**: The outer configuration has no parameter that
+   accepts the inner type
+2. **Ambiguous**: Multiple parameters can accept the inner type
+
+```python
+class Ambiguous(Config):
+    a1: Param[Inner]
+    a2: Param[Inner]  # Same type as a1
+
+# Raises ValueError: ambiguous - both a1 and a2 accept Inner
+Ambiguous.C() @ Inner.C(x=1)
+```
+
+
 ## Deprecating a configuration or attributes
 
 When a configuration is moved (or equivalently its `__xpmid__` changed), its signature
