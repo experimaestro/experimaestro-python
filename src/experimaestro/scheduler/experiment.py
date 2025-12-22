@@ -195,16 +195,32 @@ class experiment:
         return self.workdir / "jobs.jsonl"
 
     def add_job(self, job: "Job"):
-        """Register a job and its tags to jobs.jsonl file and database"""
+        """Register a job and its tags to jobs.jsonl file and database
+
+        Note: For NEW jobs, the unfinishedJobs counter is updated by
+        job.set_state() when the state transitions from UNSCHEDULED.
+        For jobs already running, we increment here since no state
+        transition will occur.
+        """
+        from experimaestro.scheduler.interfaces import JobState
+
         if self in job.experiments:
             # Do not double register
             return
 
-        # We have one more job to do
-        self.unfinishedJobs += 1
-
         # Track which experiments this job belongs to
         job.experiments.append(self)
+
+        # If job is already being tracked (not UNSCHEDULED and not finished),
+        # increment unfinishedJobs since no state transition will trigger it
+        if job.state != JobState.UNSCHEDULED and not job.state.finished():
+            self.unfinishedJobs += 1
+            logging.debug(
+                "Job %s already running, unfinished jobs for %s: %d",
+                job.identifier[:8],
+                self.workdir.name,
+                self.unfinishedJobs,
+            )
 
         record = {
             "job_id": job.identifier,

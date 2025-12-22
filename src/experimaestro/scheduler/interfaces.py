@@ -51,6 +51,9 @@ class JobState:
         """Returns True if the job has finished (success or error)"""
         return self.value >= 5  # DONE or ERROR
 
+    def is_error(self):
+        return False
+
     def __eq__(self, other):
         """Compare job states by their numeric value"""
         if isinstance(other, JobState):
@@ -157,7 +160,11 @@ class JobStateError(JobState):
             return self.value == other.value
         return False
 
+    def is_error(self):
+        return True
 
+
+# FIXME: Get rid of those
 # Create singleton instances for backward compatibility
 # These can be used in comparisons: if state == JobState.DONE: ...
 JobState.UNSCHEDULED = JobStateUnscheduled()

@@ -612,7 +612,8 @@ class WorkspaceStateProvider:
 
         # Auto-generate run_id from timestamp if not provided
         if run_id is None:
-            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            now = datetime.now()
+            run_id = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond:06d}"
 
         # Create run record
         ExperimentRunModel.insert(

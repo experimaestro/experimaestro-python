@@ -1,4 +1,3 @@
-import logging
 import threading
 import time
 from typing import (
@@ -201,11 +200,19 @@ class Scheduler(threading.Thread):
         )
         other = otherFuture.result()
         logger.debug("Job already submitted" if other else "First submission")
-        if other:
-            return other
+
+        # Only returns if job was already submitted and doesn't need reprocessing
+        if other is not None:
+            # If state is WAITING, it was just reset for resubmission and needs processing
+            # If state is RUNNING or finished (DONE), no need to reprocess
+            if other.state != JobState.WAITING:
+                return other
+            # Use 'other' for resubmission since it has the correct experiments list
+            job = other
 
         job._future = asyncio.run_coroutine_threadsafe(self.aio_submit(job), self.loop)
-        return None
+
+        return other
 
     def prepare(self, job: Job):
         """Prepares the job for running"""
@@ -220,32 +227,44 @@ class Scheduler(threading.Thread):
 
         if self.exitmode:
             logger.warning("Exit mode: not submitting")
+            return
 
-        elif job.identifier in self.jobs:
+        # Job was already submitted
+        if job.identifier in self.jobs:
             other = self.jobs[job.identifier]
             assert job.type == other.type
 
             # Add current experiment to the existing job's experiments list
             xp = experiment.current()
-            if xp not in other.experiments:
-                xp.add_job(other)
+            xp.add_job(other)
 
-            if other.state == JobState.ERROR:
+            # Copy watched outputs from new job to existing job
+            # This ensures new callbacks are registered even for resubmitted jobs
+            other.watched_outputs.extend(job.watched_outputs)
+
+            if other.state.is_error():
                 logger.info("Re-submitting job")
+                # Clean up old process info so it will be re-started
+                other._process = None
+                if other.pidpath.is_file():
+                    other.pidpath.unlink()
+                # Use set_state to handle experiment statistics updates
+                other.set_state(JobState.WAITING)
             else:
                 logger.warning("Job %s already submitted", job.identifier)
-                return other
 
-        else:
-            # Register this job
-            xp = experiment.current()
-            self.jobs[job.identifier] = job
-            xp.add_job(job)
+            # Returns the previous job
+            return other
 
-            # Set up dependencies
-            for dependency in job.dependencies:
-                dependency.target = job
-                dependency.origin.dependents.add(dependency)
+        # Register this job
+        xp = experiment.current()
+        self.jobs[job.identifier] = job
+        xp.add_job(job)
+
+        # Set up dependencies
+        for dependency in job.dependencies:
+            dependency.target = job
+            dependency.origin.dependents.add(dependency)
 
         return None
 
@@ -274,6 +293,9 @@ class Scheduler(threading.Thread):
         job.scheduler = self
         self.waitingjobs.add(job)
 
+        # Register watched outputs now that the job has a scheduler
+        job.register_watched_outputs()
+
         # Note: Job metadata will be written after directory is created in aio_start
 
         # Check that we don't have a completed job in
@@ -289,22 +311,20 @@ class Scheduler(threading.Thread):
             path.unlink()
         path.symlink_to(job.path)
 
-        job.state = JobState.WAITING
+        job.set_state(JobState.WAITING)
 
         self.notify_job_submitted(job)
 
         # Check if already done
         if job.donepath.exists():
-            job.state = JobState.DONE
+            job.set_state(JobState.DONE)
 
         # Check if we have a running process
         if not job.state.finished():
             process = await job.aio_process()
             if process is not None:
-                # Yep! First we notify the listeners
-                job.state = JobState.RUNNING
-                # Notify the listeners
-                self.notify_job_state(job)
+                # Notify listeners that job is running
+                job.set_state(JobState.RUNNING)
 
                 # Adds to the listeners
                 if self.server is not None:
@@ -324,33 +344,20 @@ class Scheduler(threading.Thread):
                         code = int(job.failedpath.read_text())
 
                 job.exit_code = code
-                job.state = process.get_job_state(code)
+                job.set_state(process.get_job_state(code))
 
         # If not done or running, start the job
         if not job.state.finished():
             try:
                 state = await self.aio_start(job)
-                job.state = state
+                job.set_state(state)
             except Exception:
                 logger.exception("Got an exception while starting the job")
                 raise
 
-        self.notify_job_state(job)
-
-        # Job is finished - update all experiments tracking this job
-        for xp in job.experiments:
-            if job.state != JobState.DONE:
-                xp.failedJobs[job.identifier] = job
-
-        # Process all remaining tasks outputs
-        await asyncThreadcheck("End of job processing", job.done_handler)
-
-        # Decrement the number of unfinished jobs for all experiments and notify
-        for xp in job.experiments:
-            xp.unfinishedJobs -= 1
+        # Job is finished - experiment statistics already updated by set_state
 
         async with self.exitCondition:
-            logging.debug("Updated number of unfinished jobs")
             self.exitCondition.notify_all()
 
         job.endtime = time.time()
@@ -360,6 +367,9 @@ class Scheduler(threading.Thread):
 
         if job in self.waitingjobs:
             self.waitingjobs.remove(job)
+
+        # Process all remaining tasks outputs
+        await asyncThreadcheck("End of job processing", job.done_handler)
 
         return job.state
 
@@ -509,7 +519,7 @@ class Scheduler(threading.Thread):
                         else:
                             code = int(job.failedpath.read_text())
 
-                    logger.debug("Job %s ended with code %s", job, code)
+                    logger.info("Job %s ended with code %s", job, code)
                     job.exit_code = code
                     # Let the process determine the job state (handles launcher-specific details)
                     state = process.get_job_state(code)

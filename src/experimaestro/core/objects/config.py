@@ -90,9 +90,6 @@ NOT_SET = object()
 
 @define()
 class WatchedOutput:
-    #: The enclosing job
-    job: "Job"
-
     #: The configuration containing the watched output
     config: "ConfigInformation"
 
@@ -104,6 +101,9 @@ class WatchedOutput:
 
     #: The callback to call (with the output of the previous method)
     callback: Callable
+
+    #: The enclosing job (set when registered with scheduler)
+    job: Optional["Job"] = None
 
 
 def get_generated_paths(
@@ -563,10 +563,20 @@ class ConfigInformation:
 
         :param method: The method to watch
         :param callback: The callback
+
+        :raises TypeError: If the task is not a ResumableTask
         """
-        watched = WatchedOutput(
-            self, method.__self__, method.__name__, method, callback
-        )
+        # Only ResumableTask can have dynamic outputs - regular tasks
+        # have their directories cleaned up, losing the output file
+        if not isinstance(self.pyobject, ResumableTask):
+            raise TypeError(
+                f"Only ResumableTask can use watch_output. "
+                f"{self.xpmtype} is not a ResumableTask. "
+                "Dynamic outputs require the task directory to be preserved "
+                "across restarts, which only ResumableTask provides."
+            )
+
+        watched = WatchedOutput(method.__self__, method.__name__, method, callback)
         self.watched_outputs.append(watched)
         if self.job:
             self.job.watch_output(watched)

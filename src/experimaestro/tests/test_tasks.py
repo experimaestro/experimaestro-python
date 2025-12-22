@@ -1,9 +1,20 @@
 # --- Task and types definitions
 
+import sys
+import time
 from pathlib import Path
 import pytest
 import logging
-from experimaestro import Config, deprecate, Task, Param
+from experimaestro import (
+    Config,
+    deprecate,
+    Task,
+    Param,
+    ResumableTask,
+    Meta,
+    field,
+    PathGenerator,
+)
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tools.jobs import fix_deprecated
 from experimaestro.scheduler import FailedExperiment, JobState
@@ -318,3 +329,99 @@ def test_task_lightweight_init():
             MyLightweightTask.C(x=x).submit(init_tasks=[lwtask]).__xpm__.job.wait()
             == JobState.DONE
         ), "Init tasks should be executed"
+
+
+# --- Test for resumable task resubmission
+
+
+class ControllableResumableTask(ResumableTask):
+    """A resumable task that can be controlled via files"""
+
+    control_file: Meta[Path] = field(default_factory=PathGenerator("control"))
+
+    def execute(self):
+        # Wait for control file
+        while not self.control_file.is_file():
+            time.sleep(0.1)
+
+        # Read control: "fail" to exit with error, "complete" to succeed
+        action = self.control_file.read_text().strip()
+        self.control_file.unlink()
+
+        if action == "fail":
+            sys.exit(1)
+
+
+def test_resumable_task_resubmit():
+    """Test resubmitting a failed ResumableTask within the same experiment"""
+    with TemporaryExperiment("resumable_resubmit", maxwait=30):
+        task1 = ControllableResumableTask.C()
+        task1.submit()
+
+        # Tell task to fail
+        task1.control_file.parent.mkdir(parents=True, exist_ok=True)
+        task1.control_file.write_text("fail")
+
+        # Wait for the job to fail
+        job = task1.__xpm__.job
+        assert job.wait() == JobState.ERROR, "Job should have failed"
+
+        # Resubmit by creating a new instance with same parameters
+        task2 = ControllableResumableTask.C()
+        task2.submit()
+
+        # Tell task to complete
+        task2.control_file.write_text("complete")
+
+        # Wait for the resubmitted job to complete
+        assert task2.__xpm__.job.wait() == JobState.DONE
+
+
+def test_resumable_task_resubmit_across_experiments():
+    """Test resubmitting a failed ResumableTask across two experiment instances"""
+    with TemporaryDirectory(prefix="xpm", suffix="resubmit_across") as workdir:
+        # First experiment: task fails
+        try:
+            with TemporaryExperiment("resubmit_across", maxwait=10, workdir=workdir):
+                task1 = ControllableResumableTask.C()
+                task1.submit()
+
+                # Tell task to fail
+                task1.control_file.parent.mkdir(parents=True, exist_ok=True)
+                task1.control_file.write_text("fail")
+        except Exception as e:
+            logging.info("First experiment ended (expected): %s", e)
+
+        # Second experiment: task completes
+        with TemporaryExperiment("resubmit_across", maxwait=30, workdir=workdir):
+            task2 = ControllableResumableTask.C()
+            task2.submit()
+
+            # Tell task to complete
+            task2.control_file.write_text("complete")
+
+            # Wait for the resubmitted job to complete
+            assert task2.__xpm__.job.wait() == JobState.DONE
+
+
+def test_task_resubmit_across_experiments():
+    """Test resubmitting a completed task across two experiment instances"""
+    with TemporaryDirectory(prefix="xpm", suffix="resubmit_across") as workdir:
+        # First experiment: task completes
+        with TemporaryExperiment("resubmit_across", maxwait=30, workdir=workdir):
+            task1 = ControllableResumableTask.C()
+            task1.submit()
+
+            # Tell task to complete
+            task1.control_file.parent.mkdir(parents=True, exist_ok=True)
+            task1.control_file.write_text("complete")
+
+            assert task1.__xpm__.job.wait() == JobState.DONE
+
+        # Second experiment: resubmit completed task (uses same workdir)
+        with TemporaryExperiment("resubmit_across", maxwait=30, workdir=workdir):
+            task2 = ControllableResumableTask.C()
+            task2.submit()
+
+            # Task should recognize it's already done
+            assert task2.__xpm__.job.wait() == JobState.DONE

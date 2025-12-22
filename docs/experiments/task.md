@@ -235,6 +235,67 @@ Callbacks can be registered to accomplish some actions e.g. on task completion.
 - `task.on_completed(callback: Callable[[], None])` register a callback that is
   called when the task terminates successfully
 
+## Dynamic Task Outputs
+
+For tasks that produce outputs during execution (e.g., checkpoints during training), you can use `watch_output` to register callbacks that are triggered when outputs are produced. This is particularly useful for triggering evaluation jobs on intermediate checkpoints.
+
+!!! example "Defining dynamic outputs"
+
+    ```py3
+    from experimaestro import ResumableTask, Config, Param, DependentMarker
+
+    class Checkpoint(Config):
+        step: Param[int]
+        model: Param[Model]
+
+    class Validation(Config):
+        model: Param[Model]
+
+        def checkpoint(self, dep: DependentMarker, *, step: int) -> Checkpoint:
+            """Method that produces dynamic outputs"""
+            return dep(Checkpoint.C(model=self.model, step=step))
+
+        def compute(self, step: int):
+            """Called during task execution to register an output"""
+            self.register_task_output(self.checkpoint, step=step)
+
+    class Learn(ResumableTask):
+        model: Param[Model]
+        validation: Param[Validation]
+
+        def execute(self):
+            for step in range(100):
+                train_step()
+                if step % 10 == 0:
+                    self.validation.compute(step)  # Triggers callbacks
+    ```
+
+!!! example "Watching dynamic outputs"
+
+    ```py3
+    def on_checkpoint(checkpoint: Checkpoint):
+        # Called when a checkpoint is produced
+        Evaluate.C(checkpoint=checkpoint).submit()
+
+    learn = Learn.C(model=model, validation=validation)
+    learn.watch_output(validation.checkpoint, on_checkpoint)
+    learn.submit()
+    ```
+
+### Key Features
+
+- **ResumableTask only**: Only `ResumableTask` can use `register_task_output` (checked at runtime)
+- **Automatic replay**: When a task is restarted, callbacks are replayed for previously produced outputs (events stored in `.experimaestro/task-outputs.jsonl`)
+- **Multiple callbacks**: Multiple callbacks can watch the same output method
+- **Separate thread**: Callbacks run in a dedicated worker thread
+
+### How It Works
+
+1. During task execution, `register_task_output()` writes events to a JSONL file
+2. The experiment monitors this file and triggers registered callbacks
+3. When a task is resubmitted after a failure, existing events are replayed to new callbacks
+4. This enables seamless resumption of training with checkpoint-based evaluation
+
 ## Lightweights tasks using `@cache`
 
 Sometimes, a configuration might need to compute some output that might be interesting to cache, but without relying on a fully-fledged task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):

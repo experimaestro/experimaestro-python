@@ -148,10 +148,10 @@ class Job(BaseJob, Resource):
         self.max_retries = max_retries if max_retries is not None else 3
         self.retry_count = 0
 
-        # Watched outputs
-        self.watched_outputs = {}
-        for watched in config.__xpm__.watched_outputs:
-            self.watch_output(watched)
+        # Watched outputs (stored for deferred registration with scheduler)
+        self.watched_outputs: List["WatchedOutput"] = list(
+            config.__xpm__.watched_outputs
+        )
 
         # Process
         self._process = None
@@ -165,21 +165,32 @@ class Job(BaseJob, Resource):
         self.tags = config.tags()
 
     def watch_output(self, watched: "WatchedOutput"):
-        """Monitor task outputs
+        """Add a watched output to this job.
 
         :param watched: A description of the watched output
         """
-        self.scheduler.xp.watch_output(watched)
+        self.watched_outputs.append(watched)
 
-    def task_output_update(self, subpath: Path):
-        """Notification of an updated task output"""
-        if watcher := self.watched_outputs.get(subpath, None):
-            watcher.update()
+    def register_watched_outputs(self):
+        """Register all watched outputs with the scheduler.
+
+        This should be called after the job is submitted and has a scheduler.
+        """
+        from experimaestro.scheduler.experiment import experiment
+
+        xp = experiment.current()
+        for watched in self.watched_outputs:
+            # Set the job reference so the watcher knows where to look
+            watched.job = self
+            xp.watch_output(watched)
 
     def done_handler(self):
-        """The task has been completed"""
-        for watcher in self.watched_outputs.values():
-            watcher.update()
+        """The task has been completed.
+
+        Ensures all remaining task output events are processed.
+        """
+        # Task output processing is handled by TaskOutputsWorker
+        pass
 
     def __str__(self):
         return "Job[{}]".format(self.identifier)
@@ -187,6 +198,58 @@ class Job(BaseJob, Resource):
     def wait(self) -> JobState:
         assert self._future, "Cannot wait a not submitted job"
         return self._future.result()
+
+    def set_state(self, new_state: JobState):
+        """Set the job state and update experiment statistics
+
+        This method should be called instead of direct state assignment
+        to ensure experiment statistics (unfinishedJobs, failedJobs) are
+        properly updated.
+
+        :param new_state: The new job state
+        """
+        old_state = self.state
+        self.state = new_state
+
+        # Helper to determine if a state should be "counted" in unfinishedJobs
+        # A job is counted when it's been submitted and hasn't finished yet
+        def is_counted(state):
+            return state != JobState.UNSCHEDULED and not state.finished()
+
+        # Update experiment statistics based on state transition
+        for xp in self.experiments:
+            # Handle transitions in/out of "counted" state
+            if is_counted(new_state) and not is_counted(old_state):
+                # Job is now being tracked (new submission or resubmit)
+                xp.unfinishedJobs += 1
+                logger.debug(
+                    "Job %s submitted, unfinished jobs for %s: %d",
+                    self.identifier[:8],
+                    xp.workdir.name,
+                    xp.unfinishedJobs,
+                )
+            elif not is_counted(new_state) and is_counted(old_state):
+                # Job is no longer being tracked (finished)
+                xp.unfinishedJobs -= 1
+                logger.debug(
+                    "Job %s finished, unfinished jobs for %s: %d",
+                    self.identifier[:8],
+                    xp.workdir.name,
+                    xp.unfinishedJobs,
+                )
+
+            # Handle error state
+            if new_state.is_error() and not old_state.is_error():
+                xp.failedJobs[self.identifier] = self
+
+            # Handle recovery from error (e.g., resubmit)
+            if old_state.is_error() and not new_state.is_error():
+                xp.failedJobs.pop(self.identifier, None)
+
+        # Notify listeners
+        if self.scheduler:
+            for listener in self.scheduler.listeners:
+                listener.job_state(self)
 
     @cached_property
     def python_path(self) -> Iterator[str]:
