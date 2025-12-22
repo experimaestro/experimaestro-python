@@ -1431,6 +1431,59 @@ class ConfigMixin:
         # Add other dependencies
         self.__xpm__.add_dependencies(*other.__xpm__.dependencies)
 
+    def __rmatmul__(self, other: "ConfigMixin") -> "ConfigMixin":
+        """Right-associative composition operator: B() @ A(x=1) is equivalent to B(a=A(x=1))
+
+        For expression `other @ self`, finds the unique parameter in `other` that
+        accepts `self`'s type and sets it. Returns `self` to enable right-associative
+        chaining: `Outer() @ Middle() @ Inner()` builds Outer(middle=Middle(inner=Inner())).
+
+        The chain is evaluated left-to-right by Python, but returns the inner config
+        so each step adds the current result as a parameter to the next outer config.
+
+        :param other: The outer configuration that will receive self as a parameter
+        :return: self (the inner configuration) to continue the chain
+        """
+        if not isinstance(other, ConfigMixin):
+            return NotImplemented
+
+        # Find parameters in 'other' that can accept self's type
+        self_type = self.__xpmtype__.value_type
+        matching_params = []
+
+        for name, argument in other.__xpmtype__.arguments.items():
+            # Get the expected type for this argument
+            arg_type = argument.type
+            if hasattr(arg_type, "value_type"):
+                # It's an ObjectType wrapper
+                expected_type = arg_type.value_type
+            elif hasattr(arg_type, "__origin__"):
+                # Generic type like Optional[X] or List[X]
+                continue  # Skip complex types for now
+            elif isinstance(arg_type, type):
+                expected_type = arg_type
+            else:
+                continue
+
+            # Check if self's type is compatible
+            if isinstance(expected_type, type) and issubclass(self_type, expected_type):
+                matching_params.append(name)
+
+        if len(matching_params) == 0:
+            raise ValueError(
+                f"No parameter in {other.__xpmtype__} accepts type {self_type.__name__}"
+            )
+        if len(matching_params) > 1:
+            raise ValueError(
+                f"Ambiguous composition: parameters {matching_params} in "
+                f"{other.__xpmtype__} all accept type {self_type.__name__}"
+            )
+
+        # Set the parameter on 'other'
+        param_name = matching_params[0]
+        other.__xpm__.set(param_name, self)
+        return other
+
 
 class Config:
     """Base type for all objects in python interface"""
