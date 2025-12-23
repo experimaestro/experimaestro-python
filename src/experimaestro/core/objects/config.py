@@ -37,6 +37,7 @@ from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 if TYPE_CHECKING:
     from ..callbacks import TaskEventListener
     from ..identifier import Identifier
+    from ..subparameters import Subparameters
     from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
     from experimaestro.launchers import Launcher
@@ -193,6 +194,9 @@ class ConfigInformation:
 
         self._identifier = None
         """The configuration identifier (cached when sealed)"""
+
+        self._partial_identifiers: Dict[str, "Identifier"] = {}
+        """Cached partial identifiers (keyed by subparameters name)"""
 
         self._validated = False
         self._sealed = False
@@ -516,6 +520,33 @@ class ConfigInformation:
         identifier = IdentifierComputer.compute(self.pyobject)
         if self._sealed:
             self._identifier = identifier
+        return identifier
+
+    def get_partial_identifier(self, subparameters: "Subparameters") -> "Identifier":
+        """Get the partial identifier for a given subparameters instance.
+
+        Partial identifiers exclude certain parameter groups, allowing
+        configurations that differ only in those groups to share the same
+        partial identifier (and thus the same partial directory).
+
+        Args:
+            subparameters: The Subparameters instance defining which groups
+                to include/exclude.
+
+        Returns:
+            The partial identifier for this configuration.
+        """
+        from ..identifier import IdentifierComputer
+
+        name = subparameters.name
+        if name in self._partial_identifiers:
+            return self._partial_identifiers[name]
+
+        identifier = IdentifierComputer.compute_partial(self.pyobject, subparameters)
+
+        if self._sealed:
+            self._partial_identifiers[name] = identifier
+
         return identifier
 
     def dependency(self):

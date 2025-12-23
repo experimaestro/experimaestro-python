@@ -29,6 +29,26 @@ class ConfigWalkContext:
             return self.path / self._configpath
         return self.path
 
+    def partial_path(self, subparameters, config) -> Path:
+        """Returns the partial directory path for a given subparameters instance.
+
+        This method should be overridden in subclasses that have access to
+        workspace information (like JobContext).
+
+        Args:
+            subparameters: The Subparameters instance defining which groups to exclude
+            config: The configuration to compute the partial identifier for
+
+        Returns:
+            The partial directory path.
+
+        Raises:
+            NotImplementedError: If the context doesn't support partial paths.
+        """
+        raise NotImplementedError(
+            "Partial paths require a context with workspace information (like JobContext)"
+        )
+
     @contextmanager
     def push(self, key: str):
         """Push a new key to contextualize paths"""

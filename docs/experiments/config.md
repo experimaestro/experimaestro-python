@@ -578,6 +578,116 @@ config/task path, i.e. if the executed task has a parameter `model`, `model` has
 a parameter `optimization`, and optimization a path parameter `loss.txt`, then
 the file will be `./out/model/optimization/loss.txt`.
 
+### Subparameters and Partial Identifiers
+
+Sometimes you want to share directories (like checkpoints) across tasks that
+differ only in certain parameters. For example, when training a model with
+different numbers of iterations but the same learning rate, you might want
+all runs to share the same checkpoint directory.
+
+**Subparameters** allow you to define parameter subsets that compute partial
+identifiers by excluding certain parameter groups. This enables:
+
+- Sharing checkpoint directories across training runs with different iteration counts
+- Resuming training from checkpoints saved by different configurations
+- Organizing experiment outputs by logical parameter groups
+
+#### Defining Parameter Groups
+
+First, define parameter groups at module level:
+
+```py3
+from experimaestro import param_group
+
+# Create parameter groups
+iter_group = param_group("iter")
+model_group = param_group("model")
+```
+
+#### Using Subparameters in Tasks
+
+Define subparameters as class attributes and assign parameters to groups:
+
+```py3
+from experimaestro import Task, Param, Meta, field, PathGenerator, subparameters, param_group
+from pathlib import Path
+
+iter_group = param_group("iter")
+
+class Learn(Task):
+    # Define a subparameters set that excludes iteration-related parameters
+    checkpoints = subparameters(exclude_groups=[iter_group])
+
+    # This parameter is in the iter group - excluded from partial identifier
+    max_iter: Param[int] = field(groups=[iter_group])
+
+    # This parameter has no group - included in partial identifier
+    learning_rate: Param[float]
+
+    # Path generated using the partial identifier
+    checkpoints_path: Meta[Path] = field(
+        default_factory=PathGenerator("checkpoints", partial=checkpoints)
+    )
+
+    def execute(self):
+        # self.checkpoints_path will be in:
+        # WORKSPACE/partials/TASK_ID/checkpoints/PARTIAL_ID/checkpoints/
+        save_checkpoint(self.checkpoints_path / "model.pt")
+```
+
+#### How Partial Identifiers Work
+
+- Tasks with the same values for **non-excluded** parameters will have the
+  same partial identifier
+- Tasks can have different values for **excluded** parameters and still
+  share the same partial directory
+
+```py3
+# These have different full identifiers but the SAME partial identifier
+task1 = Learn.C(max_iter=100, learning_rate=0.1)
+task2 = Learn.C(max_iter=200, learning_rate=0.1)
+
+# This has a DIFFERENT partial identifier (learning_rate differs)
+task3 = Learn.C(max_iter=100, learning_rate=0.2)
+```
+
+#### Subparameters Options
+
+The `subparameters()` function supports several options:
+
+| Option | Description |
+|--------|-------------|
+| `exclude_groups` | List of parameter groups to exclude from partial identifier |
+| `include_groups` | List of groups to always include (overrides exclusion) |
+| `exclude_all` | If True, exclude all parameters by default |
+| `exclude_no_group` | If True, exclude parameters with no group assigned |
+
+```py3
+# Exclude specific groups
+checkpoints = subparameters(exclude_groups=[iter_group])
+
+# Include only specific groups (exclude everything else)
+model_params = subparameters(exclude_all=True, include_groups=[model_group])
+
+# Exclude ungrouped parameters
+grouped_only = subparameters(exclude_no_group=True)
+```
+
+#### Parameters in Multiple Groups
+
+A parameter can belong to multiple groups:
+
+```py3
+class MyTask(Task):
+    checkpoints = subparameters(exclude_groups=[iter_group])
+
+    # This parameter is in both groups
+    x: Param[int] = field(groups=[iter_group, model_group])
+```
+
+If **any** of a parameter's groups is excluded, the parameter is excluded
+from the partial identifier (unless overridden by `include_groups`).
+
 ## Validation
 
 If a configuration has a `__validate__` method, it is called to validate

@@ -117,6 +117,11 @@ class Workspace:
         return self.path / "jobs"
 
     @property
+    def partialspath(self):
+        """Folder for partial job directories (shared checkpoints, etc.)"""
+        return self.path / "partials"
+
+    @property
     def experimentspath(self):
         """Folder for experiments"""
         return self.path / "xp"

@@ -454,6 +454,31 @@ class JobContext(ConfigWalkContext):
     def task(self):
         return self.job.config
 
+    def partial_path(self, subparameters, config) -> Path:
+        """Returns the partial directory path for a given subparameters instance.
+
+        The partial path structure is:
+        WORKSPACE/partials/TASK_ID/SUBPARAM_NAME/PARTIAL_ID/
+
+        Args:
+            subparameters: The Subparameters instance defining which groups to exclude
+            config: The configuration to compute the partial identifier for
+
+        Returns:
+            The partial directory path.
+        """
+        # Compute partial identifier
+        partial_id = config.__xpm__.get_partial_identifier(subparameters)
+
+        # Build partial directory path
+        task_id = str(config.__xpmtype__.identifier)
+        return (
+            self.job.workspace.partialspath
+            / task_id
+            / subparameters.name
+            / partial_id.all.hex()
+        )
+
 
 class JobError(Exception):
     def __init__(self, code):

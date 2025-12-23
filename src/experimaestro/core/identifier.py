@@ -5,8 +5,11 @@ import hashlib
 import logging
 import os
 import struct
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from experimaestro.core.objects import Config, ConfigMixin
+
+if TYPE_CHECKING:
+    from experimaestro.core.subparameters import Subparameters
 
 
 class ConfigPath:
@@ -103,7 +106,15 @@ class Identifier:
 
 
 class IdentifierComputer:
-    """This class is in charge of computing a config/task identifier"""
+    """This class is in charge of computing a config/task identifier
+
+    Args:
+        config: The configuration to compute the identifier for
+        config_path: Used to track cycles when computing identifiers
+        version: Hash computation version (defaults to XPM_HASH_COMPUTER env var or 2)
+        subparameters: If provided, only include parameters that are not excluded
+            by this Subparameters instance (for partial identifier computation)
+    """
 
     OBJECT_ID = b"\x00"
     INT_ID = b"\x01"
@@ -120,12 +131,20 @@ class IdentifierComputer:
     INIT_TASKS = b"\x0c"
     INSTANCE_ID = b"\x0d"
 
-    def __init__(self, config: "ConfigMixin", config_path: ConfigPath, *, version=None):
+    def __init__(
+        self,
+        config: "ConfigMixin",
+        config_path: ConfigPath,
+        *,
+        version=None,
+        subparameters: "Subparameters" = None,
+    ):
         # Hasher for parameters
         self._hasher = hashlib.sha256()
         self.config = config
         self.config_path = config_path
         self.version = version or int(os.environ.get("XPM_HASH_COMPUTER", 2))
+        self.subparameters = subparameters
         if hash_logger.isEnabledFor(logging.DEBUG):
             hash_logger.debug(
                 "starting hash (%s): %s", hash(str(self.config)), self.config
@@ -260,6 +279,11 @@ class IdentifierComputer:
             # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
+                # Skip arguments excluded by subparameters (for partial identifiers)
+                if self.subparameters is not None:
+                    if self.subparameters.is_excluded(argument.groups):
+                        continue
+
                 # Ignored argument
                 if argument.ignored:
                     argvalue = value.__xpm__.values.get(argument.name, None)
@@ -351,6 +375,37 @@ class IdentifierComputer:
             self = IdentifierComputer(config, config_path, version=version)
             self.update(config, myself=True)
             identifier = self.identifier()
+            identifier.has_loops = config_path.has_loop()
+
+        return identifier
+
+    @staticmethod
+    def compute_partial(
+        config: "ConfigMixin",
+        subparameters: "Subparameters",
+        config_path: ConfigPath | None = None,
+        version=None,
+    ) -> Identifier:
+        """Compute a partial identifier for a configuration
+
+        A partial identifier excludes certain parameter groups, allowing
+        configurations that differ only in those groups to share the same
+        partial identifier (and thus the same partial directory).
+
+        :param config: the configuration for which we compute the identifier
+        :param subparameters: the Subparameters instance defining which groups
+            to include/exclude
+        :param config_path: used to track down cycles between configurations
+        :param version: version for the hash computation (None for the last one)
+        """
+        config_path = config_path or ConfigPath()
+
+        with config_path.push(config):
+            computer = IdentifierComputer(
+                config, config_path, version=version, subparameters=subparameters
+            )
+            computer.update(config, myself=True)
+            identifier = computer.identifier()
             identifier.has_loops = config_path.has_loop()
 
         return identifier

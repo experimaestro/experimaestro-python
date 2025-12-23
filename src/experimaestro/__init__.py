@@ -40,6 +40,12 @@ from .core.arguments import (
     help,
 )
 from .generators import pathgenerator, PathGenerator
+from .core.subparameters import (
+    subparameters,
+    param_group,
+    ParameterGroup,
+    Subparameters,
+)
 from .core.objects import (
     Config,
     InstanceConfig,

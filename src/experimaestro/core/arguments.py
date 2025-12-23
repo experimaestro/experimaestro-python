@@ -8,6 +8,7 @@ from typing import Annotated
 
 if TYPE_CHECKING:
     import experimaestro.core.types
+    from experimaestro.core.subparameters import ParameterGroup
 
 # Track deprecation warnings per module (max 10 per module)
 _deprecation_warning_counts: dict[str, int] = {}
@@ -33,6 +34,7 @@ class Argument:
         constant=False,
         is_data=False,
         overrides=False,
+        groups: set["ParameterGroup"] = None,
     ):
         """Creates a new argument
 
@@ -66,6 +68,10 @@ class Argument:
             overrides (bool, optional): If True, this argument intentionally
             overrides a parent argument. Suppresses the warning that would
             otherwise be issued. Defaults to False.
+
+            groups (set[ParameterGroup], optional): Set of groups this parameter
+            belongs to. Used with subparameters to compute partial identifiers.
+            Defaults to None (empty set).
         """
         required = (field_or_default is None) if required is None else required
         if field_or_default is not None and required is not None and required:
@@ -88,6 +94,7 @@ class Argument:
         self.default = None
         self.ignore_generated = False
         self.ignore_default_in_identifier = False
+        self.groups = groups if groups else set()
 
         if field_or_default is not None:
             assert (
@@ -98,6 +105,10 @@ class Argument:
                 # Allow field to override the overrides flag
                 if field_or_default.overrides:
                     self.overrides = True
+
+                # Process groups from field
+                if field_or_default.groups:
+                    self.groups = field_or_default.groups
 
                 if field_or_default.ignore_default is not None:
                     # ignore_default: value is default AND ignored in identifier
@@ -247,6 +258,7 @@ class field:
         ignore_default: Any = None,
         ignore_generated=False,
         overrides=False,
+        groups: list["ParameterGroup"] = None,
     ):
         """Gives some extra per-field information
 
@@ -262,6 +274,9 @@ class field:
             used.
         :param overrides: True if this field intentionally overrides a parent field.
             Suppresses the warning that would otherwise be issued.
+        :param groups: A list of ParameterGroup objects this parameter belongs to.
+            Used with subparameters to compute partial identifiers that exclude
+            certain groups. A parameter can belong to multiple groups.
         """
         assert not (
             (default is not None) and (default_factory is not None)
@@ -280,6 +295,7 @@ class field:
         self.ignore_default = ignore_default
         self.ignore_generated = ignore_generated
         self.overrides = overrides
+        self.groups = set(groups) if groups else set()
 
 
 class help(TypeAnnotation):
