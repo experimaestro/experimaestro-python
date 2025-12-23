@@ -50,6 +50,7 @@ def process(
     filter="",
     perform=False,
     fullpath=False,
+    count=0,
 ):
     """Process jobs from the workspace database
 
@@ -62,6 +63,7 @@ def process(
         filter: Filter expression
         perform: Actually perform kill/clean (dry run if False)
         fullpath: Show full paths instead of short names
+        count: Limit output to N most recent jobs (0 = no limit)
     """
     from .filter import createFilter
     from experimaestro.scheduler.state_provider import WorkspaceStateProvider
@@ -84,6 +86,14 @@ def process(
         # Apply filter expression
         if _filter:
             all_jobs = [j for j in all_jobs if _filter(j)]
+
+        # Sort by submission time (most recent first)
+        # Jobs without submittime go to the end
+        all_jobs.sort(key=lambda j: j.submittime or 0, reverse=True)
+
+        # Limit to N most recent jobs if count is specified
+        if count > 0:
+            all_jobs = all_jobs[:count]
 
         if not all_jobs:
             cprint("No jobs found.", "yellow")
@@ -145,6 +155,7 @@ def process(
 @click.option("--tags", is_flag=True, help="Show tags")
 @click.option("--filter", default="", help="Filter expression")
 @click.option("--fullpath", is_flag=True, help="Prints full paths")
+@click.option("--count", "-c", default=0, type=int, help="Limit to N most recent jobs")
 @jobs.command()
 @click.pass_context
 def list(
@@ -153,14 +164,16 @@ def list(
     filter: str,
     tags: bool,
     fullpath: bool,
+    count: int,
 ):
-    """List all jobs in the workspace"""
+    """List all jobs in the workspace (sorted by submission date, most recent first)"""
     process(
         ctx.obj.workspace,
         experiment=experiment,
         filter=filter,
         tags=tags,
         fullpath=fullpath,
+        count=count,
     )
 
 

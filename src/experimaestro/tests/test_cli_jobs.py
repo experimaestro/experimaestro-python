@@ -148,6 +148,100 @@ def test_jobs_list_fullpath(workspace_with_jobs):
     assert str(workspace_with_jobs / "jobs") in result.output
 
 
+@pytest.fixture
+def workspace_with_timed_jobs(workspace_path):
+    """Create a workspace with jobs that have different submission times"""
+    db_path = workspace_path / ".experimaestro" / "workspace.db"
+    db = initialize_workspace_database(db_path, read_only=False)
+
+    with db.bind_ctx(ALL_MODELS):
+        ExperimentModel.create(experiment_id="test_exp", current_run_id="run_001")
+        ExperimentRunModel.create(
+            experiment_id="test_exp", run_id="run_001", status="active"
+        )
+
+        # Create jobs with different submission times (oldest to newest)
+        base_time = time.time()
+        jobs_data = [
+            ("job_oldest", "mymodule.Task", "done", base_time - 3600),  # 1 hour ago
+            ("job_middle", "mymodule.Task", "done", base_time - 1800),  # 30 min ago
+            ("job_newest", "mymodule.Task", "done", base_time),  # now
+        ]
+
+        jobs_dir = workspace_path / "jobs"
+        for job_id, task_id, state, submit_time in jobs_data:
+            JobModel.create(
+                job_id=job_id,
+                experiment_id="test_exp",
+                run_id="run_001",
+                task_id=task_id,
+                locator=job_id,
+                state=state,
+                submitted_time=submit_time,
+            )
+            job_dir = jobs_dir / task_id / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+            script_name = task_id.rsplit(".", 1)[-1]
+            (job_dir / f"{script_name}.done").touch()
+
+    close_workspace_database(db)
+    yield workspace_path
+
+
+def test_jobs_list_sorted_by_date(workspace_with_timed_jobs):
+    """Test that jobs are sorted by submission date (most recent first)"""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["jobs", "--workdir", str(workspace_with_timed_jobs), "list"]
+    )
+
+    assert result.exit_code == 0
+    output = result.output
+
+    # Verify order: newest should appear before middle, middle before oldest
+    newest_pos = output.find("job_newest")
+    middle_pos = output.find("job_middle")
+    oldest_pos = output.find("job_oldest")
+
+    assert newest_pos < middle_pos < oldest_pos, (
+        f"Jobs should be sorted by date (newest first). "
+        f"Positions: newest={newest_pos}, middle={middle_pos}, oldest={oldest_pos}"
+    )
+
+
+def test_jobs_list_with_count(workspace_with_timed_jobs):
+    """Test jobs list with --count option"""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["jobs", "--workdir", str(workspace_with_timed_jobs), "list", "-c", "2"]
+    )
+
+    assert result.exit_code == 0
+    output = result.output
+
+    # Should only show 2 most recent jobs
+    assert "job_newest" in output
+    assert "job_middle" in output
+    assert "job_oldest" not in output
+
+
+def test_jobs_list_count_zero_shows_all(workspace_with_timed_jobs):
+    """Test that --count 0 shows all jobs (default behavior)"""
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["jobs", "--workdir", str(workspace_with_timed_jobs), "list", "--count", "0"],
+    )
+
+    assert result.exit_code == 0
+    output = result.output
+
+    # All jobs should be present
+    assert "job_newest" in output
+    assert "job_middle" in output
+    assert "job_oldest" in output
+
+
 def test_jobs_list_with_experiment_filter(workspace_with_jobs):
     """Test jobs list filtered by experiment"""
     runner = CliRunner()

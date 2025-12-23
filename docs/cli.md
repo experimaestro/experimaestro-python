@@ -44,7 +44,7 @@ This is typically needed when:
 
 | Command | Description |
 |---------|-------------|
-| `experimaestro jobs list` | List all jobs in the workspace |
+| `experimaestro jobs list` | List all jobs in the workspace (sorted by date, most recent first) |
 | `experimaestro jobs kill` | Kill running jobs |
 | `experimaestro jobs clean` | Clean (delete) finished jobs |
 | `experimaestro jobs log JOBID` | View job log (stderr by default) |
@@ -60,6 +60,20 @@ All job commands support these options:
 - `--filter EXPR`: Filter using a filter expression (see below)
 - `--tags`: Show job tags in output
 - `--fullpath`: Show full paths instead of `task.id/hash` format
+
+### List Command Options
+
+The `list` command has additional options:
+
+- `--count N` or `-c N`: Limit output to the N most recent jobs
+
+```bash
+# Show only the 10 most recent jobs
+experimaestro jobs list -c 10
+
+# Show the 5 most recent running jobs
+experimaestro jobs list --filter '@state = "RUNNING"' -c 5
+```
 
 ### Kill and Clean Commands
 
