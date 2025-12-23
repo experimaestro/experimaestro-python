@@ -113,15 +113,49 @@ def evaluate(evaluations, checkpoint: Checkpoint):
 
 
 def test_task_dynamic_simple():
-    """Test that dynamic task outputs trigger callbacks"""
+    """Test that dynamic task outputs trigger callbacks
+
+    This test verifies that callbacks are guaranteed to complete before
+    the experiment context exits. The callback waits for jobs to complete
+    before submitting evaluations, which validates that the synchronization
+    logic correctly waits for all callbacks to finish.
+    """
+    import asyncio
+
     evaluations = []
+    xp_ref = [None]  # To access xp from callback
+
+    def collect_checkpoint(checkpoint: Checkpoint):
+        """Callback that waits for jobs to complete before evaluating
+
+        This simulates a real-world scenario where the callback needs to wait
+        for the triggering task to complete before it can proceed (e.g., to
+        read outputs from the task's directory).
+        """
+        logging.info("Received checkpoint %s, waiting for jobs to complete", checkpoint)
+        xp = xp_ref[0]
+
+        # Wait for unfinished jobs to become 0 (all tasks completed)
+        async def wait_for_jobs_done():
+            async with xp.scheduler.exitCondition:
+                while xp.unfinishedJobs > 0:
+                    await xp.scheduler.exitCondition.wait()
+
+        asyncio.run_coroutine_threadsafe(
+            wait_for_jobs_done(), xp.scheduler.loop
+        ).result()
+
+        # Now submit evaluation
+        logging.info("Jobs done, submitting evaluation for checkpoint %s", checkpoint)
+        evaluate(evaluations, checkpoint)
 
     with TemporaryDirectory() as workdir:
-        with TemporaryExperiment("dynamic", maxwait=5, workdir=workdir):
+        with TemporaryExperiment("dynamic", maxwait=10, workdir=workdir) as xp:
+            xp_ref[0] = xp
             model = Model.C()
             validation = Validation.C(model=model)
             learn = Learn.C(model=model, validation=validation)
-            learn.watch_output(validation.checkpoint, partial(evaluate, evaluations))
+            learn.watch_output(validation.checkpoint, collect_checkpoint)
 
             learn.submit()
 

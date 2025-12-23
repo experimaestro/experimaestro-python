@@ -387,17 +387,21 @@ class Scheduler(threading.Thread):
 
         # Job is finished - experiment statistics already updated by set_state
 
-        async with self.exitCondition:
-            self.exitCondition.notify_all()
-
         # Write final metadata with end time and final state
         job.write_metadata()
 
         if job in self.waitingjobs:
             self.waitingjobs.remove(job)
 
-        # Process all remaining tasks outputs
+        # Process all remaining task outputs BEFORE notifying exit condition
+        # This ensures taskOutputQueueSize is updated before wait() can check it,
+        # preventing a race where wait() sees both unfinishedJobs==0 and
+        # taskOutputQueueSize==0 before callbacks have been queued.
         await asyncThreadcheck("End of job processing", job.done_handler)
+
+        # Now notify - wait() will see the correct taskOutputQueueSize
+        async with self.exitCondition:
+            self.exitCondition.notify_all()
 
         return job.state
 
