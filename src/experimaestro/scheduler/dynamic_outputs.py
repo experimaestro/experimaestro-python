@@ -284,6 +284,23 @@ class TaskOutputsWorker(threading.Thread):
 
         logger.debug("Task outputs worker stopped")
 
+    def process_job_outputs(self, job) -> None:
+        """Explicitly process any remaining task outputs for a completed job.
+
+        This is called when a job finishes to ensure all task outputs written
+        by the job are processed before the experiment considers exiting.
+        This is necessary because file system watchers may have latency.
+
+        :param job: The job that has finished
+        """
+        path = job.task_outputs_path
+        with self._lock:
+            monitor = self._monitors.get(path)
+
+        if monitor is not None:
+            with monitor._lock:
+                monitor._process_file()
+
     def shutdown(self):
         """Stop the worker and all monitors"""
         # Stop all monitors

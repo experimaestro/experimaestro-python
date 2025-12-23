@@ -187,10 +187,16 @@ class Job(BaseJob, Resource):
     def done_handler(self):
         """The task has been completed.
 
-        Ensures all remaining task output events are processed.
+        Ensures all remaining task output events are processed by explicitly
+        reading the task outputs file. This is necessary because file system
+        watchers may have latency, and we need to process all outputs before
+        the experiment can exit.
         """
-        # Task output processing is handled by TaskOutputsWorker
-        pass
+        if not self.watched_outputs:
+            return
+
+        for xp in self.experiments:
+            xp.taskOutputsWorker.process_job_outputs(self)
 
     def __str__(self):
         return "Job[{}]".format(self.identifier)
