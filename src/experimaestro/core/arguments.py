@@ -165,7 +165,12 @@ class ArgumentOptions:
             self.kwargs["field_or_default"] = defaultvalue
 
             # Emit deprecation warning for bare default values (not wrapped in field)
-            if defaultvalue is not None and not isinstance(defaultvalue, field):
+            # Skip warning for Constant parameters - they are inherently constant, not defaults
+            if (
+                defaultvalue is not None
+                and not isinstance(defaultvalue, field)
+                and not self.kwargs.get("constant")
+            ):
                 module = originaltype.__module__
                 count = _deprecation_warning_counts.get(module, 0)
                 if count < _MAX_WARNINGS_PER_MODULE:
