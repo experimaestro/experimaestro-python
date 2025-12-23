@@ -76,6 +76,14 @@ class Workspace:
 
         # Only initialize on first entry
         if self._ref_count == 1:
+            # Check if a different workspace is already active
+            if Workspace.CURRENT is not None and Workspace.CURRENT.path != self.path:
+                raise RuntimeError(
+                    f"Cannot activate workspace at {self.path} - "
+                    f"workspace at {Workspace.CURRENT.path} is already active. "
+                    "Multiple workspaces are not yet supported."
+                )
+
             self.old_workspace = Workspace.CURRENT
             Workspace.CURRENT = self
 

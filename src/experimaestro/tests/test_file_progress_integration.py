@@ -321,7 +321,7 @@ def test_file_progress_concurrent_experiments():
 
         with TemporaryExperiment(
             "file-progress-concurrent-2",
-            workdir=xp1.workdir,
+            workdir=xp1.workspace.path,
             maxwait=max_wait,
             port=0,
         ) as xp2:

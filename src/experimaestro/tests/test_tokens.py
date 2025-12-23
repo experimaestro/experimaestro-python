@@ -133,7 +133,7 @@ def test_token_cleanup():
 
 
 def test_token_monitor():
-    """Two different schedulers (within the same process)
+    """Two different experiments (within the same process and workspace)
 
     Test the ability of the token to monitor the filesystem
     """
@@ -145,19 +145,18 @@ def test_token_monitor():
         )
         return task
 
-    with (
-        TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1,
-        TemporaryExperiment("tokens2", maxwait=20) as xp2,
-    ):
-        path = xp1.workspace.path / "test_token.file"
-        task1 = run(xp1, 1, path)
-        task2 = run(xp2, 2, path)
+    with TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1:
+        # Use the same workspace for both experiments
+        with TemporaryExperiment(
+            "tokens2", workdir=xp1.workspace.path, maxwait=20
+        ) as xp2:
+            path = xp1.workspace.path / "test_token.file"
+            task1 = run(xp1, 1, path)
+            task2 = run(xp2, 2, path)
 
-        time.sleep(0.5)
-        path.write_text("Hello world")
+            time.sleep(0.5)
+            path.write_text("Hello world")
 
-        xp1.wait()
-        xp2.wait()
         time1 = get_times(task1)
         time2 = get_times(task2)
 
