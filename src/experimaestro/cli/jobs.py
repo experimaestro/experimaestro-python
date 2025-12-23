@@ -1,8 +1,6 @@
 # flake8: noqa: T201
-import asyncio
 import subprocess
 from typing import Optional
-from shutil import rmtree
 import click
 from pathlib import Path
 from termcolor import colored, cprint
@@ -34,6 +32,9 @@ def jobs(
     selects jobs where the tag model is "bm25", the tag mode is either
     "a" or "b", and the state is running.
 
+    Note: Jobs are read from the workspace database. If jobs are missing,
+    run 'experimaestro experiments sync' to synchronize the database
+    with the filesystem.
     """
     ws = ctx.obj.workspace = find_workspace(workdir=workdir, workspace=workspace)
     check_xp_path(ctx, None, ws.path)
@@ -44,117 +45,106 @@ def process(
     *,
     experiment="",
     tags="",
-    ready=False,
     clean=False,
     kill=False,
     filter="",
     perform=False,
     fullpath=False,
-    check=False,
 ):
-    from .filter import createFilter, JobInformation
+    """Process jobs from the workspace database
+
+    Args:
+        workspace: Workspace settings
+        experiment: Filter by experiment ID
+        tags: Show tags in output
+        clean: Clean finished jobs
+        kill: Kill running jobs
+        filter: Filter expression
+        perform: Actually perform kill/clean (dry run if False)
+        fullpath: Show full paths instead of short names
+    """
+    from .filter import createFilter
+    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
     from experimaestro.scheduler import JobState
 
-    _filter = createFilter(filter) if filter else lambda x: True
+    _filter = createFilter(filter) if filter else None
 
-    # Get all jobs from experiments
-    job2xp = {}
+    # Get state provider (write mode for kill/clean operations)
+    read_only = not (kill or clean)
+    provider = WorkspaceStateProvider.get_instance(workspace.path, read_only=read_only)
 
-    path = workspace.path
-    for p in (path / "xp").glob("*"):
-        for job in p.glob("jobs/*/*"):
-            job_path = job.resolve()
-            if job_path.is_dir():
-                job2xp.setdefault(job_path.name, set()).add(p.name)
+    try:
+        # Get all jobs from the database
+        all_jobs = provider.get_all_jobs()
 
-        if (p / "jobs.bak").is_dir():
-            cprint(f"  Experiment {p.name} has not finished yet", "red")
-            if (not perform) and (kill or clean):
-                cprint(
-                    "  Preventing kill/clean (use --perform if you want to)", "yellow"
-                )
-                kill = False
-                clean = False
+        # Filter by experiment if specified
+        if experiment:
+            all_jobs = [j for j in all_jobs if j.experiment_id == experiment]
 
-    # Now, process jobs
-    for job in path.glob("jobs/*/*"):
-        info = None
-        p = job.resolve()
-        if p.is_dir():
-            *_, scriptname = p.parent.name.rsplit(".", 1)
-            xps = job2xp.get(job.name, set())
-            if experiment and experiment not in xps:
-                continue
+        # Apply filter expression
+        if _filter:
+            all_jobs = [j for j in all_jobs if _filter(j)]
 
-            info = JobInformation(p, scriptname, check=check)
-            job_str = (
-                (str(job.resolve()) if fullpath else f"{job.parent.name}/{job.name}")
-                + " "
-                + ",".join(xps)
-            )
+        if not all_jobs:
+            cprint("No jobs found.", "yellow")
+            return
 
-            if filter:
-                if not _filter(info):
-                    continue
+        # Process each job
+        for job in all_jobs:
+            job_str = str(job.path) if fullpath else f"{job.task_id}/{job.identifier}"
 
-            if info.state is None:
-                print(colored(f"NODIR   {job_str}", "red"), end="")
-            elif info.state.running():
+            # Add experiment info
+            if job.experiment_id:
+                job_str += f" [{job.experiment_id}]"
+
+            if job.state is None or job.state == JobState.UNSCHEDULED:
+                print(colored(f"UNSCHED {job_str}", "red"), end="")
+            elif job.state.running():
                 if kill:
                     if perform:
-                        process = info.getprocess()
-                        if process is None:
-                            cprint(
-                                "internal error – no process could be retrieved",
-                                "red",
-                            )
+                        if provider.kill_job(job, perform=True):
+                            cprint(f"KILLED  {job_str}", "light_red")
                         else:
-                            cprint(f"KILLING {process}", "light_red")
-                            process.kill()
+                            cprint(f"KILL FAILED {job_str}", "red")
                     else:
-                        print("KILLING (not performing)", process)
-                print(
-                    colored(f"{info.state.name:8}{job_str}", "yellow"),
-                    end="",
-                )
-            elif info.state == JobState.DONE:
-                print(
-                    colored(f"DONE    {job_str}", "green"),
-                    end="",
-                )
-            elif info.state == JobState.ERROR:
+                        cprint(f"KILLING {job_str} (dry run)", "yellow")
+                else:
+                    print(colored(f"{job.state.name:8}{job_str}", "yellow"), end="")
+            elif job.state == JobState.DONE:
+                print(colored(f"DONE    {job_str}", "green"), end="")
+            elif job.state == JobState.ERROR:
                 print(colored(f"FAIL    {job_str}", "red"), end="")
             else:
-                print(
-                    colored(f"{info.state.name:8}{job_str}", "red"),
-                    end="",
-                )
+                print(colored(f"{job.state.name:8}{job_str}", "red"), end="")
 
-        else:
-            if not ready:
-                continue
-            print(colored(f"READY {job_path}", "yellow"), end="")
+            # Show tags if requested
+            if tags and job.tags:
+                print(f""" {" ".join(f"{k}={v}" for k, v in job.tags.items())}""")
+            elif not (kill and perform):
+                print()
 
-        if tags:
-            print(f""" {" ".join(f"{k}={v}" for k, v in info.tags.items())}""")
-        else:
-            print()
+            # Clean finished jobs
+            if clean and job.state and job.state.finished():
+                if perform:
+                    if provider.clean_job(job, perform=True):
+                        cprint("  Cleaned", "red")
+                    else:
+                        cprint("  Clean failed", "red")
+                else:
+                    cprint("  Would clean (dry run)", "yellow")
 
-        if clean and info.state and info.state.finished():
-            if perform:
-                cprint("Cleaning...", "red")
-                rmtree(p)
-            else:
-                cprint("Cleaning... (not performed)", "red")
-    print()
+        print()
+
+    finally:
+        # Close provider if we created it for write mode
+        if not read_only:
+            provider.close()
 
 
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
-@click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
 @click.option("--filter", default="", help="Filter expression")
 @click.option("--fullpath", is_flag=True, help="Prints full paths")
-@click.option("--no-check", is_flag=True, help="Check that running jobs")
 @jobs.command()
 @click.pass_context
 def list(
@@ -162,24 +152,20 @@ def list(
     experiment: str,
     filter: str,
     tags: bool,
-    ready: bool,
     fullpath: bool,
-    no_check: bool,
 ):
+    """List all jobs in the workspace"""
     process(
         ctx.obj.workspace,
         experiment=experiment,
         filter=filter,
         tags=tags,
-        ready=ready,
         fullpath=fullpath,
-        check=not no_check,
     )
 
 
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
-@click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
 @click.option("--filter", default="", help="Filter expression")
 @click.option("--perform", is_flag=True, help="Really perform the killing")
 @click.option("--fullpath", is_flag=True, help="Prints full paths")
@@ -190,17 +176,15 @@ def kill(
     experiment: str,
     filter: str,
     tags: bool,
-    ready: bool,
     fullpath: bool,
     perform: bool,
-    check: bool,
 ):
+    """Kill running jobs"""
     process(
         ctx.obj.workspace,
         experiment=experiment,
         filter=filter,
         tags=tags,
-        ready=ready,
         kill=True,
         perform=perform,
         fullpath=fullpath,
@@ -209,7 +193,6 @@ def kill(
 
 @click.option("--experiment", default=None, help="Restrict to this experiment")
 @click.option("--tags", is_flag=True, help="Show tags")
-@click.option("--ready", is_flag=True, help="Include tasks which are not yet scheduled")
 @click.option("--filter", default="", help="Filter expression")
 @click.option("--perform", is_flag=True, help="Really perform the cleaning")
 @click.option("--fullpath", is_flag=True, help="Prints full paths")
@@ -220,16 +203,15 @@ def clean(
     experiment: str,
     filter: str,
     tags: bool,
-    ready: bool,
     fullpath: bool,
     perform: bool,
 ):
+    """Clean finished jobs (delete directories and DB entries)"""
     process(
         ctx.obj.workspace,
         experiment=experiment,
         filter=filter,
         tags=tags,
-        ready=ready,
         clean=True,
         perform=perform,
         fullpath=fullpath,
@@ -244,25 +226,39 @@ def clean(
 @jobs.command()
 @click.pass_context
 def log(ctx, jobid: str, follow: bool, std: bool):
+    """View job log (stderr by default, stdout with --std)
+
+    JOBID format: task.name/hash (e.g., mymodule.MyTask/abc123)
+    """
     task_name, task_hash = jobid.split("/")
     _, name = task_name.rsplit(".", 1)
-    path = (
+    log_path = (
         ctx.obj.workspace.path
         / "jobs"
         / task_name
         / task_hash
         / f"""{name}.{'out' if std else 'err'}"""
     )
+    if not log_path.exists():
+        cprint(f"Log file not found: {log_path}", "red")
+        return
     if follow:
-        subprocess.run(["tail", "-f", path])
+        subprocess.run(["tail", "-f", log_path])
     else:
-        subprocess.run(["less", "-r", path])
+        subprocess.run(["less", "-r", log_path])
 
 
 @click.argument("jobid", type=str)
 @jobs.command()
 @click.pass_context
 def path(ctx, jobid: str):
+    """Print the path to a job directory
+
+    JOBID format: task.name/hash (e.g., mymodule.MyTask/abc123)
+    """
     task_name, task_hash = jobid.split("/")
-    path = ctx.obj.workspace.path / "jobs" / task_name / task_hash
-    print(path)
+    job_path = ctx.obj.workspace.path / "jobs" / task_name / task_hash
+    if not job_path.exists():
+        cprint(f"Job directory not found: {job_path}", "red")
+        return
+    print(job_path)

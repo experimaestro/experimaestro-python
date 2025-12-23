@@ -14,6 +14,9 @@ import fasteners
 
 if TYPE_CHECKING:
     from .state_provider import WorkspaceStateProvider
+    from .jobs import JobState
+
+from .interfaces import BaseJob
 
 from experimaestro.scheduler.state_db import (
     ExperimentModel,
@@ -134,14 +137,139 @@ def should_sync(
     return False, None
 
 
-def scan_job_state_from_disk(job_path: Path, scriptname: str) -> Optional[Dict]:
+def check_process_alive(
+    job_path: Path, scriptname: str, update_disk: bool = True
+) -> bool:
+    """Check if a running job's process is still alive
+
+    If the process is dead and update_disk=True, this function will:
+    1. Acquire a lock on the job directory
+    2. Create a .failed file to persist the state (with detailed failure info)
+    3. Remove the .pid file
+
+    Args:
+        job_path: Path to the job directory
+        scriptname: Name of the script (for PID file name)
+        update_disk: If True, update disk state when process is dead
+
+    Returns:
+        True if process is running, False otherwise
+    """
+    import asyncio
+
+    from experimaestro.connectors import Process
+    from experimaestro.connectors.local import LocalConnector
+
+    pid_file = BaseJob.get_pidfile(job_path, scriptname)
+    if not pid_file.exists():
+        return False
+
+    # Try to acquire lock on job directory (non-blocking)
+    # If we can't acquire, assume the job is running (another process has it)
+    lock_path = job_path / ".lock"
+    lock = fasteners.InterProcessLock(str(lock_path))
+
+    if not lock.acquire(blocking=False):
+        # Can't acquire lock - job is probably running
+        logger.debug("Could not acquire lock for %s, assuming job is running", job_path)
+        return True
+
+    try:
+        pinfo = json.loads(pid_file.read_text())
+        connector = LocalConnector.instance()
+        process = Process.fromDefinition(connector, pinfo)
+
+        if process is None:
+            # Can't get process info - mark as dead
+            if update_disk:
+                _mark_job_failed_on_disk(job_path, scriptname, None)
+            return False
+
+        # Check process state (with 0 timeout for immediate check)
+        state = asyncio.run(process.aio_state(0))
+        if state is None or state.finished:
+            # Process is dead - get detailed job state from process
+            if update_disk:
+                exit_code = state.exitcode if state else 1
+                # Use get_job_state() to get detailed failure info (e.g., SLURM timeout)
+                job_state = process.get_job_state(exit_code)
+                _mark_job_failed_on_disk(job_path, scriptname, job_state, exit_code)
+            return False
+
+        return True
+    except Exception as e:
+        logger.debug("Could not check process state for %s: %s", job_path, e)
+        # On error, assume process is dead but don't update disk (we're not sure)
+        return False
+    finally:
+        lock.release()
+
+
+def _mark_job_failed_on_disk(
+    job_path: Path,
+    scriptname: str,
+    job_state: Optional["JobState"],
+    exit_code: int = 1,
+) -> None:
+    """Mark a job as failed on disk by creating .failed file and removing .pid
+
+    Args:
+        job_path: Path to the job directory
+        scriptname: Name of the script
+        job_state: JobState from process.get_job_state() - may contain detailed
+            failure info (e.g., TIMEOUT for SLURM jobs)
+        exit_code: Exit code of the process (default: 1)
+    """
+    from experimaestro.scheduler.jobs import JobStateError
+
+    pid_file = BaseJob.get_pidfile(job_path, scriptname)
+    failed_file = BaseJob.get_failedfile(job_path, scriptname)
+
+    try:
+        # Extract failure status from job_state
+        failure_status = "UNKNOWN"
+
+        if isinstance(job_state, JobStateError):
+            # JobStateError can contain detailed failure reason
+            if job_state.failure_reason:
+                failure_status = job_state.failure_reason.name
+
+        # Write .failed file with exit code and failure status (JSON format)
+        failed_data = {
+            "exit_code": exit_code,
+            "failure_status": failure_status,
+        }
+
+        failed_file.write_text(json.dumps(failed_data))
+        logger.info(
+            "Created %s for dead job (exit_code=%d, status=%s)",
+            failed_file,
+            exit_code,
+            failure_status,
+        )
+
+        # Remove .pid file
+        if pid_file.exists():
+            pid_file.unlink()
+            logger.debug("Removed stale PID file %s", pid_file)
+
+    except Exception as e:
+        logger.warning("Failed to update disk state for %s: %s", job_path, e)
+
+
+def scan_job_state_from_disk(
+    job_path: Path, scriptname: str, check_running: bool = True
+) -> Optional[Dict]:
     """Scan a job directory to determine state from disk files
 
-    Reads job state from .xpm_metadata.json (primary) or marker files (fallback).
+    Reads job state from .experimaestro/information.json (primary) or marker
+    files (fallback).
 
     Args:
         job_path: Path to the job directory
         scriptname: Name of the script (for marker file names)
+        check_running: If True, verify that jobs with PID files are actually
+            still running (default: True)
 
     Returns:
         Dictionary with job state information, or None if no state found:
@@ -158,23 +286,36 @@ def scan_job_state_from_disk(job_path: Path, scriptname: str) -> Optional[Dict]:
             'process': dict or None  # Process spec from metadata
         }
     """
-    # Try reading .xpm_metadata.json first (primary source)
-    metadata_path = job_path / ".xpm_metadata.json"
+    # Try reading metadata from .experimaestro/information.json (primary source)
+    metadata_path = BaseJob.get_metadata_path(job_path)
     if metadata_path.exists():
         try:
             with metadata_path.open("r") as f:
                 metadata = json.load(f)
 
+            state = metadata.get("state", "unscheduled")
+            failure_reason = metadata.get("failure_reason")
+
+            # If state is "running", verify the process is still alive
+            if state == "running" and check_running:
+                if not check_process_alive(job_path, scriptname):
+                    logger.info(
+                        "Job %s marked as running but process is dead, marking as error",
+                        job_path.name,
+                    )
+                    state = "error"
+                    failure_reason = "UNKNOWN"
+
             logger.debug("Read metadata from %s", metadata_path)
             return {
                 "job_id": metadata.get("job_id"),
                 "task_id": metadata.get("task_id"),
-                "state": metadata.get("state", "unscheduled"),
+                "state": state,
                 "submitted_time": metadata.get("submitted_time"),
                 "started_time": metadata.get("started_time"),
                 "ended_time": metadata.get("ended_time"),
                 "exit_code": metadata.get("exit_code"),
-                "failure_reason": metadata.get("failure_reason"),
+                "failure_reason": failure_reason,
                 "retry_count": metadata.get("retry_count", 0),
                 "process": metadata.get("process"),  # Process spec with launcher info
             }
@@ -182,27 +323,44 @@ def scan_job_state_from_disk(job_path: Path, scriptname: str) -> Optional[Dict]:
             logger.warning("Failed to read metadata from %s: %s", metadata_path, e)
             # Fall through to marker file fallback
 
-    # Fallback: Infer from marker files and params.json
+    # Fallback: Infer from marker files
     try:
-        # Check marker files for state
-        done_file = job_path / f"{scriptname}.done"
-        failed_file = job_path / f"{scriptname}.failed"
-        pid_file = job_path / f"{scriptname}.pid"
+        done_file = BaseJob.get_donefile(job_path, scriptname)
+        failed_file = BaseJob.get_failedfile(job_path, scriptname)
+        pid_file = BaseJob.get_pidfile(job_path, scriptname)
 
         state = "unscheduled"
         exit_code = None
+        failure_reason = None
 
         if done_file.is_file():
             state = "done"
             exit_code = 0
         elif failed_file.is_file():
             state = "error"
+            # Try to parse .failed file (JSON or legacy integer format)
             try:
-                exit_code = int(failed_file.read_text().strip())
-            except (ValueError, OSError):
-                exit_code = 1
+                content = failed_file.read_text().strip()
+                data = json.loads(content)
+                exit_code = data.get("exit_code", 1)
+                failure_reason = data.get("failure_status", "UNKNOWN")
+            except json.JSONDecodeError:
+                # Legacy integer format
+                try:
+                    exit_code = int(content)
+                except (ValueError, OSError):
+                    exit_code = 1
         elif pid_file.is_file():
-            state = "running"
+            # PID file exists - check if process is actually running
+            if check_running and not check_process_alive(job_path, scriptname):
+                logger.info(
+                    "Job %s has PID file but process is dead, marking as error",
+                    job_path.name,
+                )
+                state = "error"
+                failure_reason = "UNKNOWN"
+            else:
+                state = "running"
 
         # Use directory structure to infer job_id and task_id
         # job_path structure: {workspace}/jobs/{task_id}/{hash}/
@@ -218,7 +376,7 @@ def scan_job_state_from_disk(job_path: Path, scriptname: str) -> Optional[Dict]:
             "started_time": None,
             "ended_time": None,
             "exit_code": exit_code,
-            "failure_reason": None,
+            "failure_reason": failure_reason,
             "retry_count": 0,
             "process": None,
         }

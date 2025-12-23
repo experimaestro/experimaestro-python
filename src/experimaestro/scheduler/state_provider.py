@@ -320,6 +320,33 @@ class MockJob(BaseJob):
             logger.warning("Failed to read job metadata from %s: %s", path, e)
             return None
 
+    def getprocess(self):
+        """Get process handle for running job
+
+        This method is used for compatibility with filter expressions and
+        for killing running jobs.
+
+        Returns:
+            Process instance or None if process info not available
+        """
+        from experimaestro.connectors import Process
+        from experimaestro.connectors.local import LocalConnector
+
+        # Get script name from task_id (last component after the last dot)
+        scriptname = self.task_id.rsplit(".", 1)[-1]
+        pid_file = self.path / f"{scriptname}.pid"
+
+        if not pid_file.exists():
+            return None
+
+        try:
+            connector = LocalConnector.instance()
+            pinfo = json.loads(pid_file.read_text())
+            return Process.fromDefinition(connector, pinfo)
+        except Exception as e:
+            logger.warning("Could not get process for job at %s: %s", self.path, e)
+            return None
+
 
 class MockExperiment(BaseExperiment):
     """Concrete implementation of BaseExperiment for database-loaded experiments
@@ -1194,6 +1221,203 @@ class WorkspaceStateProvider:
         logger.debug(
             "Deleted job %s (experiment=%s, run=%s)", job_id, experiment_id, run_id
         )
+
+    # CLI utility methods for job management
+
+    @_with_db_context
+    def get_all_jobs(
+        self,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,
+    ) -> List[MockJob]:
+        """Query all jobs across all experiments/runs
+
+        This method is designed for CLI tools that need to list or manage jobs
+        across the entire workspace, regardless of experiment or run.
+
+        Args:
+            state: Filter by job state (e.g., "done", "error", "running")
+            tags: Filter by tags (all tags must match)
+            since: If provided, only return jobs updated after this timestamp
+
+        Returns:
+            List of MockJob objects
+        """
+        # Build base query
+        query = JobModel.select()
+
+        # Apply since filter for incremental updates
+        if since is not None:
+            query = query.where(JobModel.updated_at > since)
+
+        # Apply state filter
+        if state is not None:
+            query = query.where(JobModel.state == state)
+
+        # Apply tag filters
+        if tags:
+            for tag_key, tag_value in tags.items():
+                query = query.join(
+                    JobTagModel,
+                    on=(
+                        (JobTagModel.job_id == JobModel.job_id)
+                        & (JobTagModel.experiment_id == JobModel.experiment_id)
+                        & (JobTagModel.run_id == JobModel.run_id)
+                        & (JobTagModel.tag_key == tag_key)
+                        & (JobTagModel.tag_value == tag_value)
+                    ),
+                )
+
+        # Execute query and convert to MockJob objects
+        jobs = []
+        for job_model in query:
+            # Get tags for this job
+            job_tags = self._get_job_tags(
+                job_model.job_id, job_model.experiment_id, job_model.run_id
+            )
+            jobs.append(self._job_model_to_dict(job_model, job_tags))
+
+        return jobs
+
+    def kill_job(self, job: MockJob, perform: bool = False) -> bool:
+        """Kill a running job process
+
+        This method finds the process associated with a running job and kills it.
+        It also updates the job state in the database to ERROR.
+
+        Args:
+            job: MockJob instance to kill
+            perform: If True, actually kill the process. If False, just check
+                if the job can be killed (dry run).
+
+        Returns:
+            True if job was killed (or would be killed in dry run),
+            False if job is not running or process not found
+        """
+        # Check if job is in a running state
+        if not job.state.running():
+            logger.debug("Job %s is not running (state=%s)", job.identifier, job.state)
+            return False
+
+        # Get process from job
+        process = job.getprocess()
+        if process is None:
+            logger.warning("Could not get process for job %s", job.identifier)
+            return False
+
+        if perform:
+            try:
+                logger.info("Killing job %s (process: %s)", job.identifier, process)
+                process.kill()
+
+                # Update job state in database
+                if not self.read_only:
+                    self._update_job_state_to_error(job, "killed")
+            except Exception as e:
+                logger.error("Error killing job %s: %s", job.identifier, e)
+                return False
+
+        return True
+
+    def _update_job_state_to_error(self, job: MockJob, reason: str):
+        """Update job state to ERROR in database
+
+        Args:
+            job: MockJob instance
+            reason: Failure reason
+        """
+        if self.read_only:
+            return
+
+        now = datetime.now()
+        with self.workspace_db.bind_ctx([JobModel]):
+            JobModel.update(
+                state="error",
+                failure_reason=reason,
+                ended_time=now.timestamp(),
+                updated_at=now,
+            ).where(
+                (JobModel.job_id == job.identifier)
+                & (JobModel.experiment_id == job.experiment_id)
+                & (JobModel.run_id == job.run_id)
+            ).execute()
+
+        logger.debug(
+            "Updated job %s state to error (reason=%s)", job.identifier, reason
+        )
+
+    def clean_job(self, job: MockJob, perform: bool = False) -> bool:
+        """Clean a finished job (delete directory and DB entry)
+
+        This method removes the job's working directory and its database entry.
+        Only finished jobs (DONE or ERROR state) can be cleaned.
+
+        Args:
+            job: MockJob instance to clean
+            perform: If True, actually delete the job. If False, just check
+                if the job can be cleaned (dry run).
+
+        Returns:
+            True if job was cleaned (or would be cleaned in dry run),
+            False if job is not finished or cannot be cleaned
+        """
+        from shutil import rmtree
+
+        # Check if job is in a finished state
+        if not job.state.finished():
+            logger.debug(
+                "Job %s is not finished (state=%s), cannot clean",
+                job.identifier,
+                job.state,
+            )
+            return False
+
+        if perform:
+            # Delete job directory
+            if job.path.exists():
+                logger.info("Cleaning job %s: removing %s", job.identifier, job.path)
+                rmtree(job.path)
+            else:
+                logger.warning("Job directory does not exist: %s", job.path)
+
+            # Delete from database
+            if not self.read_only:
+                self.delete_job(job.identifier, job.experiment_id, job.run_id)
+
+        return True
+
+    def kill_jobs(self, jobs: List[MockJob], perform: bool = False) -> int:
+        """Kill multiple jobs
+
+        Args:
+            jobs: List of MockJob instances to kill
+            perform: If True, actually kill the processes. If False, dry run.
+
+        Returns:
+            Number of jobs that were killed (or would be killed in dry run)
+        """
+        count = 0
+        for job in jobs:
+            if self.kill_job(job, perform=perform):
+                count += 1
+        return count
+
+    def clean_jobs(self, jobs: List[MockJob], perform: bool = False) -> int:
+        """Clean multiple finished jobs
+
+        Args:
+            jobs: List of MockJob instances to clean
+            perform: If True, actually delete the jobs. If False, dry run.
+
+        Returns:
+            Number of jobs that were cleaned (or would be cleaned in dry run)
+        """
+        count = 0
+        for job in jobs:
+            if self.clean_job(job, perform=perform):
+                count += 1
+        return count
 
     # Service operations
 

@@ -257,8 +257,8 @@ def find_launchers(config: Optional[Path], spec: str):
     print(launcher_registry.find_launcher(spec))
 
 
-class Launchers(click.MultiCommand):
-    """Connectors commands"""
+class Launchers(click.Group):
+    """Dynamic command group for entry point discovery"""
 
     @cached_property
     def commands(self):

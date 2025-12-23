@@ -69,19 +69,19 @@ class JobState:
         return f"{self.__class__.__name__}()"
 
     @staticmethod
-    def from_path(basepath: Path, name: str) -> "JobState":
+    def from_path(basepath: Path, scriptname: str) -> "JobState":
         """Read job state from .done or .failed files
 
         Args:
             basepath: The job directory path
-            name: The job name (used for file naming)
+            scriptname: The script name (used for file naming)
 
         Returns:
             JobState.DONE if .done exists, JobStateError with details if .failed exists,
             or None if neither exists.
         """
-        donepath = basepath / f"{name}.done"
-        failedpath = basepath / f"{name}.failed"
+        donepath = basepath / f"{scriptname}.done"
+        failedpath = basepath / f"{scriptname}.failed"
 
         if donepath.is_file():
             return JobState.DONE
@@ -93,9 +93,19 @@ class JobState:
             try:
                 data = json.loads(content)
                 if isinstance(data, dict):
+                    # New format: failure_status field
+                    failure_status_str = data.get("failure_status")
+                    if failure_status_str:
+                        try:
+                            failure_status = JobFailureStatus[
+                                failure_status_str.upper()
+                            ]
+                            return JobStateError(failure_status)
+                        except KeyError:
+                            pass
+                    # Legacy format: reason field
                     reason = data.get("reason")
                     if reason:
-                        # Use enum name directly (case-insensitive)
                         try:
                             failure_status = JobFailureStatus[reason.upper()]
                             return JobStateError(failure_status)
@@ -279,11 +289,83 @@ class BaseJob:
     exit_code: Optional[int]
     retry_count: int
 
+    # -------------------------------------------------------------------------
+    # Static path computation (for use without a job instance)
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def get_scriptname(task_id: str) -> str:
+        """Extract script name from task_id (last component after '.')"""
+        return task_id.rsplit(".", 1)[-1]
+
+    @staticmethod
+    def get_xpm_dir(job_path: Path) -> Path:
+        """Get .experimaestro directory path for a job path"""
+        return job_path / ".experimaestro"
+
+    @staticmethod
+    def get_metadata_path(job_path: Path) -> Path:
+        """Get metadata file path for a job path"""
+        return job_path / ".experimaestro" / "information.json"
+
+    @staticmethod
+    def get_pidfile(job_path: Path, scriptname: str) -> Path:
+        """Get PID file path"""
+        return job_path / f"{scriptname}.pid"
+
+    @staticmethod
+    def get_donefile(job_path: Path, scriptname: str) -> Path:
+        """Get done marker file path"""
+        return job_path / f"{scriptname}.done"
+
+    @staticmethod
+    def get_failedfile(job_path: Path, scriptname: str) -> Path:
+        """Get failed marker file path"""
+        return job_path / f"{scriptname}.failed"
+
+    # -------------------------------------------------------------------------
+    # Instance properties (using static methods for consistency)
+    # -------------------------------------------------------------------------
+
+    @property
+    def scriptname(self) -> str:
+        """The script name derived from task_id"""
+        return BaseJob.get_scriptname(self.task_id)
+
+    @property
+    def xpm_dir(self) -> Path:
+        """Path to the .experimaestro directory within job path"""
+        return BaseJob.get_xpm_dir(self.path)
+
+    @property
+    def metadata_path(self) -> Path:
+        """Path to the job metadata file"""
+        return BaseJob.get_metadata_path(self.path)
+
+    @property
+    def pidfile(self) -> Path:
+        """Path to the .pid file"""
+        return BaseJob.get_pidfile(self.path, self.scriptname)
+
+    @property
+    def donefile(self) -> Path:
+        """Path to the .done file"""
+        return BaseJob.get_donefile(self.path, self.scriptname)
+
+    @property
+    def failedfile(self) -> Path:
+        """Path to the .failed file"""
+        return BaseJob.get_failedfile(self.path, self.scriptname)
+
+    # -------------------------------------------------------------------------
+    # Metadata I/O
+    # -------------------------------------------------------------------------
+
     def write_metadata(self, **extra_fields) -> None:
-        """Write or update job metadata in .xpm_metadata.json file
+        """Write or update job metadata in .experimaestro/information.json file
 
         Automatically extracts metadata from job attributes (identifier, state,
-        submittime, starttime, endtime, retry_count) and writes to .xpm_metadata.json.
+        submittime, starttime, endtime, retry_count) and writes to the metadata file.
 
         Performs atomic write using temp file + rename. If metadata exists,
         new fields are merged with existing ones. Updates last_updated timestamp.
@@ -291,7 +373,9 @@ class BaseJob:
         Args:
             **extra_fields: Optional extra fields (e.g., launcher, launcher_job_id, exit_code)
         """
-        metadata_path = self.path / ".xpm_metadata.json"
+        # Ensure .experimaestro directory exists
+        self.xpm_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = self.metadata_path
 
         # Read existing metadata
         existing = {}
@@ -348,12 +432,12 @@ class BaseJob:
             raise
 
     def read_metadata(self) -> Optional[dict]:
-        """Read job metadata from .xpm_metadata.json file
+        """Read job metadata from .experimaestro/information.json file
 
         Returns:
             Dictionary of metadata fields, or None if file doesn't exist
         """
-        metadata_path = self.path / ".xpm_metadata.json"
+        metadata_path = self.metadata_path
         if not metadata_path.exists():
             return None
 
@@ -363,21 +447,6 @@ class BaseJob:
         except Exception as e:
             logger.warning("Failed to read metadata from %s: %s", metadata_path, e)
             return None
-
-    @property
-    def pidfile(self) -> Path:
-        """Path to the .pid file"""
-        return self.path / f"{self.path.name}.pid"
-
-    @property
-    def donefile(self) -> Path:
-        """Path to the .done file"""
-        return self.path / f"{self.path.name}.done"
-
-    @property
-    def failedfile(self) -> Path:
-        """Path to the .failed file"""
-        return self.path / f"{self.path.name}.failed"
 
 
 # =============================================================================

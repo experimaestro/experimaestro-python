@@ -1,60 +1,15 @@
-import asyncio
-import logging
-from typing import Any, Callable, Dict, List, Optional
-import pyparsing as pp
-from pathlib import Path
-import json
-from functools import cached_property
+"""Filter expressions for job queries
+
+This module provides a filter expression parser for querying jobs by state,
+tags, and other attributes.
+"""
+
 import re
-from experimaestro.scheduler import JobState
+from typing import Callable, TYPE_CHECKING
+import pyparsing as pp
 
-
-class JobInformation:
-    def __init__(self, path: Path, scriptname: str, check: bool = False):
-        self.path = path
-        self.scriptname = scriptname
-        self.check = check
-
-    @cached_property
-    def params(self):
-        try:
-            return json.loads((self.path / "params.json").read_text())
-        except Exception:
-            logging.warning("Could not load params.json in %s", self.path)
-            return {}
-
-    @cached_property
-    def tags(self) -> List[str]:
-        # Tags are no longer stored in params.json
-        # They are now experiment-run-dependent and stored in the workspace database
-        # For backward compatibility with old params.json files
-        return self.params.get("tags", {})
-
-    @cached_property
-    def state(self) -> Optional[JobState]:
-        if (self.path / f"{self.scriptname}.done").is_file():
-            return JobState.DONE
-        if (self.path / f"{self.scriptname}.failed").is_file():
-            return JobState.ERROR
-        if (self.path / f"{self.scriptname}.pid").is_file():
-            if self.check:
-                if process := self.getprocess():
-                    state = asyncio.run(process.aio_state(0))
-                    if state is None or state.finished:
-                        return JobState.ERROR
-                else:
-                    return JobState.ERROR
-            return JobState.RUNNING
-        else:
-            return None
-
-    def getprocess(self):
-        from experimaestro.connectors import Process
-        from experimaestro.connectors.local import LocalConnector
-
-        connector = LocalConnector.instance()
-        pinfo = json.loads((self.path / f"{self.scriptname}.pid").read_text())
-        return Process.fromDefinition(connector, pinfo)
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_provider import MockJob
 
 
 # --- classes for processing
@@ -64,14 +19,14 @@ class VarExpr:
     def __init__(self, values):
         (self.varname,) = values
 
-    def get(self, info: JobInformation):
+    def get(self, job: "MockJob"):
         if self.varname == "@state":
-            return info.state.name if info.state else None
+            return job.state.name if job.state else None
 
         if self.varname == "@name":
-            return str(info.path.parent.name)
+            return str(job.path.parent.name)
 
-        return info.tags.get(self.varname, None)
+        return job.tags.get(self.varname, None)
 
     def __repr__(self):
         return f"""VAR<{self.varname}>"""
@@ -84,8 +39,8 @@ class BaseInExpr:
 
 
 class InExpr(BaseInExpr):
-    def filter(self, information: JobInformation):
-        value = self.var.get(information)
+    def filter(self, job: "MockJob"):
+        value = self.var.get(job)
         return value in self.values
 
     def __repr__(self):
@@ -93,8 +48,8 @@ class InExpr(BaseInExpr):
 
 
 class NotInExpr(BaseInExpr):
-    def filter(self, information: JobInformation):
-        value = self.var.get(information)
+    def filter(self, job: "MockJob"):
+        value = self.var.get(job)
         return value not in self.values
 
     def __repr__(self):
@@ -109,25 +64,25 @@ class RegexExpr:
     def __repr__(self):
         return f"""REGEX[{self.varname}, {self.value}]"""
 
-    def matches(self, manager, publication):
+    def matches(self, _manager, publication):
         if self.varname == "tag":
             return self.value in publication.tags
 
         raise AssertionError()
 
-    def filter(self, information: JobInformation):
-        value = self.var.get(information)
+    def filter(self, job: "MockJob"):
+        value = self.var.get(job)
         if not value:
             return False
 
-        return self.re.match(value)
+        return self.regex.match(value)
 
 
 class ConstantString:
     def __init__(self, tokens):
         (self.value,) = tokens
 
-    def get(self, information: JobInformation):
+    def get(self, _job: "MockJob"):
         return self.value
 
     def __repr__(self):
@@ -141,8 +96,8 @@ class EqExpr:
     def __repr__(self):
         return f"""EQ[{self.var1}, {self.var2}]"""
 
-    def filter(self, information: JobInformation):
-        return self.var1.get(information) == self.var2.get(information)
+    def filter(self, job: "MockJob"):
+        return self.var1.get(job) == self.var2.get(job)
 
 
 class LogicExpr:
@@ -152,11 +107,11 @@ class LogicExpr:
         self.operator, self.y = tokens
         self.x = None
 
-    def filter(self, information: JobInformation):
+    def filter(self, job: "MockJob"):
         if self.operator == "and":
-            return self.y.filter(information) and self.x.filter(information)
+            return self.y.filter(job) and self.x.filter(job)
 
-        return self.y.filter(information) or self.x.filter(information)
+        return self.y.filter(job) or self.x.filter(job)
 
     @staticmethod
     def summary(tokens):
@@ -223,7 +178,14 @@ filterExpr = (
 expr = (matchExpr + pp.Optional(pipe + filterExpr)).setParseAction(LogicExpr.generator)
 
 
-def createFilter(query: str) -> Callable[[Dict[str, Any]], bool]:
-    """Returns a filter object given a query"""
+def createFilter(query: str) -> Callable[["MockJob"], bool]:
+    """Returns a filter function given a query string
+
+    Args:
+        query: Filter expression (e.g., '@state = "DONE" and model = "bm25"')
+
+    Returns:
+        A callable that takes a MockJob and returns True if it matches
+    """
     (r,) = logicExpr.parseString(query, parseAll=True)
     return r.filter
