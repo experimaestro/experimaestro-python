@@ -38,7 +38,6 @@ from .core.arguments import (
     field,
     # Annotations helpers
     help,
-    default,
 )
 from .generators import pathgenerator, PathGenerator
 from .core.objects import (

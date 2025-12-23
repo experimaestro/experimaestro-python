@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from experimaestro import Config, Task, Annotated, copyconfig, default
+from experimaestro import Config, Task, Annotated, copyconfig, field
 from experimaestro.core.arguments import Param
 from experimaestro.core.objects import ConfigMixin
 from experimaestro.generators import pathgenerator
@@ -38,7 +38,7 @@ class D(B, A):
 
 
 class DefaultAnnotationConfig(Config):
-    a: Annotated[A, default(A.C(x=3))]
+    a: Param[A] = field(default=A.C(x=3))
 
 
 def test_object_config_default():

@@ -278,7 +278,8 @@ class IdentifierComputer:
                 # Argument value
                 # Skip if the argument is not a constant, and
                 # - optional argument: both value and default are None
-                # - the argument value is equal to the default value
+                # - the argument value is equal to the default value AND
+                #   ignore_default_in_identifier is True
                 try:
                     argvalue = getattr(value, argument.name, None)
                 except KeyError:
@@ -296,7 +297,8 @@ class IdentifierComputer:
                         and argvalue is None
                     )
                     or (
-                        argument.default is not None
+                        argument.ignore_default_in_identifier
+                        and argument.default is not None
                         and argument.default == remove_meta(argvalue)
                     )
                 ):

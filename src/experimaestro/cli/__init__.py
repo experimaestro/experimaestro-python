@@ -289,6 +289,11 @@ from .jobs import jobs as jobs_cli
 
 cli.add_command(jobs_cli)
 
+# Import and add refactor commands
+from .refactor import refactor as refactor_cli
+
+cli.add_command(refactor_cli)
+
 
 @cli.group()
 @click.option("--workdir", type=Path, default=None)

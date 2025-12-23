@@ -16,7 +16,6 @@ from experimaestro import (
     Constant,
     Param,
     Task,
-    default,
     Meta,
     Config,
     pathgenerator,
@@ -80,7 +79,7 @@ def test_type_hinting():
 
         x: Param[int]
         y: Param[float] = 2.3
-        y2: Annotated[float, default(2.3)]
+        y2: Param[float] = field(ignore_default=2.3)
         z: Param[Optional[float]]
         t: Param[List[float]]
         w: Param[int]

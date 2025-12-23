@@ -647,3 +647,94 @@ def test_instanceconfig_serialization():
 
     # The identifier should remain the same
     assert getidentifier(m1) == original_id
+
+
+# --- Test ignore_default vs default in field() ---
+
+
+def test_identifier_field_ignore_default():
+    """Test that field(ignore_default=X) ignores value in identifier when value == X"""
+
+    class ConfigWithIgnoreDefault(Config):
+        __xpmid__ = "test.identifier.field_ignore_default"
+        a: Param[int] = field(ignore_default=1)
+        b: Param[int]
+
+    # When a=1 (matches ignore_default), should be same as not specifying a
+    class ConfigWithoutA(Config):
+        __xpmid__ = "test.identifier.field_ignore_default"
+        b: Param[int]
+
+    assert_equal(
+        ConfigWithIgnoreDefault.C(a=1, b=2),
+        ConfigWithIgnoreDefault.C(b=2),
+        "field(ignore_default=1) should ignore a=1 in identifier",
+    )
+    assert_equal(
+        ConfigWithIgnoreDefault.C(a=1, b=2),
+        ConfigWithoutA.C(b=2),
+        "Config with ignore_default should match config without that param",
+    )
+
+    # When a=2 (doesn't match ignore_default), should be included
+    assert_notequal(
+        ConfigWithIgnoreDefault.C(a=2, b=2),
+        ConfigWithIgnoreDefault.C(b=2),
+        "field(ignore_default=1) should include a=2 in identifier",
+    )
+
+
+def test_identifier_field_default():
+    """Test that field(default=X) includes value in identifier even when value == X"""
+
+    class ConfigWithDefault(Config):
+        __xpmid__ = "test.identifier.field_default"
+        a: Param[int] = field(default=1)
+        b: Param[int]
+
+    class ConfigWithoutA(Config):
+        __xpmid__ = "test.identifier.field_default"
+        b: Param[int]
+
+    # When a=1 (matches default), should still be included in identifier
+    # so Config with a=1 should differ from Config without a
+    assert_notequal(
+        ConfigWithDefault.C(a=1, b=2),
+        ConfigWithoutA.C(b=2),
+        "field(default=1) should include a=1 in identifier",
+    )
+
+    # But two configs with same a=1 should be equal
+    assert_equal(
+        ConfigWithDefault.C(a=1, b=2),
+        ConfigWithDefault.C(a=1, b=2),
+        "Same values should have same identifier",
+    )
+
+
+def test_identifier_field_default_vs_ignore_default():
+    """Test difference between field(default=X) and field(ignore_default=X)"""
+
+    class ConfigWithDefault(Config):
+        __xpmid__ = "test.identifier.field_default_vs_ignore"
+        a: Param[int] = field(default=1)
+        b: Param[int]
+
+    class ConfigWithIgnoreDefault(Config):
+        __xpmid__ = "test.identifier.field_default_vs_ignore"
+        a: Param[int] = field(ignore_default=1)
+        b: Param[int]
+
+    # Both with a=1, b=2 - should differ because one includes a, other doesn't
+    assert_notequal(
+        ConfigWithDefault.C(a=1, b=2),
+        ConfigWithIgnoreDefault.C(a=1, b=2),
+        "field(default=1) vs field(ignore_default=1) should differ when a=1",
+    )
+
+    # Both with a=2 (not matching default), should be the same
+    assert_equal(
+        ConfigWithDefault.C(a=2, b=2),
+        ConfigWithIgnoreDefault.C(a=2, b=2),
+        "field(default=1) vs field(ignore_default=1) should be same when a!=1",
+    )
