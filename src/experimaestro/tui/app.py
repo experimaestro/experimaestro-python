@@ -383,16 +383,41 @@ class JobDetailView(Widget):
 
         # Times - format timestamps
         from datetime import datetime
+        import time as time_module
 
         def format_time(ts):
             if ts:
-                return datetime.fromtimestamp(ts).isoformat()
+                return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
             return "-"
+
+        def format_duration(seconds: float) -> str:
+            if seconds < 0:
+                return "-"
+            seconds = int(seconds)
+            if seconds < 60:
+                return f"{seconds}s"
+            elif seconds < 3600:
+                return f"{seconds // 60}m {seconds % 60}s"
+            elif seconds < 86400:
+                return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+            else:
+                return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
 
         submitted = format_time(job.submittime)
         start = format_time(job.starttime)
         end = format_time(job.endtime)
-        times_text = f"Submitted: {submitted} | Start: {start} | End: {end}"
+
+        # Calculate duration
+        duration = "-"
+        if job.starttime:
+            if job.endtime:
+                duration = format_duration(job.endtime - job.starttime)
+            else:
+                duration = (
+                    format_duration(time_module.time() - job.starttime) + " (running)"
+                )
+
+        times_text = f"Submitted: {submitted} | Start: {start} | End: {end} | Duration: {duration}"
         self.query_one("#job-times-label", Label).update(times_text)
 
         # Tags - job.tags is now a dict
@@ -475,6 +500,10 @@ class JobsTable(Widget):
         jobs = self.state_provider.get_jobs(self.current_experiment)
         self.log(f"Refreshing jobs for {self.current_experiment}: {len(jobs)} jobs")
 
+        # Sort jobs by submission time (oldest first)
+        # Jobs without submittime go to the end
+        jobs.sort(key=lambda j: j.submittime or float("inf"))
+
         # Get existing row keys
         existing_keys = set(table.rows.keys())
         current_job_ids = set()
@@ -488,33 +517,43 @@ class JobsTable(Widget):
             # Format status with icon
             status_text = get_status_text(status)
 
-            # Format progress
-            progress_list = job.progress or []
-            if progress_list:
-                # Get the last progress entry
-                last_progress = progress_list[-1]
-                progress_pct = last_progress.get("progress", 0) * 100
-                progress_text = f"{progress_pct:.0f}%"
-            else:
+            # Format progress - only show for running jobs
+            if job.state and job.state.finished():
+                # Don't show progress for finished jobs
                 progress_text = "-"
+            else:
+                progress_list = job.progress or []
+                if progress_list:
+                    # Get the last progress entry
+                    last_progress = progress_list[-1]
+                    progress_pct = last_progress.get("progress", 0) * 100
+                    progress_text = f"{progress_pct:.0f}%"
+                else:
+                    progress_text = "-"
 
             # Format timestamps
             from datetime import datetime
+            import time as time_module
 
             submitted = "-"
             if job.submittime:
-                submitted = datetime.fromtimestamp(job.submittime).strftime("%Y-%m-%d")
+                submitted = datetime.fromtimestamp(job.submittime).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
 
             # Calculate duration
             start = job.starttime
             end = job.endtime
-            if start and end:
-                # Simple duration display
-                duration = "completed"
-            elif start:
-                duration = "running"
-            else:
-                duration = "-"
+            duration = "-"
+            if start:
+                if end:
+                    # Job finished - show total duration
+                    elapsed = end - start
+                else:
+                    # Job still running - show elapsed time so far
+                    elapsed = time_module.time() - start
+                # Format duration as human-readable
+                duration = self._format_duration(elapsed)
 
             row_data = (
                 job_id,
@@ -543,6 +582,27 @@ class JobsTable(Widget):
             table.remove_row(old_job_id)
 
         self.log(f"Jobs table now has {table.row_count} rows")
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format duration in seconds to human-readable string"""
+        if seconds < 0:
+            return "-"
+
+        seconds = int(seconds)
+        if seconds < 60:
+            return f"{seconds}s"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            secs = seconds % 60
+            return f"{minutes}m {secs}s"
+        elif seconds < 86400:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours}h {minutes}m"
+        else:
+            days = seconds // 86400
+            hours = (seconds % 86400) // 3600
+            return f"{days}d {hours}h"
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle job selection"""

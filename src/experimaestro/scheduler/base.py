@@ -259,6 +259,9 @@ class Scheduler(threading.Thread):
         # Register this job
         xp = experiment.current()
         self.jobs[job.identifier] = job
+        # Set submittime now so that add_job can record it in the database
+        # (aio_submit may update this later for re-submitted jobs)
+        job.submittime = time.time()
         xp.add_job(job)
 
         # Set up dependencies
@@ -367,12 +370,16 @@ class Scheduler(threading.Thread):
                     else:
                         logger.error("No .done or .failed file found for job %s", job)
                         state = JobState.ERROR
+                # Set endtime before set_state so database gets the timestamp
+                job.endtime = time.time()
                 job.set_state(state)
 
         # If not done or running, start the job
         if not job.state.finished():
             try:
                 state = await self.aio_start(job)
+                # Set endtime before set_state so database gets the timestamp
+                job.endtime = time.time()
                 job.set_state(state)
             except Exception:
                 logger.exception("Got an exception while starting the job")
@@ -382,8 +389,6 @@ class Scheduler(threading.Thread):
 
         async with self.exitCondition:
             self.exitCondition.notify_all()
-
-        job.endtime = time.time()
 
         # Write final metadata with end time and final state
         job.write_metadata()
