@@ -1,5 +1,6 @@
 from typing import Dict
 from pathlib import Path
+import logging
 from experimaestro import (
     tag,
     LightweightTask,
@@ -118,3 +119,138 @@ def test_objects_tags():
     a = A.C(x=tag(1))
     a.__xpm__.seal(context)
     assert a.__xpm__.tags() == {"x": 1}
+
+
+def test_conflicting_tags_warning(caplog):
+    """Test that conflicting tag values produce a warning"""
+
+    class Inner(Config):
+        value: Param[int]
+
+    class Outer(Config):
+        inner: Param[Inner]
+        x: Param[int]
+
+    # Create inner config with tag "mytag" = 1
+    inner = Inner.C(value=10).tag("mytag", 1)
+
+    # Create outer config with same tag "mytag" = 2 (conflicting)
+    outer = Outer.C(inner=inner, x=5).tag("mytag", 2)
+
+    # Getting tags should warn about conflict
+    with caplog.at_level(logging.WARNING):
+        tags = outer.tags()
+
+    # The warning should mention the conflicting tag
+    assert any("mytag" in record.message for record in caplog.records)
+    assert any("conflicting" in record.message.lower() for record in caplog.records)
+
+    # The last value should win
+    assert tags["mytag"] == 2
+
+
+def test_same_tag_same_value_no_warning(caplog):
+    """Test that same tag with same value does not produce a warning"""
+
+    class Inner(Config):
+        value: Param[int]
+
+    class Outer(Config):
+        inner: Param[Inner]
+
+    # Create inner config with tag "mytag" = 1
+    inner = Inner.C(value=10).tag("mytag", 1)
+
+    # Create outer config with same tag "mytag" = 1 (same value)
+    outer = Outer.C(inner=inner).tag("mytag", 1)
+
+    # Getting tags should NOT warn (same value)
+    with caplog.at_level(logging.WARNING):
+        tags = outer.tags()
+
+    # No warning for same values
+    assert not any("mytag" in record.message for record in caplog.records)
+    assert tags["mytag"] == 1
+
+
+def test_tag_source_tracking():
+    """Test that tag source locations are tracked"""
+
+    class MyConfig(Config):
+        x: Param[int]
+
+    config = MyConfig.C(x=tag(5))
+
+    # Check that tags have source info stored internally
+    assert "x" in config.__xpm__._tags
+    value, source = config.__xpm__._tags["x"]
+    assert value == 5
+    # Source should contain file path and line number
+    assert ":" in source
+    assert "test_tags.py" in source
+
+
+def test_tag_method_source_tracking():
+    """Test that tag() method also tracks source location"""
+
+    class MyConfig(Config):
+        x: Param[int]
+
+    config = MyConfig.C(x=5)
+    config.tag("mytag", "myvalue")
+
+    # Check that tag has source info
+    assert "mytag" in config.__xpm__._tags
+    value, source = config.__xpm__._tags["mytag"]
+    assert value == "myvalue"
+    assert ":" in source
+    assert "test_tags.py" in source
+
+
+def test_tag_via_setattr():
+    """Test that config.key = tag(value) works and tracks source"""
+
+    class MyConfig(Config):
+        x: Param[int]
+
+    config = MyConfig.C(x=5)
+    config.x = tag(10)
+
+    # Check that tag was set correctly
+    assert config.tags() == {"x": 10}
+    assert config.x == 10
+
+    # Check that source is tracked
+    value, source = config.__xpm__._tags["x"]
+    assert value == 10
+    assert "test_tags.py" in source
+
+
+def test_tag_setattr_conflict_warning(caplog):
+    """Test that setting conflicting tag via setattr produces warning"""
+
+    class Inner(Config):
+        value: Param[int]
+
+    class Outer(Config):
+        inner: Param[Inner]
+        x: Param[int]
+
+    # Create with tag via constructor
+    inner = Inner.C(value=tag(1))
+
+    # Create outer with same tag name
+    outer = Outer.C(inner=inner, x=5)
+    outer.x = tag(2)  # Set tag on x
+
+    # Add a conflicting value tag
+    outer.tag("value", 99)
+
+    # Getting tags should warn about conflict
+    with caplog.at_level(logging.WARNING):
+        tags = outer.tags()
+
+    # The warning should mention the conflicting tag
+    assert any("value" in record.message for record in caplog.records)
+    assert tags["value"] == 99  # Last value wins
+    assert tags["x"] == 2

@@ -30,7 +30,7 @@ from typing import (
 )
 import sys
 import experimaestro
-from experimaestro.utils import logger
+from experimaestro.utils import logger, get_caller_location
 from experimaestro.core.types import DeprecatedAttribute, ObjectType, TypeVarType
 from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
@@ -158,7 +158,9 @@ class ConfigInformation:
         self.values = {}
 
         # Meta-informations
-        self._tags: dict[str, Any] = {}
+        # Tags are stored as {name: (value, source_location)}
+        # where source_location is "file:line" string for error reporting
+        self._tags: dict[str, tuple[Any, str]] = {}
         self._initinfo = ""
 
         self._taskoutput = None
@@ -331,8 +333,17 @@ class ConfigInformation:
             f" (current typevars bindings: {self.concrete_typevars})"
         )
 
-    def addtag(self, name, value):
-        self._tags[name] = value
+    def addtag(self, name, value, source: str = None):
+        """Add a tag with optional source location for error reporting
+
+        Args:
+            name: Tag name
+            value: Tag value
+            source: Source location string (file:line). If None, captured from caller.
+        """
+        if source is None:
+            source = get_caller_location(skip_frames=1)
+        self._tags[name] = (value, source)
 
     def xpmvalues(self, generated=False):
         """Returns an iterarator over arguments and associated values"""
@@ -344,11 +355,29 @@ class ConfigInformation:
         class TagFinder(ConfigWalk):
             def __init__(self):
                 super().__init__(recurse_task=True)
-                self.tags = {}
+                # Store {name: (value, source)} for conflict detection
+                self.tags_with_source: dict[str, tuple[Any, str]] = {}
 
             def postprocess(self, stub, config: Config, values):
-                self.tags.update(config.__xpm__._tags)
-                return self.tags
+                for name, (value, source) in config.__xpm__._tags.items():
+                    if name in self.tags_with_source:
+                        existing_value, existing_source = self.tags_with_source[name]
+                        if existing_value != value:
+                            logger.warning(
+                                "Tag '%s' has conflicting values: "
+                                "'%s' (set at %s) vs '%s' (set at %s). "
+                                "Using the latter value.",
+                                name,
+                                existing_value,
+                                existing_source,
+                                value,
+                                source,
+                            )
+                    self.tags_with_source[name] = (value, source)
+                # Return just the values (without source info)
+                return {
+                    name: value for name, (value, _) in self.tags_with_source.items()
+                }
 
         return TagFinder()(self.pyobject)
 
@@ -1334,7 +1363,14 @@ class ConfigMixin:
         # Check if this is an XPM argument
         xpmtype = self.__xpmtype__
         if name in xpmtype.arguments:
-            xpm.set(name, value)
+            # Handle TaggedValue: extract value and add tag
+            if isinstance(value, TaggedValue):
+                actual_value = value.value
+                source = get_caller_location(skip_frames=1)
+                xpm.addtag(name, actual_value, source=source)
+                xpm.set(name, actual_value)
+            else:
+                xpm.set(name, value)
             return
 
         # Check for deprecated replacement warning
@@ -1392,7 +1428,8 @@ class ConfigMixin:
             # Special case of a tagged value
             if isinstance(value, TaggedValue):
                 value = value.value
-                self.__xpm__._tags[name] = value
+                # Use _initinfo as source since tag is set at config creation
+                self.__xpm__.addtag(name, value, source=xpm._initinfo)
 
             # Really set the value
             xpm.set(name, value)
@@ -1410,7 +1447,9 @@ class ConfigMixin:
         )
 
     def tag(self, name, value):
-        self.__xpm__.addtag(name, value)
+        # Capture caller's location and pass to addtag
+        source = get_caller_location(skip_frames=1)
+        self.__xpm__.addtag(name, value, source=source)
         return self
 
     def __eq__(self, other):

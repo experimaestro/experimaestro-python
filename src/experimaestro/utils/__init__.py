@@ -4,8 +4,31 @@ import threading
 from typing import Union
 import logging
 import shutil
+import inspect
 
 logger = logging.getLogger("xpm")
+
+
+def get_caller_location(skip_frames: int = 1) -> str:
+    """Get the source location of the caller
+
+    Args:
+        skip_frames: Number of frames to skip (1 = immediate caller)
+
+    Returns:
+        Source location string in format "path:line"
+    """
+    frame = inspect.currentframe()
+    try:
+        # Skip this function's frame plus requested frames
+        for _ in range(skip_frames + 1):
+            if frame is not None:
+                frame = frame.f_back
+        if frame is not None:
+            return f"{Path(frame.f_code.co_filename).absolute()}:{frame.f_lineno}"
+    finally:
+        del frame  # Avoid reference cycles
+    return "<unknown>"
 
 
 def aspath(path: Union[str, Path]):
