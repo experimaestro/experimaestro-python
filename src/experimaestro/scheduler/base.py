@@ -602,6 +602,8 @@ class Scheduler(threading.Thread):
                         job.retry_count,
                         job.max_retries,
                     )
+                    # Rotate log files to preserve previous run's logs
+                    job.rotate_logs()
                     # Clear cached process so aio_run() will create a new one
                     job._process = None
                     # Delete PID file so the job will be resubmitted

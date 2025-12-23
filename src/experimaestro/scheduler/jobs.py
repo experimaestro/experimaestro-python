@@ -1,5 +1,6 @@
 import asyncio
 from collections import ChainMap
+from datetime import datetime
 from functools import cached_property
 import itertools
 from pathlib import Path
@@ -408,6 +409,24 @@ class Job(BaseJob, Resource):
     @property
     def stderr(self) -> Path:
         return self.jobpath / ("%s.err" % self.name)
+
+    def rotate_logs(self) -> None:
+        """Rotate log files before restarting a task.
+
+        Renames non-empty stdout and stderr files with a timestamp suffix
+        (e.g., job.20231215143022.out) to preserve logs from previous runs.
+        """
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+
+        for log_path in [self.stdout, self.stderr]:
+            if log_path.exists() and log_path.stat().st_size > 0:
+                # Extract extension (.out or .err)
+                ext = log_path.suffix
+                # Create new name with timestamp before extension
+                new_name = f"{log_path.stem}.{timestamp}{ext}"
+                new_path = log_path.parent / new_name
+                logger.info("Rotating log file %s -> %s", log_path.name, new_name)
+                log_path.rename(new_path)
 
     @property
     def basepath(self) -> Path:
