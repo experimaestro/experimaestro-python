@@ -6,7 +6,7 @@ from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.slurm import (
     SlurmLauncher,
 )
-from experimaestro import ResumableTask, Param
+from experimaestro import field, ResumableTask, Param
 from experimaestro.scheduler import JobState
 import shutil
 import pytest
@@ -92,9 +92,9 @@ class SlurmResumableTask(ResumableTask):
     """ResumableTask that simulates timeout on first N attempts for SLURM testing"""
 
     checkpoint: Param[Path]
-    timeout_count: Param[int] = 2
+    timeout_count: Param[int] = field(ignore_default=2)
     slurm_jobs_dir: Param[Path]  # Path to mock SLURM jobs directory
-    output_file: Param[Path] = None
+    output_file: Param[Path] = field(ignore_default=None)
 
     def execute(self):
         import os

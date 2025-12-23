@@ -1,11 +1,11 @@
 """Test for task outputs"""
 
-from experimaestro import Config, Task, Param
+from experimaestro import field, Config, Task, Param
 from experimaestro.scheduler.workspace import RunMode
 
 
 class B(Config):
-    x: Param[int] = 1
+    x: Param[int] = field(ignore_default=1)
 
 
 class A(Config):

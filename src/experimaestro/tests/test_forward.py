@@ -1,11 +1,11 @@
-from experimaestro import Param, Config
+from experimaestro import field, Param, Config
 from experimaestro.click import forwardoption
 import click
 
 
 def test_main():
     class MyModel(Config):
-        epochs: Param[int] = 100
+        epochs: Param[int] = field(ignore_default=100)
         """Number of learning epochs"""
 
     @forwardoption.epochs(MyModel)
@@ -19,7 +19,7 @@ def test_main():
 
 def test_rename():
     class MyModel(Config):
-        epochs: Param[int] = 100
+        epochs: Param[int] = field(ignore_default=100)
         """Number of learning epochs"""
 
     @forwardoption.epochs(MyModel, "my-epochs")

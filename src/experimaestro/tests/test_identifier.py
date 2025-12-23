@@ -34,7 +34,7 @@ class B(Config):
 
 
 class C(Config):
-    a: Param[int] = 1
+    a: Param[int] = field(ignore_default=1)
     b: Param[int]
 
 
@@ -129,7 +129,7 @@ def test_identifier_option():
     class OptionConfig(Config):
         __xpmid__ = "test.identifier.option"
         a: Param[int]
-        b: Option[int] = 1
+        b: Option[int] = field(ignore_default=1)
 
     assert_notequal(OptionConfig.C(a=2), OptionConfig.C(a=1))
     assert_equal(OptionConfig.C(a=1, b=2), OptionConfig.C(a=1))
@@ -229,7 +229,7 @@ def test_identifier_defaultnew():
         __xpmid__ = "defaultnew"
 
         a: Param[int]
-        b: Param[int] = 1
+        b: Param[int] = field(ignore_default=1)
 
     class A(Config):
         __xpmid__ = "defaultnew"
@@ -330,7 +330,7 @@ def test_identifier_meta():
 
 def test_identifier_meta_default_dict():
     class DictConfig(Config):
-        params: Param[Dict[str, MetaA]] = {}
+        params: Param[Dict[str, MetaA]] = field(ignore_default={})
 
     assert_equal(
         DictConfig.C(params={}),
@@ -346,7 +346,7 @@ def test_identifier_meta_default_dict():
 
 def test_identifier_meta_default_array():
     class ArrayConfigWithDefault(Config):
-        array: Param[List[MetaA]] = []
+        array: Param[List[MetaA]] = field(ignore_default=[])
 
     # Array (with default) with mixed
     assert_equal(

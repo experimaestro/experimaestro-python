@@ -1,11 +1,11 @@
 from typing import Optional
-from experimaestro import Param, Config
+from experimaestro import field, Param, Config
 from experimaestro.core.objects import ConfigMixin
 from experimaestro.core.serializers import SerializationLWTask
 
 
 class A(Config):
-    x: Param[int] = 1
+    x: Param[int] = field(ignore_default=1)
 
 
 class A1(A):
@@ -47,7 +47,7 @@ class LoadModel(SerializationLWTask):
 
 
 class ConfigWithOptional(Config):
-    x: Param[int] = 1
+    x: Param[int] = field(ignore_default=1)
     y: Param[Optional[int]]
 
 

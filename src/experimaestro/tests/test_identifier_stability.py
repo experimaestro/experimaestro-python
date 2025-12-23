@@ -8,6 +8,7 @@ from typing import Dict, List
 from experimaestro import (
     Param,
     Config,
+    field,
     InstanceConfig,
     Task,
     LightweightTask,
@@ -127,14 +128,14 @@ class ConfigWithOption(Config):
 
     __xpmid__ = "test.stability.ConfigWithOption"
     required: Param[int]
-    optional: Option[int] = 42
+    optional: Option[int] = field(ignore_default=42)
 
 
 class ConfigWithDefault(Config):
     """Config with default parameter"""
 
     __xpmid__ = "test.stability.ConfigWithDefault"
-    x: Param[int] = 10
+    x: Param[int] = field(ignore_default=10)
     y: Param[int]
 
 
@@ -208,7 +209,7 @@ class SubModel(InstanceConfig):
     """InstanceConfig for testing instance identity"""
 
     __xpmid__ = "test.stability.SubModel"
-    value: Param[int] = 100
+    value: Param[int] = field(ignore_default=100)
 
 
 class ModelContainer(Config):

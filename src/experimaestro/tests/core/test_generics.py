@@ -3,7 +3,7 @@
 from typing import Generic, Optional, TypeVar
 
 import pytest
-from experimaestro import Config, Param
+from experimaestro import field, Config, Param
 from experimaestro.core.arguments import Argument
 from experimaestro.core.types import TypeVarType
 
@@ -162,7 +162,7 @@ class TreeGenericConfig(Config, Generic[T]):
 class TagTreeGenericConfig(TreeGenericConfig[T], Generic[T]):
     """A tagged version of TreeGenericConfig to test recursive generics"""
 
-    tag: Param[str] = "default"
+    tag: Param[str] = field(ignore_default="default")
 
 
 def test_core_generics_recursive():

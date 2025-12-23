@@ -12,7 +12,7 @@ Tests cover:
 import logging
 from typing import List
 
-from experimaestro import Config, Param, Task, deprecate
+from experimaestro import field, Config, Param, Task, deprecate
 from experimaestro.core.identifier import IdentifierComputer
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tools.jobs import fix_deprecated
@@ -65,7 +65,7 @@ def test_deprecated_attribute():
 
     class Values(Config):
         __xpmid__ = "test.deprecated.attribute"
-        values: Param[List[int]] = []
+        values: Param[List[int]] = field(ignore_default=[])
 
         @deprecate
         def value(self, x):
@@ -605,7 +605,9 @@ def test_deprecate_replace_warns_on_old_attribute(caplog):
     class OldConfigForWarn(Config):
         __xpmid__ = "test.deprecate.replace.warn.old"
         value: Param[int]
-        extra: Param[str] = "default"  # This doesn't exist in NewConfigForWarn
+        extra: Param[str] = field(
+            ignore_default="default"
+        )  # This doesn't exist in NewConfigForWarn
 
         def __convert__(self):
             return NewConfigForWarn.C(values=[self.value])

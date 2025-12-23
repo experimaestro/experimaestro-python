@@ -78,7 +78,7 @@ def test_type_hinting():
         __xpmid__ = "annotations.class_variable.config"
 
         x: Param[int]
-        y: Param[float] = 2.3
+        y: Param[float] = field(ignore_default=2.3)
         y2: Param[float] = field(ignore_default=2.3)
         z: Param[Optional[float]]
         t: Param[List[float]]
@@ -178,7 +178,7 @@ def test_config_class():
 
 def test_constant():
     class A(Config):
-        x: Constant[int] = 2
+        x: Constant[int] = field(ignore_default=2)
 
     a = A.C()
     assert a.x == 2, "Constant value not set"
@@ -212,7 +212,7 @@ def test_inheritance():
         x: Param[int]
 
     class B(A):
-        y: Param[int] = 3
+        y: Param[int] = field(ignore_default=3)
 
     b = B.C()
     b.x = 2
@@ -225,7 +225,7 @@ def test_redefined_param():
         x: Param[int]
 
     class B(Config):
-        x: Param[int] = 3
+        x: Param[int] = field(ignore_default=3)
 
     atx = A.C.__getxpmtype__().getArgument("x")
     btx = B.C.__getxpmtype__().getArgument("x")
@@ -282,7 +282,7 @@ def test_default_mismatch():
     """Test mismatch between default and type"""
 
     class A(Config):
-        x: Param[int] = 0.2
+        x: Param[int] = field(ignore_default=0.2)
 
     with pytest.raises(TypeError):
         A.__getxpmtype__().getArgument("x")
@@ -295,7 +295,7 @@ def test_param_default_set():
     """Test that the default setting is well set"""
 
     class A0(Config):
-        x: Param[int] = 2
+        x: Param[int] = field(ignore_default=2)
 
     assert A0.C().instance().x == 2
     assert A0.C(x=3).instance().x == 3

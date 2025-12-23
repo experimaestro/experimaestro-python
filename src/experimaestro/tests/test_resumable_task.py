@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from experimaestro import ResumableTask, Task, Param, GracefulTimeout
+from experimaestro import field, ResumableTask, Task, Param, GracefulTimeout
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.scheduler import JobState, JobFailureStatus
 from experimaestro.scheduler.jobs import JobStateError
@@ -387,7 +387,7 @@ class GracefulTimeoutTask(ResumableTask):
     """Task that raises GracefulTimeout"""
 
     checkpoint: Param[Path]
-    should_timeout: Param[bool] = True
+    should_timeout: Param[bool] = field(ignore_default=True)
 
     def execute(self):
         # Count attempts in checkpoint file
