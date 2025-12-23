@@ -150,6 +150,11 @@ When a configuration is moved (or equivalently its `__xpmid__` changed), its sig
 changes, and thus the same tasks can be run twice. To avoid this, use the `@deprecate`
 annotation.
 
+### Simple deprecation (legacy pattern)
+
+For simple cases where the old and new configurations have the same parameters, use
+`@deprecate` with inheritance:
+
 !!! example
 
     ```py3
@@ -163,6 +168,96 @@ annotation.
         # Only pass is allowed here
         pass
     ```
+
+### Deprecation with conversion
+
+For cases where the deprecated configuration has different parameters and needs to
+be converted to the new format, use `@deprecate(TargetConfig)` with a `__convert__`
+method:
+
+!!! example
+
+    ```py3
+    from experimaestro import Param, Config, deprecate
+
+    class NewConfig(Config):
+        """New configuration with a list of values."""
+        values: Param[list[int]]
+
+    @deprecate(NewConfig)
+    class OldConfig(Config):
+        """Old configuration with a single value."""
+        value: Param[int]
+
+        def __convert__(self):
+            # Convert old single value to new list format
+            return NewConfig(values=[self.value])
+    ```
+
+The `__convert__` method should return an equivalent instance of the target
+configuration. The identifier is computed from the converted configuration,
+ensuring that equivalent old and new configurations produce the same job
+identifier.
+
+This also supports chained deprecation for multiple version migrations:
+
+!!! example
+
+    ```py3
+    class ConfigV2(Config):
+        values: Param[list[int]]
+
+    @deprecate(ConfigV2)
+    class ConfigV1(Config):
+        value: Param[int]
+
+        def __convert__(self):
+            return ConfigV2(values=[self.value])
+
+    @deprecate(ConfigV1)
+    class ConfigV0(Config):
+        val: Param[int]
+
+        def __convert__(self):
+            return ConfigV1(value=self.val)
+    ```
+
+### Immediate replacement with replace=True
+
+In some cases, you want the deprecated configuration to be immediately replaced
+by the new one during creation. Use `replace=True` for this behavior:
+
+!!! example
+
+    ```py3
+    from experimaestro import Param, Config, deprecate
+
+    class NewConfig(Config):
+        values: Param[list[int]]
+
+    @deprecate(NewConfig, replace=True)
+    class OldConfig(Config):
+        value: Param[int]
+
+        def __convert__(self):
+            return NewConfig(values=[self.value])
+
+    # Creating OldConfig actually returns a NewConfig instance
+    result = OldConfig.C(value=42)
+    print(type(result).__name__)  # "NewConfig.XPMConfig"
+    print(result.values)          # [42]
+    ```
+
+With `replace=True`:
+
+- Creating the deprecated configuration immediately calls `__convert__` and returns
+  the new configuration type
+- The original deprecated identifier is still preserved for `fix_deprecated` tool
+  to create symlinks between old and new job directories
+- If code tries to set an attribute that existed on the deprecated config but not
+  on the new one, a warning is logged and the value is discarded
+
+### Deprecating a parameter
 
 It is possible to deprecate a parameter or option:
 

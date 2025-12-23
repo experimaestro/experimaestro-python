@@ -188,6 +188,19 @@ class IdentifierComputer:
 
         # Handles configurations
         elif isinstance(value, ConfigMixin):
+            # For deprecated configs with __convert__, compute identifier from converted config
+            # This must happen BEFORE hashing OBJECT_ID to ensure identical identifiers
+            if myself:
+                xpmtype = value.__xpmtype__
+                if xpmtype.deprecated and hasattr(value, "__convert__"):
+                    hash_logger.debug(
+                        "Computing hash via __convert__ for deprecated %s", xpmtype
+                    )
+                    converted = value.__convert__()
+                    # Delegate entirely to the converted config
+                    self.update(converted, myself=True)
+                    return
+
             # Encodes the identifier
             self._hashupdate(IdentifierComputer.OBJECT_ID)
 

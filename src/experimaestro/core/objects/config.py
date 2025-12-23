@@ -1274,8 +1274,90 @@ class ConfigMixin:
     """The __xpm__ object contains all instance specific information about a
     configuration/task"""
 
+    # Set when this instance was created via a deprecated config with replace=True
+    _deprecated_from: "ConfigMixin | None" = None
+
+    def __new__(cls, **kwargs):
+        """Create a new config instance, handling deprecated replacements."""
+        xpmtype = cls.__xpmtype__
+
+        # Check if this is a deprecated type with replace=True
+        if xpmtype._deprecation is not None and xpmtype._deprecation.replace:
+            # Create the deprecated instance normally
+            instance = object.__new__(cls)
+            # Initialize it
+            ConfigMixin.__init__(instance, **kwargs)
+            # Convert to the new type
+            converted = instance.__convert__()
+            # Mark that this came from a deprecated config
+            converted._deprecated_from = instance
+            return converted
+
+        # Normal creation
+        return object.__new__(cls)
+
+    def __getattribute__(self, name: str):
+        """Get an attribute, handling XPM arguments specially.
+
+        We use __getattribute__ instead of __getattr__ because default values
+        like `b: Param[X] = None` create class attributes that would prevent
+        __getattr__ from being called.
+        """
+        # Get __xpm__ without recursion
+        try:
+            xpm = object.__getattribute__(self, "__xpm__")
+        except AttributeError:
+            # During early init, __xpm__ may not exist yet
+            return object.__getattribute__(self, name)
+
+        # Check if this is an XPM argument - parameters take precedence
+        xpmtype = object.__getattribute__(self, "__xpmtype__")
+        if name in xpmtype.arguments:
+            return xpm.get(name)
+
+        # Fall back to normal lookup (methods, etc.)
+        return object.__getattribute__(self, name)
+
+    def __setattr__(self, name: str, value):
+        """Set an attribute, handling XPM arguments specially."""
+        # Allow setting internal attributes directly
+        if name in ("__xpm__", "_deprecated_from"):
+            object.__setattr__(self, name, value)
+            return
+
+        # Check if we have __xpm__ yet (might not during early init)
+        xpm = self.__dict__.get("__xpm__")
+        if xpm is None:
+            object.__setattr__(self, name, value)
+            return
+
+        # Check if this is an XPM argument
+        xpmtype = self.__xpmtype__
+        if name in xpmtype.arguments:
+            xpm.set(name, value)
+            return
+
+        # Check for deprecated replacement warning
+        deprecated_from = self.__dict__.get("_deprecated_from")
+        if deprecated_from is not None:
+            deprecated_xpmtype = deprecated_from.__xpmtype__
+            if name in deprecated_xpmtype.arguments:
+                logger.warning(
+                    f"Attribute '{name}' was in deprecated config "
+                    f"{deprecated_xpmtype.identifier} but is not in "
+                    f"{xpmtype.identifier}. The value is being discarded."
+                )
+                return  # Don't set the attribute
+
+        # Normal attribute setting
+        object.__setattr__(self, name, value)
+
     def __init__(self, **kwargs):
         """Initialize the configuration with the given parameters"""
+
+        # Skip if already initialized (can happen with deprecated replace=True)
+        if hasattr(self, "__xpm__"):
+            return
 
         # Add configuration
         xpmtype = self.__xpmtype__

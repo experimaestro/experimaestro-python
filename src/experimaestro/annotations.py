@@ -9,7 +9,7 @@ import experimaestro.core.types as types
 from experimaestro.generators import PathGenerator
 
 from .core.arguments import Argument as CoreArgument, field
-from .core.objects import Config
+from .core.objects import Config, Task
 from .core.types import Any, Identifier, TypeProxy, Type, ObjectType
 from .utils import logger
 from .checkers import Checker
@@ -288,33 +288,96 @@ def tagspath(value: Config):
 # --- Deprecated
 
 
-def deprecate(config: Union[TypingType[Config], Callable]):
-    """Deprecate a configuration / task or
-    an attribute (via a method)
+def deprecate(
+    config_or_target: Union[TypingType[Config], Callable, None] = None,
+    *,
+    replace: bool = False,
+):
+    """Deprecate a configuration / task or an attribute (via a method)
 
     Usage:
 
+        # Method 1: Deprecated class inherits from new class (legacy)
         @deprecate
         class OldConfig(NewConfig):
             pass
 
-        # Or only a parameter
-        class MyConfig():
+        # Method 2: Specify target class explicitly with __convert__
+        @deprecate(NewConfig)
+        class OldConfig(Config):
+            value: Param[int]
+
+            def __convert__(self):
+                return NewConfig.C(values=[self.value])
+
+        # Method 3: Immediate replacement with __convert__
+        @deprecate(NewConfig, replace=True)
+        class OldConfig(Config):
+            value: Param[int]
+
+            def __convert__(self):
+                return NewConfig.C(values=[self.value])
+
+        # Method 4: Deprecate a parameter
+        class MyConfig(Config):
             @deprecate
             def oldattribute(self, value):
                 # Do something with the value
                 pass
-    """
-    if inspect.isclass(config):
-        config.__getxpmtype__().deprecate()
-        return config
 
-    if inspect.isfunction(config):
+    When using @deprecate(TargetConfig), the deprecated class should define a
+    __convert__ method that returns an equivalent instance of the target class.
+    The identifier is computed from the converted configuration, so deprecated
+    and new configurations will have the same identifier when equivalent.
+
+    With replace=True, creating an instance of the deprecated class immediately
+    returns the converted new config. The deprecated identifier is preserved for
+    fix_deprecated to create symlinks between old and new job directories.
+    """
+    # Case 1: @deprecate on a function (deprecated attribute)
+    if inspect.isfunction(config_or_target):
         from experimaestro.core.types import DeprecatedAttribute
 
-        return DeprecatedAttribute(config)
+        return DeprecatedAttribute(config_or_target)
 
-    raise NotImplementedError("Cannot deprecate %s", config)
+    # Case 2: @deprecate (no parens) on a class - legacy pattern
+    # The class inherits from its target (NewConfig), not directly from Config
+    if config_or_target is not None and inspect.isclass(config_or_target):
+        # Check if this looks like a deprecated class (legacy pattern)
+        # Legacy pattern: @deprecate class OldConfig(NewConfig) where NewConfig is a Config subclass
+        # The deprecated class inherits from exactly one Config subclass (the target)
+        # We exclude Config and Task as base classes since those indicate the new pattern
+        base_classes_for_new_pattern = (Config, Task)
+        if (
+            not replace
+            and len(config_or_target.__bases__) == 1
+            and config_or_target.__bases__[0] not in base_classes_for_new_pattern
+            and issubclass(config_or_target.__bases__[0], Config)
+        ):
+            # This is the legacy pattern: @deprecate on a class
+            deprecated_class = config_or_target
+            deprecated_class.__getxpmtype__().deprecate()
+            return deprecated_class
+
+        # Otherwise, this is the new pattern: @deprecate(TargetConfig)
+        target = config_or_target
+
+        def decorator(deprecated_class: TypingType[Config]):
+            deprecated_class.__getxpmtype__().deprecate(target=target, replace=replace)
+            return deprecated_class
+
+        return decorator
+
+    # Case 3: @deprecate() with parentheses but no arguments (legacy, uses parent class)
+    if config_or_target is None:
+
+        def decorator(deprecated_class: TypingType[Config]):
+            deprecated_class.__getxpmtype__().deprecate()
+            return deprecated_class
+
+        return decorator
+
+    raise NotImplementedError("Cannot deprecate %s" % config_or_target)
 
 
 def deprecateClass(klass):

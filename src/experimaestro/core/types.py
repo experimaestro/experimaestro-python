@@ -1,7 +1,18 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import inspect
 import sys
-from typing import Set, TypeVar, Union, Dict, Iterator, List, get_args, get_origin
+from typing import (
+    Set,
+    TypeVar,
+    Union,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    get_args,
+    get_origin,
+)
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -19,6 +30,20 @@ if typing.TYPE_CHECKING:
     from experimaestro.scheduler.base import Job
     from experimaestro.launchers import Launcher
     from experimaestro.core.objects import Config
+
+
+@dataclass
+class DeprecationInfo:
+    """Information about a deprecated configuration type."""
+
+    #: The original identifier before deprecation
+    original_identifier: "Identifier"
+
+    #: The target configuration class to convert to
+    target: type
+
+    #: If True, creating an instance immediately converts to the target type
+    replace: bool = False
 
 
 class Identifier:
@@ -276,7 +301,7 @@ class ObjectType(Type):
         self.__initialized__ = False
         self._runtype = None
         self.annotations = []
-        self._deprecated = False
+        self._deprecation: Optional[DeprecationInfo] = None
 
         # --- Value class (for external value types, e.g., nn.Module subclasses)
         self._original_type: type = tp  # Keep reference to original config class
@@ -418,24 +443,56 @@ class ObjectType(Type):
 
                 argname = None
 
-    def deprecate(self):
-        if len(self.value_type.__bases__) != 1:
-            raise RuntimeError(
-                "Deprecated configurations must have "
-                "only one parent (the new configuration)"
-            )
-        assert not self._deprecated, "Already deprecated"
+    def deprecate(self, target=None, replace: bool = False):
+        """Mark this configuration type as deprecated.
 
-        # Uses the parent identifier (and saves the deprecated one for path updates)
-        self._deprecated_identifier = self.identifier
-        parent = self.value_type.__bases__[0].__getxpmtype__()
-        self.identifier = parent.identifier
-        self._deprecated = True
+        Args:
+            target: Optional target configuration class. If provided, uses
+                    target's identifier. If None, uses parent class's identifier
+                    (legacy behavior requiring single inheritance).
+            replace: If True, creating an instance of this class immediately
+                    returns a converted instance of the target class.
+
+        When a target is specified, the deprecated class should define a
+        __convert__ method that returns an equivalent target configuration.
+        The identifier is computed from the converted configuration.
+        """
+        assert self._deprecation is None, "Already deprecated"
+
+        # Save the deprecated identifier for migration tools (fix_deprecated)
+        original_identifier = self.identifier
+
+        if target is not None:
+            # New mechanism: explicit target class
+            target_xpmtype = target.__getxpmtype__()
+            self.identifier = target_xpmtype.identifier
+            deprecation_target = target
+        else:
+            # Legacy mechanism: parent class is the target
+            if len(self.value_type.__bases__) != 1:
+                raise RuntimeError(
+                    "Deprecated configurations must have "
+                    "only one parent (the new configuration)"
+                )
+            parent = self.value_type.__bases__[0].__getxpmtype__()
+            self.identifier = parent.identifier
+            deprecation_target = self.value_type.__bases__[0]
+
+        self._deprecation = DeprecationInfo(
+            original_identifier=original_identifier,
+            target=deprecation_target,
+            replace=replace,
+        )
 
     @property
     def deprecated(self) -> bool:
         """Returns true if this type is deprecated"""
-        return self._deprecated
+        return self._deprecation is not None
+
+    @property
+    def _deprecated_identifier(self) -> Optional["Identifier"]:
+        """Returns the original identifier before deprecation (for backwards compatibility)"""
+        return self._deprecation.original_identifier if self._deprecation else None
 
     @property
     def description(self) -> str:
@@ -455,16 +512,6 @@ class ObjectType(Type):
     def addArgument(self, argument: Argument):
         self._arguments[argument.name] = argument
         argument.objecttype = self
-
-        # The the attribute for the config type
-        setattr(
-            self.config_type,
-            argument.name,
-            property(
-                lambda _self: _self.__xpm__.get(argument.name),
-                lambda _self, value: _self.__xpm__.set(argument.name, value),
-            ),
-        )
 
         # Check default value
         if argument.default is not None:

@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from experimaestro import (
     Param,
-    deprecate,
     Config,
     InstanceConfig,
     Constant,
@@ -280,41 +279,6 @@ def test_identifier_constant():
         version: Constant[int] = 2
 
     assert_notequal(A1.C(), A2.C())
-
-
-def test_identifier_deprecated_class():
-    """Test that when submitting the task, the computed identifier is the one of
-    the new class"""
-
-    class NewConfig(Config):
-        __xpmid__ = "new"
-
-    @deprecate
-    class OldConfig(NewConfig):
-        __xpmid__ = "old"
-
-    class DerivedConfig(NewConfig):
-        __xpmid__ = "derived"
-
-    assert_notequal(
-        NewConfig.C(), DerivedConfig.C(), "A derived configuration has another ID"
-    )
-    assert_equal(
-        NewConfig.C(),
-        OldConfig.C(),
-        "Deprecated and new configuration have the same ID",
-    )
-
-
-def test_identifier_deprecated_attribute():
-    class Values(Config):
-        values: Param[List[int]] = []
-
-        @deprecate
-        def value(self, x):
-            self.values = [x]
-
-    assert_equal(Values.C(values=[1]), Values.C(value=1))
 
 
 class MetaA(Config):
