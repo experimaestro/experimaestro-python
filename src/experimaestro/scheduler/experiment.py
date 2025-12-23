@@ -317,11 +317,17 @@ class experiment:
 
     def __enter__(self):
         from .dynamic_outputs import TaskOutputsWorker
+        from experimaestro.utils.environment import save_environment_info
 
         if self.workspace.run_mode != RunMode.DRY_RUN:
             logger.info("Locking experiment %s", self.xplockpath)
             self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
             logger.info("Experiment locked")
+
+        # Capture and save environment info (git info for editable packages + all package versions)
+        if self.workspace.run_mode == RunMode.NORMAL:
+            env_info_path = self.workdir / "environment.json"
+            save_environment_info(env_info_path)
 
         # Move old jobs into "jobs.bak"
         if self.workspace.run_mode == RunMode.NORMAL:
