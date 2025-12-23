@@ -37,7 +37,6 @@ class forwardoption(metaclass=forwardoptionMetaclass):
         name = "--%s" % (option_name or argument.name.replace("_", "-"))
         default = kwargs["default"] if "default" in kwargs else argument.default
 
-        # TODO: set the type of the option when not a simple type
         return click.option(name, help=argument.help or "", default=default)
 
     def __getattr__(self, key):

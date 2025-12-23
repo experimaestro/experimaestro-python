@@ -106,8 +106,6 @@ class StateFile:
 
 
 class ProgressFileWriter:
-    # TODO: Implement buffering and flushing
-
     def __init__(
         self, task_path: Path, max_entries_per_file: int = DEFAULT_MAX_ENTRIES_PER_FILE
     ):
