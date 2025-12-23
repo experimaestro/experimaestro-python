@@ -1825,7 +1825,22 @@ class ResumableTask(Task):
     preserved across restarts to allow checkpoint recovery.
     """
 
-    pass
+    def remaining_time(self) -> Optional[float]:
+        """Returns the remaining time in seconds before the job times out.
+
+        This is useful for checkpointing before hitting a time limit
+        (e.g., SLURM walltime).
+
+        Returns:
+            The remaining time in seconds, or None if:
+            - There is no time limit
+            - The launcher doesn't support querying remaining time
+            - The task is not running
+        """
+        launcher_info = taskglobals.Env.instance().launcher_info
+        if launcher_info is None:
+            return None
+        return launcher_info.remaining_time()
 
 
 def cache(fn, name: str):

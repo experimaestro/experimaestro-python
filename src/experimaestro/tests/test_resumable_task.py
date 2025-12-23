@@ -399,3 +399,82 @@ class GracefulTimeoutTask(ResumableTask):
         # Raise GracefulTimeout on first attempt if should_timeout is True
         if self.should_timeout and attempt == 1:
             raise GracefulTimeout("Not enough time for another epoch")
+
+
+# =============================================================================
+# Tests for remaining_time() method with mock launcher
+# =============================================================================
+
+
+class MockLauncherWithRemainingTime(DirectLauncher):
+    """Mock launcher that provides remaining_time via launcher_info_code()"""
+
+    def __init__(self, remaining_time_value: float | None):
+        super().__init__(LocalConnector())
+        self.remaining_time_value = remaining_time_value
+
+    def launcher_info_code(self) -> str:
+        """Generate code to set up MockLauncherInformation with the specified value"""
+        if self.remaining_time_value is None:
+            return (
+                "    from experimaestro.tests.test_resumable_task import MockLauncherInformation\n"
+                "    from experimaestro import taskglobals\n"
+                "    taskglobals.Env.instance().launcher_info = MockLauncherInformation(None)\n"
+            )
+        return (
+            "    from experimaestro.tests.test_resumable_task import MockLauncherInformation\n"
+            "    from experimaestro import taskglobals\n"
+            f"    taskglobals.Env.instance().launcher_info = MockLauncherInformation({self.remaining_time_value})\n"
+        )
+
+
+class MockLauncherInformation:
+    """Mock launcher info for testing remaining_time()"""
+
+    def __init__(self, remaining: float | None):
+        self._remaining = remaining
+
+    def remaining_time(self) -> float | None:
+        return self._remaining
+
+
+class RemainingTimeTask(ResumableTask):
+    """Task that records the remaining_time() value"""
+
+    output_file: Param[Path]
+
+    def execute(self):
+        remaining = self.remaining_time()
+        self.output_file.write_text(str(remaining) if remaining is not None else "None")
+
+
+def test_remaining_time_with_mock_launcher():
+    """Test remaining_time() works with a mock launcher that provides launcher_info_code()"""
+    with TemporaryExperiment("remaining_time", maxwait=10) as xp:
+        output_file = xp.workspace.path / "remaining.txt"
+        launcher = MockLauncherWithRemainingTime(remaining_time_value=1234.5)
+
+        task = RemainingTimeTask.C(output_file=output_file).submit(launcher=launcher)
+
+        state = task.__xpm__.job.wait()
+        assert state == JobState.DONE
+
+        # Verify the task received the remaining time value
+        assert output_file.exists()
+        assert output_file.read_text() == "1234.5"
+
+
+def test_remaining_time_none_with_mock_launcher():
+    """Test remaining_time() returns None when launcher has no time limit"""
+    with TemporaryExperiment("remaining_time_none", maxwait=10) as xp:
+        output_file = xp.workspace.path / "remaining.txt"
+        launcher = MockLauncherWithRemainingTime(remaining_time_value=None)
+
+        task = RemainingTimeTask.C(output_file=output_file).submit(launcher=launcher)
+
+        state = task.__xpm__.job.wait()
+        assert state == JobState.DONE
+
+        # Verify the task received None
+        assert output_file.exists()
+        assert output_file.read_text() == "None"

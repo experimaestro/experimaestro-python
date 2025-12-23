@@ -228,32 +228,72 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
 - **Directory preservation**: Unlike regular tasks, the task directory is preserved between retries to maintain checkpoints
 - **Non-timeout failures**: Only timeout failures trigger retries. Other errors (out of memory, bugs, etc.) will not retry
 
-### Graceful Timeout
+### Querying Remaining Time
 
-Sometimes a task knows it won't have enough time to complete another processing step before the scheduler kills it (e.g., SLURM walltime). In this case, the task can raise `GracefulTimeout` to stop cleanly and trigger a retry.
+Resumable tasks can query the remaining time before a job timeout using the `remaining_time()` method. This is useful for deciding whether to start another iteration or checkpoint before the scheduler kills the job.
 
-!!! example "Using GracefulTimeout"
+!!! example "Using remaining_time()"
 
     ```py3
     from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
     from pathlib import Path
-    import time
 
     class LongTraining(ResumableTask):
         epochs: Param[int] = 1000
         checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
-        time_limit: Param[float] = 3600  # 1 hour
 
         def execute(self):
-            start_time = time.time()
             start_epoch = 0
             if self.checkpoint.exists():
                 start_epoch = load_checkpoint(self.checkpoint)
 
             for epoch in range(start_epoch, self.epochs):
                 # Check if we have enough time for another epoch
-                elapsed = time.time() - start_time
-                if elapsed > self.time_limit - 300:  # 5 min buffer
+                remaining = self.remaining_time()
+                if remaining is not None and remaining < 300:  # 5 min buffer
+                    save_checkpoint(self.checkpoint, epoch)
+                    raise GracefulTimeout("Not enough time for another epoch")
+
+                train_one_epoch()
+                save_checkpoint(self.checkpoint, epoch)
+    ```
+
+The `remaining_time()` method returns:
+
+- **Remaining seconds** (as `float`): When running on a launcher with time limits (e.g., SLURM)
+- **`None`**: When there is no time limit, or the launcher doesn't support querying remaining time
+
+!!! note "Launcher Support"
+    Currently, `remaining_time()` is supported for:
+
+    - **SLURM**: Queries the remaining walltime using `squeue`
+    - **Direct (local)**: Always returns `None` (no time limit)
+
+    The remaining time is cached internally, so repeated calls are efficient.
+
+### Graceful Timeout
+
+Sometimes a task knows it won't have enough time to complete another processing step before the scheduler kills it (e.g., SLURM walltime). In this case, the task can raise `GracefulTimeout` to stop cleanly and trigger a retry.
+
+!!! example "Using GracefulTimeout with remaining_time()"
+
+    ```py3
+    from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+    from pathlib import Path
+
+    class LongTraining(ResumableTask):
+        epochs: Param[int] = 1000
+        checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
+
+        def execute(self):
+            start_epoch = 0
+            if self.checkpoint.exists():
+                start_epoch = load_checkpoint(self.checkpoint)
+
+            for epoch in range(start_epoch, self.epochs):
+                # Check remaining time before starting an epoch
+                remaining = self.remaining_time()
+                if remaining is not None and remaining < 300:  # 5 min buffer
                     raise GracefulTimeout("Not enough time for another epoch")
 
                 train_one_epoch()

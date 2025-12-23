@@ -38,6 +38,126 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("xpm.slurm")
 
+# Cached job end time (absolute timestamp).
+# Only used when a task is running within a SLURM job.
+_slurm_job_end_time: Optional[float] = None
+
+
+class SlurmLauncherInformation:
+    """Launcher information for SLURM jobs, used during task execution."""
+
+    def __init__(self, binpath: str = "/usr/bin"):
+        self.binpath = Path(binpath)
+
+    def remaining_time(self) -> Optional[float]:
+        """Returns the remaining time in seconds before the SLURM job times out.
+
+        Uses the SLURM_JOB_ID environment variable to query squeue for the
+        remaining time. The job end time is cached on first call.
+
+        Returns:
+            The remaining time in seconds, or None if no time limit.
+        """
+        import os
+        import time
+
+        global _slurm_job_end_time
+
+        # Use cached end time if available
+        if _slurm_job_end_time is not None:
+            remaining = _slurm_job_end_time - time.time()
+            return max(0.0, remaining)
+
+        # Query SLURM for remaining time and compute end time
+        job_id = os.environ.get("SLURM_JOB_ID")
+        if not job_id:
+            logger.debug("No SLURM_JOB_ID in environment, cannot get remaining time")
+            return None
+
+        remaining_seconds = self._query_remaining_time(job_id)
+        if remaining_seconds is None:
+            return None
+
+        # Cache the absolute end time
+        _slurm_job_end_time = time.time() + remaining_seconds
+        return remaining_seconds
+
+    def _query_remaining_time(self, job_id: str) -> Optional[float]:
+        """Query SLURM for remaining time of a job."""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                [
+                    f"{self.binpath}/squeue",
+                    "--job",
+                    job_id,
+                    "--format=%L",
+                    "--noheader",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if result.returncode != 0:
+                logger.warning(
+                    "squeue returned error code %d: %s",
+                    result.returncode,
+                    result.stderr,
+                )
+                return None
+
+            time_str = result.stdout.strip()
+            if not time_str or time_str == "UNLIMITED":
+                return None
+
+            return self._parse_slurm_time(time_str)
+        except subprocess.TimeoutExpired:
+            logger.warning("Timeout querying squeue for remaining time")
+            return None
+        except Exception as e:
+            logger.warning("Error querying SLURM remaining time: %s", e)
+            return None
+
+    @staticmethod
+    def _parse_slurm_time(time_str: str) -> Optional[float]:
+        """Parse SLURM time format to seconds.
+
+        SLURM time format can be:
+        - D-HH:MM:SS (days-hours:minutes:seconds)
+        - HH:MM:SS (hours:minutes:seconds)
+        - MM:SS (minutes:seconds)
+        - SS (seconds)
+
+        Returns:
+            Time in seconds, or None if parsing fails
+        """
+        try:
+            days = 0
+            if "-" in time_str:
+                days_str, time_str = time_str.split("-", 1)
+                days = int(days_str)
+
+            parts = time_str.split(":")
+            if len(parts) == 3:
+                hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
+            elif len(parts) == 2:
+                hours = 0
+                minutes, seconds = int(parts[0]), int(parts[1])
+            elif len(parts) == 1:
+                hours = 0
+                minutes = 0
+                seconds = int(parts[0])
+            else:
+                logger.warning("Could not parse SLURM time: %s", time_str)
+                return None
+
+            return float(days * 86400 + hours * 3600 + minutes * 60 + seconds)
+        except (ValueError, IndexError) as e:
+            logger.warning("Could not parse SLURM time '%s': %s", time_str, e)
+            return None
+
 
 class SlurmJobState:
     start: str
@@ -465,6 +585,14 @@ class SlurmLauncher(Launcher):
 
         By default, returns the associated connector builder"""
         return SlurmProcessBuilder(self)
+
+    def launcher_info_code(self) -> str:
+        """Returns Python code to set up launcher info during task execution."""
+        return (
+            "    from experimaestro.launchers.slurm import SlurmLauncherInformation\n"
+            "    from experimaestro import taskglobals\n"
+            f'    taskglobals.Env.instance().launcher_info = SlurmLauncherInformation(binpath="{self.binpath}")\n'
+        )
 
 
 class SlurmScriptBuilder(PythonScriptBuilder):

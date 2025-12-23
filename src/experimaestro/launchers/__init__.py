@@ -69,6 +69,19 @@ class Launcher(ABC):
         By default, returns the associated connector builder"""
         return self.connector.processbuilder()
 
+    @abstractmethod
+    def launcher_info_code(self) -> str:
+        """Returns Python code to set up launcher info during task execution.
+
+        This code is inserted into the generated task script to set up
+        launcher-specific information (like LauncherInformation for
+        querying remaining time).
+
+        Returns:
+            Python code as a string, or empty string if no setup needed.
+        """
+        ...
+
     @staticmethod
     def get(path: Path):
         """Get a default launcher for a given path"""

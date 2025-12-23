@@ -126,6 +126,13 @@ class PythonScriptBuilder:
             for path in job.python_path:
                 out.write(f"""    sys.path.insert(0, "{shquote(str(path))}")\n""")
 
+            # Write launcher info code (for remaining_time support)
+            launcher_info_code = job.launcher.launcher_info_code()
+            if launcher_info_code:
+                out.write("\n")
+                out.write(launcher_info_code)
+                out.write("\n")
+
             out.write(
                 f"""    TaskRunner("{shquote(connector.resolve(scriptpath))}","""
                 """ lockfiles).run()\n"""
