@@ -27,6 +27,7 @@ class Argument:
         checker=None,
         constant=False,
         is_data=False,
+        overrides=False,
     ):
         """Creates a new argument
 
@@ -55,6 +56,10 @@ class Argument:
 
             is_data (bool, optional): Flag for paths that are data path (to be
             serialized). Defaults to False.
+
+            overrides (bool, optional): If True, this argument intentionally
+            overrides a parent argument. Suppresses the warning that would
+            otherwise be issued. Defaults to False.
         """
         required = (default is None) if required is None else required
         if default is not None and required is not None and required:
@@ -71,6 +76,7 @@ class Argument:
         self.required = required
         self.objecttype = None
         self.is_data = is_data
+        self.overrides = overrides
 
         self.generator = generator
         self.default = None
@@ -80,6 +86,9 @@ class Argument:
             assert self.generator is None, "generator and default are exclusive options"
             if isinstance(default, field):
                 self.ignore_generated = default.ignore_generated
+                # Allow field to override the overrides flag
+                if default.overrides:
+                    self.overrides = True
 
                 if default.default is not None:
                     self.default = default.default
@@ -187,6 +196,7 @@ class field:
         default: Any = None,
         default_factory: Callable = None,
         ignore_generated=False,
+        overrides=False,
     ):
         """Gives some extra per-field information
 
@@ -196,6 +206,8 @@ class field:
             tasks, defaults to False. The interest of hidden is to add a
             configuration field that changes the identifier, but will not be
             used.
+        :param overrides: True if this field intentionally overrides a parent field.
+            Suppresses the warning that would otherwise be issued.
         """
         assert not (
             (default is not None) and (default_factory is not None)
@@ -204,6 +216,7 @@ class field:
         self.default_factory = default_factory
         self.default = default
         self.ignore_generated = ignore_generated
+        self.overrides = overrides
 
 
 class help(TypeAnnotation):

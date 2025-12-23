@@ -510,12 +510,71 @@ class ObjectType(Type):
         return self._arguments
 
     def addArgument(self, argument: Argument):
+        # Check if this argument overrides a parent argument
+        # _arguments is a ChainMap where maps[0] is current class, maps[1:] are parents
+        parent_argument = None
+        for parent_map in self._arguments.maps[1:]:
+            if argument.name in parent_map:
+                parent_argument = parent_map[argument.name]
+                break
+
+        if parent_argument is not None:
+            # Check type compatibility (child type should be subtype of parent type)
+            self._check_override_type_compatibility(argument, parent_argument)
+
+            # Warn if overrides flag is not set
+            if not argument.overrides:
+                logger.warning(
+                    "Parameter '%s' in %s overrides parent parameter from %s. "
+                    "Use field(overrides=True) to suppress this warning.",
+                    argument.name,
+                    self._original_type.__qualname__,
+                    (
+                        parent_argument.objecttype._original_type.__qualname__
+                        if parent_argument.objecttype
+                        else "unknown"
+                    ),
+                )
+
         self._arguments[argument.name] = argument
         argument.objecttype = self
 
         # Check default value
         if argument.default is not None:
             argument.type.validate(argument.default)
+
+    def _check_override_type_compatibility(
+        self, child_arg: Argument, parent_arg: Argument
+    ):
+        """Check that the child argument type is compatible with the parent type.
+
+        For Config types, the child type should be a subtype of the parent type
+        (covariant). For other types, we check for exact match.
+        """
+        child_type = child_arg.type
+        parent_type = parent_arg.type
+
+        # Check if both are ObjectType (Config types)
+        if isinstance(child_type, ObjectType) and isinstance(parent_type, ObjectType):
+            child_pytype = child_type.value_type
+            parent_pytype = parent_type.value_type
+
+            # Check if child is a subtype of parent
+            if not issubclass(child_pytype, parent_pytype):
+                raise TypeError(
+                    f"Parameter '{child_arg.name}' type {child_pytype.__qualname__} "
+                    f"is not a subtype of parent type {parent_pytype.__qualname__}. "
+                    f"Override types must be subtypes of the parent type."
+                )
+        elif type(child_type) is not type(parent_type):
+            # For non-Config types, check for exact type match
+            # Different type classes (e.g., IntType vs StrType) are incompatible
+            raise TypeError(
+                f"Parameter '{child_arg.name}' type {type(child_type).__name__} "
+                f"is not compatible with parent type {type(parent_type).__name__}. "
+                f"Override types must be the same type or a subtype."
+            )
+        # Same type class is allowed (e.g., both are IntType)
 
     def getArgument(self, key: str) -> Argument:
         self.__initialize__()

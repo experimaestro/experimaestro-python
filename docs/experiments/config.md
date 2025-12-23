@@ -419,6 +419,55 @@ assert new_id == old_id
     ```
 
 
+### Overriding parameters
+
+When a subclass redefines a parameter from a parent class, experimaestro issues
+a warning to alert you about the potential unintended override. To intentionally
+override a parent parameter, use `field(overrides=True)`:
+
+```py3
+from experimaestro import Param, Config, field
+
+class Parent(Config):
+    value: Param[int]
+
+class Child(Parent):
+    # This will produce a warning about overriding 'value'
+    value: Param[int]
+
+class ChildWithOverride(Parent):
+    # This explicitly marks the override as intentional - no warning
+    value: Param[int] = field(overrides=True)
+```
+
+#### Type compatibility
+
+When overriding a parameter, the new type must be compatible with the parent type:
+
+- For **Config types**: The child type must be a subtype of the parent type (covariant)
+- For **primitive types**: The types must match exactly
+
+```py3
+from experimaestro import Param, Config, field
+
+class BaseModel(Config):
+    pass
+
+class AdvancedModel(BaseModel):
+    pass
+
+class Parent(Config):
+    model: Param[BaseModel]
+
+# OK - AdvancedModel is a subtype of BaseModel
+class Child(Parent):
+    model: Param[AdvancedModel] = field(overrides=True)
+
+# ERROR - str is not compatible with int
+class BadChild(Parent):
+    value: Param[str] = field(overrides=True)  # TypeError
+```
+
 ### Constants
 
 Constants are special parameters that cannot be modified. They are useful to note that the
