@@ -1,0 +1,3 @@
+[submodule "docs/demo"]
+	path = docs/demo
+	url = https://github.com/experimaestro/experimaestro-demo.git
