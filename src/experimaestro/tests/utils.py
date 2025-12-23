@@ -5,7 +5,7 @@ from pathlib import Path
 import logging
 import signal
 
-from experimaestro import experiment, task
+from experimaestro import experiment, Task
 from experimaestro.scheduler.workspace import RunMode
 
 
@@ -24,7 +24,7 @@ class TimeInterval:
         return str(self)
 
 
-def get_times(task: task) -> TimeInterval:
+def get_times(task: Task) -> TimeInterval:
     logging.info("Reading times from %s", task.stdout())
     return TimeInterval(
         *(float(t) for t in task.stdout().read_text().strip().split("\n"))

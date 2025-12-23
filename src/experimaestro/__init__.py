@@ -4,15 +4,7 @@ from pathlib import Path
 
 # Annotations
 from .annotations import (
-    config,
-    task,
-    param,
-    ConstantParam,
-    constant,
-    option,
-    pathoption,
     cache,
-    Identifier,
     Array,
     TagDict,
     tag,
@@ -21,12 +13,11 @@ from .annotations import (
     STDOUT,
     STDERR,
     deprecate,
-    # deprecated
-    argument,
     initializer,
     # Method
     config_only,
 )
+from .core.types import Identifier
 from .core.serialization import (
     load,
     save,
