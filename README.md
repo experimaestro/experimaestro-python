@@ -6,10 +6,19 @@ Experimaestro helps in designing and managing **complex experimental plans**. It
 - **Task Automation**: The tool automates repetitive tasks, making it easier to run large-scale experiments. It's particularly useful in scenarios where experiments need to be repeated with different parameters or datasets.
 - **Resource Management**: It efficiently manages computational resources, which is critical when dealing with data-intensive tasks or when running multiple experiments in parallel.
 - **Reproducibility**: By keeping a detailed record of experiments (the experimental plan in python), including parameters and environments, it aids in ensuring the reproducibility of scientific experiments, which is a fundamental requirement in research.
-- **User Interface**: While primarily a back-end tool, Experimaestro also offers a user interface to help in managing and visualizing workflows.
+- **User Interface**: While primarily a back-end tool, Experimaestro also offers a user interface to help in managing and visualizing workflows (web and text-based).
 
 The full documentation can be read by going to the following URL: [https://experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io). A tutorial (training a CNN on MNIST) is [available on github](https://github.com/experimaestro/experimaestro-demo).
 
+# Screenshots
+
+## Textual interface (new in v2)
+
+![Experiment screen](docs/img/tui-experiments.png)
+
+![Jobs screen](docs/img/tui-jobs.png)
+
+![Log screen](docs/img/tui-logs.jpg)
 
 # Install
 
