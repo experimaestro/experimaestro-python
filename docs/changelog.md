@@ -228,6 +228,10 @@ class MyConfig(Config):
 
 Run `experimaestro refactor default-values` to automatically fix bare defaults.
 
+#### Tags Are Now Experiment-Specific
+
+Tags are now scoped to individual experiments rather than being global. This means tags set in one experiment are no longer visible in other experiments. Additionally, tags are no longer stored in the `params.json` file.
+
 #### Workspace Database Migration
 
 v2 uses a new workspace-level SQLite database format (stored in
