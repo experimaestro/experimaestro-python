@@ -14,6 +14,8 @@ from experimaestro import (
     field,
     Task,
     LightweightTask,
+    subparameters,
+    param_group,
 )
 from experimaestro.core.objects import (
     ConfigInformation,
@@ -738,3 +740,184 @@ def test_identifier_field_default_vs_ignore_default():
         ConfigWithIgnoreDefault.C(a=2, b=2),
         "field(default=1) vs field(ignore_default=1) should be same when a!=1",
     )
+
+
+# --- Test partial identifiers (subparameters) ---
+
+
+# Define parameter groups at module level
+iter_group = param_group("iter")
+model_group = param_group("model")
+
+
+def get_partial_identifier(config, sp):
+    """Helper to get partial identifier for a config and subparameters"""
+    return config.__xpm__.get_partial_identifier(sp).all
+
+
+def test_partial_identifier_excludes_grouped_params():
+    """Test that partial identifier excludes parameters in excluded groups"""
+
+    class ConfigWithGroups(Config):
+        checkpoints = subparameters(exclude_groups=[iter_group])
+        max_iter: Param[int] = field(groups=[iter_group])
+        learning_rate: Param[float]
+
+    c1 = ConfigWithGroups.C(max_iter=100, learning_rate=0.1)
+    c2 = ConfigWithGroups.C(max_iter=200, learning_rate=0.1)
+
+    # Full identifiers should differ (max_iter is different)
+    assert_notequal(c1, c2, "Full identifiers should differ when max_iter differs")
+
+    # Partial identifiers should be the same (max_iter is excluded)
+    pid1 = get_partial_identifier(c1, ConfigWithGroups.checkpoints)
+    pid2 = get_partial_identifier(c2, ConfigWithGroups.checkpoints)
+    assert (
+        pid1 == pid2
+    ), "Partial identifiers should match when only excluded params differ"
+
+
+def test_partial_identifier_includes_ungrouped_params():
+    """Test that partial identifier includes parameters not in excluded groups"""
+
+    class ConfigWithGroups(Config):
+        checkpoints = subparameters(exclude_groups=[iter_group])
+        max_iter: Param[int] = field(groups=[iter_group])
+        learning_rate: Param[float]
+
+    c1 = ConfigWithGroups.C(max_iter=100, learning_rate=0.1)
+    c2 = ConfigWithGroups.C(max_iter=100, learning_rate=0.2)
+
+    # Partial identifiers should differ (learning_rate is not excluded)
+    pid1 = get_partial_identifier(c1, ConfigWithGroups.checkpoints)
+    pid2 = get_partial_identifier(c2, ConfigWithGroups.checkpoints)
+    assert (
+        pid1 != pid2
+    ), "Partial identifiers should differ when non-excluded params differ"
+
+
+def test_partial_identifier_matches_config_without_excluded():
+    """Test that partial identifier matches config without the excluded fields"""
+
+    class ConfigWithIter(Config):
+        __xpmid__ = "test.partial_identifier.config"
+        checkpoints = subparameters(exclude_groups=[iter_group])
+        max_iter: Param[int] = field(groups=[iter_group])
+        learning_rate: Param[float]
+
+    class ConfigWithoutIter(Config):
+        __xpmid__ = "test.partial_identifier.config"
+        learning_rate: Param[float]
+
+    c_with = ConfigWithIter.C(max_iter=100, learning_rate=0.1)
+    c_without = ConfigWithoutIter.C(learning_rate=0.1)
+
+    # The partial identifier of c_with should match full identifier of c_without
+    pid = get_partial_identifier(c_with, ConfigWithIter.checkpoints)
+    full_id = getidentifier(c_without)
+    assert (
+        pid == full_id
+    ), "Partial identifier should match config without excluded fields"
+
+
+def test_partial_identifier_multiple_groups():
+    """Test partial identifier with parameter in multiple groups"""
+
+    class ConfigMultiGroup(Config):
+        checkpoints = subparameters(exclude_groups=[iter_group])
+        # This parameter is in both groups - should be excluded if any group is excluded
+        x: Param[int] = field(groups=[iter_group, model_group])
+        y: Param[float]
+
+    c1 = ConfigMultiGroup.C(x=1, y=0.1)
+    c2 = ConfigMultiGroup.C(x=2, y=0.1)
+
+    # Partial identifiers should be the same (x is in iter_group which is excluded)
+    pid1 = get_partial_identifier(c1, ConfigMultiGroup.checkpoints)
+    pid2 = get_partial_identifier(c2, ConfigMultiGroup.checkpoints)
+    assert (
+        pid1 == pid2
+    ), "Partial identifiers should match when param is in any excluded group"
+
+
+def test_partial_identifier_include_overrides_exclude():
+    """Test that include_groups overrides exclude_groups"""
+
+    class ConfigIncludeOverride(Config):
+        # iter_group is excluded but also included, so it should NOT be excluded
+        partial = subparameters(
+            exclude_groups=[iter_group, model_group], include_groups=[iter_group]
+        )
+        x: Param[int] = field(groups=[iter_group])
+        y: Param[int] = field(groups=[model_group])
+        z: Param[float]
+
+    c1 = ConfigIncludeOverride.C(x=1, y=1, z=0.1)
+    c2 = ConfigIncludeOverride.C(x=2, y=1, z=0.1)
+    c3 = ConfigIncludeOverride.C(x=1, y=2, z=0.1)
+
+    # x is in iter_group which is included (overrides exclusion)
+    # so different x should give different partial identifiers
+    pid1 = get_partial_identifier(c1, ConfigIncludeOverride.partial)
+    pid2 = get_partial_identifier(c2, ConfigIncludeOverride.partial)
+    assert pid1 != pid2, "Include should override exclude - x should be included"
+
+    # y is in model_group which is excluded (not included)
+    # so different y should give SAME partial identifiers
+    pid3 = get_partial_identifier(c3, ConfigIncludeOverride.partial)
+    assert pid1 == pid3, "y is excluded - different y should give same partial ID"
+
+
+def test_partial_identifier_exclude_all():
+    """Test exclude_all option"""
+
+    class ConfigExcludeAll(Config):
+        # Exclude all, but include model_group
+        partial = subparameters(exclude_all=True, include_groups=[model_group])
+        x: Param[int] = field(groups=[iter_group])
+        y: Param[int] = field(groups=[model_group])
+        z: Param[float]  # No group
+
+    c1 = ConfigExcludeAll.C(x=1, y=1, z=0.1)
+    c2 = ConfigExcludeAll.C(x=2, y=1, z=0.1)  # Different x (excluded)
+    c3 = ConfigExcludeAll.C(x=1, y=2, z=0.1)  # Different y (included)
+    c4 = ConfigExcludeAll.C(x=1, y=1, z=0.2)  # Different z (excluded - no group)
+
+    pid1 = get_partial_identifier(c1, ConfigExcludeAll.partial)
+    pid2 = get_partial_identifier(c2, ConfigExcludeAll.partial)
+    pid3 = get_partial_identifier(c3, ConfigExcludeAll.partial)
+    pid4 = get_partial_identifier(c4, ConfigExcludeAll.partial)
+
+    # x is excluded (in iter_group, not included) - same partial ID
+    assert pid1 == pid2, "x is excluded - should have same partial ID"
+
+    # y is included (in model_group) - different partial ID
+    assert pid1 != pid3, "y is included - should have different partial ID"
+
+    # z is excluded (no group, exclude_all=True) - same partial ID
+    assert (
+        pid1 == pid4
+    ), "z (no group) is excluded by exclude_all - should have same partial ID"
+
+
+def test_partial_identifier_exclude_no_group():
+    """Test exclude_no_group option"""
+
+    class ConfigExcludeNoGroup(Config):
+        partial = subparameters(exclude_no_group=True)
+        x: Param[int] = field(groups=[iter_group])
+        y: Param[float]  # No group
+
+    c1 = ConfigExcludeNoGroup.C(x=1, y=0.1)
+    c2 = ConfigExcludeNoGroup.C(x=2, y=0.1)  # Different x (has group - not excluded)
+    c3 = ConfigExcludeNoGroup.C(x=1, y=0.2)  # Different y (no group - excluded)
+
+    pid1 = get_partial_identifier(c1, ConfigExcludeNoGroup.partial)
+    pid2 = get_partial_identifier(c2, ConfigExcludeNoGroup.partial)
+    pid3 = get_partial_identifier(c3, ConfigExcludeNoGroup.partial)
+
+    # x has a group, so it's NOT excluded by exclude_no_group
+    assert pid1 != pid2, "x has group - should have different partial ID"
+
+    # y has no group, so it IS excluded by exclude_no_group
+    assert pid1 == pid3, "y has no group - should have same partial ID"

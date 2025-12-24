@@ -243,6 +243,57 @@ class ServiceModel(BaseModel):
         primary_key = CompositeKey("service_id", "experiment_id", "run_id")
 
 
+class PartialModel(BaseModel):
+    """Partial directory tracking for subparameters
+
+    Tracks partial directories that are shared across jobs with different
+    parameter values (but same partial identifier). These directories are
+    at WORKSPACE/partials/TASK_ID/SUBPARAM_NAME/PARTIAL_ID/ (reconstructible).
+
+    Fields:
+        partial_id: Hex hash of the partial identifier
+        task_id: Task class identifier
+        subparameters_name: Name of the subparameters definition
+        created_at: When this partial directory was first created
+    """
+
+    partial_id = CharField(primary_key=True)
+    task_id = CharField(index=True)
+    subparameters_name = CharField(index=True)
+    created_at = DateTimeField(default=datetime.now)
+
+    class Meta:
+        table_name = "partials"
+        indexes = ((("task_id", "subparameters_name"), False),)
+
+
+class JobPartialModel(BaseModel):
+    """Links jobs to partial directories they use
+
+    Tracks which jobs reference which partial directories. This enables
+    cleanup of orphan partials when all referencing jobs are deleted.
+
+    A job can use multiple partials (different subparameters definitions),
+    and a partial can be used by multiple jobs.
+
+    Fields:
+        job_id: ID of the job using this partial
+        experiment_id: ID of the experiment
+        run_id: ID of the run
+        partial_id: ID of the partial directory being used
+    """
+
+    job_id = CharField(index=True)
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
+    partial_id = CharField(index=True)
+
+    class Meta:
+        table_name = "job_partials"
+        primary_key = CompositeKey("job_id", "experiment_id", "run_id", "partial_id")
+        indexes = ((("partial_id",), False),)  # For finding jobs using a partial
+
+
 # List of all models for binding
 ALL_MODELS = [
     ExperimentModel,
@@ -251,6 +302,8 @@ ALL_MODELS = [
     JobModel,
     JobTagModel,
     ServiceModel,
+    PartialModel,
+    JobPartialModel,
 ]
 
 

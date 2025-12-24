@@ -32,6 +32,8 @@ from experimaestro.scheduler.state_db import (
     JobModel,
     JobTagModel,
     ServiceModel,
+    PartialModel,
+    JobPartialModel,
     ALL_MODELS,
 )
 from experimaestro.scheduler.interfaces import (
@@ -1012,13 +1014,15 @@ class WorkspaceStateProvider:
         if self.read_only:
             raise RuntimeError("Cannot update jobs in read-only mode")
 
+        task_id = str(job.type.identifier)
+
         # Create or update job record
         now = datetime.now()
         JobModel.insert(
             job_id=job.identifier,
             experiment_id=experiment_id,
             run_id=run_id,
-            task_id=str(job.type.identifier),
+            task_id=task_id,
             locator=job.identifier,
             state=job.state.name,
             submitted_time=job.submittime,
@@ -1034,6 +1038,20 @@ class WorkspaceStateProvider:
 
         # Update tags (run-scoped)
         self.update_job_tags(job.identifier, experiment_id, run_id, job.tags)
+
+        # Register partials for all declared subparameters
+        subparameters = job.type._subparameters
+        for name, sp in subparameters.items():
+            partial_id = job.config.__xpm__.get_partial_identifier(sp)
+            partial_id_hex = partial_id.all.hex()
+
+            # Register the partial directory
+            self.register_partial(partial_id_hex, task_id, name)
+
+            # Link job to partial
+            self.register_job_partial(
+                job.identifier, experiment_id, run_id, partial_id_hex
+            )
 
         logger.debug(
             "Recorded job submission: %s (experiment=%s, run=%s)",
@@ -1191,7 +1209,7 @@ class WorkspaceStateProvider:
 
     @_with_db_context
     def delete_job(self, job_id: str, experiment_id: str, run_id: str):
-        """Remove a job and its tags
+        """Remove a job, its tags, and partial references
 
         Args:
             job_id: Job identifier
@@ -1209,6 +1227,13 @@ class WorkspaceStateProvider:
             (JobTagModel.job_id == job_id)
             & (JobTagModel.experiment_id == experiment_id)
             & (JobTagModel.run_id == run_id)
+        ).execute()
+
+        # Delete partial references
+        JobPartialModel.delete().where(
+            (JobPartialModel.job_id == job_id)
+            & (JobPartialModel.experiment_id == experiment_id)
+            & (JobPartialModel.run_id == run_id)
         ).execute()
 
         # Delete job
@@ -1552,6 +1577,175 @@ class WorkspaceStateProvider:
             update={WorkspaceSyncMetadata.last_sync_time: datetime.now()},
         ).execute()
         logger.debug("Updated last sync time")
+
+    # Partial management methods
+
+    @_with_db_context
+    def register_partial(
+        self, partial_id: str, task_id: str, subparameters_name: str
+    ) -> None:
+        """Register a partial directory (creates if not exists)
+
+        Args:
+            partial_id: Hex hash of the partial identifier
+            task_id: Task class identifier
+            subparameters_name: Name of the subparameters definition
+
+        Raises:
+            RuntimeError: If in read-only mode
+        """
+        if self.read_only:
+            raise RuntimeError("Cannot register partials in read-only mode")
+
+        PartialModel.insert(
+            partial_id=partial_id,
+            task_id=task_id,
+            subparameters_name=subparameters_name,
+            created_at=datetime.now(),
+        ).on_conflict_ignore().execute()
+
+        logger.debug(
+            "Registered partial: %s (task=%s, subparams=%s)",
+            partial_id,
+            task_id,
+            subparameters_name,
+        )
+
+    @_with_db_context
+    def register_job_partial(
+        self, job_id: str, experiment_id: str, run_id: str, partial_id: str
+    ) -> None:
+        """Link a job to a partial directory it uses
+
+        Args:
+            job_id: Job identifier
+            experiment_id: Experiment identifier
+            run_id: Run identifier
+            partial_id: Partial directory identifier
+
+        Raises:
+            RuntimeError: If in read-only mode
+        """
+        if self.read_only:
+            raise RuntimeError("Cannot register job partials in read-only mode")
+
+        JobPartialModel.insert(
+            job_id=job_id,
+            experiment_id=experiment_id,
+            run_id=run_id,
+            partial_id=partial_id,
+        ).on_conflict_ignore().execute()
+
+        logger.debug(
+            "Linked job %s to partial %s (experiment=%s, run=%s)",
+            job_id,
+            partial_id,
+            experiment_id,
+            run_id,
+        )
+
+    @_with_db_context
+    def unregister_job_partials(
+        self, job_id: str, experiment_id: str, run_id: str
+    ) -> None:
+        """Remove all partial links for a job
+
+        Called when a job is deleted to clean up its partial references.
+
+        Args:
+            job_id: Job identifier
+            experiment_id: Experiment identifier
+            run_id: Run identifier
+
+        Raises:
+            RuntimeError: If in read-only mode
+        """
+        if self.read_only:
+            raise RuntimeError("Cannot unregister job partials in read-only mode")
+
+        JobPartialModel.delete().where(
+            (JobPartialModel.job_id == job_id)
+            & (JobPartialModel.experiment_id == experiment_id)
+            & (JobPartialModel.run_id == run_id)
+        ).execute()
+
+        logger.debug(
+            "Unregistered partials for job %s (experiment=%s, run=%s)",
+            job_id,
+            experiment_id,
+            run_id,
+        )
+
+    @_with_db_context
+    def get_orphan_partials(self) -> List[Dict]:
+        """Find partial directories that are not referenced by any job
+
+        Returns:
+            List of dictionaries with partial_id, task_id, subparameters_name
+        """
+        # Find partials that have no job references
+        # Using a subquery to find referenced partial_ids
+        referenced_partials = JobPartialModel.select(JobPartialModel.partial_id)
+
+        orphan_query = PartialModel.select().where(
+            PartialModel.partial_id.not_in(referenced_partials)
+        )
+
+        orphans = []
+        for partial in orphan_query:
+            orphans.append(
+                {
+                    "partial_id": partial.partial_id,
+                    "task_id": partial.task_id,
+                    "subparameters_name": partial.subparameters_name,
+                    "created_at": partial.created_at.isoformat(),
+                }
+            )
+
+        return orphans
+
+    def cleanup_orphan_partials(self, perform: bool = False) -> List[Path]:
+        """Clean up orphan partial directories
+
+        Finds partial directories not referenced by any job and removes them.
+
+        Args:
+            perform: If True, actually delete. If False, dry run (list only).
+
+        Returns:
+            List of paths that were deleted (or would be deleted in dry run)
+        """
+        from shutil import rmtree
+
+        orphans = self.get_orphan_partials()
+        deleted_paths = []
+
+        for orphan in orphans:
+            # Reconstruct path: WORKSPACE/partials/TASK_ID/SUBPARAM_NAME/PARTIAL_ID
+            partial_path = (
+                self.workspace_path
+                / "partials"
+                / orphan["task_id"]
+                / orphan["subparameters_name"]
+                / orphan["partial_id"]
+            )
+
+            if perform:
+                # Delete directory if it exists
+                if partial_path.exists():
+                    logger.info("Cleaning orphan partial: %s", partial_path)
+                    rmtree(partial_path)
+
+                # Delete from database
+                if not self.read_only:
+                    with self.workspace_db.bind_ctx([PartialModel]):
+                        PartialModel.delete().where(
+                            PartialModel.partial_id == orphan["partial_id"]
+                        ).execute()
+
+            deleted_paths.append(partial_path)
+
+        return deleted_paths
 
     # Utility methods
 

@@ -275,3 +275,45 @@ def path(ctx, jobid: str):
         cprint(f"Job directory not found: {job_path}", "red")
         return
     print(job_path)
+
+
+@click.option("--perform", is_flag=True, help="Actually delete orphan partials")
+@jobs.command("cleanup-partials")
+@click.pass_context
+def cleanup_partials(ctx, perform: bool):
+    """Clean up orphan partial directories
+
+    Partial directories are shared checkpoint locations created by
+    subparameters. When all jobs using a partial are deleted, the
+    partial becomes orphaned and can be cleaned up.
+
+    This command finds all orphan partials and deletes them (or shows
+    what would be deleted in dry-run mode).
+    """
+    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+
+    provider = WorkspaceStateProvider.get_instance(
+        ctx.obj.workspace.path, read_only=not perform
+    )
+
+    try:
+        orphan_paths = provider.cleanup_orphan_partials(perform=perform)
+
+        if not orphan_paths:
+            cprint("No orphan partials found.", "green")
+            return
+
+        if perform:
+            cprint(f"Cleaned {len(orphan_paths)} orphan partial(s):", "green")
+        else:
+            cprint(f"Found {len(orphan_paths)} orphan partial(s) (dry run):", "yellow")
+
+        for path in orphan_paths:
+            if perform:
+                print(colored(f"  Deleted: {path}", "red"))
+            else:
+                print(colored(f"  Would delete: {path}", "yellow"))
+
+    finally:
+        if perform:
+            provider.close()
