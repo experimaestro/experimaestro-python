@@ -27,7 +27,7 @@ and some special variables are defined:
 
 - tags can be accessed as a dictionary using `self.__tags__`
 - task directory can is `self.__taskdir__`
-- when using [sub-parameters](./config.md#sub-parameters), `self.__maintaskdir__` is the directory of the main task
+- when using [subparameters](./config.md#subparameters-and-partial-identifiers), `self.__maintaskdir__` is the directory of the main task
 
 
 ## Tasks outputs and dependencies
