@@ -105,7 +105,9 @@ def test_partial_registered_in_database():
         assert task.__xpm__.job.state == JobState.DONE
 
         # Get the state provider and check database
-        provider = WorkspaceStateProvider.get_instance(workdir, read_only=True)
+        # Note: Must use read_only=False since the experiment left a singleton
+        # with read_only=False that hasn't been closed yet
+        provider = WorkspaceStateProvider.get_instance(workdir, read_only=False)
 
         try:
             with provider.workspace_db.bind_ctx([PartialModel, JobPartialModel]):
