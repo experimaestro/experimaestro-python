@@ -95,7 +95,11 @@ Provides:
 
 #### [Subparameters (Partial Identifiers)](experiments/config.md#subparameters-and-partial-identifiers)
 
-Share directories across tasks that differ only in excluded parameters:
+Share directories across tasks that differ only in excluded parameters. This is particularly useful for:
+
+- **Checkpoint sharing**: Training runs with different iteration counts can share the same checkpoint directory, enabling seamless resume from any previous run
+- **Resource efficiency**: Avoid duplicating large files (model weights, preprocessed data) across similar experiments
+- **Hyperparameter sweeps**: When varying certain parameters (e.g., number of epochs), other outputs remain shared
 
 ```python
 class Learn(Task):
@@ -110,14 +114,25 @@ class Learn(Task):
     )
 ```
 
+[Read more about subparameters...](experiments/config.md#subparameters-and-partial-identifiers)
+
 #### [Configuration Composition](experiments/config.md#composition-operator)
 
-Compose configurations using the `@` operator:
+Compose configurations using the `@` operator. The operator automatically finds the parameter in the outer configuration that accepts the inner configuration's type:
 
 ```python
-base_model = Model.C(hidden_size=256)
-large_model = base_model @ Model.C(hidden_size=512)  # Override hidden_size
+class Encoder(Config):
+    hidden_size: Param[int]
+
+class Model(Config):
+    encoder: Param[Encoder]
+
+# These two are equivalent:
+model1 = Model.C(encoder=Encoder.C(hidden_size=256))
+model2 = Model.C() @ Encoder.C(hidden_size=256)
 ```
+
+[Read more about configuration composition...](experiments/config.md#composition-operator)
 
 #### [Flexible Deprecation](experiments/config.md#deprecating-a-configuration-or-attributes)
 
