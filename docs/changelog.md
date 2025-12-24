@@ -146,12 +146,23 @@ class OldConfig(Config):
 
 #### [Instance-Based Identity](experiments/config.md#instance-based-configurations)
 
-Use `InstanceConfig` for configs where identity is based on the instance, not parameters:
+Distinguish between *shared* and *separate* instances with identical parameters using `InstanceConfig`. Essential for workflows where components can be tied or independent:
 
 ```python
-class Dataset(InstanceConfig):
-    path: Param[Path]
+class Encoder(InstanceConfig):
+    hidden_size: Param[int]
+
+class DualEncoderModel(Config):
+    query_encoder: Param[Encoder]
+    doc_encoder: Param[Encoder]
+
+enc = Encoder.C(hidden_size=128)
+shared = DualEncoderModel.C(query_encoder=enc, doc_encoder=enc)      # tied weights
+separate = DualEncoderModel.C(query_encoder=enc, doc_encoder=Encoder.C(hidden_size=128))  # independent
+# shared and separate have different identifiers
 ```
+
+Backwards-compatible: first instance keeps its original identifier.
 
 #### [Workspace Auto-Selection](settings.md)
 
