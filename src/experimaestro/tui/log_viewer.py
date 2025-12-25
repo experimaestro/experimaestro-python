@@ -158,15 +158,9 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         Binding("f", "toggle_follow", "Follow"),
         Binding("g", "go_to_top", "Top"),
         Binding("G", "go_to_bottom", "Bottom"),
-        Binding("escape", "dismiss", "Back"),
-        Binding("q", "dismiss", "Quit"),
+        Binding("escape", "close_viewer", "Back", priority=True),
+        Binding("q", "close_viewer", "Quit", priority=True),
     ]
-
-    def on_key(self, event) -> None:
-        """Handle key events directly"""
-        if event.key in ("escape", "q"):
-            event.stop()
-            self.action_dismiss()
 
     def __init__(self, log_files: list[str], job_id: str):
         super().__init__()
@@ -207,9 +201,9 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         for widget in self.log_widgets:
             widget.refresh_content()
 
-    def action_dismiss(self) -> None:
+    def action_close_viewer(self) -> None:
         """Go back to the job detail view"""
-        self.app.pop_screen()
+        self.dismiss()
 
     def action_toggle_follow(self) -> None:
         """Toggle following mode"""

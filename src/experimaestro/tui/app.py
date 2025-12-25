@@ -729,9 +729,9 @@ class ExperimentTUI(App):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit", priority=True),
-        Binding("r", "refresh", "Refresh", priority=True),
-        Binding("escape", "go_back", "Back", priority=True),
+        Binding("q", "quit", "Quit"),
+        Binding("r", "refresh", "Refresh"),
+        Binding("escape", "go_back", "Back"),
         Binding("l", "view_logs", "View Logs"),
     ]
 
