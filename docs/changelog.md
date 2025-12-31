@@ -19,7 +19,7 @@ A new interactive terminal interface built with [Textual](https://textual.textua
 
 ![Jobs screen](img/tui-jobs.png)
 
-![Log screen](img/tui-logs.jpg)
+![Log screen](img/tui-logs.png)
 
 Launch with:
 ```bash
