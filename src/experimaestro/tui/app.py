@@ -1311,7 +1311,7 @@ class OrphanJobsScreen(Screen):
 
     async def _calc_size_worker(self, job_id: str, path):
         """Worker to calculate folder size"""
-        size_bytes = self._get_folder_size(path)
+        size_bytes = await self._get_folder_size_async(path)
         size_str = self._format_size(size_bytes)
         self._size_cache[job_id] = size_str
         self._size_bytes_cache[job_id] = size_bytes
@@ -1325,8 +1325,51 @@ class OrphanJobsScreen(Screen):
         self._calculate_next_size()
 
     @staticmethod
-    def _get_folder_size(path) -> int:
-        """Calculate total size of a folder"""
+    async def _get_folder_size_async(path) -> int:
+        """Calculate total size of a folder using du command if available"""
+        import asyncio
+        import shutil
+        import sys
+
+        # Try using du command for better performance
+        if shutil.which("du"):
+            try:
+                if sys.platform == "darwin":
+                    # macOS: du -sk gives size in KB
+                    proc = await asyncio.create_subprocess_exec(
+                        "du",
+                        "-sk",
+                        str(path),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+                    if proc.returncode == 0 and stdout:
+                        # Output format: "SIZE\tPATH"
+                        size_kb = int(stdout.decode().split()[0])
+                        return size_kb * 1024
+                else:
+                    # Linux: du -sb gives size in bytes
+                    proc = await asyncio.create_subprocess_exec(
+                        "du",
+                        "-sb",
+                        str(path),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+                    if proc.returncode == 0 and stdout:
+                        # Output format: "SIZE\tPATH"
+                        return int(stdout.decode().split()[0])
+            except (asyncio.TimeoutError, ValueError, IndexError, OSError):
+                pass  # Fall back to Python implementation
+
+        # Fallback: Python implementation
+        return OrphanJobsScreen._get_folder_size_sync(path)
+
+    @staticmethod
+    def _get_folder_size_sync(path) -> int:
+        """Calculate total size of a folder using Python (fallback)"""
         total = 0
         try:
             for entry in path.rglob("*"):
