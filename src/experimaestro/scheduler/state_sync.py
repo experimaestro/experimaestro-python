@@ -257,7 +257,7 @@ def _mark_job_failed_on_disk(
         logger.warning("Failed to update disk state for %s: %s", job_path, e)
 
 
-def scan_job_state_from_disk(
+def scan_job_state_from_disk(  # noqa: C901
     job_path: Path, scriptname: str, check_running: bool = True
 ) -> Optional[Dict]:
     """Scan a job directory to determine state from disk files
@@ -342,8 +342,11 @@ def scan_job_state_from_disk(
             try:
                 content = failed_file.read_text().strip()
                 data = json.loads(content)
-                exit_code = data.get("exit_code", 1)
-                failure_reason = data.get("failure_status", "UNKNOWN")
+                if isinstance(data, int):
+                    exit_code = data
+                else:
+                    exit_code = data.get("exit_code", 1)
+                    failure_reason = data.get("failure_status", "UNKNOWN")
             except json.JSONDecodeError:
                 # Legacy integer format
                 try:
@@ -368,13 +371,50 @@ def scan_job_state_from_disk(
             job_id = job_path.name  # Hash hex
             task_id = job_path.parent.name
 
+        # Infer timestamps from file modification times
+        submitted_time = None
+        started_time = None
+        ended_time = None
+
+        # Use params.json mtime as submitted_time
+        params_file = job_path / "params.json"
+        if params_file.exists():
+            try:
+                submitted_time = params_file.stat().st_mtime
+            except OSError:
+                pass
+
+        # Use stdout file (.out) mtime as started_time
+        stdout_file = job_path / f"{scriptname}.out"
+        if stdout_file.exists():
+            try:
+                stdout_stat = stdout_file.stat()
+                # Use creation time if available, otherwise mtime
+                started_time = getattr(
+                    stdout_stat, "st_birthtime", stdout_stat.st_ctime
+                )
+            except OSError:
+                pass
+
+        # Use done/failed file mtime as ended_time
+        if state == "done" and done_file.exists():
+            try:
+                ended_time = done_file.stat().st_mtime
+            except OSError:
+                pass
+        elif state == "error" and failed_file.exists():
+            try:
+                ended_time = failed_file.stat().st_mtime
+            except OSError:
+                pass
+
         return {
             "job_id": job_id,
             "task_id": task_id,
             "state": state,
-            "submitted_time": None,  # Not available from marker files
-            "started_time": None,
-            "ended_time": None,
+            "submitted_time": submitted_time,
+            "started_time": started_time,
+            "ended_time": ended_time,
             "exit_code": exit_code,
             "failure_reason": failure_reason,
             "retry_count": 0,
@@ -382,7 +422,7 @@ def scan_job_state_from_disk(
         }
 
     except Exception as e:
-        logger.warning("Failed to scan job state from %s: %s", job_path, e)
+        logger.exception("Failed to scan job state from %s: %s", job_path, e)
         return None
 
 
@@ -527,6 +567,33 @@ def sync_workspace_from_disk(  # noqa: C901
                 if not jobs_dir.exists():
                     continue
 
+                # Infer experiment run timestamps from jobs directory
+                if write_mode:
+                    try:
+                        from peewee import fn
+
+                        jobs_stat = jobs_dir.stat()
+                        # Use jobs dir creation time as started_at (fallback to mtime)
+                        started_at = datetime.fromtimestamp(
+                            getattr(jobs_stat, "st_birthtime", jobs_stat.st_ctime)
+                        )
+                        # Use jobs dir last modification time as ended_at
+                        ended_at = datetime.fromtimestamp(jobs_stat.st_mtime)
+
+                        # Update experiment run with inferred timestamps
+                        # Use COALESCE to only set started_at if not already set
+                        ExperimentRunModel.update(
+                            started_at=fn.COALESCE(
+                                ExperimentRunModel.started_at, started_at
+                            ),
+                            ended_at=ended_at,
+                        ).where(
+                            (ExperimentRunModel.experiment_id == experiment_id)
+                            & (ExperimentRunModel.run_id == current_run_id)
+                        ).execute()
+                    except OSError:
+                        pass
+
                 # Find all symlinks in experiment jobs directory
                 for symlink_path in jobs_dir.rglob("*"):
                     if not symlink_path.is_symlink():
@@ -582,7 +649,7 @@ def sync_workspace_from_disk(  # noqa: C901
                         job_state = {
                             "job_id": job_id,
                             "task_id": task_id,
-                            "state": "unscheduled",  # Unknown state for broken links
+                            "state": "phantom",  # Job was deleted but symlink remains
                             "submitted_time": None,
                             "started_time": None,
                             "ended_time": None,

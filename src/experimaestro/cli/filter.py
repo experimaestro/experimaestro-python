@@ -145,7 +145,10 @@ quotedString = pp.QuotedString('"', unquoteResults=True) | pp.QuotedString(
     "'", unquoteResults=True
 )
 
-var = l("@state") | l("@name") | pp.Word(pp.alphas)
+# Tag names can contain letters, digits, underscores, and hyphens
+# First character must be a letter, rest can include digits, underscores, hyphens
+tag_name = pp.Word(pp.alphas, pp.alphanums + "_-")
+var = l("@state") | l("@name") | tag_name
 var.setParseAction(VarExpr)
 
 regexExpr = var + tilde + quotedString

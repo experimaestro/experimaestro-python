@@ -321,9 +321,20 @@ def list(workdir: Path):
 @click.option(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
 )
+@click.option(
+    "--sync", is_flag=True, help="Force sync from disk before starting monitor"
+)
 @pass_cfg
-def monitor(workdir: Path, console: bool, port: int):
+def monitor(workdir: Path, console: bool, port: int, sync: bool):
     """Monitor experiments with web UI or console TUI"""
+    # Force sync from disk if requested
+    if sync:
+        from experimaestro.scheduler.state_sync import sync_workspace_from_disk
+
+        cprint("Syncing workspace from disk...", "yellow")
+        sync_workspace_from_disk(workdir, write_mode=True, force=True)
+        cprint("Sync complete", "green")
+
     if console:
         # Use Textual TUI
         from experimaestro.tui import ExperimentTUI
@@ -339,7 +350,8 @@ def monitor(workdir: Path, console: bool, port: int):
         cprint("Press Ctrl+C to stop", "yellow")
 
         state_provider = WorkspaceStateProvider.get_instance(
-            workdir, sync_on_start=True
+            workdir,
+            sync_on_start=not sync,  # Skip auto-sync if we just did a forced one
         )
         settings = ServerSettings()
         settings.port = port

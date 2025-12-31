@@ -44,6 +44,7 @@ dependencies = [
     "peewee >=3.17,<4",
     "psutil >=7,<8",
     "pyparsing >=3.1,<4",
+    "pyperclip >=1.8,<2",
     "pytools >=2023.1.1,<2024",
     "pyyaml >=6.0.1,<7",
     "requests >=2.31,<3",
@@ -123,6 +124,7 @@ packages = ["src/experimaestro"]
 "src/experimaestro/server/data" = "experimaestro/server/data"
 "src/experimaestro/sphinx/static/experimaestro.css" = "experimaestro/sphinx/static/experimaestro.css"
 "src/experimaestro/mkdocs/style.css" = "experimaestro/mkdocs/style.css"
+"src/experimaestro/tui/app.tcss" = "experimaestro/tui/app.tcss"
 
 [tool.pydocstyle]
 match-dir = '(?!tests)(?!resources)(?!docs)[^\.].*'

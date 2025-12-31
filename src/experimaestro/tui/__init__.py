@@ -1,5 +1,8 @@
 """Textual-based TUI for monitoring experiments"""
 
-from .app import ExperimentTUI
+from .app import ExperimaestroUI
 
-__all__ = ["ExperimentTUI"]
+# Backward compatibility alias
+ExperimentTUI = ExperimaestroUI
+
+__all__ = ["ExperimaestroUI", "ExperimentTUI"]

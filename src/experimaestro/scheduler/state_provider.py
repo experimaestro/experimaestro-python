@@ -365,6 +365,8 @@ class MockExperiment(BaseExperiment):
         finished_jobs: int,
         failed_jobs: int,
         updated_at: str,
+        started_at: Optional[float] = None,
+        ended_at: Optional[float] = None,
     ):
         self.workdir = workdir
         self.current_run_id = current_run_id
@@ -372,6 +374,8 @@ class MockExperiment(BaseExperiment):
         self.finished_jobs = finished_jobs
         self.failed_jobs = failed_jobs
         self.updated_at = updated_at
+        self.started_at = started_at
+        self.ended_at = ended_at
 
     @property
     def experiment_id(self) -> str:
@@ -723,6 +727,9 @@ class WorkspaceStateProvider:
             finished_jobs = 0
             failed_jobs = 0
 
+            started_at = None
+            ended_at = None
+
             if exp_model.current_run_id:
                 total_jobs = (
                     JobModel.select()
@@ -751,6 +758,19 @@ class WorkspaceStateProvider:
                     .count()
                 )
 
+                # Get run timestamps
+                try:
+                    run_model = ExperimentRunModel.get(
+                        (ExperimentRunModel.experiment_id == exp_model.experiment_id)
+                        & (ExperimentRunModel.run_id == exp_model.current_run_id)
+                    )
+                    if run_model.started_at:
+                        started_at = run_model.started_at.timestamp()
+                    if run_model.ended_at:
+                        ended_at = run_model.ended_at.timestamp()
+                except ExperimentRunModel.DoesNotExist:
+                    pass
+
             # Compute experiment path from workspace_path and experiment_id
             exp_path = self.workspace_path / "xp" / exp_model.experiment_id
 
@@ -762,6 +782,8 @@ class WorkspaceStateProvider:
                     finished_jobs=finished_jobs,
                     failed_jobs=failed_jobs,
                     updated_at=exp_model.updated_at.isoformat(),
+                    started_at=started_at,
+                    ended_at=ended_at,
                 )
             )
 
@@ -1443,6 +1465,162 @@ class WorkspaceStateProvider:
             if self.clean_job(job, perform=perform):
                 count += 1
         return count
+
+    def delete_job_safely(
+        self, job: MockJob, cascade_orphans: bool = True
+    ) -> tuple[bool, str]:
+        """Delete a job with proper locking and orphan cleanup
+
+        This method is designed for TUI/UI use. It acquires a lock on the job
+        to prevent race conditions, then deletes the job directory and DB entry.
+
+        Args:
+            job: MockJob instance to delete
+            cascade_orphans: If True, clean up orphan partials after deletion
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        import fasteners
+        from shutil import rmtree
+
+        # Check if job is running
+        if job.state.running():
+            return False, "Cannot delete a running job"
+
+        # Check if path exists
+        if not job.path or not job.path.exists():
+            # Just delete from database if path doesn't exist
+            if not self.read_only:
+                self.delete_job(job.identifier, job.experiment_id, job.run_id)
+            if cascade_orphans:
+                self.cleanup_orphan_partials(perform=True)
+            return True, f"Job {job.identifier} deleted (directory already gone)"
+
+        # Try to acquire job lock (non-blocking)
+        # Lock file is typically {script_name}.lock, but we use .lock for general locking
+        lock_path = job.path / ".lock"
+        lock = fasteners.InterProcessLock(str(lock_path))
+
+        if not lock.acquire(blocking=False):
+            return False, "Job is currently locked (possibly running)"
+
+        try:
+            # Delete all files except the lock file
+            for item in job.path.iterdir():
+                if item.name != ".lock":
+                    if item.is_dir():
+                        rmtree(item)
+                    else:
+                        item.unlink()
+
+            # Mark job as "phantom" in database (don't delete - keep as phantom)
+            if not self.read_only:
+                from datetime import datetime
+
+                JobModel.update(
+                    state="phantom",
+                    updated_at=datetime.now(),
+                ).where(
+                    (JobModel.job_id == job.identifier)
+                    & (JobModel.experiment_id == job.experiment_id)
+                    & (JobModel.run_id == job.run_id)
+                ).execute()
+
+        finally:
+            lock.release()
+            # Now delete the lock file and directory
+            try:
+                lock_path.unlink(missing_ok=True)
+                if job.path.exists() and not any(job.path.iterdir()):
+                    job.path.rmdir()
+            except Exception as e:
+                logger.warning("Could not clean up lock file: %s", e)
+
+        # Clean up orphan partials if requested
+        if cascade_orphans:
+            self.cleanup_orphan_partials(perform=True)
+
+        return True, f"Job {job.identifier} deleted successfully"
+
+    @_with_db_context
+    def delete_experiment(
+        self, experiment_id: str, delete_jobs: bool = False
+    ) -> tuple[bool, str]:
+        """Delete an experiment from the database
+
+        Args:
+            experiment_id: Experiment identifier
+            delete_jobs: If True, also delete associated jobs (default: False)
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        from shutil import rmtree
+
+        if self.read_only:
+            return False, "Cannot delete in read-only mode"
+
+        # Get all jobs for this experiment
+        jobs = self.get_jobs(experiment_id)
+        running_jobs = [j for j in jobs if j.state.running()]
+
+        if running_jobs:
+            return (
+                False,
+                f"Cannot delete experiment with {len(running_jobs)} running job(s)",
+            )
+
+        # Delete jobs if requested
+        if delete_jobs:
+            for job in jobs:
+                success, msg = self.delete_job_safely(job, cascade_orphans=False)
+                if not success:
+                    logger.warning("Failed to delete job %s: %s", job.identifier, msg)
+
+        # Delete experiment runs
+        ExperimentRunModel.delete().where(
+            ExperimentRunModel.experiment_id == experiment_id
+        ).execute()
+
+        # Delete experiment
+        ExperimentModel.delete().where(
+            ExperimentModel.experiment_id == experiment_id
+        ).execute()
+
+        # Optionally delete experiment directory
+        exp_path = self.workspace_path / "xp" / experiment_id
+        if exp_path.exists():
+            try:
+                rmtree(exp_path)
+            except Exception as e:
+                logger.warning("Could not delete experiment directory: %s", e)
+
+        # Clean up orphan partials
+        self.cleanup_orphan_partials(perform=True)
+
+        return True, f"Experiment {experiment_id} deleted successfully"
+
+    @_with_db_context
+    def get_orphan_jobs(self) -> List[MockJob]:
+        """Find jobs that have no associated experiment in the database
+
+        Returns:
+            List of MockJob instances for orphan jobs
+        """
+        # Get all jobs
+        all_jobs = self.get_all_jobs()
+
+        # Get all experiment IDs
+        experiments = self.get_experiments()
+        experiment_ids = {exp.experiment_id for exp in experiments}
+
+        # Find jobs with no matching experiment
+        orphan_jobs = [
+            job for job in all_jobs if job.experiment_id not in experiment_ids
+        ]
+
+        return orphan_jobs
 
     # Service operations
 

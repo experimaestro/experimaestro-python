@@ -15,13 +15,15 @@ from textual.widgets import (
     RichLog,
     Button,
     Static,
+    Input,
 )
 from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 from textual.message import Message
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual import events
+from rich.text import Text
 from experimaestro.scheduler.state_provider import (
     WorkspaceStateProvider,
     StateEvent,
@@ -30,48 +32,23 @@ from experimaestro.scheduler.state_provider import (
 from experimaestro.tui.log_viewer import LogViewerScreen
 
 
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string"""
+    if seconds < 0:
+        return "-"
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    elif seconds < 86400:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    else:
+        return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
+
+
 class QuitConfirmScreen(ModalScreen[bool]):
     """Modal screen for quit confirmation"""
-
-    CSS = """
-    QuitConfirmScreen {
-        align: center middle;
-    }
-
-    #quit-dialog {
-        width: 60;
-        height: auto;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-
-    #quit-title {
-        text-align: center;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #quit-message {
-        margin-bottom: 1;
-    }
-
-    #quit-warning {
-        color: $warning;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-
-    #quit-buttons {
-        width: 100%;
-        height: auto;
-        align: center middle;
-    }
-
-    #quit-buttons Button {
-        margin: 0 1;
-    }
-    """
 
     def __init__(self, has_active_experiment: bool = False):
         super().__init__()
@@ -101,19 +78,82 @@ class QuitConfirmScreen(ModalScreen[bool]):
             self.dismiss(False)
 
 
-def get_status_text(status: str):
-    if status == "done":
-        status_text = "✓ Done"
-    elif status == "error":
-        status_text = "❌ Failed"
-    elif status == "running":
-        status_text = "⏳ Running"
-    elif status == "unscheduled":
-        status_text = "📆 Unscheduled"
-    else:
-        status_text = status
+class DeleteConfirmScreen(ModalScreen[bool]):
+    """Modal screen for delete confirmation"""
 
-    return status_text
+    def __init__(
+        self, item_type: str, item_name: str, warning: Optional[str] = None
+    ) -> None:
+        super().__init__()
+        self.item_type = item_type
+        self.item_name = item_name
+        self.warning = warning
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="delete-dialog"):
+            yield Static(f"Delete {self.item_type}?", id="delete-title")
+            yield Static(
+                f"This will permanently delete: {self.item_name}", id="delete-message"
+            )
+
+            if self.warning:
+                yield Static(f"Warning: {self.warning}", id="delete-warning")
+
+            with Horizontal(id="delete-buttons"):
+                yield Button("Delete", variant="error", id="delete-yes")
+                yield Button("Cancel", variant="primary", id="delete-no")
+
+    def on_mount(self) -> None:
+        """Focus cancel button by default"""
+        self.query_one("#delete-no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "delete-yes":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+
+class KillConfirmScreen(ModalScreen[bool]):
+    """Modal screen for kill confirmation"""
+
+    def __init__(self, item_type: str, item_name: str) -> None:
+        super().__init__()
+        self.item_type = item_type
+        self.item_name = item_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="kill-dialog"):
+            yield Static(f"Kill {self.item_type}?", id="kill-title")
+            yield Static(f"This will terminate: {self.item_name}", id="kill-message")
+
+            with Horizontal(id="kill-buttons"):
+                yield Button("Kill", variant="warning", id="kill-yes")
+                yield Button("Cancel", variant="primary", id="kill-no")
+
+    def on_mount(self) -> None:
+        """Focus cancel button by default"""
+        self.query_one("#kill-no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "kill-yes":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+
+def get_status_icon(status: str):
+    if status == "done":
+        return "✓"
+    elif status == "error":
+        return "❌"
+    elif status == "running":
+        return "▶"
+    elif status == "waiting":
+        return "⌛"  # Waiting for dependencies
+    else:
+        # phantom, unscheduled or unknown
+        return "👻"
 
 
 class CaptureLog(RichLog):
@@ -132,6 +172,11 @@ class CaptureLog(RichLog):
 class ExperimentsList(Widget):
     """Widget displaying list of experiments"""
 
+    BINDINGS = [
+        Binding("d", "delete_experiment", "Delete", show=False),
+        Binding("k", "kill_experiment", "Kill", show=False),
+    ]
+
     current_experiment: reactive[Optional[str]] = reactive(None)
     collapsed: reactive[bool] = reactive(False)
 
@@ -139,6 +184,28 @@ class ExperimentsList(Widget):
         super().__init__()
         self.state_provider = state_provider
         self.experiments = []
+
+    def _get_selected_experiment_id(self) -> Optional[str]:
+        """Get the experiment ID from the currently selected row"""
+        table = self.query_one("#experiments-table", DataTable)
+        if table.cursor_row is None:
+            return None
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            return str(row_key.value)
+        return None
+
+    def action_delete_experiment(self) -> None:
+        """Request to delete the selected experiment"""
+        exp_id = self._get_selected_experiment_id()
+        if exp_id:
+            self.post_message(DeleteExperimentRequest(exp_id))
+
+    def action_kill_experiment(self) -> None:
+        """Request to kill all running jobs in the selected experiment"""
+        exp_id = self._get_selected_experiment_id()
+        if exp_id:
+            self.post_message(KillExperimentRequest(exp_id))
 
     def compose(self) -> ComposeResult:
         # Collapsed header (hidden initially)
@@ -156,6 +223,8 @@ class ExperimentsList(Widget):
         table.add_column("ID", key="id")
         table.add_column("Jobs", key="jobs")
         table.add_column("Status", key="status")
+        table.add_column("Started", key="started")
+        table.add_column("Duration", key="duration")
         self.refresh_experiments()
 
         # If there's only one experiment, automatically select it
@@ -186,6 +255,9 @@ class ExperimentsList(Widget):
         existing_keys = set(table.rows.keys())
         current_exp_ids = set()
 
+        from datetime import datetime
+        import time as time_module
+
         for exp in self.experiments:
             exp_id = exp.experiment_id
             current_exp_ids.add(exp_id)
@@ -199,23 +271,48 @@ class ExperimentsList(Widget):
             elif finished == total and total > 0:
                 status = "✓ Done"
             elif finished < total:
-                status = f"⏳ {finished}/{total}"
+                status = f"▶ {finished}/{total}"
             else:
                 status = "Empty"
 
             jobs_text = f"{finished}/{total}"
+
+            # Format started time
+            if exp.started_at:
+                started = datetime.fromtimestamp(exp.started_at).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
+            else:
+                started = "-"
+
+            # Calculate duration
+            duration = "-"
+            if exp.started_at:
+                if exp.ended_at:
+                    elapsed = exp.ended_at - exp.started_at
+                else:
+                    # Still running - show elapsed time
+                    elapsed = time_module.time() - exp.started_at
+                # Format duration
+                duration = format_duration(elapsed)
 
             # Update existing row or add new one
             if exp_id in existing_keys:
                 table.update_cell(exp_id, "id", exp_id, update_width=True)
                 table.update_cell(exp_id, "jobs", jobs_text, update_width=True)
                 table.update_cell(exp_id, "status", status, update_width=True)
+                table.update_cell(exp_id, "started", started, update_width=True)
+                table.update_cell(exp_id, "duration", duration, update_width=True)
             else:
-                table.add_row(exp_id, jobs_text, status, key=exp_id)
+                table.add_row(exp_id, jobs_text, status, started, duration, key=exp_id)
 
         # Remove rows for experiments that no longer exist
         for old_exp_id in existing_keys - current_exp_ids:
             table.remove_row(old_exp_id)
+
+        # Update collapsed header if viewing an experiment
+        if self.collapsed and self.current_experiment:
+            self._update_collapsed_header(self.current_experiment)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle experiment selection"""
@@ -224,9 +321,8 @@ class ExperimentsList(Widget):
             self.collapse_to_experiment(self.current_experiment)
             self.post_message(ExperimentSelected(str(event.row_key.value)))
 
-    def collapse_to_experiment(self, experiment_id: str) -> None:
-        """Collapse the experiments list to show only the selected experiment"""
-        # Find experiment info
+    def _update_collapsed_header(self, experiment_id: str) -> None:
+        """Update the collapsed experiment header with current stats"""
         exp_info = next(
             (exp for exp in self.experiments if exp.experiment_id == experiment_id),
             None,
@@ -234,7 +330,6 @@ class ExperimentsList(Widget):
         if not exp_info:
             return
 
-        # Update collapsed header
         total = exp_info.total_jobs
         finished = exp_info.finished_jobs
         failed = exp_info.failed_jobs
@@ -244,12 +339,16 @@ class ExperimentsList(Widget):
         elif finished == total and total > 0:
             status = "✓ Done"
         elif finished < total:
-            status = f"⏳ {finished}/{total}"
+            status = f"▶ {finished}/{total}"
         else:
             status = "Empty"
 
         collapsed_label = self.query_one("#collapsed-experiment-info", Label)
-        collapsed_label.update(f"📊 {experiment_id} - {status} (click to expand)")
+        collapsed_label.update(f"📊 {experiment_id} - {status} (click to go back)")
+
+    def collapse_to_experiment(self, experiment_id: str) -> None:
+        """Collapse the experiments list to show only the selected experiment"""
+        self._update_collapsed_header(experiment_id)
 
         # Hide table, show collapsed header
         self.query_one("#experiments-table-container").add_class("hidden")
@@ -313,6 +412,57 @@ class ViewJobLogs(Message):
         self.task_id = task_id
 
 
+class ViewJobLogsRequest(Message):
+    """Message sent when user requests to view logs from jobs table"""
+
+    def __init__(self, job_id: str, experiment_id: str) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.experiment_id = experiment_id
+
+
+class DeleteJobRequest(Message):
+    """Message sent when user requests to delete a job"""
+
+    def __init__(self, job_id: str, experiment_id: str) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.experiment_id = experiment_id
+
+
+class DeleteExperimentRequest(Message):
+    """Message sent when user requests to delete an experiment"""
+
+    def __init__(self, experiment_id: str) -> None:
+        super().__init__()
+        self.experiment_id = experiment_id
+
+
+class KillJobRequest(Message):
+    """Message sent when user requests to kill a running job"""
+
+    def __init__(self, job_id: str, experiment_id: str) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.experiment_id = experiment_id
+
+
+class KillExperimentRequest(Message):
+    """Message sent when user requests to kill all running jobs in an experiment"""
+
+    def __init__(self, experiment_id: str) -> None:
+        super().__init__()
+        self.experiment_id = experiment_id
+
+
+class FilterChanged(Message):
+    """Message sent when search filter changes"""
+
+    def __init__(self, filter_fn) -> None:
+        super().__init__()
+        self.filter_fn = filter_fn
+
+
 class JobDetailView(Widget):
     """Widget displaying detailed job information"""
 
@@ -372,8 +522,10 @@ class JobDetailView(Widget):
         self.query_one("#job-id-label", Label).update(f"Job ID: {job.identifier}")
         self.query_one("#job-task-label", Label).update(f"Task: {job.task_id}")
 
-        # Format status
-        status_text = get_status_text(job.state.name if job.state else "unknown")
+        # Format status with icon and name
+        status_name = job.state.name if job.state else "unknown"
+        status_icon = get_status_icon(status_name)
+        status_text = f"{status_icon} {status_name}"
 
         self.query_one("#job-status-label", Label).update(f"Status: {status_text}")
 
@@ -389,19 +541,6 @@ class JobDetailView(Widget):
             if ts:
                 return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
             return "-"
-
-        def format_duration(seconds: float) -> str:
-            if seconds < 0:
-                return "-"
-            seconds = int(seconds)
-            if seconds < 60:
-                return f"{seconds}s"
-            elif seconds < 3600:
-                return f"{seconds // 60}m {seconds % 60}s"
-            elif seconds < 86400:
-                return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
-            else:
-                return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
 
         submitted = format_time(job.submittime)
         start = format_time(job.starttime)
@@ -462,35 +601,385 @@ class JobDetailView(Widget):
             self.query_one("#job-logs-hint", Label).update("")
 
 
-class JobsTable(Widget):
+class SearchBar(Widget):
+    """Search bar widget with filter hints for filtering jobs"""
+
+    visible: reactive[bool] = reactive(False)
+    _keep_filter: bool = False  # Flag to keep filter when hiding
+    _query_valid: bool = False  # Track if current query is valid
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.filter_fn = None
+        self.active_query = ""  # Store the active query text
+
+    def compose(self) -> ComposeResult:
+        # Active filter indicator (shown when filter active but bar hidden)
+        yield Static("", id="active-filter")
+        # Search input container
+        with Vertical(id="search-container"):
+            yield Input(
+                placeholder="Filter: @state = 'done', @name ~ 'pattern', tag = 'value'",
+                id="search-input",
+            )
+            yield Static(
+                "Syntax: @state = 'done' | @name ~ 'regex' | tag = 'value' | and/or",
+                id="search-hints",
+            )
+            yield Static("", id="search-error")
+
+    def on_mount(self) -> None:
+        """Initialize visibility state"""
+        # Start with everything hidden
+        self.display = False
+        self.query_one("#search-container").display = False
+        self.query_one("#active-filter").display = False
+        self.query_one("#search-error").display = False
+
+    def watch_visible(self, visible: bool) -> None:
+        """Show/hide search bar"""
+        search_container = self.query_one("#search-container")
+        active_filter = self.query_one("#active-filter")
+        error_widget = self.query_one("#search-error")
+
+        if visible:
+            self.display = True
+            search_container.display = True
+            active_filter.display = False
+            self.query_one("#search-input", Input).focus()
+        else:
+            if not self._keep_filter:
+                self.query_one("#search-input", Input).value = ""
+                self.filter_fn = None
+                self.active_query = ""
+                self._query_valid = False
+            self._keep_filter = False
+
+            # Show/hide based on whether filter is active
+            if self.filter_fn is not None:
+                # Filter active - show indicator, hide input
+                self.display = True
+                search_container.display = False
+                error_widget.display = False
+                active_filter.update(
+                    f"Filter: {self.active_query} (/ to edit, c to clear)"
+                )
+                active_filter.display = True
+            else:
+                # No filter - hide everything including this widget
+                self.display = False
+                search_container.display = False
+                active_filter.display = False
+                error_widget.display = False
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Parse filter expression when input changes"""
+        query = event.value.strip()
+        input_widget = self.query_one("#search-input", Input)
+        error_widget = self.query_one("#search-error", Static)
+
+        if not query:
+            self.filter_fn = None
+            self._query_valid = False
+            self.post_message(FilterChanged(None))
+            input_widget.remove_class("error")
+            input_widget.remove_class("valid")
+            error_widget.display = False
+            return
+
+        try:
+            from experimaestro.cli.filter import createFilter
+
+            self.filter_fn = createFilter(query)
+            self._query_valid = True
+            self.active_query = query
+            self.post_message(FilterChanged(self.filter_fn))
+            input_widget.remove_class("error")
+            input_widget.add_class("valid")
+            error_widget.display = False
+        except Exception as e:
+            self.filter_fn = None
+            self._query_valid = False
+            self.post_message(FilterChanged(None))
+            input_widget.remove_class("valid")
+            input_widget.add_class("error")
+            error_widget.update(f"Invalid query: {str(e)[:50]}")
+            error_widget.display = True
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Apply filter and hide search bar (only if query is valid)"""
+        if self._query_valid and self.filter_fn is not None:
+            # Set flag to keep filter when hiding
+            self._keep_filter = True
+            self.visible = False
+            # Post message to focus jobs table
+            self.post_message(SearchApplied())
+        # If invalid, do nothing (keep input focused for correction)
+
+
+class SearchApplied(Message):
+    """Message sent when search filter is applied via Enter"""
+
+    pass
+
+
+class JobsTable(Vertical):
     """Widget displaying jobs for selected experiment"""
+
+    BINDINGS = [
+        Binding("d", "delete_job", "Delete", show=False),
+        Binding("k", "kill_job", "Kill", show=False),
+        Binding("l", "view_logs", "Logs"),
+        Binding("f", "copy_path", "Copy Path", show=False),
+        Binding("/", "toggle_search", "Search"),
+        Binding("c", "clear_filter", "Clear", show=False),
+        Binding("S", "sort_by_status", "Sort ⚑", show=False),
+        Binding("T", "sort_by_task", "Sort Task", show=False),
+        Binding("D", "sort_by_submitted", "Sort Date", show=False),
+        Binding("escape", "clear_search", show=False, priority=True),
+    ]
+
+    # Track current sort state
+    _sort_column: Optional[str] = None
+    _sort_reverse: bool = False
+    _needs_rebuild: bool = True  # Start with rebuild needed
 
     def __init__(self, state_provider: WorkspaceStateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
+        self.filter_fn = None
         self.current_experiment: Optional[str] = None
 
     def compose(self) -> ComposeResult:
+        yield SearchBar()
         yield Label("Jobs", classes="section-title")
         yield DataTable(id="jobs-table", cursor_type="row")
+
+    def action_toggle_search(self) -> None:
+        """Toggle search bar visibility"""
+        search_bar = self.query_one(SearchBar)
+        search_bar.visible = not search_bar.visible
+
+    def action_clear_filter(self) -> None:
+        """Clear the active filter"""
+        if self.filter_fn is not None:
+            search_bar = self.query_one(SearchBar)
+            search_bar.query_one("#search-input", Input).value = ""
+            search_bar.filter_fn = None
+            search_bar.active_query = ""
+            search_bar._query_valid = False
+            # Hide the SearchBar completely
+            search_bar.display = False
+            search_bar.query_one("#search-container").display = False
+            search_bar.query_one("#active-filter").display = False
+            search_bar.query_one("#search-error").display = False
+            self.filter_fn = None
+            self.refresh_jobs()
+            self.notify("Filter cleared", severity="information")
+
+    def action_sort_by_status(self) -> None:
+        """Sort jobs by status"""
+        if self._sort_column == "status":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "status"
+            self._sort_reverse = False
+        self._needs_rebuild = True
+        self._update_column_headers()
+        self.refresh_jobs()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted by status ({order})", severity="information")
+
+    def action_sort_by_task(self) -> None:
+        """Sort jobs by task"""
+        if self._sort_column == "task":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "task"
+            self._sort_reverse = False
+        self._needs_rebuild = True
+        self._update_column_headers()
+        self.refresh_jobs()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted by task ({order})", severity="information")
+
+    def action_sort_by_submitted(self) -> None:
+        """Sort jobs by submission time"""
+        if self._sort_column == "submitted":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "submitted"
+            self._sort_reverse = False
+        self._needs_rebuild = True
+        self._update_column_headers()
+        self.refresh_jobs()
+        order = "newest first" if self._sort_reverse else "oldest first"
+        self.notify(f"Sorted by date ({order})", severity="information")
+
+    def action_clear_search(self) -> None:
+        """Handle escape: hide search bar if visible, or go back"""
+        search_bar = self.query_one(SearchBar)
+        if search_bar.visible:
+            # Search bar visible - hide it and clear filter
+            search_bar.visible = False
+            self.filter_fn = None
+            self.refresh_jobs()
+            # Focus the jobs table
+            self.query_one("#jobs-table", DataTable).focus()
+        else:
+            # Search bar hidden - go back (keep filter)
+            self.app.action_go_back()
+
+    def on_filter_changed(self, message: FilterChanged) -> None:
+        """Apply new filter"""
+        self.filter_fn = message.filter_fn
+        self.refresh_jobs()
+
+    def on_search_applied(self, message: SearchApplied) -> None:
+        """Focus jobs table when search is applied"""
+        self.query_one("#jobs-table", DataTable).focus()
+
+    def _get_selected_job_id(self) -> Optional[str]:
+        """Get the job ID from the currently selected row"""
+        table = self.query_one("#jobs-table", DataTable)
+        if table.cursor_row is None:
+            return None
+        row_key = table.get_row_at(table.cursor_row)
+        if row_key:
+            # The first column is job_id
+            return str(table.get_row_at(table.cursor_row)[0])
+        return None
+
+    def action_delete_job(self) -> None:
+        """Request to delete the selected job"""
+        table = self.query_one("#jobs-table", DataTable)
+        if table.cursor_row is None or not self.current_experiment:
+            return
+
+        # Get job ID from the row key
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            self.post_message(DeleteJobRequest(job_id, self.current_experiment))
+
+    def action_kill_job(self) -> None:
+        """Request to kill the selected job"""
+        table = self.query_one("#jobs-table", DataTable)
+        if table.cursor_row is None or not self.current_experiment:
+            return
+
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            self.post_message(KillJobRequest(job_id, self.current_experiment))
+
+    def action_view_logs(self) -> None:
+        """Request to view logs for the selected job"""
+        table = self.query_one("#jobs-table", DataTable)
+        if table.cursor_row is None or not self.current_experiment:
+            return
+
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            self.post_message(ViewJobLogsRequest(job_id, self.current_experiment))
+
+    def action_copy_path(self) -> None:
+        """Copy the job folder path to clipboard"""
+        import pyperclip
+
+        table = self.query_one("#jobs-table", DataTable)
+        if table.cursor_row is None or not self.current_experiment:
+            return
+
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            job = self.state_provider.get_job(job_id, self.current_experiment)
+            if job and job.path:
+                try:
+                    pyperclip.copy(str(job.path))
+                    self.notify(f"Path copied: {job.path}", severity="information")
+                except Exception as e:
+                    self.notify(f"Failed to copy: {e}", severity="error")
+            else:
+                self.notify("No path available for this job", severity="warning")
+
+    # Status sort order (for sorting by status)
+    STATUS_ORDER = {
+        "running": 0,
+        "waiting": 1,
+        "error": 2,
+        "done": 3,
+        "unscheduled": 4,
+        "phantom": 5,
+    }
+
+    # Column key to display name mapping
+    COLUMN_LABELS = {
+        "job_id": "ID",
+        "task": "Task",
+        "status": "⚑",
+        "tags": "Tags",
+        "submitted": "Submitted",
+        "duration": "Duration",
+    }
+
+    # Columns that support sorting (column key -> sort column name)
+    SORTABLE_COLUMNS = {
+        "status": "status",
+        "task": "task",
+        "submitted": "submitted",
+    }
 
     def on_mount(self) -> None:
         """Initialize the jobs table"""
         table = self.query_one("#jobs-table", DataTable)
-        table.add_column("Job ID", key="job_id", width=8)
+        table.add_column("ID", key="job_id")
         table.add_column("Task", key="task")
-        table.add_column("Status", key="status")
-        table.add_column("Progress", key="progress")
+        table.add_column("⚑", key="status", width=6)
+        table.add_column("Tags", key="tags")
         table.add_column("Submitted", key="submitted")
         table.add_column("Duration", key="duration")
         table.cursor_type = "row"
+        table.zebra_stripes = True
+
+    def _update_column_headers(self) -> None:
+        """Update column headers with sort indicators"""
+        table = self.query_one("#jobs-table", DataTable)
+        for column in table.columns.values():
+            col_key = str(column.key.value) if column.key else None
+            if col_key and col_key in self.COLUMN_LABELS:
+                label = self.COLUMN_LABELS[col_key]
+                sort_col = self.SORTABLE_COLUMNS.get(col_key)
+                if sort_col and self._sort_column == sort_col:
+                    # Add sort indicator
+                    indicator = "▼" if self._sort_reverse else "▲"
+                    new_label = f"{label} {indicator}"
+                else:
+                    new_label = label
+                column.label = new_label
+
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        """Handle column header click for sorting"""
+        col_key = str(event.column_key.value) if event.column_key else None
+        if col_key and col_key in self.SORTABLE_COLUMNS:
+            sort_col = self.SORTABLE_COLUMNS[col_key]
+            if self._sort_column == sort_col:
+                self._sort_reverse = not self._sort_reverse
+            else:
+                self._sort_column = sort_col
+                self._sort_reverse = False
+            self._needs_rebuild = True
+            self._update_column_headers()
+            self.refresh_jobs()
 
     def set_experiment(self, experiment_id: Optional[str]) -> None:
         """Set the current experiment and refresh jobs"""
         self.current_experiment = experiment_id
         self.refresh_jobs()
 
-    def refresh_jobs(self) -> None:
+    def refresh_jobs(self) -> None:  # noqa: C901
         """Refresh the jobs list from state provider"""
         table = self.query_one("#jobs-table", DataTable)
 
@@ -500,40 +989,91 @@ class JobsTable(Widget):
         jobs = self.state_provider.get_jobs(self.current_experiment)
         self.log(f"Refreshing jobs for {self.current_experiment}: {len(jobs)} jobs")
 
-        # Sort jobs by submission time (oldest first)
-        # Jobs without submittime go to the end
-        jobs.sort(key=lambda j: j.submittime or float("inf"))
+        # Apply filter if set
+        if self.filter_fn:
+            jobs = [j for j in jobs if self.filter_fn(j)]
+            self.log(f"After filter: {len(jobs)} jobs")
 
-        # Get existing row keys
-        existing_keys = set(table.rows.keys())
-        current_job_ids = set()
+        # Sort jobs based on selected column
+        if self._sort_column == "status":
+            # Sort by status priority
+            jobs.sort(
+                key=lambda j: self.STATUS_ORDER.get(
+                    j.state.name if j.state else "unknown", 99
+                ),
+                reverse=self._sort_reverse,
+            )
+        elif self._sort_column == "task":
+            # Sort by task name
+            jobs.sort(
+                key=lambda j: j.task_id or "",
+                reverse=self._sort_reverse,
+            )
+        else:
+            # Default: sort by submission time (oldest first by default)
+            # Jobs without submittime go to the end
+            jobs.sort(
+                key=lambda j: j.submittime or float("inf"),
+                reverse=self._sort_reverse,
+            )
 
+        # Check if we need to rebuild (new/removed jobs, or status changed when sorting by status)
+        from datetime import datetime
+        import time as time_module
+
+        existing_keys = {str(k.value) for k in table.rows.keys()}
+        current_job_ids = {job.identifier for job in jobs}
+
+        # Check if job set changed
+        jobs_changed = existing_keys != current_job_ids
+
+        # Check if status changed when sorting by status
+        status_changed = False
+        if self._sort_column == "status" and not jobs_changed:
+            current_statuses = {
+                job.identifier: (job.state.name if job.state else "unknown")
+                for job in jobs
+            }
+            if (
+                hasattr(self, "_last_statuses")
+                and self._last_statuses != current_statuses
+            ):
+                status_changed = True
+            self._last_statuses = current_statuses
+
+        needs_rebuild = self._needs_rebuild or jobs_changed or status_changed
+        self._needs_rebuild = False
+
+        # Build row data for all jobs
+        rows_data = {}
         for job in jobs:
             job_id = job.identifier
-            current_job_ids.add(job_id)
             task_id = job.task_id
             status = job.state.name if job.state else "unknown"
 
-            # Format status with icon
-            status_text = get_status_text(status)
-
-            # Format progress - only show for running jobs
-            if job.state and job.state.finished():
-                # Don't show progress for finished jobs
-                progress_text = "-"
-            else:
+            # Format status with icon (and progress % if running)
+            if status == "running":
                 progress_list = job.progress or []
                 if progress_list:
-                    # Get the last progress entry
                     last_progress = progress_list[-1]
                     progress_pct = last_progress.get("progress", 0) * 100
-                    progress_text = f"{progress_pct:.0f}%"
+                    status_text = f"▶ {progress_pct:.0f}%"
                 else:
-                    progress_text = "-"
+                    status_text = "▶"
+            else:
+                status_text = get_status_icon(status)
 
-            # Format timestamps
-            from datetime import datetime
-            import time as time_module
+            # Format tags - show all tags on single line
+            tags = job.tags
+            if tags:
+                tags_text = Text()
+                for i, (k, v) in enumerate(tags.items()):
+                    if i > 0:
+                        tags_text.append(", ")
+                    tags_text.append(f"{k}", style="bold")
+                    tags_text.append(f"={v}")
+            else:
+                tags_text = Text("-")
 
             submitted = "-"
             if job.submittime:
@@ -547,41 +1087,56 @@ class JobsTable(Widget):
             duration = "-"
             if start:
                 if end:
-                    # Job finished - show total duration
                     elapsed = end - start
                 else:
-                    # Job still running - show elapsed time so far
                     elapsed = time_module.time() - start
-                # Format duration as human-readable
                 duration = self._format_duration(elapsed)
 
-            row_data = (
-                job_id,
+            job_id_short = job_id[:7]
+            rows_data[job_id] = (
+                job_id_short,
                 task_id,
                 status_text,
-                progress_text,
+                tags_text,
                 submitted,
                 duration,
             )
 
-            # Update existing row or add new one
-            if job_id in existing_keys:
-                table.update_cell(job_id, "job_id", job_id, update_width=True)
+        if needs_rebuild:
+            # Full rebuild needed - save selection, clear, rebuild
+            selected_key = None
+            if table.cursor_row is not None and table.row_count > 0:
+                try:
+                    row_keys = list(table.rows.keys())
+                    if table.cursor_row < len(row_keys):
+                        selected_key = str(row_keys[table.cursor_row].value)
+                except (IndexError, KeyError):
+                    pass
+
+            table.clear()
+            new_cursor_row = None
+            for idx, job in enumerate(jobs):
+                job_id = job.identifier
+                table.add_row(*rows_data[job_id], key=job_id)
+                if selected_key == job_id:
+                    new_cursor_row = idx
+
+            if new_cursor_row is not None and table.row_count > 0:
+                table.move_cursor(row=new_cursor_row)
+        else:
+            # Just update cells in place - no reordering needed
+            for job_id, row_data in rows_data.items():
+                job_id_short, task_id, status_text, tags_text, submitted, duration = (
+                    row_data
+                )
+                table.update_cell(job_id, "job_id", job_id_short, update_width=True)
                 table.update_cell(job_id, "task", task_id, update_width=True)
                 table.update_cell(job_id, "status", status_text, update_width=True)
-                table.update_cell(job_id, "progress", progress_text, update_width=True)
+                table.update_cell(job_id, "tags", tags_text, update_width=True)
                 table.update_cell(job_id, "submitted", submitted, update_width=True)
                 table.update_cell(job_id, "duration", duration, update_width=True)
-                self.log(f"Updated job row: {job_id}")
-            else:
-                table.add_row(*row_data, key=job_id)
-                self.log(f"Added job row: {job_id}")
 
-        # Remove rows for jobs that no longer exist
-        for old_job_id in existing_keys - current_job_ids:
-            table.remove_row(old_job_id)
-
-        self.log(f"Jobs table now has {table.row_count} rows")
+        self.log(f"Jobs table now has {table.row_count} rows (rebuild={needs_rebuild})")
 
     def _format_duration(self, seconds: float) -> str:
         """Format duration in seconds to human-readable string"""
@@ -611,128 +1166,392 @@ class JobsTable(Widget):
             self.post_message(JobSelected(job_id, self.current_experiment))
 
 
-class ExperimentTUI(App):
+class SizeCalculated(Message):
+    """Message sent when a folder size has been calculated"""
+
+    def __init__(self, job_id: str, size: str, size_bytes: int) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.size = size
+        self.size_bytes = size_bytes
+
+
+class OrphanJobsScreen(Screen):
+    """Screen for viewing and managing orphan jobs"""
+
+    BINDINGS = [
+        Binding("d", "delete_selected", "Delete"),
+        Binding("D", "delete_all", "Delete All", key_display="D"),
+        Binding("escape", "go_back", "Back"),
+        Binding("q", "go_back", "Quit"),
+        Binding("r", "refresh", "Refresh"),
+        Binding("f", "copy_path", "Copy Path", show=False),
+        Binding("T", "sort_by_task", "Sort Task", show=False),
+        Binding("Z", "sort_by_size", "Sort Size", show=False),
+    ]
+
+    _size_cache: dict = {}  # Class-level cache (formatted strings)
+    _size_bytes_cache: dict = {}  # Class-level cache (raw bytes for sorting)
+
+    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+        super().__init__()
+        self.state_provider = state_provider
+        self.orphan_jobs = []
+        self._pending_jobs = []  # Jobs waiting for size calculation
+        self._sort_column: Optional[str] = None
+        self._sort_reverse: bool = False
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with Vertical(id="orphan-container"):
+            yield Static("Orphan Jobs", id="orphan-title")
+            yield Static("", id="orphan-stats")
+            yield DataTable(id="orphan-table", cursor_type="row")
+            yield Static("", id="orphan-job-info")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Initialize the orphan jobs table"""
+        table = self.query_one("#orphan-table", DataTable)
+        table.add_column("⚑", key="status", width=3)
+        table.add_column("Job ID", key="job_id", width=10)
+        table.add_column("Task", key="task")
+        table.add_column("Size", key="size", width=10)
+        self.refresh_orphans()
+
+    def action_sort_by_task(self) -> None:
+        """Sort by task name"""
+        if self._sort_column == "task":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "task"
+            self._sort_reverse = False
+        self._rebuild_table()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted by task ({order})", severity="information")
+
+    def action_sort_by_size(self) -> None:
+        """Sort by size"""
+        if self._sort_column == "size":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "size"
+            self._sort_reverse = True  # Default: largest first
+        self._rebuild_table()
+        order = "largest first" if self._sort_reverse else "smallest first"
+        self.notify(f"Sorted by size ({order})", severity="information")
+
+    def _get_sorted_jobs(self):
+        """Return jobs sorted by current sort column"""
+        jobs = self.orphan_jobs[:]
+        if self._sort_column == "task":
+            jobs.sort(key=lambda j: j.task_id or "", reverse=self._sort_reverse)
+        elif self._sort_column == "size":
+            # Sort by raw bytes, jobs not in cache go to end
+            jobs.sort(
+                key=lambda j: self._size_bytes_cache.get(j.identifier, -1),
+                reverse=self._sort_reverse,
+            )
+        return jobs
+
+    def _rebuild_table(self) -> None:
+        """Rebuild the table with current sort order"""
+        table = self.query_one("#orphan-table", DataTable)
+        table.clear()
+
+        for job in self._get_sorted_jobs():
+            status_icon = get_status_icon(job.state.name if job.state else "unknown")
+            if job.identifier in self._size_cache:
+                size_text = self._size_cache[job.identifier]
+            else:
+                size_text = "waiting"
+            table.add_row(
+                status_icon,
+                job.identifier[:7],
+                job.task_id,
+                size_text,
+                key=job.identifier,
+            )
+
+    def refresh_orphans(self) -> None:
+        """Refresh the orphan jobs list"""
+        # Only include orphan jobs that have an existing folder
+        all_orphans = self.state_provider.get_orphan_jobs()
+        self.orphan_jobs = [j for j in all_orphans if j.path and j.path.exists()]
+
+        # Update stats
+        stats = self.query_one("#orphan-stats", Static)
+        stats.update(f"Found {len(self.orphan_jobs)} orphan jobs")
+
+        # Collect jobs needing size calculation
+        self._pending_jobs = [
+            j for j in self.orphan_jobs if j.identifier not in self._size_cache
+        ]
+
+        # Rebuild table
+        self._rebuild_table()
+
+        # Start calculating sizes
+        if self._pending_jobs:
+            self._calculate_next_size()
+
+    def _calculate_next_size(self) -> None:
+        """Calculate size for the next pending job using a worker"""
+        if not self._pending_jobs:
+            return
+
+        job = self._pending_jobs.pop(0)
+        # Update to "calc..."
+        self._update_size_cell(job.identifier, "calc...")
+        # Run calculation in worker thread
+        self.run_worker(
+            self._calc_size_worker(job.identifier, job.path),
+            thread=True,
+        )
+
+    async def _calc_size_worker(self, job_id: str, path):
+        """Worker to calculate folder size"""
+        size_bytes = self._get_folder_size(path)
+        size_str = self._format_size(size_bytes)
+        self._size_cache[job_id] = size_str
+        self._size_bytes_cache[job_id] = size_bytes
+        self.post_message(SizeCalculated(job_id, size_str, size_bytes))
+
+    def on_size_calculated(self, message: SizeCalculated) -> None:
+        """Handle size calculation completion"""
+        self._size_bytes_cache[message.job_id] = message.size_bytes
+        self._update_size_cell(message.job_id, message.size)
+        # Calculate next one
+        self._calculate_next_size()
+
+    @staticmethod
+    def _get_folder_size(path) -> int:
+        """Calculate total size of a folder"""
+        total = 0
+        try:
+            for entry in path.rglob("*"):
+                if entry.is_file():
+                    total += entry.stat().st_size
+        except (OSError, PermissionError):
+            pass
+        return total
+
+    @staticmethod
+    def _format_size(size: int) -> str:
+        """Format size in human-readable format"""
+        for unit in ["B", "KB", "MB", "GB"]:
+            if size < 1024:
+                return f"{size:.1f}{unit}" if unit != "B" else f"{size}{unit}"
+            size /= 1024
+        return f"{size:.1f}TB"
+
+    def _update_size_cell(self, job_id: str, value: str = None) -> None:
+        """Update the size cell for a job"""
+        try:
+            table = self.query_one("#orphan-table", DataTable)
+            size_text = (
+                value if value is not None else self._size_cache.get(job_id, "-")
+            )
+            table.update_cell(job_id, "size", size_text)
+        except Exception:
+            pass  # Table may have changed
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Show job details when a row is selected"""
+        self._update_job_info()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """Show job details when cursor moves"""
+        self._update_job_info()
+
+    def _update_job_info(self) -> None:
+        """Update the job info display"""
+        table = self.query_one("#orphan-table", DataTable)
+        info = self.query_one("#orphan-job-info", Static)
+
+        if table.cursor_row is None:
+            info.update("")
+            return
+
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
+            if job and job.path:
+                size = self._size_cache.get(job.identifier, "calculating...")
+                info.update(f"Path: {job.path}  |  Size: {size}")
+            else:
+                info.update("")
+
+    def action_copy_path(self) -> None:
+        """Copy the job folder path to clipboard"""
+        import pyperclip
+
+        table = self.query_one("#orphan-table", DataTable)
+        if table.cursor_row is None:
+            return
+
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
+            if job and job.path:
+                try:
+                    pyperclip.copy(str(job.path))
+                    self.notify("Path copied", severity="information")
+                except Exception as e:
+                    self.notify(f"Failed to copy: {e}", severity="error")
+
+    def action_delete_selected(self) -> None:
+        """Delete the selected orphan job"""
+        table = self.query_one("#orphan-table", DataTable)
+        if table.cursor_row is None:
+            return
+
+        row_key = list(table.rows.keys())[table.cursor_row]
+        if row_key:
+            job_id = str(row_key.value)
+            job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
+            if job:
+                self._delete_job(job)
+
+    def _delete_job(self, job) -> None:
+        """Delete a single orphan job with confirmation"""
+
+        def handle_delete(confirmed: bool) -> None:
+            if confirmed:
+                success, msg = self.state_provider.delete_job_safely(job)
+                if success:
+                    self.notify(msg, severity="information")
+                    self.refresh_orphans()
+                else:
+                    self.notify(msg, severity="error")
+
+        self.app.push_screen(
+            DeleteConfirmScreen("orphan job", job.identifier),
+            handle_delete,
+        )
+
+    def action_delete_all(self) -> None:
+        """Delete all orphan jobs"""
+        if not self.orphan_jobs:
+            self.notify("No orphan jobs to delete", severity="warning")
+            return
+
+        # Filter out running jobs
+        deletable_jobs = [j for j in self.orphan_jobs if not j.state.running()]
+
+        if not deletable_jobs:
+            self.notify("All orphan jobs are running", severity="warning")
+            return
+
+        def handle_delete_all(confirmed: bool) -> None:
+            if confirmed:
+                deleted = 0
+                for job in deletable_jobs:
+                    success, _ = self.state_provider.delete_job_safely(
+                        job, cascade_orphans=False
+                    )
+                    if success:
+                        deleted += 1
+
+                # Clean up orphan partials once at the end
+                self.state_provider.cleanup_orphan_partials(perform=True)
+
+                self.notify(f"Deleted {deleted} orphan jobs", severity="information")
+                self.refresh_orphans()
+
+        self.app.push_screen(
+            DeleteConfirmScreen(
+                "all orphan jobs",
+                f"{len(deletable_jobs)} jobs",
+                "This action cannot be undone",
+            ),
+            handle_delete_all,
+        )
+
+    def action_refresh(self) -> None:
+        """Refresh the orphan jobs list"""
+        self.refresh_orphans()
+
+    def action_go_back(self) -> None:
+        """Go back to main screen"""
+        self.dismiss()
+
+
+class HelpScreen(ModalScreen[None]):
+    """Modal screen showing keyboard shortcuts"""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("?", "close", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        from textual.containers import VerticalScroll
+
+        help_text = """
+[bold]Keyboard Shortcuts[/bold]
+
+[bold cyan]Navigation[/bold cyan]
+  q         Quit application
+  Esc       Go back / Close dialog
+  r         Refresh data
+  ?         Show this help
+
+[bold cyan]Experiments[/bold cyan]
+  Enter     Select experiment
+  d         Delete experiment
+  k         Kill all running jobs
+
+[bold cyan]Jobs[/bold cyan]
+  l         View job logs
+  d         Delete job
+  k         Kill running job
+  /         Open search filter
+  c         Clear search filter
+  S         Sort by status
+  T         Sort by task
+  D         Sort by date
+  f         Copy folder path
+
+[bold cyan]Search Filter[/bold cyan]
+  Enter     Apply filter
+  Esc       Close and clear filter
+
+[bold cyan]Orphan Jobs[/bold cyan]
+  o         Show orphan jobs
+  T         Sort by task
+  Z         Sort by size
+  d         Delete selected
+  D         Delete all
+  f         Copy folder path
+"""
+        with Vertical(id="help-dialog"):
+            yield Static("Experimaestro Help", id="help-title")
+            with VerticalScroll(id="help-scroll"):
+                yield Static(help_text, id="help-content")
+            yield Button("Close", id="help-close-btn")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+
+class ExperimaestroUI(App):
     """Textual TUI for monitoring experiments"""
 
-    CSS = """
-    #main-container {
-        width: 100%;
-        height: 100%;
-    }
-
-    ExperimentsList {
-        width: 100%;
-        height: auto;
-    }
-
-    Monitor {
-        height: 100%;
-    }
-
-    #experiments-table-container {
-        width: 100%;
-        height: auto;
-    }
-
-    #collapsed-header {
-        background: $boost;
-        padding: 1;
-        text-style: bold;
-        border: solid green;
-        height: auto;
-        width: 100%;
-    }
-
-    #collapsed-header:hover {
-        background: $primary;
-    }
-
-    #collapsed-experiment-info {
-        width: 100%;
-        height: auto;
-    }
-
-    #jobs-container {
-        width: 100%;
-        height: 1fr;
-        border: solid blue;
-        padding: 1;
-    }
-
-    JobsTable {
-        width: 100%;
-        height: 100%;
-    }
-
-    #jobs-table {
-        height: 100%;
-    }
-
-    .hidden {
-        display: none;
-    }
-
-    .section-title {
-        background: $boost;
-        padding: 1;
-        text-style: bold;
-    }
-
-    #experiments-table {
-        height: auto;
-        min-height: 5;
-    }
-
-    DataTable {
-        height: 100%;
-    }
-
-    RichLog {
-        height: 100%;
-        border: solid cyan;
-    }
-
-    TabbedContent {
-        height: 100%;
-    }
-
-    #job-detail-container {
-        width: 100%;
-        height: 1fr;
-        border: solid magenta;
-        padding: 1;
-    }
-
-    JobDetailView {
-        width: 100%;
-        height: 100%;
-    }
-
-    #job-detail-content {
-        padding: 1;
-    }
-
-    #job-detail-content Label {
-        margin-bottom: 1;
-    }
-
-    .subsection-title {
-        background: $surface;
-        padding: 0 1;
-        text-style: italic;
-        margin-top: 1;
-    }
-
-    #job-logs-hint {
-        margin-top: 1;
-    }
-    """
+    TITLE = "Experimaestro UI"
+    CSS_PATH = "app.tcss"
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("escape", "go_back", "Back"),
-        Binding("l", "view_logs", "View Logs"),
+        Binding("?", "show_help", "Help"),
+        Binding("escape", "go_back", "Back", show=False),
+        Binding("l", "view_logs", "Logs", show=False),
+        Binding("o", "show_orphans", "Orphans", show=False),
     ]
 
     def __init__(
@@ -948,6 +1767,10 @@ class ExperimentTUI(App):
             job_detail_view = self.query_one(JobDetailView)
             job_detail_view.action_view_logs()
 
+    def action_show_orphans(self) -> None:
+        """Show orphan jobs screen"""
+        self.push_screen(OrphanJobsScreen(self.state_provider))
+
     def on_view_job_logs(self, message: ViewJobLogs) -> None:
         """Handle request to view job logs - push LogViewerScreen"""
         job_path = Path(message.job_path)
@@ -974,6 +1797,137 @@ class ExperimentTUI(App):
         job_id = job_path.name
         self.push_screen(LogViewerScreen(log_files, job_id))
 
+    def on_view_job_logs_request(self, message: ViewJobLogsRequest) -> None:
+        """Handle log viewing request from jobs table"""
+        job = self.state_provider.get_job(message.job_id, message.experiment_id)
+        if not job or not job.path or not job.task_id:
+            self.notify("Cannot find job logs", severity="warning")
+            return
+        self.post_message(ViewJobLogs(str(job.path), job.task_id))
+
+    def on_delete_job_request(self, message: DeleteJobRequest) -> None:
+        """Handle job deletion request"""
+        job = self.state_provider.get_job(message.job_id, message.experiment_id)
+        if not job:
+            self.notify("Job not found", severity="error")
+            return
+
+        if job.state.running():
+            self.notify("Cannot delete a running job", severity="warning")
+            return
+
+        # Save cursor position to restore after delete
+        jobs_table = self.query_one(JobsTable)
+        table = jobs_table.query_one("#jobs-table", DataTable)
+        cursor_row = table.cursor_row
+
+        def handle_delete_response(confirmed: bool) -> None:
+            if confirmed:
+                success, msg = self.state_provider.delete_job_safely(job)
+                if success:
+                    self.notify(msg, severity="information")
+                    self.action_refresh()
+                    # Move cursor to previous row (or first if was at top)
+                    if cursor_row is not None and table.row_count > 0:
+                        new_row = min(cursor_row, table.row_count - 1)
+                        if new_row > 0 and cursor_row > 0:
+                            new_row = cursor_row - 1
+                        table.move_cursor(row=new_row)
+                else:
+                    self.notify(msg, severity="error")
+
+        self.push_screen(
+            DeleteConfirmScreen("job", job.identifier),
+            handle_delete_response,
+        )
+
+    def on_delete_experiment_request(self, message: DeleteExperimentRequest) -> None:
+        """Handle experiment deletion request"""
+        jobs = self.state_provider.get_jobs(message.experiment_id)
+        running_jobs = [j for j in jobs if j.state.running()]
+
+        if running_jobs:
+            self.notify(
+                f"Cannot delete: {len(running_jobs)} jobs are running",
+                severity="warning",
+            )
+            return
+
+        warning = (
+            f"{len(jobs)} jobs will remain (not deleted by default)" if jobs else None
+        )
+
+        def handle_delete_response(confirmed: bool) -> None:
+            if confirmed:
+                success, msg = self.state_provider.delete_experiment(
+                    message.experiment_id, delete_jobs=False
+                )
+                if success:
+                    self.notify(msg, severity="information")
+                    # Go back to experiments list
+                    experiments_list = self.query_one(ExperimentsList)
+                    experiments_list.expand_experiments()
+                    self.post_message(ExperimentDeselected())
+                    self.action_refresh()
+                else:
+                    self.notify(msg, severity="error")
+
+        self.push_screen(
+            DeleteConfirmScreen("experiment", message.experiment_id, warning),
+            handle_delete_response,
+        )
+
+    def on_kill_job_request(self, message: KillJobRequest) -> None:
+        """Handle job kill request"""
+        job = self.state_provider.get_job(message.job_id, message.experiment_id)
+        if not job:
+            self.notify("Job not found", severity="error")
+            return
+
+        if not job.state.running():
+            self.notify("Job is not running", severity="warning")
+            return
+
+        def handle_kill_response(confirmed: bool) -> None:
+            if confirmed:
+                success = self.state_provider.kill_job(job, perform=True)
+                if success:
+                    self.notify(f"Job {job.identifier} killed", severity="information")
+                    self.action_refresh()
+                else:
+                    self.notify("Failed to kill job", severity="error")
+
+        self.push_screen(
+            KillConfirmScreen("job", job.identifier),
+            handle_kill_response,
+        )
+
+    def on_kill_experiment_request(self, message: KillExperimentRequest) -> None:
+        """Handle experiment kill request (kill all running jobs)"""
+        jobs = self.state_provider.get_jobs(message.experiment_id)
+        running_jobs = [j for j in jobs if j.state.running()]
+
+        if not running_jobs:
+            self.notify("No running jobs in experiment", severity="warning")
+            return
+
+        def handle_kill_response(confirmed: bool) -> None:
+            if confirmed:
+                killed = 0
+                for job in running_jobs:
+                    if self.state_provider.kill_job(job, perform=True):
+                        killed += 1
+                self.notify(
+                    f"Killed {killed} of {len(running_jobs)} running jobs",
+                    severity="information",
+                )
+                self.action_refresh()
+
+        self.push_screen(
+            KillConfirmScreen("experiment", f"{len(running_jobs)} running jobs"),
+            handle_kill_response,
+        )
+
     def action_switch_focus(self) -> None:
         """Switch focus between experiments and jobs tables"""
         focused = self.focused
@@ -997,6 +1951,10 @@ class ExperimentTUI(App):
             QuitConfirmScreen(has_active_experiment=self._has_active_experiment),
             handle_quit_response,
         )
+
+    def action_show_help(self) -> None:
+        """Show help screen with keyboard shortcuts"""
+        self.push_screen(HelpScreen())
 
     def on_unmount(self) -> None:
         """Clean up when closing"""

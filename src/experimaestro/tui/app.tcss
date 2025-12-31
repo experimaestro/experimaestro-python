@@ -1,0 +1,332 @@
+/* Main Experimaestro UI styles */
+
+#main-container {
+    width: 100%;
+    height: 100%;
+}
+
+ExperimentsList {
+    width: 100%;
+    height: auto;
+}
+
+Monitor {
+    height: 100%;
+}
+
+#experiments-table-container {
+    width: 100%;
+    height: auto;
+}
+
+#collapsed-header {
+    background: $boost;
+    padding: 0;
+    text-style: bold;
+    border: solid green;
+    height: auto;
+    width: 100%;
+}
+
+#collapsed-header:hover {
+    background: $primary;
+}
+
+#collapsed-experiment-info {
+    width: 100%;
+    height: auto;
+}
+
+#jobs-container {
+    width: 100%;
+    height: 1fr;
+    border: solid blue;
+    padding: 1;
+}
+
+JobsTable {
+    width: 100%;
+    height: 1fr;
+}
+
+#jobs-table {
+    width: 100%;
+    height: 1fr;
+    min-height: 10;
+}
+
+.hidden {
+    display: none;
+}
+
+.section-title {
+    background: $boost;
+    padding: 1;
+    text-style: bold;
+    height: auto;
+}
+
+#experiments-table {
+    height: auto;
+    min-height: 5;
+}
+
+RichLog {
+    height: 100%;
+    border: solid cyan;
+}
+
+TabbedContent {
+    height: 100%;
+}
+
+#job-detail-container {
+    width: 100%;
+    height: 1fr;
+    border: solid magenta;
+    padding: 1;
+}
+
+JobDetailView {
+    width: 100%;
+    height: 100%;
+}
+
+#job-detail-content {
+    padding: 1;
+}
+
+#job-detail-content Label {
+    margin-bottom: 1;
+}
+
+.subsection-title {
+    background: $surface;
+    padding: 0 1;
+    text-style: italic;
+    margin-top: 1;
+}
+
+#job-logs-hint {
+    margin-top: 1;
+}
+
+/* SearchBar styles */
+SearchBar {
+    height: auto;
+}
+
+#search-container {
+    width: 100%;
+    height: auto;
+    padding: 1;
+    background: $boost;
+}
+
+#search-input {
+    width: 100%;
+}
+
+#search-input.valid {
+    border: solid $success;
+}
+
+#search-input.error {
+    border: solid $error;
+}
+
+#search-hints {
+    color: $text-muted;
+    text-style: italic;
+    margin-top: 1;
+}
+
+#search-error {
+    color: $error;
+    margin-top: 1;
+}
+
+#active-filter {
+    background: $success-darken-2;
+    color: $text;
+    padding: 0 1;
+}
+
+/* Modal dialogs */
+QuitConfirmScreen {
+    align: center middle;
+}
+
+#quit-dialog {
+    width: 60;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#quit-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#quit-message {
+    margin-bottom: 1;
+}
+
+#quit-warning {
+    color: $warning;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#quit-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+}
+
+#quit-buttons Button {
+    margin: 0 1;
+}
+
+DeleteConfirmScreen {
+    align: center middle;
+}
+
+#delete-dialog {
+    width: 70;
+    height: auto;
+    border: thick $error;
+    background: $surface;
+    padding: 1 2;
+}
+
+#delete-title {
+    text-align: center;
+    text-style: bold;
+    color: $error;
+    margin-bottom: 1;
+}
+
+#delete-message {
+    margin-bottom: 1;
+}
+
+#delete-warning {
+    color: $warning;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#delete-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+}
+
+#delete-buttons Button {
+    margin: 0 1;
+}
+
+KillConfirmScreen {
+    align: center middle;
+}
+
+#kill-dialog {
+    width: 70;
+    height: auto;
+    border: thick $warning;
+    background: $surface;
+    padding: 1 2;
+}
+
+#kill-title {
+    text-align: center;
+    text-style: bold;
+    color: $warning;
+    margin-bottom: 1;
+}
+
+#kill-message {
+    margin-bottom: 1;
+}
+
+#kill-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+}
+
+#kill-buttons Button {
+    margin: 0 1;
+}
+
+/* Orphan Jobs Screen */
+OrphanJobsScreen {
+    background: $surface;
+}
+
+#orphan-container {
+    height: 100%;
+    width: 100%;
+    padding: 1;
+}
+
+#orphan-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+    color: $warning;
+}
+
+#orphan-stats {
+    margin-bottom: 1;
+}
+
+#orphan-table {
+    height: 1fr;
+}
+
+#orphan-job-info {
+    height: auto;
+    margin-top: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* Help Screen */
+HelpScreen {
+    align: center middle;
+}
+
+#help-dialog {
+    width: 65;
+    height: 80%;
+    max-height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#help-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+    height: auto;
+}
+
+#help-scroll {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+#help-content {
+    height: auto;
+}
+
+#help-close-btn {
+    width: 100%;
+    height: auto;
+}

@@ -126,9 +126,9 @@ class ConfigurationLoader:
     help="Port for monitoring (can be defined in the settings.yaml file)",
 )
 @click.option(
-    "--tui",
+    "--console",
     is_flag=True,
-    help="Launch Textual TUI for monitoring with logs",
+    help="Launch Textual console UI for monitoring with logs",
 )
 @click.option(
     "--file",
@@ -166,7 +166,7 @@ def experiments_cli(  # noqa: C901
     xp_file: str,
     host: str,
     port: int,
-    tui: bool,
+    console: bool,
     xpm_config_dir: Path,
     workdir: Optional[Path],
     workspace: Optional[str],
@@ -360,8 +360,8 @@ def experiments_cli(  # noqa: C901
         except HandledException:
             sys.exit(1)
 
-    if tui:
-        # Run experiment in background thread, TUI in main thread
+    if console:
+        # Run experiment in background thread, console UI in main thread
         import threading
         from experimaestro.tui import ExperimentTUI
 
