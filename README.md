@@ -18,7 +18,7 @@ The full documentation can be read by going to the following URL: [https://exper
 
 ![Jobs screen](docs/img/tui-jobs.png)
 
-![Log screen](docs/img/tui-logs.jpg)
+![Log screen](docs/img/tui-logs.png)
 
 # Install
 
