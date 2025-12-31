@@ -481,7 +481,7 @@ class Scheduler(threading.Thread):
                                             )
                                             locks.append(lock)
                                         except LockError:
-                                            logger.debug(
+                                            logger.info(
                                                 "Could not lock %s, retrying",
                                                 dependency,
                                             )
@@ -507,11 +507,19 @@ class Scheduler(threading.Thread):
                         logger.debug("Making directories job %s...", directory)
 
                         # Warn about directory cleanup for non-resumable tasks
-                        if directory.is_dir() and not job.resumable:
+                        # (only once per task type)
+                        xpmtype = job.config.__xpmtype__
+                        if (
+                            directory.is_dir()
+                            and not job.resumable
+                            and not xpmtype.warned_clean_not_resumable
+                        ):
+                            xpmtype.warned_clean_not_resumable = True
                             logger.warning(
                                 "In a future version, directory will be cleaned up for "
-                                "non-resumable tasks. Use ResumableTask if you want to "
-                                "preserve the directory contents."
+                                "non-resumable tasks (%s). Use ResumableTask if you want "
+                                "to preserve the directory contents.",
+                                xpmtype.identifier,
                             )
 
                         if not directory.is_dir():

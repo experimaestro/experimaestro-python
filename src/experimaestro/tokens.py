@@ -316,12 +316,12 @@ class CounterToken(Token, FileSystemEventHandler):
         self.watchedpath = str(path.absolute())
         self.proxy = CounterTokenProxy(self)
         self.watcher = ipcom().fswatch(self.proxy, self.path, recursive=True)
-        logger.info("Watching %s", self.watchedpath)
+        logger.debug("Watching %s", self.watchedpath)
 
     def __del__(self):
         # Remove the watcher
         if self.watcher is not None:
-            logging.info("Removing watcher on %s", self.watchedpath)
+            logging.debug("Removing watcher on %s", self.watchedpath)
             ipcom().fsunwatch(self.watcher)
             self.watcher = None
 
@@ -468,7 +468,7 @@ class CounterToken(Token, FileSystemEventHandler):
         with self.lock, self.ipc_lock:
             self._update()
             if self.available < dependency.count:
-                logger.warning(
+                logger.debug(
                     "Not enough available (%d available, %d requested)",
                     self.available,
                     dependency.count,

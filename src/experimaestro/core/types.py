@@ -244,6 +244,9 @@ class ObjectType(Type):
         self._title = None
         self.submit_hooks = set()
 
+        # Warning flag for non-resumable task directory cleanup
+        self.warned_clean_not_resumable = False
+
         # --- Get the identifier
         if identifier is None and hasattr(tp, "__xpmid__"):
             __xpmid__ = getattr(tp, "__xpmid__")
