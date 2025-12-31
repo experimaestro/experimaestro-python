@@ -143,6 +143,22 @@ def get_generated_paths(
     return paths
 
 
+@define
+class TaskStub:
+    """Stub for a task that was not loaded during partial loading.
+
+    This is used when loading configurations from disk (e.g., HuggingFace)
+    where the task code may have changed or is not available. The stub stores
+    the identifier and typename so the information is preserved.
+    """
+
+    identifier: "Identifier"
+    """The experimaestro identifier of the task"""
+
+    typename: str
+    """The type name of the task (e.g., 'mymodule.MyTask')"""
+
+
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
@@ -972,12 +988,18 @@ class ConfigInformation:
         path: Union[str, Path, SerializedPathLoader],
         as_instance: bool = False,
         return_tasks: bool = False,
+        partial_loading: Optional[bool] = None,
     ) -> "Config":
         """Deserialize a configuration
 
         :param path: The filesystem Path to use, or a way to download the
             information through a function taking two arguments
         :param as_instance: Return an instance
+        :param return_tasks: Return init tasks instead of executing them
+        :param partial_loading: If True, skip loading task references. If None
+            (default), partial_loading is enabled when as_instance is True.
+            This is useful when loading configurations from disk (e.g.,
+            HuggingFace) where the task code may have changed.
         :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
@@ -1002,6 +1024,7 @@ class ConfigInformation:
             as_instance=as_instance,
             data_loader=data_loader,
             return_tasks=return_tasks,
+            partial_loading=partial_loading,
         )
 
     @staticmethod
@@ -1049,6 +1072,7 @@ class ConfigInformation:
         as_instance=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
+        partial_loading: Optional[bool] = None,
     ) -> "ConfigMixin": ...
 
     @overload
@@ -1059,6 +1083,7 @@ class ConfigInformation:
         return_tasks=True,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
+        partial_loading: Optional[bool] = None,
     ) -> Tuple["Config", List["LightweightTask"]]: ...
 
     @overload
@@ -1068,7 +1093,71 @@ class ConfigInformation:
         as_instance=False,
         save_directory: Optional[Path] = None,
         discard_id: bool = False,
+        partial_loading: Optional[bool] = None,
     ) -> "Config": ...
+
+    @staticmethod
+    def _get_field_refs(value: Any) -> Set[int]:
+        """Recursively extract object references from a serialized field value"""
+        refs: Set[int] = set()
+        if isinstance(value, dict):
+            if value.get("type") == "python":
+                refs.add(value["value"])
+            else:
+                for v in value.values():
+                    refs.update(ConfigInformation._get_field_refs(v))
+        elif isinstance(value, list):
+            for v in value:
+                refs.update(ConfigInformation._get_field_refs(v))
+        return refs
+
+    @staticmethod
+    def _compute_skipped_ids(definitions: List[Dict]) -> Set[int]:
+        """Compute IDs of objects only reachable through task references.
+
+        When partial_loading is enabled, we skip loading task references and
+        any objects that are only used by those tasks. This method computes
+        which object IDs should be skipped by finding objects reachable from
+        the main object (last definition) without following task references.
+
+        :param definitions: List of object definitions from JSON
+        :return: Set of object IDs to skip loading
+        """
+        # Build index of definitions by ID
+        def_by_id = {d["id"]: d for d in definitions}
+
+        # Compute reachable objects from main object (last definition)
+        # without going through task references
+        main_defn = definitions[-1]
+        main_id = main_defn["id"]
+        reachable: Set[int] = set()
+        to_visit = [main_id]
+
+        # Also include init-tasks as reachable (needed for as_instance/return_tasks)
+        for init_task_id in main_defn.get("init-tasks", []):
+            to_visit.append(init_task_id)
+
+        while to_visit:
+            obj_id = to_visit.pop()
+            if obj_id in reachable:
+                continue
+            reachable.add(obj_id)
+
+            defn = def_by_id.get(obj_id)
+            if defn is None:
+                continue
+
+            # Add field references (not task reference)
+            for field_value in defn.get("fields", {}).values():
+                for ref_id in ConfigInformation._get_field_refs(field_value):
+                    if ref_id not in reachable:
+                        to_visit.append(ref_id)
+
+            # Note: we intentionally skip defn["task"] to avoid loading tasks
+
+        # All objects not reachable should be skipped
+        all_ids = {d["id"] for d in definitions}
+        return all_ids - reachable
 
     @staticmethod
     def load_objects(  # noqa: C901
@@ -1076,15 +1165,43 @@ class ConfigInformation:
         as_instance=True,
         data_loader: Optional[SerializedPathLoader] = None,
         discard_id: bool = False,
+        partial_loading: bool = False,
     ):
-        """Load the objects"""
+        """Load the objects
+
+        :param definitions: List of object definitions from JSON
+        :param as_instance: Return instances instead of configs
+        :param data_loader: Function to load data files
+        :param discard_id: If True, don't use the stored identifier
+        :param partial_loading: If True, skip loading task references. This is
+            useful when loading configurations from disk (e.g., HuggingFace)
+            where the task code may have changed.
+        """
         o = None
         objects = {}
         import experimaestro.taskglobals as taskglobals
         from ..identifier import Identifier
 
+        # Compute which objects to skip when partial_loading
+        skipped_ids = (
+            ConfigInformation._compute_skipped_ids(definitions)
+            if partial_loading
+            else set()
+        )
+
         # Loop over all the definitions and create objects
         for definition in definitions:
+            obj_id = definition["id"]
+
+            # Skip objects that are only reachable through task references
+            if obj_id in skipped_ids:
+                # Create a TaskStub for skipped task objects
+                objects[obj_id] = TaskStub(
+                    identifier=Identifier.from_state_dict(definition["identifier"]),
+                    typename=definition.get("typename", definition["type"]),
+                )
+                continue
+
             module_name = definition["module"]
 
             # Avoids problem when runing module
@@ -1117,12 +1234,18 @@ class ConfigInformation:
                 o = cls.__new__(cls)
             else:
                 o = cls.XPMConfig.__new__(cls.XPMConfig)
-            assert definition["id"] not in objects, "Duplicate id %s" % definition["id"]
-            objects[definition["id"]] = o
+            assert obj_id not in objects, "Duplicate id %s" % obj_id
+            objects[obj_id] = o
 
         # Now that objects have been created, fill in the fields
         for definition in definitions:
-            o = objects[definition["id"]]
+            obj_id = definition["id"]
+
+            # Skip processing skipped objects (they are TaskStubs)
+            if obj_id in skipped_ids:
+                continue
+
+            o = objects[obj_id]
             xpmtype = o.__getxpmtype__()  # type: ObjectType
 
             # If instance...
@@ -1212,13 +1335,20 @@ class ConfigInformation:
         data_loader: Optional[SerializedPathLoader] = None,
         discard_id: bool = False,
         return_tasks: bool = False,
+        partial_loading: Optional[bool] = None,
     ):
+        # Determine effective partial_loading: as_instance implies partial_loading
+        effective_partial_loading = (
+            partial_loading if partial_loading is not None else as_instance
+        )
+
         # Get the objects
         objects = ConfigInformation.load_objects(
             definitions,
             as_instance=as_instance,
             data_loader=data_loader,
             discard_id=discard_id,
+            partial_loading=effective_partial_loading,
         )
 
         # Get the last one

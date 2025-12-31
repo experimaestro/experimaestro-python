@@ -89,7 +89,8 @@ def from_state_dict(
     state: Dict[str, Any],
     path: Union[None, str, Path, SerializedPathLoader] = None,
     *,
-    as_instance: bool = False
+    as_instance: bool = False,
+    partial_loading: Optional[bool] = None,
 ):
     """Load an object from a state dictionary
 
@@ -97,11 +98,19 @@ def from_state_dict(
     :param path: A directory or a function that transforms relative file path
         into absolute ones
     :param as_instance: returns instances instead of configuration objects
+    :param partial_loading: If True, skip loading task references. If None
+        (default), partial_loading is enabled when as_instance is True.
     """
+    # Determine effective partial_loading: as_instance implies partial_loading
+    effective_partial_loading = (
+        partial_loading if partial_loading is not None else as_instance
+    )
+
     objects = ConfigInformation.load_objects(
         state["objects"],
         as_instance=as_instance,
         data_loader=get_data_loader(path),
+        partial_loading=effective_partial_loading,
     )
 
     return ConfigInformation._objectFromParameters(state["data"], objects)
@@ -110,32 +119,47 @@ def from_state_dict(
 def load(
     path: Union[str, Path, SerializedPathLoader],
     as_instance: bool = False,
+    partial_loading: Optional[bool] = None,
 ) -> Tuple[Any, List["LightweightTask"]]:
     """Load data from disk
 
     :param path: A directory or a function that transforms relative file path
         into absolute ones
     :param as_instance: returns instances instead of configuration objects
+    :param partial_loading: If True, skip loading task references. If None
+        (default), partial_loading is enabled when as_instance is True.
     """
     data_loader = get_data_loader(path)
 
     with data_loader("definition.json").open("rt") as fh:
         content = json.load(fh)
-    return from_state_dict(content, as_instance=as_instance)
+    return from_state_dict(
+        content, as_instance=as_instance, partial_loading=partial_loading
+    )
 
 
 def from_task_dir(
     path: Union[str, Path, SerializedPathLoader],
     as_instance: bool = False,
+    partial_loading: Optional[bool] = None,
 ):
-    """Loads a task object"""
+    """Loads a task object
+
+    :param path: A directory or a function that transforms relative file path
+        into absolute ones
+    :param as_instance: returns instances instead of configuration objects
+    :param partial_loading: If True, skip loading task references. If None
+        (default), partial_loading is enabled when as_instance is True.
+    """
     data_loader = get_data_loader(path)
     with data_loader("params.json").open("rt") as fh:
         content = json.load(fh)
 
     content["data"] = {"type": "python", "value": content["objects"][-1]["id"]}
 
-    return from_state_dict(content, as_instance=as_instance)
+    return from_state_dict(
+        content, as_instance=as_instance, partial_loading=partial_loading
+    )
 
 
 def serialize(
@@ -158,12 +182,15 @@ def serialize(
 def deserialize(
     path: Union[str, Path, SerializedPathLoader],
     as_instance: bool = False,
+    partial_loading: Optional[bool] = None,
 ) -> tuple[Any, List["LightweightTask"]] | Any:
     """Load data from disk, and initialize the object
 
     :param path: A directory or a function that transforms relative file path
         into absolute ones
     :param as_instance: returns instances instead of configuration objects
+    :param partial_loading: If True, skip loading task references. If None
+        (default), partial_loading is enabled when as_instance is True.
     :returns: either the object (as_instance is true), or a tuple
     """
     data_loader = get_data_loader(path)
@@ -171,7 +198,9 @@ def deserialize(
     with data_loader("definition.json").open("rt") as fh:
         content = json.load(fh)
 
-    object, init_tasks = from_state_dict(content, data_loader, as_instance=as_instance)
+    object, init_tasks = from_state_dict(
+        content, data_loader, as_instance=as_instance, partial_loading=partial_loading
+    )
 
     if as_instance:
         for init_task in init_tasks:
