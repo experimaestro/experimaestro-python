@@ -144,4 +144,5 @@ log_date_format = "%H:%M:%S"
 [dependency-groups]
 dev = [
     "flake8>=7.3.0",
+    "mkdocs>=1.6.1",
 ]
