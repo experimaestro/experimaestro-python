@@ -576,7 +576,7 @@ class SlurmLauncher(Launcher):
     def scriptbuilder(self):
         """Returns the script builder
 
-        We assume *nix, but should be changed to PythonScriptBuilder when working
+        We assume Unix, but should be changed to PythonScriptBuilder when working
         """
         return SlurmScriptBuilder(self)
 

@@ -273,3 +273,129 @@ Type annotations are used to declare parameters in configurations and tasks.
 .. autoclass:: experimaestro.SerializationContext
    :members:
 ```
+
+## Launchers
+
+### DirectLauncher
+
+```{eval-rst}
+.. autoclass:: experimaestro.launchers.direct.DirectLauncher
+   :members:
+   :show-inheritance:
+```
+
+### SlurmLauncher
+
+```{eval-rst}
+.. autoclass:: experimaestro.launchers.slurm.SlurmLauncher
+   :members:
+   :show-inheritance:
+```
+
+### SlurmOptions
+
+```{eval-rst}
+.. autoclass:: experimaestro.launchers.slurm.SlurmOptions
+   :members:
+```
+
+## Connectors
+
+### LocalConnector
+
+```{eval-rst}
+.. autoclass:: experimaestro.connectors.local.LocalConnector
+   :members:
+   :show-inheritance:
+```
+
+## Launcher Finder
+
+### find_launcher
+
+```{eval-rst}
+.. autofunction:: experimaestro.launcherfinder.find_launcher
+```
+
+### parse
+
+```{eval-rst}
+.. autofunction:: experimaestro.launcherfinder.parser.parse
+```
+
+### HostRequirement
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.HostRequirement
+   :members:
+```
+
+### HostSpecification
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.HostSpecification
+   :members:
+```
+
+### CudaSpecification
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.CudaSpecification
+   :members:
+```
+
+### CPUSpecification
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.CPUSpecification
+   :members:
+```
+
+## Experiments CLI
+
+### ExperimentHelper
+
+```{eval-rst}
+.. autoclass:: experimaestro.experiments.cli.ExperimentHelper
+   :members:
+```
+
+### ConfigurationBase
+
+```{eval-rst}
+.. autoclass:: experimaestro.experiments.ConfigurationBase
+   :members:
+```
+
+### configuration
+
+```{eval-rst}
+.. autofunction:: experimaestro.experiments.configuration
+```
+
+## HuggingFace Integration
+
+### ExperimaestroHFHub
+
+```{eval-rst}
+.. autoclass:: experimaestro.huggingface.ExperimaestroHFHub
+   :members: from_pretrained, push_to_hub
+```
+
+## Submit Hooks
+
+### SubmitHook
+
+```{eval-rst}
+.. autoclass:: experimaestro.core.types.SubmitHook
+   :members:
+```
+
+## Click Integration
+
+### forwardoption
+
+```{eval-rst}
+.. autoclass:: experimaestro.click.forwardoption
+   :members:
+```

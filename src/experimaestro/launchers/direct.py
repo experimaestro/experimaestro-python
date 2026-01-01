@@ -3,6 +3,14 @@ from . import Launcher
 
 
 class DirectLauncher(Launcher):
+    """Launcher that runs tasks directly as local processes.
+
+    This is the default launcher that executes tasks on the local machine
+    without any job scheduler. Tasks are run as Python subprocesses.
+
+    :param connector: The connector to use (defaults to LocalConnector)
+    """
+
     def scriptbuilder(self):
         return PythonScriptBuilder()
 

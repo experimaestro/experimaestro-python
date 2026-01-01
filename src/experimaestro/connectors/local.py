@@ -163,6 +163,18 @@ class InterProcessLock(fasteners.InterProcessLock, Lock):
 
 
 class LocalConnector(Connector):
+    """Connector for executing tasks on the local machine.
+
+    This connector handles local file system operations and process execution.
+    It is the default connector used when no remote execution is needed.
+
+    Use :meth:`instance` to get a singleton instance of the local connector.
+
+    :param localpath: Base path for experimaestro data. Defaults to
+        ``~/.local/share/experimaestro`` or the value of ``XPM_WORKDIR``
+        environment variable.
+    """
+
     INSTANCE: Connector = None
 
     @staticmethod

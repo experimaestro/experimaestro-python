@@ -105,6 +105,35 @@ class Visitor(PTNodeVisitor):
 
 
 def parse(expr: str):
+    """Parse a requirement specification string into a HostRequirement object.
+
+    The specification string describes hardware requirements for running a task.
+    Multiple alternatives can be specified using ``|`` (OR), and requirements
+    within an alternative are combined using ``&`` (AND).
+
+    **Syntax elements:**
+
+    - ``duration=<N><unit>``: Job duration (units: h/hours, d/days, m/mins)
+    - ``cpu(mem=<size>, cores=<N>)``: CPU requirements
+    - ``cuda(mem=<size>) * <N>``: GPU requirements (memory and count)
+    - Memory sizes: ``<N>G``, ``<N>GiB``, ``<N>M``, ``<N>MiB``
+
+    :param expr: The requirement specification string
+    :return: A :class:`~experimaestro.launcherfinder.specs.HostRequirement` object
+
+    **Example:**
+
+    .. code-block:: python
+
+        from experimaestro.launcherfinder.parser import parse
+
+        # Request 2 GPUs with 32GB each, 700GB RAM, for 40 hours
+        # OR 4 GPUs with 32GB each for 50 hours
+        req = parse(
+            "duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 2"
+            " | duration=50h & cpu(mem=700GiB) & cuda(mem=32GiB) * 4"
+        )
+    """
     parser = ParserPython(grammar, syntax_classes={"StrMatch": SuppressStrMatch})
     parse_tree = parser.parse(expr)
     return visit_parse_tree(parse_tree, Visitor(debug=False))

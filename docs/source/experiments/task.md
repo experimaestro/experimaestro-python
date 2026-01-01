@@ -171,7 +171,9 @@ When a task is submitted, it is possible to modify the job/launcher environnemen
 
 ```python
 from experimaestro import Config
-from experimaestro.core.submithooks import SubmitHook, Job, Launcher
+from experimaestro.core.types import SubmitHook
+from experimaestro.scheduler.jobs import Job
+from experimaestro.launchers import Launcher
 
 
 class needs_java(SubmitHook):
