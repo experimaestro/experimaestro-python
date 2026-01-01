@@ -3,6 +3,20 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+# Mock mkdocs module if not installed (mkdocs is only needed for mkdocs builds)
+import sys
+from unittest.mock import MagicMock
+
+try:
+    import mkdocs  # noqa: F401
+except ImportError:
+    sys.modules["mkdocs"] = MagicMock()
+    sys.modules["mkdocs.config"] = MagicMock()
+    sys.modules["mkdocs.config.config_options"] = MagicMock()
+    sys.modules["mkdocs.structure"] = MagicMock()
+    sys.modules["mkdocs.structure.pages"] = MagicMock()
+    sys.modules["mkdocs.plugins"] = MagicMock()
+
 import experimaestro
 
 # -- Project information -----------------------------------------------------
