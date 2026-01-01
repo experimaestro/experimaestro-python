@@ -107,7 +107,7 @@ Type annotations are used to declare parameters in configurations and tasks.
 
 ```{eval-rst}
 .. autoclass:: experimaestro.experiment
-   :members: current, submit, wait
+   :members: current, submit, wait, add_service
    :show-inheritance:
 ```
 
@@ -389,6 +389,49 @@ Type annotations are used to declare parameters in configurations and tasks.
 ```{eval-rst}
 .. autoclass:: experimaestro.core.types.SubmitHook
    :members:
+```
+
+## Services
+
+### Service
+
+```{eval-rst}
+.. autoclass:: experimaestro.scheduler.services.Service
+   :members:
+```
+
+### WebService
+
+```{eval-rst}
+.. autoclass:: experimaestro.scheduler.services.WebService
+   :members:
+   :show-inheritance:
+```
+
+### ServiceState
+
+```{eval-rst}
+.. autoclass:: experimaestro.scheduler.services.ServiceState
+   :members:
+```
+
+## Jobs
+
+### Job
+
+```{eval-rst}
+.. autoclass:: experimaestro.scheduler.jobs.Job
+   :members:
+```
+
+## Base Launcher
+
+### Launcher
+
+```{eval-rst}
+.. autoclass:: experimaestro.launchers.Launcher
+   :members:
+   :show-inheritance:
 ```
 
 ## Click Integration

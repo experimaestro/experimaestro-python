@@ -4,6 +4,21 @@ Services can be used to add some useful functionalities when running experiments
 below is an example of tensorboard service
 
 ```python
+import logging
+import threading
+from pathlib import Path
+
+from experimaestro import Config, tagspath
+from experimaestro.scheduler.services import WebService, ServiceState
+
+
+def cleanupdir(path: Path):
+    """Remove directory contents"""
+    if path.exists():
+        for child in path.iterdir():
+            child.unlink()
+
+
 class TensorboardService(WebService):
     id = "tensorboard"
 
@@ -52,16 +67,31 @@ class TensorboardService(WebService):
             running.set()
 ```
 
-Within an experiment, this can be used as follows:
+## Adding a service to an experiment
+
+Services are added to an experiment using the
+{meth}`~experimaestro.experiment.add_service` method. The method returns
+the same service instance, allowing you to use it immediately.
 
 ```python
-# Creates the tensorboard service
-tb = xp.add_service(TensorboardService(xp.workdir / "runs"))
+from experimaestro import experiment
 
-learner = Learner()
-learner.submit()
+with experiment("/path/to/workdir", "my_experiment", port=12345) as xp:
+    # Add the tensorboard service to the experiment
+    tb = xp.add_service(TensorboardService(xp.workdir / "runs"))
 
-# This will allow to monitor the run through tensorboard
-# (in the web interface)
-tb.add(learner, learner.logpath)
+    # Submit a task
+    learner = Learner.C(...).submit()
+
+    # Register the task's log directory with tensorboard
+    # This creates a symlink so tensorboard can monitor the run
+    tb.add(learner, learner.logpath)
+
+    # Wait for completion
+    xp.wait()
 ```
+
+When using the web interface (enabled by the `port` parameter), services
+are accessible through the services menu. For `WebService` subclasses like
+`TensorboardService`, the service URL is automatically proxied through the
+experimaestro web interface.

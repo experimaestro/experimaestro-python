@@ -13,6 +13,12 @@ class ServiceListener:
 
 
 class ServiceState(Enum):
+    """State of a service lifecycle.
+
+    Services transition through these states:
+    STOPPED -> STARTING -> RUNNING -> STOPPING -> STOPPED
+    """
+
     STOPPED = 0
     STARTING = 1
     RUNNING = 2
@@ -63,13 +69,44 @@ class Service:
 
 
 class WebService(Service):
-    """Web service"""
+    """Base class for web-based experiment services.
+
+    Web services provide HTTP endpoints that can be accessed through the
+    experimaestro web interface. When an experiment is running with a port
+    configured, web services are automatically proxied through the main
+    experimaestro server.
+
+    To implement a web service:
+
+    1. Subclass ``WebService``
+    2. Set a unique ``id`` class attribute
+    3. Implement the :meth:`_serve` method to start your web server
+    4. Set ``self.url`` and call ``running.set()`` when ready
+
+    Example::
+
+        class MyWebService(WebService):
+            id = "myservice"
+
+            def _serve(self, running: threading.Event):
+                # Start your web server
+                self.url = "http://localhost:8080"
+                running.set()
+                # Keep serving...
+    """
 
     def __init__(self):
         super().__init__()
         self.url = None
 
     def get_url(self):
+        """Get the URL of this web service, starting it if needed.
+
+        If the service is not running, this method will start it and
+        block until the URL is available.
+
+        :return: The URL where this service can be accessed
+        """
         if self.state == ServiceState.STOPPED:
             self.state = ServiceState.STARTING
             self.running = threading.Event()
@@ -82,9 +119,14 @@ class WebService(Service):
         return self.url
 
     def stop(self):
+        """Stop the web service."""
         ...
 
     def serve(self):
+        """Start the web service in a background thread.
+
+        This method creates a daemon thread that calls :meth:`_serve`.
+        """
         import threading
 
         self.thread = threading.Thread(
@@ -95,9 +137,16 @@ class WebService(Service):
         self.thread.start()
 
     @abc.abstractmethod
-    def _server(self, running: threading.Event):
-        """Starts the web service
+    def _serve(self, running: threading.Event):
+        """Start the web server (implement in subclasses).
 
-        :param running: signals that `self.url` is set
+        This method should:
+
+        1. Start your web server
+        2. Set ``self.url`` to the service URL
+        3. Call ``running.set()`` to signal readiness
+        4. Keep the server running (this runs in a background thread)
+
+        :param running: Event to signal when ``self.url`` is set
         """
         ...

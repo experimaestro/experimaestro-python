@@ -31,7 +31,19 @@ SubmitListener = Callable[[Job], None]
 
 
 class Launcher(ABC):
-    """A launcher"""
+    """Base class for task launchers.
+
+    Launchers are responsible for executing tasks on a compute resource.
+    They work with a :class:`~experimaestro.connectors.Connector` to
+    access the target system and manage process execution.
+
+    Subclasses include:
+
+    - :class:`~experimaestro.launchers.direct.DirectLauncher`: Local execution
+    - :class:`~experimaestro.launchers.slurm.SlurmLauncher`: SLURM cluster
+
+    :param connector: The connector to use for accessing the compute resource
+    """
 
     submit_listeners: List[SubmitListener]
 
