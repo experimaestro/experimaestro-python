@@ -111,22 +111,35 @@ When chaining multiple `@` operations, each configuration is added to the
 **same** outer configuration (left-associative behavior):
 
 ```python
+from experimaestro import Config, Param
+
+class TypeA(Config):
+    pass
+
+class TypeB(Config):
+    pass
+
 class Multi(Config):
     a: Param[TypeA]
     b: Param[TypeB]
 
 # Adds both TypeA and TypeB to Multi
-result = Multi.C() @ TypeA.C(...) @ TypeB.C(...)
+result = Multi.C() @ TypeA.C() @ TypeB.C()
 ```
 
 For **nested** structures, use parentheses to compose from inside out:
 
 ```python
-class Outer(Config):
-    middle: Param[Middle]
+from experimaestro import Config, Param
+
+class Inner(Config):
+    x: Param[int]
 
 class Middle(Config):
     inner: Param[Inner]
+
+class Outer(Config):
+    middle: Param[Middle]
 
 # Creates Outer(middle=Middle(inner=Inner(x=1)))
 result = Outer.C() @ (Middle.C() @ Inner.C(x=1))
@@ -141,6 +154,11 @@ The composition operator raises `ValueError` in two cases:
 2. **Ambiguous**: Multiple parameters can accept the inner type
 
 ```python
+from experimaestro import Config, Param
+
+class Inner(Config):
+    x: Param[int]
+
 class Ambiguous(Config):
     a1: Param[Inner]
     a2: Param[Inner]  # Same type as a1
@@ -280,6 +298,7 @@ It is possible to deprecate a parameter or option:
 :class: example
 
 ```python
+from typing import List
 from experimaestro import Param, Config, deprecate
 
 class Learning(Config):
@@ -322,16 +341,15 @@ Sometimes, it is necessary to postpone a part of the initialization of a configu
 object because it depends on an external processing. In this case, the `initializer` decorator can
 be used:
 
-```py3
+```python
 from experimaestro import Config, initializer
 
 class MyConfig(Config):
     # The decorator ensures the initializer can only be called once
     @initializer
-    def initialize(self, ...):
+    def initialize(self):
         # Do whatever is needed
         pass
-
 ```
 
 ## Types
@@ -347,7 +365,7 @@ Possible types are:
 (parameters)=
 ## Parameters
 
-```py3
+```python
 from experimaestro import Config, Param, field
 
 class MyConfig(Config):
@@ -408,6 +426,8 @@ that were previously hard-coded.
 For instance, if the original class is:
 
 ```python
+from experimaestro import Config, Param
+
 class MyConfig(Config):
     a: Param[int]
 
@@ -419,7 +439,7 @@ Then when using `field(ignore_default=...)` for parameter b will yield an object
 same identifier when using the default value:
 
 ```python
-from experimaestro import field
+from experimaestro import Config, Param, field
 
 class MyConfig(Config):
     a: Param[int]
@@ -442,6 +462,8 @@ The identifier can be different if only the ignore_default value is changed. In 
 if the ignore_default value is 2 (and not 4)
 
 ```python
+from experimaestro import Config, Param, field
+
 class MyConfig(Config):
     a: Param[int]
     b: Param[int] = field(ignore_default=2)
@@ -490,7 +512,7 @@ When a subclass redefines a parameter from a parent class, experimaestro issues
 a warning to alert you about the potential unintended override. To intentionally
 override a parent parameter, use `field(overrides=True)`:
 
-```py3
+```python
 from experimaestro import Param, Config, field
 
 class Parent(Config):
@@ -512,7 +534,7 @@ When overriding a parameter, the new type must be compatible with the parent typ
 - For **Config types**: The child type must be a subtype of the parent type (covariant)
 - For **primitive types**: The types must match exactly
 
-```py3
+```python
 from experimaestro import Param, Config, field
 
 class BaseModel(Config):
@@ -539,8 +561,9 @@ Constants are special parameters that cannot be modified. They are useful to not
 behavior of a configuration/task has changed, and thus that the signature should not be the
 same (as the result of the processing will differ).
 
-```py3
-from experimaestro import Constant
+```python
+from experimaestro import Config, Constant
+
 class MyConfig(Config):
     # Constant
     version: Constant[str] = "2.1"
@@ -554,7 +577,9 @@ declared as parameters, but using the `Meta` type hint.
 
 Example
 
-```py3
+```python
+from experimaestro import Config, Meta
+
 class MyConfig(Config):
     """
     Attributes:
@@ -565,7 +590,7 @@ class MyConfig(Config):
 
 It is also possible to dynamically change the type of an argument using the `setmeta` method:
 
-```py3
+```python
 from experimaestro import setmeta
 
 # Forces the parameter to be a meta-parameter
@@ -581,7 +606,7 @@ a = setmeta(A(), False)
 It is possible to define special options that will be set
 to paths relative to the task directory. For instance,
 
-```py3
+```python
 from experimaestro import Config, Meta, PathGenerator, field
 from pathlib import Path
 
@@ -614,7 +639,7 @@ identifiers by excluding certain parameter groups. This enables:
 
 First, define parameter groups at module level:
 
-```py3
+```python
 from experimaestro import param_group
 
 # Create parameter groups
@@ -626,7 +651,7 @@ model_group = param_group("model")
 
 Define subparameters as class attributes and assign parameters to groups:
 
-```py3
+```python
 from experimaestro import Task, Param, Meta, field, PathGenerator, subparameters, param_group
 from pathlib import Path
 
@@ -660,7 +685,9 @@ class Learn(Task):
 - Tasks can have different values for **excluded** parameters and still
   share the same partial directory
 
-```py3
+```python
+# (Assuming Learn is defined as above)
+
 # These have different full identifiers but the SAME partial identifier
 task1 = Learn.C(max_iter=100, learning_rate=0.1)
 task2 = Learn.C(max_iter=200, learning_rate=0.1)
@@ -680,7 +707,12 @@ The `subparameters()` function supports several options:
 | `exclude_all` | If True, exclude all parameters by default |
 | `exclude_no_group` | If True, exclude parameters with no group assigned |
 
-```py3
+```python
+from experimaestro import subparameters, param_group
+
+iter_group = param_group("iter")
+model_group = param_group("model")
+
 # Exclude specific groups
 checkpoints = subparameters(exclude_groups=[iter_group])
 
@@ -695,7 +727,12 @@ grouped_only = subparameters(exclude_no_group=True)
 
 A parameter can belong to multiple groups:
 
-```py3
+```python
+from experimaestro import Task, Param, field, subparameters, param_group
+
+iter_group = param_group("iter")
+model_group = param_group("model")
+
 class MyTask(Task):
     checkpoints = subparameters(exclude_groups=[iter_group])
 
@@ -712,7 +749,7 @@ If a configuration has a `__validate__` method, it is called to validate
 the values before a task is submitted. This allows to fail fast when parameters
 are not valid.
 
-```py3
+```python
 from experimaestro import Param, Config
 
 class ModelLearn(Config):
@@ -769,6 +806,8 @@ The value class must:
    the child value class must inherit from it
 
 ```python
+from experimaestro import Config, Param
+
 class BaseModel(Config):
     base_param: Param[int]
 
@@ -792,6 +831,8 @@ class ChildModelImpl(ChildModel, BaseModelImpl):
 You can access the value class through the `XPMValue` property:
 
 ```python
+# (Assuming Model is defined as above)
+
 # Returns TorchModel if registered, or Model itself otherwise
 Model.XPMValue
 
@@ -806,6 +847,8 @@ If an intermediate class in the hierarchy doesn't have a value class,
 child classes can still define their own:
 
 ```python
+from experimaestro import Config, Param
+
 class Base(Config):
     x: Param[int]
 

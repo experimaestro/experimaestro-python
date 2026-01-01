@@ -39,7 +39,7 @@ Parameters are ignored if:
 
 Tokens can be used to restrict the number of running jobs.
 
-```py3
+```python
 # Creates a token with 3 "resources"
 # (resources are whatever you want)
 token = connector.createtoken("cpu", 3)
@@ -59,25 +59,23 @@ Tags allow to monitor specific experimental parameters.
 
 ### Tagging a value
 
-Tagging a value can be done easily by using the `tag` function from `experimaestro`
+Tagging a value can be done easily by using the `tag` function from `experimaestro`:
 
-```py3
-tag(value: Union[str, int, float, bool])
-````
+`tag(value: Union[str, int, float, bool])`
 
 For example,
 
-```py3
+```python
+from experimaestro import tag
+
 model = MyModel.C(epochs=tag(100))
 ```
 
-will create a tag with key "epochs" and value "100"./
+will create a tag with key "epochs" and value "100".
 
 Adding a tag can be also be done by using a configuration instance method:
 
-```python
-tag(name: str, value: Union[str, int, float, bool])
-```
+`tag(name: str, value: Union[str, int, float, bool])`
 
 ### Retrieving tags
 
@@ -95,7 +93,7 @@ their values. The keys are ordered to ensure the uniqueness of the path.
 For each experiment (identified by its name), a folder is created automatically. This
 can be used to store additional experimental results as shown in the example below:
 
-```py3
+```python
 from experimaestro import tag, tagspath
 
 with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
@@ -140,14 +138,13 @@ Callbacks can be registered to accomplish some actions e.g. on task completion.
 You can easily define command line arguments with [click](https://click.palletsprojects.com)
 by using the `forwardoption` command
 
-```py3
-
-from experimaestro import Config, Param, type
+```python
+from experimaestro import Config, Param
 from experimaestro.click import forwardoption, arguments
 import click
 
 class MyModel(Config):
-    epochs: Params[int] = 100
+    epochs: Param[int] = 100
     "Number of learning epochs"
 
 @forwardoption(arguments(MyModel).epochs)

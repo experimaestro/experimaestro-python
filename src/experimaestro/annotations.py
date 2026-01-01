@@ -60,7 +60,27 @@ def STDOUT(jobcontext, config):
 
 
 def cache(name: str):
-    """Use a cache path for a given config"""
+    """Decorator for caching method results to disk.
+
+    The cache is stored in the workspace's config directory, keyed by the
+    configuration's identifier.
+
+    Example::
+
+        class MyConfig(Config):
+            data_path: Param[Path]
+
+            @cache("processed.pkl")
+            def process(self, cache_path: Path):
+                if cache_path.exists():
+                    return pickle.load(cache_path.open("rb"))
+                result = expensive_computation(self.data_path)
+                pickle.dump(result, cache_path.open("wb"))
+                return result
+
+    :param name: Filename for the cache file
+    :return: A decorator that wraps the method with caching logic
+    """
 
     def annotate(method):
         return objects.cache(method, name)
@@ -72,7 +92,22 @@ def cache(name: str):
 
 
 def tag(value):
-    """Tag a value"""
+    """Tag a parameter value for tracking in experiments.
+
+    Tagged values appear in experiment logs and can be used for filtering
+    and organizing results. Tags are included in the task's ``__tags__``
+    dictionary.
+
+    Example::
+
+        task = MyTask.C(
+            learning_rate=tag(0.001),  # Will appear in task tags
+            batch_size=32,
+        ).submit()
+
+    :param value: The value to tag (str, int, float, or bool)
+    :return: A tagged value wrapper that preserves the original value
+    """
     return objects.TaggedValue(value)
 
 
@@ -87,7 +122,19 @@ class TagDict(SortedDict):
 
 
 def tags(value) -> TagDict:
-    """Return the tags associated with a value"""
+    """Return the tags associated with a configuration.
+
+    Returns a dictionary of all tagged parameter values from this configuration
+    and its nested configurations.
+
+    Example::
+
+        config = MyTask.C(learning_rate=tag(0.001), epochs=tag(100))
+        task_tags = tags(config)  # {"learning_rate": 0.001, "epochs": 100}
+
+    :param value: A configuration object
+    :return: A TagDict with tag names as keys and tagged values as values
+    """
     return TagDict(value.__xpm__.tags())
 
 
@@ -97,8 +144,20 @@ def _normalizepathcomponent(v: Any):
     return v
 
 
-def tagspath(value: Config):
-    """Return a unique path made of tags and their values"""
+def tagspath(value: Config) -> str:
+    """Generate a unique path string from a configuration's tags.
+
+    Useful for creating tag-based directory structures. Tags are sorted
+    alphabetically and joined with underscores.
+
+    Example::
+
+        config = MyTask.C(learning_rate=tag(0.001), epochs=tag(100))
+        path = tagspath(config)  # "epochs=100_learning_rate=0.001"
+
+    :param value: A configuration object
+    :return: A string with sorted tags in ``key=value`` format, joined by ``_``
+    """
     return "_".join(
         f"""{_normalizepathcomponent(key)}={_normalizepathcomponent(value)}"""
         for key, value in tags(value).items()
@@ -113,16 +172,22 @@ def deprecate(
     *,
     replace: bool = False,
 ):
-    """Deprecate a configuration / task or an attribute (via a method)
+    """Deprecate a configuration/task class or a parameter.
 
-    Usage:
+    Deprecated configurations maintain backwards compatibility while allowing
+    migration to new structures. The identifier is computed from the converted
+    configuration, ensuring consistency.
 
-        # Method 1: Deprecated class inherits from new class (legacy)
+    **Usage patterns:**
+
+    1. Simple deprecation (class inherits from new class)::
+
         @deprecate
         class OldConfig(NewConfig):
             pass
 
-        # Method 2: Specify target class explicitly with __convert__
+    2. Deprecation with conversion::
+
         @deprecate(NewConfig)
         class OldConfig(Config):
             value: Param[int]
@@ -130,7 +195,8 @@ def deprecate(
             def __convert__(self):
                 return NewConfig.C(values=[self.value])
 
-        # Method 3: Immediate replacement with __convert__
+    3. Immediate replacement::
+
         @deprecate(NewConfig, replace=True)
         class OldConfig(Config):
             value: Param[int]
@@ -138,21 +204,19 @@ def deprecate(
             def __convert__(self):
                 return NewConfig.C(values=[self.value])
 
-        # Method 4: Deprecate a parameter
+    4. Deprecate a parameter::
+
         class MyConfig(Config):
+            new_param: Param[list[int]]
+
             @deprecate
-            def oldattribute(self, value):
-                # Do something with the value
-                pass
+            def old_param(self, value: int):
+                self.new_param = [value]
 
-    When using @deprecate(TargetConfig), the deprecated class should define a
-    __convert__ method that returns an equivalent instance of the target class.
-    The identifier is computed from the converted configuration, so deprecated
-    and new configurations will have the same identifier when equivalent.
-
-    With replace=True, creating an instance of the deprecated class immediately
-    returns the converted new config. The deprecated identifier is preserved for
-    fix_deprecated to create symlinks between old and new job directories.
+    :param config_or_target: Target class for conversion, or the deprecated
+        class/method when used as a simple decorator
+    :param replace: If True, creating the deprecated class immediately returns
+        the converted instance
     """
     # Case 1: @deprecate on a function (deprecated attribute)
     if inspect.isfunction(config_or_target):
@@ -220,7 +284,21 @@ def deprecateClass(klass):
 
 
 def initializer(method):
-    """Defines a method as an initializer that can only be called once"""
+    """Decorator for methods that should only execute once.
+
+    After the first call, subsequent calls return the cached result.
+    This is useful for lazy initialization of expensive resources.
+
+    Example::
+
+        class MyConfig(Config):
+            @initializer
+            def model(self):
+                return load_expensive_model()
+
+    :param method: The method to wrap
+    :return: A wrapper that caches the result after first execution
+    """
 
     def wrapper(self, *args, **kwargs):
         value = method(self, *args, **kwargs)

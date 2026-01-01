@@ -36,15 +36,21 @@ class ParameterGroup:
 
 
 def param_group(name: str) -> ParameterGroup:
-    """Returns a new group
+    """Create a parameter group for use with subparameters.
 
-    Usage:
+    Parameter groups allow computing partial identifiers that exclude
+    certain parameters, enabling shared directories across related tasks.
 
-    iter_group = param_group("iter")
+    Example::
 
-    class Learn(Task):
-        checkpoints = subparameters(exclude_groups=[iter_group])
+        training_group = param_group("training")
 
+        class MyTask(Task):
+            model_size: Param[int]
+            learning_rate: Param[float] = field(groups=[training_group])
+
+    :param name: Unique name for this parameter group
+    :return: A ParameterGroup object
     """
     return ParameterGroup(name)
 
@@ -124,41 +130,31 @@ def subparameters(
     exclude_no_group: bool = False,
     exclude_all: bool = False,
 ) -> Subparameters:
-    """Define a parameter subset for partial identifier computation.
+    """Create a subparameters specification for partial identifier computation.
 
-    This function creates a Subparameters instance that can be used with
-    `field(partial=...)` to generate paths in shared partial directories.
+    Subparameters allow tasks to share directories when they differ only
+    in certain parameter groups (e.g., training hyperparameters).
 
-    The inclusion/exclusion logic follows these rules (in order):
-    1. If `exclude_all` is True, all parameters are excluded by default
-    2. Parameters in `exclude_groups` are excluded
-    3. Parameters with no group are excluded if `exclude_no_group` is True
-    4. Parameters in `include_groups` are always included (overrides exclusion)
+    Example::
 
-    Args:
-        exclude_groups: List of group names to exclude from identifier.
-        include_groups: List of group names to always include (overrides exclusion).
-        exclude_no_group: If True, exclude parameters with no group assigned.
-        exclude_all: If True, exclude all parameters by default. Use with
-            `include_groups` to selectively include specific groups.
+        training_group = param_group("training")
 
-    Returns:
-        A Subparameters instance to be assigned as a class attribute and
-        referenced in `field(partial=...)`.
+        class Train(Task):
+            model: Param[Model]
+            epochs: Param[int] = field(groups=[training_group])
 
-    Examples:
-        # Define groups
-        iter_group = param_group("iter")
-        model_group = param_group("model")
+            checkpoint: Meta[Path] = field(
+                default_factory=PathGenerator(
+                    "model.pt",
+                    subparameters=subparameters(exclude=[training_group])
+                )
+            )
 
-        # Exclude specific groups
-        checkpoints = subparameters(exclude_groups=[iter_group])
-
-        # Include only specific groups (exclude everything else)
-        model_params = subparameters(exclude_all=True, include_groups=[model_group])
-
-        # Exclude ungrouped parameters
-        grouped_only = subparameters(exclude_no_group=True)
+    :param exclude_groups: Parameter groups to exclude from identifier
+    :param include_groups: Parameter groups to always include (overrides exclusion)
+    :param exclude_no_group: If True, exclude parameters with no group assigned
+    :param exclude_all: If True, exclude all parameters by default
+    :return: A Subparameters object
     """
     return Subparameters(
         exclude_groups=set(exclude_groups or []),

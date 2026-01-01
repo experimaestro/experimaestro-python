@@ -3,20 +3,24 @@ class HandledException(Exception):
 
 
 class GracefulTimeout(Exception):
-    """Exception raised by ResumableTask to stop gracefully before a hard timeout.
+    """Exception raised to signal a graceful timeout in resumable tasks.
 
-    ResumableTasks can catch signals or monitor time remaining and raise this
-    exception to stop cleanly before the scheduler (e.g., SLURM) terminates
-    the process. The task will be retried if retry_count < max_retries.
+    Raise this exception when a task needs to checkpoint and exit before
+    a time limit (e.g., SLURM walltime). The task will be marked for retry
+    rather than as failed.
 
-    Example:
-        class LongTraining(ResumableTask):
-            def execute(self):
-                for epoch in range(1000):
-                    if time_remaining() < MIN_TIME_FOR_EPOCH:
-                        raise GracefulTimeout("Not enough time for another epoch")
-                    train_one_epoch()
-                    save_checkpoint()
+    Example::
+
+        ```python
+            class LongTraining(ResumableTask):
+                def execute(self):
+                    for epoch in range(self.epochs):
+                        remaining = self.remaining_time()
+                        if remaining is not None and remaining < 300:
+                            save_checkpoint(self.checkpoint, epoch)
+                            raise GracefulTimeout("Not enough time for another epoch")
+                        train_one_epoch()
+        ```
     """
 
     def __init__(self, message: str = "Task stopped gracefully before timeout"):

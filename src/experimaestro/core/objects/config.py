@@ -56,6 +56,26 @@ T = TypeVar("T", bound="Config")
 
 
 DependentMarker = Callable[["Config"], None]
+"""Type alias for dependency marker functions.
+
+A DependentMarker is a callable that marks a configuration as a dependency
+of another configuration. Used in ``task_outputs()`` and dynamic output methods
+to establish task dependencies.
+
+Example::
+
+    class Learn(Task):
+        model: Param[Model]
+
+        def task_outputs(self, dep: DependentMarker):
+            return dep(Checkpoint.C(model=self.model, path=self.checkpoint_path))
+
+    class Validation(Config):
+        model: Param[Model]
+
+        def checkpoint(self, dep: DependentMarker, *, step: int) -> Checkpoint:
+            return dep(Checkpoint.C(model=self.model, step=step))
+"""
 
 
 def updatedependencies(
@@ -1816,7 +1836,8 @@ class Config:
         instances, which is useful to avoid initializing resources (e.g., PyTorch)
         when only configuring.
 
-        Example:
+        .. code-block:: python
+
             class Model(Config):
                 hidden_size: Param[int]
 
@@ -1826,9 +1847,8 @@ class Config:
                     super().__init__()
                     self.layer = nn.Linear(self.hidden_size, self.hidden_size)
 
-        The value class must:
-        1. Be a subclass of the configuration class
-        2. Be a subclass of parent configuration value classes (if any)
+        The value class must be a subclass of the configuration class
+        and a subclass of parent configuration value classes (if any).
         """
 
         def decorator(value_class: type) -> type:
@@ -2012,7 +2032,25 @@ def copyconfig(config: Config, **kwargs):
 
 
 def setmeta(config: Config, flag: bool):
-    """Flags the configuration as a meta-parameter"""
+    """Force a configuration to be treated as a meta-parameter.
+
+    When a configuration is marked as meta, it is excluded from the
+    identifier computation of its parent configuration.
+
+    Example::
+
+        class Ensemble(Config):
+            model1: Param[Model]
+            model2: Param[Model]
+
+        # Mark model2 as meta - it won't affect the ensemble's identifier
+        model2 = setmeta(Model.C(...), True)
+        ensemble = Ensemble.C(model1=model1, model2=model2)
+
+    :param config: The configuration to mark
+    :param flag: True to mark as meta, False to include in identifier
+    :return: The same configuration (for chaining)
+    """
     config.__xpm__.set_meta(flag)
     return config
 

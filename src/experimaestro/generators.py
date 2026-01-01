@@ -22,13 +22,34 @@ class Generator(ABC):
 
 
 class PathGenerator(Generator):
-    """Generates a path
+    """Generate paths within the task directory.
 
-    Args:
-        path: The relative path to generate. Can be a string, Path, or callable.
-        partial: If provided, the path will be generated in a partial directory
-            that is shared across configurations that differ only in the
-            parameters excluded by this Subparameters instance.
+    Use ``PathGenerator`` with ``field(default_factory=...)`` to create
+    paths relative to the task's working directory.
+
+    Example::
+
+        class MyTask(Task):
+            output: Meta[Path] = field(default_factory=PathGenerator("results.json"))
+            model: Meta[Path] = field(default_factory=PathGenerator("model.pt"))
+
+    For shared directories across related tasks, use with subparameters::
+
+        training_group = param_group("training")
+
+        class Train(Task):
+            epochs: Param[int] = field(groups=[training_group])
+            checkpoint: Meta[Path] = field(
+                default_factory=PathGenerator(
+                    "model.pt",
+                    subparameters=subparameters(exclude=[training_group])
+                )
+            )
+
+    :param path: Relative path within the task directory. Can be a string,
+        Path, or callable that takes (context, config) and returns a Path.
+    :param subparameters: Optional subparameters for partial directory sharing.
+        When provided, the path is generated in a shared partial directory.
     """
 
     def __init__(

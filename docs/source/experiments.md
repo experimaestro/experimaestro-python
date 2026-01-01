@@ -34,19 +34,19 @@ experimaestro-ir for an example).
 
 An `experiment.py` file:
 
-```py3
-    from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
+```python
+from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
 
-    @configuration
-    class Configuration(ConfigurationBase):
-        #: Default learning rate
-        learning_rate: float = 1e-3
+@configuration
+class Configuration(ConfigurationBase):
+    #: Default learning rate
+    learning_rate: float = 1e-3
 
-    def run(
-        helper: ExperimentHelper, cfg: Configuration
-    ):
-        # Experimental code
-        ...
+def run(
+    helper: ExperimentHelper, cfg: Configuration
+):
+    # Experimental code
+    ...
 ```
 
 With `full.yaml` located in the same folder as `experiment.py`

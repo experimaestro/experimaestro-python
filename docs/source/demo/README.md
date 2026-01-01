@@ -13,7 +13,7 @@ various hyper-parameters. This can rapidly become a pain to:
 - Track the hyper-parameters already tested. And avoid launching a job with same parameters twice.
 - Save results in proper _unique and not conflicting directories_ for further loading and analysis.
 
-### Luckily, `experimaestro` can do all of that for you !
+## Luckily, `experimaestro` can do all of that for you !
 
 By the end of this tutorial, you will understand the core structure of
 experimaestro. And you will be able to launch and monitor your own experiments. In this tutorial, we rely on `git` and `uv`; both needs to be installed.
@@ -76,7 +76,10 @@ and experiments.
 
 Let's see a first configuration that defines a CNN model
 
-```py
+```python
+from experimaestro import Config, Param
+import torch.nn as nn
+
 class CNN(Config, nn.Module):
     """Defines a CNN model"""
 
@@ -88,7 +91,7 @@ class CNN(Config, nn.Module):
 
     kernel_size: Param[int] = 3
     """Kernel size of the CNN"""
-	...
+    ...
 ```
 
 A configuration is characterized by:
@@ -107,11 +110,15 @@ identifier, which is different from `CNN.C(n_layers=1)`.
 
 Another important type of object are `Task` objects. They correspond to the code that can be run, e.g. on a SLURM cluster or locally, to perform a part of the experiment, e.g. learning the CNN model from data. Let us take a closer look at some bits of the code:
 
-```py
+```python
+from pathlib import Path
+from experimaestro import Task, Param, Meta
+from experimaestro.generators import PathGenerator
+
 class Learn(Task):
     """Learn to classify an image into a pre-defined set of classes"""
 
-    parameters_path: Meta[Path] = field(default_factory=PathGenerator("parameters.pth"))
+    parameters_path: Meta[Path] = PathGenerator("parameters.pth")
     """Path to store the model parameters"""
 
     data: Param[LabelledImages]
@@ -120,10 +127,10 @@ class Learn(Task):
     model: Param[CNN]
     """The model we are training"""
 
-	...
+    ...
 
-	def execute(self):
-		...
+    def execute(self):
+        ...
 ```
 
 You can notice that tasks are specific types of configuration. You can also notice that
@@ -145,7 +152,11 @@ abstraction of the basic datasets we manipulate in our experiment. We use the
 [datamaestro](https://datamaestro.readthedocs.io/en/latest/) library, which is
 tightly associated with experimaestro, for this purpose.
 
-```py
+```python
+from abc import ABC, abstractmethod
+from datamaestro import Base
+from torchvision.datasets import VisionDataset
+
 class LabelledImages(Base, ABC):
     @abstractmethod
     def torchvision_dataset(self, **kwargs) -> VisionDataset:
@@ -191,7 +202,7 @@ def mnist(root: Path) -> Supervised[LabelledImages, None, LabelledImages]:
 
 <summary>👓 See how MNIST is defined in datamaestro-image</summary>
 
-```py
+```python
 from datamaestro_image.data import ImageClassification, LabelledImages, Base, IDXImage
 from datamaestro.download.single import filedownloader
 from datamaestro.definitions import dataset
@@ -280,12 +291,11 @@ Now we are ready to launch our tasks !
 we use the
 
 ```python
- for n_layer in cfg.n_layers:
-        for hidden_dim in cfg.hidden_dim:
-            for kernel_size in cfg.kernel_size:
-
-                task = TrainOnMNIST(...)
-				...task.submit(launcher=gpulauncher)... # Submit the Task to Slurm
+for n_layer in cfg.n_layers:
+    for hidden_dim in cfg.hidden_dim:
+        for kernel_size in cfg.kernel_size:
+            task = TrainOnMNIST(...)
+            task.submit(launcher=gpulauncher)
 ```
 
 ### `params.yaml`

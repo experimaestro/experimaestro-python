@@ -1,3 +1,5 @@
+# Documenting Configurations
+
 There are two documentation plugins, one for for Sphinx (recommended) and mkdocs (deprecated).
 
 ## Sphinx
@@ -33,7 +35,7 @@ plugins:
 
 ## Including methods
 
-```py3
+```python
 class CSV:
     @documentation
     def data(self) -> Tuple[List[str], "numpy.array"]:
@@ -82,7 +84,7 @@ How to sample learning batches.
 When building the documentation, it might be useful not to have to install
 all the dependencies.
 
-```py3
+```python
 import re
 from experimaestro.mkdocs.metaloader import DependencyInjectorFinder
 

@@ -12,7 +12,7 @@ This page discusses how to save and load configuration objects:
 Configuration objects can be loaded and saved. You can even embed them
 within any standard Python structure (i.e. dictionary, list, tuple).
 
-```py3
+```python
 from experimaestro import load, save
 
 # Saves the object
@@ -56,7 +56,7 @@ and loads from them.
 To ease saving/loading configuration from experiments, one
 can use methods from the experiment objects as follows:
 
-```py
+```python
 from experimaestro import experiment, Param, Config
 
 class MyConfig(Config):
@@ -82,7 +82,7 @@ Configurations can be serialized with the data necessary
 to restore their state. This can be useful to share a
 model (e.g. with HuggingFace hub).
 
-```py3
+```python
 from experimaestro import DataPath
 
 class MyConfig(Config):
@@ -92,7 +92,7 @@ class MyConfig(Config):
 
 ## HuggingFace integration
 
-```py3
+```python
 # ExperimaestroHFHub implements the interface from ModelHubMixin
 # https://huggingface.co/docs/huggingface_hub/package_reference/mixins#huggingface_hub.ModelHubMixin
 from experimaestro.huggingface import ExperimaestroHFHub

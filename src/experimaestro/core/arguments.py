@@ -237,18 +237,74 @@ T = TypeVar("T")
 
 paramHint = _Param()
 Param = Annotated[T, paramHint]
+"""Type annotation for configuration parameters.
+
+Parameters annotated with ``Param[T]`` are included in the configuration
+identifier computation and must be set before the configuration is sealed.
+
+Example::
+
+    class MyConfig(Config):
+        name: Param[str]
+        count: Param[int] = field(default=10)
+        threshold: Param[float] = field(ignore_default=0.5)
+"""
 
 optionHint = _Param(ignored=True)
 Option = Annotated[T, optionHint]
+"""Deprecated alias for Meta. Use Meta instead."""
+
 Meta = Annotated[T, optionHint]
+"""Type annotation for meta-parameters (ignored in identifier computation).
+
+Use ``Meta[T]`` for parameters that should not affect the task identity,
+such as output paths or runtime configuration.
+
+Example::
+
+    class MyTask(Task):
+        # This affects the task identity
+        learning_rate: Param[float]
+
+        # This does not affect the identity
+        checkpoint_path: Meta[Path] = field(default_factory=PathGenerator("model.pt"))
+"""
 
 dataHint = _Param(ignored=True, is_data=True)
 DataPath = Annotated[Path, dataHint]
-"""Annotates a path that should be kept to restore an object to its state"""
+"""Type annotation for data paths that should be serialized.
+
+Use ``DataPath`` for paths that point to data files that should be
+preserved when serializing/deserializing a configuration. The path
+is copied during serialization.
+
+Example::
+
+    class MyConfig(Config):
+        model_weights: DataPath
+"""
 
 
 class field:
-    """Extra information for a given experimaestro field (param or meta)"""
+    """Specify additional properties for a configuration parameter.
+
+    Use ``field()`` to control default value behavior and parameter grouping.
+
+    Example::
+
+        class MyConfig(Config):
+            # Default included in identifier
+            count: Param[int] = field(default=10)
+
+            # Default ignored in identifier (backwards compatible)
+            threshold: Param[float] = field(ignore_default=0.5)
+
+            # Generated path
+            output: Meta[Path] = field(default_factory=PathGenerator("out.txt"))
+
+            # Parameter in a group (for partial identifiers)
+            lr: Param[float] = field(groups=[training_group])
+    """
 
     def __init__(
         self,
@@ -260,23 +316,18 @@ class field:
         overrides=False,
         groups: list["ParameterGroup"] = None,
     ):
-        """Gives some extra per-field information
+        """Create a field specification.
 
-        :param default: a default value that IS included in the identifier computation,
-            defaults to None
-        :param default_factory: a default factory for values, defaults to None
-        :param ignore_default: a default value that is IGNORED in identifier computation
-            when the actual value matches this default. Use this for backwards-compatible
+        :param default: Default value (included in identifier computation)
+        :param default_factory: Callable that generates the default value
+        :param ignore_default: Default value that is ignored in identifier computation
+            when the actual value equals this default. Use for backwards-compatible
             behavior with bare default values.
-        :param ignore_generated: True if the value is hidden – it won't be accessible in
-            tasks, defaults to False. The interest of hidden is to add a
-            configuration field that changes the identifier, but will not be
-            used.
-        :param overrides: True if this field intentionally overrides a parent field.
-            Suppresses the warning that would otherwise be issued.
-        :param groups: A list of ParameterGroup objects this parameter belongs to.
-            Used with subparameters to compute partial identifiers that exclude
-            certain groups. A parameter can belong to multiple groups.
+        :param ignore_generated: If True, the generated value is hidden from tasks.
+            Useful for adding a field that changes the identifier but won't be used.
+        :param overrides: If True, suppress warning when overriding parent parameter
+        :param groups: List of ParameterGroup objects for partial identifiers.
+            Used with subparameters to compute identifiers that exclude certain groups.
         """
         assert not (
             (default is not None) and (default_factory is not None)
@@ -313,3 +364,13 @@ class ConstantHint(TypeAnnotation):
 
 constantHint = ConstantHint()
 Constant = Annotated[T, constantHint]
+"""Type annotation for constant (read-only) parameters.
+
+Constants must have a default value and cannot be modified after creation.
+They are included in the identifier computation.
+
+Example::
+
+    class MyConfig(Config):
+        version: Constant[str] = "1.0"
+"""

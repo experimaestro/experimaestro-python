@@ -20,7 +20,7 @@ The [Slurm](https://slurm.schedmd.com/documentation.html) workload manager launc
 It is possible to use different settings for different jobs by using the `config`
 method of the launcher
 
-```py3
+```python
 
 from experimaestro.launchers.slurm import SlurmLauncher
 
@@ -55,8 +55,8 @@ The `launchers.py` file dictates how a given *requirement* (e.g., 2 CPU with
 
 ::: experimaestro.launcherfinder.parser.parse
 
-```py3
-from experimaestro.launcherfinder.parse
+```python
+from experimaestro.launcherfinder.parser import parse
 
 req = parse("""duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 8 | duration=50h & cpu(mem=700GiB) & cuda(mem=32GiB) * 4""")
 ```
@@ -74,7 +74,7 @@ Requirements can be manipulated:
 To construct launchers given a specification, you have to use a `launchers.py`
 file within the configuration directory.
 
-```py3
+```python
 from typing import Set
 from experimaestro.launcherfinder import (
     HostRequirement,
@@ -115,8 +115,7 @@ def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
 
 Tags can be used to filter out some launchers
 
-```py
-
+```python
 from experimaestro.launcherfinder import find_launcher
 
 find_launcher("""duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""", tags=["slurm"])

@@ -1,8 +1,10 @@
+# Frequently Asked Questions
+
 ## Controlling tasks
 
 ### Wait a for a task to complete
 
-```py3
+```python
 # Submit the task
 output = mytask.submit()
 
@@ -18,7 +20,7 @@ Method 1: creates an instance of a task with its `.instance(context)` method. Th
 be necessary to create the directory structure for executing the task. If no context is provided, the default context
 is used.
 
-```py3
+```python
 context = DirectoryContext("/tmp/taskfolder")
 task.instance(context).execute()
 ```

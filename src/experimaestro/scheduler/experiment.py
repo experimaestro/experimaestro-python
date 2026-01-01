@@ -47,14 +47,18 @@ class DatabaseListener:
 
 
 class experiment:
-    """Main experiment object
+    """Context manager for running experiments.
 
-    It is a context object, i.e. an experiment is run with
+    Creates a workspace, manages task submission, and optionally starts
+    a web server for monitoring.
 
-    ```py
-        with experiment(...) as xp:
-            ...
-    ```
+    Example::
+
+        from experimaestro import experiment
+
+        with experiment("./workdir", "my-experiment", port=12345) as xp:
+            task = MyTask.C(param=42).submit()
+            result = task.wait()
     """
 
     #: Current experiment

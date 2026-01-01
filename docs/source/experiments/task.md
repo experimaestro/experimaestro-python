@@ -42,12 +42,13 @@ to the task.
 
 By default, the task configuration is marked as a dependency as follows:
 
-```py3
+```python
+from experimaestro import Task
 
-    class MyTask(Task):
-        # (by default)
-        def task_outputs(self, dep) -> Task:
-            return dep(self)
+class MyTask(Task):
+    # (by default)
+    def task_outputs(self, dep) -> Task:
+        return dep(self)
 ```
 
 For more complex cases, one can redefine the `task_outputs` method
@@ -66,6 +67,10 @@ In that case, we express the fact that:
 - but the `documents` property should not (since we do not sample from it)
 
 ```python
+from pathlib import Path
+from experimaestro import Task, Param, field
+from experimaestro.generators import PathGenerator
+
 class RandomFold(Task):
     dataset: Param[Dataset]
     """The source dataset"""
@@ -98,6 +103,7 @@ configuration. There are two ways to do so:
 :class: example
 
 ```python
+from pathlib import Path
 from experimaestro import Config, Task, Param, Meta
 
 class TaskA_Output(Config):
@@ -120,40 +126,41 @@ configuration logic; in that case, `LightweightTask` (a `Config` which must be
 subclassed) can be used.
 
 
-```py3
-    from experimaestro import Config, Param, Task, Meta, LightweightTask
+```python
+from pathlib import Path
+from experimaestro import Config, Param, Task, Meta, LightweightTask
 
-    class Model(Config):
+class Model(Config):
+    ...
+
+class ModelLoader(LightweightTask):
+    path: Meta[Path]
+    model: Param[Model]
+
+    def execute(self):
         ...
 
-    class ModelLoader(LightweightTask):
-        path: Meta[Path]
-        model: Param[Model]
+class Evaluate(Task):
+    model: Param[Model]
 
-        def execute(self):
-            ...
+    def execute(self):
+        ...
 
-    def Evaluate(Task):
-        model: Param[Model]
+class ModelLearner(Task):
+    model: Param[Model]
 
-        def execute(self):
-            ...
+    def task_outputs(self, dep):
+        return dep(ModelLoader.C(model=model, path=path))
 
-    class ModelLearner(Task):
-        model: Param[Model]
-
-        def task_outputs(self, dep):
-            return dep(ModelLoader.C(model=model, path=path))
-
-        def execute(self):
-            ...
+    def execute(self):
+        ...
 
 
-    # We learn the model...
-    model_loader = learner.submit()
+# We learn the model...
+model_loader = learner.submit()
 
-    # ... and evaluate it, using the learned parameters
-    Evaluate.C(model=model).submit(init_tasks=[model_loader])
+# ... and evaluate it, using the learned parameters
+Evaluate.C(model=model).submit(init_tasks=[model_loader])
 ```
 
 
@@ -162,8 +169,9 @@ subclassed) can be used.
 
 When a task is submitted, it is possible to modify the job/launcher environnement
 
-```py3
-from experimaestro import SubmitHook, Job, Launcher, submit_hook_decorator
+```python
+from experimaestro import Config
+from experimaestro.core.submithooks import SubmitHook, Job, Launcher
 
 
 class needs_java(SubmitHook):
@@ -226,7 +234,7 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
    ```
 
 2. **Per-task**: Override when submitting:
-   ```py3
+   ```python
    task = LongTraining.C(epochs=1000).submit(max_retries=10)
    ```
 
@@ -403,7 +411,12 @@ learn.submit()
 
 Sometimes, a configuration might need to compute some output that might be interesting to cache, but without relying on a fully-fledged task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
-```py3
+```python
+from pathlib import Path
+import pickle
+import numpy as np
+from experimaestro import Config, cache
+
 class Terms(Config):
     @cache("terms.npy")
     def load(self, path: Path):

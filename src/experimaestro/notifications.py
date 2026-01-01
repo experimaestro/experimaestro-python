@@ -249,12 +249,21 @@ class Reporter(threading.Thread):
 
 
 def progress(value: float, level=0, desc: Optional[str] = None, console=False):
-    """When called from a running task, report the progress
+    """Report task progress to the experimaestro server.
 
-    Args:
-        level: The level (starting from 0)
-        value: The current value
-        desc: An optional description of the current task
+    Call this function from within a running task to report progress.
+    Progress is displayed in the web UI and TUI monitors.
+
+    Example::
+
+        for i, batch in enumerate(dataloader):
+            train(batch)
+            progress(i / len(dataloader), desc="Training")
+
+    :param value: Progress value between 0.0 and 1.0
+    :param level: Nesting level for nested progress bars (default: 0)
+    :param desc: Optional description of the current operation
+    :param console: If True, also print to console when no server is available
     """
     if TaskEnv.instance().slave:
         # Skip if in a slave process
@@ -268,8 +277,21 @@ def report_eoj():
 
 
 class xpm_tqdm(std_tqdm):
-    """XPM wrapper for experimaestro that automatically reports progress to the
-    server"""
+    """Experimaestro-aware tqdm progress bar.
+
+    A drop-in replacement for ``tqdm`` that automatically reports progress
+    to the experimaestro server. Use this instead of the standard ``tqdm``
+    in your task's ``execute()`` method.
+
+    Example::
+
+        from experimaestro import tqdm
+
+        class MyTask(Task):
+            def execute(self):
+                for batch in tqdm(dataloader, desc="Training"):
+                    train(batch)
+    """
 
     def __init__(self, iterable=None, file=None, *args, **kwargs):
         # Report progress bar
@@ -300,4 +322,21 @@ def tqdm(iterable: Optional[Iterator[T]] = None, **kwargs) -> Iterator[T]: ...
 
 
 def tqdm(*args, **kwargs):
+    """Create an experimaestro-aware progress bar.
+
+    A drop-in replacement for ``tqdm.tqdm`` that automatically reports progress
+    to the experimaestro server. Use this in task ``execute()`` methods.
+
+    Example::
+
+        from experimaestro import tqdm
+
+        for epoch in tqdm(range(100), desc="Epochs"):
+            for batch in tqdm(dataloader, desc="Batches"):
+                train(batch)
+
+    :param iterable: Iterable to wrap (optional)
+    :param kwargs: Additional arguments passed to tqdm
+    :return: A progress bar iterator
+    """
     return xpm_tqdm(*args, **kwargs)  # type: ignore

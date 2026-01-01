@@ -31,10 +31,14 @@ def json_object(context: SerializationContext, value: Any, objects=[]):
 
 
 def state_dict(context: SerializationContext, obj: Any):
-    """Returns a state dictionary of the object
+    """Convert an object to a state dictionary for serialization.
+
+    Returns a dictionary representation that can be serialized to JSON
+    and later restored with :func:`from_state_dict`.
 
     :param context: The serialization context
-    :param obj: the object to serialize
+    :param obj: The object to serialize
+    :return: A dictionary with 'objects' and 'data' keys
     """
     objects: list[Any] = []
     data = json_object(context, obj, objects)
@@ -48,14 +52,19 @@ def save_definition(obj: Any, context: SerializationContext, path: Path):
 
 
 def save(obj: Any, save_directory: Optional[Path]):
-    """Saves an object into a disk file
+    """Save a configuration to a directory.
 
-    The serialization process also stores in the given folder the different
-    files or folders that are registered as Path parameters (or
-    meta-parameters).
+    The serialization process stores the configuration in "definition.json"
+    and copies any files or folders registered as DataPath parameters.
 
+    Example::
+
+        config = MyConfig.C(data_path=Path("/data/file.txt"))
+        save(config, Path("/output/saved_config"))
+
+    :param obj: The configuration to save
     :param save_directory: The directory in which the object and its data will
-        be saved (by default, the object is saved in "definition.json")
+        be saved (object is saved in "definition.json")
     """
     context = SerializationContext(save_directory=save_directory)
     save_definition(
@@ -92,14 +101,18 @@ def from_state_dict(
     as_instance: bool = False,
     partial_loading: Optional[bool] = None,
 ):
-    """Load an object from a state dictionary
+    """Load an object from a state dictionary.
 
-    :param state: The state
-    :param path: A directory or a function that transforms relative file path
-        into absolute ones
-    :param as_instance: returns instances instead of configuration objects
+    Restores a configuration from a dictionary previously created by
+    :func:`state_dict`.
+
+    :param state: The state dictionary to load from
+    :param path: Directory containing data files, or a function that resolves
+        relative paths to absolute ones
+    :param as_instance: If True, return an instance instead of a config
     :param partial_loading: If True, skip loading task references. If None
         (default), partial_loading is enabled when as_instance is True.
+    :return: The loaded configuration or instance
     """
     # Determine effective partial_loading: as_instance implies partial_loading
     effective_partial_loading = (
@@ -121,13 +134,20 @@ def load(
     as_instance: bool = False,
     partial_loading: Optional[bool] = None,
 ) -> Tuple[Any, List["LightweightTask"]]:
-    """Load data from disk
+    """Load a configuration from a directory.
 
-    :param path: A directory or a function that transforms relative file path
-        into absolute ones
-    :param as_instance: returns instances instead of configuration objects
+    Restores a configuration previously saved with :func:`save`.
+
+    Example::
+
+        config = load(Path("/output/saved_config"))
+
+    :param path: Directory containing the saved configuration, or a function
+        that resolves relative paths to absolute ones
+    :param as_instance: If True, return an instance instead of a config
     :param partial_loading: If True, skip loading task references. If None
         (default), partial_loading is enabled when as_instance is True.
+    :return: The loaded configuration or instance
     """
     data_loader = get_data_loader(path)
 
@@ -143,13 +163,17 @@ def from_task_dir(
     as_instance: bool = False,
     partial_loading: Optional[bool] = None,
 ):
-    """Loads a task object
+    """Load a task configuration from a task directory.
 
-    :param path: A directory or a function that transforms relative file path
-        into absolute ones
-    :param as_instance: returns instances instead of configuration objects
+    Loads the task parameters from a job directory (containing params.json).
+    This is useful for reloading task configurations after execution.
+
+    :param path: Task directory containing params.json, or a function that
+        resolves relative paths to absolute ones
+    :param as_instance: If True, return an instance instead of a config
     :param partial_loading: If True, skip loading task references. If None
         (default), partial_loading is enabled when as_instance is True.
+    :return: The loaded task configuration or instance
     """
     data_loader = get_data_loader(path)
     with data_loader("params.json").open("rt") as fh:
@@ -165,15 +189,15 @@ def from_task_dir(
 def serialize(
     obj: Any, save_directory: Path, *, init_tasks: list["LightweightTask"] = []
 ):
-    """Saves an object into a disk file, including initialization tasks
+    """Serialize a configuration to a directory with initialization tasks.
 
-    The serialization process also stores in the given folder the different
-    files or folders that are registered as Path parameters (or
-    meta-parameters).
+    Similar to :func:`save`, but also stores lightweight initialization tasks
+    that should be run when the configuration is deserialized.
 
+    :param obj: The configuration to serialize
     :param save_directory: The directory in which the object and its data will
-        be saved (by default, the object is saved in "definition.json")
-    :param init_tasks: The optional
+        be saved (object is saved in "definition.json")
+    :param init_tasks: List of lightweight tasks to run on deserialization
     """
     context = SerializationContext(save_directory=save_directory)
     save_definition((obj, init_tasks), context, save_directory / "definition.json")
@@ -184,14 +208,18 @@ def deserialize(
     as_instance: bool = False,
     partial_loading: Optional[bool] = None,
 ) -> tuple[Any, List["LightweightTask"]] | Any:
-    """Load data from disk, and initialize the object
+    """Deserialize a configuration from a directory.
 
-    :param path: A directory or a function that transforms relative file path
-        into absolute ones
-    :param as_instance: returns instances instead of configuration objects
+    Restores a configuration previously saved with :func:`serialize`.
+    When ``as_instance=True``, runs any stored initialization tasks.
+
+    :param path: Directory containing the serialized configuration, or a function
+        that resolves relative paths to absolute ones
+    :param as_instance: If True, return an instance and run init tasks
     :param partial_loading: If True, skip loading task references. If None
         (default), partial_loading is enabled when as_instance is True.
-    :returns: either the object (as_instance is true), or a tuple
+    :return: The configuration/instance (if as_instance), or tuple of
+        (configuration, init_tasks)
     """
     data_loader = get_data_loader(path)
 
