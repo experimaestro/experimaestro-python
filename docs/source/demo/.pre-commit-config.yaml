@@ -1,0 +1,19 @@
+repos:
+- hooks:
+  - id: check-yaml
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
+  repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.4.0
+- hooks:
+  - exclude: ^src/experimaestro/server/data
+    id: black
+  repo: https://github.com/psf/black
+  rev: 23.1.0
+- hooks:
+  - additional_dependencies:
+    - flake8-print
+    - flake8-fixme
+    id: flake8
+  repo: https://github.com/pycqa/flake8
+  rev: 6.0.0

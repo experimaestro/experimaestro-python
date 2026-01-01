@@ -1,5 +1,6 @@
 # Command Line Interface
 
+(running-experiments)=
 ## Running Experiments
 
 here is the general command used to launch experiments:

@@ -1,5 +1,63 @@
 # Introduction
 
+```{toctree}
+---
+maxdepth: 1
+caption: "Getting Started"
+---
+tutorial
+```
+
+```{toctree}
+---
+maxdepth: 2
+caption: "Experiments"
+---
+experiments/config
+experiments/task
+experiments/plan
+```
+
+```{toctree}
+---
+maxdepth: 1
+caption: "Execution"
+---
+launchers/index
+connectors/index
+```
+
+```{toctree}
+---
+maxdepth: 1
+caption: "Core Concepts"
+---
+serialization
+settings
+experiments
+services
+```
+
+```{toctree}
+---
+maxdepth: 1
+caption: "Integration"
+---
+jupyter
+documenting
+```
+
+```{toctree}
+---
+maxdepth: 1
+caption: "Reference"
+---
+api/index
+cli
+changelog
+faq
+```
+
 Experimaestro is a versatile tool for designing and managing complex workflows.
 It enables the definition of tasks and their dependencies, ensuring orderly
 execution within a workflow. Key features of Experimaestro include:
@@ -60,10 +118,10 @@ A [connector](./connectors/index.md) allow to specify how to access files on the
 A [launcher](./launchers/index.md) specifies how a given task can be run. The most basic method is direct execution, but experimaestro can launch and monitor oar (_planned_) and slurm (_planned_) jobs.
 
 
-!!! note
+:::{note}
+Experimaestro and datamaestro are described in the following paper
 
-    Experimaestro and datamaestro are described in the following paper
-
-    Benjamin Piwowarski. 2020.
-    [Experimaestro and Datamaestro: Experiment and Dataset Managers (for IR).](https://doi.org/10.1145/3397271.3401410)
-    *In Proceedings of the 43rd International ACM SIGIR*
+Benjamin Piwowarski. 2020.
+[Experimaestro and Datamaestro: Experiment and Dataset Managers (for IR).](https://doi.org/10.1145/3397271.3401410)
+*In Proceedings of the 43rd International ACM SIGIR*
+:::

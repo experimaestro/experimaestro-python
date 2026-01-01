@@ -1,0 +1,17 @@
+[project]
+name = "experimaestro-demo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "datamaestro>=1.4.1",
+    "experimaestro>=1.6.2",
+    "pandas>=2.2.3",
+    "tensorboard>=2.19.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+]
+
+[tool.uv.sources]
+experimaestro = { git = "https://github.com/experimaestro/experimaestro-python", rev = "dd4690d" }

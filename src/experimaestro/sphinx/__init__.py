@@ -113,12 +113,12 @@ class ConfigDocumenter(ClassDocumenter):
     @staticmethod
     def formatDefault(value) -> str:
         if isinstance(value, Config):
-            objecttype = value.__xpmtype__.objecttype
+            value_type = value.__xpmtype__.value_type
             params = ", ".join(
                 [f"{key}={value}" for key, value in value.__xpm__.values.items()]
             )
             # It would be possible to do better... if not
-            return f"{objecttype.__module__}.{objecttype.__qualname__}({params})"
+            return f"{value_type.__module__}.{value_type.__qualname__}({params})"
 
         return str(value)
 
@@ -176,7 +176,7 @@ class ConfigDocumenter(ClassDocumenter):
             self.add_line("   " + _("Bases: %s") % ", ".join(base_classes), sourcename)
 
         # Adds return type if different
-        if xpminfo.returntype != xpminfo.objecttype:
+        if xpminfo.returntype != xpminfo.value_type:
             self.add_line("", sourcename)
             self.add_line(
                 "   " + _("Submit type: %s") % restify(xpminfo.returntype), sourcename

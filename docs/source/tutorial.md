@@ -2,16 +2,18 @@
 
 This tutorial is based on the [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) repository, which provides a complete working example of using experimaestro for hyperparameter search in deep learning.
 
-!!! tip "Running the tutorial"
-    To follow along with this tutorial, clone the demo repository:
-    ```bash
-    git clone https://github.com/experimaestro/experimaestro-demo.git
-    cd experimaestro-demo
-    ```
+:::{tip} Running the tutorial
+To follow along with this tutorial, clone the demo repository:
+```bash
+git clone https://github.com/experimaestro/experimaestro-demo.git
+cd experimaestro-demo
+```
+:::
 
 ---
 
---8<-- "docs/demo/README.md"
+```{include} demo/README.md
+```
 
 ---
 

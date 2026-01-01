@@ -6,12 +6,14 @@ a new process) or through [slurm](#slurm)
 
 ## Types
 
+(direct)=
 ### Direct
 
 By default, jobs are launched directly by the scheduler using python scripts.
 
 ::: experimaestro.launchers.direct.DirectLauncher
 
+(slurm)=
 ### Slurm
 
 The [Slurm](https://slurm.schedmd.com/documentation.html) workload manager launcher is supported.

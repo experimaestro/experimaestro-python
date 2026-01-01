@@ -26,7 +26,7 @@ task.instance(context).execute()
 The main problem with this approach is that resources are shared between experimaestro and the task
 
 ### How to Debug a failed task ?
-If a task failed, you can rerun it with [debugpy](https://github.com/microsoft/debugpy). 
+If a task failed, you can rerun it with [debugpy](https://github.com/microsoft/debugpy).
 
 #### Using vsCode
 If the task is already generated, you can run it with the [python debugger](https://code.visualstudio.com/docs/python/debugging) directly within vsCode.

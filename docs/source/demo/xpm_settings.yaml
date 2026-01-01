@@ -1,0 +1,7 @@
+# Experimaestro Demo Workspace settings
+# see https://experimaestro-python.readthedocs.io/en/latest/settings/ for more options
+
+workspaces:
+  # First workspace will be used as default if not specified in `experimaestro run-experiment ..`
+  - id: MNIST_train
+    path: ~/experiments/mnist_xp

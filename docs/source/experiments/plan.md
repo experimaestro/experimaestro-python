@@ -8,15 +8,16 @@ In experimaestro, plans are defined imperatively which gives a lot of freedom.
 Configuration and task arguments can be set by using a constructor or assigning a member within
 the config/task instance, as in the example below:
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3 linenums="1"
-
-    model = Model1.C(layers=3)
-    learnedmodel = Learn.C(epochs=100)
-    learnedmodel.model = model
-    learnedmodel.submit()
-    ```
+```python
+model = Model1.C(layers=3)
+learnedmodel = Learn.C(epochs=100)
+learnedmodel.model = model
+learnedmodel.submit()
+```
+:::
 
 - line 1: the `Model1` configuration is set with argument `layers` set to `3`.
 - line 2: the `Learn` task is configured with parameter `epochs` set to 100
@@ -51,6 +52,7 @@ task1 = token(2, task)
 task2 = token(2, task)
 ```
 
+(tags)=
 ## Tags
 
 Tags allow to monitor specific experimental parameters.

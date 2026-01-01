@@ -5,20 +5,22 @@ A task is a special [configuration](./config.md) that can be:
 1. Submitted to the task scheduler using `submit` (preparation of the experiment)
 1. Executed with the method `execute` (running a specific task within the experiment)
 
-!!! example "Defining a task"
+:::{admonition} Defining a task
+:class: example
 
-    ```py3
-    from experimaestro import Config, Task, Param, Meta, PathGenerator, field
+```python
+from experimaestro import Config, Task, Param, Meta, PathGenerator, field
 
-    class ModelLearn(Task):
-        epochs: Param[int] = 100
-        model: Param[Model]
-        parameters: Meta[Path] = field(default_factory=PathGenerator("parameters.pth"))
+class ModelLearn(Task):
+    epochs: Param[int] = 100
+    model: Param[Model]
+    parameters: Meta[Path] = field(default_factory=PathGenerator("parameters.pth"))
 
-        def execute(self):
-            """Called when this task is run"""
-            pass
-    ```
+    def execute(self):
+        """Called when this task is run"""
+        pass
+```
+:::
 
 ## Task lifecycle
 
@@ -52,31 +54,32 @@ For more complex cases, one can redefine the `task_outputs` method
 and explicitly declare the dependencies.
 
 
-!!! example "Task outputs"
+:::{admonition} Task outputs
+:class: example
 
-    In this example, we sample from a dataset composed of composed of queries
-    and documents. The documents are left untouched, but the topics are sampled.
-    In that case, we express the fact that:
+In this example, we sample from a dataset composed of composed of queries
+and documents. The documents are left untouched, but the topics are sampled.
+In that case, we express the fact that:
 
-    - the returned object `Dataset` should be dependant on the task `RandomFold`
-    - the `topics` property of this dataset should also be dependant
-    - but the `documents` property should not (since we do not sample from it)
+- the returned object `Dataset` should be dependant on the task `RandomFold`
+- the `topics` property of this dataset should also be dependant
+- but the `documents` property should not (since we do not sample from it)
 
-    ```py3
+```python
+class RandomFold(Task):
+    dataset: Param[Dataset]
+    """The source dataset"""
 
-        class RandomFold(Task):
-            dataset: Param[Dataset]
-            """The source dataset"""
+    topics: Param[Path] = field(default_factory=PathGenerator("topics.tsv"))
+    """Generated topics"""
 
-            topics: Param[Path] = field(default_factory=PathGenerator("topics.tsv"))
-            """Generated topics"""
-
-            def task_outputs(self, dep) -> Adhoc:
-                return dep(Dataset.C(
-                    topics=dep(Topics.C(path=self.topics)),
-                    documents=self.dataset.documents,
-                ))
-    ```
+    def task_outputs(self, dep) -> Adhoc:
+        return dep(Dataset.C(
+            topics=dep(Topics.C(path=self.topics)),
+            documents=self.dataset.documents,
+        ))
+```
+:::
 
 ## Common use case
 
@@ -91,20 +94,23 @@ configuration. There are two ways to do so:
 
 ### Wrapping the task output
 
-!!! example "Wrapping a task output"
-    ```py
-    from experimaestro import Config, Task, Param, Meta
+:::{admonition} Wrapping a task output
+:class: example
 
-    class TaskA_Output(Config):
-        path: Meta[Path]
+```python
+from experimaestro import Config, Task, Param, Meta
 
-    class TaskA(Task):
-        def task_outputs(self, dep) -> Task:
-            return dep(MyTaskOutput.C(path=self.jobpath))
+class TaskA_Output(Config):
+    path: Meta[Path]
 
-    class TaskB(Task):
-        task_a: Param[TaskA_Output]
-    ```
+class TaskA(Task):
+    def task_outputs(self, dep) -> Task:
+        return dep(MyTaskOutput.C(path=self.jobpath))
+
+class TaskB(Task):
+    task_a: Param[TaskA_Output]
+```
+:::
 
 ### Initialization tasks
 
@@ -178,31 +184,34 @@ class IndexCollection(Config):
     ...
 ```
 
+(resumable-tasks)=
 ## Resumable Tasks
 
 For long-running tasks that may be interrupted by scheduler timeouts (e.g., SLURM job time limits), you can use `ResumableTask` instead of `Task`. Resumable tasks can automatically retry when they fail due to timeouts, allowing them to resume from checkpoints.
 
-!!! example "Defining a resumable task"
+:::{admonition} Defining a resumable task
+:class: example
 
-    ```py3
-    from experimaestro import ResumableTask, Param, Meta, PathGenerator, field
-    from pathlib import Path
+```python
+from experimaestro import ResumableTask, Param, Meta, PathGenerator, field
+from pathlib import Path
 
-    class LongTraining(ResumableTask):
-        epochs: Param[int] = 1000
-        checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
+class LongTraining(ResumableTask):
+    epochs: Param[int] = 1000
+    checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
 
-        def execute(self):
-            # Check if we're resuming from a checkpoint
-            start_epoch = 0
-            if self.checkpoint.exists():
-                start_epoch = load_checkpoint(self.checkpoint)
+    def execute(self):
+        # Check if we're resuming from a checkpoint
+        start_epoch = 0
+        if self.checkpoint.exists():
+            start_epoch = load_checkpoint(self.checkpoint)
 
-            # Continue training from where we left off
-            for epoch in range(start_epoch, self.epochs):
-                train_one_epoch()
-                save_checkpoint(self.checkpoint, epoch)
-    ```
+        # Continue training from where we left off
+        for epoch in range(start_epoch, self.epochs):
+            train_one_epoch()
+            save_checkpoint(self.checkpoint, epoch)
+```
+:::
 
 ### Automatic Retry on Timeout
 
@@ -232,73 +241,78 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
 
 Resumable tasks can query the remaining time before a job timeout using the `remaining_time()` method. This is useful for deciding whether to start another iteration or checkpoint before the scheduler kills the job.
 
-!!! example "Using remaining_time()"
+:::{admonition} Using remaining_time()
+:class: example
 
-    ```py3
-    from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
-    from pathlib import Path
+```python
+from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+from pathlib import Path
 
-    class LongTraining(ResumableTask):
-        epochs: Param[int] = 1000
-        checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
+class LongTraining(ResumableTask):
+    epochs: Param[int] = 1000
+    checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
 
-        def execute(self):
-            start_epoch = 0
-            if self.checkpoint.exists():
-                start_epoch = load_checkpoint(self.checkpoint)
+    def execute(self):
+        start_epoch = 0
+        if self.checkpoint.exists():
+            start_epoch = load_checkpoint(self.checkpoint)
 
-            for epoch in range(start_epoch, self.epochs):
-                # Check if we have enough time for another epoch
-                remaining = self.remaining_time()
-                if remaining is not None and remaining < 300:  # 5 min buffer
-                    save_checkpoint(self.checkpoint, epoch)
-                    raise GracefulTimeout("Not enough time for another epoch")
-
-                train_one_epoch()
+        for epoch in range(start_epoch, self.epochs):
+            # Check if we have enough time for another epoch
+            remaining = self.remaining_time()
+            if remaining is not None and remaining < 300:  # 5 min buffer
                 save_checkpoint(self.checkpoint, epoch)
-    ```
+                raise GracefulTimeout("Not enough time for another epoch")
+
+            train_one_epoch()
+            save_checkpoint(self.checkpoint, epoch)
+```
+:::
 
 The `remaining_time()` method returns:
 
 - **Remaining seconds** (as `float`): When running on a launcher with time limits (e.g., SLURM)
 - **`None`**: When there is no time limit, or the launcher doesn't support querying remaining time
 
-!!! note "Launcher Support"
-    Currently, `remaining_time()` is supported for:
+:::{note} Launcher Support
+Currently, `remaining_time()` is supported for:
 
-    - **SLURM**: Queries the remaining walltime using `squeue`
-    - **Direct (local)**: Always returns `None` (no time limit)
+- **SLURM**: Queries the remaining walltime using `squeue`
+- **Direct (local)**: Always returns `None` (no time limit)
 
-    The remaining time is cached internally, so repeated calls are efficient.
+The remaining time is cached internally, so repeated calls are efficient.
+:::
 
 ### Graceful Timeout
 
 Sometimes a task knows it won't have enough time to complete another processing step before the scheduler kills it (e.g., SLURM walltime). In this case, the task can raise `GracefulTimeout` to stop cleanly and trigger a retry.
 
-!!! example "Using GracefulTimeout with remaining_time()"
+:::{admonition} Using GracefulTimeout with remaining_time()
+:class: example
 
-    ```py3
-    from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
-    from pathlib import Path
+```python
+from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+from pathlib import Path
 
-    class LongTraining(ResumableTask):
-        epochs: Param[int] = 1000
-        checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
+class LongTraining(ResumableTask):
+    epochs: Param[int] = 1000
+    checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
 
-        def execute(self):
-            start_epoch = 0
-            if self.checkpoint.exists():
-                start_epoch = load_checkpoint(self.checkpoint)
+    def execute(self):
+        start_epoch = 0
+        if self.checkpoint.exists():
+            start_epoch = load_checkpoint(self.checkpoint)
 
-            for epoch in range(start_epoch, self.epochs):
-                # Check remaining time before starting an epoch
-                remaining = self.remaining_time()
-                if remaining is not None and remaining < 300:  # 5 min buffer
-                    raise GracefulTimeout("Not enough time for another epoch")
+        for epoch in range(start_epoch, self.epochs):
+            # Check remaining time before starting an epoch
+            remaining = self.remaining_time()
+            if remaining is not None and remaining < 300:  # 5 min buffer
+                raise GracefulTimeout("Not enough time for another epoch")
 
-                train_one_epoch()
-                save_checkpoint(self.checkpoint, epoch)
-    ```
+            train_one_epoch()
+            save_checkpoint(self.checkpoint, epoch)
+```
+:::
 
 When `GracefulTimeout` is raised:
 
@@ -319,52 +333,57 @@ Callbacks can be registered to accomplish some actions e.g. on task completion.
 - `task.on_completed(callback: Callable[[], None])` register a callback that is
   called when the task terminates successfully
 
+(dynamic-task-outputs)=
 ## Dynamic Task Outputs
 
 For tasks that produce outputs during execution (e.g., checkpoints during training), you can use `watch_output` to register callbacks that are triggered when outputs are produced. This is particularly useful for triggering evaluation jobs on intermediate checkpoints.
 
-!!! example "Defining dynamic outputs"
+:::{admonition} Defining dynamic outputs
+:class: example
 
-    ```py3
-    from experimaestro import ResumableTask, Config, Param, DependentMarker
+```python
+from experimaestro import ResumableTask, Config, Param, DependentMarker
 
-    class Checkpoint(Config):
-        step: Param[int]
-        model: Param[Model]
+class Checkpoint(Config):
+    step: Param[int]
+    model: Param[Model]
 
-    class Validation(Config):
-        model: Param[Model]
+class Validation(Config):
+    model: Param[Model]
 
-        def checkpoint(self, dep: DependentMarker, *, step: int) -> Checkpoint:
-            """Method that produces dynamic outputs"""
-            return dep(Checkpoint.C(model=self.model, step=step))
+    def checkpoint(self, dep: DependentMarker, *, step: int) -> Checkpoint:
+        """Method that produces dynamic outputs"""
+        return dep(Checkpoint.C(model=self.model, step=step))
 
-        def compute(self, step: int):
-            """Called during task execution to register an output"""
-            self.register_task_output(self.checkpoint, step=step)
+    def compute(self, step: int):
+        """Called during task execution to register an output"""
+        self.register_task_output(self.checkpoint, step=step)
 
-    class Learn(ResumableTask):
-        model: Param[Model]
-        validation: Param[Validation]
+class Learn(ResumableTask):
+    model: Param[Model]
+    validation: Param[Validation]
 
-        def execute(self):
-            for step in range(100):
-                train_step()
-                if step % 10 == 0:
-                    self.validation.compute(step)  # Triggers callbacks
-    ```
+    def execute(self):
+        for step in range(100):
+            train_step()
+            if step % 10 == 0:
+                self.validation.compute(step)  # Triggers callbacks
+```
+:::
 
-!!! example "Watching dynamic outputs"
+:::{admonition} Watching dynamic outputs
+:class: example
 
-    ```py3
-    def on_checkpoint(checkpoint: Checkpoint):
-        # Called when a checkpoint is produced
-        Evaluate.C(checkpoint=checkpoint).submit()
+```python
+def on_checkpoint(checkpoint: Checkpoint):
+    # Called when a checkpoint is produced
+    Evaluate.C(checkpoint=checkpoint).submit()
 
-    learn = Learn.C(model=model, validation=validation)
-    learn.watch_output(validation.checkpoint, on_checkpoint)
-    learn.submit()
-    ```
+learn = Learn.C(model=model, validation=validation)
+learn.watch_output(validation.checkpoint, on_checkpoint)
+learn.submit()
+```
+:::
 
 ### Key Features
 

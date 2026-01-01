@@ -23,6 +23,7 @@ In Experimaestro, a configuration object is a fundamental concept used to specif
    *default* values can be introduced.
 
 
+(configuration-identifiers)=
 ## Configuration identifiers
 
 A configuration identifier in the context of systems like Experimaestro is a
@@ -46,16 +47,18 @@ A configuration is defined whenever an object derives from `Config`.
 When an identifier is not given, it is computed as `__module__.__qualname__`. In that case,
 it is possible to shorten the definition using the `Config` class as a base class.
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3
-    from experimaestro import Param, Config
+```python
+from experimaestro import Param, Config
 
-    class MyModel(Config):
-        __xpmid__ = "my.model"
+class MyModel(Config):
+    __xpmid__ = "my.model"
 
-        gamma: Param[float]
-    ```
+    gamma: Param[float]
+```
+:::
 
 defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
 
@@ -73,27 +76,30 @@ configuration specific behavior.
 ![object hierarchy](../img/xpm-objects.svg)
 
 
+(composition-operator)=
 ## Composition operator
 
 The `@` operator provides a concise syntax for composing configurations. When
 a configuration has a parameter that accepts another configuration type, you
 can use `@` instead of explicitly naming the parameter.
 
-!!! example "Basic composition"
+:::{admonition} Basic composition
+:class: example
 
-    ```python
-    from experimaestro import Config, Param
+```python
+from experimaestro import Config, Param
 
-    class Inner(Config):
-        x: Param[int]
+class Inner(Config):
+    x: Param[int]
 
-    class Outer(Config):
-        inner: Param[Inner]
+class Outer(Config):
+    inner: Param[Inner]
 
-    # These two are equivalent:
-    outer1 = Outer.C(inner=Inner.C(x=42))
-    outer2 = Outer.C() @ Inner.C(x=42)
-    ```
+# These two are equivalent:
+outer1 = Outer.C(inner=Inner.C(x=42))
+outer2 = Outer.C() @ Inner.C(x=42)
+```
+:::
 
 The operator finds the unique parameter in the outer configuration that can
 accept the inner configuration's type. If there are multiple matching
@@ -144,6 +150,7 @@ Ambiguous.C() @ Inner.C(x=1)
 ```
 
 
+(deprecating-a-configuration-or-attributes)=
 ## Deprecating a configuration or attributes
 
 When a configuration is moved (or equivalently its `__xpmid__` changed), its signature
@@ -155,19 +162,21 @@ annotation.
 For simple cases where the old and new configurations have the same parameters, use
 `@deprecate` with inheritance:
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3
-    from experimaestro import Param, Config, deprecate
+```python
+from experimaestro import Param, Config, deprecate
 
-    class NewConfiguration(Config):
-        pass
+class NewConfiguration(Config):
+    pass
 
-    @deprecate
-    class OldConfiguration(NewConfiguration):
-        # Only pass is allowed here
-        pass
-    ```
+@deprecate
+class OldConfiguration(NewConfiguration):
+    # Only pass is allowed here
+    pass
+```
+:::
 
 ### Deprecation with conversion
 
@@ -175,24 +184,26 @@ For cases where the deprecated configuration has different parameters and needs 
 be converted to the new format, use `@deprecate(TargetConfig)` with a `__convert__`
 method:
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3
-    from experimaestro import Param, Config, deprecate
+```python
+from experimaestro import Param, Config, deprecate
 
-    class NewConfig(Config):
-        """New configuration with a list of values."""
-        values: Param[list[int]]
+class NewConfig(Config):
+    """New configuration with a list of values."""
+    values: Param[list[int]]
 
-    @deprecate(NewConfig)
-    class OldConfig(Config):
-        """Old configuration with a single value."""
-        value: Param[int]
+@deprecate(NewConfig)
+class OldConfig(Config):
+    """Old configuration with a single value."""
+    value: Param[int]
 
-        def __convert__(self):
-            # Convert old single value to new list format
-            return NewConfig(values=[self.value])
-    ```
+    def __convert__(self):
+        # Convert old single value to new list format
+        return NewConfig(values=[self.value])
+```
+:::
 
 The `__convert__` method should return an equivalent instance of the target
 configuration. The identifier is computed from the converted configuration,
@@ -201,52 +212,56 @@ identifier.
 
 This also supports chained deprecation for multiple version migrations:
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3
-    class ConfigV2(Config):
-        values: Param[list[int]]
+```python
+class ConfigV2(Config):
+    values: Param[list[int]]
 
-    @deprecate(ConfigV2)
-    class ConfigV1(Config):
-        value: Param[int]
+@deprecate(ConfigV2)
+class ConfigV1(Config):
+    value: Param[int]
 
-        def __convert__(self):
-            return ConfigV2(values=[self.value])
+    def __convert__(self):
+        return ConfigV2(values=[self.value])
 
-    @deprecate(ConfigV1)
-    class ConfigV0(Config):
-        val: Param[int]
+@deprecate(ConfigV1)
+class ConfigV0(Config):
+    val: Param[int]
 
-        def __convert__(self):
-            return ConfigV1(value=self.val)
-    ```
+    def __convert__(self):
+        return ConfigV1(value=self.val)
+```
+:::
 
 ### Immediate replacement with replace=True
 
 In some cases, you want the deprecated configuration to be immediately replaced
 by the new one during creation. Use `replace=True` for this behavior:
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3
-    from experimaestro import Param, Config, deprecate
+```python
+from experimaestro import Param, Config, deprecate
 
-    class NewConfig(Config):
-        values: Param[list[int]]
+class NewConfig(Config):
+    values: Param[list[int]]
 
-    @deprecate(NewConfig, replace=True)
-    class OldConfig(Config):
-        value: Param[int]
+@deprecate(NewConfig, replace=True)
+class OldConfig(Config):
+    value: Param[int]
 
-        def __convert__(self):
-            return NewConfig(values=[self.value])
+    def __convert__(self):
+        return NewConfig(values=[self.value])
 
-    # Creating OldConfig actually returns a NewConfig instance
-    result = OldConfig.C(value=42)
-    print(type(result).__name__)  # "NewConfig.XPMConfig"
-    print(result.values)          # [42]
-    ```
+# Creating OldConfig actually returns a NewConfig instance
+result = OldConfig.C(value=42)
+print(type(result).__name__)  # "NewConfig.XPMConfig"
+print(result.values)          # [42]
+```
+:::
 
 With `replace=True`:
 
@@ -261,22 +276,23 @@ With `replace=True`:
 
 It is possible to deprecate a parameter or option:
 
-!!! example
+:::{admonition} Example
+:class: example
 
-    ```py3
-    from experimaestro import Param, Config, deprecate
+```python
+from experimaestro import Param, Config, deprecate
 
-    class Learning(Config):
-        losses: Param[List[Loss]] = []
+class Learning(Config):
+    losses: Param[List[Loss]] = []
 
-        @deprecate
-        def loss(self, value):
-            # Checking that the new param is not used
-            assert len(self.losses) == 0
-            # We allow several losses to be defined now
-            self.losses.append(value)
-
-    ```
+    @deprecate
+    def loss(self, value):
+        # Checking that the new param is not used
+        assert len(self.losses) == 0
+        # We allow several losses to be defined now
+        self.losses.append(value)
+```
+:::
 
 **Warning** the signature will change when deprecating attributes
 
@@ -328,6 +344,7 @@ Possible types are:
 - dictionaries (support for basic types in keys only) with `typing.Dict[U, V]`
 - Other configurations
 
+(parameters)=
 ## Parameters
 
 ```py3
@@ -364,24 +381,24 @@ class MyConfig(Config):
     - `field(ignore_default=value)`: The default is `value`, and if the actual value equals the default, it won't be included in the signature computation. This allows adding new parameters without changing past experiment signatures.
     - `field(default=value)`: The default is `value`, but it's always included in the signature computation.
 
-!!! warning "Bare default values are deprecated"
+:::{warning} Bare default values are deprecated
+Using bare default values like `x: Param[int] = 23` is deprecated. This syntax is
+ambiguous because it's unclear whether the default should be ignored in identifier
+computation or not.
 
-    Using bare default values like `x: Param[int] = 23` is deprecated. This syntax is
-    ambiguous because it's unclear whether the default should be ignored in identifier
-    computation or not.
+Use `field(ignore_default=23)` to keep the backwards-compatible behavior (default
+ignored in identifier) or `field(default=23)` to always include the value in identifier.
 
-    Use `field(ignore_default=23)` to keep the backwards-compatible behavior (default
-    ignored in identifier) or `field(default=23)` to always include the value in identifier.
-
-    Run `experimaestro refactor default-values` to automatically convert bare defaults
-    to `field(ignore_default=...)` syntax.
+Run `experimaestro refactor default-values` to automatically convert bare defaults
+to `field(ignore_default=...)` syntax.
+:::
 
 ### Default Values
 
-!!! warning
-
-    When changing an `ignore_default` value, the identifier of configurations
-    **might** change. The reason is explained below.
+:::{warning}
+When changing an `ignore_default` value, the identifier of configurations
+**might** change. The reason is explained below.
+:::
 
 Adding a new parameter to a `Config` with `field(ignore_default=...)` will not change the original `id`.
 
@@ -420,21 +437,21 @@ new_id = obj.__identifier__()
 assert new_id == old_id
 ```
 
-!!! warning
+:::{warning}
+The identifier can be different if only the ignore_default value is changed. In particular,
+if the ignore_default value is 2 (and not 4)
 
-    The identifier can be different if only the ignore_default value is changed. In particular,
-    if the ignore_default value is 2 (and not 4)
+```python
+class MyConfig(Config):
+    a: Param[int]
+    b: Param[int] = field(ignore_default=2)
 
-    ```python
-    class MyConfig(Config):
-        a: Param[int]
-        b: Param[int] = field(ignore_default=2)
-
-    # Here, `b` is not the ignore_default value
-    obj = MyConfig.C(a = 4, b = 4)
-    new_id = obj.__identifier__()
-    assert new_id != old_id
-    ```
+# Here, `b` is not the ignore_default value
+obj = MyConfig.C(a = 4, b = 4)
+new_id = obj.__identifier__()
+assert new_id != old_id
+```
+:::
 
 ### field(default=...) vs field(ignore_default=...)
 
@@ -578,6 +595,7 @@ config/task path, i.e. if the executed task has a parameter `model`, `model` has
 a parameter `optimization`, and optimization a path parameter `loss.txt`, then
 the file will be `./out/model/optimization/loss.txt`.
 
+(subparameters-and-partial-identifiers)=
 ### Subparameters and Partial Identifiers
 
 Sometimes you want to share directories (like checkpoints) across tasks that
@@ -705,6 +723,7 @@ class ModelLearn(Config):
         assert self.batch_size % self.micro_batch_size == 0
 ```
 
+(value-classes)=
 ## Value classes
 
 By default, the configuration class itself is used to create instances. However,
@@ -806,6 +825,7 @@ class LeafImpl(Leaf, BaseImpl):
     pass
 ```
 
+(instance-based-configurations)=
 ## Instance-based configurations
 
 By default, two `Config` instances with identical parameters will have the same identifier. This is the desired behavior in most cases, as it ensures task deduplication and caching. However, in some scenarios, you need to distinguish between different instances even when their parameters are identical.
@@ -819,40 +839,42 @@ Use `InstanceConfig` when:
 - **Shared vs. Separate Resources**: You need to distinguish between shared and separate instances of the same configuration (e.g., shared model weights vs. separate model instances)
 - **Multiple Identical Configurations**: The same configuration appears multiple times in a workflow, and each occurrence should be treated as distinct
 
-!!! example "Shared vs Separate Model Instances"
+:::{admonition} Shared vs Separate Model Instances
+:class: example
 
-    ```python
-    from experimaestro import Param, Config, InstanceConfig
+```python
+from experimaestro import Param, Config, InstanceConfig
 
-    class SubModel(InstanceConfig):  # Use InstanceConfig instead of Config
-        """A model component that can be shared or separate"""
-        hidden_size: Param[int] = 128
+class SubModel(InstanceConfig):  # Use InstanceConfig instead of Config
+    """A model component that can be shared or separate"""
+    hidden_size: Param[int] = 128
 
-    class Ensemble(Config):
-        """An ensemble using multiple models"""
-        model1: Param[SubModel]
-        model2: Param[SubModel]
+class Ensemble(Config):
+    """An ensemble using multiple models"""
+    model1: Param[SubModel]
+    model2: Param[SubModel]
 
-    # Create two instances with identical parameters
-    sm1 = SubModel.C(hidden_size=128)
-    sm2 = SubModel.C(hidden_size=128)
+# Create two instances with identical parameters
+sm1 = SubModel.C(hidden_size=128)
+sm2 = SubModel.C(hidden_size=128)
 
-    # Case 1: Shared instance - the same SubModel is used for both parameters
-    # This means model1 and model2 share weights/state
-    shared_ensemble = Ensemble.C(model1=sm1, model2=sm1)
+# Case 1: Shared instance - the same SubModel is used for both parameters
+# This means model1 and model2 share weights/state
+shared_ensemble = Ensemble.C(model1=sm1, model2=sm1)
 
-    # Case 2: Separate instances - different SubModel instances for each parameter
-    # This means model1 and model2 have independent weights/state
-    separate_ensemble = Ensemble.C(model1=sm1, model2=sm2)
+# Case 2: Separate instances - different SubModel instances for each parameter
+# This means model1 and model2 have independent weights/state
+separate_ensemble = Ensemble.C(model1=sm1, model2=sm2)
 
-    # The Ensemble configurations will have DIFFERENT identifiers
-    # Even though both use SubModel instances with hidden_size=128
-    assert shared_ensemble.__identifier__() != separate_ensemble.__identifier__()
+# The Ensemble configurations will have DIFFERENT identifiers
+# Even though both use SubModel instances with hidden_size=128
+assert shared_ensemble.__identifier__() != separate_ensemble.__identifier__()
 
-    # This distinction is important: with regular Config, both would have
-    # the same identifier since the parameters are identical. With InstanceConfig,
-    # the framework can distinguish between shared and separate instances.
-    ```
+# This distinction is important: with regular Config, both would have
+# the same identifier since the parameters are identical. With InstanceConfig,
+# the framework can distinguish between shared and separate instances.
+```
+:::
 
 ### Backwards compatibility
 
@@ -860,9 +882,9 @@ Use `InstanceConfig` when:
 
 This means you can migrate existing configurations to `InstanceConfig` without invalidating previous experiments, as long as you were only using a single instance of each configuration.
 
-!!! warning
-
-    Be careful when migrating to `InstanceConfig` if your workflow previously created multiple instances with the same parameters. The identifiers will change for the second and subsequent instances.
+:::{warning}
+Be careful when migrating to `InstanceConfig` if your workflow previously created multiple instances with the same parameters. The identifiers will change for the second and subsequent instances.
+:::
 
 ### How it works
 

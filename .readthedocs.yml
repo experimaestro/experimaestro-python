@@ -14,16 +14,19 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.10"
-  commands:
-    # Create empty server data directory (normally created by frontend build)
-    - mkdir -p src/experimaestro/server/data
-    # Install documentation dependencies
-    - pip install -r docs/requirements.txt
-    # Install the package (pip will use hatch as build backend)
-    - pip install .
-    # Build the MkDocs site
-    - mkdocs build --site-dir $READTHEDOCS_OUTPUT/html
+  jobs:
+    pre_build:
+      # Create empty server data directory (normally created by frontend build)
+      - mkdir -p src/experimaestro/server/data
 
-# Build documentation with MkDocs
-mkdocs:
-  configuration: mkdocs.yml
+# Build documentation with Sphinx
+sphinx:
+  configuration: docs/source/conf.py
+
+# Python requirements for documentation
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
