@@ -40,6 +40,7 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     JobState,
+    JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
 )
 
@@ -57,6 +58,7 @@ class StateEventType(Enum):
     EXPERIMENT_UPDATED = auto()
     RUN_UPDATED = auto()
     JOB_UPDATED = auto()
+    SERVICE_UPDATED = auto()
 
 
 @dataclass
@@ -261,6 +263,7 @@ class MockJob(BaseJob):
         updated_at: str,
         exit_code: Optional[int] = None,
         retry_count: int = 0,
+        failure_reason: Optional[JobFailureStatus] = None,
     ):
         self.identifier = identifier
         self.task_id = task_id
@@ -278,6 +281,7 @@ class MockJob(BaseJob):
         self.updated_at = updated_at
         self.exit_code = exit_code
         self.retry_count = retry_count
+        self.failure_reason = failure_reason
 
     @classmethod
     def from_disk(cls, path: Path) -> Optional["MockJob"]:
@@ -1055,6 +1059,7 @@ class WorkspaceStateProvider:
                 JobModel.state: job.state.name,
                 JobModel.submitted_time: job.submittime,
                 JobModel.updated_at: now,
+                JobModel.failure_reason: None,  # Clear old failure reason on resubmit
             },
         ).execute()
 
@@ -1123,11 +1128,14 @@ class WorkspaceStateProvider:
             JobModel.updated_at: now,
         }
 
-        # Add failure reason if available
+        # Add or clear failure reason based on state
         from experimaestro.scheduler.jobs import JobStateError
 
         if isinstance(job.state, JobStateError) and job.state.failure_reason:
             update_data[JobModel.failure_reason] = job.state.failure_reason.name
+        else:
+            # Clear failure reason when job is not in error state
+            update_data[JobModel.failure_reason] = None
 
         # Add timing information
         if job.starttime:
@@ -1632,6 +1640,7 @@ class WorkspaceStateProvider:
         run_id: str,
         description: str,
         state: str,
+        state_dict: Optional[str] = None,
     ):
         """Update service information
 
@@ -1641,6 +1650,7 @@ class WorkspaceStateProvider:
             run_id: Run identifier
             description: Human-readable description
             state: Service state
+            state_dict: JSON serialized state_dict for service recreation
 
         Raises:
             RuntimeError: If in read-only mode
@@ -1648,25 +1658,32 @@ class WorkspaceStateProvider:
         if self.read_only:
             raise RuntimeError("Cannot update services in read-only mode")
 
-        ServiceModel.insert(
-            service_id=service_id,
-            experiment_id=experiment_id,
-            run_id=run_id,
-            description=description,
-            state=state,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-        ).on_conflict(
+        insert_data = {
+            "service_id": service_id,
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "description": description,
+            "state": state,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+        }
+        update_data = {
+            ServiceModel.description: description,
+            ServiceModel.state: state,
+            ServiceModel.updated_at: datetime.now(),
+        }
+
+        if state_dict is not None:
+            insert_data["state_dict"] = state_dict
+            update_data[ServiceModel.state_dict] = state_dict
+
+        ServiceModel.insert(**insert_data).on_conflict(
             conflict_target=[
                 ServiceModel.service_id,
                 ServiceModel.experiment_id,
                 ServiceModel.run_id,
             ],
-            update={
-                ServiceModel.description: description,
-                ServiceModel.state: state,
-                ServiceModel.updated_at: datetime.now(),
-            },
+            update=update_data,
         ).execute()
 
         logger.debug(
@@ -1676,19 +1693,62 @@ class WorkspaceStateProvider:
             run_id,
         )
 
+        # Notify listeners
+        self._notify_listeners(
+            StateEvent(
+                event_type=StateEventType.SERVICE_UPDATED,
+                data={
+                    "serviceId": service_id,
+                    "experimentId": experiment_id,
+                    "runId": run_id,
+                    "state": state,
+                    "description": description,
+                },
+            )
+        )
+
     @_with_db_context
     def get_services(
         self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
-    ) -> List[Dict]:
+    ) -> List["Service"]:
         """Get services, optionally filtered by experiment/run
+
+        This method abstracts whether services are live (from scheduler) or
+        from the database. It returns actual Service objects in both cases:
+        - If a live scheduler has the experiment, return live Service objects
+        - Otherwise, recreate Service objects from stored state_dict
 
         Args:
             experiment_id: Filter by experiment (None = all)
             run_id: Filter by run (None = current run if experiment_id provided)
 
         Returns:
-            List of service dictionaries
+            List of Service objects
         """
+        from experimaestro.scheduler.services import Service
+
+        # First, check for live services from the scheduler
+        if experiment_id is not None:
+            try:
+                from experimaestro.scheduler.base import Scheduler
+
+                if Scheduler.has_instance():
+                    scheduler = Scheduler.instance()
+                    # Check if experiment is registered with scheduler
+                    if experiment_id in scheduler.experiments:
+                        exp = scheduler.experiments[experiment_id]
+                        services = list(exp.services.values())
+                        logger.debug(
+                            "Returning %d live services for experiment %s",
+                            len(services),
+                            experiment_id,
+                        )
+                        return services
+            except Exception as e:
+                # Scheduler not available or error - fall back to database
+                logger.debug("Could not get live services: %s", e)
+
+        # Fall back to database
         query = ServiceModel.select()
 
         if experiment_id is not None:
@@ -1705,17 +1765,29 @@ class WorkspaceStateProvider:
 
         services = []
         for service_model in query:
-            services.append(
-                {
-                    "service_id": service_model.service_id,
-                    "experiment_id": service_model.experiment_id,
-                    "run_id": service_model.run_id,
-                    "description": service_model.description,
-                    "state": service_model.state,
-                    "created_at": service_model.created_at.isoformat(),
-                    "updated_at": service_model.updated_at.isoformat(),
-                }
+            # Try to recreate service from state_dict
+            state_dict_json = service_model.state_dict
+            if state_dict_json and state_dict_json != "{}":
+                try:
+                    state_dict = json.loads(state_dict_json)
+                    if "__class__" in state_dict:
+                        service = Service.from_state_dict(state_dict)
+                        # Set the id from the database record
+                        service.id = service_model.service_id
+                        services.append(service)
+                        continue
+                except Exception as e:
+                    logger.warning(
+                        "Failed to recreate service %s from state_dict: %s",
+                        service_model.service_id,
+                        e,
+                    )
+            # If we can't recreate, skip this service (it's not usable)
+            logger.debug(
+                "Service %s has no state_dict for recreation, skipping",
+                service_model.service_id,
             )
+
         return services
 
     # Sync metadata methods
@@ -2093,6 +2165,14 @@ class WorkspaceStateProvider:
         # Compute job path from workspace_path, task_id, and job_id
         job_path = self.workspace_path / "jobs" / job_model.task_id / job_model.job_id
 
+        # Convert failure_reason string to enum if present
+        failure_reason = None
+        if job_model.failure_reason:
+            try:
+                failure_reason = JobFailureStatus[job_model.failure_reason]
+            except KeyError:
+                pass  # Unknown failure reason, leave as None
+
         return MockJob(
             identifier=job_model.job_id,
             task_id=job_model.task_id,
@@ -2107,6 +2187,7 @@ class WorkspaceStateProvider:
             experiment_id=job_model.experiment_id,
             run_id=job_model.run_id,
             updated_at=job_model.updated_at.isoformat(),
+            failure_reason=failure_reason,
         )
 
     def _format_time(self, timestamp: Optional[float]) -> str:

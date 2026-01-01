@@ -72,6 +72,11 @@ class Scheduler(threading.Thread):
         self.server: Optional["Server"] = None
 
     @staticmethod
+    def has_instance() -> bool:
+        """Check if a scheduler instance exists without creating one"""
+        return Scheduler._instance is not None
+
+    @staticmethod
     def instance() -> "Scheduler":
         """Get or create the global scheduler instance"""
         if Scheduler._instance is None:
@@ -317,7 +322,6 @@ class Scheduler(threading.Thread):
         path.symlink_to(job.path)
 
         job.set_state(JobState.WAITING)
-
         self.notify_job_submitted(job)
 
         # Check if already done

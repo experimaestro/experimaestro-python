@@ -226,6 +226,7 @@ class ServiceModel(BaseModel):
         run_id: ID of the run this service belongs to
         description: Human-readable description
         state: Service state (e.g., "running", "stopped")
+        state_dict: JSON serialized state_dict for service recreation
         created_at: When service was created
         updated_at: Timestamp of last update
     """
@@ -235,6 +236,7 @@ class ServiceModel(BaseModel):
     run_id = CharField(index=True)
     description = TextField(default="")
     state = CharField()
+    state_dict = TextField(default="{}")  # JSON for service recreation
     created_at = DateTimeField(default=datetime.now)
     updated_at = DateTimeField(default=datetime.now)
 

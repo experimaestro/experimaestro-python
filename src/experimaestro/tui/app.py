@@ -142,10 +142,30 @@ class KillConfirmScreen(ModalScreen[bool]):
             self.dismiss(False)
 
 
-def get_status_icon(status: str):
+def get_status_icon(status: str, failure_reason=None):
+    """Get status icon for a job state.
+
+    Args:
+        status: Job state name (e.g., "done", "error", "running")
+        failure_reason: Optional JobFailureStatus enum for error states
+
+    Returns:
+        Status icon string
+    """
     if status == "done":
         return "✓"
     elif status == "error":
+        # Show different icons for different failure types
+        if failure_reason is not None:
+            from experimaestro.scheduler.interfaces import JobFailureStatus
+
+            if failure_reason == JobFailureStatus.DEPENDENCY:
+                return "🔗"  # Dependency failed
+            elif failure_reason == JobFailureStatus.TIMEOUT:
+                return "⏱"  # Timeout
+            elif failure_reason == JobFailureStatus.MEMORY:
+                return "💾"  # Memory issue
+            # FAILED or unknown - use default error icon
         return "❌"
     elif status == "running":
         return "▶"
@@ -463,6 +483,146 @@ class FilterChanged(Message):
         self.filter_fn = filter_fn
 
 
+class ServicesList(Vertical):
+    """Widget displaying services for selected experiment
+
+    Services are retrieved from WorkspaceStateProvider.get_services() which
+    abstracts away whether services are live (from scheduler) or recreated
+    from database state_dict. The UI treats all services uniformly.
+    """
+
+    BINDINGS = [
+        Binding("s", "start_service", "Start"),
+        Binding("x", "stop_service", "Stop"),
+        Binding("u", "copy_url", "Copy URL", show=False),
+    ]
+
+    # State icons for display
+    STATE_ICONS = {
+        "STOPPED": "⏹",
+        "STARTING": "⏳",
+        "RUNNING": "▶",
+        "STOPPING": "⏳",
+    }
+
+    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+        super().__init__()
+        self.state_provider = state_provider
+        self.current_experiment: Optional[str] = None
+        self._services: dict = {}  # service_id -> Service object
+
+    def compose(self) -> ComposeResult:
+        yield DataTable(id="services-table", cursor_type="row")
+
+    def on_mount(self) -> None:
+        """Set up the services table"""
+        table = self.query_one("#services-table", DataTable)
+        table.add_columns("ID", "Description", "State", "URL")
+        table.cursor_type = "row"
+
+    def set_experiment(self, experiment_id: Optional[str]) -> None:
+        """Set the current experiment and refresh services"""
+        self.current_experiment = experiment_id
+        self.refresh_services()
+
+    def refresh_services(self) -> None:
+        """Refresh the services list from state provider"""
+        table = self.query_one("#services-table", DataTable)
+        table.clear()
+        self._services = {}
+
+        if not self.current_experiment:
+            return
+
+        # Get services from state provider (handles live vs DB automatically)
+        services = self.state_provider.get_services(self.current_experiment)
+
+        for service in services:
+            service_id = service.id
+            self._services[service_id] = service
+
+            state_name = service.state.name if hasattr(service, "state") else "UNKNOWN"
+            state_icon = self.STATE_ICONS.get(state_name, "?")
+            url = getattr(service, "url", None) or "-"
+            description = (
+                service.description() if hasattr(service, "description") else ""
+            )
+
+            table.add_row(
+                service_id,
+                description,
+                f"{state_icon} {state_name}",
+                url,
+                key=service_id,
+            )
+
+    def _get_selected_service(self):
+        """Get the currently selected Service object"""
+        table = self.query_one("#services-table", DataTable)
+        if table.cursor_row is not None and table.row_count > 0:
+            row_key = list(table.rows.keys())[table.cursor_row]
+            if row_key:
+                service_id = str(row_key.value)
+                return self._services.get(service_id)
+        return None
+
+    def action_start_service(self) -> None:
+        """Start the selected service"""
+        service = self._get_selected_service()
+        if not service:
+            return
+
+        try:
+            if hasattr(service, "get_url"):
+                url = service.get_url()
+                self.notify(f"Service started: {url}", severity="information")
+            else:
+                self.notify("Service does not support starting", severity="warning")
+            self.refresh_services()
+        except Exception as e:
+            self.notify(f"Failed to start service: {e}", severity="error")
+
+    def action_stop_service(self) -> None:
+        """Stop the selected service"""
+        service = self._get_selected_service()
+        if not service:
+            return
+
+        from experimaestro.scheduler.services import ServiceState
+
+        if service.state == ServiceState.STOPPED:
+            self.notify("Service is not running", severity="warning")
+            return
+
+        try:
+            if hasattr(service, "stop"):
+                service.stop()
+                self.notify(f"Service stopped: {service.id}", severity="information")
+            else:
+                self.notify("Service does not support stopping", severity="warning")
+            self.refresh_services()
+        except Exception as e:
+            self.notify(f"Failed to stop service: {e}", severity="error")
+
+    def action_copy_url(self) -> None:
+        """Copy the service URL to clipboard"""
+        service = self._get_selected_service()
+        if not service:
+            return
+
+        url = getattr(service, "url", None)
+        if url:
+            try:
+                import pyperclip
+
+                pyperclip.copy(url)
+                self.notify(f"URL copied: {url}", severity="information")
+            except Exception as e:
+                self.notify(f"Failed to copy: {e}", severity="error")
+        else:
+            self.notify("Start the service first to get URL", severity="warning")
+
+
 class JobDetailView(Widget):
     """Widget displaying detailed job information"""
 
@@ -524,8 +684,11 @@ class JobDetailView(Widget):
 
         # Format status with icon and name
         status_name = job.state.name if job.state else "unknown"
-        status_icon = get_status_icon(status_name)
+        failure_reason = getattr(job, "failure_reason", None)
+        status_icon = get_status_icon(status_name, failure_reason)
         status_text = f"{status_icon} {status_name}"
+        if failure_reason:
+            status_text += f" ({failure_reason.name})"
 
         self.query_one("#job-status-label", Label).update(f"Status: {status_text}")
 
@@ -752,7 +915,6 @@ class JobsTable(Vertical):
 
     def compose(self) -> ComposeResult:
         yield SearchBar()
-        yield Label("Jobs", classes="section-title")
         yield DataTable(id="jobs-table", cursor_type="row")
 
     def action_toggle_search(self) -> None:
@@ -915,6 +1077,36 @@ class JobsTable(Vertical):
         "phantom": 5,
     }
 
+    # Failure reason sort order (within error status)
+    # More actionable failures first
+    FAILURE_ORDER = {
+        "TIMEOUT": 0,  # Might just need retry
+        "MEMORY": 1,  # Might need resource adjustment
+        "DEPENDENCY": 2,  # Need to fix upstream job first
+        "FAILED": 3,  # Generic failure
+    }
+
+    @classmethod
+    def _get_status_sort_key(cls, job):
+        """Get sort key for a job based on status and failure reason.
+
+        Returns tuple (status_order, failure_order) for proper sorting.
+        """
+        state_name = job.state.name if job.state else "unknown"
+        status_order = cls.STATUS_ORDER.get(state_name, 99)
+
+        # For error jobs, also sort by failure reason
+        if state_name == "error":
+            failure_reason = getattr(job, "failure_reason", None)
+            if failure_reason:
+                failure_order = cls.FAILURE_ORDER.get(failure_reason.name, 99)
+            else:
+                failure_order = 99  # Unknown failure at end
+        else:
+            failure_order = 0
+
+        return (status_order, failure_order)
+
     # Column key to display name mapping
     COLUMN_LABELS = {
         "job_id": "ID",
@@ -996,11 +1188,9 @@ class JobsTable(Vertical):
 
         # Sort jobs based on selected column
         if self._sort_column == "status":
-            # Sort by status priority
+            # Sort by status priority, then by failure reason for errors
             jobs.sort(
-                key=lambda j: self.STATUS_ORDER.get(
-                    j.state.name if j.state else "unknown", 99
-                ),
+                key=self._get_status_sort_key,
                 reverse=self._sort_reverse,
             )
         elif self._sort_column == "task":
@@ -1061,7 +1251,8 @@ class JobsTable(Vertical):
                 else:
                     status_text = "▶"
             else:
-                status_text = get_status_icon(status)
+                failure_reason = getattr(job, "failure_reason", None)
+                status_text = get_status_icon(status, failure_reason)
 
             # Format tags - show all tags on single line
             tags = job.tags
@@ -1260,7 +1451,10 @@ class OrphanJobsScreen(Screen):
         table.clear()
 
         for job in self._get_sorted_jobs():
-            status_icon = get_status_icon(job.state.name if job.state else "unknown")
+            failure_reason = getattr(job, "failure_reason", None)
+            status_icon = get_status_icon(
+                job.state.name if job.state else "unknown", failure_reason
+            )
             if job.identifier in self._size_cache:
                 size_text = self._size_cache[job.identifier]
             else:
@@ -1541,6 +1735,8 @@ class HelpScreen(ModalScreen[None]):
   Esc       Go back / Close dialog
   r         Refresh data
   ?         Show this help
+  j         Switch to Jobs tab
+  s         Switch to Services tab
 
 [bold cyan]Experiments[/bold cyan]
   Enter     Select experiment
@@ -1557,6 +1753,11 @@ class HelpScreen(ModalScreen[None]):
   T         Sort by task
   D         Sort by date
   f         Copy folder path
+
+[bold cyan]Services[/bold cyan]
+  s         Start service
+  x         Stop service
+  u         Copy URL
 
 [bold cyan]Search Filter[/bold cyan]
   Enter     Apply filter
@@ -1595,6 +1796,8 @@ class ExperimaestroUI(App):
         Binding("escape", "go_back", "Back", show=False),
         Binding("l", "view_logs", "Logs", show=False),
         Binding("o", "show_orphans", "Orphans", show=False),
+        Binding("j", "focus_jobs", "Jobs", show=False),
+        Binding("s", "focus_services", "Services", show=False),
     ]
 
     def __init__(
@@ -1655,11 +1858,14 @@ class ExperimaestroUI(App):
         yield Footer()
 
     def _compose_monitor_view(self):
-        """Compose the monitor view with experiments, jobs, and job details"""
+        """Compose the monitor view with experiments, jobs/services tabs, and job details"""
         yield ExperimentsList(self.state_provider)
-        # Jobs view (hidden initially)
-        with Vertical(id="jobs-container", classes="hidden"):
-            yield JobsTable(self.state_provider)
+        # Tabbed view for jobs and services (hidden initially)
+        with TabbedContent(id="experiment-tabs", classes="hidden"):
+            with TabPane("Jobs", id="jobs-tab"):
+                yield JobsTable(self.state_provider)
+            with TabPane("Services", id="services-tab"):
+                yield ServicesList(self.state_provider)
         # Job detail view (hidden initially)
         with Vertical(id="job-detail-container", classes="hidden"):
             yield JobDetailView(self.state_provider)
@@ -1721,26 +1927,39 @@ class ExperimaestroUI(App):
             experiments_list = self.query_one(ExperimentsList)
             experiments_list.refresh_experiments()
 
+        elif event.event_type == StateEventType.SERVICE_UPDATED:
+            # Refresh services list if we're viewing the affected experiment
+            services_list = self.query_one(ServicesList)
+            event_exp_id = event.data.get("experimentId")
+
+            if services_list.current_experiment == event_exp_id:
+                services_list.refresh_services()
+
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
-        """Handle experiment selection - show jobs view"""
+        """Handle experiment selection - show jobs/services tabs"""
         self.log(f"Experiment selected: {message.experiment_id}")
+
+        # Set up services list
+        services_list = self.query_one(ServicesList)
+        services_list.set_experiment(message.experiment_id)
+
+        # Set up jobs table
         jobs_table_widget = self.query_one(JobsTable)
         jobs_table_widget.set_experiment(message.experiment_id)
 
-        # Show jobs container
-        jobs_container = self.query_one("#jobs-container")
-        self.log(f"Jobs container before: hidden={jobs_container.has_class('hidden')}")
-        jobs_container.remove_class("hidden")
-        self.log(f"Jobs container after: hidden={jobs_container.has_class('hidden')}")
+        # Show the tabbed content
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        tabs.remove_class("hidden")
 
         # Focus the jobs table
         jobs_table = self.query_one("#jobs-table", DataTable)
         jobs_table.focus()
 
     def on_experiment_deselected(self, message: ExperimentDeselected) -> None:
-        """Handle experiment deselection - hide jobs view"""
-        jobs_container = self.query_one("#jobs-container")
-        jobs_container.add_class("hidden")
+        """Handle experiment deselection - hide jobs/services tabs"""
+        # Hide the tabbed content
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        tabs.add_class("hidden")
         # Also hide job detail if visible
         job_detail_container = self.query_one("#job-detail-container")
         job_detail_container.add_class("hidden")
@@ -1749,9 +1968,9 @@ class ExperimaestroUI(App):
         """Handle job selection - show job detail view"""
         self.log(f"Job selected: {message.job_id} from {message.experiment_id}")
 
-        # Hide jobs table, show job detail
-        jobs_container = self.query_one("#jobs-container")
-        jobs_container.add_class("hidden")
+        # Hide tabs, show job detail
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        tabs.add_class("hidden")
 
         job_detail_container = self.query_one("#job-detail-container")
         job_detail_container.remove_class("hidden")
@@ -1762,12 +1981,12 @@ class ExperimaestroUI(App):
 
     def on_job_deselected(self, message: JobDeselected) -> None:
         """Handle job deselection - go back to jobs view"""
-        # Hide job detail, show jobs table
+        # Hide job detail, show tabs
         job_detail_container = self.query_one("#job-detail-container")
         job_detail_container.add_class("hidden")
 
-        jobs_container = self.query_one("#jobs-container")
-        jobs_container.remove_class("hidden")
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        tabs.remove_class("hidden")
 
         # Focus the jobs table
         jobs_table = self.query_one("#jobs-table", DataTable)
@@ -1789,19 +2008,20 @@ class ExperimaestroUI(App):
 
     def action_go_back(self) -> None:
         """Go back one level in the navigation hierarchy"""
-        # Check if job detail is visible -> go back to jobs
+        # Check if job detail is visible -> go back to jobs/services tabs
         job_detail_container = self.query_one("#job-detail-container")
         if not job_detail_container.has_class("hidden"):
             self.post_message(JobDeselected())
             return
 
-        # Check if jobs list is visible -> go back to experiments
-        jobs_container = self.query_one("#jobs-container")
-        if not jobs_container.has_class("hidden"):
+        # Check if experiment tabs visible -> go back to experiments list
+        experiment_tabs = self.query_one("#experiment-tabs", TabbedContent)
+        if not experiment_tabs.has_class("hidden"):
             experiments_list = self.query_one(ExperimentsList)
             if experiments_list.collapsed:
                 experiments_list.expand_experiments()
-                jobs_container.add_class("hidden")
+                experiment_tabs.add_class("hidden")
+                self.post_message(ExperimentDeselected())
 
     def action_view_logs(self) -> None:
         """View logs for the current job (if job detail is visible)"""
@@ -1971,15 +2191,39 @@ class ExperimaestroUI(App):
             handle_kill_response,
         )
 
+    def action_focus_jobs(self) -> None:
+        """Switch to the jobs tab"""
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        if not tabs.has_class("hidden"):
+            tabs.active = "jobs-tab"
+            jobs_table = self.query_one("#jobs-table", DataTable)
+            jobs_table.focus()
+        else:
+            self.notify("Select an experiment first", severity="warning")
+
+    def action_focus_services(self) -> None:
+        """Switch to the services tab"""
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        if not tabs.has_class("hidden"):
+            tabs.active = "services-tab"
+            services_table = self.query_one("#services-table", DataTable)
+            services_table.focus()
+        else:
+            self.notify("Select an experiment first", severity="warning")
+
     def action_switch_focus(self) -> None:
-        """Switch focus between experiments and jobs tables"""
+        """Switch focus between experiments table and current tab"""
         focused = self.focused
         if focused:
             experiments_table = self.query_one("#experiments-table", DataTable)
-            jobs_table = self.query_one("#jobs-table", DataTable)
+            tabs = self.query_one("#experiment-tabs", TabbedContent)
 
-            if focused == experiments_table:
-                jobs_table.focus()
+            if focused == experiments_table and not tabs.has_class("hidden"):
+                # Focus the active tab's table
+                if tabs.active == "services-tab":
+                    self.query_one("#services-table", DataTable).focus()
+                else:
+                    self.query_one("#jobs-table", DataTable).focus()
             else:
                 experiments_table.focus()
 

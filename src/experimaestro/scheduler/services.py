@@ -30,6 +30,10 @@ class Service:
 
     Services can be associated with an experiment. They send
     notifications to service listeners.
+
+    To support restarting services from monitor mode, subclasses should
+    override :meth:`state_dict` to return the data needed to recreate
+    the service, and implement :meth:`from_state_dict` to recreate it.
     """
 
     id: str
@@ -37,6 +41,44 @@ class Service:
 
     def __init__(self):
         self.listeners: Set[ServiceListener] = set()
+
+    def state_dict(self) -> dict:
+        """Return a dictionary representation for serialization.
+
+        Subclasses should override this to include any parameters needed
+        to recreate the service. The base implementation returns the
+        class module and name.
+
+        Returns:
+            Dict with '__class__' key and any additional kwargs.
+        """
+        return {
+            "__class__": f"{self.__class__.__module__}.{self.__class__.__name__}",
+        }
+
+    @staticmethod
+    def from_state_dict(data: dict) -> "Service":
+        """Recreate a service from a state dictionary.
+
+        Args:
+            data: Dictionary from :meth:`state_dict`
+
+        Returns:
+            A new Service instance, or raises if the class cannot be loaded.
+        """
+        import importlib
+
+        class_path = data.get("__class__")
+        if not class_path:
+            raise ValueError("Missing '__class__' in service state_dict")
+
+        module_name, class_name = class_path.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        cls = getattr(module, class_name)
+
+        # Remove __class__ and pass remaining as kwargs
+        kwargs = {k: v for k, v in data.items() if k != "__class__"}
+        return cls(**kwargs)
 
     def add_listener(self, listener: ServiceListener):
         """Adds a listener
@@ -82,6 +124,7 @@ class WebService(Service):
     2. Set a unique ``id`` class attribute
     3. Implement the :meth:`_serve` method to start your web server
     4. Set ``self.url`` and call ``running.set()`` when ready
+    5. Optionally check ``self.should_stop()`` to handle graceful shutdown
 
     Example::
 
@@ -92,12 +135,26 @@ class WebService(Service):
                 # Start your web server
                 self.url = "http://localhost:8080"
                 running.set()
-                # Keep serving...
+                # Keep serving, checking for stop signal
+                while not self.should_stop():
+                    time.sleep(1)
     """
 
     def __init__(self):
         super().__init__()
         self.url = None
+        self.thread = None
+        self._stop_event = threading.Event()
+
+    def should_stop(self) -> bool:
+        """Check if the service should stop.
+
+        Subclasses can call this in their _serve loop to check for
+        graceful shutdown requests.
+
+        :return: True if stop() has been called
+        """
+        return self._stop_event.is_set()
 
     def get_url(self):
         """Get the URL of this web service, starting it if needed.
@@ -108,27 +165,81 @@ class WebService(Service):
         :return: The URL where this service can be accessed
         """
         if self.state == ServiceState.STOPPED:
+            self._stop_event.clear()
             self.state = ServiceState.STARTING
             self.running = threading.Event()
             self.serve()
 
         # Wait until the server is ready
         self.running.wait()
+        self.state = ServiceState.RUNNING
 
         # Returns the URL
         return self.url
 
-    def stop(self):
-        """Stop the web service."""
-        ...
+    def stop(self, timeout: float = 2.0):
+        """Stop the web service.
+
+        This method signals the service to stop and waits for the thread
+        to terminate. If the thread doesn't stop gracefully within the
+        timeout, it attempts to forcefully terminate it.
+
+        :param timeout: Seconds to wait for graceful shutdown before forcing
+        """
+        if self.state == ServiceState.STOPPED:
+            return
+
+        self.state = ServiceState.STOPPING
+
+        # Signal the service to stop
+        self._stop_event.set()
+
+        # Wait for the thread to finish
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout=timeout)
+
+            # If thread is still alive, try to terminate it forcefully
+            if self.thread.is_alive():
+                self._force_stop_thread()
+
+        self.url = None
+        self.state = ServiceState.STOPPED
+
+    def _force_stop_thread(self):
+        """Attempt to forcefully stop the service thread.
+
+        This uses ctypes to raise an exception in the thread. It's not
+        guaranteed to work (e.g., if the thread is blocked in C code),
+        but it's the best we can do in Python.
+        """
+        import ctypes
+
+        if self.thread is None or not self.thread.is_alive():
+            return
+
+        thread_id = self.thread.ident
+        if thread_id is None:
+            return
+
+        # Raise SystemExit in the target thread
+        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+            ctypes.c_ulong(thread_id), ctypes.py_object(SystemExit)
+        )
+
+        if res == 0:
+            # Thread ID was invalid
+            pass
+        elif res > 1:
+            # Multiple threads affected - reset
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_ulong(thread_id), ctypes.c_long(0)
+            )
 
     def serve(self):
         """Start the web service in a background thread.
 
         This method creates a daemon thread that calls :meth:`_serve`.
         """
-        import threading
-
         self.thread = threading.Thread(
             target=functools.partial(self._serve, self.running),
             name=f"service[{self.id}]",
@@ -146,6 +257,7 @@ class WebService(Service):
         2. Set ``self.url`` to the service URL
         3. Call ``running.set()`` to signal readiness
         4. Keep the server running (this runs in a background thread)
+        5. Optionally check ``self.should_stop()`` for graceful shutdown
 
         :param running: Event to signal when ``self.url`` is set
         """

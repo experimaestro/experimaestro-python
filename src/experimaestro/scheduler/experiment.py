@@ -43,7 +43,26 @@ class DatabaseListener:
         self.state_provider.update_job_state(job, self.experiment_id, self.run_id)
 
     def service_add(self, service):
-        pass
+        """Update service in database"""
+        self.state_provider.update_service(
+            service.id,
+            self.experiment_id,
+            self.run_id,
+            service.description(),
+            service.state.name,
+            state_dict=json.dumps(service.state_dict()),
+        )
+
+    def service_state_changed(self, service):
+        """Update service state in database (called by Service when state changes)"""
+        self.state_provider.update_service(
+            service.id,
+            self.experiment_id,
+            self.run_id,
+            service.description(),
+            service.state.name,
+            state_dict=json.dumps(service.state_dict()),
+        )
 
 
 class experiment:
@@ -197,6 +216,32 @@ class experiment:
     def jobs_jsonl_path(self):
         """Return the path to the jobs.jsonl file for this experiment"""
         return self.workdir / "jobs.jsonl"
+
+    @property
+    def services_json_path(self):
+        """Return the path to the services.json file for this experiment"""
+        return self.workdir / "services.json"
+
+    def _write_services_json(self):
+        """Write all services to services.json file"""
+        services_data = {}
+        for service_id, service in self.services.items():
+            # Get state_dict from service (includes __class__ for recreation)
+            service_state = service.state_dict()
+            # Add runtime state info
+            service_state.update(
+                {
+                    "service_id": service_id,
+                    "description": service.description(),
+                    "state": service.state.name,
+                    "url": getattr(service, "url", None),
+                    "timestamp": time.time(),
+                }
+            )
+            services_data[service_id] = service_state
+
+        with self.services_json_path.open("w") as f:
+            json.dump(services_data, f, indent=2)
 
     def add_job(self, job: "Job"):
         """Register a job and its tags to jobs.jsonl file and database
@@ -484,9 +529,24 @@ class experiment:
         :return: The same service instance
         """
         self.services[service.id] = service
+
+        # Register database listener for state changes
+        service.add_listener(self._db_listener)
+
+        # Register file listener for state changes (writes to services.json)
+        service.add_listener(self)
+
         for listener in self.scheduler.listeners:
             listener.service_add(service)
+
+        # Write services.json file
+        self._write_services_json()
+
         return service
+
+    def service_state_changed(self, service):
+        """Called when a service state changes - update services.json"""
+        self._write_services_json()
 
     def save(self, obj: Any, name: str = "default"):
         """Serializes configurations.

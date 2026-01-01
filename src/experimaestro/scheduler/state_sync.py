@@ -23,6 +23,7 @@ from experimaestro.scheduler.state_db import (
     ExperimentRunModel,
     JobModel,
     JobTagModel,
+    ServiceModel,
     WorkspaceSyncMetadata,
 )
 
@@ -62,6 +63,38 @@ def read_jobs_jsonl(exp_dir: Path) -> Dict[str, Dict]:
 
     logger.debug("Read %d job records from jobs.jsonl", len(job_records))
     return job_records
+
+
+def read_services_json(exp_dir: Path) -> Dict[str, Dict]:
+    """Read services.json file and return a mapping of service_id -> record
+
+    Args:
+        exp_dir: Path to the experiment directory
+
+    Returns:
+        Dictionary mapping service_id to record (with description, state, url, timestamp)
+    """
+    services_json_path = exp_dir / "services.json"
+
+    if not services_json_path.exists():
+        logger.debug("No services.json found in %s", exp_dir)
+        return {}
+
+    try:
+        with services_json_path.open("r") as f:
+            services_data = json.load(f)
+            logger.debug(
+                "Read %d service records from services.json", len(services_data)
+            )
+            return services_data
+    except json.JSONDecodeError as e:
+        logger.warning("Failed to parse services.json: %s", e)
+    except Exception as e:
+        logger.warning(
+            "Failed to read services.json from %s: %s", services_json_path, e
+        )
+
+    return {}
 
 
 def acquire_sync_lock(
@@ -494,6 +527,7 @@ def sync_workspace_from_disk(  # noqa: C901
                 ExperimentRunModel,
                 JobModel,
                 JobTagModel,
+                ServiceModel,
                 WorkspaceSyncMetadata,
             ]
         ):
@@ -513,6 +547,9 @@ def sync_workspace_from_disk(  # noqa: C901
 
                 # Read jobs.jsonl to get tags for each job
                 job_records = read_jobs_jsonl(exp_dir)
+
+                # Read services.json to get services for this experiment
+                service_records = read_services_json(exp_dir)
 
                 if write_mode:
                     # Ensure experiment exists in database
@@ -561,6 +598,44 @@ def sync_workspace_from_disk(  # noqa: C901
                 logger.debug(
                     "Experiment %s: current_run_id=%s", experiment_id, current_run_id
                 )
+
+                # Sync services from services.json
+                if write_mode and service_records:
+                    for service_id, service_data in service_records.items():
+                        now = datetime.now()
+                        # Store the full state_dict as JSON for recreation
+                        state_dict_json = json.dumps(service_data)
+                        ServiceModel.insert(
+                            service_id=service_id,
+                            experiment_id=experiment_id,
+                            run_id=current_run_id,
+                            description=service_data.get("description", ""),
+                            state=service_data.get("state", "STOPPED"),
+                            state_dict=state_dict_json,
+                            created_at=now,
+                            updated_at=now,
+                        ).on_conflict(
+                            conflict_target=[
+                                ServiceModel.service_id,
+                                ServiceModel.experiment_id,
+                                ServiceModel.run_id,
+                            ],
+                            update={
+                                ServiceModel.description: service_data.get(
+                                    "description", ""
+                                ),
+                                ServiceModel.state: service_data.get(
+                                    "state", "STOPPED"
+                                ),
+                                ServiceModel.state_dict: state_dict_json,
+                                ServiceModel.updated_at: now,
+                            },
+                        ).execute()
+                        logger.debug(
+                            "Synced service %s for experiment %s",
+                            service_id,
+                            experiment_id,
+                        )
 
                 # Scan jobs linked from this experiment
                 jobs_dir = exp_dir / "jobs"
@@ -669,7 +744,12 @@ def sync_workspace_from_disk(  # noqa: C901
                             task_id=job_state["task_id"],
                             locator="",  # Not available from disk
                             state=job_state["state"],
-                            failure_reason=job_state.get("failure_reason"),
+                            # Only set failure_reason if job is in error state
+                            failure_reason=(
+                                job_state.get("failure_reason")
+                                if job_state["state"] == "error"
+                                else None
+                            ),
                             submitted_time=job_state.get("submitted_time"),
                             started_time=job_state.get("started_time"),
                             ended_time=job_state.get("ended_time"),
@@ -683,8 +763,12 @@ def sync_workspace_from_disk(  # noqa: C901
                             ],
                             update={
                                 JobModel.state: job_state["state"],
-                                JobModel.failure_reason: job_state.get(
-                                    "failure_reason"
+                                # Only set failure_reason if job is in error state
+                                # Otherwise clear it to avoid stale failure reasons
+                                JobModel.failure_reason: (
+                                    job_state.get("failure_reason")
+                                    if job_state["state"] == "error"
+                                    else None
                                 ),
                                 JobModel.submitted_time: job_state.get(
                                     "submitted_time"

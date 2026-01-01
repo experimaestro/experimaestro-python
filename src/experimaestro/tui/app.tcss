@@ -37,11 +37,20 @@ Monitor {
     height: auto;
 }
 
-#jobs-container {
+#experiment-tabs {
     width: 100%;
     height: 1fr;
-    border: solid blue;
-    padding: 1;
+}
+
+ServicesList {
+    width: 100%;
+    height: 1fr;
+}
+
+#services-table {
+    width: 100%;
+    height: 1fr;
+    min-height: 10;
 }
 
 JobsTable {
