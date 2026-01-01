@@ -15,8 +15,9 @@ build:
   tools:
     python: "3.10"
   jobs:
-    pre_build:
+    post_checkout:
       # Create empty server data directory (normally created by frontend build)
+      # Must run before pip install, not pre_build which runs after
       - mkdir -p src/experimaestro/server/data
 
 # Build documentation with Sphinx
