@@ -461,6 +461,10 @@ class experiment:
                 )
             else:
                 self.wait()
+
+            # Wait for all pending notifications to be processed
+            # before removing listeners
+            self.scheduler.wait_for_notifications()
         finally:
             if self._register_signals:
                 SIGNAL_HANDLER.remove(self)

@@ -197,6 +197,27 @@ class Scheduler(threading.Thread):
         with self._listeners_lock:
             self._listeners.clear()
 
+    def wait_for_notifications(self, timeout: float = 5.0) -> bool:
+        """Wait for all pending notifications to be processed.
+
+        This submits a sentinel task and waits for it to complete,
+        ensuring all previously submitted notifications have been processed.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if all notifications were processed, False if timeout occurred
+        """
+        try:
+            # Submit a no-op and wait for it to complete
+            future = self._notification_executor.submit(lambda: None)
+            future.result(timeout=timeout)
+            return True
+        except concurrent.futures.TimeoutError:
+            logger.warning("Timeout waiting for notification queue to drain")
+            return False
+
     def getJobState(self, job: Job) -> "concurrent.futures.Future[JobState]":
         # Check if the job belongs to this scheduler
         if job.identifier not in self.jobs:
