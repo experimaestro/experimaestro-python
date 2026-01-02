@@ -1790,6 +1790,62 @@ class WorkspaceStateProvider:
 
         return services
 
+    def get_live_job_states(self, experiment_id: str) -> Dict[str, str]:
+        """Get live job states from the scheduler if available
+
+        This is useful for debugging to compare live state vs database state.
+
+        Args:
+            experiment_id: The experiment ID to get live jobs for
+
+        Returns:
+            Dict mapping job identifier to live state name, empty if scheduler
+            not available or experiment not registered
+        """
+        try:
+            from experimaestro.scheduler.base import Scheduler
+
+            if not Scheduler.has_instance():
+                logger.debug("No scheduler instance available for live states")
+                return {}
+
+            scheduler = Scheduler.instance()
+            live_states = {}
+
+            logger.debug(
+                "get_live_job_states: looking for exp=%s, scheduler has %d jobs",
+                experiment_id,
+                len(scheduler.jobs),
+            )
+
+            for job_id, job in scheduler.jobs.items():
+                # Filter by experiment if needed
+                if hasattr(job, "experiment") and job.experiment is not None:
+                    if hasattr(job.experiment, "workdir"):
+                        job_exp_id = job.experiment.workdir.name
+                        if job_exp_id == experiment_id:
+                            live_states[job_id] = job.state.name
+                        else:
+                            logger.debug(
+                                "Job %s exp_id=%s != requested %s",
+                                job_id[:8],
+                                job_exp_id,
+                                experiment_id,
+                            )
+                else:
+                    # Job not associated with experiment, include it anyway
+                    live_states[job_id] = job.state.name
+                    logger.debug(
+                        "Job %s has no experiment, including anyway", job_id[:8]
+                    )
+
+            logger.debug("Returning %d live job states", len(live_states))
+            return live_states
+
+        except Exception as e:
+            logger.debug("Could not get live job states: %s", e)
+            return {}
+
     # Sync metadata methods
 
     @_with_db_context

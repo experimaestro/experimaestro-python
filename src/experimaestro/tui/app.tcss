@@ -14,6 +14,18 @@ Monitor {
     height: 100%;
 }
 
+#logs-tab {
+    height: 1fr;
+    width: 100%;
+}
+
+CaptureLog {
+    width: 1fr;
+    height: 1fr;
+    min-height: 10;
+    border: solid cyan;
+}
+
 #experiments-table-container {
     width: 100%;
     height: auto;
@@ -80,13 +92,13 @@ JobsTable {
     min-height: 5;
 }
 
-RichLog {
-    height: 100%;
-    border: solid cyan;
-}
-
 TabbedContent {
     height: 100%;
+}
+
+#logs {
+    height: 100%;
+    width: 100%;
 }
 
 #job-detail-container {

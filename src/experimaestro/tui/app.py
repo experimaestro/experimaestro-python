@@ -177,16 +177,40 @@ def get_status_icon(status: str, failure_reason=None):
 
 
 class CaptureLog(RichLog):
-    """Custom RichLog that handles Print events and logging"""
+    """Custom RichLog widget that captures print statements with log highlighting"""
 
     def on_mount(self) -> None:
         """Enable print capturing when widget is mounted"""
-        # Capture print statements
         self.begin_capture_print()
+
+    def on_unmount(self) -> None:
+        """Stop print capturing when widget is unmounted"""
+        self.end_capture_print()
+
+    def _format_log_line(self, text: str) -> Text:
+        """Format a log line with appropriate styling based on log level"""
+        result = Text()
+
+        # Check for common log level patterns
+        if text.startswith("ERROR:") or ":ERROR:" in text:
+            result.append(text, style="bold red")
+        elif text.startswith("WARNING:") or ":WARNING:" in text:
+            result.append(text, style="yellow")
+        elif text.startswith("INFO:") or ":INFO:" in text:
+            result.append(text, style="green")
+        elif text.startswith("DEBUG:") or ":DEBUG:" in text:
+            result.append(text, style="dim")
+        elif text.startswith("CRITICAL:") or ":CRITICAL:" in text:
+            result.append(text, style="bold white on red")
+        else:
+            result.append(text)
+
+        return result
 
     def on_print(self, event: events.Print) -> None:
         """Handle print events from captured stdout/stderr"""
-        self.write(event.text)
+        if text := event.text.strip():
+            self.write(self._format_log_line(text))
 
 
 class ExperimentsList(Widget):
@@ -260,14 +284,14 @@ class ExperimentsList(Widget):
 
         try:
             self.experiments = self.state_provider.get_experiments()
-            self.log(
+            self.log.debug(
                 f"Refreshing experiments: found {len(self.experiments)} experiments"
             )
         except Exception as e:
-            self.log(f"ERROR refreshing experiments: {e}")
+            self.log.error(f"ERROR refreshing experiments: {e}")
             import traceback
 
-            self.log(traceback.format_exc())
+            self.log.error(traceback.format_exc())
             self.experiments = []
             return
 
@@ -896,6 +920,7 @@ class JobsTable(Vertical):
         Binding("f", "copy_path", "Copy Path", show=False),
         Binding("/", "toggle_search", "Search"),
         Binding("c", "clear_filter", "Clear", show=False),
+        Binding("r", "refresh_live", "Refresh"),
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("T", "sort_by_task", "Sort Task", show=False),
         Binding("D", "sort_by_submitted", "Sort Date", show=False),
@@ -991,6 +1016,11 @@ class JobsTable(Vertical):
         else:
             # Search bar hidden - go back (keep filter)
             self.app.action_go_back()
+
+    def action_refresh_live(self) -> None:
+        """Refresh the jobs table"""
+        self.refresh_jobs()
+        self.notify("Jobs refreshed", severity="information")
 
     def on_filter_changed(self, message: FilterChanged) -> None:
         """Apply new filter"""
@@ -1179,12 +1209,14 @@ class JobsTable(Vertical):
             return
 
         jobs = self.state_provider.get_jobs(self.current_experiment)
-        self.log(f"Refreshing jobs for {self.current_experiment}: {len(jobs)} jobs")
+        self.log.debug(
+            f"Refreshing jobs for {self.current_experiment}: {len(jobs)} jobs"
+        )
 
         # Apply filter if set
         if self.filter_fn:
             jobs = [j for j in jobs if self.filter_fn(j)]
-            self.log(f"After filter: {len(jobs)} jobs")
+            self.log.debug(f"After filter: {len(jobs)} jobs")
 
         # Sort jobs based on selected column
         if self._sort_column == "status":
@@ -1317,9 +1349,14 @@ class JobsTable(Vertical):
         else:
             # Just update cells in place - no reordering needed
             for job_id, row_data in rows_data.items():
-                job_id_short, task_id, status_text, tags_text, submitted, duration = (
-                    row_data
-                )
+                (
+                    job_id_short,
+                    task_id,
+                    status_text,
+                    tags_text,
+                    submitted,
+                    duration,
+                ) = row_data
                 table.update_cell(job_id, "job_id", job_id_short, update_width=True)
                 table.update_cell(job_id, "task", task_id, update_width=True)
                 table.update_cell(job_id, "status", status_text, update_width=True)
@@ -1327,7 +1364,9 @@ class JobsTable(Vertical):
                 table.update_cell(job_id, "submitted", submitted, update_width=True)
                 table.update_cell(job_id, "duration", duration, update_width=True)
 
-        self.log(f"Jobs table now has {table.row_count} rows (rebuild={needs_rebuild})")
+        self.log.debug(
+            f"Jobs table now has {table.row_count} rows (rebuild={needs_rebuild})"
+        )
 
     def _format_duration(self, seconds: float) -> str:
         """Format duration in seconds to human-readable string"""
@@ -1845,11 +1884,11 @@ class ExperimaestroUI(App):
 
         if self.show_logs:
             # Tabbed layout with logs
-            with TabbedContent():
+            with TabbedContent(id="main-tabs"):
                 with TabPane("Monitor", id="monitor-tab"):
                     yield from self._compose_monitor_view()
                 with TabPane("Logs", id="logs-tab"):
-                    yield CaptureLog(id="logs", wrap=True, highlight=True, markup=True)
+                    yield CaptureLog(id="logs", auto_scroll=True)
         else:
             # Simple layout without logs
             with Vertical(id="main-container"):
@@ -1895,45 +1934,53 @@ class ExperimaestroUI(App):
 
     def _handle_state_event(self, event: StateEvent) -> None:
         """Process state event on the main thread"""
-        self.log(f"State event received: {event.event_type.name}")
+        # Use query() instead of query_one() to avoid NoMatches exception
+        # when widgets aren't visible yet
+        jobs_tables = self.query(JobsTable)
+        services_lists = self.query(ServicesList)
+
+        self.log.debug(
+            f"State event {event.event_type.name}, "
+            f"JobsTable found: {len(jobs_tables)}, ServicesList found: {len(services_lists)}"
+        )
 
         if event.event_type == StateEventType.EXPERIMENT_UPDATED:
             # Refresh experiments list
-            experiments_list = self.query_one(ExperimentsList)
-            experiments_list.refresh_experiments()
+            for exp_list in self.query(ExperimentsList):
+                exp_list.refresh_experiments()
 
         elif event.event_type == StateEventType.JOB_UPDATED:
-            # Refresh jobs table if we're viewing the affected experiment
-            jobs_table = self.query_one(JobsTable)
             event_exp_id = event.data.get("experimentId")
 
-            if jobs_table.current_experiment == event_exp_id:
-                jobs_table.refresh_jobs()
+            # Refresh jobs table if we're viewing the affected experiment
+            for jobs_table in jobs_tables:
+                if jobs_table.current_experiment == event_exp_id:
+                    jobs_table.refresh_jobs()
 
             # Also refresh job detail if we're viewing the affected job
-            job_detail_container = self.query_one("#job-detail-container")
-            if not job_detail_container.has_class("hidden"):
-                job_detail_view = self.query_one(JobDetailView)
-                event_job_id = event.data.get("jobId")
-                if job_detail_view.current_job_id == event_job_id:
-                    job_detail_view.refresh_job_detail()
+            for job_detail_container in self.query("#job-detail-container"):
+                if not job_detail_container.has_class("hidden"):
+                    for job_detail_view in self.query(JobDetailView):
+                        event_job_id = event.data.get("jobId")
+                        if job_detail_view.current_job_id == event_job_id:
+                            job_detail_view.refresh_job_detail()
 
             # Also update the experiment stats in the experiments list
-            experiments_list = self.query_one(ExperimentsList)
-            experiments_list.refresh_experiments()
+            for exp_list in self.query(ExperimentsList):
+                exp_list.refresh_experiments()
 
         elif event.event_type == StateEventType.RUN_UPDATED:
             # Refresh experiments list to show updated run info
-            experiments_list = self.query_one(ExperimentsList)
-            experiments_list.refresh_experiments()
+            for exp_list in self.query(ExperimentsList):
+                exp_list.refresh_experiments()
 
         elif event.event_type == StateEventType.SERVICE_UPDATED:
-            # Refresh services list if we're viewing the affected experiment
-            services_list = self.query_one(ServicesList)
             event_exp_id = event.data.get("experimentId")
 
-            if services_list.current_experiment == event_exp_id:
-                services_list.refresh_services()
+            # Refresh services list if we're viewing the affected experiment
+            for services_list in services_lists:
+                if services_list.current_experiment == event_exp_id:
+                    services_list.refresh_services()
 
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
         """Handle experiment selection - show jobs/services tabs"""
