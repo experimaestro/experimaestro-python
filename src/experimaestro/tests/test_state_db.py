@@ -23,7 +23,7 @@ def test_database_initialization(tmp_path: Path):
     db_path = tmp_path / "workspace.db"
 
     # Initialize database
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     # Verify all tables were created
     assert ExperimentModel.table_exists()
@@ -47,7 +47,7 @@ def test_database_initialization(tmp_path: Path):
 def test_experiment_and_run_models(tmp_path: Path):
     """Test creating experiments and runs"""
     db_path = tmp_path / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         # Create an experiment
@@ -79,7 +79,7 @@ def test_experiment_and_run_models(tmp_path: Path):
 def test_job_model_with_composite_key(tmp_path: Path):
     """Test job model with composite primary key (job_id, experiment_id, run_id)"""
     db_path = tmp_path / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and run first
@@ -133,7 +133,7 @@ def test_job_model_with_composite_key(tmp_path: Path):
 def test_job_tags_model(tmp_path: Path):
     """Test run-scoped job tags (fixes GH #128)"""
     db_path = tmp_path / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and runs
@@ -203,7 +203,7 @@ def test_job_tags_model(tmp_path: Path):
 def test_multiple_experiments_same_workspace(tmp_path: Path):
     """Test that multiple experiments can coexist in same workspace database"""
     db_path = tmp_path / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         # Create two experiments
@@ -249,13 +249,13 @@ def test_read_only_mode(tmp_path: Path):
     db_path = tmp_path / "workspace.db"
 
     # Create database with write mode
-    db_write = initialize_workspace_database(db_path, read_only=False)
+    db_write, _ = initialize_workspace_database(db_path, read_only=False)
     with db_write.bind_ctx(ALL_MODELS):
         ExperimentModel.create(experiment_id="exp1")
     close_workspace_database(db_write)
 
     # Open in read-only mode
-    db_read = initialize_workspace_database(db_path, read_only=True)
+    db_read, _ = initialize_workspace_database(db_path, read_only=True)
 
     with db_read.bind_ctx(ALL_MODELS):
         # Can read
@@ -272,7 +272,7 @@ def test_read_only_mode(tmp_path: Path):
 def test_upsert_on_conflict(tmp_path: Path):
     """Test that on_conflict works for updating existing records"""
     db_path = tmp_path / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and run

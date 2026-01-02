@@ -69,6 +69,7 @@ experimaestro experiments monitor --workdir /path/to/workspace --console
 
 ### Features
 
+- **Experiments Table**: Lists experiments with ID, hostname, jobs count, status, and duration
 - **Job Table**: Scrollable list of jobs with status indicators
 - **Live Logs**: Real-time log output panel
 - **Keyboard Navigation**: Navigate and interact using keyboard shortcuts

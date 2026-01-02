@@ -309,11 +309,44 @@ def experiments(ctx, workdir, workspace):
 @experiments.command()
 @pass_cfg
 def list(workdir: Path):
+    """List experiments in the workspace"""
+    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+
+    # Get experiments from state provider for detailed info
+    state_provider = WorkspaceStateProvider.get_instance(
+        workdir, read_only=True, sync_on_start=True
+    )
+    experiments_list = state_provider.get_experiments()
+
+    # Build lookup by experiment_id
+    exp_info = {exp.experiment_id: exp for exp in experiments_list}
+
     for p in (workdir / "xp").iterdir():
+        exp_id = p.name
+        exp = exp_info.get(exp_id)
+
+        # Build display string
+        display_parts = []
+
         if (p / "jobs.bak").exists():
-            cprint(f"[unfinished] {p.name}", "yellow")
+            display_parts.append("[unfinished]")
+
+        display_parts.append(exp_id)
+
+        # Add hostname if available
+        if exp and getattr(exp, "hostname", None):
+            display_parts.append(f"[{exp.hostname}]")
+
+        # Add job stats if available
+        if exp:
+            display_parts.append(f"({exp.finished_jobs}/{exp.total_jobs} jobs)")
+
+        display_str = " ".join(display_parts)
+
+        if (p / "jobs.bak").exists():
+            cprint(display_str, "yellow")
         else:
-            cprint(p.name, "cyan")
+            cprint(display_str, "cyan")
 
 
 @experiments.command()

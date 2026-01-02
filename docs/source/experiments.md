@@ -149,3 +149,26 @@ experimaestro run-experiment --show -c learning_rate=1e-5 --pre-yaml base.yaml e
 ### Common handling
 
 See {py:class}`~experimaestro.experiments.cli.ExperimentHelper` for the CLI helper class.
+
+## Experiment metadata
+
+### Hostname tracking
+
+Experimaestro automatically records the hostname where each experiment run is launched. This information is useful for identifying which machine was used when running experiments across multiple hosts.
+
+The hostname is:
+- Recorded when a new experiment run starts
+- Stored in both the workspace database and on disk (in `xp/{experiment_id}/informations.json`)
+- Displayed in the experiments list in both CLI and TUI
+- Preserved during database resync operations
+
+To view the hostname for experiments:
+
+```bash
+# CLI - shows hostname in brackets
+experimaestro experiments list --workdir /path/to/workspace
+# Output: my-experiment [hostname.local] (5/10 jobs)
+
+# TUI - hostname shown in "Host" column
+experimaestro experiments monitor --console --workdir /path/to/workspace
+```

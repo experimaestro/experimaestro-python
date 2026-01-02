@@ -33,7 +33,7 @@ def workspace_path(tmp_path):
     xpm_dir = ws_path / ".experimaestro"
     xpm_dir.mkdir()
     db_path = xpm_dir / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     # Create jobs directory
     jobs_dir = ws_path / "jobs"
@@ -48,7 +48,7 @@ def workspace_path(tmp_path):
 def workspace_with_jobs(workspace_path):
     """Create a workspace with some test jobs in the database"""
     db_path = workspace_path / ".experimaestro" / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         # Create experiment and run
@@ -152,7 +152,7 @@ def test_jobs_list_fullpath(workspace_with_jobs):
 def workspace_with_timed_jobs(workspace_path):
     """Create a workspace with jobs that have different submission times"""
     db_path = workspace_path / ".experimaestro" / "workspace.db"
-    db = initialize_workspace_database(db_path, read_only=False)
+    db, _ = initialize_workspace_database(db_path, read_only=False)
 
     with db.bind_ctx(ALL_MODELS):
         ExperimentModel.create(experiment_id="test_exp", current_run_id="run_001")

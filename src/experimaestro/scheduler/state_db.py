@@ -15,6 +15,7 @@ Key design:
 """
 
 from pathlib import Path
+from typing import Tuple
 from peewee import (
     Model,
     SqliteDatabase,
@@ -29,6 +30,9 @@ from peewee import (
 )
 from datetime import datetime
 import fasteners
+
+# Database schema version - increment when schema changes require resync
+CURRENT_DB_VERSION = 2
 
 
 class BaseModel(Model):
@@ -84,6 +88,7 @@ class ExperimentRunModel(BaseModel):
         started_at: When this run started
         ended_at: When this run completed (null if still active)
         status: Run status (active, completed, failed, abandoned)
+        hostname: Host where the experiment was launched (null for old runs)
     """
 
     experiment_id = CharField(index=True)
@@ -91,6 +96,7 @@ class ExperimentRunModel(BaseModel):
     started_at = DateTimeField(default=datetime.now)
     ended_at = DateTimeField(null=True)
     status = CharField(default="active", index=True)
+    hostname = CharField(null=True)
 
     class Meta:
         table_name = "experiment_runs"
@@ -108,11 +114,13 @@ class WorkspaceSyncMetadata(BaseModel):
         id: Always "workspace" (single row table)
         last_sync_time: When last sync completed
         sync_interval_minutes: Minimum interval between syncs
+        db_version: Schema version for migration detection
     """
 
     id = CharField(primary_key=True, default="workspace")
     last_sync_time = DateTimeField(null=True)
     sync_interval_minutes = IntegerField(default=5)
+    db_version = IntegerField(default=1)
 
     class Meta:
         table_name = "workspace_sync_metadata"
@@ -311,7 +319,7 @@ ALL_MODELS = [
 
 def initialize_workspace_database(
     db_path: Path, read_only: bool = False
-) -> SqliteDatabase:
+) -> Tuple[SqliteDatabase, bool]:
     """Initialize a workspace database connection with proper configuration
 
     Creates and configures a SQLite database connection for the workspace.
@@ -325,7 +333,9 @@ def initialize_workspace_database(
         read_only: If True, open database in read-only mode
 
     Returns:
-        Configured SqliteDatabase instance
+        Tuple of (SqliteDatabase instance, needs_resync flag)
+        The needs_resync flag is True when the database schema version is outdated
+        and a full resync from disk is required.
     """
     # Ensure parent directory exists (unless read-only)
     if not read_only:
@@ -335,6 +345,8 @@ def initialize_workspace_database(
     # This prevents SQLite locking issues during table creation
     lock_path = db_path.parent / f".{db_path.name}.init.lock"
     lock = fasteners.InterProcessLock(str(lock_path))
+
+    needs_resync = False
 
     # Acquire lock (blocking) - only one process can initialize at a time
     with lock:
@@ -364,18 +376,41 @@ def initialize_workspace_database(
         if not read_only:
             db.create_tables(ALL_MODELS, safe=True)
 
+            # Check database version for migration - use raw SQL since column may not exist
+            try:
+                cursor = db.execute_sql(
+                    "SELECT db_version FROM workspace_sync_metadata WHERE id='workspace'"
+                )
+                row = cursor.fetchone()
+                if row is None or row[0] < CURRENT_DB_VERSION:
+                    needs_resync = True
+            except OperationalError:
+                # Column doesn't exist - add it and trigger resync
+                needs_resync = True
+                try:
+                    db.execute_sql(
+                        "ALTER TABLE workspace_sync_metadata "
+                        "ADD COLUMN db_version INTEGER DEFAULT 1"
+                    )
+                except OperationalError:
+                    pass  # Column may already exist
+
             # Initialize WorkspaceSyncMetadata with default row if not exists
             # Use try/except to handle race condition (shouldn't happen with lock, but be safe)
             try:
                 WorkspaceSyncMetadata.get_or_create(
                     id="workspace",
-                    defaults={"last_sync_time": None, "sync_interval_minutes": 5},
+                    defaults={
+                        "last_sync_time": None,
+                        "sync_interval_minutes": 5,
+                        "db_version": 1,
+                    },
                 )
             except (IntegrityError, OperationalError):
                 # If get_or_create fails, the row likely already exists
                 pass
 
-    return db
+    return db, needs_resync
 
 
 def close_workspace_database(db: SqliteDatabase):

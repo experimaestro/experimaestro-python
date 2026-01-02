@@ -265,6 +265,7 @@ class ExperimentsList(Widget):
         """Initialize the experiments table"""
         table = self.query_one("#experiments-table", DataTable)
         table.add_column("ID", key="id")
+        table.add_column("Host", key="host")
         table.add_column("Jobs", key="jobs")
         table.add_column("Status", key="status")
         table.add_column("Started", key="started")
@@ -340,15 +341,21 @@ class ExperimentsList(Widget):
                 # Format duration
                 duration = format_duration(elapsed)
 
+            # Get hostname (may be None for older experiments)
+            hostname = getattr(exp, "hostname", None) or "-"
+
             # Update existing row or add new one
             if exp_id in existing_keys:
                 table.update_cell(exp_id, "id", exp_id, update_width=True)
+                table.update_cell(exp_id, "host", hostname, update_width=True)
                 table.update_cell(exp_id, "jobs", jobs_text, update_width=True)
                 table.update_cell(exp_id, "status", status, update_width=True)
                 table.update_cell(exp_id, "started", started, update_width=True)
                 table.update_cell(exp_id, "duration", duration, update_width=True)
             else:
-                table.add_row(exp_id, jobs_text, status, started, duration, key=exp_id)
+                table.add_row(
+                    exp_id, hostname, jobs_text, status, started, duration, key=exp_id
+                )
 
         # Remove rows for experiments that no longer exist
         for old_exp_id in existing_keys - current_exp_ids:

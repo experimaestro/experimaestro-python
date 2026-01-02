@@ -228,6 +228,23 @@ experimaestro experiments [OPTIONS] COMMAND
 | `monitor` | Monitor experiments with web UI or console TUI |
 | `sync` | Synchronize workspace database from disk state |
 
+### List Command
+
+List experiments with their status and metadata:
+
+```bash
+experimaestro experiments list --workdir /path/to/workspace
+```
+
+Output format:
+```
+experiment-id [hostname] (finished_jobs/total_jobs jobs)
+```
+
+- `experiment-id`: The experiment identifier
+- `hostname`: The host where the experiment was launched (if recorded)
+- Job counts: Number of completed jobs out of total
+
 ### Monitor Command
 
 Launch an interactive monitoring interface for experiments:

@@ -15,6 +15,7 @@ Key features:
 
 import json
 import logging
+import socket
 import threading
 import time
 from dataclasses import dataclass
@@ -34,7 +35,9 @@ from experimaestro.scheduler.state_db import (
     ServiceModel,
     PartialModel,
     JobPartialModel,
+    WorkspaceSyncMetadata,
     ALL_MODELS,
+    CURRENT_DB_VERSION,
 )
 from experimaestro.scheduler.interfaces import (
     BaseJob,
@@ -371,6 +374,7 @@ class MockExperiment(BaseExperiment):
         updated_at: str,
         started_at: Optional[float] = None,
         ended_at: Optional[float] = None,
+        hostname: Optional[str] = None,
     ):
         self.workdir = workdir
         self.current_run_id = current_run_id
@@ -380,6 +384,7 @@ class MockExperiment(BaseExperiment):
         self.updated_at = updated_at
         self.started_at = started_at
         self.ended_at = ended_at
+        self.hostname = hostname
 
     @property
     def experiment_id(self) -> str:
@@ -570,8 +575,17 @@ class WorkspaceStateProvider:
             experimaestro_dir.mkdir(parents=True, exist_ok=True)
 
         db_path = experimaestro_dir / "workspace.db"
-        self.workspace_db = initialize_workspace_database(db_path, read_only=read_only)
+        self.workspace_db, needs_resync = initialize_workspace_database(
+            db_path, read_only=read_only
+        )
         self._db_dir = experimaestro_dir  # Store for file watcher
+
+        # Sync from disk if needed due to schema version change
+        if needs_resync and not read_only:
+            logger.info(
+                "Database schema version changed, triggering full resync from disk"
+            )
+            sync_on_start = True  # Force sync
 
         # Optionally sync from disk on start (only in write mode)
         # Syncing requires write access to update the database and sync timestamp
@@ -581,9 +595,17 @@ class WorkspaceStateProvider:
             sync_workspace_from_disk(
                 self.workspace_path,
                 write_mode=True,
-                force=False,
+                force=needs_resync,  # Force full sync if schema changed
                 sync_interval_minutes=sync_interval_minutes,
             )
+
+            # Update db_version after successful sync
+            if needs_resync:
+                with self.workspace_db.bind_ctx([WorkspaceSyncMetadata]):
+                    WorkspaceSyncMetadata.update(db_version=CURRENT_DB_VERSION).where(
+                        WorkspaceSyncMetadata.id == "workspace"
+                    ).execute()
+                logger.info("Database schema updated to version %d", CURRENT_DB_VERSION)
 
         logger.info(
             "WorkspaceStateProvider initialized (read_only=%s, workspace=%s)",
@@ -652,13 +674,39 @@ class WorkspaceStateProvider:
             now = datetime.now()
             run_id = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond:06d}"
 
-        # Create run record
+        # Capture hostname
+        hostname = socket.gethostname()
+        started_at = datetime.now()
+
+        # Create run record with hostname
         ExperimentRunModel.insert(
             experiment_id=experiment_id,
             run_id=run_id,
-            started_at=datetime.now(),
+            started_at=started_at,
             status="active",
+            hostname=hostname,
         ).execute()
+
+        # Persist to disk in experiment folder (informations.json)
+        exp_dir = self.workspace_path / "xp" / experiment_id
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        info_file = exp_dir / "informations.json"
+
+        # Merge with existing data (may have multiple runs)
+        info_data: Dict = {}
+        if info_file.exists():
+            try:
+                info_data = json.loads(info_file.read_text())
+            except json.JSONDecodeError:
+                logger.warning("Could not parse existing informations.json")
+
+        if "runs" not in info_data:
+            info_data["runs"] = {}
+        info_data["runs"][run_id] = {
+            "hostname": hostname,
+            "started_at": started_at.isoformat(),
+        }
+        info_file.write_text(json.dumps(info_data, indent=2))
 
         # Update experiment's current_run_id and updated_at
         now = datetime.now()
@@ -667,7 +715,12 @@ class WorkspaceStateProvider:
             updated_at=now,
         ).where(ExperimentModel.experiment_id == experiment_id).execute()
 
-        logger.info("Created run %s for experiment %s", run_id, experiment_id)
+        logger.info(
+            "Created run %s for experiment %s on host %s",
+            run_id,
+            experiment_id,
+            hostname,
+        )
 
         # Notify listeners
         self._notify_listeners(
@@ -678,6 +731,7 @@ class WorkspaceStateProvider:
                     "run_id": run_id,
                     "status": "active",
                     "started_at": now.isoformat(),
+                    "hostname": hostname,
                 },
             )
         )
@@ -718,6 +772,7 @@ class WorkspaceStateProvider:
             - finished_jobs: Number of completed jobs (for current run)
             - failed_jobs: Number of failed jobs (for current run)
             - updated_at: When experiment was last modified
+            - hostname: Host where the current run was launched
         """
         experiments = []
 
@@ -733,6 +788,7 @@ class WorkspaceStateProvider:
 
             started_at = None
             ended_at = None
+            hostname = None
 
             if exp_model.current_run_id:
                 total_jobs = (
@@ -762,7 +818,7 @@ class WorkspaceStateProvider:
                     .count()
                 )
 
-                # Get run timestamps
+                # Get run timestamps and hostname
                 try:
                     run_model = ExperimentRunModel.get(
                         (ExperimentRunModel.experiment_id == exp_model.experiment_id)
@@ -772,6 +828,7 @@ class WorkspaceStateProvider:
                         started_at = run_model.started_at.timestamp()
                     if run_model.ended_at:
                         ended_at = run_model.ended_at.timestamp()
+                    hostname = run_model.hostname
                 except ExperimentRunModel.DoesNotExist:
                     pass
 
@@ -788,6 +845,7 @@ class WorkspaceStateProvider:
                     updated_at=exp_model.updated_at.isoformat(),
                     started_at=started_at,
                     ended_at=ended_at,
+                    hostname=hostname,
                 )
             )
 
@@ -814,6 +872,7 @@ class WorkspaceStateProvider:
         total_jobs = 0
         finished_jobs = 0
         failed_jobs = 0
+        hostname = None
 
         if exp_model.current_run_id:
             total_jobs = (
@@ -843,6 +902,16 @@ class WorkspaceStateProvider:
                 .count()
             )
 
+            # Get hostname from run model
+            try:
+                run_model = ExperimentRunModel.get(
+                    (ExperimentRunModel.experiment_id == exp_model.experiment_id)
+                    & (ExperimentRunModel.run_id == exp_model.current_run_id)
+                )
+                hostname = run_model.hostname
+            except ExperimentRunModel.DoesNotExist:
+                pass
+
         # Compute experiment path from workspace_path and experiment_id
         exp_path = self.workspace_path / "xp" / exp_model.experiment_id
 
@@ -853,6 +922,7 @@ class WorkspaceStateProvider:
             finished_jobs=finished_jobs,
             failed_jobs=failed_jobs,
             updated_at=exp_model.updated_at.isoformat(),
+            hostname=hostname,
         )
 
     @_with_db_context
