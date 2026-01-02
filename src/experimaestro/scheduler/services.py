@@ -1,8 +1,11 @@
 import abc
 from enum import Enum
 import functools
+import logging
 import threading
 from typing import Set
+
+logger = logging.getLogger(__name__)
 
 
 class ServiceListener:
@@ -40,7 +43,8 @@ class Service:
     _state: ServiceState = ServiceState.STOPPED
 
     def __init__(self):
-        self.listeners: Set[ServiceListener] = set()
+        self._listeners: Set[ServiceListener] = set()
+        self._listeners_lock = threading.Lock()
 
     def state_dict(self) -> dict:
         """Return a dictionary representation for serialization.
@@ -85,14 +89,16 @@ class Service:
 
         :param listener: The listener to add
         """
-        self.listeners.add(listener)
+        with self._listeners_lock:
+            self._listeners.add(listener)
 
     def remove_listener(self, listener: ServiceListener):
         """Removes a listener
 
         :param listener: The listener to remove
         """
-        self.listeners.remove(listener)
+        with self._listeners_lock:
+            self._listeners.discard(listener)
 
     def description(self):
         return ""
@@ -106,8 +112,15 @@ class Service:
         # Set the state
         self._state = state
 
-        for listener in self.listeners:
-            listener.service_state_changed(self)
+        # Notify listeners with thread-safe snapshot
+        with self._listeners_lock:
+            listeners_snapshot = list(self._listeners)
+
+        for listener in listeners_snapshot:
+            try:
+                listener.service_state_changed(self)
+            except Exception:
+                logger.exception("Error notifying listener %s", listener)
 
 
 class WebService(Service):

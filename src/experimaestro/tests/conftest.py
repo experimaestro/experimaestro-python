@@ -50,7 +50,7 @@ def reset_scheduler():
             logging.debug("FIXTURE: Cleared state provider experiment providers")
 
         # Also clear listeners to prevent stale listeners
-        scheduler.listeners.clear()
+        scheduler.clear_listeners()
 
         # Re-add state_provider as listener if it exists
         if (
@@ -86,7 +86,7 @@ def reset_scheduler():
             for provider in scheduler.state_provider.experiment_providers.values():
                 provider.close()
             scheduler.state_provider.experiment_providers.clear()
-        scheduler.listeners.clear()
+        scheduler.clear_listeners()
         # Re-add state_provider as listener if it exists
         if (
             hasattr(scheduler, "state_provider")

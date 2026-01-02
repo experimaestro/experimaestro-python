@@ -420,7 +420,7 @@ class experiment:
         self._db_listener = DatabaseListener(
             self.state_provider, experiment_id, self.run_id
         )
-        self.scheduler.listeners.add(self._db_listener)
+        self.scheduler.addlistener(self._db_listener)
 
         # Number of unfinished jobs
         self.unfinishedJobs = 0
@@ -474,7 +474,7 @@ class experiment:
             self.scheduler.unregister_experiment(self)
 
             # Remove database listener
-            self.scheduler.listeners.discard(self._db_listener)
+            self.scheduler.removelistener(self._db_listener)
 
             # Mark run as completed in database
             experiment_id = self.workdir.name
@@ -536,8 +536,7 @@ class experiment:
         # Register file listener for state changes (writes to services.json)
         service.add_listener(self)
 
-        for listener in self.scheduler.listeners:
-            listener.service_add(service)
+        self.scheduler.notify_service_add(service)
 
         # Write services.json file
         self._write_services_json()

@@ -65,8 +65,14 @@ class Scheduler(threading.Thread):
         # List of jobs
         self.waitingjobs: Set[Job] = set()
 
-        # Listeners
-        self.listeners: Set[Listener] = set()
+        # Listeners with thread-safe access
+        self._listeners: Set[Listener] = set()
+        self._listeners_lock = threading.Lock()
+
+        # Notification thread pool (single worker to serialize notifications)
+        self._notification_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="NotificationWorker"
+        )
 
         # Server (managed by scheduler)
         self.server: Optional["Server"] = None
@@ -179,10 +185,17 @@ class Scheduler(threading.Thread):
             logger.warning("Scheduler already started")
 
     def addlistener(self, listener: Listener):
-        self.listeners.add(listener)
+        with self._listeners_lock:
+            self._listeners.add(listener)
 
     def removelistener(self, listener: Listener):
-        self.listeners.remove(listener)
+        with self._listeners_lock:
+            self._listeners.discard(listener)
+
+    def clear_listeners(self):
+        """Clear all listeners (for testing purposes)"""
+        with self._listeners_lock:
+            self._listeners.clear()
 
     def getJobState(self, job: Job) -> "concurrent.futures.Future[JobState]":
         # Check if the job belongs to this scheduler
@@ -255,6 +268,7 @@ class Scheduler(threading.Thread):
                     other.pidpath.unlink()
                 # Use set_state to handle experiment statistics updates
                 other.set_state(JobState.WAITING)
+                self.notify_job_state(other)  # Notify listeners of re-submit
             else:
                 logger.warning("Job %s already submitted", job.identifier)
 
@@ -276,21 +290,37 @@ class Scheduler(threading.Thread):
 
         return None
 
+    def _notify_listeners(self, notification_func, job: Job):
+        """Execute notification in thread pool with error isolation.
+
+        This runs notifications in a dedicated thread pool to avoid blocking
+        the scheduler and to isolate errors from affecting other listeners.
+        """
+
+        def _do_notify():
+            # Get a snapshot of listeners with the lock
+            with self._listeners_lock:
+                listeners_snapshot = list(self._listeners)
+
+            for listener in listeners_snapshot:
+                try:
+                    notification_func(listener, job)
+                except Exception:
+                    logger.exception("Got an error with listener %s", listener)
+
+        self._notification_executor.submit(_do_notify)
+
     def notify_job_submitted(self, job: Job):
         """Notify the listeners that a job has been submitted"""
-        for listener in self.listeners:
-            try:
-                listener.job_submitted(job)
-            except Exception:
-                logger.exception("Got an error with listener %s", listener)
+        self._notify_listeners(lambda lst, j: lst.job_submitted(j), job)
 
     def notify_job_state(self, job: Job):
         """Notify the listeners that a job has changed state"""
-        for listener in self.listeners:
-            try:
-                listener.job_state(job)
-            except Exception:
-                logger.exception("Got an error with listener %s", listener)
+        self._notify_listeners(lambda lst, j: lst.job_state(j), job)
+
+    def notify_service_add(self, service: Service):
+        """Notify the listeners that a service has been added"""
+        self._notify_listeners(lambda lst, s: lst.service_add(s), service)
 
     async def aio_submit(self, job: Job) -> JobState:
         """Main scheduler function: submit a job, run it (if needed), and returns
@@ -327,6 +357,7 @@ class Scheduler(threading.Thread):
         # Check if already done
         if job.donepath.exists():
             job.set_state(JobState.DONE)
+            self.notify_job_state(job)  # Notify listeners of done state
 
         # Check if we have a running process
         if not job.state.finished():
@@ -334,6 +365,7 @@ class Scheduler(threading.Thread):
             if process is not None:
                 # Notify listeners that job is running
                 job.set_state(JobState.RUNNING)
+                self.notify_job_state(job)
 
                 # Adds to the listeners
                 if self.server is not None:
@@ -377,6 +409,7 @@ class Scheduler(threading.Thread):
                 # Set endtime before set_state so database gets the timestamp
                 job.endtime = time.time()
                 job.set_state(state)
+                self.notify_job_state(job)  # Notify listeners of final state
 
         # If not done or running, start the job
         if not job.state.finished():

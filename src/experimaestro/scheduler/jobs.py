@@ -254,10 +254,9 @@ class Job(BaseJob, Resource):
             if old_state.is_error() and not new_state.is_error():
                 xp.failedJobs.pop(self.identifier, None)
 
-        # Notify listeners
+        # Notify listeners via scheduler's thread-safe mechanism
         if self.scheduler:
-            for listener in self.scheduler.listeners:
-                listener.job_state(self)
+            self.scheduler.notify_job_state(self)
 
     @cached_property
     def python_path(self) -> Iterator[str]:
@@ -302,8 +301,8 @@ class Job(BaseJob, Resource):
             self._progress[-1].desc = desc
         self._progress[-1].progress = value
 
-        for listener in self.scheduler.listeners:
-            listener.job_state(self)
+        # Notify listeners via scheduler's thread-safe mechanism
+        self.scheduler.notify_job_state(self)
 
     def add_notification_server(self, server):
         """Adds a notification server"""
