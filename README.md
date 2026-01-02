@@ -14,11 +14,11 @@ The full documentation can be read by going to the following URL: [https://exper
 
 ## Textual interface (new in v2)
 
-![Experiment screen](docs/img/tui-experiments.png)
+![Experiment screen](docs/source/img/tui-experiments.png)
 
-![Jobs screen](docs/img/tui-jobs.png)
+![Jobs screen](docs/source/img/tui-jobs.png)
 
-![Log screen](docs/img/tui-logs.png)
+![Log screen](docs/source/img/tui-logs.png)
 
 # Install
 
