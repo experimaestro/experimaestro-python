@@ -652,8 +652,23 @@ def sync_workspace_from_disk(  # noqa: C901
                 if write_mode and service_records:
                     for service_id, service_data in service_records.items():
                         now = datetime.now()
-                        # Store the full state_dict as JSON for recreation
-                        state_dict_json = json.dumps(service_data)
+                        # Extract only the state_dict keys (not metadata like
+                        # service_id, description, state, url, timestamp)
+                        # The state_dict should have __class__ and service-specific
+                        # fields like 'path' for TensorboardService
+                        metadata_keys = {
+                            "service_id",
+                            "description",
+                            "state",
+                            "url",
+                            "timestamp",
+                        }
+                        state_dict = {
+                            k: v
+                            for k, v in service_data.items()
+                            if k not in metadata_keys
+                        }
+                        state_dict_json = json.dumps(state_dict)
                         ServiceModel.insert(
                             service_id=service_id,
                             experiment_id=experiment_id,

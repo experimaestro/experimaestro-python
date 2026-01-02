@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.api import ObservedWatch
@@ -42,6 +43,7 @@ from experimaestro.scheduler.state_db import (
 from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
+    BaseService,
     JobState,
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
@@ -79,6 +81,213 @@ class StateEvent:
 
 # Type alias for listener callbacks
 StateListener = Callable[[StateEvent], None]
+
+
+class StateProvider(ABC):
+    """Abstract base class for state providers
+
+    Defines the interface that all state providers must implement.
+    This enables both local (WorkspaceStateProvider) and remote
+    (SSHStateProviderClient) providers to be used interchangeably.
+
+    Provides common service caching logic to preserve service instances
+    (and their URLs) across calls to get_services(). Subclasses should call
+    _init_service_cache() in their __init__ and implement _fetch_services_from_storage().
+    """
+
+    def _init_service_cache(self) -> None:
+        """Initialize service cache - call from subclass __init__"""
+        self._service_cache: Dict[Tuple[str, str], Dict[str, "BaseService"]] = {}
+        self._service_cache_lock = threading.Lock()
+
+    def _clear_service_cache(self) -> None:
+        """Clear the service cache"""
+        with self._service_cache_lock:
+            self._service_cache.clear()
+
+    def get_services(
+        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
+    ) -> List[BaseService]:
+        """Get services for an experiment
+
+        Uses caching to preserve service instances (and their URLs) across calls.
+        Subclasses can override _get_live_services() for live service support
+        and must implement _fetch_services_from_storage() for persistent storage.
+        """
+        # Resolve run_id if needed
+        if experiment_id is not None and run_id is None:
+            run_id = self.get_current_run(experiment_id)
+            if run_id is None:
+                return []
+
+        cache_key = (experiment_id or "", run_id or "")
+
+        with self._service_cache_lock:
+            # Try to get live services (scheduler, etc.) - may return None
+            live_services = self._get_live_services(experiment_id, run_id)
+            if live_services is not None:
+                # Cache and return live services
+                self._service_cache[cache_key] = {s.id: s for s in live_services}
+                return live_services
+
+            # Check cache
+            cached = self._service_cache.get(cache_key)
+            if cached is not None:
+                return list(cached.values())
+
+            # Fetch from persistent storage (DB or remote)
+            services = self._fetch_services_from_storage(experiment_id, run_id)
+            self._service_cache[cache_key] = {s.id: s for s in services}
+            return services
+
+    def _get_live_services(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> Optional[List[BaseService]]:
+        """Get live services if available (e.g., from scheduler).
+
+        Returns None if no live services are available (default).
+        Subclasses may override to check for live services.
+        """
+        return None
+
+    @abstractmethod
+    def _fetch_services_from_storage(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> List[BaseService]:
+        """Fetch services from persistent storage (DB or remote).
+
+        Called when no live services and cache is empty.
+        """
+        ...
+
+    @abstractmethod
+    def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
+        """Get list of all experiments"""
+        ...
+
+    @abstractmethod
+    def get_experiment(self, experiment_id: str) -> Optional[BaseExperiment]:
+        """Get a specific experiment by ID"""
+        ...
+
+    @abstractmethod
+    def get_experiment_runs(self, experiment_id: str) -> List[Dict]:
+        """Get all runs for an experiment"""
+        ...
+
+    @abstractmethod
+    def get_current_run(self, experiment_id: str) -> Optional[str]:
+        """Get the current run ID for an experiment"""
+        ...
+
+    @abstractmethod
+    def get_jobs(
+        self,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,
+    ) -> List[BaseJob]:
+        """Query jobs with optional filters"""
+        ...
+
+    @abstractmethod
+    def get_job(
+        self, job_id: str, experiment_id: str, run_id: Optional[str] = None
+    ) -> Optional[BaseJob]:
+        """Get a specific job"""
+        ...
+
+    @abstractmethod
+    def get_all_jobs(
+        self,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,
+    ) -> List[BaseJob]:
+        """Get all jobs across all experiments"""
+        ...
+
+    # Note: get_services is implemented in base class using _fetch_services_from_storage
+
+    @abstractmethod
+    def get_services_raw(
+        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
+    ) -> List[Dict]:
+        """Get raw service data as dictionaries (for serialization)"""
+        ...
+
+    @abstractmethod
+    def add_listener(self, listener: StateListener) -> None:
+        """Register a listener for state change events"""
+        ...
+
+    @abstractmethod
+    def remove_listener(self, listener: StateListener) -> None:
+        """Unregister a listener"""
+        ...
+
+    @abstractmethod
+    def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
+        """Kill a running job"""
+        ...
+
+    @abstractmethod
+    def clean_job(self, job: BaseJob, perform: bool = False) -> bool:
+        """Clean a finished job"""
+        ...
+
+    @abstractmethod
+    def close(self) -> None:
+        """Close the state provider and release resources"""
+        ...
+
+    # Optional methods with default implementations
+
+    def sync_path(self, path: str) -> Optional[Path]:
+        """Sync a specific path from remote (remote providers only)
+
+        Returns None for local providers or if sync fails.
+        """
+        return None
+
+    def get_orphan_jobs(self) -> List[BaseJob]:
+        """Get orphan jobs (jobs not associated with any experiment run)"""
+        return []
+
+    def delete_job_safely(self, job: BaseJob, perform: bool = True) -> Tuple[bool, str]:
+        """Safely delete a job and its data"""
+        return False, "Not implemented"
+
+    def delete_experiment(
+        self, experiment_id: str, perform: bool = True
+    ) -> Tuple[bool, str]:
+        """Delete an experiment and all its data"""
+        return False, "Not implemented"
+
+    def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
+        """Clean up orphan partial directories"""
+        return []
+
+    def get_last_sync_time(self) -> Optional[datetime]:
+        """Get the last sync time (for incremental updates)"""
+        return None
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this provider is read-only"""
+        return True
+
+    @property
+    def is_remote(self) -> bool:
+        """Whether this is a remote provider (e.g., SSH)
+
+        Remote providers use periodic refresh instead of push notifications
+        and support sync_path for on-demand file synchronization.
+        """
+        return False
 
 
 class _DatabaseChangeDetector:
@@ -392,6 +601,57 @@ class MockExperiment(BaseExperiment):
         return self.workdir.name
 
 
+class MockService(BaseService):
+    """Mock service object for remote monitoring
+
+    This class provides a service-like interface for services loaded from
+    the remote server. It mimics the Service class interface sufficiently
+    for display in the TUI ServicesList widget.
+    """
+
+    def __init__(
+        self,
+        service_id: str,
+        description_text: str,
+        state: str,
+        state_dict_data: dict,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        url: Optional[str] = None,
+    ):
+        self.id = service_id
+        self._description = description_text
+        self._state_name = state
+        self._state_dict_data = state_dict_data
+        self.experiment_id = experiment_id
+        self.run_id = run_id
+        self.url = url
+
+    @property
+    def state(self):
+        """Return state as a ServiceState-like object with a name attribute"""
+        from experimaestro.scheduler.services import ServiceState
+
+        # Convert state name to ServiceState enum
+        try:
+            return ServiceState[self._state_name]
+        except KeyError:
+            # Return a mock object with name attribute for unknown states
+            class MockState:
+                def __init__(self, name):
+                    self.name = name
+
+            return MockState(self._state_name)
+
+    def description(self) -> str:
+        """Return service description"""
+        return self._description
+
+    def state_dict(self) -> dict:
+        """Return state dictionary for service recreation"""
+        return self._state_dict_data
+
+
 def _with_db_context(func):
     """Decorator to wrap method in database bind context
 
@@ -411,7 +671,7 @@ def _with_db_context(func):
     return wrapper
 
 
-class WorkspaceStateProvider:
+class WorkspaceStateProvider(StateProvider):
     """Unified state provider for workspace-level database (singleton per workspace path)
 
     Provides access to experiment and job state from a single workspace database.
@@ -512,12 +772,15 @@ class WorkspaceStateProvider:
             workspace_path = Path(workspace_path).absolute()
 
         self.workspace_path = workspace_path
-        self.read_only = read_only
+        self._read_only = read_only
         self.sync_interval_minutes = sync_interval_minutes
 
         # Listeners for push notifications
         self._listeners: Set[StateListener] = set()
         self._listeners_lock = threading.Lock()
+
+        # Service cache (from base class)
+        self._init_service_cache()
 
         # File watcher for database changes (started when listeners are added)
         self._change_detector: Optional[_DatabaseChangeDetector] = None
@@ -612,6 +875,11 @@ class WorkspaceStateProvider:
             read_only,
             workspace_path,
         )
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this provider is read-only"""
+        return self._read_only
 
     # Experiment management methods
 
@@ -1763,6 +2031,11 @@ class WorkspaceStateProvider:
             run_id,
         )
 
+        # Note: We do NOT invalidate the cache here because:
+        # 1. The cached service IS the same object that was just updated
+        # 2. Invalidating would cause get_services() to create new instances
+        # 3. The state change is already reflected in the cached object
+
         # Notify listeners
         self._notify_listeners(
             StateEvent(
@@ -1777,48 +2050,105 @@ class WorkspaceStateProvider:
             )
         )
 
-    @_with_db_context
-    def get_services(
-        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
-    ) -> List["Service"]:
-        """Get services, optionally filtered by experiment/run
+    def _get_live_services(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> Optional[List["Service"]]:
+        """Get live services from scheduler if available.
 
-        This method abstracts whether services are live (from scheduler) or
-        from the database. It returns actual Service objects in both cases:
-        - If a live scheduler has the experiment, return live Service objects
-        - Otherwise, recreate Service objects from stored state_dict
+        Returns None if no live services (experiment not in scheduler).
+        """
+        if experiment_id is None:
+            return None
+
+        try:
+            from experimaestro.scheduler.base import Scheduler
+
+            if not Scheduler.has_instance():
+                return None
+
+            scheduler = Scheduler.instance()
+            if experiment_id not in scheduler.experiments:
+                logger.debug("Experiment %s not in scheduler", experiment_id)
+                return None
+
+            exp = scheduler.experiments[experiment_id]
+            services = list(exp.services.values())
+            logger.debug(
+                "Returning %d live services for experiment %s",
+                len(services),
+                experiment_id,
+            )
+            return services
+
+        except Exception as e:
+            logger.warning("Could not get live services: %s", e)
+            return None
+
+    @_with_db_context
+    def _fetch_services_from_storage(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> List["Service"]:
+        """Fetch services from database.
+
+        Called when no live services and cache is empty.
+        """
+        from experimaestro.scheduler.services import Service
+
+        query = ServiceModel.select()
+
+        if experiment_id is not None:
+            query = query.where(
+                (ServiceModel.experiment_id == experiment_id)
+                & (ServiceModel.run_id == run_id)
+            )
+
+        services = []
+
+        for service_model in query:
+            service_id = service_model.service_id
+
+            # Try to recreate service from state_dict
+            state_dict_json = service_model.state_dict
+            if state_dict_json and state_dict_json != "{}":
+                try:
+                    state_dict = json.loads(state_dict_json)
+                    if "__class__" in state_dict:
+                        service = Service.from_state_dict(state_dict)
+                        # Set the id from the database record
+                        service.id = service_id
+                        services.append(service)
+                        continue
+                except Exception as e:
+                    logger.warning(
+                        "Failed to recreate service %s from state_dict: %s",
+                        service_id,
+                        e,
+                    )
+            # If we can't recreate, skip this service (it's not usable)
+            logger.debug(
+                "Service %s has no state_dict for recreation, skipping",
+                service_id,
+            )
+
+        return services
+
+    @_with_db_context
+    def get_services_raw(
+        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
+    ) -> List[Dict]:
+        """Get raw service data from database without recreating Service objects
+
+        This is useful for remote monitoring where the client may have different
+        modules installed than the server. Returns dictionaries with service
+        metadata that can be serialized over JSON-RPC.
 
         Args:
             experiment_id: Filter by experiment (None = all)
             run_id: Filter by run (None = current run if experiment_id provided)
 
         Returns:
-            List of Service objects
+            List of dictionaries with service data
         """
-        from experimaestro.scheduler.services import Service
-
-        # First, check for live services from the scheduler
-        if experiment_id is not None:
-            try:
-                from experimaestro.scheduler.base import Scheduler
-
-                if Scheduler.has_instance():
-                    scheduler = Scheduler.instance()
-                    # Check if experiment is registered with scheduler
-                    if experiment_id in scheduler.experiments:
-                        exp = scheduler.experiments[experiment_id]
-                        services = list(exp.services.values())
-                        logger.debug(
-                            "Returning %d live services for experiment %s",
-                            len(services),
-                            experiment_id,
-                        )
-                        return services
-            except Exception as e:
-                # Scheduler not available or error - fall back to database
-                logger.debug("Could not get live services: %s", e)
-
-        # Fall back to database
         query = ServiceModel.select()
 
         if experiment_id is not None:
@@ -1835,27 +2165,22 @@ class WorkspaceStateProvider:
 
         services = []
         for service_model in query:
-            # Try to recreate service from state_dict
-            state_dict_json = service_model.state_dict
-            if state_dict_json and state_dict_json != "{}":
+            state_dict = {}
+            if service_model.state_dict and service_model.state_dict != "{}":
                 try:
-                    state_dict = json.loads(state_dict_json)
-                    if "__class__" in state_dict:
-                        service = Service.from_state_dict(state_dict)
-                        # Set the id from the database record
-                        service.id = service_model.service_id
-                        services.append(service)
-                        continue
-                except Exception as e:
-                    logger.warning(
-                        "Failed to recreate service %s from state_dict: %s",
-                        service_model.service_id,
-                        e,
-                    )
-            # If we can't recreate, skip this service (it's not usable)
-            logger.debug(
-                "Service %s has no state_dict for recreation, skipping",
-                service_model.service_id,
+                    state_dict = json.loads(service_model.state_dict)
+                except json.JSONDecodeError:
+                    pass
+
+            services.append(
+                {
+                    "service_id": service_model.service_id,
+                    "description": service_model.description,
+                    "state": service_model.state,
+                    "state_dict": state_dict,
+                    "experiment_id": service_model.experiment_id,
+                    "run_id": service_model.run_id,
+                }
             )
 
         return services
@@ -1925,13 +2250,19 @@ class WorkspaceStateProvider:
         Returns:
             datetime of last sync, or None if never synced
         """
+        from peewee import OperationalError
+
         from .state_db import WorkspaceSyncMetadata
 
-        metadata = WorkspaceSyncMetadata.get_or_none(
-            WorkspaceSyncMetadata.id == "workspace"
-        )
-        if metadata and metadata.last_sync_time:
-            return metadata.last_sync_time
+        try:
+            metadata = WorkspaceSyncMetadata.get_or_none(
+                WorkspaceSyncMetadata.id == "workspace"
+            )
+            if metadata and metadata.last_sync_time:
+                return metadata.last_sync_time
+        except OperationalError:
+            # Table might not exist in older workspaces opened in read-only mode
+            pass
         return None
 
     @_with_db_context
@@ -2403,13 +2734,37 @@ class SchedulerListener:
             experiment_id: Experiment identifier
             run_id: Run identifier
         """
+        from experimaestro.scheduler.services import Service
+
         try:
+            # Get state_dict for service recreation
+            state_dict_json = None
+            try:
+                # _full_state_dict includes __class__ automatically
+                state_dict = service._full_state_dict()
+                # Serialize paths automatically
+                serialized = Service.serialize_state_dict(state_dict)
+                state_dict_json = json.dumps(serialized)
+            except Exception as e:
+                # Service cannot be serialized - store unserializable marker
+                logger.warning(
+                    "Could not get state_dict for service %s: %s", service.id, e
+                )
+                state_dict_json = json.dumps(
+                    {
+                        "__class__": f"{service.__class__.__module__}.{service.__class__.__name__}",
+                        "__unserializable__": True,
+                        "__reason__": f"Cannot serialize: {e}",
+                    }
+                )
+
             self.state_provider.update_service(
                 service.id,
                 experiment_id,
                 run_id,
                 service.description(),
                 service.state.name,
+                state_dict=state_dict_json,
             )
         except Exception as e:
             logger.exception("Error updating service %s: %s", service.id, e)

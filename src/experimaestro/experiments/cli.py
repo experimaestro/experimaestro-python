@@ -375,7 +375,6 @@ def experiments_cli(  # noqa: C901
                 run_experiment_code(xp_holder, xp_ready, register_signals=False)
                 # Add a test message after experiment completes
                 logging.info("Experiment thread completed")
-                print("Experiment thread print test")
             except Exception as e:
                 exception_holder["exception"] = e
                 xp_ready.set()  # Signal even on error

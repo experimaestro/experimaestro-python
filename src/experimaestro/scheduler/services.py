@@ -1,9 +1,14 @@
 import abc
 from enum import Enum
-import functools
 import logging
 import threading
-from typing import Set
+from pathlib import Path
+from typing import Callable, Optional, Set, TYPE_CHECKING
+
+from experimaestro.scheduler.interfaces import BaseService
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.experiment import Experiment
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +33,7 @@ class ServiceState(Enum):
     STOPPING = 3
 
 
-class Service:
+class Service(BaseService):
     """An experiment service
 
     Services can be associated with an experiment. They send
@@ -46,31 +51,88 @@ class Service:
         self._listeners: Set[ServiceListener] = set()
         self._listeners_lock = threading.Lock()
 
-    def state_dict(self) -> dict:
-        """Return a dictionary representation for serialization.
+    def set_experiment(self, xp: "Experiment") -> None:
+        """Called when the service is added to an experiment.
 
-        Subclasses should override this to include any parameters needed
-        to recreate the service. The base implementation returns the
-        class module and name.
+        Override this method to access the experiment context (e.g., workdir).
+        The default implementation does nothing.
+
+        Args:
+            xp: The experiment this service is being added to.
+        """
+        pass
+
+    def state_dict(self) -> dict:
+        """Return parameters needed to recreate this service.
+
+        Subclasses should override this to return constructor arguments.
+        Path values are automatically serialized and restored (with
+        translation for remote monitoring).
+
+        Example::
+
+            def state_dict(self):
+                return {
+                    "log_dir": self.log_dir,  # Path is auto-handled
+                    "name": self.name,
+                }
 
         Returns:
-            Dict with '__class__' key and any additional kwargs.
+            Dict with constructor kwargs (no need to include __class__).
         """
-        return {
-            "__class__": f"{self.__class__.__module__}.{self.__class__.__name__}",
-        }
+        return {}
+
+    def _full_state_dict(self) -> dict:
+        """Get complete state_dict including __class__ for serialization."""
+        d = self.state_dict()
+        d["__class__"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
+        return d
 
     @staticmethod
-    def from_state_dict(data: dict) -> "Service":
+    def serialize_state_dict(data: dict) -> dict:
+        """Serialize a state_dict, converting Path objects to serializable format.
+
+        This is called automatically when storing services. Path values are
+        converted to {"__path__": "/path/string"} format.
+
+        Args:
+            data: Raw state_dict from service (should include __class__)
+
+        Returns:
+            Serializable dictionary with paths converted
+        """
+        result = {}
+        for k, v in data.items():
+            if isinstance(v, Path):
+                result[k] = {"__path__": str(v)}
+            else:
+                result[k] = v
+        return result
+
+    @staticmethod
+    def from_state_dict(
+        data: dict, path_translator: Optional[Callable[[str], Path]] = None
+    ) -> "Service":
         """Recreate a service from a state dictionary.
 
         Args:
-            data: Dictionary from :meth:`state_dict`
+            data: Dictionary from :meth:`state_dict` (may be serialized)
+            path_translator: Optional function to translate remote paths to local.
+                Used by remote clients to map paths to local cache.
 
         Returns:
             A new Service instance, or raises if the class cannot be loaded.
+
+        Raises:
+            ValueError: If __unserializable__ is True or __class__ is missing
         """
         import importlib
+
+        # Check if service is marked as unserializable
+        if data.get("__unserializable__"):
+            raise ValueError(
+                f"Service cannot be recreated: {data.get('__reason__', 'unknown reason')}"
+            )
 
         class_path = data.get("__class__")
         if not class_path:
@@ -80,8 +142,22 @@ class Service:
         module = importlib.import_module(module_name)
         cls = getattr(module, class_name)
 
-        # Remove __class__ and pass remaining as kwargs
-        kwargs = {k: v for k, v in data.items() if k != "__class__"}
+        # Build kwargs, detecting and translating paths automatically
+        kwargs = {}
+        for k, v in data.items():
+            if k.startswith("__"):
+                continue  # Skip special keys
+            if isinstance(v, dict) and "__path__" in v:
+                # Serialized path - deserialize with optional translation
+                path_str = v["__path__"]
+                if path_translator:
+                    kwargs[k] = path_translator(path_str)
+                else:
+                    kwargs[k] = Path(path_str)
+            else:
+                kwargs[k] = v
+
+        logger.debug("Creating %s with kwargs: %s", cls.__name__, kwargs)
         return cls(**kwargs)
 
     def add_listener(self, listener: ServiceListener):
@@ -158,6 +234,8 @@ class WebService(Service):
         self.url = None
         self.thread = None
         self._stop_event = threading.Event()
+        self._start_lock = threading.Lock()
+        self._running_event: Optional[threading.Event] = None
 
     def should_stop(self) -> bool:
         """Check if the service should stop.
@@ -173,21 +251,46 @@ class WebService(Service):
         """Get the URL of this web service, starting it if needed.
 
         If the service is not running, this method will start it and
-        block until the URL is available.
+        block until the URL is available. If the service is already
+        starting or running, returns the existing URL.
 
         :return: The URL where this service can be accessed
+        :raises RuntimeError: If called while service is stopping
         """
-        if self.state == ServiceState.STOPPED:
-            self._stop_event.clear()
-            self.state = ServiceState.STARTING
-            self.running = threading.Event()
-            self.serve()
+        with self._start_lock:
+            if self.state == ServiceState.STOPPING:
+                raise RuntimeError("Cannot start service while it is stopping")
 
-        # Wait until the server is ready
-        self.running.wait()
-        self.state = ServiceState.RUNNING
+            if self.state == ServiceState.RUNNING:
+                logger.debug("Service already running, returning existing URL")
+                return self.url
 
-        # Returns the URL
+            if self.state == ServiceState.STOPPED:
+                logger.info(
+                    "Starting service %s (id=%s)", self.__class__.__name__, id(self)
+                )
+                self._stop_event.clear()
+                self.state = ServiceState.STARTING
+                self._running_event = threading.Event()
+                self.serve()
+            else:
+                logger.info(
+                    "Service %s (id=%s) already starting, waiting for it",
+                    self.__class__.__name__,
+                    id(self),
+                )
+
+            # State is STARTING - wait for it to be ready
+            running_event = self._running_event
+
+        # Wait outside the lock to avoid blocking other callers
+        if running_event:
+            running_event.wait()
+            # Set state to RUNNING (this will notify listeners)
+            with self._start_lock:
+                if self.state == ServiceState.STARTING:
+                    self.state = ServiceState.RUNNING
+
         return self.url
 
     def stop(self, timeout: float = 2.0):
@@ -199,10 +302,21 @@ class WebService(Service):
 
         :param timeout: Seconds to wait for graceful shutdown before forcing
         """
-        if self.state == ServiceState.STOPPED:
-            return
+        with self._start_lock:
+            if self.state == ServiceState.STOPPED:
+                return
 
-        self.state = ServiceState.STOPPING
+            if self.state == ServiceState.STARTING:
+                # Wait for service to finish starting before stopping
+                running_event = self._running_event
+            else:
+                running_event = None
+
+            self.state = ServiceState.STOPPING
+
+        # Wait for starting to complete if needed (outside lock to avoid deadlock)
+        if running_event is not None:
+            running_event.wait()
 
         # Signal the service to stop
         self._stop_event.set()
@@ -215,8 +329,10 @@ class WebService(Service):
             if self.thread.is_alive():
                 self._force_stop_thread()
 
-        self.url = None
-        self.state = ServiceState.STOPPED
+        with self._start_lock:
+            self.url = None
+            self._running_event = None
+            self.state = ServiceState.STOPPED
 
     def _force_stop_thread(self):
         """Attempt to forcefully stop the service thread.
@@ -254,11 +370,21 @@ class WebService(Service):
         This method creates a daemon thread that calls :meth:`_serve`.
         """
         self.thread = threading.Thread(
-            target=functools.partial(self._serve, self.running),
+            target=self._serve_wrapper,
             name=f"service[{self.id}]",
         )
         self.thread.daemon = True
         self.thread.start()
+
+    def _serve_wrapper(self):
+        """Wrapper for _serve that handles state transitions."""
+        running_event = self._running_event
+        try:
+            self._serve(running_event)
+        finally:
+            # Ensure the event is set even if _serve fails
+            if running_event and not running_event.is_set():
+                running_event.set()
 
     @abc.abstractmethod
     def _serve(self, running: threading.Event):

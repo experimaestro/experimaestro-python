@@ -349,6 +349,60 @@ def list(workdir: Path):
             cprint(display_str, "cyan")
 
 
+def _run_monitor_ui(
+    state_provider, workdir: Path, console: bool, port: int, title: str = ""
+):
+    """Shared code for running monitor UI (TUI or web)
+
+    Args:
+        state_provider: StateProvider instance (local or remote)
+        workdir: Local workspace/cache directory
+        console: If True, use TUI; otherwise use web UI
+        port: Port for web server
+        title: Optional title for status messages
+    """
+    try:
+        if console:
+            # Use Textual TUI
+            from experimaestro.tui import ExperimentTUI
+
+            app = ExperimentTUI(
+                workdir, state_provider=state_provider, watch=True, show_logs=True
+            )
+            app.run()
+        else:
+            # Use React web server
+            from experimaestro.server import Server
+
+            if title:
+                cprint(
+                    f"Starting experiment monitor for {title} on http://localhost:{port}",
+                    "green",
+                )
+            else:
+                cprint(
+                    f"Starting experiment monitor on http://localhost:{port}", "green"
+                )
+            cprint("Press Ctrl+C to stop", "yellow")
+
+            settings = ServerSettings()
+            settings.port = port
+            server = Server.instance(settings, state_provider=state_provider)
+            server.start()
+
+            try:
+                import time
+
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+    finally:
+        cprint("\nShutting down...", "yellow")
+        if state_provider:
+            state_provider.close()
+
+
 @experiments.command()
 @click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
 @click.option(
@@ -359,7 +413,7 @@ def list(workdir: Path):
 )
 @pass_cfg
 def monitor(workdir: Path, console: bool, port: int, sync: bool):
-    """Monitor experiments with web UI or console TUI"""
+    """Monitor local experiments with web UI or console TUI"""
     # Force sync from disk if requested
     if sync:
         from experimaestro.scheduler.state_sync import sync_workspace_from_disk
@@ -368,37 +422,96 @@ def monitor(workdir: Path, console: bool, port: int, sync: bool):
         sync_workspace_from_disk(workdir, write_mode=True, force=True)
         cprint("Sync complete", "green")
 
-    if console:
-        # Use Textual TUI
-        from experimaestro.tui import ExperimentTUI
+    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
 
-        app = ExperimentTUI(workdir, watch=True)
-        app.run()
-    else:
-        # Use React web server
-        from experimaestro.scheduler.state_provider import WorkspaceStateProvider
-        from experimaestro.server import Server
+    state_provider = WorkspaceStateProvider.get_instance(
+        workdir,
+        sync_on_start=not sync,  # Skip auto-sync if we just did a forced one
+    )
 
-        cprint(f"Starting experiment monitor on http://localhost:{port}", "green")
-        cprint("Press Ctrl+C to stop", "yellow")
+    _run_monitor_ui(state_provider, workdir, console, port)
 
-        state_provider = WorkspaceStateProvider.get_instance(
-            workdir,
-            sync_on_start=not sync,  # Skip auto-sync if we just did a forced one
-        )
-        settings = ServerSettings()
-        settings.port = port
-        server = Server.instance(settings, state_provider=state_provider)
+
+@experiments.command("ssh-monitor")
+@click.argument("host", type=str)
+@click.argument("remote_workdir", type=str)
+@click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
+@click.option(
+    "--port", type=int, default=12345, help="Port for web server (default: 12345)"
+)
+@click.option(
+    "--remote-xpm",
+    type=str,
+    default=None,
+    help="Path to experimaestro on remote host (default: use 'uv tool run')",
+)
+@click.option(
+    "--ssh-option",
+    "-o",
+    multiple=True,
+    help="Additional SSH options (can be repeated, e.g., -o '-p 2222')",
+)
+def ssh_monitor(
+    host: str,
+    remote_workdir: str,
+    console: bool,
+    port: int,
+    remote_xpm: str,
+    ssh_option: tuple,
+):
+    """Monitor experiments on a remote server via SSH
+
+    HOST is the SSH host (e.g., user@server)
+    REMOTE_WORKDIR is the workspace path on the remote server
+
+    Examples:
+        experimaestro experiments ssh-monitor myserver /path/to/workspace
+        experimaestro experiments ssh-monitor user@host /workspace --console
+        experimaestro experiments ssh-monitor host /workspace --remote-xpm /opt/xpm/bin/experimaestro
+    """
+    from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+    cprint(f"Connecting to {host}...", "yellow")
+    state_provider = SSHStateProviderClient(
+        host=host,
+        remote_workspace=remote_workdir,
+        ssh_options=list(ssh_option) if ssh_option else None,
+        remote_xpm_path=remote_xpm,
+    )
+    try:
+        state_provider.connect()
+        cprint(f"Connected to {host}", "green")
+    except Exception as e:
+        cprint(f"Failed to connect: {e}", "red")
+        raise click.Abort()
+
+    _run_monitor_ui(
+        state_provider,
+        state_provider.local_cache_dir,
+        console,
+        port,
+        title=host,
+    )
+
+
+@experiments.command("monitor-server")
+@pass_cfg
+def monitor_server(workdir: Path):
+    """Start monitoring server for SSH connections (JSON-RPC over stdio)
+
+    This command is intended to be run over SSH to provide remote monitoring.
+    Communication is via JSON-RPC over stdin/stdout.
+
+    Example:
+        ssh host 'experimaestro experiments --workdir /path monitor-server'
+    """
+    from experimaestro.scheduler.remote.server import SSHStateProviderServer
+
+    server = SSHStateProviderServer(workdir)
+    try:
         server.start()
-
-        try:
-            import time
-
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            cprint("\nShutting down...", "yellow")
-            state_provider.close()
+    except KeyboardInterrupt:
+        server.stop()
 
 
 @experiments.command()

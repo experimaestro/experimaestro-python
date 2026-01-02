@@ -44,24 +44,30 @@ class DatabaseListener:
 
     def service_add(self, service):
         """Update service in database"""
+        from experimaestro.scheduler.services import Service
+
+        state_dict = Service.serialize_state_dict(service._full_state_dict())
         self.state_provider.update_service(
             service.id,
             self.experiment_id,
             self.run_id,
             service.description(),
             service.state.name,
-            state_dict=json.dumps(service.state_dict()),
+            state_dict=json.dumps(state_dict),
         )
 
     def service_state_changed(self, service):
         """Update service state in database (called by Service when state changes)"""
+        from experimaestro.scheduler.services import Service
+
+        state_dict = Service.serialize_state_dict(service._full_state_dict())
         self.state_provider.update_service(
             service.id,
             self.experiment_id,
             self.run_id,
             service.description(),
             service.state.name,
-            state_dict=json.dumps(service.state_dict()),
+            state_dict=json.dumps(state_dict),
         )
 
 
@@ -224,10 +230,13 @@ class experiment:
 
     def _write_services_json(self):
         """Write all services to services.json file"""
+        from experimaestro.scheduler.services import Service
+
         services_data = {}
         for service_id, service in self.services.items():
             # Get state_dict from service (includes __class__ for recreation)
-            service_state = service.state_dict()
+            # and serialize paths to JSON-compatible format
+            service_state = Service.serialize_state_dict(service._full_state_dict())
             # Add runtime state info
             service_state.update(
                 {
@@ -530,9 +539,27 @@ class experiment:
         """Adds a service (e.g. tensorboard viewer) to the experiment
 
         :param service: A service instance
-        :return: The same service instance
+        :return: The same service instance (or existing service if already added)
         """
+        existing = self.services.get(service.id)
+        if existing is not None:
+            if existing is service:
+                # Same service instance added twice - just return it
+                logger.debug("Service %s already added, ignoring duplicate", service.id)
+                return service
+            else:
+                # Different service with same id - warn and replace
+                logger.warning(
+                    "Replacing service %s (old id=%s, new id=%s)",
+                    service.id,
+                    id(existing),
+                    id(service),
+                )
+
         self.services[service.id] = service
+
+        # Allow service to access experiment context
+        service.set_experiment(self)
 
         # Register database listener for state changes
         service.add_listener(self._db_listener)

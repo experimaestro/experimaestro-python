@@ -472,3 +472,30 @@ class BaseExperiment:
     def experiment_id(self) -> str:
         """Experiment identifier derived from workdir name"""
         return self.workdir.name
+
+
+class BaseService:
+    """Base interface for service information
+
+    This class defines the interface for service data. Both live Service instances
+    and MockService instances should provide these attributes and methods.
+
+    Attributes:
+        id: Unique identifier for the service
+        state: Current service state (ServiceState enum or compatible)
+    """
+
+    id: str
+
+    @property
+    def state(self):
+        """Current service state"""
+        raise NotImplementedError
+
+    def description(self) -> str:
+        """Human-readable description of the service"""
+        raise NotImplementedError
+
+    def state_dict(self) -> dict:
+        """Return dictionary representation for serialization"""
+        raise NotImplementedError

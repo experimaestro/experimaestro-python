@@ -26,14 +26,26 @@ class TensorboardService(WebService):
         super().__init__()
 
         self.path = path
-        cleanupdir(self.path)
-        self.path.mkdir(exist_ok=True, parents=True)
+        self.server = None
+        self.program = None
         logging.info("You can monitor learning with:")
         logging.info("tensorboard --logdir=%s", self.path)
         self.url = None
 
+    def set_experiment(self, xp):
+        """Called when added to an experiment - access xp.workdir etc."""
+        self.xp = xp
+        if xp.run_mode == RunMode.NORMAL_RUN:
+            self.path.mkdir(exist_ok=True, parents=True)
+            cleanupdir(self.path)
+
+    def state_dict(self) -> dict:
+        """Return constructor arguments for service recreation."""
+        return {"path": self.path}  # Path is automatically handled
+
     def add(self, config: Config, path: Path):
-        (self.path / tagspath(config)).symlink_to(path)
+        if self.xp.run_mode == RunMode.NORMAL_RUN:
+            (self.path / tagspath(config)).symlink_to(path)
 
     def description(self):
         return "Tensorboard service"
@@ -67,6 +79,28 @@ class TensorboardService(WebService):
             running.set()
 ```
 
+## Service State Serialization
+
+For services to be visible in monitoring, they must implement `state_dict()` to
+return constructor arguments needed to recreate the service. The base
+`Service.state_dict()` returns an empty dict, so subclasses with constructor
+parameters must override it.
+
+### Path Handling
+
+`Path` values in `state_dict()` are automatically handled:
+
+1. When storing: Paths are serialized to a special format
+2. When recreating locally: Paths are restored as `Path` objects
+3. When recreating remotely (SSH): Paths are translated to local cache and synced via rsync
+
+Just return constructor arguments - paths are handled automatically:
+
+```python
+def state_dict(self):
+    return {"log_dir": self.log_dir}  # Path is auto-handled
+```
+
 ## Adding a service to an experiment
 
 Services are added to an experiment using the
@@ -78,6 +112,7 @@ from experimaestro import experiment
 
 with experiment("/path/to/workdir", "my_experiment", port=12345) as xp:
     # Add the tensorboard service to the experiment
+    # set_experiment(xp) is called automatically by add_service
     tb = xp.add_service(TensorboardService(xp.workdir / "runs"))
 
     # Submit a task

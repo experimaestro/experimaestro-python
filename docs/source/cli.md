@@ -226,6 +226,7 @@ experimaestro experiments [OPTIONS] COMMAND
 |---------|-------------|
 | `list` | List experiments in the workspace |
 | `monitor` | Monitor experiments with web UI or console TUI |
+| `monitor-server` | Start SSH monitoring server (internal, for remote monitoring) |
 | `sync` | Synchronize workspace database from disk state |
 
 ### List Command
@@ -262,6 +263,28 @@ experimaestro experiments monitor --workdir /path/to/workspace --port 8080
 # Force sync before starting
 experimaestro experiments monitor --workdir /path/to/workspace --sync
 ```
+
+#### Remote Monitoring via SSH
+
+Monitor experiments running on a remote server through SSH:
+
+```bash
+# Monitor a remote workspace via SSH
+experimaestro experiments monitor --ssh user@server --remote-workdir /path/to/workspace
+
+# With console TUI
+experimaestro experiments monitor --ssh user@server --remote-workdir /path/to/workspace --console
+
+# With additional SSH options
+experimaestro experiments monitor --ssh user@server --remote-workdir /path/to/workspace --ssh-option "-p 2222"
+```
+
+The SSH monitoring connects to the remote server, starts a monitoring server process, and communicates via JSON-RPC over SSH stdin/stdout. Files are synchronized on-demand using rsync when needed (e.g., for TensorBoard log directories).
+
+Requirements:
+- SSH access to the remote server
+- `experimaestro` installed on the remote server (same version recommended)
+- `rsync` available on both local and remote machines
 
 See [Monitoring Interfaces](interfaces.md) for more details on the web and TUI interfaces.
 

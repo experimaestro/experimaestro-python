@@ -14,6 +14,7 @@ Key design:
 - Database instance is passed explicitly to avoid global state
 """
 
+import logging
 from pathlib import Path
 from typing import Tuple
 from peewee import (
@@ -30,6 +31,8 @@ from peewee import (
 )
 from datetime import datetime
 import fasteners
+
+logger = logging.getLogger("xpm.state_db")
 
 # Database schema version - increment when schema changes require resync
 CURRENT_DB_VERSION = 2
@@ -377,12 +380,15 @@ def initialize_workspace_database(
             db.create_tables(ALL_MODELS, safe=True)
 
             # Check database version for migration - use raw SQL since column may not exist
+            current_version = 0
             try:
                 cursor = db.execute_sql(
                     "SELECT db_version FROM workspace_sync_metadata WHERE id='workspace'"
                 )
                 row = cursor.fetchone()
-                if row is None or row[0] < CURRENT_DB_VERSION:
+                if row is not None:
+                    current_version = row[0]
+                if current_version < CURRENT_DB_VERSION:
                     needs_resync = True
             except OperationalError:
                 # Column doesn't exist - add it and trigger resync
@@ -394,6 +400,17 @@ def initialize_workspace_database(
                     )
                 except OperationalError:
                     pass  # Column may already exist
+
+            # Run schema migrations for older databases
+            if current_version < 2:
+                # Migration v1 -> v2: Add hostname column to experiment_runs table
+                try:
+                    db.execute_sql(
+                        "ALTER TABLE experiment_runs ADD COLUMN hostname VARCHAR(255) NULL"
+                    )
+                    logger.info("Added hostname column to experiment_runs table")
+                except OperationalError:
+                    pass  # Column already exists
 
             # Initialize WorkspaceSyncMetadata with default row if not exists
             # Use try/except to handle race condition (shouldn't happen with lock, but be safe)

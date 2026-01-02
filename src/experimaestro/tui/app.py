@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from textual.app import App, ComposeResult
+from textual import work
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import (
     Header,
@@ -472,6 +473,23 @@ class ViewJobLogsRequest(Message):
         self.experiment_id = experiment_id
 
 
+class LogsSyncComplete(Message):
+    """Message sent when remote log sync is complete"""
+
+    def __init__(self, log_files: list, job_id: str) -> None:
+        super().__init__()
+        self.log_files = log_files
+        self.job_id = job_id
+
+
+class LogsSyncFailed(Message):
+    """Message sent when remote log sync fails"""
+
+    def __init__(self, error: str) -> None:
+        super().__init__()
+        self.error = error
+
+
 class DeleteJobRequest(Message):
     """Message sent when user requests to delete a job"""
 
@@ -567,6 +585,10 @@ class ServicesList(Vertical):
 
         # Get services from state provider (handles live vs DB automatically)
         services = self.state_provider.get_services(self.current_experiment)
+        self.log.info(
+            f"refresh_services got {len(services)} services: "
+            f"{[(s.id, id(s), getattr(s, 'url', None)) for s in services]}"
+        )
 
         for service in services:
             service_id = service.id
@@ -603,9 +625,12 @@ class ServicesList(Vertical):
         if not service:
             return
 
+        self.log.info(f"Starting service {service.id} (id={id(service)})")
+
         try:
             if hasattr(service, "get_url"):
                 url = service.get_url()
+                self.log.info(f"Service started, url={url}, service.url={service.url}")
                 self.notify(f"Service started: {url}", severity="information")
             else:
                 self.notify("Service does not support starting", severity="warning")
@@ -1895,7 +1920,7 @@ class ExperimaestroUI(App):
                 with TabPane("Monitor", id="monitor-tab"):
                     yield from self._compose_monitor_view()
                 with TabPane("Logs", id="logs-tab"):
-                    yield CaptureLog(id="logs", auto_scroll=True)
+                    yield CaptureLog(id="logs", auto_scroll=True, wrap=True)
         else:
             # Simple layout without logs
             with Vertical(id="main-container"):
@@ -1925,19 +1950,27 @@ class ExperimaestroUI(App):
         experiments_list = self.query_one(ExperimentsList)
         experiments_list.refresh_experiments()
 
-        # Register as listener for push notifications from state provider
+        # Register as listener for state change notifications
+        # The state provider handles its own notification strategy internally
         if self.state_provider:
             self.state_provider.add_listener(self._on_state_event)
             self._listener_registered = True
-            self.log("Registered state listener for push notifications")
+            self.log("Registered state listener for notifications")
 
     def _on_state_event(self, event: StateEvent) -> None:
         """Handle state change events from the state provider
 
-        This is called from the state provider's thread, so we use
-        call_from_thread to safely update the UI.
+        This may be called from the state provider's thread or the main thread,
+        so we check before using call_from_thread.
         """
-        self.call_from_thread(self._handle_state_event, event)
+        import threading
+
+        if threading.current_thread() is threading.main_thread():
+            # Already in main thread, call directly
+            self._handle_state_event(event)
+        else:
+            # From background thread, use call_from_thread
+            self.call_from_thread(self._handle_state_event, event)
 
     def _handle_state_event(self, event: StateEvent) -> None:
         """Process state event on the main thread"""
@@ -2088,10 +2121,62 @@ class ExperimaestroUI(App):
         """Show orphan jobs screen"""
         self.push_screen(OrphanJobsScreen(self.state_provider))
 
+    @work(thread=True, exclusive=True)
+    def _sync_and_view_logs(self, job_path: Path, task_id: str) -> None:
+        """Sync logs from remote and then view them (runs in worker thread)"""
+        try:
+            # Sync the job directory
+            local_path = self.state_provider.sync_path(str(job_path))
+            if not local_path:
+                self.post_message(LogsSyncFailed("Failed to sync logs from remote"))
+                return
+
+            job_path = local_path
+
+            # Log files are named after the last part of the task ID
+            task_name = task_id.split(".")[-1]
+            stdout_path = job_path / f"{task_name}.out"
+            stderr_path = job_path / f"{task_name}.err"
+
+            # Collect existing log files
+            log_files = []
+            if stdout_path.exists():
+                log_files.append(str(stdout_path))
+            if stderr_path.exists():
+                log_files.append(str(stderr_path))
+
+            if not log_files:
+                self.post_message(
+                    LogsSyncFailed(f"No log files found: {task_name}.out/.err")
+                )
+                return
+
+            # Signal completion via message
+            job_id = job_path.name
+            self.post_message(LogsSyncComplete(log_files, job_id))
+
+        except Exception as e:
+            self.post_message(LogsSyncFailed(str(e)))
+
+    def on_logs_sync_complete(self, message: LogsSyncComplete) -> None:
+        """Handle successful log sync - show log viewer"""
+        self.push_screen(LogViewerScreen(message.log_files, message.job_id))
+
+    def on_logs_sync_failed(self, message: LogsSyncFailed) -> None:
+        """Handle failed log sync"""
+        self.notify(message.error, severity="warning")
+
     def on_view_job_logs(self, message: ViewJobLogs) -> None:
         """Handle request to view job logs - push LogViewerScreen"""
         job_path = Path(message.job_path)
-        # Log files are named after the last part of the task ID
+
+        # For remote monitoring, sync the job directory first (in worker thread)
+        if self.state_provider.is_remote:
+            self.notify("Syncing logs from remote...", timeout=5)
+            self._sync_and_view_logs(job_path, message.task_id)
+            return
+
+        # Local monitoring - no sync needed
         task_name = message.task_id.split(".")[-1]
         stdout_path = job_path / f"{task_name}.out"
         stderr_path = job_path / f"{task_name}.err"
