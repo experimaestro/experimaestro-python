@@ -3,24 +3,39 @@
 (running-experiments)=
 ## Running Experiments
 
-here is the general command used to launch experiments:
+The general command to launch experiments is:
 
-`experimaestro run-experiment --run-mode NORMAL --workspace workspace-id some_xp_params.yaml`
+```bash
+experimaestro run-experiment [OPTIONS] YAML_FILE [ARGS]
+```
 
-Use `experimaestro jobs --help` for more details.
+### run-experiment Options
 
-Let's detail some important parts:
+| Option | Description |
+|--------|-------------|
+| `--run-mode MODE` | Set run mode: `NORMAL`, `DRY_RUN`, or `GENERATE_ONLY` |
+| `--workspace ID` | Use a workspace from settings by ID |
+| `--workdir PATH` | Specify working directory directly |
+| `--port PORT` | Port for web monitoring interface |
+| `--console` | Use terminal TUI instead of web interface |
+| `--host HOST` | Server hostname (for remote job access) |
+| `--pre-yaml FILE` | Load YAML file before the main one (can be repeated) |
+| `--post-yaml FILE` | Load YAML file after the main one (can be repeated) |
+| `-c KEY=VALUE` | Override configuration values |
+| `--file PATH` | Python file containing the `run` function |
+| `--module-name NAME` | Python module containing the `run` function |
+| `--env KEY VALUE` | Set environment variable (can be repeated) |
+| `--xpm-config-dir PATH` | Custom experimaestro config directory |
+| `--show` | Print merged configuration and exit |
+| `--debug` | Enable debug logging |
 
-### Run modes
+### Run Modes
 
-`experimaestro run-experiment --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY] `
+`experimaestro run-experiment --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY]`
 
-Several run modes are possible:
-- `DRY_RUN` will not launch any Task, but display task hashes and dependencies
-- `GENERATE_ONLY` will generate jobs folder without [launching](./launchers/index.md) tasks.
-- `NORMAL` will both generate and launch the jobs, effectively running the experiment.
-
-Use `experimaestro run-experiment --help` for more details.
+- `DRY_RUN` - Display task hashes and dependencies without launching
+- `GENERATE_ONLY` - Generate job folders without [launching](./launchers/index.md) tasks
+- `NORMAL` - Generate and launch jobs (default)
 
 ## Job Control
 
@@ -184,10 +199,59 @@ DONE    mymodule.MyTask/abc123 [my_experiment] model=bm25 dataset=msmarco
 RUNNING mymodule.MyTask/def456 [my_experiment] model=splade dataset=msmarco
 ```
 
-## Cleaning up
+### Cleanup Partial Directories
+
+Partial directories are shared checkpoint locations created by `subparameters`.
+When all jobs using a partial are deleted, the partial becomes orphaned:
+
+```bash
+# Dry run - shows what would be deleted
+experimaestro jobs cleanup-partials
+
+# Actually delete orphan partials
+experimaestro jobs cleanup-partials --perform
+```
+
+## Experiment Management
+
+The `experiments` command group provides tools for managing experiments:
+
+```bash
+experimaestro experiments [OPTIONS] COMMAND
+```
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List experiments in the workspace |
+| `monitor` | Monitor experiments with web UI or console TUI |
+| `sync` | Synchronize workspace database from disk state |
+
+### Monitor Command
+
+Launch an interactive monitoring interface for experiments:
+
+```bash
+# Web interface (default) on port 12345
+experimaestro experiments monitor --workdir /path/to/workspace
+
+# Console TUI interface
+experimaestro experiments monitor --workdir /path/to/workspace --console
+
+# Custom port for web interface
+experimaestro experiments monitor --workdir /path/to/workspace --port 8080
+
+# Force sync before starting
+experimaestro experiments monitor --workdir /path/to/workspace --sync
+```
+
+See [Monitoring Interfaces](interfaces.md) for more details on the web and TUI interfaces.
+
+## Cleaning Up Orphans
 
 Check for tasks that are not part of any experimental plan in the given
-experimental folder.
+experimental folder:
 
 ```
 Usage: experimaestro orphans [OPTIONS] PATH

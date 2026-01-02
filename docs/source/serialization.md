@@ -22,33 +22,26 @@ save([obj1, obj2, {key: obj3, key2: obj4}], "/my/folder")
 [obj1, obj2, obj_dict] = load("/my/folder")
 ```
 
-::: experimaestro.load
-::: experimaestro.save
+- {py:func}`~experimaestro.load` - Load configuration objects from a folder.
+- {py:func}`~experimaestro.save` - Save configuration objects to a folder.
 
 You can use `serialization` methods to include init_tasks
 in the deserialize process. This makes it easier to distribute
 configurations that need to be initialized in a special way.
 
-::: experimaestro.serialize
-::: experimaestro.deserialize
+- {py:func}`~experimaestro.serialize` - Serialize configurations with init tasks.
+- {py:func}`~experimaestro.deserialize` - Deserialize configurations with init tasks.
 
+A task configuration/instance can be loaded with {py:func}`~experimaestro.from_task_dir`.
 
-A task configuration/instance can be loaded with
-
-::: experimaestro.from_task_dir
-
-The serialization context is controlled by a specific object
-named `SerializationContext`:
-
-::: experimaestro.SerializationContext
-
+The serialization context is controlled by {py:class}`~experimaestro.SerializationContext`.
 
 If you need more control over saved data, you can use `state_dict`
 and `from_state_dict` that respectively returns Python data structures
 and loads from them.
 
-::: experimaestro.state_dict
-::: experimaestro.from_state_dict
+- {py:func}`~experimaestro.state_dict` - Convert configurations to Python data structures.
+- {py:func}`~experimaestro.from_state_dict` - Load configurations from Python data structures.
 
 
 ### Saving/Loading from running experiment
@@ -109,8 +102,4 @@ ExperimaestroHFHub(config).push_to_hub(hf_id, variant)
 ExperimaestroHFHub().from_pretrained(hf_id_or_folder, variant=variant, as_instance=as_instance)
 ```
 
-::: experimaestro.huggingface.ExperimaestroHFHub
-    options:
-      members:
-        - from_pretrained
-        - push_to_hub
+{py:class}`~experimaestro.huggingface.ExperimaestroHFHub` - HuggingFace Hub integration for experimaestro configurations. Key methods: `from_pretrained()`, `push_to_hub()`.

@@ -16,6 +16,7 @@ caption: "Experiments"
 experiments/config
 experiments/task
 experiments/plan
+experiments
 ```
 
 ```{toctree}
@@ -30,12 +31,12 @@ connectors/index
 ```{toctree}
 ---
 maxdepth: 1
-caption: "Core Concepts"
+caption: "Misc"
 ---
 serialization
 settings
-experiments
 services
+interfaces
 ```
 
 ```{toctree}

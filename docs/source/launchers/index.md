@@ -11,7 +11,7 @@ a new process) or through [slurm](#slurm)
 
 By default, jobs are launched directly by the scheduler using python scripts.
 
-::: experimaestro.launchers.direct.DirectLauncher
+{py:class}`~experimaestro.launchers.direct.DirectLauncher` - Launcher that runs tasks directly as local processes without any job scheduler.
 
 (slurm)=
 ### Slurm
@@ -35,9 +35,9 @@ with experiment(launcher=launcher):
     mytask().submit(launcher=gpulauncher)
 ```
 
-::: experimaestro.launchers.slurm.SlurmOptions
+{py:class}`~experimaestro.launchers.slurm.SlurmOptions` - Configuration options for SLURM jobs (nodes, time, partition, GPUs, etc.).
 
-::: experimaestro.launchers.slurm.SlurmLauncher
+{py:class}`~experimaestro.launchers.slurm.SlurmLauncher` - Launcher that submits tasks to the SLURM workload manager.
 
 ## Launcher file
 
@@ -46,14 +46,14 @@ The `launchers.py` file dictates how a given *requirement* (e.g., 2 CPU with
 
 ### Requirements
 
-::: experimaestro.launcherfinder.specs.HostRequirement
-::: experimaestro.launcherfinder.specs.HostSimpleRequirement
-::: experimaestro.launcherfinder.specs.CudaSpecification
-::: experimaestro.launcherfinder.specs.CPUSpecification
+- {py:class}`~experimaestro.launcherfinder.specs.HostRequirement` - Abstract base representing a disjunction of host requirements (alternatives).
+- {py:class}`~experimaestro.launcherfinder.specs.HostSimpleRequirement` - A single host requirement specifying CPU, GPU, and duration constraints.
+- {py:class}`~experimaestro.launcherfinder.specs.CudaSpecification` - Specifies CUDA GPU requirements (memory, model).
+- {py:class}`~experimaestro.launcherfinder.specs.CPUSpecification` - Specifies CPU requirements (cores, memory).
 
 #### Parsing requirements
 
-::: experimaestro.launcherfinder.parser.parse
+{py:func}`~experimaestro.launcherfinder.parser.parse` - Parses a requirement specification string into a {py:class}`~experimaestro.launcherfinder.specs.HostRequirement` object.
 
 ```python
 from experimaestro.launcherfinder.parser import parse

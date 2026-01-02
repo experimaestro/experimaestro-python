@@ -9,15 +9,22 @@ The core classes form the foundation of experimaestro's configuration and task s
 ### Config
 
 ```{eval-rst}
-.. autoclass:: experimaestro.Config
-   :members: C, XPMConfig, XPMValue, value_class, __validate__, __post_init__, __identifier__, copy_dependencies, register_task_output
+.. autoxpmconfig:: experimaestro.Config
+   :members: XPMConfig, XPMValue, value_class, __validate__, __post_init__, __identifier__, copy_dependencies, register_task_output
    :show-inheritance:
+```
+
+### ConfigMixin
+
+```{eval-rst}
+.. autoclass:: experimaestro.core.objects.ConfigMixin
+   :members: XPMConfig, XPMValue, value_class, __validate__, __post_init__, __identifier__, copy_dependencies, register_task_output
 ```
 
 ### Task
 
 ```{eval-rst}
-.. autoclass:: experimaestro.Task
+.. autoxpmconfig:: experimaestro.Task
    :members: execute, submit, watch_output, on_completed
    :show-inheritance:
 ```
@@ -25,7 +32,7 @@ The core classes form the foundation of experimaestro's configuration and task s
 ### ResumableTask
 
 ```{eval-rst}
-.. autoclass:: experimaestro.ResumableTask
+.. autoxpmconfig:: experimaestro.ResumableTask
    :members: remaining_time
    :show-inheritance:
 ```
@@ -33,7 +40,7 @@ The core classes form the foundation of experimaestro's configuration and task s
 ### LightweightTask
 
 ```{eval-rst}
-.. autoclass:: experimaestro.LightweightTask
+.. autoxpmconfig:: experimaestro.LightweightTask
    :members: execute
    :show-inheritance:
 ```
@@ -41,7 +48,7 @@ The core classes form the foundation of experimaestro's configuration and task s
 ### InstanceConfig
 
 ```{eval-rst}
-.. autoclass:: experimaestro.InstanceConfig
+.. autoxpmconfig:: experimaestro.InstanceConfig
    :show-inheritance:
 ```
 
@@ -309,6 +316,14 @@ Type annotations are used to declare parameters in configurations and tasks.
    :show-inheritance:
 ```
 
+### SshConnector
+
+```{eval-rst}
+.. autoclass:: experimaestro.connectors.ssh.SshConnector
+   :members:
+   :show-inheritance:
+```
+
 ## Launcher Finder
 
 ### find_launcher
@@ -327,6 +342,13 @@ Type annotations are used to declare parameters in configurations and tasks.
 
 ```{eval-rst}
 .. autoclass:: experimaestro.launcherfinder.specs.HostRequirement
+   :members:
+```
+
+### HostSimpleRequirement
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.HostSimpleRequirement
    :members:
 ```
 
@@ -412,6 +434,13 @@ Type annotations are used to declare parameters in configurations and tasks.
 
 ```{eval-rst}
 .. autoclass:: experimaestro.scheduler.services.ServiceState
+   :members:
+```
+
+### ServiceListener
+
+```{eval-rst}
+.. autoclass:: experimaestro.scheduler.services.ServiceListener
    :members:
 ```
 
