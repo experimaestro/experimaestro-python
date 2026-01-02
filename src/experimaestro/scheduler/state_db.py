@@ -35,7 +35,7 @@ import fasteners
 logger = logging.getLogger("xpm.state_db")
 
 # Database schema version - increment when schema changes require resync
-CURRENT_DB_VERSION = 2
+CURRENT_DB_VERSION = 3
 
 
 class BaseModel(Model):
@@ -230,26 +230,23 @@ class ServiceModel(BaseModel):
     """Service information linked to specific experiment run
 
     Services are tied to a specific run of an experiment via (experiment_id, run_id).
+    Services are only added or removed, not updated - state is managed at runtime.
 
     Fields:
         service_id: Unique identifier for the service
         experiment_id: ID of the experiment this service belongs to
         run_id: ID of the run this service belongs to
         description: Human-readable description
-        state: Service state (e.g., "running", "stopped")
         state_dict: JSON serialized state_dict for service recreation
-        created_at: When service was created
-        updated_at: Timestamp of last update
+        created_at: When service was registered
     """
 
     service_id = CharField()
     experiment_id = CharField(index=True)
     run_id = CharField(index=True)
     description = TextField(default="")
-    state = CharField()
     state_dict = TextField(default="{}")  # JSON for service recreation
     created_at = DateTimeField(default=datetime.now)
-    updated_at = DateTimeField(default=datetime.now)
 
     class Meta:
         table_name = "services"

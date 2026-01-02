@@ -659,7 +659,6 @@ def sync_workspace_from_disk(  # noqa: C901
                         metadata_keys = {
                             "service_id",
                             "description",
-                            "state",
                             "url",
                             "timestamp",
                         }
@@ -674,10 +673,8 @@ def sync_workspace_from_disk(  # noqa: C901
                             experiment_id=experiment_id,
                             run_id=current_run_id,
                             description=service_data.get("description", ""),
-                            state=service_data.get("state", "STOPPED"),
                             state_dict=state_dict_json,
                             created_at=now,
-                            updated_at=now,
                         ).on_conflict(
                             conflict_target=[
                                 ServiceModel.service_id,
@@ -688,11 +685,7 @@ def sync_workspace_from_disk(  # noqa: C901
                                 ServiceModel.description: service_data.get(
                                     "description", ""
                                 ),
-                                ServiceModel.state: service_data.get(
-                                    "state", "STOPPED"
-                                ),
                                 ServiceModel.state_dict: state_dict_json,
-                                ServiceModel.updated_at: now,
                             },
                         ).execute()
                         logger.debug(

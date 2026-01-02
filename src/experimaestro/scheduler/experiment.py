@@ -43,32 +43,22 @@ class DatabaseListener:
         self.state_provider.update_job_state(job, self.experiment_id, self.run_id)
 
     def service_add(self, service):
-        """Update service in database"""
+        """Register service in database"""
         from experimaestro.scheduler.services import Service
 
         state_dict = Service.serialize_state_dict(service._full_state_dict())
-        self.state_provider.update_service(
+        self.state_provider.register_service(
             service.id,
             self.experiment_id,
             self.run_id,
             service.description(),
-            service.state.name,
             state_dict=json.dumps(state_dict),
         )
 
     def service_state_changed(self, service):
-        """Update service state in database (called by Service when state changes)"""
-        from experimaestro.scheduler.services import Service
-
-        state_dict = Service.serialize_state_dict(service._full_state_dict())
-        self.state_provider.update_service(
-            service.id,
-            self.experiment_id,
-            self.run_id,
-            service.description(),
-            service.state.name,
-            state_dict=json.dumps(state_dict),
-        )
+        """Called when service state changes (runtime only, not persisted)"""
+        # Service state is managed at runtime, not persisted to DB
+        pass
 
 
 class experiment:

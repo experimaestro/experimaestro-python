@@ -1971,70 +1971,52 @@ class WorkspaceStateProvider(StateProvider):
     # Service operations
 
     @_with_db_context
-    def update_service(
+    def register_service(
         self,
         service_id: str,
         experiment_id: str,
         run_id: str,
         description: str,
-        state: str,
         state_dict: Optional[str] = None,
     ):
-        """Update service information
+        """Register a service in the database
+
+        Services are only added or removed, not updated. Runtime state
+        is managed by the Service object itself.
 
         Args:
             service_id: Service identifier
             experiment_id: Experiment identifier
             run_id: Run identifier
             description: Human-readable description
-            state: Service state
             state_dict: JSON serialized state_dict for service recreation
 
         Raises:
             RuntimeError: If in read-only mode
         """
         if self.read_only:
-            raise RuntimeError("Cannot update services in read-only mode")
+            raise RuntimeError("Cannot register services in read-only mode")
 
         insert_data = {
             "service_id": service_id,
             "experiment_id": experiment_id,
             "run_id": run_id,
             "description": description,
-            "state": state,
             "created_at": datetime.now(),
-            "updated_at": datetime.now(),
-        }
-        update_data = {
-            ServiceModel.description: description,
-            ServiceModel.state: state,
-            ServiceModel.updated_at: datetime.now(),
         }
 
         if state_dict is not None:
             insert_data["state_dict"] = state_dict
-            update_data[ServiceModel.state_dict] = state_dict
 
-        ServiceModel.insert(**insert_data).on_conflict(
-            conflict_target=[
-                ServiceModel.service_id,
-                ServiceModel.experiment_id,
-                ServiceModel.run_id,
-            ],
-            update=update_data,
-        ).execute()
+        # Use INSERT OR IGNORE - services are only added, not updated
+        ServiceModel.insert(**insert_data).on_conflict_ignore().execute()
 
         logger.debug(
-            "Updated service %s (experiment=%s, run=%s)",
+            "Registered service %s (experiment=%s, run=%s)",
             service_id,
             experiment_id,
             run_id,
         )
-
-        # Note: We do NOT invalidate the cache here because:
-        # 1. The cached service IS the same object that was just updated
-        # 2. Invalidating would cause get_services() to create new instances
-        # 3. The state change is already reflected in the cached object
 
         # Notify listeners
         self._notify_listeners(
@@ -2044,7 +2026,6 @@ class WorkspaceStateProvider(StateProvider):
                     "serviceId": service_id,
                     "experimentId": experiment_id,
                     "runId": run_id,
-                    "state": state,
                     "description": description,
                 },
             )
@@ -2114,21 +2095,40 @@ class WorkspaceStateProvider(StateProvider):
                     state_dict = json.loads(state_dict_json)
                     if "__class__" in state_dict:
                         service = Service.from_state_dict(state_dict)
-                        # Set the id from the database record
-                        service.id = service_id
-                        services.append(service)
-                        continue
                 except Exception as e:
+                    service = MockService(
+                        service_id,
+                        f"error: {e}",
+                        "error",
+                        {},
+                        experiment_id=experiment_id,
+                        run_id=run_id,
+                    )
+
                     logger.warning(
                         "Failed to recreate service %s from state_dict: %s",
                         service_id,
                         e,
                     )
-            # If we can't recreate, skip this service (it's not usable)
-            logger.debug(
-                "Service %s has no state_dict for recreation, skipping",
-                service_id,
-            )
+            else:
+                # If we can't recreate, skip this service (it's not usable)
+                logger.debug(
+                    "Service %s has no state_dict for recreation, skipping",
+                    service_id,
+                )
+                service = MockService(
+                    service_id,
+                    "error: no state_dict",
+                    "error",
+                    {},
+                    experiment_id=experiment_id,
+                    run_id=run_id,
+                )
+
+            # Add to services
+            service.id = service_id
+            services.append(service)
+            continue
 
         return services
 
@@ -2758,7 +2758,7 @@ class SchedulerListener:
                     }
                 )
 
-            self.state_provider.update_service(
+            self.state_provider.register_service(
                 service.id,
                 experiment_id,
                 run_id,
