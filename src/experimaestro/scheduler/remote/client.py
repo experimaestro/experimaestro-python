@@ -728,7 +728,6 @@ class SSHStateProviderClient(StateProvider):
             return MockService(
                 service_id=service_id,
                 description_text=f"[{reason}]",
-                state=d.get("state", "STOPPED"),
                 state_dict_data=state_dict,
                 experiment_id=d.get("experiment_id"),
                 run_id=d.get("run_id"),
@@ -766,7 +765,6 @@ class SSHStateProviderClient(StateProvider):
                 return MockService(
                     service_id=service_id,
                     description_text=f"[Missing module: {missing_module}]",
-                    state=d.get("state", "STOPPED"),
                     state_dict_data=state_dict,
                     experiment_id=d.get("experiment_id"),
                     run_id=d.get("run_id"),
@@ -777,7 +775,6 @@ class SSHStateProviderClient(StateProvider):
                 return MockService(
                     service_id=service_id,
                     description_text=f"[Error: {e}]",
-                    state=d.get("state", "STOPPED"),
                     state_dict_data=state_dict,
                     experiment_id=d.get("experiment_id"),
                     run_id=d.get("run_id"),
@@ -788,7 +785,6 @@ class SSHStateProviderClient(StateProvider):
         return MockService(
             service_id=service_id,
             description_text=d.get("description", ""),
-            state=d.get("state", "STOPPED"),
             state_dict_data=state_dict,
             experiment_id=d.get("experiment_id"),
             run_id=d.get("run_id"),

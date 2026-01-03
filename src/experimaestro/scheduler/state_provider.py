@@ -613,11 +613,11 @@ class MockService(BaseService):
         self,
         service_id: str,
         description_text: str,
-        state: str,
         state_dict_data: dict,
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
         url: Optional[str] = None,
+        state: str = "STOPPED",
     ):
         self.id = service_id
         self._description = description_text
@@ -2099,7 +2099,6 @@ class WorkspaceStateProvider(StateProvider):
                     service = MockService(
                         service_id,
                         f"error: {e}",
-                        "error",
                         {},
                         experiment_id=experiment_id,
                         run_id=run_id,
@@ -2119,7 +2118,6 @@ class WorkspaceStateProvider(StateProvider):
                 service = MockService(
                     service_id,
                     "error: no state_dict",
-                    "error",
                     {},
                     experiment_id=experiment_id,
                     run_id=run_id,
@@ -2176,7 +2174,6 @@ class WorkspaceStateProvider(StateProvider):
                 {
                     "service_id": service_model.service_id,
                     "description": service_model.description,
-                    "state": service_model.state,
                     "state_dict": state_dict,
                     "experiment_id": service_model.experiment_id,
                     "run_id": service_model.run_id,
@@ -2763,7 +2760,6 @@ class SchedulerListener:
                 experiment_id,
                 run_id,
                 service.description(),
-                service.state.name,
                 state_dict=state_dict_json,
             )
         except Exception as e:
