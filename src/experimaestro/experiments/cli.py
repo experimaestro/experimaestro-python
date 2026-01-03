@@ -360,7 +360,12 @@ def experiments_cli(  # noqa: C901
         except HandledException:
             sys.exit(1)
 
-    if console:
+    # Console mode is only available in NORMAL run mode
+    use_console = console and run_mode == RunMode.NORMAL
+    if console and not use_console:
+        logging.warning("--console is ignored when run_mode is not NORMAL")
+
+    if use_console:
         # Run experiment in background thread, console UI in main thread
         import threading
         from experimaestro.tui import ExperimentTUI

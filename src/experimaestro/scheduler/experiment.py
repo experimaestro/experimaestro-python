@@ -280,9 +280,10 @@ class experiment:
         with self.jobs_jsonl_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
 
-        # Also register in database for TUI/monitoring
-        experiment_id = self.workdir.name
-        self.state_provider.update_job_submitted(job, experiment_id, self.run_id)
+        # Also register in database for TUI/monitoring (only in NORMAL mode)
+        if self._db_listener is not None:
+            experiment_id = self.workdir.name
+            self.state_provider.update_job_submitted(job, experiment_id, self.run_id)
 
     def stop(self):
         """Stop the experiment as soon as possible"""
@@ -402,24 +403,31 @@ class experiment:
         (self.workspace.path / ".__experimaestro__").touch()
 
         # Initialize workspace state provider (singleton per workspace path)
+        # Use read_only mode when not in NORMAL run mode to prevent DB changes
         from .state_provider import WorkspaceStateProvider
 
+        is_normal_mode = self.workspace.run_mode == RunMode.NORMAL
         self.state_provider = WorkspaceStateProvider.get_instance(
             self.workspace.path,
-            read_only=False,
+            read_only=not is_normal_mode,
             sync_on_start=False,  # Experiments don't sync on start
         )
 
-        # Register experiment in database and create a run
+        # Register experiment in database and create a run (only in NORMAL mode)
         experiment_id = self.workdir.name
-        self.state_provider.ensure_experiment(experiment_id)
-        self.run_id = self.state_provider.create_run(experiment_id)
+        self._db_listener = None
+        if is_normal_mode:
+            self.state_provider.ensure_experiment(experiment_id)
+            self.run_id = self.state_provider.create_run(experiment_id)
 
-        # Add database listener to update job state in database
-        self._db_listener = DatabaseListener(
-            self.state_provider, experiment_id, self.run_id
-        )
-        self.scheduler.addlistener(self._db_listener)
+            # Add database listener to update job state in database
+            self._db_listener = DatabaseListener(
+                self.state_provider, experiment_id, self.run_id
+            )
+            self.scheduler.addlistener(self._db_listener)
+        else:
+            # In non-NORMAL modes, use a placeholder run_id
+            self.run_id = None
 
         # Number of unfinished jobs
         self.unfinishedJobs = 0
@@ -476,13 +484,14 @@ class experiment:
             # Unregister experiment from scheduler
             self.scheduler.unregister_experiment(self)
 
-            # Remove database listener
-            self.scheduler.removelistener(self._db_listener)
+            # Remove database listener and mark run as completed (only in NORMAL mode)
+            if self._db_listener is not None:
+                self.scheduler.removelistener(self._db_listener)
 
-            # Mark run as completed in database
-            experiment_id = self.workdir.name
-            status = "failed" if exc_type else "completed"
-            self.state_provider.complete_run(experiment_id, self.run_id, status)
+                # Mark run as completed in database
+                experiment_id = self.workdir.name
+                status = "failed" if exc_type else "completed"
+                self.state_provider.complete_run(experiment_id, self.run_id, status)
 
             # Note: Don't stop scheduler - it's shared!
             # Note: Don't stop server - it runs in daemon mode until program exit
