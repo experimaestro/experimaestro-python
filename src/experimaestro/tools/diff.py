@@ -1,3 +1,4 @@
+# ruff: noqa: T201 - This is a CLI diff tool that uses print for output
 import importlib
 from itertools import chain
 from typing import Dict, Any

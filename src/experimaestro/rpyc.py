@@ -100,7 +100,6 @@ class ClassicService(rpyc.core.service.ClassicService):
         super().on_connect(conn)
 
     def on_disconnect(self, conn):
-        print("Disconnected")
         super().on_disconnect(conn)
 
 
@@ -119,7 +118,6 @@ def start_server(unix_path, clean=None):
     def sayhello():
         while not server.active:
             time.sleep(0.01)
-        print("HELLO", flush=True)
         logger.debug("Server started")
 
         time.sleep(5)

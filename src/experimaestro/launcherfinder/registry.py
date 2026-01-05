@@ -83,7 +83,6 @@ class LauncherRegistry:
 
         # Register the find launcher function if it exists
         launchers_py = basepath / "launchers.py"
-        print(f"basepath {launchers_py}")
         if launchers_py.is_file():
             logger.info("Loading %s", launchers_py)
 

@@ -104,14 +104,14 @@ class SlurmResumableTask(ResumableTask):
         if self.checkpoint.exists():
             attempt = int(self.checkpoint.read_text()) + 1
 
-        print(f"SlurmResumableTask attempt #{attempt}")
+        print(f"SlurmResumableTask attempt #{attempt}")  # noqa: T201
 
         # Write updated attempt count
         self.checkpoint.write_text(str(attempt))
 
         # Simulate timeout for first timeout_count attempts
         if attempt <= self.timeout_count:
-            print(f"Simulating SLURM TIMEOUT on attempt {attempt}")
+            print(f"Simulating SLURM TIMEOUT on attempt {attempt}")  # noqa: T201
             # Create timeout marker file for mock SLURM
             # The marker needs to be named <jobid>.timeout in the SLURM jobs directory
             # Use SLURM_JOB_ID environment variable (set by mock sbatch, like real SLURM)
@@ -123,7 +123,7 @@ class SlurmResumableTask(ResumableTask):
             raise RuntimeError(f"Simulated timeout on attempt {attempt}")
 
         # Success - task completed
-        print(f"Task completed successfully on attempt {attempt}")
+        print(f"Task completed successfully on attempt {attempt}")  # noqa: T201
         if self.output_file:
             self.output_file.write_text(f"Completed after {attempt} attempts")
 

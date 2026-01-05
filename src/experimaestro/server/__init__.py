@@ -5,7 +5,6 @@ import platform
 import socket
 import uuid
 from experimaestro.scheduler.base import Job
-import sys
 import http
 import threading
 from typing import Optional, Tuple, ClassVar

@@ -1,3 +1,4 @@
+# ruff: noqa: T201 - Test script that outputs to stdout
 import argparse
 import sys
 

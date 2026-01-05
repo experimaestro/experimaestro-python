@@ -16,7 +16,7 @@ class TokenTask(Task):
     """A dummy parameter to create several distinct token tasks"""
 
     def execute(self):
-        print(time.time())
+        print(time.time())  # noqa: T201
         while not self.path.is_file():
             time.sleep(0.1)
-        print(time.time())
+        print(time.time())  # noqa: T201

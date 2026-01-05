@@ -1087,7 +1087,7 @@ class ConfigInformation:
 
     @overload
     @staticmethod
-    def fromParameters(  # noqa: E704
+    def fromParameters(
         definitions: List[Dict],
         as_instance=True,
         save_directory: Optional[Path] = None,
@@ -1097,7 +1097,7 @@ class ConfigInformation:
 
     @overload
     @staticmethod
-    def fromParameters(  # noqa: E704
+    def fromParameters(
         definitions: List[Dict],
         as_instance=False,
         return_tasks=True,
@@ -1108,7 +1108,7 @@ class ConfigInformation:
 
     @overload
     @staticmethod
-    def fromParameters(  # noqa: E704
+    def fromParameters(
         definitions: List[Dict],
         as_instance=False,
         save_directory: Optional[Path] = None,

@@ -280,17 +280,17 @@ cli.add_command(Launchers("connectors", help="Connector specific commands"))
 cli.add_command(Launchers("tokens", help="Token specific commands"))
 
 # Import and add progress commands
-from .progress import progress as progress_cli
+from .progress import progress as progress_cli  # noqa: E402
 
 cli.add_command(progress_cli)
 
 # Import and add jobs commands
-from .jobs import jobs as jobs_cli
+from .jobs import jobs as jobs_cli  # noqa: E402
 
 cli.add_command(jobs_cli)
 
 # Import and add refactor commands
-from .refactor import refactor as refactor_cli
+from .refactor import refactor as refactor_cli  # noqa: E402
 
 cli.add_command(refactor_cli)
 

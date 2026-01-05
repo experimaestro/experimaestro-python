@@ -138,7 +138,7 @@ class LogicExpr:
 
 # --- Grammar
 
-l = pp.Literal
+lit = pp.Literal
 
 lpar, rpar, lbra, rbra, eq, comma, pipe, tilde = map(pp.Suppress, "()[]=,|~")
 quotedString = pp.QuotedString('"', unquoteResults=True) | pp.QuotedString(
@@ -148,7 +148,7 @@ quotedString = pp.QuotedString('"', unquoteResults=True) | pp.QuotedString(
 # Tag names can contain letters, digits, underscores, and hyphens
 # First character must be a letter, rest can include digits, underscores, hyphens
 tag_name = pp.Word(pp.alphas, pp.alphanums + "_-")
-var = l("@state") | l("@name") | tag_name
+var = lit("@state") | lit("@name") | tag_name
 var.setParseAction(VarExpr)
 
 regexExpr = var + tilde + quotedString
@@ -161,15 +161,15 @@ eqExpr.setParseAction(EqExpr)
 
 stringList = quotedString + pp.ZeroOrMore(comma + quotedString)
 
-notInExpr = var + (pp.Suppress(l("not in")) + lbra + stringList + rbra)
+notInExpr = var + (pp.Suppress(lit("not in")) + lbra + stringList + rbra)
 notInExpr.setParseAction(NotInExpr)
 
-inExpr = var + (pp.Suppress(l("in")) + lbra + stringList + rbra)
+inExpr = var + (pp.Suppress(lit("in")) + lbra + stringList + rbra)
 inExpr.setParseAction(InExpr)
 
 matchExpr = eqExpr | regexExpr | inExpr | notInExpr
 
-booleanOp = l("and") | l("or")
+booleanOp = lit("and") | lit("or")
 logicExpr = (
     matchExpr + pp.ZeroOrMore((booleanOp + matchExpr).setParseAction(LogicExpr))
 ).setParseAction(LogicExpr.summary)

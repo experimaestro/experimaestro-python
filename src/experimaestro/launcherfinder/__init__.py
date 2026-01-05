@@ -1,6 +1,6 @@
-# flake8: noqa: F401
+# ruff: noqa: F401
 
-from .base import *
+from .base import ConnectorConfiguration, TokenConfiguration
 from .specs import (
     cpu,
     cuda_gpu,

@@ -1,3 +1,4 @@
+# ruff: noqa: T201 - Test helper script
 import importlib
 import sys
 from experimaestro import experiment

@@ -52,7 +52,7 @@ class ExperimentHelper:
 class ExperimentCallable(Protocol):
     """Protocol for the run function"""
 
-    def __call__(self, helper: ExperimentHelper, configuration: Any): ...  # noqa: E704
+    def __call__(self, helper: ExperimentHelper, configuration: Any): ...
 
 
 class ConfigurationLoader:

@@ -1,3 +1,4 @@
+# ruff: noqa: T201 - Test script that outputs status to stderr
 import sys
 from pathlib import Path
 import time

@@ -1,3 +1,4 @@
+# ruff: noqa: T201 - This module uses print for CLI output when run as script
 # Tests for identifier stability across versions
 
 import json

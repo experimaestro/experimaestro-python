@@ -138,7 +138,7 @@ def test_submitted_twice():
         task2 = SimpleTask.C(x=1)
         o2 = task2.submit()
 
-        print(o1)
+        print(o1)  # noqa: T201
         assert o1.task is not o2.task
         assert task1.__xpm__.job is task2.__xpm__.job, f"{id(task1)} != {id(task2)}"
 
