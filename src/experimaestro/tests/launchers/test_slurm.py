@@ -151,15 +151,15 @@ def test_slurm_resumable_task(tmp_path: Path, slurmlauncher: SlurmLauncher):
 
         # Verify task completed successfully after retries
         assert state == JobState.DONE, f"Task did not complete successfully: {state}"
-        assert (
-            task.__xpm__.job.retry_count == 2
-        ), f"Expected 2 retries, got {task.__xpm__.job.retry_count}"
+        assert task.__xpm__.job.retry_count == 2, (
+            f"Expected 2 retries, got {task.__xpm__.job.retry_count}"
+        )
 
         # Verify checkpoint shows 3 attempts (2 timeouts + 1 success)
         assert checkpoint.exists(), "Checkpoint file was not created"
-        assert (
-            int(checkpoint.read_text()) == 3
-        ), f"Expected 3 attempts, got {checkpoint.read_text()}"
+        assert int(checkpoint.read_text()) == 3, (
+            f"Expected 3 attempts, got {checkpoint.read_text()}"
+        )
 
         # Verify output file was created on success
         assert output_file.exists(), "Output file was not created"

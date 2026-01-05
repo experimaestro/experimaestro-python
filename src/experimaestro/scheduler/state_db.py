@@ -392,8 +392,7 @@ def initialize_workspace_database(
                 needs_resync = True
                 try:
                     db.execute_sql(
-                        "ALTER TABLE workspace_sync_metadata "
-                        "ADD COLUMN db_version INTEGER DEFAULT 1"
+                        "ALTER TABLE workspace_sync_metadata ADD COLUMN db_version INTEGER DEFAULT 1"
                     )
                 except OperationalError:
                     pass  # Column may already exist

@@ -18,9 +18,7 @@ if __name__ == "__main__":
 
     handler = logging.StreamHandler()
     bf = logging.Formatter(
-        f"[XP{x}] "
-        "[%(levelname)s] %(asctime)s.%(msecs)03d %(name)s "
-        "[%(process)d/%(threadName)s]: %(message)s",
+        f"[XP{x}] [%(levelname)s] %(asctime)s.%(msecs)03d %(name)s [%(process)d/%(threadName)s]: %(message)s",
         datefmt="%H:%M:%S",
     )
     handler.setFormatter(bf)

@@ -60,8 +60,7 @@ def jobmonitor(*outputs: Config):
                             reporter.update(100 - progress)
                     else:
                         raise RuntimeError(
-                            f"Job did not complete successfully ({job.state.name})."
-                            f"Check the error log {job.stderr}"
+                            f"Job did not complete successfully ({job.state.name}).Check the error log {job.stderr}"
                         )
 
         finally:

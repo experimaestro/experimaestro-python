@@ -45,13 +45,11 @@ class TokenUsageTracker:
 
             if self.memory_used > self.memory_limit:
                 self.violations.append(
-                    f"Memory limit exceeded: {self.memory_used} > {self.memory_limit} "
-                    f"(task {task_id})"
+                    f"Memory limit exceeded: {self.memory_used} > {self.memory_limit} (task {task_id})"
                 )
             if self.cpu_used > self.cpu_limit:
                 self.violations.append(
-                    f"CPU limit exceeded: {self.cpu_used} > {self.cpu_limit} "
-                    f"(task {task_id})"
+                    f"CPU limit exceeded: {self.cpu_used} > {self.cpu_limit} (task {task_id})"
                 )
 
             logger.debug(

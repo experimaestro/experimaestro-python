@@ -308,7 +308,7 @@ class ConfigInformation:
                     raise AttributeError(
                         f"Cannot set {k} to a configuration with generated values. "
                         "Here is the list of paths to help you: "
-                        f"""{', '.join(get_generated_paths(v, [k]))}"""
+                        f"""{", ".join(get_generated_paths(v, [k]))}"""
                     )
 
                 if not bypass and (
@@ -499,9 +499,9 @@ class ConfigInformation:
                                         logging.warning("Ignoring %s", k)
                                     value = argument.generator(self.context, config)
                                 else:
-                                    assert (
-                                        False
-                                    ), "generator has either two parameters (context and config), or none"
+                                    assert False, (
+                                        "generator has either two parameters (context and config), or none"
+                                    )
                             config.__xpm__.set(k, value, bypass=True)
                         else:
                             value = config.__xpm__.values.get(k)
@@ -807,9 +807,9 @@ class ConfigInformation:
     def mark_output(self, config: "Config"):
         """Sets a dependency on the job"""
         assert not isinstance(config, Task), "Cannot set a dependency on a task"
-        assert isinstance(
-            config, ConfigMixin
-        ), "Only configurations can be marked as dependent on a task"
+        assert isinstance(config, ConfigMixin), (
+            "Only configurations can be marked as dependent on a task"
+        )
         config.__xpm__.task = self.pyobject
         return config
 
@@ -915,9 +915,9 @@ class ConfigInformation:
         for argument, value in self.xpmvalues():
             with context.push(argument.name) as var_path:
                 if argument.is_data and value is not None:
-                    assert isinstance(
-                        value, Path
-                    ), f"Data arguments should be paths (type is {type(value)})"
+                    assert isinstance(value, Path), (
+                        f"Data arguments should be paths (type is {type(value)})"
+                    )
                     value = context.serialize(var_path, value)
 
                 jsonfields[argument.name] = ConfigInformation._outputjsonvalue(
@@ -1023,9 +1023,9 @@ class ConfigInformation:
         :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
-        assert not (
-            as_instance and return_tasks
-        ), "Cannot set as_instance and return_tasks to True"
+        assert not (as_instance and return_tasks), (
+            "Cannot set as_instance and return_tasks to True"
+        )
         if callable(path):
             data_loader = path
         else:
@@ -1325,9 +1325,9 @@ class ConfigInformation:
                     # Unwrap the value if needed
                     setattr(o, name, v)
 
-                    assert (
-                        getattr(o, name) is v
-                    ), f"Problem with deserialization {name} of {o.__class__}"
+                    assert getattr(o, name) is v, (
+                        f"Problem with deserialization {name} of {o.__class__}"
+                    )
                 else:
                     o.__xpm__.set(name, v, bypass=True)
 
@@ -1622,10 +1622,7 @@ class ConfigMixin:
         params = ", ".join(
             [f"{key}={value}" for key, value in self.__xpm__.values.items()]
         )
-        return (
-            f"{self.__xpmtype__.value_type.__module__}."
-            f"{self.__xpmtype__.value_type.__qualname__}({params})"
-        )
+        return f"{self.__xpmtype__.value_type.__module__}.{self.__xpmtype__.value_type.__qualname__}({params})"
 
     def tag(self, name, value):
         # Capture caller's location and pass to addtag
@@ -1674,9 +1671,9 @@ class ConfigMixin:
 
             context = EmptyContext()
         else:
-            assert isinstance(
-                context, ConfigWalkContext
-            ), f"{context.__class__} is not an instance of ConfigWalkContext"
+            assert isinstance(context, ConfigWalkContext), (
+                f"{context.__class__} is not an instance of ConfigWalkContext"
+            )
 
         instance = self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
         if keep:
@@ -1857,8 +1854,7 @@ class Config:
             # Check that value class is a subclass of the config class
             if not issubclass(value_class, cls):
                 raise TypeError(
-                    f"Value class {value_class.__name__} must be a subclass of "
-                    f"{cls.__name__}"
+                    f"Value class {value_class.__name__} must be a subclass of {cls.__name__}"
                 )
 
             # Check that value class inherits from parent value classes

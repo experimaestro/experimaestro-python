@@ -36,8 +36,7 @@ class serverwidget:
             if experiment.CURRENT:
                 self.button.description = "Stop experimaestro server"
                 print(  # noqa: T201
-                    "Server started : "
-                    f"http://localhost:{self.port}/auth?xpm-token={serverwidget.TOKEN}"
+                    f"Server started : http://localhost:{self.port}/auth?xpm-token={serverwidget.TOKEN}"
                 )
             else:
                 self.button.description = "Start experimaestro server"

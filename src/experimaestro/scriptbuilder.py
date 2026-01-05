@@ -67,9 +67,9 @@ class PythonScriptBuilder:
         Returns:
             str -- The script path on disk
         """
-        assert isinstance(
-            job, CommandLineJob
-        ), "Cannot handle a job which is not a command line job"
+        assert isinstance(job, CommandLineJob), (
+            "Cannot handle a job which is not a command line job"
+        )
         assert self.command is not None
         assert job.workspace, "No workspace defined for the job"
         assert job.launcher is not None, "No launcher defined for the job"
@@ -101,7 +101,7 @@ class PythonScriptBuilder:
                 """format='%(levelname)s:%(process)d:%(asctime)s [%(name)s] %(message)s', datefmt='%y-%m-%d %H:%M:%S')\n\n"""
             )
 
-            out.write("\nif __name__ == '__main__':\n\n" "")
+            out.write("\nif __name__ == '__main__':\n\n")
 
             # --- Checks locks right away
 

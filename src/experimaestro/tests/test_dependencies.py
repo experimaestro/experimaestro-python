@@ -20,9 +20,9 @@ def check_dependencies(task: Task, *tasks: Task):
 
     assert len(deps) == len(tasks)
     for task in tasks:
-        assert (
-            id(task) in deps
-        ), f"Task {task.__xpmtype__} with ID {task.__identifier__()}"
+        assert id(task) in deps, (
+            f"Task {task.__xpmtype__} with ID {task.__identifier__()}"
+        )
         " is not not in the dependencies"
 
 

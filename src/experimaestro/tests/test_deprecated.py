@@ -422,14 +422,14 @@ def test_task_deprecated_config_identifier():
         )
 
         # Old (non-deprecated) and new should have different paths
-        assert (
-            task_new.stdout() != task_old.stdout()
-        ), "Old and new path should be different"
+        assert task_new.stdout() != task_old.stdout(), (
+            "Old and new path should be different"
+        )
 
         # Deprecated should have same path as new (identifier matches)
-        assert (
-            task_new.stdout() == task_deprecated.stdout()
-        ), "Deprecated path should be the same as non deprecated"
+        assert task_new.stdout() == task_deprecated.stdout(), (
+            "Deprecated path should be the same as non deprecated"
+        )
 
 
 def test_task_deprecated_config_fix_deprecated():
@@ -485,14 +485,14 @@ def test_task_deprecated_identifier():
         task_deprecated = DeprecatedTask.C(x=1).submit(run_mode=RunMode.DRY_RUN)
 
         # Old and new should have different paths
-        assert (
-            task_new.stdout() != task_old.stdout()
-        ), "Old and new path should be different"
+        assert task_new.stdout() != task_old.stdout(), (
+            "Old and new path should be different"
+        )
 
         # Deprecated should have same path as new
-        assert (
-            task_new.stdout() == task_deprecated.stdout()
-        ), "Deprecated path should be the same as non deprecated"
+        assert task_new.stdout() == task_deprecated.stdout(), (
+            "Deprecated path should be the same as non deprecated"
+        )
 
 
 def test_task_deprecated_fix_deprecated():
@@ -550,9 +550,9 @@ def test_task_deprecated_with_convert_identifier():
         task_new = NewTaskWithConvert.C(values=[42]).submit(run_mode=RunMode.DRY_RUN)
 
         # Identifiers should match (computed via __convert__)
-        assert (
-            task_old.stdout() == task_new.stdout()
-        ), "Deprecated task should have same path as equivalent new task"
+        assert task_old.stdout() == task_new.stdout(), (
+            "Deprecated task should have same path as equivalent new task"
+        )
 
 
 @deprecate(NewTaskWithConvert, replace=True)

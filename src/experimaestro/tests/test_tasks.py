@@ -132,7 +132,6 @@ def test_restart(terminate):
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
     with TemporaryExperiment("duplicate", maxwait=20):
-
         task1 = SimpleTask.C(x=1)
         o1 = task1.submit()
 

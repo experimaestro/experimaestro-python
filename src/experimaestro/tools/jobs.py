@@ -67,8 +67,7 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
                 if newjobpath.exists():
                     if newjobpath.resolve() != oldjobpath.resolve():
                         logger.warning(
-                            "New job path %s exists and is set to a "
-                            "different value (%s) than the computed one (%s)",
+                            "New job path %s exists and is set to a different value (%s) than the computed one (%s)",
                             newjobpath,
                             newjobpath.resolve(),
                             oldjobpath.resolve(),

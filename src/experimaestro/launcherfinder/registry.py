@@ -59,9 +59,9 @@ class LauncherRegistry:
             ).expanduser()
 
         if LauncherRegistry.CURRENT_CONFIG_DIR not in LauncherRegistry.INSTANCES:
-            LauncherRegistry.INSTANCES[
-                LauncherRegistry.CURRENT_CONFIG_DIR
-            ] = LauncherRegistry(LauncherRegistry.CURRENT_CONFIG_DIR)
+            LauncherRegistry.INSTANCES[LauncherRegistry.CURRENT_CONFIG_DIR] = (
+                LauncherRegistry(LauncherRegistry.CURRENT_CONFIG_DIR)
+            )
 
         return LauncherRegistry.INSTANCES[LauncherRegistry.CURRENT_CONFIG_DIR]
 
@@ -163,9 +163,9 @@ class LauncherRegistry:
         if self.find_launcher_fn is not None:
             for spec in specs.requirements:
                 if launcher := self.find_launcher_fn(spec, tags):
-                    assert isinstance(
-                        launcher, Launcher
-                    ), "f{self.find_launcher_fn} did not return a Launcher but {type(launcher)}"
+                    assert isinstance(launcher, Launcher), (
+                        "f{self.find_launcher_fn} did not return a Launcher but {type(launcher)}"
+                    )
                     return launcher
 
         return None

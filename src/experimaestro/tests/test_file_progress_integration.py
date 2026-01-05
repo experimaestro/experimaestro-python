@@ -137,9 +137,9 @@ def verify_file_progress(job: Job, expected_entries: List[Tuple[int, float, str]
         logger.info(f"  Level {entry.level}: {entry.progress:.3f} - {entry.desc}")
 
     # Verify we have at least the expected number of significant progress updates
-    assert len(filtered_entries) >= len(
-        expected_entries
-    ), f"Expected at least {len(expected_entries)} entries, got {len(filtered_entries)}"
+    assert len(filtered_entries) >= len(expected_entries), (
+        f"Expected at least {len(expected_entries)} entries, got {len(filtered_entries)}"
+    )
 
     # Verify current progress state
     current_progress = reader.get_current_progress()
@@ -148,9 +148,9 @@ def verify_file_progress(job: Job, expected_entries: List[Tuple[int, float, str]
     expected_levels = set(level for level, _, _ in expected_entries)
     actual_levels = set(current_progress.keys())
 
-    assert expected_levels.issubset(
-        actual_levels
-    ), f"Expected levels {expected_levels}, got {actual_levels}"
+    assert expected_levels.issubset(actual_levels), (
+        f"Expected levels {expected_levels}, got {actual_levels}"
+    )
 
     return filtered_entries, current_progress
 

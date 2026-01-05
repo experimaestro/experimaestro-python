@@ -103,8 +103,7 @@ class ConfigurationLoader:
     "--host",
     type=str,
     default=None,
-    help="Server hostname (default to localhost,"
-    " not suitable if your jobs are remote)",
+    help="Server hostname (default to localhost, not suitable if your jobs are remote)",
 )
 @click.option(
     "--run-mode",
@@ -116,8 +115,7 @@ class ConfigurationLoader:
     "--xpm-config-dir",
     type=Path,
     default=None,
-    help="Path for the experimaestro config directory "
-    "(if not specified, use $HOME/.config/experimaestro)",
+    help="Path for the experimaestro config directory (if not specified, use $HOME/.config/experimaestro)",
 )
 @click.option(
     "--port",
@@ -207,9 +205,9 @@ def experiments_cli(  # noqa: C901
     if xp_file is None:
         xp_file = configuration.get("file", None)
         if xp_file:
-            assert (
-                not module_name
-            ), "Module name and experiment file are mutually exclusive options"
+            assert not module_name, (
+                "Module name and experiment file are mutually exclusive options"
+            )
             xp_file = Path(xp_file)
             if not python_path:
                 python_path.append(xp_file.parent.absolute())
@@ -217,9 +215,9 @@ def experiments_cli(  # noqa: C901
                 "Using python path: %s", ", ".join(str(s) for s in python_path)
             )
 
-    assert (
-        module_name or xp_file
-    ), "Either the module name or experiment file should be given"
+    assert module_name or xp_file, (
+        "Either the module name or experiment file should be given"
+    )
 
     # --- Set some options
 

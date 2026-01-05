@@ -250,7 +250,7 @@ def log(ctx, jobid: str, follow: bool, std: bool):
         / "jobs"
         / task_name
         / task_hash
-        / f"""{name}.{'out' if std else 'err'}"""
+        / f"""{name}.{"out" if std else "err"}"""
     )
     if not log_path.exists():
         cprint(f"Log file not found: {log_path}", "red")

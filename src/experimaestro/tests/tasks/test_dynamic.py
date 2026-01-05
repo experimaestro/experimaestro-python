@@ -201,9 +201,9 @@ def test_task_dynamic_replay():
             logging.info("First run ended (expected): %s", e)
 
         # First run should have produced at least one evaluation (for step 15)
-        assert (
-            len(evaluations_run1) == 1
-        ), f"Run 1: Expected 1 evaluation, got {len(evaluations_run1)}"
+        assert len(evaluations_run1) == 1, (
+            f"Run 1: Expected 1 evaluation, got {len(evaluations_run1)}"
+        )
 
         # Second run: restart and continue
         evaluations_run2 = []
@@ -226,6 +226,6 @@ def test_task_dynamic_replay():
         # - Replayed the step 15 checkpoint (from first run)
         # - Produced step 30 and 45 checkpoints
         # Total: 3 evaluations (but step 15 was replayed, not re-produced)
-        assert (
-            len(evaluations_run2) == 3
-        ), f"Run 2: Expected 3 evaluations, got {len(evaluations_run2)}"
+        assert len(evaluations_run2) == 3, (
+            f"Run 2: Expected 3 evaluations, got {len(evaluations_run2)}"
+        )

@@ -463,8 +463,7 @@ class experiment:
                 # import faulthandler
                 # faulthandler.dump_traceback()
                 logger.error(
-                    "Not waiting since an exception was thrown"
-                    " (some jobs may be running)"
+                    "Not waiting since an exception was thrown (some jobs may be running)"
                 )
             else:
                 self.wait()

@@ -245,8 +245,7 @@ class DocumentationAnalyzer:
 
     def report(self):
         cprint(
-            f"{len(self.documentation_errors)} errors were "
-            "encountered while parsing documentation",
+            f"{len(self.documentation_errors)} errors were encountered while parsing documentation",
             "red" if self.documentation_errors else "green",
         )
         for error in self.documentation_errors:
@@ -277,6 +276,6 @@ class DocumentationAnalyzer:
     def assert_valid_documentation(self):
         """Asserts that there are no falsy documented"""
         self.assert_no_undocumented()
-        assert (
-            len(self.falsy_documented) == 0
-        ), f"{self.falsy_documented} falsy documented members"
+        assert len(self.falsy_documented) == 0, (
+            f"{self.falsy_documented} falsy documented members"
+        )

@@ -114,9 +114,9 @@ def restart(terminate: Callable, experiment):
                 time.sleep(0.1)
 
             currentState = scheduler.getJobState(job).result()
-            assert (
-                currentState == JobState.RUNNING
-            ), f"Job is not running (state is {currentState})"
+            assert currentState == JobState.RUNNING, (
+                f"Job is not running (state is {currentState})"
+            )
 
             # Notify the task
             with task.wait.open("w") as fp:

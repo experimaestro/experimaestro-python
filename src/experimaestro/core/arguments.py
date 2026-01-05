@@ -97,9 +97,9 @@ class Argument:
         self.groups = groups if groups else set()
 
         if field_or_default is not None:
-            assert (
-                self.generator is None
-            ), "generator and field_or_default are exclusive options"
+            assert self.generator is None, (
+                "generator and field_or_default are exclusive options"
+            )
             if isinstance(field_or_default, field):
                 self.ignore_generated = field_or_default.ignore_generated
                 # Allow field to override the overrides flag
@@ -125,9 +125,9 @@ class Argument:
                 self.default = field_or_default
                 self.ignore_default_in_identifier = True
 
-        assert (
-            not self.constant or self.default is not None
-        ), "Cannot be constant without default"
+        assert not self.constant or self.default is not None, (
+            "Cannot be constant without default"
+        )
 
     def __repr__(self):
         return "Param[{name}:{type}]".format(**self.__dict__)
@@ -329,17 +329,17 @@ class field:
         :param groups: List of ParameterGroup objects for partial identifiers.
             Used with subparameters to compute identifiers that exclude certain groups.
         """
-        assert not (
-            (default is not None) and (default_factory is not None)
-        ), "default and default_factory are mutually exclusive options"
+        assert not ((default is not None) and (default_factory is not None)), (
+            "default and default_factory are mutually exclusive options"
+        )
 
-        assert not (
-            (default is not None) and (ignore_default is not None)
-        ), "default and ignore_default are mutually exclusive options"
+        assert not ((default is not None) and (ignore_default is not None)), (
+            "default and ignore_default are mutually exclusive options"
+        )
 
-        assert not (
-            (ignore_default is not None) and (default_factory is not None)
-        ), "ignore_default and default_factory are mutually exclusive options"
+        assert not ((ignore_default is not None) and (default_factory is not None)), (
+            "ignore_default and default_factory are mutually exclusive options"
+        )
 
         self.default_factory = default_factory
         self.default = default

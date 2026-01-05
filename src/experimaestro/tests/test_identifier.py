@@ -772,9 +772,9 @@ def test_partial_identifier_excludes_grouped_params():
     # Partial identifiers should be the same (max_iter is excluded)
     pid1 = get_partial_identifier(c1, ConfigWithGroups.checkpoints)
     pid2 = get_partial_identifier(c2, ConfigWithGroups.checkpoints)
-    assert (
-        pid1 == pid2
-    ), "Partial identifiers should match when only excluded params differ"
+    assert pid1 == pid2, (
+        "Partial identifiers should match when only excluded params differ"
+    )
 
 
 def test_partial_identifier_includes_ungrouped_params():
@@ -791,9 +791,9 @@ def test_partial_identifier_includes_ungrouped_params():
     # Partial identifiers should differ (learning_rate is not excluded)
     pid1 = get_partial_identifier(c1, ConfigWithGroups.checkpoints)
     pid2 = get_partial_identifier(c2, ConfigWithGroups.checkpoints)
-    assert (
-        pid1 != pid2
-    ), "Partial identifiers should differ when non-excluded params differ"
+    assert pid1 != pid2, (
+        "Partial identifiers should differ when non-excluded params differ"
+    )
 
 
 def test_partial_identifier_matches_config_without_excluded():
@@ -815,9 +815,9 @@ def test_partial_identifier_matches_config_without_excluded():
     # The partial identifier of c_with should match full identifier of c_without
     pid = get_partial_identifier(c_with, ConfigWithIter.checkpoints)
     full_id = getidentifier(c_without)
-    assert (
-        pid == full_id
-    ), "Partial identifier should match config without excluded fields"
+    assert pid == full_id, (
+        "Partial identifier should match config without excluded fields"
+    )
 
 
 def test_partial_identifier_multiple_groups():
@@ -835,9 +835,9 @@ def test_partial_identifier_multiple_groups():
     # Partial identifiers should be the same (x is in iter_group which is excluded)
     pid1 = get_partial_identifier(c1, ConfigMultiGroup.checkpoints)
     pid2 = get_partial_identifier(c2, ConfigMultiGroup.checkpoints)
-    assert (
-        pid1 == pid2
-    ), "Partial identifiers should match when param is in any excluded group"
+    assert pid1 == pid2, (
+        "Partial identifiers should match when param is in any excluded group"
+    )
 
 
 def test_partial_identifier_include_overrides_exclude():
@@ -895,9 +895,9 @@ def test_partial_identifier_exclude_all():
     assert pid1 != pid3, "y is included - should have different partial ID"
 
     # z is excluded (no group, exclude_all=True) - same partial ID
-    assert (
-        pid1 == pid4
-    ), "z (no group) is excluded by exclude_all - should have same partial ID"
+    assert pid1 == pid4, (
+        "z (no group) is excluded by exclude_all - should have same partial ID"
+    )
 
 
 def test_partial_identifier_exclude_no_group():

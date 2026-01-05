@@ -213,9 +213,9 @@ class LocalConnector(Connector):
         return LocalProcessBuilder()
 
     def resolve(self, path: Path, basepath: Path = None) -> str:
-        assert isinstance(path, PosixPath) or isinstance(
-            path, WindowsPath
-        ), f"Unrecognized path {type(path)}"
+        assert isinstance(path, PosixPath) or isinstance(path, WindowsPath), (
+            f"Unrecognized path {type(path)}"
+        )
         if not basepath:
             return str(path.absolute())
         try:

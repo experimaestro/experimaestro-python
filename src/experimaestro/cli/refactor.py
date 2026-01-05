@@ -153,8 +153,7 @@ def refactor_file(file_path: Path, perform: bool) -> int:
             # Multi-line value - more complex handling needed
             # For now, just report it
             cprint(
-                f"  {file_path}:{line_num}: {class_name}.{param_name} has multi-line default "
-                f"(manual fix required)",
+                f"  {file_path}:{line_num}: {class_name}.{param_name} has multi-line default (manual fix required)",
                 "red",
             )
             changes_made += 1

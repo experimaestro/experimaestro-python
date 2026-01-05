@@ -357,15 +357,13 @@ class ObjectType(Type):
         else:
             self._file = Path(inspect.getfile(self.originaltype)).absolute()
 
-        assert (
-            self._module and self._package
-        ) or self._file, f"Could not detect module/file for {self.originaltype}"
+        assert (self._module and self._package) or self._file, (
+            f"Could not detect module/file for {self.originaltype}"
+        )
 
         # The class of the object
 
-        self._arguments = ChainMap(
-            {}, *(tp.arguments for tp in self.parents())
-        )  # type: ChainMap[Argument, Any]
+        self._arguments = ChainMap({}, *(tp.arguments for tp in self.parents()))  # type: ChainMap[Argument, Any]
 
         # Add arguments from annotations
         for annotation in self.annotations:
@@ -488,8 +486,7 @@ class ObjectType(Type):
             # Legacy mechanism: parent class is the target
             if len(self.value_type.__bases__) != 1:
                 raise RuntimeError(
-                    "Deprecated configurations must have "
-                    "only one parent (the new configuration)"
+                    "Deprecated configurations must have only one parent (the new configuration)"
                 )
             parent = self.value_type.__bases__[0].__getxpmtype__()
             self.identifier = parent.identifier

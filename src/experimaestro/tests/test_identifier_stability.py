@@ -395,8 +395,7 @@ def test_identifier_stability():
 
     if not reference_file.exists():
         raise FileNotFoundError(
-            f"Reference file {reference_file} not found. "
-            f"Run 'python {__file__}' to generate it."
+            f"Reference file {reference_file} not found. Run 'python {__file__}' to generate it."
         )
 
     # Load reference identifiers
@@ -417,9 +416,7 @@ def test_identifier_stability():
             )
         elif current_id != expected_id:
             mismatches.append(
-                f"  - {name}: MISMATCH\n"
-                f"    Expected: {expected_id}\n"
-                f"    Current:  {current_id}"
+                f"  - {name}: MISMATCH\n    Expected: {expected_id}\n    Current:  {current_id}"
             )
 
     # Check for removed configurations

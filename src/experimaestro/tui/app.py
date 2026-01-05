@@ -61,8 +61,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
 
             if self.has_active_experiment:
                 yield Static(
-                    "⚠️  The experiment is still in progress.\n"
-                    "Quitting will prevent new jobs from being launched.",
+                    "⚠️  The experiment is still in progress.\nQuitting will prevent new jobs from being launched.",
                     id="quit-warning",
                 )
             else:
@@ -586,8 +585,7 @@ class ServicesList(Vertical):
         # Get services from state provider (handles live vs DB automatically)
         services = self.state_provider.get_services(self.current_experiment)
         self.log.info(
-            f"refresh_services got {len(services)} services: "
-            f"{[(s.id, id(s), getattr(s, 'url', None)) for s in services]}"
+            f"refresh_services got {len(services)} services: {[(s.id, id(s), getattr(s, 'url', None)) for s in services]}"
         )
 
         for service in services:

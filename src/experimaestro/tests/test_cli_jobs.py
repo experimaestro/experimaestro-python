@@ -610,6 +610,6 @@ def test_check_process_alive_with_lock_held(tmp_path):
 
         # No .failed file should be created
         failed_file = job_path / f"{scriptname}.failed"
-        assert (
-            not failed_file.exists()
-        ), ".failed file should not be created when lock is held"
+        assert not failed_file.exists(), (
+            ".failed file should not be created when lock is held"
+        )

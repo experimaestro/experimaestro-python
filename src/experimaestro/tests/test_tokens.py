@@ -203,8 +203,7 @@ def test_token_reschedule():
 
                 # Create the locking path
                 logging.info(
-                    "Both processes are ready:"
-                    "allowing tasks to finish by writing in %s",
+                    "Both processes are ready:allowing tasks to finish by writing in %s",
                     lockingpath,
                 )
                 lockingpath.write_text("Let's go")

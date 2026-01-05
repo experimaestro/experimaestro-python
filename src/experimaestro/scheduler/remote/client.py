@@ -161,10 +161,7 @@ class SSHStateProviderClient(StateProvider):
         # Build remote command (workdir is passed to experiments group)
         if self.remote_xpm_path:
             # Use specified path to experimaestro
-            remote_cmd = (
-                f"{self.remote_xpm_path} experiments "
-                f"--workdir {self.remote_workspace} monitor-server"
-            )
+            remote_cmd = f"{self.remote_xpm_path} experiments --workdir {self.remote_workspace} monitor-server"
         else:
             # Use uv tool run with version pinning
             try:
@@ -175,15 +172,9 @@ class SSHStateProviderClient(StateProvider):
                 xpm_version = None
 
             if xpm_version:
-                remote_cmd = (
-                    f"uv tool run experimaestro=={xpm_version} experiments "
-                    f"--workdir {self.remote_workspace} monitor-server"
-                )
+                remote_cmd = f"uv tool run experimaestro=={xpm_version} experiments --workdir {self.remote_workspace} monitor-server"
             else:
-                remote_cmd = (
-                    f"uv tool run experimaestro experiments "
-                    f"--workdir {self.remote_workspace} monitor-server"
-                )
+                remote_cmd = f"uv tool run experimaestro experiments --workdir {self.remote_workspace} monitor-server"
         cmd.append(remote_cmd)
 
         logger.info("Connecting to %s, workspace: %s", self.host, self.remote_workspace)

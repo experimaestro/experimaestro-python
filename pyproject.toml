@@ -143,6 +143,25 @@ log_date_format = "%H:%M:%S"
 
 [dependency-groups]
 dev = [
-    "flake8>=7.3.0",
+    "ruff>=0.8",
     "mkdocs>=1.6.1",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "W",      # pycodestyle warnings
+    "C90",    # mccabe complexity
+    "T20",    # flake8-print
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20

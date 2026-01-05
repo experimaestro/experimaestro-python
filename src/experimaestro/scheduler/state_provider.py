@@ -803,8 +803,7 @@ class WorkspaceStateProvider(StateProvider):
                     workspace_version = int(content)
                 except ValueError:
                     raise RuntimeError(
-                        f"Invalid workspace version file at {version_file}: "
-                        f"expected integer, got '{content}'"
+                        f"Invalid workspace version file at {version_file}: expected integer, got '{content}'"
                     )
 
             # Check if workspace version is supported
