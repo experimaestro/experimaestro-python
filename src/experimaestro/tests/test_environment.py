@@ -7,8 +7,9 @@ from experimaestro.utils.git import get_git_info
 from experimaestro.utils.environment import (
     get_environment_info,
     get_editable_packages_git_info,
-    save_environment_info,
+    get_current_environment,
     load_environment_info,
+    ExperimentEnvironment,
 )
 
 
@@ -131,22 +132,24 @@ class TestGetEditablePackagesGitInfo:
 
 
 class TestSaveAndLoadEnvironmentInfo:
-    """Tests for save_environment_info and load_environment_info functions"""
+    """Tests for get_current_environment and load_environment_info functions"""
 
     def test_save_creates_file(self, tmp_path):
-        """Test that save_environment_info creates a JSON file"""
+        """Test that get_current_environment + save creates a JSON file"""
         path = tmp_path / "environment.json"
 
-        result = save_environment_info(path)
+        env = get_current_environment()
+        env.save(path)
 
         assert path.exists()
-        assert isinstance(result, dict)
+        assert isinstance(env, ExperimentEnvironment)
 
     def test_save_writes_valid_json(self, tmp_path):
         """Test that saved file contains valid JSON"""
         path = tmp_path / "environment.json"
 
-        save_environment_info(path)
+        env = get_current_environment()
+        env.save(path)
 
         content = json.loads(path.read_text())
         assert "python_version" in content
@@ -157,10 +160,13 @@ class TestSaveAndLoadEnvironmentInfo:
         """Test that load_environment_info reads back saved data"""
         path = tmp_path / "environment.json"
 
-        saved = save_environment_info(path)
+        saved = get_current_environment()
+        saved.save(path)
         loaded = load_environment_info(path)
 
-        assert loaded == saved
+        assert loaded.python_version == saved.python_version
+        assert loaded.packages == saved.packages
+        assert loaded.editable_packages == saved.editable_packages
 
     def test_load_returns_none_for_missing_file(self, tmp_path):
         """Test that load returns None for non-existent file"""
@@ -170,14 +176,18 @@ class TestSaveAndLoadEnvironmentInfo:
 
         assert result is None
 
-    def test_load_returns_none_for_invalid_json(self, tmp_path):
-        """Test that load returns None for invalid JSON"""
+    def test_load_returns_empty_for_invalid_json(self, tmp_path):
+        """Test that load returns empty ExperimentEnvironment for invalid JSON"""
         path = tmp_path / "invalid.json"
         path.write_text("not valid json{")
 
         result = load_environment_info(path)
 
-        assert result is None
+        # Returns empty ExperimentEnvironment (graceful degradation)
+        assert result is not None
+        assert result.python_version is None
+        assert result.packages == {}
+        assert result.editable_packages == {}
 
 
 class TestExperimentEnvironmentSaving:
