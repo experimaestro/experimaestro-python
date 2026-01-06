@@ -600,6 +600,19 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_TAGS_MAP, params)
         return result or {}
 
+    def get_dependencies_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> dict[str, list[str]]:
+        """Get dependencies map for jobs in an experiment/run"""
+        params = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+        }
+        result = self._call_sync(RPCMethod.GET_DEPENDENCIES_MAP, params)
+        return result or {}
+
     def _fetch_services_from_storage(
         self, experiment_id: Optional[str], run_id: Optional[str]
     ) -> List[BaseService]:

@@ -39,6 +39,7 @@ export type Job = {
   }>;
 
   experimentIds?: Array<string>;  // Jobs can belong to multiple experiments
+  dependsOn?: Array<string>;  // Job IDs this job depends on
 };
 
 export type Jobs = {

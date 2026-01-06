@@ -38,7 +38,8 @@ logger = logging.getLogger("xpm.state_db")
 # - Version 4: Removed locator field from JobModel (redundant with job_id)
 # - Version 5: Changed JobTagModel to be experiment-run-scoped (fixes GH #128)
 # and introduced JobExperimentsModel for job-experiment/run membership tracking
-CURRENT_DB_VERSION = 5
+# - Version 6: Added JobDependenciesModel to store job dependencies
+CURRENT_DB_VERSION = 6
 
 
 class DatabaseVersionError(Exception):
@@ -259,6 +260,55 @@ class JobExperimentsModel(BaseModel):
         )
 
 
+class JobDependenciesModel(BaseModel):
+    """Stores job dependencies (which jobs depend on which)
+
+    This table tracks the dependency graph between jobs. A job can depend on
+    multiple other jobs, and a job can have multiple dependents.
+
+    Dependencies are scoped to (experiment_id, run_id) since the same job
+    can have different dependencies in different experiment runs.
+
+    Note: Dependencies are removed when jobs are deleted via delete_job().
+
+    Fields:
+        job_id: ID of the job that has the dependency
+        task_id: Task class identifier of the job
+        experiment_id: ID of the experiment
+        run_id: ID of the run
+        depends_on_job_id: ID of the job that job_id depends on
+        depends_on_task_id: Task class identifier of the dependency job
+    """
+
+    job_id = CharField(index=True)
+    task_id = CharField(index=True)
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
+    depends_on_job_id = CharField(index=True)
+    depends_on_task_id = CharField(index=True)
+
+    class Meta:
+        table_name = "job_dependencies"
+        primary_key = CompositeKey(
+            "job_id",
+            "task_id",
+            "experiment_id",
+            "run_id",
+            "depends_on_job_id",
+            "depends_on_task_id",
+        )
+        indexes = (
+            (
+                ("experiment_id", "run_id"),
+                False,
+            ),  # Query dependencies by experiment run
+            (
+                ("depends_on_job_id", "depends_on_task_id"),
+                False,
+            ),  # Query dependents of a job
+        )
+
+
 class ServiceModel(BaseModel):
     """Service information linked to specific experiment run
 
@@ -345,6 +395,7 @@ ALL_MODELS = [
     JobModel,
     JobTagModel,
     JobExperimentsModel,
+    JobDependenciesModel,
     ServiceModel,
     PartialModel,
     JobPartialModel,

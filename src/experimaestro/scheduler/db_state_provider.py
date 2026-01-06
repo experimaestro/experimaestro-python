@@ -27,6 +27,7 @@ from experimaestro.scheduler.state_db import (
     JobModel,
     JobTagModel,
     JobExperimentsModel,
+    JobDependenciesModel,
     ServiceModel,
     PartialModel,
     JobPartialModel,
@@ -1076,13 +1077,44 @@ class DbStateProvider(OfflineStateProvider):
             ]
             JobTagModel.insert_many(tag_records).execute()
 
-        # Notify that a job was added to this experiment (with its tags)
+        # Store dependencies (run-scoped) - delete existing and insert new
+        from experimaestro.scheduler.jobs import JobDependency
+
+        JobDependenciesModel.delete().where(
+            (JobDependenciesModel.job_id == job.identifier)
+            & (JobDependenciesModel.experiment_id == experiment_id)
+            & (JobDependenciesModel.run_id == run_id)
+        ).execute()
+
+        depends_on_ids = []
+        dependency_records = []
+        for dep in job.dependencies:
+            if isinstance(dep, JobDependency):
+                dep_job = dep.origin
+                dep_task_id = str(dep_job.type.identifier)
+                depends_on_ids.append(dep_job.identifier)
+                dependency_records.append(
+                    {
+                        "job_id": job.identifier,
+                        "task_id": task_id,
+                        "experiment_id": experiment_id,
+                        "run_id": run_id,
+                        "depends_on_job_id": dep_job.identifier,
+                        "depends_on_task_id": dep_task_id,
+                    }
+                )
+
+        if dependency_records:
+            JobDependenciesModel.insert_many(dependency_records).execute()
+
+        # Notify that a job was added to this experiment (with its tags and dependencies)
         self._notify_listeners(
             JobExperimentUpdatedEvent(
                 experiment_id=experiment_id,
                 run_id=run_id,
                 job_id=job.identifier,
                 tags=job.tags or {},
+                depends_on=depends_on_ids,
             )
         )
 
@@ -1184,7 +1216,7 @@ class DbStateProvider(OfflineStateProvider):
 
     @_with_db_context
     def delete_job(self, job_id: str):
-        """Remove a job, its tags, and partial references
+        """Remove a job, its tags, dependencies, and partial references
 
         Args:
             job_id: Job identifier
@@ -1197,6 +1229,14 @@ class DbStateProvider(OfflineStateProvider):
 
         # Delete tags first (foreign key constraint)
         JobTagModel.delete().where(JobTagModel.job_id == job_id).execute()
+
+        # Delete dependencies (both where this job is the source or target)
+        JobDependenciesModel.delete().where(
+            JobDependenciesModel.job_id == job_id
+        ).execute()
+        JobDependenciesModel.delete().where(
+            JobDependenciesModel.depends_on_job_id == job_id
+        ).execute()
 
         # Delete partial references
         JobPartialModel.delete().where(JobPartialModel.job_id == job_id).execute()
@@ -1282,6 +1322,40 @@ class DbStateProvider(OfflineStateProvider):
             tags_map[tag.job_id][tag.tag_key] = tag.tag_value
 
         return tags_map
+
+    @_with_db_context
+    def get_dependencies_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, List[str]]:
+        """Get dependencies map for jobs in an experiment/run
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier (None = current run)
+
+        Returns:
+            Dictionary mapping job identifiers to list of job IDs they depend on
+        """
+        # Use current run if not specified
+        if run_id is None:
+            run_id = self.get_current_run(experiment_id)
+            if run_id is None:
+                return {}
+
+        # Fetch all dependencies for this experiment/run
+        deps_map: Dict[str, List[str]] = {}
+        all_deps = JobDependenciesModel.select().where(
+            (JobDependenciesModel.experiment_id == experiment_id)
+            & (JobDependenciesModel.run_id == run_id)
+        )
+        for dep in all_deps:
+            if dep.job_id not in deps_map:
+                deps_map[dep.job_id] = []
+            deps_map[dep.job_id].append(dep.depends_on_job_id)
+
+        return deps_map
 
     def kill_job(self, job: MockJob, perform: bool = False) -> bool:
         """Kill a running job process

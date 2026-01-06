@@ -87,6 +87,7 @@ class JobExperimentUpdatedEvent(StateEvent):
     run_id: str
     job_id: str
     tags: Dict[str, str]  # Tags for this job in this experiment/run
+    depends_on: List[str]  # List of job IDs this job depends on
 
 
 @dataclass
@@ -233,6 +234,26 @@ class StateProvider(ABC):
 
         Returns:
             Dictionary mapping job identifiers to their tags dict
+        """
+        ...
+
+    @abstractmethod
+    def get_dependencies_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, List[str]]:
+        """Get dependencies map for jobs in an experiment/run
+
+        Dependencies are stored per (job_id, experiment_id, run_id) in JobDependenciesModel.
+        This method returns a map from job_id to list of job_ids it depends on.
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier (None = current run)
+
+        Returns:
+            Dictionary mapping job identifiers to list of job IDs they depend on
         """
         ...
 

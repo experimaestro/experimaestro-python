@@ -50,6 +50,15 @@ def job_create(job: Job):
     # Get experiment IDs from job.experiments list
     experiment_ids = [xp.workdir.name for xp in job.experiments]
 
+    # Get job dependencies (only JobDependency, not token dependencies)
+    from experimaestro.scheduler.jobs import JobDependency
+
+    depends_on = [
+        dep.origin.identifier
+        for dep in job.dependencies
+        if isinstance(dep, JobDependency)
+    ]
+
     return {
         "jobId": job.identifier,
         "taskId": job.name,
@@ -58,6 +67,7 @@ def job_create(job: Job):
         "tags": list(job.tags.items()),
         "progress": progress_state(job),
         "experimentIds": experiment_ids,  # Add experiment IDs
+        "dependsOn": depends_on,  # Add dependencies
     }
 
 

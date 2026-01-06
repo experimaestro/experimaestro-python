@@ -55,6 +55,7 @@ class RPCMethod(str, Enum):
     GET_ALL_JOBS = "get_all_jobs"
     GET_SERVICES = "get_services"
     GET_TAGS_MAP = "get_tags_map"
+    GET_DEPENDENCIES_MAP = "get_dependencies_map"
     KILL_JOB = "kill_job"
     CLEAN_JOB = "clean_job"
     GET_SYNC_INFO = "get_sync_info"

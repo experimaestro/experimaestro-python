@@ -771,6 +771,9 @@ class JobDetailView(Widget):
         self.current_experiment_id: Optional[str] = None
         self.job_data: Optional[dict] = None
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
+        self.dependencies_map: dict[
+            str, list[str]
+        ] = {}  # job_id -> [depends_on_job_ids]
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
@@ -782,6 +785,8 @@ class JobDetailView(Widget):
             yield Label("", id="job-times-label")
             yield Label("Tags:", classes="subsection-title")
             yield Label("", id="job-tags-label")
+            yield Label("Dependencies:", classes="subsection-title")
+            yield Label("", id="job-dependencies-label")
             yield Label("Progress:", classes="subsection-title")
             yield Label("", id="job-progress-label")
             yield Label("", id="job-logs-hint")
@@ -795,9 +800,12 @@ class JobDetailView(Widget):
 
     def set_job(self, job_id: str, experiment_id: str) -> None:
         """Set the job to display"""
-        # Load tags map if experiment changed
+        # Load tags map and dependencies map if experiment changed
         if experiment_id != self.current_experiment_id:
             self.tags_map = self.state_provider.get_tags_map(experiment_id)
+            self.dependencies_map = self.state_provider.get_dependencies_map(
+                experiment_id
+            )
         self.current_job_id = job_id
         self.current_experiment_id = experiment_id
         self.refresh_job_detail()
@@ -867,6 +875,25 @@ class JobDetailView(Widget):
         else:
             tags_text = "(no tags)"
         self.query_one("#job-tags-label", Label).update(tags_text)
+
+        # Dependencies are stored in JobDependenciesModel, accessed via dependencies_map
+        depends_on = self.dependencies_map.get(job.identifier, [])
+        if depends_on:
+            # Try to get task IDs for the dependency jobs
+            dep_texts = []
+            for dep_job_id in depends_on:
+                dep_job = self.state_provider.get_job(
+                    dep_job_id, self.current_experiment_id
+                )
+                if dep_job:
+                    dep_task_name = dep_job.task_id.split(".")[-1]
+                    dep_texts.append(f"{dep_task_name} ({dep_job_id[:8]}...)")
+                else:
+                    dep_texts.append(f"{dep_job_id[:8]}...")
+            dependencies_text = ", ".join(dep_texts)
+        else:
+            dependencies_text = "(no dependencies)"
+        self.query_one("#job-dependencies-label", Label).update(dependencies_text)
 
         # Progress
         progress_list = job.progress or []
@@ -1052,6 +1079,9 @@ class JobsTable(Vertical):
         self.filter_fn = None
         self.current_experiment: Optional[str] = None
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
+        self.dependencies_map: dict[
+            str, list[str]
+        ] = {}  # job_id -> [depends_on_job_ids]
 
     def compose(self) -> ComposeResult:
         yield SearchBar()
@@ -1314,11 +1344,15 @@ class JobsTable(Vertical):
     def set_experiment(self, experiment_id: Optional[str]) -> None:
         """Set the current experiment and refresh jobs"""
         self.current_experiment = experiment_id
-        # Load tags map for this experiment
+        # Load tags map and dependencies map for this experiment
         if experiment_id:
             self.tags_map = self.state_provider.get_tags_map(experiment_id)
+            self.dependencies_map = self.state_provider.get_dependencies_map(
+                experiment_id
+            )
         else:
             self.tags_map = {}
+            self.dependencies_map = {}
         self.refresh_jobs()
 
     def refresh_jobs(self) -> None:  # noqa: C901
@@ -2107,15 +2141,18 @@ class ExperimaestroUI(App):
                 services_list.refresh_services()
 
     def _handle_job_experiment_updated(self, event: JobExperimentUpdatedEvent) -> None:
-        """Handle JobExperimentUpdatedEvent - update tags and refresh job list"""
+        """Handle JobExperimentUpdatedEvent - update tags, dependencies, and refresh job list"""
         event_exp_id = event.experiment_id
 
-        # Update tags_map and refresh jobs for the affected experiment
+        # Update tags_map, dependencies_map, and refresh jobs for the affected experiment
         for jobs_table in self.query(JobsTable):
             if jobs_table.current_experiment == event_exp_id:
                 # Add the new job's tags to the cache
                 if event.tags:
                     jobs_table.tags_map[event.job_id] = event.tags
+                # Add the new job's dependencies to the cache
+                if event.depends_on:
+                    jobs_table.dependencies_map[event.job_id] = event.depends_on
                 # Refresh to show the new job
                 jobs_table.refresh_jobs()
 

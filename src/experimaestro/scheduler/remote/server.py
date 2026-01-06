@@ -83,6 +83,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_ALL_JOBS.value: self._handle_get_all_jobs,
             RPCMethod.GET_SERVICES.value: self._handle_get_services,
             RPCMethod.GET_TAGS_MAP.value: self._handle_get_tags_map,
+            RPCMethod.GET_DEPENDENCIES_MAP.value: self._handle_get_dependencies_map,
             RPCMethod.KILL_JOB.value: self._handle_kill_job,
             RPCMethod.CLEAN_JOB.value: self._handle_clean_job,
             RPCMethod.GET_SYNC_INFO.value: self._handle_get_sync_info,
@@ -364,6 +365,20 @@ class SSHStateProviderServer:
             raise TypeError("experiment_id is required")
 
         return self._state_provider.get_tags_map(
+            experiment_id=experiment_id,
+            run_id=params.get("run_id"),
+        )
+
+    def _handle_get_dependencies_map(self, params: Dict) -> dict[str, list[str]]:
+        """Handle get_dependencies_map request
+
+        Returns dependencies map for jobs in an experiment/run.
+        """
+        experiment_id = params.get("experiment_id")
+        if not experiment_id:
+            raise TypeError("experiment_id is required")
+
+        return self._state_provider.get_dependencies_map(
             experiment_id=experiment_id,
             run_id=params.get("run_id"),
         )

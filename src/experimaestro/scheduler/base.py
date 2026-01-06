@@ -13,7 +13,7 @@ from typing import (
 import asyncio
 
 from experimaestro.scheduler import experiment
-from experimaestro.scheduler.jobs import Job, JobState, JobError
+from experimaestro.scheduler.jobs import Job, JobState, JobError, JobDependency
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.interfaces import (
     BaseJob,
@@ -78,6 +78,9 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Tags map: (experiment_id, run_id) -> {job_id -> {tag_key: tag_value}}
         self._tags_map: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+
+        # Dependencies map: (experiment_id, run_id) -> {job_id -> [depends_on_job_ids]}
+        self._dependencies_map: dict[tuple[str, str], dict[str, list[str]]] = {}
 
         # List of jobs
         self.waitingjobs: Set[Job] = set()
@@ -321,6 +324,18 @@ class Scheduler(StateProvider, threading.Thread):
             if exp_run_key not in self._tags_map:
                 self._tags_map[exp_run_key] = {}
             self._tags_map[exp_run_key][job.identifier] = dict(job.tags)
+
+        # Update dependencies map for this experiment/run
+        exp_run_key = (xp.workdir.name, xp.run_id)
+        if exp_run_key not in self._dependencies_map:
+            self._dependencies_map[exp_run_key] = {}
+        depends_on_ids = [
+            dep.origin.identifier
+            for dep in job.dependencies
+            if isinstance(dep, JobDependency)
+        ]
+        if depends_on_ids:
+            self._dependencies_map[exp_run_key][job.identifier] = depends_on_ids
 
         # Set up dependencies
         for dependency in job.dependencies:
@@ -859,6 +874,26 @@ class Scheduler(StateProvider, threading.Thread):
 
         exp_run_key = (experiment_id, run_id)
         return self._tags_map.get(exp_run_key, {})
+
+    def get_dependencies_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> dict[str, list[str]]:
+        """Get dependencies map for jobs in an experiment/run
+
+        Returns a map from job_id to list of job_ids it depends on.
+        """
+        exp = self.experiments.get(experiment_id)
+        if not exp:
+            return {}
+
+        # Use current run if not specified
+        if run_id is None:
+            run_id = exp.run_id
+
+        exp_run_key = (experiment_id, run_id)
+        return self._dependencies_map.get(exp_run_key, {})
 
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
         """Kill a running job
