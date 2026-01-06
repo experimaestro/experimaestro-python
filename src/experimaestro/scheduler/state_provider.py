@@ -76,6 +76,20 @@ class JobUpdatedEvent(StateEvent):
 
 
 @dataclass
+class JobExperimentUpdatedEvent(StateEvent):
+    """Event fired when a job is added to an experiment/run
+
+    This event signals that a job has been associated with an experiment.
+    UIs can use this to update their job lists for the affected experiment.
+    """
+
+    experiment_id: str
+    run_id: str
+    job_id: str
+    tags: Dict[str, str]  # Tags for this job in this experiment/run
+
+
+@dataclass
 class ServiceUpdatedEvent(StateEvent):
     """Event fired when a service is added or updated"""
 

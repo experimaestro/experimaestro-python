@@ -48,6 +48,7 @@ from experimaestro.scheduler.state_provider import (
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
     JobUpdatedEvent,
+    JobExperimentUpdatedEvent,
     ServiceUpdatedEvent,
     MockJob,
     MockExperiment,
@@ -1076,8 +1077,35 @@ class DbStateProvider(OfflineStateProvider):
             run_id=run_id,
         ).on_conflict_ignore().execute()
 
-        # Update tags (run-scoped)
-        self.update_job_tags(job.identifier, experiment_id, run_id, job.tags)
+        # Update tags (run-scoped) - delete existing and insert new
+        JobTagModel.delete().where(
+            (JobTagModel.job_id == job.identifier)
+            & (JobTagModel.experiment_id == experiment_id)
+            & (JobTagModel.run_id == run_id)
+        ).execute()
+
+        if job.tags:
+            tag_records = [
+                {
+                    "job_id": job.identifier,
+                    "experiment_id": experiment_id,
+                    "run_id": run_id,
+                    "tag_key": key,
+                    "tag_value": value,
+                }
+                for key, value in job.tags.items()
+            ]
+            JobTagModel.insert_many(tag_records).execute()
+
+        # Notify that a job was added to this experiment (with its tags)
+        self._notify_listeners(
+            JobExperimentUpdatedEvent(
+                experiment_id=experiment_id,
+                run_id=run_id,
+                job_id=job.identifier,
+                tags=job.tags or {},
+            )
+        )
 
         # Register partials for all declared subparameters
         subparameters = job.type._subparameters
@@ -1173,57 +1201,6 @@ class DbStateProvider(OfflineStateProvider):
                 run_id=run_id,
                 job_id=job.identifier,
             )
-        )
-
-    @_with_db_context
-    def update_job_tags(
-        self, job_id: str, experiment_id: str, run_id: str, tags_dict: Dict[str, str]
-    ):
-        """Update tags for a job (run-scoped - fixes GH #128)
-
-        Deletes existing tags for this (job_id, experiment_id, run_id) combination
-        and inserts new tags. This ensures that the same job in different runs can
-        have different tags.
-
-        Args:
-            job_id: Job identifier
-            experiment_id: Experiment identifier
-            run_id: Run identifier
-            tags_dict: Dictionary of tag key-value pairs
-
-        Raises:
-            RuntimeError: If in read-only mode
-        """
-        if self.read_only:
-            raise RuntimeError("Cannot update tags in read-only mode")
-
-        # Delete existing tags for this job/experiment/run
-        JobTagModel.delete().where(
-            (JobTagModel.job_id == job_id)
-            & (JobTagModel.experiment_id == experiment_id)
-            & (JobTagModel.run_id == run_id)
-        ).execute()
-
-        # Insert new tags
-        if tags_dict:
-            tag_records = [
-                {
-                    "job_id": job_id,
-                    "experiment_id": experiment_id,
-                    "run_id": run_id,
-                    "tag_key": key,
-                    "tag_value": value,
-                }
-                for key, value in tags_dict.items()
-            ]
-            JobTagModel.insert_many(tag_records).execute()
-
-        logger.debug(
-            "Updated tags for job %s (experiment=%s, run=%s): %s",
-            job_id,
-            experiment_id,
-            run_id,
-            tags_dict,
         )
 
     @_with_db_context

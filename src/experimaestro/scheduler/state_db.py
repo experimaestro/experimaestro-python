@@ -35,8 +35,10 @@ import fasteners
 logger = logging.getLogger("xpm.state_db")
 
 # Database schema version - increment when schema changes require resync
-# Version 4: Removed locator field from JobModel (redundant with job_id)
-CURRENT_DB_VERSION = 4
+# - Version 4: Removed locator field from JobModel (redundant with job_id)
+# - Version 5: Changed JobTagModel to be experiment-run-scoped (fixes GH #128)
+# and introduced JobExperimentsModel for job-experiment/run membership tracking
+CURRENT_DB_VERSION = 5
 
 
 class DatabaseVersionError(Exception):

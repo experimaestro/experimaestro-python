@@ -31,6 +31,7 @@ from experimaestro.scheduler.state_provider import (
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
     JobUpdatedEvent,
+    JobExperimentUpdatedEvent,
     ServiceUpdatedEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
@@ -2060,53 +2061,75 @@ class ExperimaestroUI(App):
             self.call_from_thread(self._handle_state_event, event)
 
     def _handle_state_event(self, event: StateEvent) -> None:
-        """Process state event on the main thread"""
-        # Use query() instead of query_one() to avoid NoMatches exception
-        # when widgets aren't visible yet
-        jobs_tables = self.query(JobsTable)
-        services_lists = self.query(ServicesList)
+        """Process state event on the main thread using handler dispatch"""
+        self.log.debug(f"State event {type(event).__name__}")
 
-        self.log.debug(
-            f"State event {type(event).__name__}, "
-            f"JobsTable found: {len(jobs_tables)}, ServicesList found: {len(services_lists)}"
-        )
+        # Dispatch to handler if one exists for this event type
+        if handler := self.STATE_EVENT_HANDLERS.get(type(event)):
+            handler(self, event)
 
-        if isinstance(event, ExperimentUpdatedEvent):
-            # Refresh experiments list
-            for exp_list in self.query(ExperimentsList):
-                exp_list.refresh_experiments()
+    def _handle_experiment_updated(self, event: ExperimentUpdatedEvent) -> None:
+        """Handle ExperimentUpdatedEvent - refresh experiments list"""
+        for exp_list in self.query(ExperimentsList):
+            exp_list.refresh_experiments()
 
-        elif isinstance(event, JobUpdatedEvent):
-            event_exp_id = event.experiment_id
+    def _handle_job_updated(self, event: JobUpdatedEvent) -> None:
+        """Handle JobUpdatedEvent - refresh job display"""
+        event_exp_id = event.experiment_id
 
-            # Refresh jobs table if we're viewing the affected experiment
-            for jobs_table in jobs_tables:
-                if jobs_table.current_experiment == event_exp_id:
-                    jobs_table.refresh_jobs()
+        # Refresh jobs table if we're viewing the affected experiment
+        for jobs_table in self.query(JobsTable):
+            if jobs_table.current_experiment == event_exp_id:
+                jobs_table.refresh_jobs()
 
-            # Also refresh job detail if we're viewing the affected job
-            for job_detail_container in self.query("#job-detail-container"):
-                if not job_detail_container.has_class("hidden"):
-                    for job_detail_view in self.query(JobDetailView):
-                        if job_detail_view.current_job_id == event.job_id:
-                            job_detail_view.refresh_job_detail()
+        # Also refresh job detail if we're viewing the affected job
+        for job_detail_container in self.query("#job-detail-container"):
+            if not job_detail_container.has_class("hidden"):
+                for job_detail_view in self.query(JobDetailView):
+                    if job_detail_view.current_job_id == event.job_id:
+                        job_detail_view.refresh_job_detail()
 
-            # Also update the experiment stats in the experiments list
-            for exp_list in self.query(ExperimentsList):
-                exp_list.refresh_experiments()
+        # Also update the experiment stats in the experiments list
+        for exp_list in self.query(ExperimentsList):
+            exp_list.refresh_experiments()
 
-        elif isinstance(event, RunUpdatedEvent):
-            # Refresh experiments list to show updated run info
-            for exp_list in self.query(ExperimentsList):
-                exp_list.refresh_experiments()
+    def _handle_run_updated(self, event: RunUpdatedEvent) -> None:
+        """Handle RunUpdatedEvent - refresh experiments list"""
+        for exp_list in self.query(ExperimentsList):
+            exp_list.refresh_experiments()
 
-        elif isinstance(event, ServiceUpdatedEvent):
-            event_exp_id = event.experiment_id
+    def _handle_service_updated(self, event: ServiceUpdatedEvent) -> None:
+        """Handle ServiceUpdatedEvent - refresh services list"""
+        event_exp_id = event.experiment_id
 
-            # Refresh services list if we're viewing the affected experiment
-            for services_list in services_lists:
-                if services_list.current_experiment == event_exp_id:
-                    services_list.refresh_services()
+        for services_list in self.query(ServicesList):
+            if services_list.current_experiment == event_exp_id:
+                services_list.refresh_services()
+
+    def _handle_job_experiment_updated(self, event: JobExperimentUpdatedEvent) -> None:
+        """Handle JobExperimentUpdatedEvent - update tags and refresh job list"""
+        event_exp_id = event.experiment_id
+
+        # Update tags_map and refresh jobs for the affected experiment
+        for jobs_table in self.query(JobsTable):
+            if jobs_table.current_experiment == event_exp_id:
+                # Add the new job's tags to the cache
+                if event.tags:
+                    jobs_table.tags_map[event.job_id] = event.tags
+                # Refresh to show the new job
+                jobs_table.refresh_jobs()
+
+        # Also update experiment stats
+        for exp_list in self.query(ExperimentsList):
+            exp_list.refresh_experiments()
+
+    STATE_EVENT_HANDLERS = {
+        ExperimentUpdatedEvent: _handle_experiment_updated,
+        JobUpdatedEvent: _handle_job_updated,
+        RunUpdatedEvent: _handle_run_updated,
+        ServiceUpdatedEvent: _handle_service_updated,
+        JobExperimentUpdatedEvent: _handle_job_experiment_updated,
+    }
 
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
         """Handle experiment selection - show jobs/services tabs"""
