@@ -368,6 +368,17 @@ def experiments_cli(  # noqa: C901
         import threading
         from experimaestro.tui import ExperimentTUI
 
+        # Initialize multiprocessing resource tracker before Textual takes over
+        # terminal file descriptors. This prevents "bad value(s) in fds_to_keep"
+        # errors when code in the background thread (e.g., tqdm in torchvision)
+        # tries to use multiprocessing.
+        try:
+            from multiprocessing import resource_tracker
+
+            resource_tracker.ensure_running()
+        except Exception:
+            pass  # Best effort - may not be needed on all systems
+
         xp_holder = {"xp": None}
         exception_holder = {"exception": None}
         xp_ready = threading.Event()
