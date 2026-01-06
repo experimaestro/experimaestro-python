@@ -98,35 +98,6 @@ def read_services_json(exp_dir: Path) -> Dict[str, Dict]:
     return {}
 
 
-def read_informations_json(exp_dir: Path) -> Dict:
-    """Read informations.json file containing experiment metadata
-
-    Args:
-        exp_dir: Path to the experiment directory
-
-    Returns:
-        Dictionary with experiment informations including:
-        - runs: Dict[run_id, {hostname, started_at}]
-    """
-    info_path = exp_dir / "informations.json"
-
-    if not info_path.exists():
-        logger.debug("No informations.json found in %s", exp_dir)
-        return {}
-
-    try:
-        with info_path.open("r") as f:
-            info_data = json.load(f)
-            logger.debug("Read informations.json from %s", exp_dir)
-            return info_data
-    except json.JSONDecodeError as e:
-        logger.warning("Failed to parse informations.json: %s", e)
-    except Exception as e:
-        logger.warning("Failed to read informations.json from %s: %s", info_path, e)
-
-    return {}
-
-
 def acquire_sync_lock(
     workspace_path: Path, blocking: bool = True
 ) -> Optional[fasteners.InterProcessLock]:
@@ -581,9 +552,10 @@ def sync_workspace_from_disk(  # noqa: C901
                 # Read services.json to get services for this experiment
                 service_records = read_services_json(exp_dir)
 
-                # Read informations.json for run metadata (hostname, etc.)
-                info_data = read_informations_json(exp_dir)
-                runs_info = info_data.get("runs", {})
+                # Read environment.json for run metadata (hostname, etc.)
+                from experimaestro.utils.environment import ExperimentEnvironment
+
+                env = ExperimentEnvironment.load(exp_dir / "environment.json")
 
                 if write_mode:
                     # Ensure experiment exists in database
@@ -610,11 +582,10 @@ def sync_workspace_from_disk(  # noqa: C901
                     current_run_id = existing_runs[0].run_id
                     runs_found += len(existing_runs)
 
-                    # Update hostname from informations.json if available
+                    # Update hostname from environment.json if available
                     if write_mode:
                         for run in existing_runs:
-                            run_info = runs_info.get(run.run_id, {})
-                            hostname = run_info.get("hostname")
+                            hostname = env.run.hostname if env.run else None
                             if hostname and not run.hostname:
                                 ExperimentRunModel.update(hostname=hostname).where(
                                     (ExperimentRunModel.experiment_id == experiment_id)
@@ -625,9 +596,8 @@ def sync_workspace_from_disk(  # noqa: C901
                     current_run_id = "initial"
                     runs_found += 1
 
-                    # Get hostname from informations.json if available
-                    run_info = runs_info.get(current_run_id, {})
-                    hostname = run_info.get("hostname")
+                    # Get hostname from environment.json if available
+                    hostname = env.run.hostname if env.run else None
 
                     if write_mode:
                         ExperimentRunModel.insert(

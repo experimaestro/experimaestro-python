@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -99,6 +100,7 @@ class experiment:
         run_mode: Optional[RunMode] = None,
         launcher=None,
         register_signals: bool = True,
+        project_paths: Optional[list[Path]] = None,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -118,6 +120,9 @@ class experiment:
 
         :param register_signals: Whether to register signal handlers (default: True).
             Set to False when running in a background thread.
+
+        :param project_paths: Paths to the project files (for git info). If not
+            provided, will be inferred from the caller's location.
         """
 
         from experimaestro.scheduler import Listener, Scheduler
@@ -139,6 +144,22 @@ class experiment:
         self.services: Dict[str, Service] = {}
         self._job_listener: Optional[Listener] = None
         self._register_signals = register_signals
+
+        # Capture project paths for git info
+        if project_paths is not None:
+            self._project_paths = project_paths
+        else:
+            # Fall back to caller's file path
+            self._project_paths = []
+            try:
+                # Go up the stack to find the first frame outside this module
+                for frame_info in inspect.stack():
+                    frame_file = frame_info.filename
+                    if "experimaestro" not in frame_file:
+                        self._project_paths = [Path(frame_file).resolve().parent]
+                        break
+            except Exception:
+                pass
 
         # Get configuration settings
 
@@ -366,17 +387,53 @@ class experiment:
 
     def __enter__(self):
         from .dynamic_outputs import TaskOutputsWorker
-        from experimaestro.utils.environment import save_environment_info
+        from experimaestro.utils.environment import (
+            ExperimentEnvironment,
+            ExperimentRunInfo,
+        )
 
-        if self.workspace.run_mode != RunMode.DRY_RUN:
+        # Only lock and save environment in NORMAL mode
+        if self.workspace.run_mode == RunMode.NORMAL:
             logger.info("Locking experiment %s", self.xplockpath)
-            self.xplock = self.workspace.connector.lock(self.xplockpath, 0).__enter__()
+            lock = self.workspace.connector.lock(self.xplockpath, 0)
+
+            # Try non-blocking first to check if lock is held
+            if not lock.acquire(blocking=False):
+                # Lock is held - read hostname info from environment.json
+                env_path = self.workdir / "environment.json"
+                env = ExperimentEnvironment.load(env_path)
+                hostname = env.run.hostname if env.run else None
+                holder_info = f" (held by {hostname})" if hostname else ""
+                logger.warning(
+                    "Experiment is locked%s, waiting for lock to be released...",
+                    holder_info,
+                )
+                # Now wait for the lock
+                lock.acquire(blocking=True)
+
+            self.xplock = lock
             logger.info("Experiment locked")
 
-        # Capture and save environment info (git info for editable packages + all package versions)
-        if self.workspace.run_mode == RunMode.NORMAL:
+            # Capture and save environment info
+            from experimaestro.utils.git import get_git_info
+            from experimaestro.utils.environment import get_current_environment
+
             env_info_path = self.workdir / "environment.json"
-            save_environment_info(env_info_path)
+            env = get_current_environment()
+
+            # Capture project git info from project paths
+            for project_path in self._project_paths:
+                project_git = get_git_info(project_path)
+                if project_git:
+                    env.projects.append(project_git)
+                    # Warn if repository is dirty
+                    if project_git.get("dirty"):
+                        logger.warning(
+                            "Project repository has uncommitted changes: %s",
+                            project_git.get("path", project_path),
+                        )
+
+            env.save(env_info_path)
 
         # Move old jobs into "jobs.bak"
         if self.workspace.run_mode == RunMode.NORMAL:
@@ -431,6 +488,18 @@ class experiment:
         if is_normal_mode and self.state_provider is not None:
             self.state_provider.ensure_experiment(experiment_id)
             self.run_id = self.state_provider.create_run(experiment_id)
+
+            # Add run info to environment.json
+            import socket
+            from datetime import datetime
+
+            env_path = self.workdir / "environment.json"
+            env = ExperimentEnvironment.load(env_path)
+            env.run = ExperimentRunInfo(
+                hostname=socket.gethostname(),
+                started_at=datetime.now().isoformat(),
+            )
+            env.save(env_path)
 
             # Add database listener to update job state in database
             self._db_listener = DatabaseListener(

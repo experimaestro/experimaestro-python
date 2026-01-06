@@ -604,27 +604,6 @@ class DbStateProvider(OfflineStateProvider):
             hostname=hostname,
         ).execute()
 
-        # Persist to disk in experiment folder (informations.json)
-        exp_dir = self.workspace_path / "xp" / experiment_id
-        exp_dir.mkdir(parents=True, exist_ok=True)
-        info_file = exp_dir / "informations.json"
-
-        # Merge with existing data (may have multiple runs)
-        info_data: Dict = {}
-        if info_file.exists():
-            try:
-                info_data = json.loads(info_file.read_text())
-            except json.JSONDecodeError:
-                logger.warning("Could not parse existing informations.json")
-
-        if "runs" not in info_data:
-            info_data["runs"] = {}
-        info_data["runs"][run_id] = {
-            "hostname": hostname,
-            "started_at": started_at.isoformat(),
-        }
-        info_file.write_text(json.dumps(info_data, indent=2))
-
         # Update experiment's current_run_id and updated_at
         now = datetime.now()
         ExperimentModel.update(

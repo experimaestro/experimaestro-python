@@ -321,6 +321,13 @@ def experiments_cli(  # noqa: C901
         str(workdir.resolve()),
     )
 
+    # Determine project path for git info
+    project_paths = []
+    if xp_file:
+        project_paths.append(xp_file.resolve().parent)
+    elif hasattr(mod, "__file__") and mod.__file__:
+        project_paths.append(Path(mod.__file__).resolve().parent)
+
     # Define the experiment execution function
     def run_experiment_code(xp_holder=None, xp_ready_event=None, register_signals=True):
         """Run the experiment code - optionally storing xp in xp_holder"""
@@ -332,6 +339,7 @@ def experiments_cli(  # noqa: C901
                 port=port,
                 run_mode=run_mode,
                 register_signals=register_signals,
+                project_paths=project_paths,
             ) as xp:
                 if xp_holder is not None:
                     xp_holder["xp"] = xp

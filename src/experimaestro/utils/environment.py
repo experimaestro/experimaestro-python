@@ -4,17 +4,103 @@ This module provides functions to capture the full Python environment state
 when experiments are run, including:
 - Git information for editable (development) packages
 - Version information for all installed Python packages
+- Run information (hostname, start time) for experiment runs
 """
 
+import json
 import sys
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
+
 from importlib.metadata import distributions
 
 from experimaestro.utils.git import get_git_info
 
 logger = logging.getLogger("xpm.environment")
+
+
+@dataclass
+class ExperimentRunInfo:
+    """Information about a single experiment run"""
+
+    hostname: Optional[str] = None
+    started_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "hostname": self.hostname,
+            "started_at": self.started_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExperimentRunInfo":
+        """Create from dictionary"""
+        return cls(
+            hostname=data.get("hostname"),
+            started_at=data.get("started_at"),
+        )
+
+
+@dataclass
+class ExperimentEnvironment:
+    """Experiment environment stored in environment.json
+
+    This combines Python environment info with experiment run metadata.
+    """
+
+    python_version: Optional[str] = None
+    packages: Dict[str, str] = field(default_factory=dict)
+    editable_packages: Dict[str, Any] = field(default_factory=dict)
+    run: Optional[ExperimentRunInfo] = None
+    projects: list[Dict[str, Any]] = field(
+        default_factory=list
+    )  # Git info for projects
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        result: Dict[str, Any] = {
+            "python_version": self.python_version,
+            "packages": self.packages,
+            "editable_packages": self.editable_packages,
+        }
+        if self.run is not None:
+            result["run"] = self.run.to_dict()
+        if self.projects:
+            result["projects"] = self.projects
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExperimentEnvironment":
+        """Create from dictionary"""
+        run_data = data.get("run")
+        run = ExperimentRunInfo.from_dict(run_data) if run_data else None
+        return cls(
+            python_version=data.get("python_version"),
+            packages=data.get("packages", {}),
+            editable_packages=data.get("editable_packages", {}),
+            run=run,
+            projects=data.get("projects", []),
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> "ExperimentEnvironment":
+        """Load from a JSON file"""
+        if not path.exists():
+            return cls()
+        try:
+            with path.open("r") as f:
+                data = json.load(f)
+            return cls.from_dict(data)
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning("Failed to read environment.json: %s", e)
+            return cls()
+
+    def save(self, path: Path) -> None:
+        """Save to a JSON file"""
+        path.write_text(json.dumps(self.to_dict(), indent=2))
 
 
 def get_environment_info() -> dict:
@@ -110,39 +196,30 @@ def get_editable_packages_git_info() -> dict:
     return editable_packages
 
 
-def save_environment_info(path: Path) -> dict:
-    """Save environment information to a JSON file
-
-    Args:
-        path: Path to save the environment info JSON file
+def get_current_environment() -> ExperimentEnvironment:
+    """Get current environment as an ExperimentEnvironment object
 
     Returns:
-        The environment info dictionary that was saved
+        ExperimentEnvironment with current Python version, packages, etc.
     """
-    import json
+    current_info = get_environment_info()
+    return ExperimentEnvironment(
+        python_version=current_info["python_version"],
+        packages=current_info["packages"],
+        editable_packages=current_info["editable_packages"],
+    )
 
-    env_info = get_environment_info()
-    path.write_text(json.dumps(env_info, indent=2))
-    logger.info("Saved environment info to %s", path)
-    return env_info
 
-
-def load_environment_info(path: Path) -> Optional[dict]:
+def load_environment_info(path: Path) -> Optional[ExperimentEnvironment]:
     """Load environment information from a JSON file
 
     Args:
         path: Path to the environment info JSON file
 
     Returns:
-        Environment info dictionary if file exists and is valid, None otherwise
+        ExperimentEnvironment if file exists and is valid, None otherwise
     """
-    import json
-
     if not path.exists():
         return None
 
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Error loading environment info from %s: %s", path, e)
-        return None
+    return ExperimentEnvironment.load(path)
