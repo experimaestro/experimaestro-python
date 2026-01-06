@@ -18,6 +18,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
 
+from experimaestro.utils.fswatcher import (
+    FSEventsMarkerWorkaround,
+    DB_CHANGE_MARKER,
+)
+
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.api import ObservedWatch
 
@@ -269,26 +274,37 @@ class _DatabaseChangeDetector:
                     query = query.where(ExperimentModel.updated_at > since)
 
                 for exp in query:
-                    self.state_provider._notify_listeners(
+                    self.state_provider._notify_state_listeners(
                         ExperimentUpdatedEvent(
                             experiment_id=exp.experiment_id,
                         )
                     )
 
-            # Query for changed jobs
-            with self.state_provider.workspace_db.bind_ctx([JobModel]):
+            # Query for changed jobs - need to join with JobExperimentsModel
+            # to get experiment_id and run_id
+            with self.state_provider.workspace_db.bind_ctx(
+                [JobModel, JobExperimentsModel]
+            ):
                 query = JobModel.select()
                 if since:
                     query = query.where(JobModel.updated_at > since)
 
                 for job in query:
-                    self.state_provider._notify_listeners(
-                        JobUpdatedEvent(
-                            experiment_id=job.experiment_id,
-                            run_id=job.run_id,
-                            job_id=job.job_id,
+                    # Get experiment info from JobExperimentsModel
+                    job_experiments = list(
+                        JobExperimentsModel.select().where(
+                            JobExperimentsModel.job_id == job.job_id
                         )
                     )
+
+                    for job_exp in job_experiments:
+                        self.state_provider._notify_state_listeners(
+                            JobUpdatedEvent(
+                                experiment_id=job_exp.experiment_id,
+                                run_id=job_exp.run_id,
+                                job_id=job.job_id,
+                            )
+                        )
 
         except Exception as e:
             logger.warning("Error detecting database changes: %s", e)
@@ -301,12 +317,24 @@ class _DatabaseFileHandler(FileSystemEventHandler):
     Does not block - all processing happens in the detector thread.
     """
 
-    def __init__(self, change_detector: _DatabaseChangeDetector):
+    def __init__(
+        self,
+        change_detector: _DatabaseChangeDetector,
+        fsevents_workaround: Optional[FSEventsMarkerWorkaround] = None,
+    ):
         super().__init__()
         self.change_detector = change_detector
+        self.fsevents_workaround = fsevents_workaround
 
     def on_any_event(self, event) -> None:
         """Handle all file system events"""
+        logger.debug(
+            "File watcher received event: %s %s (is_dir=%s)",
+            event.event_type,
+            event.src_path,
+            event.is_directory,
+        )
+
         # Only handle modification-like events
         if event.event_type not in ("modified", "created", "moved"):
             return
@@ -314,14 +342,21 @@ class _DatabaseFileHandler(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        # Only react to database files
+        # Only react to database files or the change marker
         path = Path(event.src_path)
-        if path.name not in ("workspace.db", "workspace.db-wal"):
+        if path.name not in ("workspace.db", "workspace.db-wal", DB_CHANGE_MARKER):
             return
 
         logger.debug(
-            "Database file changed: %s (event: %s)", path.name, event.event_type
+            "Database file changed: %s (event: %s) - signaling detector",
+            path.name,
+            event.event_type,
         )
+
+        # If we detected a real DB file change (not marker), cancel the workaround
+        # since FSEvents worked for this change
+        if path.name != DB_CHANGE_MARKER and self.fsevents_workaround:
+            self.fsevents_workaround.cancel()
 
         # Signal the detector thread (non-blocking)
         self.change_detector.signal_change()
@@ -414,6 +449,7 @@ class DbStateProvider(OfflineStateProvider):
         read_only: bool = False,
         sync_on_start: bool = False,
         sync_interval_minutes: int = 5,
+        standalone: bool = False,
     ):
         """Initialize database state provider (called by get_instance())
 
@@ -422,6 +458,9 @@ class DbStateProvider(OfflineStateProvider):
             read_only: If True, database is in read-only mode
             sync_on_start: If True, sync from disk on initialization
             sync_interval_minutes: Minimum interval between syncs (default: 5)
+            standalone: If True, behave as if no scheduler exists (for external
+                monitoring). When standalone, file watcher auto-starts on
+                add_listener.
         """
         # Initialize parent (service cache and state listeners)
         super().__init__()
@@ -435,6 +474,7 @@ class DbStateProvider(OfflineStateProvider):
         self.workspace_path = workspace_path
         self._read_only = read_only
         self.sync_interval_minutes = sync_interval_minutes
+        self._standalone = standalone
 
         # Additional listeners for push notifications (legacy interface)
         self._listeners: Set[StateListener] = set()
@@ -444,6 +484,7 @@ class DbStateProvider(OfflineStateProvider):
         self._change_detector: Optional[_DatabaseChangeDetector] = None
         self._db_file_handler: Optional[_DatabaseFileHandler] = None
         self._db_file_watch: Optional[ObservedWatch] = None
+        self._fsevents_workaround: Optional[FSEventsMarkerWorkaround] = None
 
         # Check and update workspace version
         from .workspace import WORKSPACE_VERSION
@@ -500,6 +541,16 @@ class DbStateProvider(OfflineStateProvider):
         )
         self._db_dir = experimaestro_dir  # Store for file watcher
 
+        # Initialize FSEvents workaround for macOS (only for write mode)
+        # Use shorter interval for testing via environment variable
+        import os
+
+        marker_interval = float(os.environ.get("XPM_FSEVENTS_MARKER_INTERVAL", "1.0"))
+        if not read_only:
+            self._fsevents_workaround = FSEventsMarkerWorkaround(
+                experimaestro_dir, debounce_seconds=marker_interval
+            )
+
         # Sync from disk if needed due to schema version change
         if needs_resync and not read_only:
             logger.info(
@@ -537,6 +588,32 @@ class DbStateProvider(OfflineStateProvider):
     def read_only(self) -> bool:
         """Whether this provider is read-only"""
         return self._read_only
+
+    def add_listener(self, listener: StateListener) -> None:
+        """Register a listener for state change events
+
+        When not in a scheduler context (or standalone mode), automatically
+        starts the file watcher to detect database changes from other processes.
+
+        Args:
+            listener: Callback function that receives StateEvent objects
+        """
+        # Call parent to register the listener
+        super().add_listener(listener)
+
+        # Auto-start file watcher if not in a scheduler context
+        # or if standalone mode is enabled
+        if self._db_file_watch is None:
+            from experimaestro.scheduler.base import Scheduler
+
+            if self._standalone or not Scheduler.has_instance():
+                logger.info(
+                    "Starting file watcher for cross-process monitoring "
+                    "(standalone=%s, scheduler=%s)",
+                    self._standalone,
+                    Scheduler.has_instance(),
+                )
+                self._start_file_watcher()
 
     # Experiment management methods
 
@@ -2087,6 +2164,10 @@ class DbStateProvider(OfflineStateProvider):
         # Stop file watcher if running
         self._stop_file_watcher()
 
+        # Stop FSEvents workaround if running
+        if self._fsevents_workaround:
+            self._fsevents_workaround.stop()
+
         # Close database connection
         if hasattr(self, "workspace_db") and self.workspace_db is not None:
             from .state_db import close_workspace_database
@@ -2113,6 +2194,10 @@ class DbStateProvider(OfflineStateProvider):
         Args:
             event: State change event to broadcast
         """
+        # Schedule FSEvents workaround marker touch (macOS only, rate-limited)
+        if self._fsevents_workaround:
+            self._fsevents_workaround.schedule_touch()
+
         # Notify legacy listeners
         with self._listeners_lock:
             listeners = list(self._listeners)
@@ -2139,7 +2224,10 @@ class DbStateProvider(OfflineStateProvider):
         self._change_detector.start()
 
         # Create the file handler that signals the detector
-        self._db_file_handler = _DatabaseFileHandler(self._change_detector)
+        self._db_file_handler = _DatabaseFileHandler(
+            self._change_detector,
+            fsevents_workaround=self._fsevents_workaround,
+        )
         self._db_file_watch = ipcom().fswatch(
             self._db_file_handler,
             self._db_dir,

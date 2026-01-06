@@ -504,6 +504,7 @@ def test_mockjob_serialization_roundtrip(tmp_path: Path):
     """Test MockJob serialization and deserialization round-trip"""
     from experimaestro.scheduler.state_provider import MockJob
     from experimaestro.scheduler.interfaces import BaseJob
+    from experimaestro.notifications import LevelInformation
 
     workspace_path = tmp_path / "workspace"
     workspace_path.mkdir()
@@ -518,7 +519,7 @@ def test_mockjob_serialization_roundtrip(tmp_path: Path):
         submittime=1234567890.0,
         starttime=1234567891.0,
         endtime=None,
-        progress=[{"level": 0, "progress": 0.5, "desc": "halfway"}],
+        progress=[LevelInformation(level=0, progress=0.5, desc="halfway")],
         updated_at="2024-01-01T00:00:00",
         exit_code=None,
         retry_count=2,

@@ -354,10 +354,25 @@ def test_scheduler_db_tags_consistency(tmp_path: Path):
 
 
 class PipedServerClient:
-    """Helper class that connects server and client via pipes"""
+    """Helper class that connects server and client via pipes
 
-    def __init__(self, workspace_path: Path):
+    This simulates an external process monitoring the workspace by:
+    - Creating DbStateProvider directly (optionally via singleton)
+    - Using standalone=True to enable file watching (when using direct instantiation)
+    - Reading from the same database as the main experiment process
+    """
+
+    def __init__(self, workspace_path: Path, *, use_singleton: bool = True):
+        """Initialize the piped server client.
+
+        Args:
+            workspace_path: Path to the workspace directory
+            use_singleton: If True, use DbStateProvider.get_instance() (default).
+                          If False, create a new DbStateProvider directly (for
+                          simulating true cross-process monitoring).
+        """
         self.workspace_path = workspace_path
+        self._use_singleton = use_singleton
 
         # Create pipes for bidirectional communication
         # Server reads from server_in, writes to server_out
@@ -367,6 +382,7 @@ class PipedServerClient:
 
         self._server = None
         self._server_thread = None
+        self._state_provider = None
 
     def start_server(self):
         """Start the server in a background thread"""
@@ -374,9 +390,18 @@ class PipedServerClient:
         from experimaestro.scheduler.db_state_provider import DbStateProvider
 
         # Initialize state provider for the server
-        self._state_provider = DbStateProvider.get_instance(
-            self.workspace_path, read_only=True, sync_on_start=False
-        )
+        if self._use_singleton:
+            self._state_provider = DbStateProvider.get_instance(
+                self.workspace_path, read_only=True, sync_on_start=False
+            )
+        else:
+            # Direct instantiation - simulates an external process
+            self._state_provider = DbStateProvider(
+                workspace_path=self.workspace_path,
+                read_only=True,
+                sync_on_start=False,
+                standalone=True,  # Enable file watching like an external monitor
+            )
 
         self._server = SSHStateProviderServer(self.workspace_path)
         self._server._state_provider = self._state_provider
@@ -690,3 +715,325 @@ def test_all_providers_return_same_dependencies(tmp_path: Path):
 
     assert scheduler_counts == db_counts, "Scheduler and DbStateProvider should match"
     assert db_counts == ssh_counts, "DbStateProvider and SSH server should match"
+
+
+# =============================================================================
+# Cross-Process Monitoring Tests (DbStateProvider as external monitor)
+# =============================================================================
+
+
+def test_separate_db_provider_detects_changes(tmp_path: Path):
+    """Test that a separate DbStateProvider can detect database changes.
+
+    This simulates monitoring an experiment from another process:
+    1. Start an experiment (which creates the database)
+    2. Create a separate DbStateProvider directly (bypassing singleton)
+    3. Register a listener on it
+    4. Submit jobs (modifies the database)
+    5. Trigger change detection (simulating file watcher)
+    6. Verify the listener receives events
+
+    This tests cross-process consistency since the separate provider
+    doesn't share state with the experiment's DbStateProvider.
+    """
+    from experimaestro.scheduler.db_state_provider import (
+        DbStateProvider,
+        _DatabaseChangeDetector,
+    )
+    from experimaestro.scheduler.state_provider import (
+        ExperimentUpdatedEvent,
+        JobUpdatedEvent,
+    )
+    import threading
+
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+
+    # Track received events
+    received_events = []
+    events_lock = threading.Lock()
+
+    def event_listener(event):
+        with events_lock:
+            received_events.append(event)
+
+    with TemporaryExperiment("external_monitor_test", maxwait=0, workdir=workdir):
+        # Now that experiment is started, database exists
+        # Create a separate DbStateProvider directly (bypassing singleton)
+        # This simulates another process monitoring the same workspace
+        separate_provider = DbStateProvider(
+            workspace_path=workdir,
+            read_only=True,  # Read-only since we're just monitoring
+            sync_on_start=False,
+        )
+
+        # Register listener on the separate provider
+        separate_provider.add_listener(event_listener)
+
+        try:
+            # Submit tasks (this modifies the database)
+            producer = ProducerTask.C(value=42)
+            producer.submit()
+
+            consumer = ConsumerTask.C(producer=producer)
+            consumer.submit()
+
+            # Simulate what the file watcher would do:
+            # Create a change detector and trigger it manually
+            change_detector = _DatabaseChangeDetector(separate_provider)
+            change_detector._detect_and_notify_changes()
+
+            # Verify we received events
+            with events_lock:
+                # Should have received ExperimentUpdatedEvent
+                experiment_events = [
+                    e for e in received_events if isinstance(e, ExperimentUpdatedEvent)
+                ]
+                # Should have received JobUpdatedEvent for jobs
+                job_events = [
+                    e for e in received_events if isinstance(e, JobUpdatedEvent)
+                ]
+
+                assert len(experiment_events) >= 1, (
+                    f"Should receive ExperimentUpdatedEvent, got {len(experiment_events)}"
+                )
+                assert len(job_events) >= 2, (
+                    f"Should receive JobUpdatedEvent for each job, got {len(job_events)}"
+                )
+
+                # Verify experiment ID
+                assert any(
+                    e.experiment_id == "external_monitor_test"
+                    for e in experiment_events
+                ), "Should have event for our experiment"
+
+        finally:
+            separate_provider.remove_listener(event_listener)
+            separate_provider.close()
+
+
+def test_separate_db_provider_with_file_watcher(tmp_path: Path, monkeypatch):
+    """Test that a separate DbStateProvider with file watcher detects changes.
+
+    This tests the complete file watching mechanism:
+    1. Start an experiment (creates the database)
+    2. Create a DbStateProvider and start file watching
+    3. Register a listener on it
+    4. Submit jobs (modifies the database)
+    5. Wait for file watcher to detect changes
+    6. Verify the listener receives events
+
+    On macOS, FSEvents may not detect SQLite WAL changes directly, so we use
+    a marker file workaround (see issue #154).
+    """
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
+    from experimaestro.scheduler.state_provider import (
+        ExperimentUpdatedEvent,
+        JobUpdatedEvent,
+    )
+    import threading
+
+    # Use shorter interval for testing the FSEvents workaround
+    monkeypatch.setenv("XPM_FSEVENTS_MARKER_INTERVAL", "0.5")
+
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+
+    # Track received events
+    received_events = []
+    events_lock = threading.Lock()
+    event_received = threading.Event()
+
+    def event_listener(event):
+        with events_lock:
+            received_events.append(event)
+            event_received.set()
+
+    with TemporaryExperiment("file_watcher_test", maxwait=0, workdir=workdir):
+        # Now that experiment is started, database exists
+        # Create a separate DbStateProvider directly (bypassing singleton)
+        # Use standalone=True to enable file watcher (simulates external process)
+        separate_provider = DbStateProvider(
+            workspace_path=workdir,
+            read_only=True,
+            sync_on_start=False,
+            standalone=True,
+        )
+
+        # Register listener on the separate provider
+        # File watcher auto-starts since standalone=True
+        separate_provider.add_listener(event_listener)
+
+        # Ensure the database is opened and baseline is established
+        # before we make changes that should trigger events
+        separate_provider.get_experiments()
+
+        try:
+            # Submit a task (this modifies the database)
+            task = ProducerTask.C(value=42)
+            task.submit()
+
+            # Wait for file watcher to detect changes
+            # On macOS, the marker file workaround triggers after 0.5s,
+            # plus the change detector debounce of 0.5s
+            event_received.wait(timeout=3.0)
+
+            # Verify we received events
+            with events_lock:
+                total_events = len(received_events)
+                experiment_events = [
+                    e for e in received_events if isinstance(e, ExperimentUpdatedEvent)
+                ]
+                job_events = [
+                    e for e in received_events if isinstance(e, JobUpdatedEvent)
+                ]
+
+                assert total_events > 0, "Should receive at least one event"
+                # Either experiment or job events should be present
+                assert len(experiment_events) >= 1 or len(job_events) >= 1, (
+                    f"Should receive events, got {total_events} total"
+                )
+
+        finally:
+            separate_provider.remove_listener(event_listener)
+            separate_provider.close()
+
+
+def test_ssh_piped_cross_process_monitoring(tmp_path: Path):
+    """Test SSH state provider cross-process monitoring via piped communication.
+
+    This tests that the SSH state provider can:
+    1. Connect to a server via pipes (simulating SSH transport)
+    2. Fetch experiment data as changes are made
+    3. Return consistent results with DbStateProvider
+
+    This is the SSH equivalent of test_separate_db_provider_detects_changes.
+    """
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
+
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+
+    with TemporaryExperiment("ssh_monitor_test", maxwait=0, workdir=workdir):
+        # Submit some tasks first
+        producer = ProducerTask.C(value=42)
+        producer.submit()
+
+        consumer = ConsumerTask.C(producer=producer)
+        consumer.submit()
+
+    # Get reference data from DbStateProvider (new instance, not singleton)
+    provider = DbStateProvider(
+        workspace_path=workdir,
+        read_only=True,
+        sync_on_start=False,
+    )
+    expected_experiments = provider.get_experiments()
+    expected_jobs = provider.get_jobs("ssh_monitor_test")
+    expected_deps = provider.get_dependencies_map("ssh_monitor_test")
+    expected_tags = provider.get_tags_map("ssh_monitor_test")
+    provider.close()
+
+    # Now test via piped server (simulating SSH communication)
+    piped = PipedServerClient(workdir)
+    piped.start_server()
+
+    # Test get_experiments
+    experiments_result = piped.call_server_handler(
+        RPCMethod.GET_EXPERIMENTS,
+        {"since": None},
+    )
+    assert len(experiments_result) == len(expected_experiments)
+    result_exp_ids = {e["experiment_id"] for e in experiments_result}
+    expected_exp_ids = {e.experiment_id for e in expected_experiments}
+    assert result_exp_ids == expected_exp_ids
+
+    # Test get_jobs
+    jobs_result = piped.call_server_handler(
+        RPCMethod.GET_JOBS,
+        {"experiment_id": "ssh_monitor_test", "run_id": None},
+    )
+    assert len(jobs_result) == len(expected_jobs)
+    result_job_ids = {j["identifier"] for j in jobs_result}
+    expected_job_ids = {j.identifier for j in expected_jobs}
+    assert result_job_ids == expected_job_ids
+
+    # Test get_dependencies_map
+    deps_result = piped.call_server_handler(
+        RPCMethod.GET_DEPENDENCIES_MAP,
+        {"experiment_id": "ssh_monitor_test", "run_id": None},
+    )
+    assert deps_result == expected_deps
+
+    # Test get_tags_map
+    tags_result = piped.call_server_handler(
+        RPCMethod.GET_TAGS_MAP,
+        {"experiment_id": "ssh_monitor_test", "run_id": None},
+    )
+    assert tags_result == expected_tags
+
+    piped.close()
+
+
+def test_ssh_piped_incremental_sync(tmp_path: Path):
+    """Test SSH state provider incremental synchronization via pipes.
+
+    This tests that the SSH server can handle incremental updates:
+    1. Fetch initial state
+    2. Make changes
+    3. Fetch only changes since last sync
+
+    This validates the 'since' parameter for incremental monitoring.
+    """
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+
+    # First experiment - create initial data
+    with TemporaryExperiment("ssh_sync_test", maxwait=0, workdir=workdir):
+        task1 = ProducerTask.C(value=1)
+        task1.submit()
+
+    # Set up piped server (use_singleton=False to avoid conflict with experiment's provider)
+    piped = PipedServerClient(workdir, use_singleton=False)
+    piped.start_server()
+
+    # Get initial state
+    initial_experiments = piped.call_server_handler(
+        RPCMethod.GET_EXPERIMENTS,
+        {"since": None},
+    )
+    assert len(initial_experiments) == 1
+    assert initial_experiments[0]["experiment_id"] == "ssh_sync_test"
+
+    # Get the updated_at timestamp for incremental sync
+    initial_updated_at = initial_experiments[0].get("updated_at")
+
+    piped.close()
+
+    # Run another experiment to create more data
+    with TemporaryExperiment("ssh_sync_test2", maxwait=0, workdir=workdir):
+        task2 = ProducerTask.C(value=2)
+        task2.submit()
+
+    # Reconnect and fetch incrementally (use_singleton=False)
+    piped = PipedServerClient(workdir, use_singleton=False)
+    piped.start_server()
+
+    # Fetch all experiments (should now have 2)
+    all_experiments = piped.call_server_handler(
+        RPCMethod.GET_EXPERIMENTS,
+        {"since": None},
+    )
+    assert len(all_experiments) == 2
+
+    # Fetch only experiments updated since the first fetch
+    if initial_updated_at:
+        incremental_experiments = piped.call_server_handler(
+            RPCMethod.GET_EXPERIMENTS,
+            {"since": initial_updated_at},
+        )
+        # Should include at least the new experiment
+        new_exp_ids = {e["experiment_id"] for e in incremental_experiments}
+        assert "ssh_sync_test2" in new_exp_ids
+
+    piped.close()
