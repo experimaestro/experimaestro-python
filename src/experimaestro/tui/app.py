@@ -26,9 +26,12 @@ from textual.screen import ModalScreen, Screen
 from textual import events
 from rich.text import Text
 from experimaestro.scheduler.state_provider import (
-    WorkspaceStateProvider,
+    StateProvider,
     StateEvent,
-    StateEventType,
+    ExperimentUpdatedEvent,
+    RunUpdatedEvent,
+    JobUpdatedEvent,
+    ServiceUpdatedEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
 
@@ -177,7 +180,20 @@ def get_status_icon(status: str, failure_reason=None):
 
 
 class CaptureLog(RichLog):
-    """Custom RichLog widget that captures print statements with log highlighting"""
+    """Custom RichLog widget that captures print statements with log highlighting
+
+    Features:
+    - Captures print statements with log level highlighting
+    - Toggle follow mode (auto-scroll) with Ctrl+F
+    - Save log to file with Ctrl+S
+    - Copy log to clipboard with Ctrl+Y
+    """
+
+    BINDINGS = [
+        Binding("ctrl+f", "toggle_follow", "Follow"),
+        Binding("ctrl+s", "save_log", "Save"),
+        Binding("ctrl+y", "copy_log", "Copy"),
+    ]
 
     def on_mount(self) -> None:
         """Enable print capturing when widget is mounted"""
@@ -212,6 +228,69 @@ class CaptureLog(RichLog):
         if text := event.text.strip():
             self.write(self._format_log_line(text))
 
+    def action_toggle_follow(self) -> None:
+        """Toggle auto-scroll (follow) mode"""
+        self.auto_scroll = not self.auto_scroll
+        status = "enabled" if self.auto_scroll else "disabled"
+        self.notify(f"Follow mode {status}")
+
+    def action_save_log(self) -> None:
+        """Save log content to a file"""
+        from datetime import datetime
+
+        # Generate default filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"experiment_log_{timestamp}.txt"
+
+        # Get log content from RichLog's lines (Strip objects have .text property)
+        try:
+            content = self._get_log_content()
+        except Exception as e:
+            self.notify(f"Failed to get log content: {e}", severity="error")
+            return
+
+        if not content:
+            self.notify("No log content to save", severity="warning")
+            return
+
+        # Try to save to current directory
+        try:
+            filepath = Path(default_filename)
+            filepath.write_text(content)
+            path_str = str(filepath.absolute())
+            # Copy path to clipboard
+            try:
+                import pyperclip
+
+                pyperclip.copy(path_str)
+                self.notify(f"Log saved and path copied: {path_str}")
+            except Exception:
+                # Clipboard may not be available (headless systems)
+                self.notify(f"Log saved to {path_str}", timeout=60)
+        except Exception as e:
+            self.notify(f"Failed to save log: {e}", severity="error")
+
+    def action_copy_log(self) -> None:
+        """Copy log content to clipboard"""
+        content = self._get_log_content()
+        if not content:
+            self.notify("No log content to copy", severity="warning")
+            return
+
+        try:
+            import pyperclip
+
+            pyperclip.copy(content)
+            line_count = len(self.lines)
+            self.notify(f"Copied {line_count} lines to clipboard")
+        except Exception as e:
+            self.notify(f"Failed to copy: {e}", severity="error")
+
+    def _get_log_content(self) -> str:
+        """Get the full log content as plain text from RichLog's lines"""
+        # self.lines is a list of Strip objects, each has a .text property
+        return "\n".join(line.text for line in self.lines)
+
 
 class ExperimentsList(Widget):
     """Widget displaying list of experiments"""
@@ -224,7 +303,7 @@ class ExperimentsList(Widget):
     current_experiment: reactive[Optional[str]] = reactive(None)
     collapsed: reactive[bool] = reactive(False)
 
-    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+    def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.experiments = []
@@ -534,7 +613,7 @@ class FilterChanged(Message):
 class ServicesList(Vertical):
     """Widget displaying services for selected experiment
 
-    Services are retrieved from WorkspaceStateProvider.get_services() which
+    Services are retrieved from StateProvider.get_services() which
     abstracts away whether services are live (from scheduler) or recreated
     from database state_dict. The UI treats all services uniformly.
     """
@@ -553,7 +632,7 @@ class ServicesList(Vertical):
         "STOPPING": "⏳",
     }
 
-    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+    def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.current_experiment: Optional[str] = None
@@ -684,12 +763,13 @@ class JobDetailView(Widget):
         Binding("l", "view_logs", "View Logs", priority=True),
     ]
 
-    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+    def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.current_job_id: Optional[str] = None
         self.current_experiment_id: Optional[str] = None
         self.job_data: Optional[dict] = None
+        self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
@@ -714,6 +794,9 @@ class JobDetailView(Widget):
 
     def set_job(self, job_id: str, experiment_id: str) -> None:
         """Set the job to display"""
+        # Load tags map if experiment changed
+        if experiment_id != self.current_experiment_id:
+            self.tags_map = self.state_provider.get_tags_map(experiment_id)
         self.current_job_id = job_id
         self.current_experiment_id = experiment_id
         self.refresh_job_detail()
@@ -776,8 +859,8 @@ class JobDetailView(Widget):
         times_text = f"Submitted: {submitted} | Start: {start} | End: {end} | Duration: {duration}"
         self.query_one("#job-times-label", Label).update(times_text)
 
-        # Tags - job.tags is now a dict
-        tags = job.tags
+        # Tags are stored in JobTagModel, accessed via tags_map
+        tags = self.tags_map.get(job.identifier, {})
         if tags:
             tags_text = ", ".join(f"{k}={v}" for k, v in tags.items())
         else:
@@ -962,11 +1045,12 @@ class JobsTable(Vertical):
     _sort_reverse: bool = False
     _needs_rebuild: bool = True  # Start with rebuild needed
 
-    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+    def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.filter_fn = None
         self.current_experiment: Optional[str] = None
+        self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
 
     def compose(self) -> ComposeResult:
         yield SearchBar()
@@ -1229,6 +1313,11 @@ class JobsTable(Vertical):
     def set_experiment(self, experiment_id: Optional[str]) -> None:
         """Set the current experiment and refresh jobs"""
         self.current_experiment = experiment_id
+        # Load tags map for this experiment
+        if experiment_id:
+            self.tags_map = self.state_provider.get_tags_map(experiment_id)
+        else:
+            self.tags_map = {}
         self.refresh_jobs()
 
     def refresh_jobs(self) -> None:  # noqa: C901
@@ -1316,11 +1405,11 @@ class JobsTable(Vertical):
                 failure_reason = getattr(job, "failure_reason", None)
                 status_text = get_status_icon(status, failure_reason)
 
-            # Format tags - show all tags on single line
-            tags = job.tags
-            if tags:
+            # Tags are stored in JobTagModel, accessed via tags_map
+            job_tags = self.tags_map.get(job.identifier, {})
+            if job_tags:
                 tags_text = Text()
-                for i, (k, v) in enumerate(tags.items()):
+                for i, (k, v) in enumerate(job_tags.items()):
                     if i > 0:
                         tags_text.append(", ")
                     tags_text.append(f"{k}", style="bold")
@@ -1453,7 +1542,7 @@ class OrphanJobsScreen(Screen):
     _size_cache: dict = {}  # Class-level cache (formatted strings)
     _size_bytes_cache: dict = {}  # Class-level cache (raw bytes for sorting)
 
-    def __init__(self, state_provider: WorkspaceStateProvider) -> None:
+    def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
         self.orphan_jobs = []
@@ -1873,7 +1962,7 @@ class ExperimaestroUI(App):
         self,
         workdir: Optional[Path] = None,
         watch: bool = True,
-        state_provider: Optional[WorkspaceStateProvider] = None,
+        state_provider: Optional[StateProvider] = None,
         show_logs: bool = False,
     ):
         """Initialize the TUI
@@ -1896,10 +1985,10 @@ class ExperimaestroUI(App):
             self.owns_provider = False  # Don't close external provider
             self._has_active_experiment = True  # External provider = active experiment
         else:
-            from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+            from experimaestro.scheduler.db_state_provider import DbStateProvider
 
             # Get singleton provider instance for this workspace
-            self.state_provider = WorkspaceStateProvider.get_instance(
+            self.state_provider = DbStateProvider.get_instance(
                 self.workdir,
                 read_only=False,
                 sync_on_start=True,
@@ -1978,17 +2067,17 @@ class ExperimaestroUI(App):
         services_lists = self.query(ServicesList)
 
         self.log.debug(
-            f"State event {event.event_type.name}, "
+            f"State event {type(event).__name__}, "
             f"JobsTable found: {len(jobs_tables)}, ServicesList found: {len(services_lists)}"
         )
 
-        if event.event_type == StateEventType.EXPERIMENT_UPDATED:
+        if isinstance(event, ExperimentUpdatedEvent):
             # Refresh experiments list
             for exp_list in self.query(ExperimentsList):
                 exp_list.refresh_experiments()
 
-        elif event.event_type == StateEventType.JOB_UPDATED:
-            event_exp_id = event.data.get("experimentId")
+        elif isinstance(event, JobUpdatedEvent):
+            event_exp_id = event.experiment_id
 
             # Refresh jobs table if we're viewing the affected experiment
             for jobs_table in jobs_tables:
@@ -1999,21 +2088,20 @@ class ExperimaestroUI(App):
             for job_detail_container in self.query("#job-detail-container"):
                 if not job_detail_container.has_class("hidden"):
                     for job_detail_view in self.query(JobDetailView):
-                        event_job_id = event.data.get("jobId")
-                        if job_detail_view.current_job_id == event_job_id:
+                        if job_detail_view.current_job_id == event.job_id:
                             job_detail_view.refresh_job_detail()
 
             # Also update the experiment stats in the experiments list
             for exp_list in self.query(ExperimentsList):
                 exp_list.refresh_experiments()
 
-        elif event.event_type == StateEventType.RUN_UPDATED:
+        elif isinstance(event, RunUpdatedEvent):
             # Refresh experiments list to show updated run info
             for exp_list in self.query(ExperimentsList):
                 exp_list.refresh_experiments()
 
-        elif event.event_type == StateEventType.SERVICE_UPDATED:
-            event_exp_id = event.data.get("experimentId")
+        elif isinstance(event, ServiceUpdatedEvent):
+            event_exp_id = event.experiment_id
 
             # Refresh services list if we're viewing the affected experiment
             for services_list in services_lists:

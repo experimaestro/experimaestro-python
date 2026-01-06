@@ -310,10 +310,10 @@ def experiments(ctx, workdir, workspace):
 @pass_cfg
 def list(workdir: Path):
     """List experiments in the workspace"""
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
 
     # Get experiments from state provider for detailed info
-    state_provider = WorkspaceStateProvider.get_instance(
+    state_provider = DbStateProvider.get_instance(
         workdir, read_only=True, sync_on_start=True
     )
     experiments_list = state_provider.get_experiments()
@@ -422,9 +422,9 @@ def monitor(workdir: Path, console: bool, port: int, sync: bool):
         sync_workspace_from_disk(workdir, write_mode=True, force=True)
         cprint("Sync complete", "green")
 
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
 
-    state_provider = WorkspaceStateProvider.get_instance(
+    state_provider = DbStateProvider.get_instance(
         workdir,
         sync_on_start=not sync,  # Skip auto-sync if we just did a forced one
     )

@@ -1,6 +1,6 @@
 """Functional tests for CLI jobs commands
 
-Tests the jobs list, kill, and clean commands using the WorkspaceStateProvider.
+Tests the jobs list, kill, and clean commands using the DbStateProvider.
 """
 
 import pytest
@@ -8,13 +8,14 @@ import time
 from click.testing import CliRunner
 
 from experimaestro.cli import cli
-from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+from experimaestro.scheduler.db_state_provider import DbStateProvider
 from experimaestro.scheduler.state_db import (
     initialize_workspace_database,
     close_workspace_database,
     ExperimentModel,
     ExperimentRunModel,
     JobModel,
+    JobExperimentsModel,
     ALL_MODELS,
 )
 from experimaestro.scheduler.workspace import WORKSPACE_VERSION
@@ -57,7 +58,7 @@ def workspace_with_jobs(workspace_path):
             experiment_id="test_exp", run_id="run_001", status="active"
         )
 
-        # Create jobs with different states
+        # Create jobs with different states (job_id + task_id are primary key)
         jobs_data = [
             ("job_done_1", "mymodule.DoneTask", "done"),
             ("job_done_2", "mymodule.DoneTask", "done"),
@@ -69,12 +70,15 @@ def workspace_with_jobs(workspace_path):
         for job_id, task_id, state in jobs_data:
             JobModel.create(
                 job_id=job_id,
-                experiment_id="test_exp",
-                run_id="run_001",
                 task_id=task_id,
-                locator=job_id,
                 state=state,
                 submitted_time=time.time(),
+            )
+            # Link job to experiment/run
+            JobExperimentsModel.create(
+                job_id=job_id,
+                experiment_id="test_exp",
+                run_id="run_001",
             )
             # Create job directories
             job_dir = jobs_dir / task_id / job_id
@@ -325,7 +329,7 @@ def test_jobs_clean_with_perform(workspace_with_jobs):
     assert not (jobs_dir / "mymodule.DoneTask" / "job_done_2").exists()
 
     # Verify database entries are deleted
-    provider = WorkspaceStateProvider.get_instance(workspace_with_jobs, read_only=True)
+    provider = DbStateProvider.get_instance(workspace_with_jobs, read_only=True)
     try:
         jobs = provider.get_all_jobs()
         job_ids = [j.identifier for j in jobs]
@@ -349,7 +353,7 @@ def test_jobs_clean_does_not_clean_running(workspace_with_jobs):
     assert result.exit_code == 0
 
     # Verify running job is NOT cleaned
-    provider = WorkspaceStateProvider.get_instance(workspace_with_jobs, read_only=True)
+    provider = DbStateProvider.get_instance(workspace_with_jobs, read_only=True)
     try:
         jobs = provider.get_all_jobs()
         job_ids = [j.identifier for j in jobs]
@@ -416,7 +420,7 @@ def test_jobs_kill_with_perform(workspace_with_jobs):
         mock_process.kill.assert_called_once()
 
     # Verify database state was updated to error
-    provider = WorkspaceStateProvider.get_instance(workspace_with_jobs, read_only=True)
+    provider = DbStateProvider.get_instance(workspace_with_jobs, read_only=True)
     try:
         jobs = provider.get_all_jobs()
         running_job = next((j for j in jobs if j.identifier == "job_running_1"), None)

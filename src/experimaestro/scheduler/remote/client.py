@@ -21,11 +21,14 @@ from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set
 
+from experimaestro.scheduler.db_state_provider import OfflineStateProvider
 from experimaestro.scheduler.state_provider import (
-    StateProvider,
     StateEvent,
-    StateEventType,
     StateListener,
+    ExperimentUpdatedEvent,
+    RunUpdatedEvent,
+    JobUpdatedEvent,
+    ServiceUpdatedEvent,
     MockJob,
     MockExperiment,
     MockService,
@@ -68,7 +71,7 @@ def _strip_dev_version(version: str) -> str:
     return re.sub(r"\.dev\d+$", "", version)
 
 
-class SSHStateProviderClient(StateProvider):
+class SSHStateProviderClient(OfflineStateProvider):
     """Client that connects to SSHStateProviderServer via SSH
 
     This client implements the StateProvider interface for remote experiment
@@ -97,6 +100,9 @@ class SSHStateProviderClient(StateProvider):
             remote_xpm_path: Path to experimaestro executable on remote host.
                 If None, uses 'uv tool run experimaestro==<version>'.
         """
+        # Initialize base class (includes service cache)
+        super().__init__()
+
         self.host = host
         self.remote_workspace = remote_workspace
         self.ssh_options = ssh_options or []
@@ -130,9 +136,6 @@ class SSHStateProviderClient(StateProvider):
         self._pending_events: List[StateEvent] = []
         self._pending_events_lock = threading.Lock()
         self._notify_interval = 2.0  # Seconds between notification batches
-
-        # Service cache (from base class)
-        self._init_service_cache()
 
     def connect(self, timeout: float = 30.0):
         """Establish SSH connection and start remote server
@@ -404,25 +407,27 @@ class SSHStateProviderClient(StateProvider):
 
     def _notification_to_event(self, method: str, params: Dict) -> Optional[StateEvent]:
         """Convert a notification to a StateEvent"""
+        data = params.get("data", params)
         if method == NotificationMethod.EXPERIMENT_UPDATED.value:
-            return StateEvent(
-                event_type=StateEventType.EXPERIMENT_UPDATED,
-                data=params.get("data", params),
+            return ExperimentUpdatedEvent(
+                experiment_id=data.get("experiment_id", ""),
             )
         elif method == NotificationMethod.RUN_UPDATED.value:
-            return StateEvent(
-                event_type=StateEventType.RUN_UPDATED,
-                data=params.get("data", params),
+            return RunUpdatedEvent(
+                experiment_id=data.get("experiment_id", ""),
+                run_id=data.get("run_id", ""),
             )
         elif method == NotificationMethod.JOB_UPDATED.value:
-            return StateEvent(
-                event_type=StateEventType.JOB_UPDATED,
-                data=params.get("data", params),
+            return JobUpdatedEvent(
+                experiment_id=data.get("experiment_id", ""),
+                run_id=data.get("run_id", ""),
+                job_id=data.get("job_id", ""),
             )
         elif method == NotificationMethod.SERVICE_UPDATED.value:
-            return StateEvent(
-                event_type=StateEventType.SERVICE_UPDATED,
-                data=params.get("data", params),
+            return ServiceUpdatedEvent(
+                experiment_id=data.get("experiment_id", ""),
+                run_id=data.get("run_id", ""),
+                service_id=data.get("service_id", ""),
             )
         return None
 
@@ -582,6 +587,19 @@ class SSHStateProviderClient(StateProvider):
         result = self._call_sync(RPCMethod.GET_ALL_JOBS, params)
         return [self._dict_to_job(d) for d in result]
 
+    def get_tags_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Dict[str, str]]:
+        """Get tags map for jobs in an experiment/run"""
+        params = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+        }
+        result = self._call_sync(RPCMethod.GET_TAGS_MAP, params)
+        return result or {}
+
     def _fetch_services_from_storage(
         self, experiment_id: Optional[str], run_id: Optional[str]
     ) -> List[BaseService]:
@@ -601,16 +619,6 @@ class SSHStateProviderClient(StateProvider):
             services.append(service)
 
         return services
-
-    def get_services_raw(
-        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
-    ) -> List[Dict]:
-        """Get raw service data as dictionaries"""
-        params = {
-            "experiment_id": experiment_id,
-            "run_id": run_id,
-        }
-        return self._call_sync(RPCMethod.GET_SERVICES, params)
 
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
         """Kill a running job"""
@@ -645,64 +653,30 @@ class SSHStateProviderClient(StateProvider):
     # -------------------------------------------------------------------------
 
     def _dict_to_job(self, d: Dict) -> MockJob:
-        """Convert a dictionary to a MockJob"""
-        state_str = d.get("state", "waiting")
-
-        # Map local cache path for the job
-        path = None
+        """Convert a dictionary to a MockJob using from_db_state_dict"""
+        # Translate remote path to local cache path
         if d.get("path"):
-            # The path from remote is absolute on remote system
-            # We map it to local cache
             remote_path = d["path"]
             if remote_path.startswith(self.remote_workspace):
                 relative = remote_path[len(self.remote_workspace) :].lstrip("/")
-                path = self.local_cache_dir / relative
+                d["path"] = self.local_cache_dir / relative
             else:
-                path = Path(remote_path)
+                d["path"] = Path(remote_path)
 
-        return MockJob(
-            identifier=d["identifier"],
-            task_id=d["task_id"],
-            locator=d["locator"],
-            path=path,
-            state=state_str,
-            submittime=self._parse_datetime_to_timestamp(d.get("submittime")),
-            starttime=self._parse_datetime_to_timestamp(d.get("starttime")),
-            endtime=self._parse_datetime_to_timestamp(d.get("endtime")),
-            progress=d.get("progress", []),
-            tags=d.get("tags", {}),
-            experiment_id=d.get("experiment_id", ""),
-            run_id=d.get("run_id", ""),
-            updated_at="",
-        )
+        return MockJob.from_db_state_dict(d, self.local_cache_dir)
 
     def _dict_to_experiment(self, d: Dict) -> MockExperiment:
-        """Convert a dictionary to a MockExperiment"""
-        # Map local cache path for the experiment
-        workdir = None
+        """Convert a dictionary to a MockExperiment using from_db_state_dict"""
+        # Translate remote workdir to local cache path
         if d.get("workdir"):
             remote_path = d["workdir"]
             if remote_path.startswith(self.remote_workspace):
                 relative = remote_path[len(self.remote_workspace) :].lstrip("/")
-                workdir = self.local_cache_dir / relative
+                d["workdir"] = self.local_cache_dir / relative
             else:
-                workdir = Path(remote_path)
+                d["workdir"] = Path(remote_path)
 
-        # Convert ISO datetime strings to Unix timestamps for TUI compatibility
-        started_at = self._parse_datetime_to_timestamp(d.get("started_at"))
-        ended_at = self._parse_datetime_to_timestamp(d.get("ended_at"))
-
-        return MockExperiment(
-            workdir=workdir or self.local_cache_dir / "xp" / d["experiment_id"],
-            current_run_id=d.get("current_run_id"),
-            total_jobs=d.get("total_jobs", 0),
-            finished_jobs=d.get("finished_jobs", 0),
-            failed_jobs=d.get("failed_jobs", 0),
-            updated_at=d.get("updated_at", ""),
-            started_at=started_at,
-            ended_at=ended_at,
-            hostname=d.get("hostname"),
-        )
+        return MockExperiment.from_db_state_dict(d, self.local_cache_dir)
 
     def _dict_to_service(self, d: Dict) -> BaseService:
         """Convert a dictionary to a Service or MockService
@@ -772,15 +746,8 @@ class SSHStateProviderClient(StateProvider):
                     url=d.get("url"),
                 )
 
-        # No state_dict or no __class__ - use MockService with original description
-        return MockService(
-            service_id=service_id,
-            description_text=d.get("description", ""),
-            state_dict_data=state_dict,
-            experiment_id=d.get("experiment_id"),
-            run_id=d.get("run_id"),
-            url=d.get("url"),
-        )
+        # No state_dict or no __class__ - use MockService.from_db_state_dict
+        return MockService.from_db_state_dict(d)
 
     def _parse_datetime_to_timestamp(self, value) -> Optional[float]:
         """Convert datetime value to Unix timestamp

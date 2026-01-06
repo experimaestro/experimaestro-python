@@ -5,11 +5,26 @@ tags, and other attributes.
 """
 
 import re
-from typing import Callable, TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import Callable, Dict, TYPE_CHECKING
 import pyparsing as pp
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.state_provider import MockJob
+
+# Type alias for tags map: job_id -> {tag_key: tag_value}
+TagsMap = Dict[str, Dict[str, str]]
+
+
+@dataclass
+class FilterContext:
+    """Context for filter evaluation containing experiment-scoped data
+
+    Attributes:
+        tags_map: Maps job identifiers to their tags dict for the current experiment/run
+    """
+
+    tags_map: TagsMap = field(default_factory=dict)
 
 
 # --- classes for processing
@@ -19,14 +34,16 @@ class VarExpr:
     def __init__(self, values):
         (self.varname,) = values
 
-    def get(self, job: "MockJob"):
+    def get(self, job: "MockJob", ctx: FilterContext):
         if self.varname == "@state":
             return job.state.name if job.state else None
 
         if self.varname == "@name":
             return str(job.path.parent.name)
 
-        return job.tags.get(self.varname, None)
+        # Tags are stored in JobTagModel, accessed via ctx.tags_map keyed by job identifier
+        job_tags = ctx.tags_map.get(job.identifier, {})
+        return job_tags.get(self.varname, None)
 
     def __repr__(self):
         return f"""VAR<{self.varname}>"""
@@ -39,8 +56,8 @@ class BaseInExpr:
 
 
 class InExpr(BaseInExpr):
-    def filter(self, job: "MockJob"):
-        value = self.var.get(job)
+    def filter(self, job: "MockJob", ctx: FilterContext):
+        value = self.var.get(job, ctx)
         return value in self.values
 
     def __repr__(self):
@@ -48,8 +65,8 @@ class InExpr(BaseInExpr):
 
 
 class NotInExpr(BaseInExpr):
-    def filter(self, job: "MockJob"):
-        value = self.var.get(job)
+    def filter(self, job: "MockJob", ctx: FilterContext):
+        value = self.var.get(job, ctx)
         return value not in self.values
 
     def __repr__(self):
@@ -70,8 +87,8 @@ class RegexExpr:
 
         raise AssertionError()
 
-    def filter(self, job: "MockJob"):
-        value = self.var.get(job)
+    def filter(self, job: "MockJob", ctx: FilterContext):
+        value = self.var.get(job, ctx)
         if not value:
             return False
 
@@ -82,7 +99,7 @@ class ConstantString:
     def __init__(self, tokens):
         (self.value,) = tokens
 
-    def get(self, _job: "MockJob"):
+    def get(self, _job: "MockJob", _ctx: FilterContext):
         return self.value
 
     def __repr__(self):
@@ -96,8 +113,8 @@ class EqExpr:
     def __repr__(self):
         return f"""EQ[{self.var1}, {self.var2}]"""
 
-    def filter(self, job: "MockJob"):
-        return self.var1.get(job) == self.var2.get(job)
+    def filter(self, job: "MockJob", ctx: FilterContext):
+        return self.var1.get(job, ctx) == self.var2.get(job, ctx)
 
 
 class LogicExpr:
@@ -107,11 +124,11 @@ class LogicExpr:
         self.operator, self.y = tokens
         self.x = None
 
-    def filter(self, job: "MockJob"):
+    def filter(self, job: "MockJob", ctx: FilterContext):
         if self.operator == "and":
-            return self.y.filter(job) and self.x.filter(job)
+            return self.y.filter(job, ctx) and self.x.filter(job, ctx)
 
-        return self.y.filter(job) or self.x.filter(job)
+        return self.y.filter(job, ctx) or self.x.filter(job, ctx)
 
     @staticmethod
     def summary(tokens):
@@ -181,14 +198,22 @@ filterExpr = (
 expr = (matchExpr + pp.Optional(pipe + filterExpr)).setParseAction(LogicExpr.generator)
 
 
-def createFilter(query: str) -> Callable[["MockJob"], bool]:
+def createFilter(query: str, ctx: FilterContext = None) -> Callable[["MockJob"], bool]:
     """Returns a filter function given a query string
 
     Args:
         query: Filter expression (e.g., '@state = "DONE" and model = "bm25"')
+        ctx: FilterContext containing tags map and other experiment-scoped data.
+             If None, an empty context is used.
 
     Returns:
-        A callable that takes a MockJob and returns True if it matches
+        A callable that takes a MockJob and returns True if it matches.
     """
+    if ctx is None:
+        ctx = FilterContext()
     (r,) = logicExpr.parseString(query, parseAll=True)
-    return r.filter
+
+    def filter_fn(job: "MockJob") -> bool:
+        return r.filter(job, ctx)
+
+    return filter_fn

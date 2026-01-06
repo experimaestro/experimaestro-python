@@ -95,7 +95,7 @@ def test_partial_path_different_for_different_params():
 
 def test_partial_registered_in_database():
     """Test that partials are registered in the database when jobs are submitted"""
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
     from experimaestro.scheduler.state_db import PartialModel, JobPartialModel
 
     with TemporaryDirectory(prefix="xpm", suffix="partial_db") as workdir:
@@ -107,7 +107,7 @@ def test_partial_registered_in_database():
         # Get the state provider and check database
         # Note: Must use read_only=False since the experiment left a singleton
         # with read_only=False that hasn't been closed yet
-        provider = WorkspaceStateProvider.get_instance(workdir, read_only=False)
+        provider = DbStateProvider.get_instance(workdir, read_only=False)
 
         try:
             with provider.workspace_db.bind_ctx([PartialModel, JobPartialModel]):
@@ -127,11 +127,11 @@ def test_partial_registered_in_database():
 
 def test_orphan_partial_cleanup():
     """Test that orphan partials are cleaned up when jobs are deleted"""
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
     from experimaestro.scheduler.state_db import PartialModel, JobPartialModel
 
     with TemporaryDirectory(prefix="xpm", suffix="partial_cleanup") as workdir:
-        with TemporaryExperiment("partial_cleanup", workdir=workdir, maxwait=30) as xp:
+        with TemporaryExperiment("partial_cleanup", workdir=workdir, maxwait=30):
             task = TaskWithPartial.C(max_iter=100, learning_rate=0.1).submit()
 
         assert task.__xpm__.job.state == JobState.DONE
@@ -141,7 +141,7 @@ def test_orphan_partial_cleanup():
         assert checkpoint_path.exists()
 
         # Get the state provider
-        provider = WorkspaceStateProvider.get_instance(workdir, read_only=False)
+        provider = DbStateProvider.get_instance(workdir, read_only=False)
 
         try:
             # Delete the job
@@ -150,11 +150,7 @@ def test_orphan_partial_cleanup():
                 assert len(job_partials) == 1
 
             # Delete job (this also removes job-partial link)
-            provider.delete_job(
-                task.__xpm__.job.identifier,
-                xp.workdir.name,
-                xp.run_id,
-            )
+            provider.delete_job(task.__xpm__.job.identifier)
 
             # Now the partial should be orphaned
             orphans = provider.get_orphan_partials()
@@ -177,12 +173,12 @@ def test_orphan_partial_cleanup():
 
 def test_shared_partial_not_orphaned():
     """Test that partials shared by multiple jobs are not orphaned until all jobs deleted"""
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
 
     with TemporaryDirectory(prefix="xpm", suffix="partial_shared_cleanup") as workdir:
         with TemporaryExperiment(
             "partial_shared_cleanup", workdir=workdir, maxwait=30
-        ) as xp:
+        ):
             # Submit two tasks with same learning_rate (same partial)
             task1 = TaskWithPartial.C(max_iter=100, learning_rate=0.1).submit()
             task2 = TaskWithPartial.C(max_iter=200, learning_rate=0.1).submit()
@@ -195,15 +191,11 @@ def test_shared_partial_not_orphaned():
         assert checkpoint_path == task2.checkpoint_path
         assert checkpoint_path.exists()
 
-        provider = WorkspaceStateProvider.get_instance(workdir, read_only=False)
+        provider = DbStateProvider.get_instance(workdir, read_only=False)
 
         try:
             # Delete first job
-            provider.delete_job(
-                task1.__xpm__.job.identifier,
-                xp.workdir.name,
-                xp.run_id,
-            )
+            provider.delete_job(task1.__xpm__.job.identifier)
 
             # Partial should NOT be orphaned (still used by task2)
             orphans = provider.get_orphan_partials()
@@ -213,11 +205,7 @@ def test_shared_partial_not_orphaned():
             assert checkpoint_path.exists()
 
             # Delete second job
-            provider.delete_job(
-                task2.__xpm__.job.identifier,
-                xp.workdir.name,
-                xp.run_id,
-            )
+            provider.delete_job(task2.__xpm__.job.identifier)
 
             # Now partial should be orphaned
             orphans = provider.get_orphan_partials()

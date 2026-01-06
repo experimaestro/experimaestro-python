@@ -1,6 +1,6 @@
 """SSH State Provider Server
 
-JSON-RPC server that wraps WorkspaceStateProvider and communicates via stdio.
+JSON-RPC server that wraps DbStateProvider and communicates via stdio.
 Designed to be run over SSH for remote experiment monitoring.
 
 Usage:
@@ -13,10 +13,13 @@ import threading
 from pathlib import Path
 from typing import IO, Callable, Dict, Optional
 
+from experimaestro.scheduler.db_state_provider import DbStateProvider
 from experimaestro.scheduler.state_provider import (
-    WorkspaceStateProvider,
     StateEvent,
-    StateEventType,
+    ExperimentUpdatedEvent,
+    RunUpdatedEvent,
+    JobUpdatedEvent,
+    ServiceUpdatedEvent,
 )
 from experimaestro.scheduler.remote.protocol import (
     RPCMethod,
@@ -25,9 +28,6 @@ from experimaestro.scheduler.remote.protocol import (
     create_success_response,
     create_error_response,
     create_notification,
-    serialize_job,
-    serialize_experiment,
-    serialize_run,
     serialize_datetime,
     deserialize_datetime,
     PARSE_ERROR,
@@ -41,10 +41,10 @@ logger = logging.getLogger("xpm.remote.server")
 
 
 class SSHStateProviderServer:
-    """JSON-RPC server that wraps WorkspaceStateProvider for SSH-based monitoring
+    """JSON-RPC server that wraps DbStateProvider for SSH-based monitoring
 
     This server reads JSON-RPC requests from stdin and writes responses to stdout.
-    It registers as a listener with the WorkspaceStateProvider to push notifications
+    It registers as a listener with the DbStateProvider to push notifications
     when state changes occur.
 
     Thread safety:
@@ -69,7 +69,7 @@ class SSHStateProviderServer:
         self.workspace_path = workspace_path
         self.stdin = stdin if stdin is not None else sys.stdin.buffer
         self.stdout = stdout if stdout is not None else sys.stdout.buffer
-        self._state_provider: Optional[WorkspaceStateProvider] = None
+        self._state_provider: Optional[DbStateProvider] = None
         self._running = False
         self._write_lock = threading.Lock()
 
@@ -82,6 +82,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_JOB.value: self._handle_get_job,
             RPCMethod.GET_ALL_JOBS.value: self._handle_get_all_jobs,
             RPCMethod.GET_SERVICES.value: self._handle_get_services,
+            RPCMethod.GET_TAGS_MAP.value: self._handle_get_tags_map,
             RPCMethod.KILL_JOB.value: self._handle_kill_job,
             RPCMethod.CLEAN_JOB.value: self._handle_clean_job,
             RPCMethod.GET_SYNC_INFO.value: self._handle_get_sync_info,
@@ -103,7 +104,7 @@ class SSHStateProviderServer:
 
         # Initialize state provider in read-only mode
         try:
-            self._state_provider = WorkspaceStateProvider.get_instance(
+            self._state_provider = DbStateProvider.get_instance(
                 self.workspace_path,
                 read_only=True,
                 sync_on_start=True,
@@ -237,52 +238,37 @@ class SSHStateProviderServer:
         Converts events to JSON-RPC notifications and sends them to the client.
         """
         try:
-            if event.event_type == StateEventType.EXPERIMENT_UPDATED:
+            if isinstance(event, ExperimentUpdatedEvent):
                 self._send_notification(
                     NotificationMethod.EXPERIMENT_UPDATED,
                     {
-                        "experiment_id": event.data.get("experiment_id"),
-                        "data": event.data,
+                        "experiment_id": event.experiment_id,
                     },
                 )
-            elif event.event_type == StateEventType.RUN_UPDATED:
+            elif isinstance(event, RunUpdatedEvent):
                 self._send_notification(
                     NotificationMethod.RUN_UPDATED,
                     {
-                        "experiment_id": event.data.get("experiment_id"),
-                        "run_id": event.data.get("run_id"),
-                        "data": event.data,
+                        "experiment_id": event.experiment_id,
+                        "run_id": event.run_id,
                     },
                 )
-            elif event.event_type == StateEventType.JOB_UPDATED:
+            elif isinstance(event, JobUpdatedEvent):
                 self._send_notification(
                     NotificationMethod.JOB_UPDATED,
                     {
-                        "job_id": event.data.get("job_id"),
-                        "experiment_id": event.data.get("experiment_id"),
-                        "run_id": event.data.get("run_id"),
-                        "state": event.data.get("state"),
-                        "data": event.data,
+                        "job_id": event.job_id,
+                        "experiment_id": event.experiment_id,
+                        "run_id": event.run_id,
                     },
                 )
-                # Also send file_changed notification for job metadata
-                if "path" in event.data and event.data["path"]:
-                    self._send_notification(
-                        NotificationMethod.FILE_CHANGED,
-                        {
-                            "path": f"{event.data['path']}/.experimaestro/",
-                            "change_type": "modified",
-                        },
-                    )
-            elif event.event_type == StateEventType.SERVICE_UPDATED:
+            elif isinstance(event, ServiceUpdatedEvent):
                 self._send_notification(
                     NotificationMethod.SERVICE_UPDATED,
                     {
-                        "service_id": event.data.get("service_id"),
-                        "experiment_id": event.data.get("experiment_id"),
-                        "run_id": event.data.get("run_id"),
-                        "state": event.data.get("state"),
-                        "data": event.data,
+                        "service_id": event.service_id,
+                        "experiment_id": event.experiment_id,
+                        "run_id": event.run_id,
                     },
                 )
         except Exception as e:
@@ -296,7 +282,7 @@ class SSHStateProviderServer:
         """Handle get_experiments request"""
         since = deserialize_datetime(params.get("since"))
         experiments = self._state_provider.get_experiments(since=since)
-        return [serialize_experiment(exp) for exp in experiments]
+        return [exp.db_state_dict() for exp in experiments]
 
     def _handle_get_experiment(self, params: Dict) -> Optional[Dict]:
         """Handle get_experiment request"""
@@ -307,7 +293,7 @@ class SSHStateProviderServer:
         experiment = self._state_provider.get_experiment(experiment_id)
         if experiment is None:
             return None
-        return serialize_experiment(experiment)
+        return experiment.db_state_dict()
 
     def _handle_get_experiment_runs(self, params: Dict) -> list:
         """Handle get_experiment_runs request"""
@@ -316,7 +302,7 @@ class SSHStateProviderServer:
             raise TypeError("experiment_id is required")
 
         runs = self._state_provider.get_experiment_runs(experiment_id)
-        return [serialize_run(run) for run in runs]
+        return [run.db_state_dict() for run in runs]
 
     def _handle_get_jobs(self, params: Dict) -> list:
         """Handle get_jobs request"""
@@ -329,7 +315,7 @@ class SSHStateProviderServer:
             tags=params.get("tags"),
             since=since,
         )
-        return [serialize_job(job) for job in jobs]
+        return [job.db_state_dict() for job in jobs]
 
     def _handle_get_job(self, params: Dict) -> Optional[Dict]:
         """Handle get_job request"""
@@ -345,7 +331,7 @@ class SSHStateProviderServer:
         )
         if job is None:
             return None
-        return serialize_job(job)
+        return job.db_state_dict()
 
     def _handle_get_all_jobs(self, params: Dict) -> list:
         """Handle get_all_jobs request"""
@@ -355,17 +341,30 @@ class SSHStateProviderServer:
             tags=params.get("tags"),
             since=since,
         )
-        return [serialize_job(job) for job in jobs]
+        return [job.db_state_dict() for job in jobs]
 
     def _handle_get_services(self, params: Dict) -> list:
         """Handle get_services request
 
-        Uses get_services_raw to return raw service data without trying to
-        recreate Service objects. This allows the client to handle module
-        loading and show appropriate error messages.
+        Returns serialized service data using db_state_dict().
         """
-        return self._state_provider.get_services_raw(
+        services = self._state_provider.get_services(
             experiment_id=params.get("experiment_id"),
+            run_id=params.get("run_id"),
+        )
+        return [svc.db_state_dict() for svc in services]
+
+    def _handle_get_tags_map(self, params: Dict) -> Dict[str, Dict[str, str]]:
+        """Handle get_tags_map request
+
+        Returns tags map for jobs in an experiment/run.
+        """
+        experiment_id = params.get("experiment_id")
+        if not experiment_id:
+            raise TypeError("experiment_id is required")
+
+        return self._state_provider.get_tags_map(
+            experiment_id=experiment_id,
             run_id=params.get("run_id"),
         )
 

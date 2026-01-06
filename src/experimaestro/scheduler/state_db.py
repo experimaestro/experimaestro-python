@@ -35,7 +35,25 @@ import fasteners
 logger = logging.getLogger("xpm.state_db")
 
 # Database schema version - increment when schema changes require resync
-CURRENT_DB_VERSION = 3
+# Version 4: Removed locator field from JobModel (redundant with job_id)
+CURRENT_DB_VERSION = 4
+
+
+class DatabaseVersionError(Exception):
+    """Raised when the database schema version is incompatible with the code version.
+
+    This happens when the database was created by a newer version of experimaestro
+    than the current code. The database cannot be safely used as it may contain
+    fields or structures the current code doesn't understand.
+    """
+
+    def __init__(self, db_version: int, code_version: int):
+        self.db_version = db_version
+        self.code_version = code_version
+        super().__init__(
+            f"Database schema version ({db_version}) is newer than code version ({code_version}). "
+            f"Please upgrade experimaestro or use a different workspace."
+        )
 
 
 class BaseModel(Model):
@@ -130,17 +148,15 @@ class WorkspaceSyncMetadata(BaseModel):
 
 
 class JobModel(BaseModel):
-    """Job information linked to specific experiment run
+    """Job information (experiment-independent)
 
-    Jobs are tied to a specific run of an experiment via (experiment_id, run_id).
-    The same job can appear in multiple runs with different states/tags.
+    Jobs are stored independently of experiments. The relationship between
+    jobs and experiments/runs is stored in JobExperimentsModel.
 
     Fields:
-        job_id: Unique identifier for the job (from task identifier)
-        experiment_id: ID of the experiment this job belongs to
-        run_id: ID of the run this job belongs to
+        job_id: Unique identifier for the job (hash)
         task_id: Task class identifier
-        locator: Full task locator (identifier)
+        Together (job_id, task_id) form the PRIMARY KEY
         state: Current job state (e.g., "unscheduled", "waiting", "running", "done", "error")
         failure_reason: Optional failure reason for error states (e.g., "TIMEOUT", "DEPENDENCY")
         submitted_time: When job was submitted (Unix timestamp)
@@ -150,15 +166,13 @@ class JobModel(BaseModel):
         updated_at: When job was last modified (for incremental queries)
 
     Note: Job path is derivable: {workspace}/jobs/{task_id}/{job_id}
-    Note: Tags are stored in separate JobTagModel table (run-scoped)
+    Note: Experiment/run relationship is in JobExperimentsModel
+    Note: Tags are stored in JobTagModel (experiment/run-scoped)
     Note: Dependencies are NOT stored in DB (available in state.json only)
     """
 
     job_id = CharField(index=True)
-    experiment_id = CharField(index=True)
-    run_id = CharField(index=True)
     task_id = CharField(index=True)
-    locator = CharField()
     state = CharField(default="unscheduled", index=True)
     failure_reason = CharField(null=True)
     submitted_time = FloatField(null=True)
@@ -169,20 +183,10 @@ class JobModel(BaseModel):
 
     class Meta:
         table_name = "jobs"
-        primary_key = CompositeKey("job_id", "experiment_id", "run_id")
+        primary_key = CompositeKey("job_id", "task_id")
         indexes = (
-            (
-                ("experiment_id", "run_id", "state"),
-                False,
-            ),  # Query jobs by run and state
-            (
-                ("experiment_id", "run_id", "task_id"),
-                False,
-            ),  # Query jobs by run and task
-            (
-                ("experiment_id", "run_id", "updated_at"),
-                False,
-            ),  # Query jobs by run and update time
+            (("state",), False),  # Query jobs by state
+            (("updated_at",), False),  # Query jobs by update time
         )
 
 
@@ -223,6 +227,33 @@ class JobTagModel(BaseModel):
                 ("experiment_id", "run_id", "tag_key"),
                 False,
             ),  # For experiment run tag queries
+        )
+
+
+class JobExperimentsModel(BaseModel):
+    """Links jobs to experiments/runs they belong to
+
+    This table tracks which jobs belong to which experiment runs.
+    A job can belong to multiple experiment runs (if reused across runs).
+
+    This is similar to JobTagModel but simpler - it just tracks membership.
+    Tags are stored separately in JobTagModel because they are key-value pairs.
+
+    Fields:
+        job_id: ID of the job
+        experiment_id: ID of the experiment
+        run_id: ID of the run
+    """
+
+    job_id = CharField(index=True)
+    experiment_id = CharField(index=True)
+    run_id = CharField(index=True)
+
+    class Meta:
+        table_name = "job_experiments"
+        primary_key = CompositeKey("job_id", "experiment_id", "run_id")
+        indexes = (
+            (("experiment_id", "run_id"), False),  # Query jobs by experiment run
         )
 
 
@@ -311,6 +342,7 @@ ALL_MODELS = [
     WorkspaceSyncMetadata,
     JobModel,
     JobTagModel,
+    JobExperimentsModel,
     ServiceModel,
     PartialModel,
     JobPartialModel,
@@ -372,41 +404,59 @@ def initialize_workspace_database(
         # Bind all models to this database
         db.bind(ALL_MODELS)
 
-        # Create tables if they don't exist (only in write mode)
+        # Check database version - do this in both read and write modes
+        current_version = 0
+        try:
+            cursor = db.execute_sql(
+                "SELECT db_version FROM workspace_sync_metadata WHERE id='workspace'"
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                current_version = row[0]
+        except OperationalError:
+            # Table or column doesn't exist - will be created below in write mode
+            pass
+
+        # Check for newer database version (incompatible)
+        if current_version > CURRENT_DB_VERSION:
+            db.close()
+            raise DatabaseVersionError(current_version, CURRENT_DB_VERSION)
+
+        # Handle database initialization and migrations (only in write mode)
         if not read_only:
-            db.create_tables(ALL_MODELS, safe=True)
+            # Create tables only if database is new (current_version == 0 means
+            # either new database or very old one without version tracking)
+            if current_version == 0:
+                logging.info("Creating new workspace database at %s", db_path)
+                db.create_tables(ALL_MODELS, safe=True)
 
-            # Check database version for migration - use raw SQL since column may not exist
-            current_version = 0
-            try:
-                cursor = db.execute_sql(
-                    "SELECT db_version FROM workspace_sync_metadata WHERE id='workspace'"
+            # Check if we need to resync (older schema version)
+            # When schema is outdated, delete and recreate the database
+            if current_version > 0 and current_version < CURRENT_DB_VERSION:
+                logger.info(
+                    "Database schema version %d is outdated (current: %d), "
+                    "recreating database at %s",
+                    current_version,
+                    CURRENT_DB_VERSION,
+                    db_path,
                 )
-                row = cursor.fetchone()
-                if row is not None:
-                    current_version = row[0]
-                if current_version < CURRENT_DB_VERSION:
-                    needs_resync = True
-            except OperationalError:
-                # Column doesn't exist - add it and trigger resync
+                db.close()
+                db_path.unlink()
+                # Recreate database with current schema
+                db = SqliteDatabase(
+                    str(db_path),
+                    pragmas={
+                        "journal_mode": "wal",
+                        "foreign_keys": 1,
+                        "ignore_check_constraints": 0,
+                        "synchronous": 1,
+                        "busy_timeout": 5000,
+                    },
+                    check_same_thread=False,
+                )
+                db.bind(ALL_MODELS)
+                db.create_tables(ALL_MODELS, safe=True)
                 needs_resync = True
-                try:
-                    db.execute_sql(
-                        "ALTER TABLE workspace_sync_metadata ADD COLUMN db_version INTEGER DEFAULT 1"
-                    )
-                except OperationalError:
-                    pass  # Column may already exist
-
-            # Run schema migrations for older databases
-            if current_version < 2:
-                # Migration v1 -> v2: Add hostname column to experiment_runs table
-                try:
-                    db.execute_sql(
-                        "ALTER TABLE experiment_runs ADD COLUMN hostname VARCHAR(255) NULL"
-                    )
-                    logger.info("Added hostname column to experiment_runs table")
-                except OperationalError:
-                    pass  # Column already exists
 
             # Initialize WorkspaceSyncMetadata with default row if not exists
             # Use try/except to handle race condition (shouldn't happen with lock, but be safe)
@@ -416,7 +466,7 @@ def initialize_workspace_database(
                     defaults={
                         "last_sync_time": None,
                         "sync_interval_minutes": 5,
-                        "db_version": 1,
+                        "db_version": CURRENT_DB_VERSION,
                     },
                 )
             except (IntegrityError, OperationalError):

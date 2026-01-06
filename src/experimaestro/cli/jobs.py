@@ -65,23 +65,31 @@ def process(
         fullpath: Show full paths instead of short names
         count: Limit output to N most recent jobs (0 = no limit)
     """
-    from .filter import createFilter
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from .filter import createFilter, FilterContext
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
     from experimaestro.scheduler import JobState
-
-    _filter = createFilter(filter) if filter else None
 
     # Get state provider (write mode for kill/clean operations)
     read_only = not (kill or clean)
-    provider = WorkspaceStateProvider.get_instance(workspace.path, read_only=read_only)
+    provider = DbStateProvider.get_instance(workspace.path, read_only=read_only)
 
     try:
-        # Get all jobs from the database
-        all_jobs = provider.get_all_jobs()
-
-        # Filter by experiment if specified
+        # Get jobs from the database, optionally filtered by experiment
         if experiment:
-            all_jobs = [j for j in all_jobs if j.experiment_id == experiment]
+            all_jobs = provider.get_jobs(experiment_id=experiment)
+        else:
+            all_jobs = provider.get_all_jobs()
+
+        # Load tags map for the experiment (if specified)
+        tags_map = {}
+        if experiment:
+            tags_map = provider.get_tags_map(experiment_id=experiment)
+
+        # Create filter context with tags map
+        filter_ctx = FilterContext(tags_map=tags_map)
+
+        # Create filter function with context
+        _filter = createFilter(filter, filter_ctx) if filter else None
 
         # Apply filter expression
         if _filter:
@@ -103,10 +111,6 @@ def process(
         for job in all_jobs:
             job_str = str(job.path) if fullpath else f"{job.task_id}/{job.identifier}"
 
-            # Add experiment info
-            if job.experiment_id:
-                job_str += f" [{job.experiment_id}]"
-
             if job.state is None or job.state == JobState.UNSCHEDULED:
                 print(colored(f"UNSCHED {job_str}", "red"), end="")
             elif job.state.running():
@@ -127,9 +131,13 @@ def process(
             else:
                 print(colored(f"{job.state.name:8}{job_str}", "red"), end="")
 
-            # Show tags if requested
-            if tags and job.tags:
-                print(f""" {" ".join(f"{k}={v}" for k, v in job.tags.items())}""")
+            # Show tags if requested (from tags_map)
+            if tags:
+                job_tags = tags_map.get(job.identifier, {})
+                if job_tags:
+                    print(f""" {" ".join(f"{k}={v}" for k, v in job_tags.items())}""")
+                elif not (kill and perform):
+                    print()
             elif not (kill and perform):
                 print()
 
@@ -290,9 +298,9 @@ def cleanup_partials(ctx, perform: bool):
     This command finds all orphan partials and deletes them (or shows
     what would be deleted in dry-run mode).
     """
-    from experimaestro.scheduler.state_provider import WorkspaceStateProvider
+    from experimaestro.scheduler.db_state_provider import DbStateProvider
 
-    provider = WorkspaceStateProvider.get_instance(
+    provider = DbStateProvider.get_instance(
         ctx.obj.workspace.path, read_only=not perform
     )
 

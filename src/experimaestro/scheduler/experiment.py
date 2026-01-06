@@ -404,19 +404,31 @@ class experiment:
 
         # Initialize workspace state provider (singleton per workspace path)
         # Use read_only mode when not in NORMAL run mode to prevent DB changes
-        from .state_provider import WorkspaceStateProvider
+        from .db_state_provider import DbStateProvider
+        from .state_db import DatabaseVersionError
 
         is_normal_mode = self.workspace.run_mode == RunMode.NORMAL
-        self.state_provider = WorkspaceStateProvider.get_instance(
-            self.workspace.path,
-            read_only=not is_normal_mode,
-            sync_on_start=False,  # Experiments don't sync on start
-        )
+        self.state_provider = None
+        self._db_listener = None
+
+        try:
+            self.state_provider = DbStateProvider.get_instance(
+                self.workspace.path,
+                read_only=not is_normal_mode,
+                sync_on_start=False,  # Experiments don't sync on start
+            )
+        except DatabaseVersionError as e:
+            # Database version is newer than code - can't use it
+            # Log warning but continue without DB state tracking
+            logger.warning(
+                "Cannot use workspace database: %s. "
+                "Experiment will run without database state tracking.",
+                e,
+            )
 
         # Register experiment in database and create a run (only in NORMAL mode)
         experiment_id = self.workdir.name
-        self._db_listener = None
-        if is_normal_mode:
+        if is_normal_mode and self.state_provider is not None:
             self.state_provider.ensure_experiment(experiment_id)
             self.run_id = self.state_provider.create_run(experiment_id)
 
@@ -426,7 +438,7 @@ class experiment:
             )
             self.scheduler.addlistener(self._db_listener)
         else:
-            # In non-NORMAL modes, use a placeholder run_id
+            # In non-NORMAL modes or when DB is unavailable, use a placeholder run_id
             self.run_id = None
 
         # Number of unfinished jobs

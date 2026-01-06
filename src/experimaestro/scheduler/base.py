@@ -1,17 +1,27 @@
+import socket
 import threading
 import time
+from datetime import datetime
 from typing import (
+    Dict,
+    List,
     Optional,
     Set,
     ClassVar,
     TYPE_CHECKING,
 )
 import asyncio
-from typing import Dict
 
 from experimaestro.scheduler import experiment
 from experimaestro.scheduler.jobs import Job, JobState, JobError
 from experimaestro.scheduler.services import Service
+from experimaestro.scheduler.interfaces import (
+    BaseJob,
+    BaseExperiment,
+    BaseService,
+    ExperimentRun,
+)
+from experimaestro.scheduler.state_provider import StateProvider
 
 
 from experimaestro.utils import logger
@@ -36,18 +46,22 @@ class Listener:
         pass
 
 
-class Scheduler(threading.Thread):
-    """A job scheduler (singleton)
+class Scheduler(StateProvider, threading.Thread):
+    """A job scheduler (singleton) that provides live state
 
     The scheduler is based on asyncio for easy concurrency handling.
     This is a singleton - only one scheduler instance exists per process.
+
+    Inherits from StateProvider to allow TUI/Web interfaces to access
+    live job and experiment state during experiment execution.
     """
 
     _instance: ClassVar[Optional["Scheduler"]] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, name: str = "Global"):
-        super().__init__(name=f"Scheduler ({name})", daemon=True)
+        StateProvider.__init__(self)  # Initialize state listener management
+        threading.Thread.__init__(self, name=f"Scheduler ({name})", daemon=True)
         self._ready = threading.Event()
 
         # Name of the scheduler
@@ -62,10 +76,13 @@ class Scheduler(threading.Thread):
         # List of all jobs
         self.jobs: Dict[str, "Job"] = {}
 
+        # Tags map: (experiment_id, run_id) -> {job_id -> {tag_key: tag_value}}
+        self._tags_map: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+
         # List of jobs
         self.waitingjobs: Set[Job] = set()
 
-        # Listeners with thread-safe access
+        # Legacy listeners with thread-safe access
         self._listeners: Set[Listener] = set()
         self._listeners_lock = threading.Lock()
 
@@ -128,27 +145,21 @@ class Scheduler(threading.Thread):
             logger.debug("Unregistered experiment %s from scheduler", key)
 
     def start_server(
-        self, settings: "ServerSettings" = None, workspace: "Workspace" = None
+        self,
+        settings: "ServerSettings" = None,
+        workspace: "Workspace" = None,  # noqa: ARG002 - kept for backward compat
     ):
         """Start the notification server (if not already running)
 
         Args:
             settings: Server settings
-            workspace: Workspace instance (required to get workspace path)
+            workspace: Workspace instance (deprecated, not used)
         """
         if self.server is None:
             from experimaestro.server import Server
-            from experimaestro.scheduler.state_provider import WorkspaceStateProvider
 
-            if workspace is None:
-                raise ValueError("workspace parameter is required to start server")
-
-            # Get the workspace state provider singleton
-            state_provider = WorkspaceStateProvider.get_instance(
-                workspace.path, read_only=False, sync_on_start=False
-            )
-
-            self.server = Server.instance(settings, state_provider)
+            # Use the Scheduler itself as the StateProvider for live state access
+            self.server = Server.instance(settings, self)
             self.server.start()
             logger.info("Server started by scheduler")
         else:
@@ -303,6 +314,13 @@ class Scheduler(threading.Thread):
         # (aio_submit may update this later for re-submitted jobs)
         job.submittime = time.time()
         xp.add_job(job)
+
+        # Update tags map for this experiment/run
+        if job.tags:
+            exp_run_key = (xp.workdir.name, xp.run_id)
+            if exp_run_key not in self._tags_map:
+                self._tags_map[exp_run_key] = {}
+            self._tags_map[exp_run_key][job.identifier] = dict(job.tags)
 
         # Set up dependencies
         for dependency in job.dependencies:
@@ -693,3 +711,207 @@ class Scheduler(threading.Thread):
             # Notify scheduler listeners of job state after job completes
             self.notify_job_state(job)
             return state
+
+    # =========================================================================
+    # StateProvider abstract method implementations
+    # =========================================================================
+
+    def get_experiments(
+        self,
+        since: Optional[datetime] = None,  # noqa: ARG002
+    ) -> List[BaseExperiment]:
+        """Get list of all live experiments"""
+        # Note: 'since' filter not applicable for live scheduler
+        return list(self.experiments.values())
+
+    def get_experiment(self, experiment_id: str) -> Optional[BaseExperiment]:
+        """Get a specific experiment by ID"""
+        return self.experiments.get(experiment_id)
+
+    def get_experiment_runs(self, experiment_id: str) -> List[ExperimentRun]:
+        """Get all runs for an experiment
+
+        For a live scheduler, returns only the current run.
+        """
+        exp = self.experiments.get(experiment_id)
+        if not exp:
+            return []
+
+        # Count job statistics
+        jobs = [j for j in self.jobs.values() if j.experiments and exp in j.experiments]
+        total_jobs = len(jobs)
+        finished_jobs = sum(1 for j in jobs if j.state.finished())
+        failed_jobs = sum(1 for j in jobs if j.state.is_error())
+
+        return [
+            ExperimentRun(
+                run_id=exp.run_id,
+                experiment_id=experiment_id,
+                hostname=socket.gethostname(),
+                started_at=exp.start_time,
+                ended_at=None,
+                status="active",
+                total_jobs=total_jobs,
+                finished_jobs=finished_jobs,
+                failed_jobs=failed_jobs,
+            )
+        ]
+
+    def get_current_run(self, experiment_id: str) -> Optional[str]:
+        """Get the current run ID for an experiment"""
+        exp = self.experiments.get(experiment_id)
+        return exp.run_id if exp else None
+
+    def get_jobs(
+        self,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,  # noqa: ARG002 - not used in live scheduler
+        task_id: Optional[str] = None,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,  # noqa: ARG002 - not used in live scheduler
+    ) -> List[BaseJob]:
+        """Query jobs with optional filters"""
+        jobs: List[BaseJob] = list(self.jobs.values())
+
+        # Filter by experiment
+        if experiment_id:
+            exp = self.experiments.get(experiment_id)
+            if exp:
+                jobs = [j for j in jobs if j.experiments and exp in j.experiments]
+            else:
+                jobs = []
+
+        # Filter by task_id
+        if task_id:
+            jobs = [j for j in jobs if j.task_id == task_id]
+
+        # Filter by state
+        if state:
+            jobs = [j for j in jobs if j.state.name.lower() == state.lower()]
+
+        # Filter by tags (all tags must match)
+        if tags:
+            jobs = [j for j in jobs if all(j.tags.get(k) == v for k, v in tags.items())]
+
+        return jobs
+
+    def get_job(
+        self,
+        job_id: str,
+        experiment_id: str,  # noqa: ARG002 - job_id is sufficient in live scheduler
+        run_id: Optional[str] = None,  # noqa: ARG002 - job_id is sufficient in live scheduler
+    ) -> Optional[BaseJob]:
+        """Get a specific job"""
+        return self.jobs.get(job_id)
+
+    def get_all_jobs(
+        self,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,  # noqa: ARG002 - not used in live scheduler
+    ) -> List[BaseJob]:
+        """Get all jobs across all experiments"""
+        jobs: List[BaseJob] = list(self.jobs.values())
+
+        if state:
+            jobs = [j for j in jobs if j.state.name.lower() == state.lower()]
+
+        if tags:
+            jobs = [j for j in jobs if all(j.tags.get(k) == v for k, v in tags.items())]
+
+        return jobs
+
+    def get_services(
+        self,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,  # noqa: ARG002 - not used in live scheduler
+    ) -> List[BaseService]:
+        """Get services for an experiment"""
+        if experiment_id is None:
+            # Return all services from all experiments
+            services = []
+            for exp in self.experiments.values():
+                services.extend(exp.services.values())
+            return services
+
+        exp = self.experiments.get(experiment_id)
+        if not exp:
+            return []
+        return list(exp.services.values())
+
+    def get_tags_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> dict[str, dict[str, str]]:
+        """Get tags map for jobs in an experiment/run
+
+        Returns a map from job_id to {tag_key: tag_value}.
+        """
+        exp = self.experiments.get(experiment_id)
+        if not exp:
+            return {}
+
+        # Use current run if not specified
+        if run_id is None:
+            run_id = exp.run_id
+
+        exp_run_key = (experiment_id, run_id)
+        return self._tags_map.get(exp_run_key, {})
+
+    def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
+        """Kill a running job
+
+        For the scheduler, this is a live operation.
+        """
+        if not perform:
+            # Just check if the job can be killed
+            return job.state == JobState.RUNNING
+
+        if job.state != JobState.RUNNING:
+            return False
+
+        # Get the actual Job from our jobs dict
+        actual_job = self.jobs.get(job.identifier)
+        if actual_job is None:
+            return False
+
+        # Try to kill the process
+        process = actual_job.getprocess()
+        if process is not None:
+            try:
+                process.kill()
+                return True
+            except Exception:
+                logger.exception("Failed to kill job %s", job.identifier)
+        return False
+
+    def clean_job(
+        self,
+        job: BaseJob,  # noqa: ARG002
+        perform: bool = False,  # noqa: ARG002
+    ) -> bool:
+        """Clean a finished job
+
+        For the scheduler, jobs are automatically cleaned when they finish.
+        """
+        # Live scheduler doesn't support cleaning jobs
+        return False
+
+    def close(self) -> None:
+        """Close the state provider
+
+        For the scheduler, this is a no-op since it manages its own lifecycle.
+        """
+        pass
+
+    @property
+    def read_only(self) -> bool:
+        """Live scheduler is read-write"""
+        return False
+
+    @property
+    def is_remote(self) -> bool:
+        """Live scheduler is local"""
+        return False

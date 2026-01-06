@@ -16,11 +16,32 @@ to enable unified access in the TUI and other monitoring tools.
 import enum
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger("xpm.interfaces")
+
+
+def serialize_timestamp(ts: Optional[Union[float, datetime, str]]) -> Optional[str]:
+    """Serialize timestamp to ISO format string for DB/network storage
+
+    Handles:
+    - None: returns None
+    - float/int: Unix timestamp, converts to ISO format
+    - datetime: converts to ISO format
+    - str: returns as-is (already serialized)
+    """
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        return ts  # Already serialized
+    if isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(ts).isoformat()
+    if isinstance(ts, datetime):
+        return ts.isoformat()
+    return str(ts)
 
 
 # =============================================================================
@@ -264,30 +285,31 @@ class BaseJob:
     Attributes:
         identifier: Unique identifier for the job (hash)
         task_id: Task class identifier (string)
-        locator: Full task locator (identifier)
         path: Path to job directory
         state: Current job state (JobState object or compatible)
         submittime: When job was submitted (Unix timestamp or None)
         starttime: When job started running (Unix timestamp or None)
         endtime: When job finished (Unix timestamp or None)
         progress: List of progress updates
-        tags: Dictionary of tag key-value pairs
         exit_code: Process exit code (optional)
         retry_count: Number of retries
     """
 
     identifier: str
     task_id: str
-    locator: str
     path: Path
     state: JobState
     submittime: Optional[float]
     starttime: Optional[float]
     endtime: Optional[float]
     progress: List[Dict]
-    tags: Dict[str, str]
     exit_code: Optional[int]
     retry_count: int
+
+    @property
+    def locator(self) -> str:
+        """Full task locator (identifier): {task_id}/{identifier}"""
+        return f"{self.task_id}/{self.identifier}"
 
     # -------------------------------------------------------------------------
     # Static path computation (for use without a job instance)
@@ -448,6 +470,33 @@ class BaseJob:
             logger.warning("Failed to read metadata from %s: %s", metadata_path, e)
             return None
 
+    def db_state_dict(self) -> Dict[str, Any]:
+        """Serialize job to dictionary for DB/network storage"""
+        failure_reason = None
+        if self.state.is_error() and hasattr(self.state, "failure_reason"):
+            fr = self.state.failure_reason
+            if fr is not None:
+                failure_reason = fr.name
+
+        return {
+            "identifier": self.identifier,
+            "task_id": self.task_id,
+            "path": str(self.path) if self.path else None,
+            "state": self.state.name,
+            "failure_reason": failure_reason,
+            "submittime": serialize_timestamp(self.submittime),
+            "starttime": serialize_timestamp(self.starttime),
+            "endtime": serialize_timestamp(self.endtime),
+            "progress": self.progress,
+            "exit_code": self.exit_code,
+            "retry_count": self.retry_count,
+        }
+
+    @staticmethod
+    def db_state_eq(a: "BaseJob", b: "BaseJob") -> bool:
+        """Check if two jobs have equivalent DB state"""
+        return a.db_state_dict() == b.db_state_dict()
+
 
 # =============================================================================
 # Base Experiment Interface
@@ -472,6 +521,88 @@ class BaseExperiment:
     def experiment_id(self) -> str:
         """Experiment identifier derived from workdir name"""
         return self.workdir.name
+
+    def db_state_dict(self) -> Dict[str, Any]:
+        """Serialize experiment to dictionary for DB/network storage"""
+        return {
+            "experiment_id": self.experiment_id,
+            "workdir": str(self.workdir) if self.workdir else None,
+            "current_run_id": self.current_run_id,
+        }
+
+    @staticmethod
+    def db_state_eq(a: "BaseExperiment", b: "BaseExperiment") -> bool:
+        """Check if two experiments have equivalent DB state"""
+        return a.db_state_dict() == b.db_state_dict()
+
+
+# =============================================================================
+# Experiment Run Dataclass
+# =============================================================================
+
+
+@dataclass
+class ExperimentRun:
+    """Represents a single run of an experiment
+
+    A run is a single execution session of an experiment. Each experiment
+    can have multiple runs over time.
+
+    Attributes:
+        run_id: Unique identifier for this run
+        experiment_id: ID of the parent experiment
+        hostname: Host where the run is/was executing
+        started_at: Unix timestamp when run started
+        ended_at: Unix timestamp when run ended (None if still running)
+        status: Run status ("active", "completed", "failed")
+        total_jobs: Total number of jobs in this run
+        finished_jobs: Number of successfully completed jobs
+        failed_jobs: Number of failed jobs
+    """
+
+    run_id: str
+    experiment_id: str
+    hostname: Optional[str] = None
+    started_at: Optional[float] = None
+    ended_at: Optional[float] = None
+    status: str = "active"
+    total_jobs: int = 0
+    finished_jobs: int = 0
+    failed_jobs: int = 0
+
+    def db_state_dict(self) -> Dict[str, Any]:
+        """Serialize run to dictionary for DB/network storage"""
+        return {
+            "run_id": self.run_id,
+            "experiment_id": self.experiment_id,
+            "hostname": self.hostname,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "status": self.status,
+            "total_jobs": self.total_jobs,
+            "finished_jobs": self.finished_jobs,
+            "failed_jobs": self.failed_jobs,
+        }
+
+    @classmethod
+    def from_db_state_dict(cls, d: Dict[str, Any]) -> "ExperimentRun":
+        """Create ExperimentRun from serialized dictionary"""
+        return cls(
+            run_id=d["run_id"],
+            experiment_id=d["experiment_id"],
+            hostname=d.get("hostname"),
+            started_at=d.get("started_at"),
+            ended_at=d.get("ended_at"),
+            status=d.get("status", "active"),
+            total_jobs=d.get("total_jobs", 0),
+            finished_jobs=d.get("finished_jobs", 0),
+            failed_jobs=d.get("failed_jobs", 0),
+        )
+
+    @staticmethod
+    def db_state_eq(a: "ExperimentRun", b: "ExperimentRun") -> bool:
+        """Check if two runs have equivalent DB state"""
+        return a.db_state_dict() == b.db_state_dict()
 
 
 class BaseService:
@@ -499,3 +630,19 @@ class BaseService:
     def state_dict(self) -> dict:
         """Return dictionary representation for serialization"""
         raise NotImplementedError
+
+    def db_state_dict(self) -> Dict[str, Any]:
+        """Serialize service to dictionary for DB/network storage"""
+        state = self.state
+        state_str = state.name if hasattr(state, "name") else str(state)
+        return {
+            "service_id": self.id,
+            "description": self.description(),
+            "state": state_str,
+            "state_dict": self.state_dict(),
+        }
+
+    @staticmethod
+    def db_state_eq(a: "BaseService", b: "BaseService") -> bool:
+        """Check if two services have equivalent DB state"""
+        return a.db_state_dict() == b.db_state_dict()

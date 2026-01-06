@@ -13,7 +13,7 @@ from datetime import datetime
 import fasteners
 
 if TYPE_CHECKING:
-    from .state_provider import WorkspaceStateProvider
+    from .db_state_provider import DbStateProvider
     from .jobs import JobState
 
 from .interfaces import BaseJob
@@ -23,6 +23,7 @@ from experimaestro.scheduler.state_db import (
     ExperimentRunModel,
     JobModel,
     JobTagModel,
+    JobExperimentsModel,
     ServiceModel,
     WorkspaceSyncMetadata,
 )
@@ -150,14 +151,14 @@ def acquire_sync_lock(
 
 
 def should_sync(
-    provider: "WorkspaceStateProvider",
+    provider: "DbStateProvider",
     workspace_path: Path,
     min_interval_minutes: int = 5,
 ) -> Tuple[bool, Optional[fasteners.InterProcessLock]]:
     """Determine if sync should be performed based on locking and timing
 
     Args:
-        provider: WorkspaceStateProvider instance (used to check last sync time)
+        provider: DbStateProvider instance (used to check last sync time)
         workspace_path: Path to workspace directory
         min_interval_minutes: Minimum minutes between syncs (default: 5)
 
@@ -517,9 +518,9 @@ def sync_workspace_from_disk(  # noqa: C901
 
     # Get the workspace state provider FIRST (before should_sync)
     # This ensures consistent read_only mode throughout the sync process
-    from .state_provider import WorkspaceStateProvider
+    from .db_state_provider import DbStateProvider
 
-    provider = WorkspaceStateProvider.get_instance(
+    provider = DbStateProvider.get_instance(
         workspace_path,
         read_only=not write_mode,
         sync_on_start=False,  # Don't sync recursively
@@ -796,10 +797,7 @@ def sync_workspace_from_disk(  # noqa: C901
                         job_now = datetime.now()
                         JobModel.insert(
                             job_id=job_state["job_id"],
-                            experiment_id=experiment_id,
-                            run_id=current_run_id,
                             task_id=job_state["task_id"],
-                            locator="",  # Not available from disk
                             state=job_state["state"],
                             # Only set failure_reason if job is in error state
                             failure_reason=(
@@ -813,11 +811,7 @@ def sync_workspace_from_disk(  # noqa: C901
                             progress="[]",
                             updated_at=job_now,
                         ).on_conflict(
-                            conflict_target=[
-                                JobModel.job_id,
-                                JobModel.experiment_id,
-                                JobModel.run_id,
-                            ],
+                            conflict_target=[JobModel.job_id, JobModel.task_id],
                             update={
                                 JobModel.state: job_state["state"],
                                 # Only set failure_reason if job is in error state
@@ -835,6 +829,13 @@ def sync_workspace_from_disk(  # noqa: C901
                                 JobModel.updated_at: job_now,
                             },
                         ).execute()
+
+                        # Create or update job-experiment relationship
+                        JobExperimentsModel.insert(
+                            job_id=job_state["job_id"],
+                            experiment_id=experiment_id,
+                            run_id=current_run_id,
+                        ).on_conflict_ignore().execute()
 
                         jobs_updated += 1
 

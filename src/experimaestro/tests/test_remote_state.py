@@ -30,9 +30,16 @@ from experimaestro.scheduler.remote.protocol import (
     create_notification,
     serialize_datetime,
     deserialize_datetime,
-    serialize_job,
-    serialize_experiment,
-    serialize_run,
+)
+from experimaestro.scheduler.state_provider import (
+    MockJob,
+    MockExperiment,
+    MockService,
+)
+from experimaestro.scheduler.interfaces import (
+    BaseJob,
+    BaseExperiment,
+    BaseService,
 )
 
 
@@ -187,47 +194,38 @@ class TestDatetimeSerialization:
 
 
 class TestJobSerialization:
-    """Test job serialization"""
+    """Test job serialization using db_state_dict"""
 
     def test_serialize_mock_job(self):
-        """Test serializing a MockJob-like object"""
-        from experimaestro.scheduler.state_provider import MockJob
-
+        """Test serializing a MockJob using db_state_dict()"""
+        # Note: tags, experiment_id, run_id are not part of MockJob
+        # as they are experiment-specific
         job = MockJob(
             identifier="job123",
             task_id="task.MyTask",
-            locator="job123",
             path=Path("/tmp/jobs/job123"),
             state="running",
             submittime=1704067200.0,
             starttime=1704067300.0,
             endtime=None,
             progress=[],
-            tags={"tag1": "value1"},
-            experiment_id="exp1",
-            run_id="run1",
             updated_at="2024-01-01T00:00:00",
         )
 
-        result = serialize_job(job)
+        result = job.db_state_dict()
 
         assert result["identifier"] == "job123"
         assert result["task_id"] == "task.MyTask"
         assert result["path"] == "/tmp/jobs/job123"
         # State is serialized from JobState enum - case may vary
         assert result["state"].upper() == "RUNNING"
-        assert result["tags"] == {"tag1": "value1"}
-        assert result["experiment_id"] == "exp1"
-        assert result["run_id"] == "run1"
 
 
 class TestExperimentSerialization:
-    """Test experiment serialization"""
+    """Test experiment serialization using db_state_dict"""
 
     def test_serialize_mock_experiment(self):
-        """Test serializing a MockExperiment-like object"""
-        from experimaestro.scheduler.state_provider import MockExperiment
-
+        """Test serializing a MockExperiment using db_state_dict()"""
         exp = MockExperiment(
             workdir=Path("/tmp/xp/myexp"),
             current_run_id="run_20240101",
@@ -240,37 +238,150 @@ class TestExperimentSerialization:
             hostname="server1",
         )
 
-        result = serialize_experiment(exp)
+        result = exp.db_state_dict()
 
         assert result["experiment_id"] == "myexp"
         assert result["workdir"] == "/tmp/xp/myexp"
         assert result["current_run_id"] == "run_20240101"
-        assert result["total_jobs"] == 10
-        assert result["finished_jobs"] == 5
-        assert result["failed_jobs"] == 1
-        assert result["hostname"] == "server1"
 
 
-class TestRunSerialization:
-    """Test run serialization"""
+class TestServiceSerialization:
+    """Test service serialization using db_state_dict"""
 
-    def test_serialize_run_dict(self):
-        """Test serializing a run dictionary"""
-        run_dict = {
-            "run_id": "run_20240101",
-            "experiment_id": "exp1",
-            "hostname": "server1",
-            "started_at": "2024-01-01T10:00:00",
-            "ended_at": None,
-            "status": "active",
-        }
+    def test_serialize_mock_service(self):
+        """Test serializing a MockService using db_state_dict()"""
+        service = MockService(
+            service_id="svc123",
+            description_text="Test service",
+            state_dict_data={"port": 8080},
+            experiment_id="exp1",
+            run_id="run1",
+            url="http://localhost:8080",
+            state="RUNNING",
+        )
 
-        result = serialize_run(run_dict)
+        result = service.db_state_dict()
 
-        assert result["run_id"] == "run_20240101"
-        assert result["experiment_id"] == "exp1"
-        assert result["hostname"] == "server1"
-        assert result["status"] == "active"
+        assert result["service_id"] == "svc123"
+        assert result["description"] == "Test service"
+        assert result["state"] == "RUNNING"
+        assert result["state_dict"] == {"port": 8080}
+
+
+# =============================================================================
+# SSH Round-Trip Tests (Mock → db_state_dict → client → Mock)
+# =============================================================================
+
+
+class MockSSHClient:
+    """Minimal mock of SSHStateProviderClient for testing deserialization"""
+
+    def __init__(self, remote_workspace: str, local_cache_dir: Path):
+        self.remote_workspace = remote_workspace
+        self.local_cache_dir = local_cache_dir
+
+
+class TestSSHRoundTrip:
+    """Test SSH round-trip serialization: Mock → db_state_dict → from_db_state_dict"""
+
+    def test_mockjob_ssh_roundtrip(self, tmp_path: Path):
+        """Test MockJob round-trip through SSH serialization path"""
+        from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+        workspace_path = tmp_path / "workspace"
+        workspace_path.mkdir()
+        job_path = workspace_path / "jobs" / "my.Task" / "abc123"
+
+        # Create original MockJob
+        # Note: tags, experiment_id, run_id are not part of MockJob
+        original = MockJob(
+            identifier="abc123",
+            task_id="my.Task",
+            path=job_path,
+            state="running",
+            submittime=1234567890.0,
+            starttime=1234567891.0,
+            endtime=None,
+            progress=[{"level": 0, "progress": 0.5, "desc": "halfway"}],
+            updated_at="2024-01-01T00:00:00",
+            exit_code=None,
+            retry_count=2,
+        )
+
+        # Server-side: serialize using db_state_dict
+        serialized = original.db_state_dict()
+
+        # Client-side: deserialize using _dict_to_job (which uses from_db_state_dict)
+        mock_client = MockSSHClient(
+            remote_workspace=str(workspace_path),
+            local_cache_dir=workspace_path,
+        )
+        restored = SSHStateProviderClient._dict_to_job(mock_client, serialized)
+
+        # Verify equality using db_state_eq
+        assert BaseJob.db_state_eq(original, restored)
+
+    def test_mockexperiment_ssh_roundtrip(self, tmp_path: Path):
+        """Test MockExperiment round-trip through SSH serialization path"""
+        from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+        workspace_path = tmp_path / "workspace"
+        workspace_path.mkdir()
+        (workspace_path / "xp" / "test_exp").mkdir(parents=True)
+
+        # Create original MockExperiment
+        original = MockExperiment(
+            workdir=workspace_path / "xp" / "test_exp",
+            current_run_id="run_001",
+            total_jobs=10,
+            finished_jobs=5,
+            failed_jobs=1,
+            updated_at="2024-01-01T12:00:00",
+            started_at=1234567890.0,
+            ended_at=None,
+            hostname="testhost",
+        )
+
+        # Server-side: serialize using db_state_dict
+        serialized = original.db_state_dict()
+
+        # Client-side: deserialize using _dict_to_experiment
+        mock_client = MockSSHClient(
+            remote_workspace=str(workspace_path),
+            local_cache_dir=workspace_path,
+        )
+        restored = SSHStateProviderClient._dict_to_experiment(mock_client, serialized)
+
+        # Verify equality using db_state_eq
+        assert BaseExperiment.db_state_eq(original, restored)
+
+    def test_mockservice_ssh_roundtrip(self, tmp_path: Path):
+        """Test MockService round-trip through SSH serialization path"""
+        from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+        # Create original MockService
+        original = MockService(
+            service_id="svc_123",
+            description_text="Test service description",
+            state_dict_data={"port": 8080, "host": "localhost"},
+            experiment_id="exp1",
+            run_id="run1",
+            url="http://localhost:8080",
+            state="RUNNING",
+        )
+
+        # Server-side: serialize using db_state_dict
+        serialized = original.db_state_dict()
+
+        # Client-side: deserialize using _dict_to_service
+        mock_client = MockSSHClient(
+            remote_workspace="/tmp/workspace",
+            local_cache_dir=tmp_path,
+        )
+        restored = SSHStateProviderClient._dict_to_service(mock_client, serialized)
+
+        # Verify equality using db_state_eq
+        assert BaseService.db_state_eq(original, restored)
 
 
 # =============================================================================
@@ -312,8 +423,6 @@ class TestServerRequestHandling:
 
     def test_handle_get_experiments(self, server_with_mock, mock_state_provider):
         """Test handling get_experiments request"""
-        from experimaestro.scheduler.state_provider import MockExperiment
-
         mock_exp = MockExperiment(
             workdir=Path("/tmp/xp/exp1"),
             current_run_id="run1",
@@ -332,21 +441,16 @@ class TestServerRequestHandling:
 
     def test_handle_get_jobs(self, server_with_mock, mock_state_provider):
         """Test handling get_jobs request"""
-        from experimaestro.scheduler.state_provider import MockJob
-
+        # Note: tags, experiment_id, run_id are not part of MockJob
         mock_job = MockJob(
             identifier="job1",
             task_id="task.Test",
-            locator="job1",
             path=Path("/tmp/jobs/job1"),
             state="done",
             submittime=None,
             starttime=None,
             endtime=None,
             progress=[],
-            tags={},
-            experiment_id="exp1",
-            run_id="run1",
             updated_at="",
         )
         mock_state_provider.get_jobs.return_value = [mock_job]
@@ -456,19 +560,17 @@ class TestClientDataConversion:
 
     def test_dict_to_job(self, client, tmp_path):
         """Test converting dictionary to MockJob"""
+        # Note: tags, experiment_id, run_id are not part of MockJob
+        # as they are experiment-specific
         job_dict = {
             "identifier": "job123",
             "task_id": "task.MyTask",
-            "locator": "job123",
             "path": "/remote/workspace/jobs/job123",
             "state": "running",
             "submittime": "2024-01-01T10:00:00",
             "starttime": "2024-01-01T10:01:00",
             "endtime": None,
             "progress": [],
-            "tags": {"key": "value"},
-            "experiment_id": "exp1",
-            "run_id": "run1",
         }
 
         job = client._dict_to_job(job_dict)
@@ -477,7 +579,6 @@ class TestClientDataConversion:
         assert job.task_id == "task.MyTask"
         # Path should be mapped to local cache
         assert job.path == tmp_path / "jobs/job123"
-        assert job.tags == {"key": "value"}
 
     def test_dict_to_experiment(self, client, tmp_path):
         """Test converting dictionary to MockExperiment"""
@@ -500,12 +601,11 @@ class TestClientDataConversion:
         assert exp.total_jobs == 10
         assert exp.hostname == "server1"
 
-    def test_path_mapping_outside_workspace(self, client, tmp_path):
+    def test_path_mapping_outside_workspace(self, client):
         """Test path mapping for paths outside remote workspace"""
         job_dict = {
             "identifier": "job123",
             "task_id": "task.MyTask",
-            "locator": "job123",
             "path": "/other/path/job123",  # Not under remote_workspace
             "state": "done",
             "progress": [],
