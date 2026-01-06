@@ -29,6 +29,10 @@ from experimaestro.scheduler.interfaces import (
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
 )
+from experimaestro.notifications import (
+    ProgressInformation,
+    get_progress_information_from_dict,
+)
 
 logger = logging.getLogger("xpm.state")
 
@@ -348,7 +352,7 @@ class MockJob(BaseJob):
         submittime: Optional[float],
         starttime: Optional[float],
         endtime: Optional[float],
-        progress: List[Dict],
+        progress: ProgressInformation,
         updated_at: str,
         exit_code: Optional[int] = None,
         retry_count: int = 0,
@@ -457,6 +461,9 @@ class MockJob(BaseJob):
         if d.get("failure_reason"):
             failure_reason = JobFailureStatus[d["failure_reason"]]
 
+        # Convert progress dicts to LevelInformation objects
+        progress_list = get_progress_information_from_dict(d.get("progress", []))
+
         return cls(
             identifier=identifier,
             task_id=task_id,
@@ -465,7 +472,7 @@ class MockJob(BaseJob):
             submittime=d.get("submittime"),
             starttime=d.get("starttime"),
             endtime=d.get("endtime"),
-            progress=d.get("progress", []),
+            progress=progress_list,
             updated_at=d.get("updated_at", ""),
             exit_code=d.get("exit_code"),
             retry_count=d.get("retry_count", 0),

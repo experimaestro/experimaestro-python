@@ -364,13 +364,73 @@ class Scheduler(StateProvider, threading.Thread):
 
         self._notification_executor.submit(_do_notify)
 
+    def _notify_state_listeners_async(self, event):
+        """Notify StateProvider-style listeners asynchronously with error isolation.
+
+        This runs notifications in the same thread pool as _notify_listeners
+        to avoid blocking the scheduler and isolate errors.
+        """
+
+        def _do_notify():
+            # Get a snapshot of listeners with the lock
+            with self._state_listener_lock:
+                listeners_snapshot = list(self._state_listeners)
+
+            for listener in listeners_snapshot:
+                try:
+                    listener(event)
+                except Exception:
+                    logger.exception("Got an error with state listener %s", listener)
+
+        self._notification_executor.submit(_do_notify)
+
     def notify_job_submitted(self, job: Job):
         """Notify the listeners that a job has been submitted"""
         self._notify_listeners(lambda lst, j: lst.job_submitted(j), job)
 
+        # Also notify StateProvider-style listeners (for TUI etc.)
+        from experimaestro.scheduler.state_provider import JobExperimentUpdatedEvent
+
+        # Get experiment info from job's experiments list
+        for exp in job.experiments:
+            experiment_id = exp.experiment_id
+            run_id = exp.run_id
+            if experiment_id and run_id:
+                # Get tags and dependencies for this job
+                exp_run_key = (experiment_id, run_id)
+                tags = self._tags_map.get(exp_run_key, {}).get(job.identifier, {})
+                depends_on = self._dependencies_map.get(exp_run_key, {}).get(
+                    job.identifier, []
+                )
+
+                event = JobExperimentUpdatedEvent(
+                    experiment_id=experiment_id,
+                    run_id=run_id,
+                    job_id=job.identifier,
+                    tags=tags,
+                    depends_on=depends_on,
+                )
+                self._notify_state_listeners_async(event)
+
     def notify_job_state(self, job: Job):
         """Notify the listeners that a job has changed state"""
         self._notify_listeners(lambda lst, j: lst.job_state(j), job)
+
+        # Also notify StateProvider-style listeners (for TUI etc.)
+        from experimaestro.scheduler.state_provider import JobUpdatedEvent
+
+        # Get experiment info from job's experiments list
+        for exp in job.experiments:
+            experiment_id = exp.experiment_id
+            run_id = exp.run_id
+            if experiment_id and run_id:
+                event = JobUpdatedEvent(
+                    experiment_id=experiment_id,
+                    run_id=run_id,
+                    job_id=job.identifier,
+                    job=job,
+                )
+                self._notify_state_listeners_async(event)
 
     def notify_service_add(self, service: Service):
         """Notify the listeners that a service has been added"""

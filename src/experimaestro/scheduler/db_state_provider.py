@@ -55,6 +55,7 @@ from experimaestro.scheduler.state_provider import (
     MockExperiment,
     MockService,
 )
+from experimaestro.notifications import get_progress_information_from_dict
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.jobs import Job
@@ -2176,8 +2177,9 @@ class DbStateProvider(OfflineStateProvider):
         Returns:
             MockJob object
         """
-        # Parse progress JSON
-        progress_list = json.loads(job_model.progress)
+        # Parse progress JSON and convert to LevelInformation objects
+        progress_dicts = json.loads(job_model.progress)
+        progress_list = get_progress_information_from_dict(progress_dicts)
 
         # Compute job path from workspace_path, task_id, and job_id
         job_path = self.workspace_path / "jobs" / job_model.task_id / job_model.job_id

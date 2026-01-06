@@ -15,6 +15,7 @@ from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
 from experimaestro.scheduler.jobs import Job
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
+from experimaestro.scheduler.interfaces import BaseExperiment
 from experimaestro.settings import WorkspaceSettings, get_settings
 from experimaestro.utils import logger
 
@@ -62,11 +63,13 @@ class DatabaseListener:
         pass
 
 
-class experiment:
+class experiment(BaseExperiment):
     """Context manager for running experiments.
 
     Creates a workspace, manages task submission, and optionally starts
     a web server for monitoring.
+
+    Implements BaseExperiment interface for use with StateProvider and TUI.
 
     Example::
 
@@ -217,6 +220,51 @@ class experiment:
     def jobspath(self):
         """Return the directory in which results can be stored for this experiment"""
         return self.workdir / "jobs"
+
+    # =========================================================================
+    # BaseExperiment interface properties
+    # =========================================================================
+
+    @property
+    def current_run_id(self) -> Optional[str]:
+        """Current run ID for this experiment"""
+        return self.run_id
+
+    @property
+    def total_jobs(self) -> int:
+        """Total number of jobs in this experiment"""
+        return sum(1 for job in self.scheduler.jobs.values() if self in job.experiments)
+
+    @property
+    def finished_jobs(self) -> int:
+        """Number of completed jobs"""
+        return sum(
+            1
+            for job in self.scheduler.jobs.values()
+            if self in job.experiments and job.state.name == "done"
+        )
+
+    @property
+    def failed_jobs(self) -> int:
+        """Number of failed jobs"""
+        return len(self.failedJobs)
+
+    @property
+    def started_at(self) -> Optional[float]:
+        """Timestamp when experiment started"""
+        return getattr(self, "_started_at", None)
+
+    @property
+    def ended_at(self) -> Optional[float]:
+        """Timestamp when experiment ended (None if still running)"""
+        return getattr(self, "_ended_at", None)
+
+    @property
+    def hostname(self) -> Optional[str]:
+        """Hostname where experiment is running"""
+        import socket
+
+        return socket.gethostname()
 
     @property
     def alt_jobspaths(self):
@@ -452,6 +500,10 @@ class experiment:
         # Register experiment with scheduler
         self.scheduler.register_experiment(self)
 
+        # Set experiment start time for BaseExperiment interface
+        self._started_at = time.time()
+        self._ended_at = None
+
         # Start server via scheduler if needed
         if self._needs_server:
             self.scheduler.start_server(self._server_settings, workspace=self.workspace)
@@ -560,6 +612,9 @@ class experiment:
             for service in self.services.values():
                 logger.info("Closing service %s", service.description())
                 service.stop()
+
+            # Set end time for BaseExperiment interface
+            self._ended_at = time.time()
 
             # Unregister experiment from scheduler
             self.scheduler.unregister_experiment(self)

@@ -41,6 +41,7 @@ from experimaestro.scheduler.interfaces import (
     BaseExperiment,
     BaseService,
 )
+from experimaestro.notifications import LevelInformation
 
 
 # =============================================================================
@@ -302,7 +303,7 @@ class TestSSHRoundTrip:
             submittime=1234567890.0,
             starttime=1234567891.0,
             endtime=None,
-            progress=[{"level": 0, "progress": 0.5, "desc": "halfway"}],
+            progress=[LevelInformation(level=0, progress=0.5, desc="halfway")],
             updated_at="2024-01-01T00:00:00",
             exit_code=None,
             retry_count=2,

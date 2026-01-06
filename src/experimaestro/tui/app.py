@@ -900,9 +900,9 @@ class JobDetailView(Widget):
         if progress_list:
             progress_lines = []
             for p in progress_list:
-                level = p.get("level", 0)
-                pct = p.get("progress", 0) * 100
-                desc = p.get("desc", "")
+                level = p.level
+                pct = p.progress * 100
+                desc = p.desc or ""
                 indent = "  " * level
                 progress_lines.append(f"{indent}{pct:.1f}% {desc}")
             progress_text = "\n".join(progress_lines) if progress_lines else "-"
@@ -1432,7 +1432,7 @@ class JobsTable(Vertical):
                 progress_list = job.progress or []
                 if progress_list:
                     last_progress = progress_list[-1]
-                    progress_pct = last_progress.get("progress", 0) * 100
+                    progress_pct = last_progress.progress * 100
                     status_text = f"▶ {progress_pct:.0f}%"
                 else:
                     status_text = "▶"

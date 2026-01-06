@@ -28,6 +28,22 @@ class LevelInformation:
     previous_progress: float = -1
     previous_desc: Optional[str] = None
 
+    @classmethod
+    def from_dict(cls, d: Dict) -> "LevelInformation":
+        """Create LevelInformation from a dictionary (e.g., from JSON).
+
+        Args:
+            d: Dictionary with keys 'level', 'progress', and optionally 'desc'
+
+        Returns:
+            LevelInformation instance
+        """
+        return cls(
+            level=d.get("level", 0),
+            desc=d.get("desc"),
+            progress=d.get("progress", 0),
+        )
+
     def modified(self, reporter: "Reporter"):
         return (
             abs(self.progress - self.previous_progress) > reporter.progress_threshold
@@ -43,6 +59,24 @@ class LevelInformation:
 
     def __repr__(self) -> str:
         return f"[{self.level}] {self.desc} {int(self.progress * 1000) / 10}%"
+
+
+# Type alias for progress information
+ProgressInformation = list[LevelInformation]
+
+
+def get_progress_information_from_dict(dicts: list[dict]) -> ProgressInformation:
+    """Convert a list of progress dicts to ProgressInformation.
+
+    Handles both dict and LevelInformation items for robustness.
+
+    Args:
+        dicts: List of dictionaries with 'level', 'progress', 'desc' keys
+
+    Returns:
+        List of LevelInformation instances (ProgressInformation)
+    """
+    return [LevelInformation.from_dict(p) if isinstance(p, dict) else p for p in dicts]
 
 
 class ListenerInformation:
