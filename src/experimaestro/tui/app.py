@@ -2032,6 +2032,16 @@ class ExperimaestroUI(App):
             self.owns_provider = False  # Provider is singleton, don't close
             self._has_active_experiment = False  # Just viewing, no active experiment
 
+        # Set subtitle to show scheduler status
+        self._update_scheduler_status()
+
+    def _update_scheduler_status(self) -> None:
+        """Update the subtitle to reflect scheduler status"""
+        if self._has_active_experiment:
+            self.sub_title = "● Scheduler Running"
+        else:
+            self.sub_title = "○ Offline (Database)"
+
     def compose(self) -> ComposeResult:
         """Compose the TUI layout"""
         yield Header()
