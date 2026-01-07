@@ -37,7 +37,7 @@ from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 if TYPE_CHECKING:
     from ..callbacks import TaskEventListener
     from ..identifier import Identifier
-    from ..subparameters import Subparameters
+    from ..partial import Partial
     from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
     from experimaestro.launchers import Launcher
@@ -232,7 +232,7 @@ class ConfigInformation:
         """The configuration identifier (cached when sealed)"""
 
         self._partial_identifiers: Dict[str, "Identifier"] = {}
-        """Cached partial identifiers (keyed by subparameters name)"""
+        """Cached partial identifiers (keyed by partial name)"""
 
         self._validated = False
         self._sealed = False
@@ -558,15 +558,15 @@ class ConfigInformation:
             self._identifier = identifier
         return identifier
 
-    def get_partial_identifier(self, subparameters: "Subparameters") -> "Identifier":
-        """Get the partial identifier for a given subparameters instance.
+    def get_partial_identifier(self, partial: "Partial") -> "Identifier":
+        """Get the partial identifier for a given partial instance.
 
         Partial identifiers exclude certain parameter groups, allowing
         configurations that differ only in those groups to share the same
         partial identifier (and thus the same partial directory).
 
         Args:
-            subparameters: The Subparameters instance defining which groups
+            partial: The Partial instance defining which groups
                 to include/exclude.
 
         Returns:
@@ -574,11 +574,11 @@ class ConfigInformation:
         """
         from ..identifier import IdentifierComputer
 
-        name = subparameters.name
+        name = partial.name
         if name in self._partial_identifiers:
             return self._partial_identifiers[name]
 
-        identifier = IdentifierComputer.compute_partial(self.pyobject, subparameters)
+        identifier = IdentifierComputer.compute_partial(self.pyobject, partial)
 
         if self._sealed:
             self._partial_identifiers[name] = identifier

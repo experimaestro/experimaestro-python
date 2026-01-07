@@ -337,7 +337,7 @@ class ServiceModel(BaseModel):
 
 
 class PartialModel(BaseModel):
-    """Partial directory tracking for subparameters
+    """Partial directory tracking for partial
 
     Tracks partial directories that are shared across jobs with different
     parameter values (but same partial identifier). These directories are
@@ -346,18 +346,18 @@ class PartialModel(BaseModel):
     Fields:
         partial_id: Hex hash of the partial identifier
         task_id: Task class identifier
-        subparameters_name: Name of the subparameters definition
+        partial_name: Name of the partial definition
         created_at: When this partial directory was first created
     """
 
     partial_id = CharField(primary_key=True)
     task_id = CharField(index=True)
-    subparameters_name = CharField(index=True)
+    partial_name = CharField(index=True)
     created_at = DateTimeField(default=datetime.now)
 
     class Meta:
         table_name = "partials"
-        indexes = ((("task_id", "subparameters_name"), False),)
+        indexes = ((("task_id", "partial_name"), False),)
 
 
 class JobPartialModel(BaseModel):
@@ -366,7 +366,7 @@ class JobPartialModel(BaseModel):
     Tracks which jobs reference which partial directories. This enables
     cleanup of orphan partials when all referencing jobs are deleted.
 
-    A job can use multiple partials (different subparameters definitions),
+    A job can use multiple partials (different partial definitions),
     and a partial can be used by multiple jobs.
 
     Fields:

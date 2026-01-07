@@ -9,7 +9,7 @@ from typing import Optional, TYPE_CHECKING
 from experimaestro.core.objects import Config, ConfigMixin
 
 if TYPE_CHECKING:
-    from experimaestro.core.subparameters import Subparameters
+    from experimaestro.core.partial import Partial
 
 
 class ConfigPath:
@@ -112,8 +112,8 @@ class IdentifierComputer:
         config: The configuration to compute the identifier for
         config_path: Used to track cycles when computing identifiers
         version: Hash computation version (defaults to XPM_HASH_COMPUTER env var or 2)
-        subparameters: If provided, only include parameters that are not excluded
-            by this Subparameters instance (for partial identifier computation)
+        partial: If provided, only include parameters that are not excluded
+            by this Partial instance (for partial identifier computation)
     """
 
     OBJECT_ID = b"\x00"
@@ -137,14 +137,14 @@ class IdentifierComputer:
         config_path: ConfigPath,
         *,
         version=None,
-        subparameters: "Subparameters" = None,
+        partial: "Partial" = None,
     ):
         # Hasher for parameters
         self._hasher = hashlib.sha256()
         self.config = config
         self.config_path = config_path
         self.version = version or int(os.environ.get("XPM_HASH_COMPUTER", 2))
-        self.subparameters = subparameters
+        self.partial = partial
         if hash_logger.isEnabledFor(logging.DEBUG):
             hash_logger.debug(
                 "starting hash (%s): %s", hash(str(self.config)), self.config
@@ -279,9 +279,9 @@ class IdentifierComputer:
             # Process arguments (sort by name to ensure uniqueness)
             arguments = sorted(xpmtype.arguments.values(), key=lambda a: a.name)
             for argument in arguments:
-                # Skip arguments excluded by subparameters (for partial identifiers)
-                if self.subparameters is not None:
-                    if self.subparameters.is_excluded(argument.groups):
+                # Skip arguments excluded by partial (for partial identifiers)
+                if self.partial is not None:
+                    if self.partial.is_excluded(argument.groups):
                         continue
 
                 # Ignored argument
@@ -382,7 +382,7 @@ class IdentifierComputer:
     @staticmethod
     def compute_partial(
         config: "ConfigMixin",
-        subparameters: "Subparameters",
+        partial: "Partial",
         config_path: ConfigPath | None = None,
         version=None,
     ) -> Identifier:
@@ -393,7 +393,7 @@ class IdentifierComputer:
         partial identifier (and thus the same partial directory).
 
         :param config: the configuration for which we compute the identifier
-        :param subparameters: the Subparameters instance defining which groups
+        :param partial: the Partial instance defining which groups
             to include/exclude
         :param config_path: used to track down cycles between configurations
         :param version: version for the hash computation (None for the last one)
@@ -402,7 +402,7 @@ class IdentifierComputer:
 
         with config_path.push(config):
             computer = IdentifierComputer(
-                config, config_path, version=version, subparameters=subparameters
+                config, config_path, version=version, partial=partial
             )
             computer.update(config, myself=True)
             identifier = computer.identifier()

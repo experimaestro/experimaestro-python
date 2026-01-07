@@ -1,14 +1,14 @@
-"""Tests for subparameters (partial identifier computation)"""
+"""Tests for partial (partial identifier computation)"""
 
 from experimaestro import (
     Config,
     Task,
     Param,
     field,
-    subparameters,
+    partial,
     param_group,
     ParameterGroup,
-    Subparameters,
+    Partial,
 )
 
 
@@ -17,8 +17,8 @@ iter_group = param_group("iter")
 model_group = param_group("model")
 
 
-class TestSubparametersBasic:
-    """Test basic subparameters functionality"""
+class TestPartialBasic:
+    """Test basic partial functionality"""
 
     def test_param_group_creation(self):
         """Test creating parameter groups"""
@@ -42,38 +42,38 @@ class TestSubparametersBasic:
         s2 = {group1, group3}
         assert len(s2) == 2
 
-    def test_subparameters_creation(self):
-        """Test creating subparameters"""
-        sp = subparameters(exclude_groups=[iter_group])
-        assert isinstance(sp, Subparameters)
+    def test_partials_creation(self):
+        """Test creating partial"""
+        sp = partial(exclude_groups=[iter_group])
+        assert isinstance(sp, Partial)
         assert iter_group in sp.exclude_groups
 
-    def test_subparameters_is_excluded(self):
+    def test_partials_is_excluded(self):
         """Test is_excluded method"""
-        sp = subparameters(exclude_groups=[iter_group])
+        sp = partial(exclude_groups=[iter_group])
         assert sp.is_excluded({iter_group}) is True
         assert sp.is_excluded({model_group}) is False
         assert sp.is_excluded(set()) is False
 
-    def test_subparameters_include_overrides_exclude(self):
+    def test_partials_include_overrides_exclude(self):
         """Test that include_groups overrides exclude_groups"""
-        sp = subparameters(
+        sp = partial(
             exclude_groups=[iter_group, model_group], include_groups=[iter_group]
         )
         # iter_group is in both, but include wins
         assert sp.is_excluded({iter_group}) is False
         assert sp.is_excluded({model_group}) is True
 
-    def test_subparameters_exclude_all(self):
+    def test_partials_exclude_all(self):
         """Test exclude_all option"""
-        sp = subparameters(exclude_all=True, include_groups=[model_group])
+        sp = partial(exclude_all=True, include_groups=[model_group])
         assert sp.is_excluded({iter_group}) is True
         assert sp.is_excluded({model_group}) is False
         assert sp.is_excluded(set()) is True
 
-    def test_subparameters_exclude_no_group(self):
+    def test_partials_exclude_no_group(self):
         """Test exclude_no_group option"""
-        sp = subparameters(exclude_no_group=True)
+        sp = partial(exclude_no_group=True)
         assert sp.is_excluded(set()) is True
         assert sp.is_excluded({iter_group}) is False
 
@@ -94,24 +94,24 @@ class TestPartialIdentifiers:
         assert iter_group in xpmtype.arguments["x"].groups
         assert len(xpmtype.arguments["y"].groups) == 0
 
-    def test_subparameters_collected_in_objecttype(self):
-        """Test that subparameters are collected in ObjectType"""
+    def test_partials_collected_in_objecttype(self):
+        """Test that partial are collected in ObjectType"""
 
         class MyTask(Task):
-            checkpoints = subparameters(exclude_groups=[iter_group])
+            checkpoints = partial(exclude_groups=[iter_group])
             x: Param[int]
 
         xpmtype = MyTask.__getxpmtype__()
         xpmtype.__initialize__()
 
-        assert "checkpoints" in xpmtype._subparameters
-        assert xpmtype._subparameters["checkpoints"].name == "checkpoints"
+        assert "checkpoints" in xpmtype._partials
+        assert xpmtype._partials["checkpoints"].name == "checkpoints"
 
     def test_partial_identifier_same_when_excluded_differs(self):
         """Test that partial identifiers are the same when only excluded params differ"""
 
         class MyTask(Task):
-            checkpoints = subparameters(exclude_groups=[iter_group])
+            checkpoints = partial(exclude_groups=[iter_group])
             max_iter: Param[int] = field(groups=[iter_group])
             learning_rate: Param[float]
 
@@ -130,7 +130,7 @@ class TestPartialIdentifiers:
         """Test that partial identifiers differ when included params differ"""
 
         class MyTask(Task):
-            checkpoints = subparameters(exclude_groups=[iter_group])
+            checkpoints = partial(exclude_groups=[iter_group])
             max_iter: Param[int] = field(groups=[iter_group])
             learning_rate: Param[float]
 
@@ -146,7 +146,7 @@ class TestPartialIdentifiers:
         """Test partial identifiers with parameters in multiple groups"""
 
         class MyTask(Task):
-            checkpoints = subparameters(exclude_groups=[iter_group])
+            checkpoints = partial(exclude_groups=[iter_group])
             # This parameter is in both groups
             x: Param[int] = field(groups=[iter_group, model_group])
             y: Param[float]

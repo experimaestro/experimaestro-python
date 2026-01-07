@@ -14,7 +14,7 @@ from experimaestro import (
     field,
     Task,
     LightweightTask,
-    subparameters,
+    partial,
     param_group,
 )
 from experimaestro.core.objects import (
@@ -742,7 +742,7 @@ def test_identifier_field_default_vs_ignore_default():
     )
 
 
-# --- Test partial identifiers (subparameters) ---
+# --- Test partial identifiers (partial) ---
 
 
 # Define parameter groups at module level
@@ -751,7 +751,7 @@ model_group = param_group("model")
 
 
 def get_partial_identifier(config, sp):
-    """Helper to get partial identifier for a config and subparameters"""
+    """Helper to get partial identifier for a config and partial"""
     return config.__xpm__.get_partial_identifier(sp).all
 
 
@@ -759,7 +759,7 @@ def test_partial_identifier_excludes_grouped_params():
     """Test that partial identifier excludes parameters in excluded groups"""
 
     class ConfigWithGroups(Config):
-        checkpoints = subparameters(exclude_groups=[iter_group])
+        checkpoints = partial(exclude_groups=[iter_group])
         max_iter: Param[int] = field(groups=[iter_group])
         learning_rate: Param[float]
 
@@ -781,7 +781,7 @@ def test_partial_identifier_includes_ungrouped_params():
     """Test that partial identifier includes parameters not in excluded groups"""
 
     class ConfigWithGroups(Config):
-        checkpoints = subparameters(exclude_groups=[iter_group])
+        checkpoints = partial(exclude_groups=[iter_group])
         max_iter: Param[int] = field(groups=[iter_group])
         learning_rate: Param[float]
 
@@ -801,7 +801,7 @@ def test_partial_identifier_matches_config_without_excluded():
 
     class ConfigWithIter(Config):
         __xpmid__ = "test.partial_identifier.config"
-        checkpoints = subparameters(exclude_groups=[iter_group])
+        checkpoints = partial(exclude_groups=[iter_group])
         max_iter: Param[int] = field(groups=[iter_group])
         learning_rate: Param[float]
 
@@ -824,7 +824,7 @@ def test_partial_identifier_multiple_groups():
     """Test partial identifier with parameter in multiple groups"""
 
     class ConfigMultiGroup(Config):
-        checkpoints = subparameters(exclude_groups=[iter_group])
+        checkpoints = partial(exclude_groups=[iter_group])
         # This parameter is in both groups - should be excluded if any group is excluded
         x: Param[int] = field(groups=[iter_group, model_group])
         y: Param[float]
@@ -845,7 +845,7 @@ def test_partial_identifier_include_overrides_exclude():
 
     class ConfigIncludeOverride(Config):
         # iter_group is excluded but also included, so it should NOT be excluded
-        partial = subparameters(
+        partial = partial(
             exclude_groups=[iter_group, model_group], include_groups=[iter_group]
         )
         x: Param[int] = field(groups=[iter_group])
@@ -873,7 +873,7 @@ def test_partial_identifier_exclude_all():
 
     class ConfigExcludeAll(Config):
         # Exclude all, but include model_group
-        partial = subparameters(exclude_all=True, include_groups=[model_group])
+        partial = partial(exclude_all=True, include_groups=[model_group])
         x: Param[int] = field(groups=[iter_group])
         y: Param[int] = field(groups=[model_group])
         z: Param[float]  # No group
@@ -904,7 +904,7 @@ def test_partial_identifier_exclude_no_group():
     """Test exclude_no_group option"""
 
     class ConfigExcludeNoGroup(Config):
-        partial = subparameters(exclude_no_group=True)
+        partial = partial(exclude_no_group=True)
         x: Param[int] = field(groups=[iter_group])
         y: Param[float]  # No group
 

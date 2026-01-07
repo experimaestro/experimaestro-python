@@ -29,14 +29,14 @@ class ConfigWalkContext:
             return self.path / self._configpath
         return self.path
 
-    def partial_path(self, subparameters, config) -> Path:
-        """Returns the partial directory path for a given subparameters instance.
+    def partial_path(self, partial, config) -> Path:
+        """Returns the partial directory path for a given partial instance.
 
         This method should be overridden in subclasses that have access to
         workspace information (like JobContext).
 
         Args:
-            subparameters: The Subparameters instance defining which groups to exclude
+            partial: The Partial instance defining which groups to exclude
             config: The configuration to compute the partial identifier for
 
         Returns:

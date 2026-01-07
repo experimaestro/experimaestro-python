@@ -1,15 +1,15 @@
-"""Subparameters for partial identifier computation.
+"""Partial identifier computation.
 
-This module provides the `subparameters` function and `Subparameters` class
-for defining parameter subsets that compute partial identifiers. This enables
-sharing directories (like checkpoints) across tasks that differ only in
-excluded parameter groups.
+This module provides the `partial` function and `Partial` class for defining
+parameter subsets that compute partial identifiers. This enables sharing
+directories (like checkpoints) across tasks that differ only in excluded
+parameter groups.
 
 Example:
     iter_group = param_group("iter")
 
     class Learn(Task):
-        checkpoints = subparameters(exclude_groups=[iter_group])
+        checkpoints = partial(exclude_groups=[iter_group])
 
         max_iter: Param[int] = field(groups=[iter_group])
         learning_rate: Param[float]
@@ -36,7 +36,7 @@ class ParameterGroup:
 
 
 def param_group(name: str) -> ParameterGroup:
-    """Create a parameter group for use with subparameters.
+    """Create a parameter group for use with partial identifiers.
 
     Parameter groups allow computing partial identifiers that exclude
     certain parameters, enabling shared directories across related tasks.
@@ -56,10 +56,10 @@ def param_group(name: str) -> ParameterGroup:
 
 
 @dataclass
-class Subparameters:
+class Partial:
     """Defines a subset of parameters for partial identifier computation.
 
-    A Subparameters instance defines which parameter groups to include or exclude
+    A Partial instance defines which parameter groups to include or exclude
     when computing a partial identifier. This enables sharing directories
     (like checkpoints) across experiments that only differ in excluded groups.
 
@@ -123,16 +123,16 @@ class Subparameters:
         return False
 
 
-def subparameters(
+def partial(
     *,
     exclude_groups: list[ParameterGroup] | None = None,
     include_groups: list[ParameterGroup] | None = None,
     exclude_no_group: bool = False,
     exclude_all: bool = False,
-) -> Subparameters:
-    """Create a subparameters specification for partial identifier computation.
+) -> Partial:
+    """Create a partial specification for partial identifier computation.
 
-    Subparameters allow tasks to share directories when they differ only
+    Partials allow tasks to share directories when they differ only
     in certain parameter groups (e.g., training hyperparameters).
 
     Example::
@@ -146,7 +146,7 @@ def subparameters(
             checkpoint: Meta[Path] = field(
                 default_factory=PathGenerator(
                     "model.pt",
-                    subparameters=subparameters(exclude=[training_group])
+                    partial=partial(exclude_groups=[training_group])
                 )
             )
 
@@ -154,9 +154,9 @@ def subparameters(
     :param include_groups: Parameter groups to always include (overrides exclusion)
     :param exclude_no_group: If True, exclude parameters with no group assigned
     :param exclude_all: If True, exclude all parameters by default
-    :return: A Subparameters object
+    :return: A Partial object
     """
-    return Subparameters(
+    return Partial(
         exclude_groups=set(exclude_groups or []),
         include_groups=set(include_groups or []),
         exclude_no_group=exclude_no_group,

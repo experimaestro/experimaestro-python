@@ -292,7 +292,7 @@ def cleanup_partials(ctx, perform: bool):
     """Clean up orphan partial directories
 
     Partial directories are shared checkpoint locations created by
-    subparameters. When all jobs using a partial are deleted, the
+    partial. When all jobs using a partial are deleted, the
     partial becomes orphaned and can be cleaned up.
 
     This command finds all orphan partials and deletes them (or shows

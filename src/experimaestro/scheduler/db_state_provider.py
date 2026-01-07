@@ -1196,9 +1196,9 @@ class DbStateProvider(OfflineStateProvider):
             )
         )
 
-        # Register partials for all declared subparameters
-        subparameters = job.type._subparameters
-        for name, sp in subparameters.items():
+        # Register partials for all declared partial
+        partial = job.type._partials
+        for name, sp in partial.items():
             partial_id = job.config.__xpm__.get_partial_identifier(sp)
             partial_id_hex = partial_id.all.hex()
 
@@ -1989,14 +1989,14 @@ class DbStateProvider(OfflineStateProvider):
 
     @_with_db_context
     def register_partial(
-        self, partial_id: str, task_id: str, subparameters_name: str
+        self, partial_id: str, task_id: str, partial_name: str
     ) -> None:
         """Register a partial directory (creates if not exists)
 
         Args:
             partial_id: Hex hash of the partial identifier
             task_id: Task class identifier
-            subparameters_name: Name of the subparameters definition
+            partial_name: Name of the partial definition
 
         Raises:
             RuntimeError: If in read-only mode
@@ -2007,7 +2007,7 @@ class DbStateProvider(OfflineStateProvider):
         PartialModel.insert(
             partial_id=partial_id,
             task_id=task_id,
-            subparameters_name=subparameters_name,
+            partial_name=partial_name,
             created_at=datetime.now(),
         ).on_conflict_ignore().execute()
 
@@ -2015,7 +2015,7 @@ class DbStateProvider(OfflineStateProvider):
             "Registered partial: %s (task=%s, subparams=%s)",
             partial_id,
             task_id,
-            subparameters_name,
+            partial_name,
         )
 
     @_with_db_context
@@ -2088,7 +2088,7 @@ class DbStateProvider(OfflineStateProvider):
         """Find partial directories that are not referenced by any job
 
         Returns:
-            List of dictionaries with partial_id, task_id, subparameters_name
+            List of dictionaries with partial_id, task_id, partial_name
         """
         # Find partials that have no job references
         # Using a subquery to find referenced partial_ids
@@ -2104,7 +2104,7 @@ class DbStateProvider(OfflineStateProvider):
                 {
                     "partial_id": partial.partial_id,
                     "task_id": partial.task_id,
-                    "subparameters_name": partial.subparameters_name,
+                    "partial_name": partial.partial_name,
                     "created_at": partial.created_at.isoformat(),
                 }
             )
@@ -2133,7 +2133,7 @@ class DbStateProvider(OfflineStateProvider):
                 self.workspace_path
                 / "partials"
                 / orphan["task_id"]
-                / orphan["subparameters_name"]
+                / orphan["partial_name"]
                 / orphan["partial_id"]
             )
 

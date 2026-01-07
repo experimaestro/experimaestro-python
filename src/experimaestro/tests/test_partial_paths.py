@@ -7,7 +7,7 @@ from experimaestro import (
     Meta,
     field,
     PathGenerator,
-    subparameters,
+    partial,
     param_group,
 )
 from experimaestro.scheduler import JobState
@@ -20,10 +20,10 @@ iter_group = param_group("iter")
 
 
 class TaskWithPartial(Task):
-    """Task that uses subparameters for partial paths"""
+    """Task that uses partial for partial paths"""
 
-    # Define a subparameters set
-    checkpoints = subparameters(exclude_groups=[iter_group])
+    # Define a partial set
+    checkpoints = partial(exclude_groups=[iter_group])
 
     # Parameter in iter_group - excluded from partial identifier
     max_iter: Param[int] = field(groups=[iter_group])
@@ -114,7 +114,7 @@ def test_partial_registered_in_database():
                 # Check that partial is registered
                 partials = list(PartialModel.select())
                 assert len(partials) == 1
-                assert partials[0].subparameters_name == "checkpoints"
+                assert partials[0].partial_name == "checkpoints"
 
                 # Check that job is linked to partial
                 job_partials = list(JobPartialModel.select())

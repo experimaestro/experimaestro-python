@@ -40,11 +40,11 @@ from .core.arguments import (
     help,
 )
 from .generators import pathgenerator, PathGenerator
-from .core.subparameters import (
-    subparameters,
+from .core.partial import (
+    partial,
     param_group,
     ParameterGroup,
-    Subparameters,
+    Partial,
 )
 from .core.objects import (
     Config,

@@ -6,7 +6,7 @@ from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
 from experimaestro.core.objects import ConfigWalkContext, Config
 
 if TYPE_CHECKING:
-    from experimaestro.core.subparameters import Subparameters
+    from experimaestro.core.partial import Partial
 
 
 class Generator(ABC):
@@ -33,7 +33,7 @@ class PathGenerator(Generator):
             output: Meta[Path] = field(default_factory=PathGenerator("results.json"))
             model: Meta[Path] = field(default_factory=PathGenerator("model.pt"))
 
-    For shared directories across related tasks, use with subparameters::
+    For shared directories across related tasks, use with partial::
 
         training_group = param_group("training")
 
@@ -42,13 +42,13 @@ class PathGenerator(Generator):
             checkpoint: Meta[Path] = field(
                 default_factory=PathGenerator(
                     "model.pt",
-                    subparameters=subparameters(exclude=[training_group])
+                    partial=partial(exclude=[training_group])
                 )
             )
 
     :param path: Relative path within the task directory. Can be a string,
         Path, or callable that takes (context, config) and returns a Path.
-    :param subparameters: Optional subparameters for partial directory sharing.
+    :param partial: Optional partial for partial directory sharing.
         When provided, the path is generated in a shared partial directory.
     """
 
@@ -56,7 +56,7 @@ class PathGenerator(Generator):
         self,
         path: Union[str, Path, Callable[[ConfigWalkContext, Config], Path]] = "",
         *,
-        partial: "Subparameters" = None,
+        partial: "Partial" = None,
     ):
         self.path = path
         self.partial = partial

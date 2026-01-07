@@ -30,7 +30,7 @@ if typing.TYPE_CHECKING:
     from experimaestro.scheduler.base import Job
     from experimaestro.launchers import Launcher
     from experimaestro.core.objects import Config
-    from experimaestro.core.subparameters import Subparameters
+    from experimaestro.core.partial import Partial
 
 
 @dataclass
@@ -310,8 +310,8 @@ class ObjectType(Type):
         # --- Value class (for external value types, e.g., nn.Module subclasses)
         self._original_type: type = tp  # Keep reference to original config class
 
-        # --- Subparameters for partial identifier computation
-        self._subparameters: Dict[str, "Subparameters"] = {}
+        # --- Partial for partial identifier computation
+        self._partials: Dict[str, "Partial"] = {}
 
     def set_value_type(self, value_class: type) -> None:
         """Register an explicit value class for this configuration.
@@ -407,15 +407,15 @@ class ObjectType(Type):
                                 )
                                 raise
 
-        # Collect subparameters from class attributes
-        from .subparameters import Subparameters as SubparametersClass
+        # Collect partial from class attributes
+        from .partial import Partial as PartialClass
 
         for name, value in self._original_type.__dict__.items():
-            if isinstance(value, SubparametersClass):
+            if isinstance(value, PartialClass):
                 # Auto-set name from attribute name if not already set
                 if value.name is None:
                     value.name = name
-                self._subparameters[name] = value
+                self._partials[name] = value
 
     def name(self):
         return f"{self.value_type.__module__}.{self.value_type.__qualname__}"

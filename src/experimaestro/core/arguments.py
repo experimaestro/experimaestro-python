@@ -8,7 +8,7 @@ from typing import Annotated
 
 if TYPE_CHECKING:
     import experimaestro.core.types
-    from experimaestro.core.subparameters import ParameterGroup
+    from experimaestro.core.partial import ParameterGroup
 
 # Track deprecation warnings per module (max 10 per module)
 _deprecation_warning_counts: dict[str, int] = {}
@@ -70,7 +70,7 @@ class Argument:
             otherwise be issued. Defaults to False.
 
             groups (set[ParameterGroup], optional): Set of groups this parameter
-            belongs to. Used with subparameters to compute partial identifiers.
+            belongs to. Used with partial to compute partial identifiers.
             Defaults to None (empty set).
         """
         required = (field_or_default is None) if required is None else required
@@ -327,7 +327,7 @@ class field:
             Useful for adding a field that changes the identifier but won't be used.
         :param overrides: If True, suppress warning when overriding parent parameter
         :param groups: List of ParameterGroup objects for partial identifiers.
-            Used with subparameters to compute identifiers that exclude certain groups.
+            Used with partial to compute identifiers that exclude certain groups.
         """
         assert not ((default is not None) and (default_factory is not None)), (
             "default and default_factory are mutually exclusive options"
