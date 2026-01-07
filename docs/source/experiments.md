@@ -92,6 +92,7 @@ The YAML configuration file supports the following options from {py:class}`~expe
 | `description` | string | `""` | Full description of the experiment |
 | `paper` | string | `""` | Source paper reference for this experiment |
 | `add_timestamp` | bool | `False` | Append timestamp (`YYYYMMDD-HHMM`) to experiment ID |
+| `dirty_git` | string | `"warn"` | Action when git has uncommitted changes: `ignore`, `warn`, or `error` |
 
 #### Configuration inheritance
 
@@ -144,6 +145,55 @@ experimaestro run-experiment --show experiment.yaml
 
 # With overrides - see the final result
 experimaestro run-experiment --show -c learning_rate=1e-5 --pre-yaml base.yaml experiment.yaml
+```
+
+### Dirty Git Check
+
+Experimaestro can check whether your project's git repository has uncommitted changes when starting an experiment. This helps ensure reproducibility by warning you (or preventing you) from running experiments with uncommitted code changes.
+
+The `dirty_git` option controls the behavior:
+
+| Value | Description |
+|-------|-------------|
+| `ignore` | Don't check or warn about uncommitted changes |
+| `warn` | Log a warning if there are uncommitted changes (default) |
+| `error` | Raise a `DirtyGitError` exception and abort the experiment |
+
+#### YAML configuration
+
+```yaml
+id: my-experiment
+dirty_git: error  # Fail if git is dirty
+```
+
+#### Python API
+
+When using the experiment context manager directly, you can pass the `dirty_git` parameter:
+
+```python
+from experimaestro import experiment, DirtyGitAction
+
+# Using the enum
+with experiment(workdir, "my-experiment", dirty_git=DirtyGitAction.ERROR) as xp:
+    ...
+
+# Or using the string value
+with experiment(workdir, "my-experiment", dirty_git=DirtyGitAction.WARN) as xp:
+    ...
+```
+
+#### Handling DirtyGitError
+
+When `dirty_git` is set to `error`, a {py:class}`~experimaestro.DirtyGitError` exception is raised if the repository has uncommitted changes:
+
+```python
+from experimaestro import experiment, DirtyGitAction, DirtyGitError
+
+try:
+    with experiment(workdir, "my-experiment", dirty_git=DirtyGitAction.ERROR) as xp:
+        ...
+except DirtyGitError as e:
+    print(f"Cannot run experiment: {e}")
 ```
 
 ### Common handling

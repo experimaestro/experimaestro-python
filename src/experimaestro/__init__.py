@@ -61,7 +61,7 @@ from .core.context import SerializationContext
 from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
-from .scheduler import Scheduler, experiment, FailedExperiment
+from .scheduler import Scheduler, experiment, FailedExperiment, DirtyGitError
 from .exceptions import GracefulTimeout
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler.state import get_experiment
@@ -71,6 +71,7 @@ from .xpmutils import DirectoryContext
 from .mkdocs.annotations import documentation
 from .scheduler.base import Job
 from .launcherfinder.registry import LauncherRegistry
+from .experiments.configuration import DirtyGitAction
 
 
 def set_launcher(launcher: Launcher):

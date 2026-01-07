@@ -17,6 +17,7 @@ from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.scheduler.interfaces import BaseExperiment
 from experimaestro.settings import WorkspaceSettings, get_settings
+from experimaestro.experiments.configuration import DirtyGitAction
 from experimaestro.utils import logger
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
@@ -24,6 +25,12 @@ ServiceClass = TypeVar("ServiceClass", bound=Service)
 
 class FailedExperiment(HandledException):
     """Raised when an experiment failed"""
+
+    pass
+
+
+class DirtyGitError(HandledException):
+    """Raised when the git repository has uncommitted changes and dirty_git=error"""
 
     pass
 
@@ -105,6 +112,7 @@ class experiment(BaseExperiment):
         register_signals: bool = True,
         project_paths: Optional[list[Path]] = None,
         wait_for_quit: bool = False,
+        dirty_git: DirtyGitAction = DirtyGitAction.WARN,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -130,6 +138,10 @@ class experiment(BaseExperiment):
 
         :param wait_for_quit: If True, wait for explicit quit from web interface
             instead of exiting when experiment completes. Similar to TUI behavior.
+
+        :param dirty_git: Action when git repository has uncommitted changes:
+            DirtyGitAction.IGNORE (don't check), DirtyGitAction.WARN (log warning,
+            default), or DirtyGitAction.ERROR (raise exception).
         """
 
         from experimaestro.scheduler import Listener, Scheduler
@@ -151,6 +163,7 @@ class experiment(BaseExperiment):
         self.services: Dict[str, Service] = {}
         self._job_listener: Optional[Listener] = None
         self._register_signals = register_signals
+        self._dirty_git = dirty_git
 
         # Capture project paths for git info
         if project_paths is not None:
@@ -475,15 +488,27 @@ class experiment(BaseExperiment):
             env = get_current_environment()
 
             # Capture project git info from project paths
+            dirty_repos = []
             for project_path in self._project_paths:
                 project_git = get_git_info(project_path)
                 if project_git:
                     env.projects.append(project_git)
-                    # Warn if repository is dirty
+                    # Track dirty repositories
                     if project_git.get("dirty"):
+                        dirty_repos.append(project_git.get("path", str(project_path)))
+
+            # Handle dirty git repositories based on configured action
+            if dirty_repos and self._dirty_git != DirtyGitAction.IGNORE:
+                for repo_path in dirty_repos:
+                    if self._dirty_git == DirtyGitAction.WARN:
                         logger.warning(
                             "Project repository has uncommitted changes: %s",
-                            project_git.get("path", project_path),
+                            repo_path,
+                        )
+                    elif self._dirty_git == DirtyGitAction.ERROR:
+                        # Release the lock before raising the error
+                        raise DirtyGitError(
+                            f"Project repository has uncommitted changes: {repo_path}"
                         )
 
             env.save(env_info_path)

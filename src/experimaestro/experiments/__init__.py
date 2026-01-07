@@ -1,2 +1,6 @@
-from .cli import experiments_cli, ExperimentHelper, ExperimentCallable  # noqa: F401
-from .configuration import configuration, ConfigurationBase  # noqa: F401
+from .configuration import (  # noqa: F401
+    configuration,
+    ConfigurationBase,
+    DirtyGitAction,
+)
+from .cli import ExperimentHelper  # noqa: F401

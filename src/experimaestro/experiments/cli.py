@@ -5,7 +5,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Protocol, Tuple
 
 import click
 import omegaconf
@@ -13,16 +13,20 @@ import yaml
 from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
 
-from experimaestro import LauncherRegistry, RunMode, experiment
 from experimaestro.exceptions import HandledException
 from experimaestro.experiments.configuration import ConfigurationBase
+from experimaestro.launcherfinder.registry import LauncherRegistry
+from experimaestro.scheduler.workspace import RunMode
 from experimaestro.settings import find_workspace
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.experiment import experiment
 
 
 class ExperimentHelper:
     """Helper for experiments"""
 
-    xp: experiment
+    xp: "experiment"
     """The experiment object"""
 
     #: Run function
@@ -337,9 +341,13 @@ def experiments_cli(  # noqa: C901
         project_paths.append(Path(mod.__file__).resolve().parent)
 
     # Define the experiment execution function
-    def run_experiment_code(xp_holder=None, xp_ready_event=None, register_signals=True):
+    def run_experiment_code(
+        xp_holder=None, xp_ready_event=None, register_signals=True, in_thread=False
+    ):
         """Run the experiment code - optionally storing xp in xp_holder"""
         try:
+            from experimaestro.scheduler.experiment import experiment
+
             with experiment(
                 ws_env,
                 experiment_id,
@@ -348,6 +356,7 @@ def experiments_cli(  # noqa: C901
                 run_mode=run_mode,
                 register_signals=register_signals,
                 project_paths=project_paths,
+                dirty_git=xp_configuration.dirty_git,
             ) as xp:
                 if xp_holder is not None:
                     xp_holder["xp"] = xp
@@ -371,7 +380,11 @@ def experiments_cli(  # noqa: C901
                 # ... and wait
                 xp.wait()
 
-        except HandledException:
+        except HandledException as e:
+            if in_thread:
+                # Re-raise to preserve exception info for the main thread
+                raise
+            cprint(f"Experiment failed: {e}", "red", file=sys.stderr)
             sys.exit(1)
 
     # Console mode is only available in NORMAL run mode
@@ -402,10 +415,13 @@ def experiments_cli(  # noqa: C901
         def run_in_thread():
             try:
                 # Don't register signals in background thread
-                run_experiment_code(xp_holder, xp_ready, register_signals=False)
+                run_experiment_code(
+                    xp_holder, xp_ready, register_signals=False, in_thread=True
+                )
                 # Add a test message after experiment completes
                 logging.info("Experiment thread completed")
-            except Exception as e:
+            except BaseException as e:
+                # Use BaseException to also catch SystemExit from sys.exit()
                 exception_holder["exception"] = e
                 xp_ready.set()  # Signal even on error
 
@@ -419,9 +435,11 @@ def experiments_cli(  # noqa: C901
             sys.exit(1)
 
         if xp_holder["xp"] is None:
-            cprint("Failed to start experiment", "red", file=sys.stderr)
-            if exception_holder["exception"]:
-                raise exception_holder["exception"]
+            exc = exception_holder["exception"]
+            if exc:
+                cprint(f"Failed to start experiment: {exc}", "red", file=sys.stderr)
+            else:
+                cprint("Failed to start experiment", "red", file=sys.stderr)
             sys.exit(1)
 
         # Run TUI in main thread (handles signals via Textual)

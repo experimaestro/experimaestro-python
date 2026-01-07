@@ -1,3 +1,4 @@
+from enum import Enum
 from omegaconf import MISSING
 from typing import Optional, List
 import attr
@@ -6,6 +7,19 @@ try:
     from typing import dataclass_transform
 except ImportError:
     from typing_extensions import dataclass_transform
+
+
+class DirtyGitAction(str, Enum):
+    """Action to take when the git repository has uncommitted changes"""
+
+    IGNORE = "ignore"
+    """Don't check or warn about dirty git state"""
+
+    WARN = "warn"
+    """Warn about dirty git state (default)"""
+
+    ERROR = "error"
+    """Raise an error if git is dirty"""
 
 
 @dataclass_transform(kw_only_default=True)
@@ -54,3 +68,6 @@ class ConfigurationBase:
 
     add_timestamp: bool = False
     """Adds a timestamp YYYY_MM_DD-HH_MM to the experiment ID"""
+
+    dirty_git: DirtyGitAction = DirtyGitAction.WARN
+    """Action when git repository has uncommitted changes: ignore, warn (default), error"""
