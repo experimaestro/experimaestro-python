@@ -20,7 +20,12 @@ from experimaestro.launcherfinder.base import TokenConfiguration
 from experimaestro.launcherfinder.registry import LauncherRegistry
 
 from .ipc import ipcom
-from .locking import Lock, LockError
+from .locking import (
+    DynamicDependencyLock,
+    JobDependencyLock,
+    Lock,
+    LockError,
+)
 from .scheduler.dependencies import DynamicDependency, Resource
 import logging
 import json
@@ -35,10 +40,30 @@ class Token(Resource):
     available: int
 
 
-class CounterTokenLock(Lock):
+class CounterTokenJobLock(JobDependencyLock):
+    """Job-side counterpart of CounterTokenLock.
+
+    Since counter tokens are held by the scheduler (not the job process),
+    this is effectively a no-op lock. It exists for:
+    1. Interface consistency
+    2. Future enhancement where job process might need token info
+    """
+
+    def __init__(self, data: dict):
+        self.token_path = data.get("token_path")
+        self.count = data.get("count")
+        self.name = data.get("name")
+
+    def release(self) -> None:
+        # No-op: scheduler releases the token lock
+        pass
+
+
+class CounterTokenLock(DynamicDependencyLock):
+    """Lock for counter token dependency."""
+
     def __init__(self, dependency: "CounterTokenDependency"):
-        super().__init__()
-        self.dependency = dependency
+        super().__init__(dependency)
 
     def _acquire(self):
         self.dependency.token.acquire(self.dependency)
@@ -48,6 +73,23 @@ class CounterTokenLock(Lock):
 
     def __str__(self):
         return "Lock(%s)" % self.dependency
+
+    def to_json(self) -> dict:
+        """Serialize lock for job process."""
+        data = super().to_json()
+        data.update(
+            {
+                "token_path": str(self.dependency.token.path),
+                "count": self.dependency.count,
+                "name": self.dependency.name,
+            }
+        )
+        return data
+
+    @classmethod
+    def from_json(cls, data: dict) -> CounterTokenJobLock:
+        """Create job-side lock from serialized data."""
+        return CounterTokenJobLock(data)
 
 
 class CounterTokenDependency(DynamicDependency):

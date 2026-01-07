@@ -581,7 +581,7 @@ class Scheduler(StateProvider, threading.Thread):
             or process creation
         """
         from experimaestro.scheduler.jobs import JobStateError
-        from experimaestro.locking import Locks, LockError
+        from experimaestro.locking import DynamicDependencyLocks, LockError
         from experimaestro.scheduler.jobs import JobFailureStatus
 
         # Assert preconditions
@@ -613,7 +613,7 @@ class Scheduler(StateProvider, threading.Thread):
                     return JobStateError(JobFailureStatus.DEPENDENCY)
 
             # We first lock the job before proceeding
-            with Locks() as locks:
+            with DynamicDependencyLocks() as locks:
                 logger.debug("[starting] Locking job %s", job)
                 async with job.launcher.connector.lock(job.lockpath):
                     logger.debug("[starting] Locked job %s", job)
@@ -700,6 +700,31 @@ class Scheduler(StateProvider, threading.Thread):
                     try:
                         # Runs the job
                         process = await job.aio_run()
+
+                        # Notify locks that job has started
+                        await locks.aio_job_started(job, process)
+
+                        # Write locks.json for job process (if there are dynamic locks)
+                        if locks.locks:
+                            import json
+                            import tempfile
+
+                            locks_path = job.path / "locks.json"
+                            locks_data = {"dynamic_locks": locks.to_json()}
+                            # Atomic write: write to temp file then rename
+                            with tempfile.NamedTemporaryFile(
+                                mode="w",
+                                dir=job.path,
+                                prefix=".locks.",
+                                suffix=".json",
+                                delete=False,
+                            ) as tmp:
+                                json.dump(locks_data, tmp)
+                                tmp_path = tmp.name
+                            # Rename is atomic on POSIX
+                            import os
+
+                            os.rename(tmp_path, locks_path)
                     except Exception:
                         logger.warning("Error while starting job", exc_info=True)
                         return JobState.ERROR
@@ -756,6 +781,9 @@ class Scheduler(StateProvider, threading.Thread):
                         "Error while running job (in experimaestro)", exc_info=True
                     )
                     state = JobState.ERROR
+
+                # Notify locks that job has finished (before releasing)
+                await locks.aio_job_finished(job)
 
             # Locks are released here after job completes
 
