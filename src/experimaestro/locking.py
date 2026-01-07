@@ -901,12 +901,15 @@ class TrackedDynamicResource(ABC):
             lock_key = self._lock_file_key(lock_path)
             lf = self.cache.get(lock_key)
             if lf is None:
-                logging.error(
-                    "Could not find lock file for %s (%s)", dependency, lock_key
+                # Lock file may have been released already (e.g., job completed)
+                logger.debug(
+                    "Lock file not in cache for %s (%s) - may have been released already",
+                    dependency,
+                    lock_key,
                 )
                 return
 
-            logging.debug("Deleting %s from cache", lock_key)
+            logger.debug("Deleting %s from cache", lock_key)
             del self.cache[lock_key]
 
             self._do_release(dependency)
