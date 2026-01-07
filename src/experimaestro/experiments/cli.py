@@ -18,6 +18,7 @@ from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.launcherfinder.registry import LauncherRegistry
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.settings import find_workspace
+from experimaestro.utils.logging import setup_logging
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.experiment import experiment
@@ -184,9 +185,8 @@ def experiments_cli(  # noqa: C901
 ):
     """Run an experiment"""
 
-    # --- Set the logger
-    logging.getLogger().setLevel(logging.DEBUG if debug else logging.INFO)
-    logging.getLogger("xpm.hash").setLevel(logging.INFO)
+    # --- Set the logger with colors if outputting to terminal
+    setup_logging(debug=debug)
 
     # --- Loads the YAML
     conf_loader = ConfigurationLoader()
