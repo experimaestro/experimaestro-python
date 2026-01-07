@@ -372,7 +372,7 @@ def _run_monitor_ui(
             app.run()
         else:
             # Use React web server
-            from experimaestro.server import Server
+            from experimaestro.webui import WebUIServer
 
             if title:
                 cprint(
@@ -387,7 +387,7 @@ def _run_monitor_ui(
 
             settings = ServerSettings()
             settings.port = port
-            server = Server.instance(settings, state_provider=state_provider)
+            server = WebUIServer.instance(settings, state_provider=state_provider)
             server.start()
 
             try:

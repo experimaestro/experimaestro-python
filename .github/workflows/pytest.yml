@@ -31,9 +31,9 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Create an empty server data (editable build)
+      - name: Create an empty webui data (editable build)
         run: |
-          mkdir -p src/experimaestro/server/data
+          mkdir -p src/experimaestro/webui/data
 
       - name: Install dependencies
         run: |
@@ -41,7 +41,7 @@ jobs:
 
       - name: Lint with ruff
         run: |
-          uv run ruff check .
+          uv run ruff check src/experimaestro
 
       - name: Test with pytest
         run: |

@@ -15,4 +15,4 @@ build/
 
 # Generated
 src/experimaestro/version.py
-src/experimaestro/server/data
+src/experimaestro/webui/data

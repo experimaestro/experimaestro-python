@@ -285,7 +285,11 @@ def experiments_cli(  # noqa: C901
     schema = list_parameters[1].annotation
     if isinstance(schema, str):
         # Get the schema from the module
-        schema = eval(schema, mod.__dict__)
+        schema = getattr(mod.__dict__, schema, None)
+        assert schema is not None, (
+            f"Could not find schema {list_parameters[1].annotation} "
+            f"in module {module_name}"
+        )
 
     omegaconf_schema = OmegaConf.structured(schema())
 

@@ -69,7 +69,6 @@
     "react-redux": "^9.2.0",
     "sass": "^1.86.3",
     "sirv-cli": "^3.0.1",
-    "socket.io-client": "^4.8.1",
     "url": "^0.11.4"
   },
   "browserslist": [

@@ -19,9 +19,9 @@ build:
       # Fetch full git history and tags for hatch-vcs to determine version
       - git fetch --unshallow || true
       - git fetch --tags
-      # Create empty server data directory (normally created by frontend build)
+      # Create empty webui data directory (normally created by frontend build)
       # Must run before pip install, not pre_build which runs after
-      - mkdir -p src/experimaestro/server/data
+      - mkdir -p src/experimaestro/webui/data
 
 # Build documentation with Sphinx
 sphinx:

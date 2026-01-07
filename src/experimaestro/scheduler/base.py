@@ -29,7 +29,7 @@ from experimaestro.utils.asyncio import asyncThreadcheck
 import concurrent.futures
 
 if TYPE_CHECKING:
-    from experimaestro.server import Server
+    from experimaestro.webui import WebUIServer
     from experimaestro.settings import ServerSettings
     from experimaestro.scheduler.workspace import Workspace
 
@@ -95,7 +95,7 @@ class Scheduler(StateProvider, threading.Thread):
         )
 
         # Server (managed by scheduler)
-        self.server: Optional["Server"] = None
+        self.server: Optional["WebUIServer"] = None
 
     @staticmethod
     def has_instance() -> bool:
@@ -151,28 +151,38 @@ class Scheduler(StateProvider, threading.Thread):
         self,
         settings: "ServerSettings" = None,
         workspace: "Workspace" = None,  # noqa: ARG002 - kept for backward compat
+        wait_for_quit: bool = False,
     ):
-        """Start the notification server (if not already running)
+        """Start the web server (if not already running)
 
         Args:
             settings: Server settings
             workspace: Workspace instance (deprecated, not used)
+            wait_for_quit: If True, server waits for explicit quit from web UI
         """
         if self.server is None:
-            from experimaestro.server import Server
+            from experimaestro.webui import WebUIServer
 
             # Use the Scheduler itself as the StateProvider for live state access
-            self.server = Server.instance(settings, self)
+            self.server = WebUIServer.instance(settings, self, wait_for_quit)
             self.server.start()
-            logger.info("Server started by scheduler")
+            logger.info("Web server started by scheduler")
         else:
-            logger.debug("Server already running")
+            logger.debug("Web server already running")
 
     def stop_server(self):
-        """Stop the notification server"""
+        """Stop the web server"""
         if self.server is not None:
             self.server.stop()
-            logger.info("Server stopped by scheduler")
+            logger.info("Web server stopped by scheduler")
+
+    def wait_for_server_quit(self):
+        """Wait for explicit quit from web interface
+
+        Only blocks if server was started with wait_for_quit=True.
+        """
+        if self.server is not None:
+            self.server.wait()
 
     def run(self):
         """Run the event loop forever"""
@@ -455,7 +465,7 @@ class Scheduler(StateProvider, threading.Thread):
         # Check that we don't have a completed job in
         # alternate directories
         for jobspath in experiment.current().alt_jobspaths:
-            # FIXME: check if done
+            # Future enhancement: check if done
             pass
 
         # Creates a link into the experiment folder

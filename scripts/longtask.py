@@ -18,5 +18,5 @@ if __name__ == "__main__":
     with TemporaryDirectory() as xppath:
         with experiment(xppath, "longxp", port=12349) as xp:
             taska = TaskA().tag("task", "a").submit()
-            print("Standard error", taska.__xpm__.stderr())
+            print("Standard error", taska.__xpm__.stderr())  # noqa: T201
             xp.wait()

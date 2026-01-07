@@ -23,7 +23,7 @@ def xpmdirectory(tmp_path_factory):
 def reset_scheduler():
     """Reset scheduler state between tests to avoid state leakage with singleton pattern"""
     from experimaestro.scheduler.base import Scheduler
-    from experimaestro.server import Server
+    from experimaestro.webui import WebUIServer
 
     # Get the singleton instance if it exists
     if Scheduler._instance is not None:
@@ -60,9 +60,9 @@ def reset_scheduler():
             scheduler.addlistener(scheduler.state_provider)
 
     # Reset server instance too
-    if Server._instance is not None:
+    if WebUIServer._instance is not None:
         logging.debug("FIXTURE: Clearing server instance")
-        Server._instance = None
+        WebUIServer.clear_instance()
 
     yield
 
@@ -95,8 +95,8 @@ def reset_scheduler():
             scheduler.addlistener(scheduler.state_provider)
 
     # Reset server after test
-    if Server._instance is not None:
-        Server._instance = None
+    if WebUIServer._instance is not None:
+        WebUIServer.clear_instance()
 
 
 # Sets a flag

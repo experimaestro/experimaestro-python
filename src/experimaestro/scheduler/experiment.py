@@ -104,6 +104,7 @@ class experiment(BaseExperiment):
         launcher=None,
         register_signals: bool = True,
         project_paths: Optional[list[Path]] = None,
+        wait_for_quit: bool = False,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -126,6 +127,9 @@ class experiment(BaseExperiment):
 
         :param project_paths: Paths to the project files (for git info). If not
             provided, will be inferred from the caller's location.
+
+        :param wait_for_quit: If True, wait for explicit quit from web interface
+            instead of exiting when experiment completes. Similar to TUI behavior.
         """
 
         from experimaestro.scheduler import Listener, Scheduler
@@ -183,6 +187,7 @@ class experiment(BaseExperiment):
             settings.server.port is not None and settings.server.port >= 0
         ) and self.workspace.run_mode == RunMode.NORMAL
         self._server_settings = settings.server if self._needs_server else None
+        self._wait_for_quit = wait_for_quit and self._needs_server
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
             import faulthandler
@@ -506,7 +511,11 @@ class experiment(BaseExperiment):
 
         # Start server via scheduler if needed
         if self._needs_server:
-            self.scheduler.start_server(self._server_settings, workspace=self.workspace)
+            self.scheduler.start_server(
+                self._server_settings,
+                workspace=self.workspace,
+                wait_for_quit=self._wait_for_quit,
+            )
 
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()
@@ -629,7 +638,11 @@ class experiment(BaseExperiment):
                 self.state_provider.complete_run(experiment_id, self.run_id, status)
 
             # Note: Don't stop scheduler - it's shared!
-            # Note: Don't stop server - it runs in daemon mode until program exit
+            # Wait for explicit quit from web interface if requested
+            if self._wait_for_quit:
+                logger.info("Waiting for quit from web interface...")
+                self.scheduler.wait_for_server_quit()
+                logger.info("Quit signal received from web interface")
 
             if self.taskOutputsWorker is not None:
                 logger.info("Stopping tasks outputs worker")

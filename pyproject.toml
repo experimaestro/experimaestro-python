@@ -31,11 +31,9 @@ dependencies = [
     "click >=8",
     "decorator >=5,<6",
     "docstring-parser >=0.15,<1",
+    "fastapi >=0.109,<1",
     "fasteners >=0.19,<1",
-    "flask >=2.3,<3",
-    "flask-socketio >=5.3,<6",
-    "gevent >=25",
-    "gevent-websocket >=0.10",
+    "httpx >=0.26,<1",
     "humanfriendly >=10",
     "huggingface-hub >0.17",
     "marshmallow >=3.20,<4",
@@ -53,6 +51,7 @@ dependencies = [
     "textual >=6",
     "tqdm >=4.66.1,<5",
     "typing-extensions >=4.2; python_version < \"3.12\"",
+    "uvicorn[standard] >=0.27,<1",
     "watchdog >=2",
 ]
 
@@ -120,7 +119,7 @@ include = [
 packages = ["src/experimaestro"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/experimaestro/server/data" = "experimaestro/server/data"
+"src/experimaestro/webui/data" = "experimaestro/webui/data"
 "src/experimaestro/sphinx/static/experimaestro.css" = "experimaestro/sphinx/static/experimaestro.css"
 "src/experimaestro/tui/app.tcss" = "experimaestro/tui/app.tcss"
 
