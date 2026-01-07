@@ -350,7 +350,9 @@ class Scheduler(StateProvider, threading.Thread):
         # Set up dependencies
         for dependency in job.dependencies:
             dependency.target = job
-            dependency.origin.dependents.add(dependency)
+            # Some dependencies (like PartialDependency) don't have an origin resource
+            if dependency.origin is not None:
+                dependency.origin.dependents.add(dependency)
 
         return None
 
@@ -692,6 +694,9 @@ class Scheduler(StateProvider, threading.Thread):
                         # Sets up the notification URL
                         if self.server is not None:
                             job.add_notification_server(self.server)
+
+                        # Notify locks before job starts (e.g., create symlinks)
+                        await locks.aio_job_before_start(job)
 
                     except Exception:
                         logger.warning("Error while locking job", exc_info=True)

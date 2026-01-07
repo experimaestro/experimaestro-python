@@ -9,6 +9,7 @@ import pytest
 import tempfile
 from pathlib import Path
 import time
+import hashlib
 
 from experimaestro.tokens import CounterToken
 from experimaestro.locking import LockError
@@ -16,22 +17,54 @@ from experimaestro.locking import LockError
 pytestmark = pytest.mark.anyio
 
 
+class MockIdentifier:
+    """Mock identifier with hex() method."""
+
+    def __init__(self, value: str):
+        self._hex = hashlib.sha256(value.encode()).hexdigest()
+
+    def hex(self):
+        return self._hex
+
+
+class MockXPM:
+    """Mock __xpm__ object."""
+
+    def __init__(self, name: str):
+        self.identifier = type("Identifier", (), {"main": MockIdentifier(name)})()
+
+
+class MockConfig:
+    """Mock config object."""
+
+    def __init__(self, name: str):
+        self.__xpm__ = MockXPM(name)
+
+
+def create_mock_job(name: str, tmpdir: str):
+    """Create a mock job with all required attributes."""
+
+    class MockJob:
+        task_id = "mock-task"
+        config = MockConfig(name)
+
+        @property
+        def identifier(self):
+            return f"mock-job-{name}"
+
+        @property
+        def basepath(self):
+            return Path(tmpdir) / name
+
+    return MockJob()
+
+
 async def test_token_acquire_release():
     """Test basic token acquire and release"""
     with tempfile.TemporaryDirectory() as tmpdir:
         token = CounterToken("test-basic", Path(tmpdir) / "token", count=1)
 
-        # Create a mock job target
-        class MockJob:
-            @property
-            def identifier(self):
-                return "mock-job-1"
-
-            @property
-            def basepath(self):
-                return Path(tmpdir) / "job1"
-
-        job = MockJob()
+        job = create_mock_job("1", tmpdir)
 
         # Create dependency
         dep = token.dependency(1)
@@ -52,20 +85,8 @@ async def test_token_blocking():
     with tempfile.TemporaryDirectory() as tmpdir:
         token = CounterToken("test-blocking", Path(tmpdir) / "token", count=1)
 
-        class MockJob:
-            def __init__(self, name):
-                self.name = name
-
-            @property
-            def identifier(self):
-                return f"mock-job-{self.name}"
-
-            @property
-            def basepath(self):
-                return Path(tmpdir) / self.name
-
-        job1 = MockJob("1")
-        job2 = MockJob("2")
+        job1 = create_mock_job("1", tmpdir)
+        job2 = create_mock_job("2", tmpdir)
 
         dep1 = token.dependency(1)
         dep1.target = job1
@@ -99,20 +120,8 @@ async def test_token_notification():
     with tempfile.TemporaryDirectory() as tmpdir:
         token = CounterToken("test-notify", Path(tmpdir) / "token", count=1)
 
-        class MockJob:
-            def __init__(self, name):
-                self.name = name
-
-            @property
-            def identifier(self):
-                return f"mock-job-{self.name}"
-
-            @property
-            def basepath(self):
-                return Path(tmpdir) / self.name
-
-        job1 = MockJob("1")
-        job2 = MockJob("2")
+        job1 = create_mock_job("1", tmpdir)
+        job2 = create_mock_job("2", tmpdir)
 
         dep1 = token.dependency(1)
         dep1.target = job1
@@ -151,20 +160,8 @@ async def test_token_multiple_waiting():
     with tempfile.TemporaryDirectory() as tmpdir:
         token = CounterToken("test-multiple", Path(tmpdir) / "token", count=1)
 
-        class MockJob:
-            def __init__(self, name):
-                self.name = name
-
-            @property
-            def identifier(self):
-                return f"mock-job-{self.name}"
-
-            @property
-            def basepath(self):
-                return Path(tmpdir) / self.name
-
         # Acquire the token
-        job1 = MockJob("1")
+        job1 = create_mock_job("1", tmpdir)
         dep1 = token.dependency(1)
         dep1.target = job1
         lock1 = await dep1.aio_lock(timeout=0.5)
@@ -173,7 +170,7 @@ async def test_token_multiple_waiting():
         acquired_order = []
 
         async def acquire_task(name):
-            job = MockJob(name)
+            job = create_mock_job(name, tmpdir)
             dep = token.dependency(1)
             dep.target = job
             lock = await dep.aio_lock(timeout=10.0)
@@ -206,20 +203,8 @@ async def test_token_timeout_zero():
     with tempfile.TemporaryDirectory() as tmpdir:
         token = CounterToken("test-timeout-zero", Path(tmpdir) / "token", count=1)
 
-        class MockJob:
-            def __init__(self, name):
-                self.name = name
-
-            @property
-            def identifier(self):
-                return f"mock-job-{self.name}"
-
-            @property
-            def basepath(self):
-                return Path(tmpdir) / self.name
-
-        job1 = MockJob("1")
-        job2 = MockJob("2")
+        job1 = create_mock_job("1", tmpdir)
+        job2 = create_mock_job("2", tmpdir)
 
         dep1 = token.dependency(1)
         dep1.target = job1

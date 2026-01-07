@@ -3,32 +3,30 @@ a computational resource (e.g. number of launched jobs, etc.)
 """
 
 from dataclasses import dataclass
+import json
+import os
 import sys
 from pathlib import Path
+import threading
 import time
-import weakref
+from typing import Dict, Type
 
 from omegaconf import DictConfig
-from experimaestro.core.objects import Config
-import fasteners
-import threading
-import os.path
-from watchdog.events import FileSystemEventHandler
-from typing import Dict
-from experimaestro.launcherfinder.base import TokenConfiguration
 
+from experimaestro.core.objects import Config
+from experimaestro.launcherfinder.base import TokenConfiguration
 from experimaestro.launcherfinder.registry import LauncherRegistry
 
-from .ipc import ipcom
 from .locking import (
     DynamicDependencyLock,
+    DynamicLockFile,
     JobDependencyLock,
     Lock,
     LockError,
+    TrackedDynamicResource,
 )
 from .scheduler.dependencies import DynamicDependency, Resource
 import logging
-import json
 
 
 logger = logging.getLogger("xpm.tokens")
@@ -40,30 +38,45 @@ class Token(Resource):
     available: int
 
 
-class CounterTokenJobLock(JobDependencyLock):
-    """Job-side counterpart of CounterTokenLock.
+# =============================================================================
+# File-based counter token
+# =============================================================================
 
-    Since counter tokens are held by the scheduler (not the job process),
-    this is effectively a no-op lock. It exists for:
-    1. Interface consistency
-    2. Future enhancement where job process might need token info
+
+class CounterTokenJobLock(JobDependencyLock):
+    """Job-side lock for counter tokens.
+
+    Inherits from JobDependencyLock to participate in the dynamic lock lifecycle.
+    On release, deletes the token lock file created by the scheduler.
     """
 
     def __init__(self, data: dict):
-        self.token_path = data.get("token_path")
-        self.count = data.get("count")
-        self.name = data.get("name")
-
-    def release(self) -> None:
-        # No-op: scheduler releases the token lock
-        pass
+        self.token_path = Path(data["token_path"])
+        self.count = data["count"]
+        self.name = data["name"]
+        # Set lock_file_path for base class release() to delete
+        self.lock_file_path = Path(data["lock_file_path"])
 
 
 class CounterTokenLock(DynamicDependencyLock):
-    """Lock for counter token dependency."""
+    """Scheduler-side lock for counter token dependency.
+
+    Inherits from DynamicDependencyLock to participate in the dynamic lock lifecycle.
+    Manages token acquisition/release through the CounterToken resource.
+
+    On serialization, passes lock file path to the job process so it can
+    delete the lock file on release.
+    """
+
+    dependency: "CounterTokenDependency"
 
     def __init__(self, dependency: "CounterTokenDependency"):
         super().__init__(dependency)
+
+    @property
+    def lock_folder(self) -> Path:
+        """Path to the token lock folder."""
+        return self.dependency.token.lock_folder
 
     def _acquire(self):
         self.dependency.token.acquire(self.dependency)
@@ -81,7 +94,8 @@ class CounterTokenLock(DynamicDependencyLock):
             {
                 "token_path": str(self.dependency.token.path),
                 "count": self.dependency.count,
-                "name": self.dependency.name,
+                "name": self.dependency.token.name,
+                "lock_file_path": str(self.lock_file_path),
             }
         )
         return data
@@ -100,201 +114,114 @@ class CounterTokenDependency(DynamicDependency):
         self._token = token
         self.count = count
 
-    @property
-    def name(self):
-        """The (file) name for this dependency, when taken"""
-        return f"{self.target.identifier}.token"
-
-    async def aio_lock(self, timeout: float = 0) -> "Lock":
-        """Acquire lock on token with event-driven waiting
-
-        Args:
-            timeout: Timeout in seconds (0 = wait indefinitely)
-
-        Returns:
-            Lock object
-
-        Raises:
-            LockError: If lock cannot be acquired within timeout
-        """
-        from experimaestro.utils.asyncio import asyncThreadcheck
-        import time
-
-        start_time = time.time()
-
-        while True:
-            try:
-                lock = CounterTokenLock(self)
-                lock.acquire()
-                return lock
-            except LockError:
-                # Wait for token availability notification
-                def wait_for_available():
-                    with self.token.available_condition:
-                        # Calculate remaining timeout
-                        if timeout == 0:
-                            wait_timeout = None  # Wait indefinitely
-                        else:
-                            elapsed = time.time() - start_time
-                            if elapsed >= timeout:
-                                return False  # Timeout exceeded
-                            wait_timeout = timeout - elapsed
-
-                        # Wait for notification
-                        return self.token.available_condition.wait(timeout=wait_timeout)
-
-                # Wait in a thread (since condition is threading-based)
-                result = await asyncThreadcheck(
-                    "token availability", wait_for_available
-                )
-
-                # If wait returned False, we timed out
-                if result is False:
-                    raise LockError("Timeout waiting for tokens")
-
-                # Otherwise, loop back to try acquiring again
+    def _create_lock(self) -> "Lock":
+        """Create a counter token lock for this dependency."""
+        return CounterTokenLock(self)
 
     @property
     def token(self):
         return self._token
 
 
-class TokenFile:
-    """Represents a token file
+class TokenLockFile(DynamicLockFile):
+    """Lock file for counter tokens.
 
-    The token file (whose name refers to the corresponding job) is composed of
-    two lines:
+    The token file stores JSON with:
+    - job_uri: Reference to the job holding the lock
+    - information: {"count": number_of_tokens}
 
-    1. The number of tokens taken by the job
-    2. The URI reference of the job directory
+    Also supports reading old line-based format for backward compatibility:
+    - Line 1: count
+    - Line 2: job_uri
     """
 
+    count: int
+
     def __init__(self, path: Path):
-        # Case where the file was deleted
+        """Load token file from disk, supporting both JSON and old format."""
+        self.path = path
+        self.job_uri = None
         self.count = 0
-        self.uri = None
 
         retries = 0
         while retries < 5:
             retries += 1
             try:
-                self.path = path
                 with path.open("rt") as fp:
-                    count, self.uri = [line.strip() for line in fp.readlines()]
-                    self.count = int(count)
+                    content = fp.read().strip()
+                    if content.startswith("{"):
+                        # New JSON format
+                        data = json.loads(content)
+                        self.job_uri = data.get("job_uri")
+                        info = data.get("information", {})
+                        self.count = info.get("count", 0)
+                    else:
+                        # Old line-based format: count, uri
+                        lines = content.split("\n")
+                        if len(lines) >= 2:
+                            self.count = int(lines[0])
+                            self.job_uri = lines[1]
+                    break
             except FileNotFoundError:
-                # Case where the file was deleted
-                self.count = 0
-                self.uri = None
+                break
             except Exception:
                 logging.exception("Error while reading %s", self.path)
                 time.sleep(0.1)
                 continue
 
-            break
+    def from_information(self, info) -> None:
+        """Set count from information dict."""
+        if info is None:
+            # Creating a new lock file
+            self.count = 0
+        elif isinstance(info, dict):
+            self.count = info.get("count", 0)
+        else:
+            raise ValueError(f"Invalid information format: {info}")
 
-    @staticmethod
-    def create(dependency: CounterTokenDependency):
-        path = dependency._token.path / dependency.name
-        count = dependency.count
-        uri = str(dependency.target.basepath)
+    def to_information(self) -> dict:
+        """Return count for JSON serialization."""
+        return {"count": self.count}
 
-        self = object.__new__(TokenFile)
-        self.count = count
-        self.uri = uri
-        self.path = path
-        logging.debug("Writing token file %s", path)
-        with path.open("wt") as fp:
-            fp.write(f"{str(count)}\n{uri}\n")
-        return self
+    @classmethod
+    def from_dependency(cls, dependency: "CounterTokenDependency") -> "TokenLockFile":
+        """Create a token lock file from a dependency.
 
-    def delete(self):
-        if self.path.is_file():
-            logging.debug("Deleting token file %s", self.path)
-            self.path.unlink()
+        This is a convenience method for testing and backward compatibility.
 
-    def watch(self):
-        """Watch the matching process"""
+        Args:
+            dependency: The counter token dependency
 
-        # No need to watch if there was no token file...
-        if self.uri is None:
-            return
-
-        logger.debug(
-            "Watching process for %s (%s, taken %d)", self.path, self.uri, self.count
+        Returns:
+            New TokenLockFile instance
+        """
+        path = (
+            dependency._token.path / "tasks" / f"{dependency.target.relmainpath}.json"
         )
-        path = Path(self.uri)
-        lockpath = path.with_suffix(".lock")
-        pidpath = path.with_suffix(".pid")
-
-        # Watch for the job
-        def run():
-            logger.debug("Locking job lock path %s", lockpath)
-            process = None
-            # Acquire the job lock - blocks if scheduler is still starting the job
-            # Once we get the lock, the job has either started or finished
-            with fasteners.InterProcessLock(lockpath):
-                if not pidpath.is_file():
-                    logger.debug("Job already finished (no PID file %s)", pidpath)
-                else:
-                    s = ""
-                    while s == "":
-                        s = pidpath.read_text()
-
-                    logger.info("Loading job watcher from definition")
-                    from experimaestro.connectors import Process
-
-                    # FIXME: not always localhost...
-                    from experimaestro.connectors.local import LocalConnector
-
-                    connector = LocalConnector.instance()
-                    process = Process.fromDefinition(connector, json.loads(s))
-
-            # Wait out of the lock
-            if process is not None:
-                # Process is None: process has finished
-                process.wait()
-
-            self.delete()
-
-        threading.Thread(target=run).start()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        job_uri = str(dependency.target.basepath)
+        return cls.create(path, job_uri, information={"count": dependency.count})
 
 
-class CounterTokenProxy(FileSystemEventHandler):
-    """Hold a weak reference to the counter token to handle gracefully deleted
-    counter tokens"""
-
-    def __init__(self, token: "CounterToken"):
-        self._token_ref = weakref.ref(token)
-
-    def on_modified(self, event):
-        token = self._token_ref()
-        if token is not None:
-            return token.on_modified(event)
-
-    def on_deleted(self, event):
-        token = self._token_ref()
-        if token is not None:
-            return token.on_deleted(event)
-
-    def on_created(self, event):
-        token = self._token_ref()
-        if token is not None:
-            return token.on_created(event)
+# Backwards compatibility alias
+TokenFile = TokenLockFile
 
 
-class CounterToken(Token, FileSystemEventHandler):
+class CounterToken(Token, TrackedDynamicResource):
     """File-based counter token
 
     To ensure recovery (server stopped for whatever reason), we use one folder
-    per token; inside this folder:
+    per token; inside this folder (lock_folder):
 
-    - token.lock is used for IPC locking
-    - token.info contains the maximum number of tokens
-    - TIMESTAMP.token contains (1) the number of tokens (2) the job URI
+    - ipc.lock is used for IPC locking (from TrackedDynamicResource)
+    - informations.json contains the maximum number of tokens {"total": count}
+    - jobs/{task_id}/{identifier}.json contain job-specific lock info (count, job URI)
     """
 
-    """Maps token keys to CounterToken instances"""
+    #: Lock file class for token files
+    lock_file_class: Type[DynamicLockFile] = TokenLockFile
+
+    #: Maps token keys to CounterToken instances
     TOKENS: Dict[str, "CounterToken"] = {}
 
     @staticmethod
@@ -318,184 +245,114 @@ class CounterToken(Token, FileSystemEventHandler):
             DictConfig({}, key_type=str, element_type=CounterConfiguration),
         )
 
+    @property
+    def lock_folder(self) -> Path:
+        """Path to the lock folder."""
+        return self._path
+
+    @property
+    def path(self) -> Path:
+        """Path to the token directory (alias for lock_folder)."""
+        return self._path
+
+    def _write_informations(self, total: int) -> None:
+        """Write token informations to disk."""
+        with self.informations_path.open("w") as f:
+            json.dump({"total": total}, f)
+
+    def _read_informations(self) -> int:
+        """Read token total from informations file."""
+        try:
+            with self.informations_path.open("r") as f:
+                data = json.load(f)
+                return data.get("total", 0)
+        except FileNotFoundError:
+            return 0
+
     def __init__(self, name: str, path: Path, count: int, force=True):
-        """[summary]
+        """Initialize a counter token.
 
         Arguments:
-            path {Path} -- The file path of the token directory
-            count {int} -- Number of tokens (overrides previous definitions)
-            force --   If the token has already been created, force to write the maximum
-                       number of tokens
+            name: Token name
+            path: The file path of the token directory
+            count: Number of tokens (overrides previous definitions)
+            force: If the token has already been created, force to write the maximum
+                   number of tokens
         """
-        super().__init__()
+        # Store path before calling super().__init__ since lock_folder needs it
+        self._path = path
+        self.total = count
 
-        self.path = path
-        self.path.mkdir(exist_ok=True, parents=True)
+        # Set the informations file if needed (before TrackedDynamicResource init)
+        path.mkdir(exist_ok=True, parents=True)
+        if force or not (path / "informations.json").is_file():
+            with (path / "informations.json").open("w") as f:
+                json.dump({"total": count}, f)
 
-        self.cache: Dict[str, TokenFile] = {}
-
-        self.infopath = path / "token.info"
-
-        self.ipc_lock = fasteners.InterProcessLock(path / "token.lock")
-        self.lock = threading.Lock()
-
-        # Condition variable for waiting on token availability
-        self.available_condition = threading.Condition(self.lock)
-
-        self.name = name
-
-        # Set the new number of tokens
-        with self.lock, self.ipc_lock:
-            # Get the maximum number of tokens
-            if force or not self.infopath.is_file():
-                self.total = count
-                self.infopath.write_text(str(count))
-
-            self.timestamp = os.path.getmtime(self.path)
-            self._update()
-
-        # Watched path
-        self.watchedpath = str(path.absolute())
-        self.proxy = CounterTokenProxy(self)
-        self.watcher = ipcom().fswatch(self.proxy, self.path, recursive=True)
-        logger.debug("Watching %s", self.watchedpath)
-
-    def __del__(self):
-        # Remove the watcher
-        if self.watcher is not None:
-            logging.debug("Removing watcher on %s", self.watchedpath)
-            ipcom().fsunwatch(self.watcher)
-            self.watcher = None
-
-    def _update(self):
-        """Update the state by reading all the information from disk
-
-        Assumes that the IPC lock is taken
-        """
-        logging.debug("Full token state update")
-        self.total = int(self.infopath.read_text())
-        old_cache = self.cache
-        self.cache = {}
-        self.available = self.total
-
-        for path in self.path.glob("*.token"):
-            tf = old_cache.get(path.name)
-            if tf is None:
-                tf = TokenFile(path)
-                tf.watch()
-                logging.debug("Read token file %s (%d)", path, tf.count)
-            else:
-                logging.debug(
-                    "Token file already in cache %s (%d)", path.name, tf.count
-                )
-
-            self.cache[path.name] = tf
-            self.available -= tf.count
-        logging.debug("Full token state update finished (%d available)", self.available)
+        # Initialize base classes - this will call _update()
+        Token.__init__(self)
+        TrackedDynamicResource.__init__(self, name)
 
     def __str__(self):
         return "token[{}]".format(self.name)
 
-    def on_deleted(self, event):
+    # --- TrackedDynamicResource abstract method implementations ---
+
+    def _reset_state(self) -> None:
+        """Reset available count before re-reading lock files."""
+        self.total = self._read_informations()
+        self.available = self.total
+
+    def _account_lock_file(self, lf: DynamicLockFile) -> None:
+        """Subtract token count from available."""
+        self.available -= lf.count
+
+    def _unaccount_lock_file(self, lf: DynamicLockFile) -> None:
+        """Add token count back to available."""
+        self.available += lf.count
+
+    def is_available(self, dependency: "CounterTokenDependency") -> bool:
+        """Check if enough tokens are available."""
+        return self.available >= dependency.count
+
+    def _do_acquire(self, dependency: "CounterTokenDependency") -> None:
+        """Subtract tokens from available count."""
+        self.available -= dependency.count
         logger.debug(
-            "Deleted path notification %s [watched %s]",
-            event.src_path,
-            self.watchedpath,
-        )
-        name = Path(event.src_path).name
-        # Name is in cache if we did not release the token ourselves
-        if name in self.cache:
-            with self.lock:
-                if name in self.cache:
-                    logging.debug("Deleting %s from token cache (event)", name)
-                    fc = self.cache[name]
-                    del self.cache[name]
-
-                    self.available += fc.count
-                    logger.debug(
-                        "Getting back %d tokens (%d available)",
-                        fc.count,
-                        self.available,
-                    )
-
-                    # Notify waiting tasks that tokens are available
-                    self.available_condition.notify_all()
-
-    def on_created(self, event):
-        logger.debug(
-            "Created path notification %s [watched %s]",
-            event.src_path,
-            self.watchedpath,
+            "Token state [acquired %d]: available %d, total %d",
+            dependency.count,
+            self.available,
+            self.total,
         )
 
-        path = Path(event.src_path)
+    def _do_release(self, dependency: "CounterTokenDependency") -> None:
+        """Add tokens back to available count."""
+        self.available += dependency.count
+        logging.debug("%s: available %d", self, self.available)
 
-        try:
-            if path.name.endswith(".token") and path.name not in self.cache:
-                with self.lock:
-                    if path.name not in self.cache:
-                        tokenfile = TokenFile(path)
-                        tokenfile.watch()
-                        self.cache[path.name] = tokenfile
-        except FileNotFoundError:
-            # We did not find the token file... just ignore
-            pass
-        except Exception:
-            logger.exception("Uncaught exception in on_modified handler")
-            raise
+    def _get_lock_file_information(self, dependency: "CounterTokenDependency"):
+        """Return token count for lock file."""
+        return {"count": dependency.count}
 
-    def on_modified(self, event):
-        try:
-            logger.debug(
-                "on modified path: %s [watched %s]",
-                event.src_path,
-                self.watchedpath,
-            )
-            # logger.debug("%s", event)
+    # --- Token-specific event handling ---
 
-            path = Path(event.src_path)
+    def _handle_information_change(self) -> None:
+        """Handle token count changes from informations.json."""
+        total = self._read_informations()
+        delta = total - self.total
+        self.total = total
+        self.available += delta
+        logger.debug(
+            "Token information modified: available %d, total %d",
+            self.available,
+            self.total,
+        )
 
-            if event.src_path == str(self.infopath):
-                logger.debug("Token information modified")
-                with self.lock:
-                    timestamp = os.path.getmtime(self.infopath)
-                    if timestamp <= self.timestamp:
-                        logger.debug(
-                            "Not reading token file [%f <= %f]",
-                            timestamp,
-                            self.timestamp,
-                        )
-                        return
+        # Notify waiting tasks if tokens became available
+        if delta > 0:
+            self.available_condition.notify_all()
 
-                    total = int(self.infopath.read_text())
-                    delta = total - self.total
-                    self.total = total
-                    self.available += delta
-                    logger.debug(
-                        "Token information modified: available %d, total %d",
-                        self.available,
-                        self.total,
-                    )
-
-                    # Notify waiting tasks if tokens became available
-                    if delta > 0:
-                        self.available_condition.notify_all()
-
-            # A modified dependency not in cache
-            elif path.name.endswith(".token") and path.name not in self.cache:
-                with self.lock:
-                    if path.name not in self.cache:
-                        logger.debug("Token file not in cache %s", path.name)
-                        try:
-                            tokenfile = TokenFile(path)
-                            tokenfile.watch()
-                            self.cache[path.name] = tokenfile
-                        except FileNotFoundError:
-                            # Well, the file did not exist anymore...
-                            pass
-        except Exception:
-            logger.exception("Uncaught exception in on_modified handler")
-            raise
+    # --- Token API ---
 
     def dependency(self, count):
         """Create a token dependency"""
@@ -505,51 +362,10 @@ class CounterToken(Token, FileSystemEventHandler):
         """Create a token dependency and add it to the task"""
         return task.add_dependencies(self.dependency(count))
 
-    def acquire(self, dependency: CounterTokenDependency):
-        """Acquire requested token"""
-        with self.lock, self.ipc_lock:
-            self._update()
-            if self.available < dependency.count:
-                logger.debug(
-                    "Not enough available (%d available, %d requested)",
-                    self.available,
-                    dependency.count,
-                )
-                raise LockError("No token")
 
-            self.available -= dependency.count
-
-            self.cache[dependency.name] = TokenFile.create(dependency)
-            logger.debug(
-                "Token state [acquired %d]: available %d, taken %d",
-                dependency.count,
-                self.available,
-                self.total,
-            )
-
-    def release(self, dependency: CounterTokenDependency):
-        """Release"""
-        with self.lock, self.ipc_lock:
-            self._update()
-
-            tf = self.cache.get(dependency.name, None)
-            if tf is None:
-                logging.error(
-                    "Could not find the taken token for %s (%s)",
-                    dependency,
-                    dependency.name,
-                )
-                return
-
-            logging.debug("Deleting %s from token cache", dependency.name)
-            del self.cache[dependency.name]
-            self.available += tf.count
-            logging.debug("%s: available %d", self, self.available)
-
-            # Notify waiting tasks that tokens are available
-            self.available_condition.notify_all()
-
-            tf.delete()
+# =============================================================================
+# Process level token
+# =============================================================================
 
 
 class ProcessCounterToken(Token):

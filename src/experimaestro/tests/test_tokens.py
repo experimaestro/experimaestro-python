@@ -101,7 +101,7 @@ def test_token_cleanup():
         # Just lock directly (but without process)
         # The absence of process should be detected right away
         logging.info("Lock without process")
-        TokenFile.create(dependency)
+        TokenFile.from_dependency(dependency)
         task2 = dummy_task.C(x=2)
         task2.add_dependencies(token.dependency(1)).submit()
         xp.wait()
@@ -111,7 +111,7 @@ def test_token_cleanup():
         job = dependency.target
         with fasteners.InterProcessLock(job.lockpath):
             logging.info("Creating dependency %s", dependency)
-            TokenFile.create(dependency)
+            TokenFile.from_dependency(dependency)
             lockingpath = job.path / "testtoken.signal"
             command = [
                 sys.executable,

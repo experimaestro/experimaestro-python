@@ -750,6 +750,15 @@ class ConfigInformation:
         # Add predefined dependencies
         self.job.dependencies.update(self.dependencies)
 
+        # Add partial dependencies for scheduler-level locking
+        from experimaestro.core.partial_lock import PartialJobResource
+
+        for name, partial_spec in self.xpmtype._partials.items():
+            partial_path = job_context.partial_path(partial_spec, self.pyobject)
+            resource = PartialJobResource.create(partial_path)
+            partial_dep = resource.dependency(name)
+            self.job.dependencies.add(partial_dep)
+
         run_mode = (
             workspace.run_mode if run_mode is None else run_mode
         ) or RunMode.NORMAL

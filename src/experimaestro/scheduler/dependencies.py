@@ -1,10 +1,14 @@
 """Dependency between tasks and tokens"""
 
 import threading
-from typing import Set
+from typing import TYPE_CHECKING, Optional, Set
 from abc import ABC, abstractmethod
 from enum import Enum
+
 from ..locking import Lock
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.jobs import Job
 
 
 class Dependents:
@@ -40,10 +44,13 @@ class DependencyStatus(Enum):
     """Dependency can be locked"""
 
     FAIL = 2
-    """Dependency won't be availabe in the foreseeable future"""
+    """Dependency won't be available in the foreseeable future"""
 
 
 class Dependency(ABC):
+    origin: "Resource"
+    target: Optional["Job"]
+
     """Base class for dependencies
 
     Static dependencies (like jobs) have a fixed state once resolved - they cannot
@@ -86,8 +93,75 @@ class DynamicDependency(Dependency):
     Dynamic dependencies (like tokens) can change state at any time - availability
     can go from OK to WAIT and back. These require special handling during lock
     acquisition with retry logic.
+
+    Subclasses must implement:
+    - _create_lock(): Create the appropriate lock object for this dependency
     """
 
     def is_dynamic(self) -> bool:
         """Returns True - this is a dynamic dependency"""
         return True
+
+    @abstractmethod
+    def _create_lock(self) -> "Lock":
+        """Create a lock object for this dependency.
+
+        Returns:
+            Lock object (subclass of DynamicDependencyLock)
+        """
+        ...
+
+    async def aio_lock(self, timeout: float = 0) -> "Lock":
+        """Acquire lock on the resource with event-driven waiting.
+
+        This is the common implementation for all dynamic dependencies.
+        Uses the resource's available_condition for efficient waiting.
+
+        Args:
+            timeout: Timeout in seconds (0 = wait indefinitely)
+
+        Returns:
+            Lock object
+
+        Raises:
+            LockError: If lock cannot be acquired within timeout
+        """
+        from experimaestro.locking import LockError
+        from experimaestro.utils.asyncio import asyncThreadcheck
+        import time
+
+        start_time = time.time()
+
+        while True:
+            try:
+                lock = self._create_lock()
+                lock.acquire()
+                return lock
+            except LockError:
+                # Wait for resource availability notification
+                def wait_for_available():
+                    with self.origin.available_condition:
+                        # Calculate remaining timeout
+                        if timeout == 0:
+                            wait_timeout = None  # Wait indefinitely
+                        else:
+                            elapsed = time.time() - start_time
+                            if elapsed >= timeout:
+                                return False  # Timeout exceeded
+                            wait_timeout = timeout - elapsed
+
+                        # Wait for notification
+                        return self.origin.available_condition.wait(
+                            timeout=wait_timeout
+                        )
+
+                # Wait in a thread (since condition is threading-based)
+                result = await asyncThreadcheck(
+                    "resource availability", wait_for_available
+                )
+
+                # If wait returned False, we timed out
+                if result is False:
+                    raise LockError(f"Timeout waiting for resource: {self.origin}")
+
+                # Otherwise, loop back to try acquiring again
