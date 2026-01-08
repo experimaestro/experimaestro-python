@@ -138,22 +138,30 @@ class DynamicDependency(Dependency):
                 lock.acquire()
                 return lock
             except LockError:
+                # Fallback poll interval for when file system notifications are missed
+                POLL_INTERVAL = 1.0
+
                 # Wait for resource availability notification
                 def wait_for_available():
                     with self.origin.available_condition:
                         # Calculate remaining timeout
                         if timeout == 0:
-                            wait_timeout = None  # Wait indefinitely
+                            wait_timeout = POLL_INTERVAL  # Poll periodically
                         else:
                             elapsed = time.time() - start_time
                             if elapsed >= timeout:
                                 return False  # Timeout exceeded
-                            wait_timeout = timeout - elapsed
+                            wait_timeout = min(timeout - elapsed, POLL_INTERVAL)
 
-                        # Wait for notification
-                        return self.origin.available_condition.wait(
-                            timeout=wait_timeout
-                        )
+                        # Wait for notification (with bounded timeout for polling)
+                        self.origin.available_condition.wait(timeout=wait_timeout)
+
+                        # Check if we've exceeded the overall timeout
+                        if timeout > 0:
+                            elapsed = time.time() - start_time
+                            if elapsed >= timeout:
+                                return False
+                        return True
 
                 # Wait in a thread (since condition is threading-based)
                 result = await asyncThreadcheck(
@@ -163,5 +171,8 @@ class DynamicDependency(Dependency):
                 # If wait returned False, we timed out
                 if result is False:
                     raise LockError(f"Timeout waiting for resource: {self.origin}")
+
+                # Refresh state to catch any missed file system events
+                self.origin.refresh_state()
 
                 # Otherwise, loop back to try acquiring again

@@ -640,6 +640,16 @@ class TrackedDynamicResource(ABC):
             ipcom().fsunwatch(self.watcher)
             self.watcher = None
 
+    def refresh_state(self) -> None:
+        """Refresh state from disk.
+
+        This is a fallback for when file system notifications are missed.
+        Call this periodically when waiting for resource availability.
+        """
+        with self.lock, self.ipc_lock:
+            self._update()
+            self.available_condition.notify_all()
+
     def _lock_file_key(self, path: Path) -> str:
         """Get the cache key for a lock file path.
 
