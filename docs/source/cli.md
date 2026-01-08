@@ -226,6 +226,7 @@ experimaestro experiments [OPTIONS] COMMAND
 |---------|-------------|
 | `list` | List experiments in the workspace |
 | `monitor` | Monitor experiments with web UI or console TUI |
+| `ssh-monitor` | Monitor experiments on a remote server via SSH |
 | `monitor-server` | Start SSH monitoring server (internal, for remote monitoring) |
 | `sync` | Synchronize workspace database from disk state |
 
@@ -264,29 +265,38 @@ experimaestro experiments monitor --workdir /path/to/workspace --port 8080
 experimaestro experiments monitor --workdir /path/to/workspace --sync
 ```
 
-#### Remote Monitoring via SSH
+### SSH Monitor Command
 
 Monitor experiments running on a remote server through SSH:
 
 ```bash
-# Monitor a remote workspace via SSH
-experimaestro experiments monitor --ssh user@server --remote-workdir /path/to/workspace
-
-# With console TUI
-experimaestro experiments monitor --ssh user@server --remote-workdir /path/to/workspace --console
-
-# With additional SSH options
-experimaestro experiments monitor --ssh user@server --remote-workdir /path/to/workspace --ssh-option "-p 2222"
+experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 ```
 
-The SSH monitoring connects to the remote server, starts a monitoring server process, and communicates via JSON-RPC over SSH stdin/stdout. Files are synchronized on-demand using rsync when needed (e.g., for TensorBoard log directories).
+| Option | Description |
+|--------|-------------|
+| `--console` | Use terminal TUI instead of web UI |
+| `--port PORT` | Port for local web server (default: 12345) |
+| `--remote-xpm PATH` | Path to experimaestro on remote host |
+| `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
 
-Requirements:
-- SSH access to the remote server
-- `experimaestro` installed on the remote server (same version recommended)
-- `rsync` available on both local and remote machines
+Examples:
 
-See [Monitoring Interfaces](interfaces.md) for more details on the web and TUI interfaces.
+```bash
+# Basic monitoring with web UI
+experimaestro experiments ssh-monitor myserver /home/user/experiments
+
+# With console TUI
+experimaestro experiments ssh-monitor user@host /workspace --console
+
+# With SSH port and identity file
+experimaestro experiments ssh-monitor myserver /workspace -o "-p 2222" -o "-i ~/.ssh/mykey"
+
+# With custom experimaestro path on remote
+experimaestro experiments ssh-monitor host /workspace --remote-xpm /path/to/venv/bin/experimaestro
+```
+
+See [Remote Monitoring via SSH](interfaces.md#remote-monitoring-via-ssh) for detailed documentation.
 
 ## Cleaning Up Orphans
 

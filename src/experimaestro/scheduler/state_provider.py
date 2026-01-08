@@ -517,6 +517,24 @@ class MockExperiment(BaseExperiment):
         """Experiment identifier derived from workdir name"""
         return self.workdir.name
 
+    def db_state_dict(self) -> Dict:
+        """Serialize experiment to dictionary for DB/network storage
+
+        Overrides BaseExperiment.db_state_dict() to include all MockExperiment fields.
+        """
+        return {
+            "experiment_id": self.experiment_id,
+            "workdir": str(self.workdir) if self.workdir else None,
+            "current_run_id": self.current_run_id,
+            "total_jobs": self.total_jobs,
+            "finished_jobs": self.finished_jobs,
+            "failed_jobs": self.failed_jobs,
+            "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "hostname": self.hostname,
+        }
+
     @classmethod
     def from_db_state_dict(cls, d: Dict, workspace_path: Path) -> "MockExperiment":
         """Create MockExperiment from serialized dictionary

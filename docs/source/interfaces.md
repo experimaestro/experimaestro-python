@@ -110,6 +110,108 @@ tui.run()
 | Detailed log analysis | Web UI |
 | Quick status check | TUI |
 
+## Remote Monitoring via SSH
+
+When experiments run on remote servers (e.g., HPC clusters, cloud instances),
+you can monitor them from your local machine using SSH tunneling. The `ssh-monitor`
+command establishes an SSH connection, starts a monitoring server on the remote
+host, and communicates via JSON-RPC over the SSH channel.
+
+### Basic Usage
+
+```bash
+experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
+```
+
+- **HOST**: SSH host in standard format (e.g., `user@server`, `server`, or SSH config alias)
+- **REMOTE_WORKDIR**: Path to the workspace directory on the remote server
+
+### Examples
+
+```bash
+# Basic SSH monitoring with web UI
+experimaestro experiments ssh-monitor myserver /home/user/experiments
+
+# With console TUI instead of web UI
+experimaestro experiments ssh-monitor user@cluster.example.com /scratch/experiments --console
+
+# Custom port for web interface
+experimaestro experiments ssh-monitor myserver /workspace --port 8080
+
+# With SSH options (e.g., custom port, identity file)
+experimaestro experiments ssh-monitor myserver /workspace -o "-p 2222" -o "-i ~/.ssh/cluster_key"
+
+# Specify path to experimaestro on remote host
+experimaestro experiments ssh-monitor myserver /workspace --remote-xpm /opt/conda/bin/experimaestro
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--console` | Use terminal TUI instead of web UI |
+| `--port PORT` | Port for local web server (default: 12345) |
+| `--remote-xpm PATH` | Path to experimaestro executable on remote host |
+| `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
+
+### How It Works
+
+1. **Connection**: The client establishes an SSH connection to the remote host
+2. **Server Start**: On the remote host, experimaestro starts in server mode,
+   reading commands from stdin and writing responses to stdout
+3. **JSON-RPC Protocol**: Commands and responses are exchanged using JSON-RPC 2.0
+4. **File Sync**: When needed (e.g., for TensorBoard logs), files are synchronized
+   on-demand using rsync over SSH
+5. **Real-time Updates**: The server sends notifications when job states change
+
+### Remote experimaestro Installation
+
+By default, the SSH client runs `uv tool run experimaestro==<version>` on the
+remote host. This requires:
+
+- `uv` installed on the remote host
+- Network access to PyPI (or a local mirror)
+
+Alternatively, specify a pre-installed experimaestro path:
+
+```bash
+# If experimaestro is installed in a virtualenv
+experimaestro experiments ssh-monitor host /workspace --remote-xpm /path/to/venv/bin/experimaestro
+
+# If installed system-wide
+experimaestro experiments ssh-monitor host /workspace --remote-xpm experimaestro
+```
+
+### Version Compatibility
+
+The local and remote experimaestro versions should be compatible. The protocol
+version is checked on connection, and a warning is shown if versions differ
+significantly. For best results, use the same version on both sides.
+
+### SSH Output
+
+Remote server output (logs, warnings) is displayed locally with a colored
+`[SSH]` prefix to distinguish it from local output. This helps debug
+connection issues or see remote server activity.
+
+### Troubleshooting
+
+**Connection refused or timeout:**
+- Verify SSH access: `ssh user@host echo "connected"`
+- Check if the remote workspace exists
+- Ensure experimaestro is accessible on the remote host
+
+**Jobs not appearing:**
+- The remote database may need synchronization:
+  ```bash
+  ssh user@host "experimaestro experiments sync --workdir /path/to/workspace"
+  ```
+
+**Services not working (e.g., TensorBoard):**
+- Services are recreated locally from saved state
+- Some services may require file synchronization; this happens automatically
+- Check that rsync is available on both machines
+
 ## Database Synchronization
 
 Both interfaces read job information from the workspace database. If jobs

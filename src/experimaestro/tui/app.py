@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 from textual.app import App, ComposeResult
 from textual import work
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Header,
     Footer,
@@ -781,7 +781,7 @@ class JobDetailView(Widget):
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
-        with Vertical(id="job-detail-content"):
+        with VerticalScroll(id="job-detail-content"):
             yield Label("", id="job-id-label")
             yield Label("", id="job-task-label")
             yield Label("", id="job-status-label")

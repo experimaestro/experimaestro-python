@@ -758,7 +758,7 @@ class experiment(BaseExperiment):
         # Register file listener for state changes (writes to services.json)
         service.add_listener(self)
 
-        self.scheduler.notify_service_add(service)
+        self.scheduler.notify_service_add(service, self.workdir.name, self.run_id or "")
 
         # Write services.json file
         self._write_services_json()

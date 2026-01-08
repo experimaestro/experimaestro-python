@@ -468,9 +468,23 @@ class Scheduler(StateProvider, threading.Thread):
                 )
                 self._notify_state_listeners_async(event)
 
-    def notify_service_add(self, service: Service):
+    def notify_service_add(
+        self, service: Service, experiment_id: str = "", run_id: str = ""
+    ):
         """Notify the listeners that a service has been added"""
         self._notify_listeners(lambda lst, s: lst.service_add(s), service)
+
+        # Also notify StateProvider-style listeners (for TUI etc.)
+        from experimaestro.scheduler.state_provider import ServiceUpdatedEvent
+
+        if experiment_id:
+            event = ServiceUpdatedEvent(
+                experiment_id=experiment_id,
+                run_id=run_id or "",
+                service_id=service.id,
+                service=service,
+            )
+            self._notify_state_listeners_async(event)
 
     async def aio_submit(self, job: Job) -> JobState:
         """Main scheduler function: submit a job, run it (if needed), and returns
@@ -983,12 +997,26 @@ class Scheduler(StateProvider, threading.Thread):
             services = []
             for exp in self.experiments.values():
                 services.extend(exp.services.values())
+            logger.debug(
+                "get_services(None): returning %d services from %d experiments",
+                len(services),
+                len(self.experiments),
+            )
             return services
 
         exp = self.experiments.get(experiment_id)
         if not exp:
+            logger.debug(
+                "get_services(%s): experiment not found in %s",
+                experiment_id,
+                list(self.experiments.keys()),
+            )
             return []
-        return list(exp.services.values())
+        services = list(exp.services.values())
+        logger.debug(
+            "get_services(%s): returning %d services", experiment_id, len(services)
+        )
+        return services
 
     def get_tags_map(
         self,

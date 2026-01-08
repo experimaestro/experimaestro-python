@@ -115,6 +115,8 @@ JobDetailView {
 
 #job-detail-content {
     padding: 1;
+    overflow-y: auto;
+    height: 1fr;
 }
 
 #job-detail-content Label {

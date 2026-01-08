@@ -28,6 +28,14 @@ class LevelInformation:
     previous_progress: float = -1
     previous_desc: Optional[str] = None
 
+    def to_dict(self) -> Dict:
+        """Convert to a dictionary for JSON serialization."""
+        return {
+            "level": self.level,
+            "desc": self.desc,
+            "progress": self.progress,
+        }
+
     @classmethod
     def from_dict(cls, d: Dict) -> "LevelInformation":
         """Create LevelInformation from a dictionary (e.g., from JSON).

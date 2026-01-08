@@ -492,7 +492,10 @@ class BaseJob:
             "submittime": serialize_timestamp(self.submittime),
             "starttime": serialize_timestamp(self.starttime),
             "endtime": serialize_timestamp(self.endtime),
-            "progress": self.progress,
+            "progress": [
+                p.to_dict() if hasattr(p, "to_dict") else p
+                for p in (self.progress or [])
+            ],
             "exit_code": self.exit_code,
             "retry_count": self.retry_count,
         }

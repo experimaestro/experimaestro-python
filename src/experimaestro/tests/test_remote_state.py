@@ -281,6 +281,22 @@ class MockSSHClient:
         self.remote_workspace = remote_workspace
         self.local_cache_dir = local_cache_dir
 
+    def _parse_datetime_to_timestamp(self, value) -> float | None:
+        """Convert datetime value to Unix timestamp"""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                dt = datetime.fromisoformat(value)
+                return dt.timestamp()
+            except ValueError:
+                return None
+        if isinstance(value, datetime):
+            return value.timestamp()
+        return None
+
 
 class TestSSHRoundTrip:
     """Test SSH round-trip serialization: Mock → db_state_dict → from_db_state_dict"""
@@ -440,9 +456,61 @@ class TestServerRequestHandling:
         assert result[0]["experiment_id"] == "exp1"
         mock_state_provider.get_experiments.assert_called_once_with(since=None)
 
+    def test_handle_get_experiment(self, server_with_mock, mock_state_provider):
+        """Test handling get_experiment request"""
+        mock_exp = MockExperiment(
+            workdir=Path("/tmp/xp/exp1"),
+            current_run_id="run1",
+            total_jobs=5,
+            finished_jobs=3,
+            failed_jobs=0,
+            updated_at="2024-01-01T00:00:00",
+        )
+        mock_state_provider.get_experiment.return_value = mock_exp
+
+        result = server_with_mock._handle_get_experiment({"experiment_id": "exp1"})
+
+        assert result["experiment_id"] == "exp1"
+        assert result["current_run_id"] == "run1"
+        mock_state_provider.get_experiment.assert_called_once_with("exp1")
+
+    def test_handle_get_experiment_not_found(
+        self, server_with_mock, mock_state_provider
+    ):
+        """Test handling get_experiment when experiment not found"""
+        mock_state_provider.get_experiment.return_value = None
+
+        result = server_with_mock._handle_get_experiment(
+            {"experiment_id": "nonexistent"}
+        )
+
+        assert result is None
+
+    def test_handle_get_experiment_runs(self, server_with_mock, mock_state_provider):
+        """Test handling get_experiment_runs request"""
+        from experimaestro.scheduler.interfaces import ExperimentRun
+
+        mock_run = ExperimentRun(
+            run_id="run1",
+            experiment_id="exp1",
+            hostname="server1",
+            started_at=1704067200.0,
+            ended_at=1704070800.0,
+            status="completed",
+            total_jobs=10,
+            finished_jobs=10,
+            failed_jobs=0,
+        )
+        mock_state_provider.get_experiment_runs.return_value = [mock_run]
+
+        result = server_with_mock._handle_get_experiment_runs({"experiment_id": "exp1"})
+
+        assert len(result) == 1
+        assert result[0]["run_id"] == "run1"
+        assert result[0]["status"] == "completed"
+
     def test_handle_get_jobs(self, server_with_mock, mock_state_provider):
         """Test handling get_jobs request"""
-        # Note: tags, experiment_id, run_id are not part of MockJob
         mock_job = MockJob(
             identifier="job1",
             task_id="task.Test",
@@ -465,6 +533,195 @@ class TestServerRequestHandling:
 
         assert len(result) == 1
         assert result[0]["identifier"] == "job1"
+
+    def test_handle_get_job(self, server_with_mock, mock_state_provider):
+        """Test handling get_job request"""
+        mock_job = MockJob(
+            identifier="job1",
+            task_id="task.Test",
+            path=Path("/tmp/jobs/job1"),
+            state="running",
+            submittime=1704067200.0,
+            starttime=1704067300.0,
+            endtime=None,
+            progress=[],
+            updated_at="2024-01-01T00:00:00",
+        )
+        mock_state_provider.get_job.return_value = mock_job
+
+        result = server_with_mock._handle_get_job(
+            {"job_id": "job1", "experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["identifier"] == "job1"
+        assert result["task_id"] == "task.Test"
+
+    def test_handle_get_job_not_found(self, server_with_mock, mock_state_provider):
+        """Test handling get_job when job not found"""
+        mock_state_provider.get_job.return_value = None
+
+        result = server_with_mock._handle_get_job(
+            {"job_id": "nonexistent", "experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result is None
+
+    def test_handle_get_all_jobs(self, server_with_mock, mock_state_provider):
+        """Test handling get_all_jobs request"""
+        mock_job1 = MockJob(
+            identifier="job1",
+            task_id="task.Test1",
+            path=Path("/tmp/jobs/job1"),
+            state="done",
+            submittime=None,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+        mock_job2 = MockJob(
+            identifier="job2",
+            task_id="task.Test2",
+            path=Path("/tmp/jobs/job2"),
+            state="running",
+            submittime=None,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+        mock_state_provider.get_all_jobs.return_value = [mock_job1, mock_job2]
+
+        result = server_with_mock._handle_get_all_jobs({"state": None, "tags": None})
+
+        assert len(result) == 2
+        assert result[0]["identifier"] == "job1"
+        assert result[1]["identifier"] == "job2"
+
+    def test_handle_get_services(self, server_with_mock, mock_state_provider):
+        """Test handling get_services request"""
+        mock_service = MockService(
+            service_id="svc1",
+            description_text="Test service",
+            state_dict_data={"port": 8080},
+            experiment_id="exp1",
+            run_id="run1",
+            url="http://localhost:8080",
+            state="RUNNING",
+        )
+        mock_state_provider.get_services.return_value = [mock_service]
+
+        result = server_with_mock._handle_get_services(
+            {"experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert len(result) == 1
+        assert result[0]["service_id"] == "svc1"
+        assert result[0]["state"] == "RUNNING"
+
+    def test_handle_get_tags_map(self, server_with_mock, mock_state_provider):
+        """Test handling get_tags_map request"""
+        mock_state_provider.get_tags_map.return_value = {
+            "job1": {"model": "bert", "dataset": "squad"},
+            "job2": {"model": "gpt"},
+        }
+
+        result = server_with_mock._handle_get_tags_map(
+            {"experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["job1"]["model"] == "bert"
+        assert result["job2"]["model"] == "gpt"
+
+    def test_handle_get_tags_map_missing_experiment(self, server_with_mock):
+        """Test get_tags_map raises TypeError when experiment_id missing"""
+        with pytest.raises(TypeError, match="experiment_id is required"):
+            server_with_mock._handle_get_tags_map({"run_id": "run1"})
+
+    def test_handle_get_dependencies_map(self, server_with_mock, mock_state_provider):
+        """Test handling get_dependencies_map request"""
+        mock_state_provider.get_dependencies_map.return_value = {
+            "job2": ["job1"],
+            "job3": ["job1", "job2"],
+        }
+
+        result = server_with_mock._handle_get_dependencies_map(
+            {"experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["job2"] == ["job1"]
+        assert result["job3"] == ["job1", "job2"]
+
+    def test_handle_get_dependencies_map_missing_experiment(self, server_with_mock):
+        """Test get_dependencies_map raises TypeError when experiment_id missing"""
+        with pytest.raises(TypeError, match="experiment_id is required"):
+            server_with_mock._handle_get_dependencies_map({"run_id": "run1"})
+
+    def test_handle_kill_job(self, server_with_mock, mock_state_provider):
+        """Test handling kill_job request"""
+        mock_job = MockJob(
+            identifier="job1",
+            task_id="task.Test",
+            path=Path("/tmp/jobs/job1"),
+            state="running",
+            submittime=None,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+        mock_state_provider.get_job.return_value = mock_job
+        mock_state_provider.kill_job.return_value = True
+
+        result = server_with_mock._handle_kill_job(
+            {"job_id": "job1", "experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["success"] is True
+
+    def test_handle_kill_job_not_found(self, server_with_mock, mock_state_provider):
+        """Test handling kill_job when job not found"""
+        mock_state_provider.get_job.return_value = None
+
+        result = server_with_mock._handle_kill_job(
+            {"job_id": "nonexistent", "experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["success"] is False
+        assert "error" in result
+
+    def test_handle_clean_job(self, server_with_mock, mock_state_provider):
+        """Test handling clean_job request"""
+        mock_job = MockJob(
+            identifier="job1",
+            task_id="task.Test",
+            path=Path("/tmp/jobs/job1"),
+            state="done",
+            submittime=None,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+        mock_state_provider.get_job.return_value = mock_job
+        mock_state_provider.clean_job.return_value = True
+
+        result = server_with_mock._handle_clean_job(
+            {"job_id": "job1", "experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["success"] is True
+
+    def test_handle_clean_job_not_found(self, server_with_mock, mock_state_provider):
+        """Test handling clean_job when job not found"""
+        mock_state_provider.get_job.return_value = None
+
+        result = server_with_mock._handle_clean_job(
+            {"job_id": "nonexistent", "experiment_id": "exp1", "run_id": "run1"}
+        )
+
+        assert result["success"] is False
+        assert "error" in result
 
     def test_handle_get_sync_info(self, server_with_mock):
         """Test handling get_sync_info request"""
@@ -517,8 +774,8 @@ class TestClientServerIntegration:
         assert isinstance(resp_msg, RPCResponse)
         assert resp_msg.result == []
 
-    def test_notification_handling(self):
-        """Test notification message handling"""
+    def test_notification_job_updated(self):
+        """Test job_updated notification message handling"""
         notification = create_notification(
             NotificationMethod.JOB_UPDATED,
             {
@@ -533,6 +790,85 @@ class TestClientServerIntegration:
         assert isinstance(msg, RPCNotification)
         assert msg.method == "notification.job_updated"
         assert msg.params["job_id"] == "job1"
+
+    def test_notification_experiment_updated(self):
+        """Test experiment_updated notification message handling"""
+        notification = create_notification(
+            NotificationMethod.EXPERIMENT_UPDATED,
+            {
+                "experiment_id": "exp1",
+                "total_jobs": 10,
+                "finished_jobs": 5,
+            },
+        )
+
+        msg = parse_message(notification)
+        assert isinstance(msg, RPCNotification)
+        assert msg.method == "notification.experiment_updated"
+        assert msg.params["experiment_id"] == "exp1"
+
+    def test_notification_run_updated(self):
+        """Test run_updated notification message handling"""
+        notification = create_notification(
+            NotificationMethod.RUN_UPDATED,
+            {
+                "experiment_id": "exp1",
+                "run_id": "run1",
+                "status": "completed",
+            },
+        )
+
+        msg = parse_message(notification)
+        assert isinstance(msg, RPCNotification)
+        assert msg.method == "notification.run_updated"
+        assert msg.params["run_id"] == "run1"
+
+    def test_notification_service_updated(self):
+        """Test service_updated notification message handling"""
+        notification = create_notification(
+            NotificationMethod.SERVICE_UPDATED,
+            {
+                "experiment_id": "exp1",
+                "run_id": "run1",
+                "service_id": "svc1",
+                "state": "RUNNING",
+            },
+        )
+
+        msg = parse_message(notification)
+        assert isinstance(msg, RPCNotification)
+        assert msg.method == "notification.service_updated"
+        assert msg.params["service_id"] == "svc1"
+
+    def test_notification_file_changed(self):
+        """Test file_changed notification message handling"""
+        notification = create_notification(
+            NotificationMethod.FILE_CHANGED,
+            {
+                "path": "/workspace/logs/job.log",
+                "event_type": "modified",
+            },
+        )
+
+        msg = parse_message(notification)
+        assert isinstance(msg, RPCNotification)
+        assert msg.method == "notification.file_changed"
+        assert msg.params["path"] == "/workspace/logs/job.log"
+
+    def test_notification_shutdown(self):
+        """Test shutdown notification message handling"""
+        notification = create_notification(
+            NotificationMethod.SHUTDOWN,
+            {
+                "reason": "server_stop",
+                "code": 0,
+            },
+        )
+
+        msg = parse_message(notification)
+        assert isinstance(msg, RPCNotification)
+        assert msg.method == "notification.shutdown"
+        assert msg.params["reason"] == "server_stop"
 
 
 # =============================================================================

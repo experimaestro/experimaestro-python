@@ -19,7 +19,9 @@ from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from datetime import datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set
+
+from termcolor import colored
 
 from experimaestro.scheduler.db_state_provider import OfflineStateProvider
 from experimaestro.scheduler.state_provider import (
@@ -47,6 +49,9 @@ from experimaestro.scheduler.remote.protocol import (
     create_request,
     serialize_datetime,
 )
+
+# Type for SSH output callback
+OutputCallback = Optional["Callable[[str], None]"]
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.remote.sync import RemoteFileSynchronizer
@@ -90,6 +95,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         remote_workspace: str,
         ssh_options: Optional[List[str]] = None,
         remote_xpm_path: Optional[str] = None,
+        output_callback: Optional[Callable[[str], None]] = None,
     ):
         """Initialize the client
 
@@ -99,6 +105,9 @@ class SSHStateProviderClient(OfflineStateProvider):
             ssh_options: Additional SSH options (e.g., ["-p", "2222"])
             remote_xpm_path: Path to experimaestro executable on remote host.
                 If None, uses 'uv tool run experimaestro==<version>'.
+            output_callback: Callback for SSH process output (stderr).
+                If None, a default callback prints with colored prefix.
+                Set to False (or a no-op lambda) to disable output display.
         """
         # Initialize base class (includes service cache)
         super().__init__()
@@ -107,6 +116,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         self.remote_workspace = remote_workspace
         self.ssh_options = ssh_options or []
         self.remote_xpm_path = remote_xpm_path
+        self._output_callback = output_callback
 
         # Session-specific temporary cache directory (created on connect)
         self._temp_dir: Optional[str] = None
@@ -127,6 +137,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         self._read_thread: Optional[threading.Thread] = None
         self._notify_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
         self._running = False
         self._connected = False
 
@@ -212,6 +223,12 @@ class SSHStateProviderClient(OfflineStateProvider):
         )
         self._notify_thread.start()
 
+        # Start stderr thread to display SSH output
+        self._stderr_thread = threading.Thread(
+            target=self._stderr_loop, daemon=True, name="SSHClient-Stderr"
+        )
+        self._stderr_thread.start()
+
         # Wait for connection to be established by sending a test request
         try:
             sync_info = self._call_sync(RPCMethod.GET_SYNC_INFO, {}, timeout=timeout)
@@ -252,6 +269,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             self._read_thread.join(timeout=2.0)
         if self._notify_thread and self._notify_thread.is_alive():
             self._notify_thread.join(timeout=2.0)
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            self._stderr_thread.join(timeout=2.0)
 
         # Cancel any pending requests
         with self._response_lock:
@@ -314,6 +333,33 @@ class SSHStateProviderClient(OfflineStateProvider):
         if self._running:
             logger.warning("Connection to %s lost", self.host)
             self._connected = False
+
+    def _stderr_loop(self):
+        """Read and display SSH stderr output with colored prefix"""
+        while self._running:
+            try:
+                line = self._stderr.readline()
+                if not line:
+                    # EOF - stderr closed
+                    logger.debug("SSH stderr closed")
+                    break
+
+                line_str = line.decode("utf-8").rstrip("\n\r")
+                if not line_str:
+                    continue
+
+                # Call output callback or use default
+                if self._output_callback is not None:
+                    self._output_callback(line_str)
+                else:
+                    # Default: print with colored prefix
+                    prefix = colored("[SSH] ", "cyan", attrs=["bold"])
+                    print(f"{prefix}{line_str}")  # noqa: T201
+
+            except Exception as e:
+                if self._running:
+                    logger.debug("Error reading stderr: %s", e)
+                break
 
     def _process_message(self, line: str):
         """Process a single message from the server"""
@@ -396,8 +442,9 @@ class SSHStateProviderClient(OfflineStateProvider):
             seen_types = set()
             unique_events = []
             for event in reversed(events):
-                if event.event_type not in seen_types:
-                    seen_types.add(event.event_type)
+                event_type = type(event)
+                if event_type not in seen_types:
+                    seen_types.add(event_type)
                     unique_events.append(event)
             unique_events.reverse()
 
@@ -676,6 +723,10 @@ class SSHStateProviderClient(OfflineStateProvider):
             else:
                 d["path"] = Path(remote_path)
 
+        # Convert ISO datetime strings back to timestamps (floats)
+        for key in ("submittime", "starttime", "endtime"):
+            d[key] = self._parse_datetime_to_timestamp(d.get(key))
+
         return MockJob.from_db_state_dict(d, self.local_cache_dir)
 
     def _dict_to_experiment(self, d: Dict) -> MockExperiment:
@@ -688,6 +739,10 @@ class SSHStateProviderClient(OfflineStateProvider):
                 d["workdir"] = self.local_cache_dir / relative
             else:
                 d["workdir"] = Path(remote_path)
+
+        # Convert ISO datetime strings back to timestamps (floats)
+        for key in ("started_at", "ended_at"):
+            d[key] = self._parse_datetime_to_timestamp(d.get(key))
 
         return MockExperiment.from_db_state_dict(d, self.local_cache_dir)
 

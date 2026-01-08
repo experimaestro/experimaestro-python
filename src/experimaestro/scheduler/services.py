@@ -88,6 +88,20 @@ class Service(BaseService):
         d["__class__"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         return d
 
+    def db_state_dict(self) -> dict:
+        """Serialize service to dictionary for DB/network storage.
+
+        Overrides BaseService.db_state_dict() to properly serialize Path objects.
+        """
+        state = self.state
+        state_str = state.name if hasattr(state, "name") else str(state)
+        return {
+            "service_id": self.id,
+            "description": self.description(),
+            "state": state_str,
+            "state_dict": self.serialize_state_dict(self._full_state_dict()),
+        }
+
     @staticmethod
     def serialize_state_dict(data: dict) -> dict:
         """Serialize a state_dict, converting Path objects to serializable format.
@@ -101,13 +115,18 @@ class Service(BaseService):
         Returns:
             Serializable dictionary with paths converted
         """
-        result = {}
-        for k, v in data.items():
+
+        def serialize_value(v):
             if isinstance(v, Path):
-                result[k] = {"__path__": str(v)}
+                return {"__path__": str(v)}
+            elif isinstance(v, dict):
+                return {k: serialize_value(val) for k, val in v.items()}
+            elif isinstance(v, (list, tuple)):
+                return [serialize_value(item) for item in v]
             else:
-                result[k] = v
-        return result
+                return v
+
+        return {k: serialize_value(v) for k, v in data.items()}
 
     @staticmethod
     def from_state_dict(
@@ -142,20 +161,32 @@ class Service(BaseService):
         module = importlib.import_module(module_name)
         cls = getattr(module, class_name)
 
-        # Build kwargs, detecting and translating paths automatically
+        # Build kwargs, detecting and translating paths automatically (handles nested)
+        def deserialize_value(v):
+            if isinstance(v, dict):
+                if "__path__" in v:
+                    # Serialized path - deserialize with optional translation
+                    path_str = v["__path__"]
+                    if path_translator:
+                        return path_translator(path_str)
+                    else:
+                        return Path(path_str)
+                else:
+                    return {
+                        k: deserialize_value(val)
+                        for k, val in v.items()
+                        if not k.startswith("__")
+                    }
+            elif isinstance(v, list):
+                return [deserialize_value(item) for item in v]
+            else:
+                return v
+
         kwargs = {}
         for k, v in data.items():
             if k.startswith("__"):
                 continue  # Skip special keys
-            if isinstance(v, dict) and "__path__" in v:
-                # Serialized path - deserialize with optional translation
-                path_str = v["__path__"]
-                if path_translator:
-                    kwargs[k] = path_translator(path_str)
-                else:
-                    kwargs[k] = Path(path_str)
-            else:
-                kwargs[k] = v
+            kwargs[k] = deserialize_value(v)
 
         logger.debug("Creating %s with kwargs: %s", cls.__name__, kwargs)
         return cls(**kwargs)
