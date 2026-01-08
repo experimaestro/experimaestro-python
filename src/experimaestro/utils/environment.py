@@ -27,12 +27,16 @@ class ExperimentRunInfo:
 
     hostname: Optional[str] = None
     started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    status: Optional[str] = None  # 'completed' or 'failed'
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             "hostname": self.hostname,
             "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "status": self.status,
         }
 
     @classmethod
@@ -41,6 +45,8 @@ class ExperimentRunInfo:
         return cls(
             hostname=data.get("hostname"),
             started_at=data.get("started_at"),
+            ended_at=data.get("ended_at"),
+            status=data.get("status"),
         )
 
 

@@ -16,6 +16,7 @@ caption: "Experiments"
 experiments/config
 experiments/task
 experiments/plan
+experiments/workspace
 experiments
 ```
 

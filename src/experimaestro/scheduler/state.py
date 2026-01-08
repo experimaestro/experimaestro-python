@@ -23,8 +23,29 @@ class JobInformation:
 
 
 class ExperimentState:
-    def __init__(self, workdir: Path, name: str):
-        path = workdir / "xp" / name / "state.json"
+    def __init__(self, workdir: Path, name: str, run_id: str = None):
+        """Load experiment state from disk.
+
+        Args:
+            workdir: Workspace path
+            name: Experiment name
+            run_id: Run ID to load (default: latest run)
+        """
+        exp_base = workdir / "experiments" / name
+        if run_id is None:
+            # Find the latest run directory
+            run_dirs = sorted(
+                [d for d in exp_base.iterdir() if d.is_dir()],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+            if not run_dirs:
+                raise FileNotFoundError(f"No runs found for experiment {name}")
+            run_dir = run_dirs[0]
+        else:
+            run_dir = exp_base / run_id
+
+        path = run_dir / "state.json"
         with path.open("rt") as fh:
             content = json.load(fh)
 

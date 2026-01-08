@@ -16,7 +16,7 @@ from experimaestro.scheduler.jobs import Job
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.scheduler.interfaces import BaseExperiment
-from experimaestro.settings import WorkspaceSettings, get_settings
+from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
 from experimaestro.experiments.configuration import DirtyGitAction
 from experimaestro.utils import logger
 
@@ -158,10 +158,18 @@ class experiment(BaseExperiment):
         run_mode = run_mode or RunMode.NORMAL
         self.workspace = Workspace(settings, env, launcher=launcher, run_mode=run_mode)
 
-        # Mark the directory has an experimaestro folder
-        self.workdir = self.workspace.experimentspath / name
-        self.workdir.mkdir(parents=True, exist_ok=True)
-        self.xplockpath = self.workdir / "lock"
+        # Store experiment name for ID references
+        self.name = name
+
+        # Create experiment base directory (run directories will be created inside)
+        self._experiment_base = self.workspace.experimentspath / name
+        self._experiment_base.mkdir(parents=True, exist_ok=True)
+
+        # Lock is at experiment level (prevents concurrent runs of same experiment)
+        self.xplockpath = self._experiment_base / "lock"
+
+        # workdir will be set in __enter__ after run_id is generated
+        self.workdir = None
         self.xplock = None
         self.old_experiment = None
         self.services: Dict[str, Service] = {}
@@ -249,6 +257,11 @@ class experiment(BaseExperiment):
     # =========================================================================
 
     @property
+    def experiment_id(self) -> str:
+        """Experiment identifier (overrides BaseExperiment.experiment_id)"""
+        return self.name
+
+    @property
     def current_run_id(self) -> Optional[str]:
         """Current run ID for this experiment"""
         return self.run_id
@@ -294,11 +307,6 @@ class experiment(BaseExperiment):
         """Return potential other directories"""
         for alt_workdir in self.workspace.alt_workdirs:
             yield alt_workdir / "jobs"
-
-    @property
-    def jobsbakpath(self):
-        """Return the directory in which results can be stored for this experiment"""
-        return self.workdir / "jobs.bak"
 
     @property
     def jobs_jsonl_path(self):
@@ -358,7 +366,7 @@ class experiment(BaseExperiment):
             logging.debug(
                 "Job %s already running, unfinished jobs for %s: %d",
                 job.identifier[:8],
-                self.workdir.name,
+                self.name,
                 self.unfinishedJobs,
             )
 
@@ -374,7 +382,7 @@ class experiment(BaseExperiment):
 
         # Also register in database for TUI/monitoring (only in NORMAL mode)
         if self._db_listener is not None:
-            experiment_id = self.workdir.name
+            experiment_id = self.name
             self.state_provider.update_job_submitted(job, experiment_id, self.run_id)
 
     def stop(self):
@@ -457,11 +465,23 @@ class experiment(BaseExperiment):
         return self.workspace.connector.createtoken(name, count)
 
     def __enter__(self):
+        from datetime import datetime
         from .dynamic_outputs import TaskOutputsWorker
         from experimaestro.utils.environment import (
             ExperimentEnvironment,
             ExperimentRunInfo,
         )
+
+        # Check for old experiment layout and warn
+        old_xp_dir = self.workspace.path / "xp"
+        if old_xp_dir.exists() and old_xp_dir.is_dir():
+            logger.warning(
+                "Experimaestro v2 has a modified experiment file layout. "
+                "DO NOT use experimaestro v1 to cleanup orphans. "
+                "You can use 'experimaestro migrate v1-to-v2 %s' to migrate old experiment "
+                "folders to the new structure.",
+                self.workspace.path,
+            )
 
         # Only lock and save environment in NORMAL mode
         if self.workspace.run_mode == RunMode.NORMAL:
@@ -470,10 +490,22 @@ class experiment(BaseExperiment):
 
             # Try non-blocking first to check if lock is held
             if not lock.acquire(blocking=False):
-                # Lock is held - read hostname info from environment.json
-                env_path = self.workdir / "environment.json"
-                env = ExperimentEnvironment.load(env_path)
-                hostname = env.run.hostname if env.run else None
+                # Lock is held - try to find hostname from latest run's environment.json
+                hostname = None
+                try:
+                    # Find the most recent run directory
+                    run_dirs = sorted(
+                        [d for d in self._experiment_base.iterdir() if d.is_dir()],
+                        key=lambda d: d.stat().st_mtime,
+                        reverse=True,
+                    )
+                    if run_dirs:
+                        env_path = run_dirs[0] / "environment.json"
+                        if env_path.exists():
+                            env = ExperimentEnvironment.load(env_path)
+                            hostname = env.run.hostname if env.run else None
+                except Exception:
+                    pass  # Ignore errors when trying to find hostname
                 holder_info = f" (held by {hostname})" if hostname else ""
                 logger.warning(
                     "Experiment is locked%s, waiting for lock to be released...",
@@ -484,6 +516,20 @@ class experiment(BaseExperiment):
 
             self.xplock = lock
             logger.info("Experiment locked")
+
+            # Generate run_id with collision detection
+            now = datetime.now()
+            base_run_id = now.strftime("%Y%m%d_%H%M%S")
+            run_id = base_run_id
+            suffix = 1
+            while (self._experiment_base / run_id).exists():
+                run_id = f"{base_run_id}.{suffix}"
+                suffix += 1
+            self.run_id = run_id
+
+            # Create the run-specific workdir
+            self.workdir = self._experiment_base / self.run_id
+            self.workdir.mkdir(parents=True, exist_ok=True)
 
             # Capture and save environment info
             from experimaestro.utils.git import get_git_info
@@ -517,20 +563,11 @@ class experiment(BaseExperiment):
                         )
 
             env.save(env_info_path)
-
-        # Move old jobs into "jobs.bak"
-        if self.workspace.run_mode == RunMode.NORMAL:
-            self.jobsbakpath.mkdir(exist_ok=True)
-            for p in self.jobspath.glob("*/*"):
-                if p.is_symlink():
-                    target = self.jobsbakpath / p.relative_to(self.jobspath)
-                    if target.is_symlink():
-                        # Remove if duplicate
-                        p.unlink()
-                    else:
-                        # Rename otherwise
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        p.rename(target)
+        else:
+            # Non-NORMAL mode: use placeholder run_id and workdir
+            self.run_id = "dry-run"
+            self.workdir = self._experiment_base / self.run_id
+            self.workdir.mkdir(parents=True, exist_ok=True)
 
         # Register experiment with scheduler
         self.scheduler.register_experiment(self)
@@ -577,10 +614,11 @@ class experiment(BaseExperiment):
                 )
 
         # Register experiment in database and create a run (only in NORMAL mode)
-        experiment_id = self.workdir.name
+        experiment_id = self.name
         if is_normal_mode and self.state_provider is not None and not self._no_db:
             self.state_provider.ensure_experiment(experiment_id)
-            self.run_id = self.state_provider.create_run(experiment_id)
+            # Pass the run_id we generated (with filesystem collision detection)
+            self.state_provider.create_run(experiment_id, run_id=self.run_id)
 
             # Add run info to environment.json
             import socket
@@ -599,9 +637,6 @@ class experiment(BaseExperiment):
                 self.state_provider, experiment_id, self.run_id
             )
             self.scheduler.addlistener(self._db_listener)
-        else:
-            # In non-NORMAL modes or when DB is unavailable, use a placeholder run_id
-            self.run_id = None
 
         # Number of unfinished jobs
         self.unfinishedJobs = 0
@@ -626,10 +661,6 @@ class experiment(BaseExperiment):
 
     def __exit__(self, exc_type, exc_value, traceback):
         logger.debug("Exiting scheduler context")
-        # If no exception and normal run mode, remove old "jobs"
-        if self.workspace.run_mode == RunMode.NORMAL:
-            if exc_type is None and self.jobsbakpath.is_dir():
-                rmtree(self.jobsbakpath)
 
         # Close the different locks
         try:
@@ -661,13 +692,30 @@ class experiment(BaseExperiment):
             self.scheduler.unregister_experiment(self)
 
             # Remove database listener and mark run as completed (only in NORMAL mode)
+            status = "failed" if exc_type else "completed"
+
             if self._db_listener is not None:
                 self.scheduler.removelistener(self._db_listener)
 
                 # Mark run as completed in database
-                experiment_id = self.workdir.name
-                status = "failed" if exc_type else "completed"
+                experiment_id = self.name
                 self.state_provider.complete_run(experiment_id, self.run_id, status)
+
+            # Update environment.json with run status
+            if self.workspace.run_mode == RunMode.NORMAL and self.workdir:
+                from datetime import datetime
+                from experimaestro.utils.environment import ExperimentEnvironment
+
+                env_path = self.workdir / "environment.json"
+                if env_path.exists():
+                    try:
+                        env = ExperimentEnvironment.load(env_path)
+                        if env.run:
+                            env.run.ended_at = datetime.now().isoformat()
+                            env.run.status = status
+                            env.save(env_path)
+                    except Exception as e:
+                        logger.warning("Failed to update environment.json: %s", e)
 
             # Note: Don't stop scheduler - it's shared!
             # Wait for explicit quit from web interface if requested
@@ -714,6 +762,17 @@ class experiment(BaseExperiment):
             ExperimentState.save(
                 self.workdir / "state.json", self.scheduler.jobs.values()
             )
+
+            # Cleanup old runs based on history settings
+            try:
+                cleanup_experiment_history(
+                    self._experiment_base,
+                    current_run_id=self.run_id,
+                    current_status=status,
+                    history=self._get_history_settings(),
+                )
+            except Exception as e:
+                logger.warning("Failed to cleanup old runs: %s", e)
 
     async def update_task_output_count(self, delta: int):
         """Change in the number of task outputs to process"""
@@ -765,7 +824,7 @@ class experiment(BaseExperiment):
         # Register file listener for state changes (writes to services.json)
         service.add_listener(self)
 
-        self.scheduler.notify_service_add(service, self.workdir.name, self.run_id or "")
+        self.scheduler.notify_service_add(service, self.name, self.run_id or "")
 
         # Write services.json file
         self._write_services_json()
@@ -793,18 +852,173 @@ class experiment(BaseExperiment):
 
             save(obj, save_dir)
 
-    def load(self, reference: str, name: str = "default"):
-        """Serializes configurations.
-
-        Loads configuration objects from an experimental directory
+    def load(self, reference: str, name: str = "default", run_id: str = None):
+        """Loads configuration objects from an experimental directory.
 
         :param reference: The name of the experiment
         :param name: The name of the saving directory (default to `default`)
+        :param run_id: The run ID to load from (default: latest run)
         """
         from experimaestro import load
 
-        path = self.workspace.experimentspath / reference / "data" / name
+        exp_base = self.workspace.experimentspath / reference
+        if run_id is None:
+            # Find the latest run directory
+            run_dirs = sorted(
+                [d for d in exp_base.iterdir() if d.is_dir()],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+            if not run_dirs:
+                raise FileNotFoundError(f"No runs found for experiment {reference}")
+            run_dir = run_dirs[0]
+        else:
+            run_dir = exp_base / run_id
+
+        path = run_dir / "data" / name
         return load(path)
+
+    def _get_history_settings(self) -> HistorySettings:
+        """Get the history settings for this experiment.
+
+        Returns workspace-specific settings if available, otherwise global defaults.
+        """
+        # Check if workspace has explicit history settings
+        ws_settings = self.workspace.settings
+        if ws_settings and ws_settings.history:
+            return ws_settings.history
+
+        # Fall back to global settings
+        settings = get_settings()
+        return settings.history
+
+
+def get_run_status(run_dir: Path) -> Optional[str]:
+    """Get the status of a run from its state.json or environment.json.
+
+    Args:
+        run_dir: Path to the run directory
+
+    Returns:
+        'completed', 'failed', or None if status cannot be determined.
+    """
+    # Try environment.json first (most reliable - written on exit)
+    env_path = run_dir / "environment.json"
+    if env_path.exists():
+        try:
+            from experimaestro.utils.environment import ExperimentEnvironment
+
+            env = ExperimentEnvironment.load(env_path)
+            if env.run and env.run.status:
+                return env.run.status
+        except Exception:
+            pass
+
+    # Fall back to state.json
+    state_path = run_dir / "state.json"
+    if state_path.exists():
+        try:
+            with state_path.open() as f:
+                state = json.load(f)
+                # If state exists and all jobs succeeded, it's completed
+                # Failed jobs are indicated in the state
+                jobs = state.get("jobs", [])
+                if any(j.get("state") == "error" for j in jobs):
+                    return "failed"
+                return "completed"
+        except Exception:
+            pass
+
+    # Cannot determine status
+    return None
+
+
+def cleanup_experiment_history(
+    experiment_base: Path,
+    *,
+    current_run_id: Optional[str] = None,
+    current_status: Optional[str] = None,
+    history: Optional[HistorySettings] = None,
+) -> list[Path]:
+    """Clean up old experiment runs based on history settings.
+
+    This function can be called from the CLI or other contexts.
+
+    Args:
+        experiment_base: Path to the experiment directory (containing run subdirs)
+        current_run_id: ID of the current run to exclude from cleanup (optional)
+        current_status: Status of the current run ('completed' or 'failed'), used
+            to determine if failed runs should be removed (optional)
+        history: History settings to use (defaults to global settings)
+
+    Returns:
+        List of paths that were removed
+    """
+    if history is None:
+        settings = get_settings()
+        history = settings.history
+
+    removed_paths = []
+
+    # List all run directories (excluding the current one)
+    run_dirs = []
+    for d in experiment_base.iterdir():
+        if d.is_dir() and d.name != current_run_id:
+            run_dirs.append(d)
+
+    # Sort by modification time (oldest first)
+    run_dirs.sort(key=lambda d: d.stat().st_mtime)
+
+    # Categorize runs by status
+    completed_runs = []
+    failed_runs = []
+
+    for run_dir in run_dirs:
+        status = get_run_status(run_dir)
+        if status == "completed":
+            completed_runs.append(run_dir)
+        elif status == "failed":
+            failed_runs.append(run_dir)
+        # Runs with unknown status are not touched
+
+    # If current run succeeded, remove all past failed runs (per user requirement)
+    if current_status == "completed":
+        # Remove all past failed runs
+        # Per user requirement: "If an experiment succeed, it remove the past failed"
+        for run_dir in failed_runs:
+            logger.info("Removing failed run (experiment succeeded): %s", run_dir)
+            try:
+                rmtree(run_dir)
+                removed_paths.append(run_dir)
+            except Exception as e:
+                logger.warning("Failed to remove run directory %s: %s", run_dir, e)
+        failed_runs = []
+
+    # Keep only max_done completed runs (remove oldest ones)
+    while len(completed_runs) >= history.max_done:
+        run_dir = completed_runs.pop(0)  # Remove oldest
+        logger.info(
+            "Removing old completed run (keeping %d): %s", history.max_done, run_dir
+        )
+        try:
+            rmtree(run_dir)
+            removed_paths.append(run_dir)
+        except Exception as e:
+            logger.warning("Failed to remove run directory %s: %s", run_dir, e)
+
+    # Keep only max_failed failed runs (remove oldest ones)
+    while len(failed_runs) >= history.max_failed:
+        run_dir = failed_runs.pop(0)  # Remove oldest
+        logger.info(
+            "Removing old failed run (keeping %d): %s", history.max_failed, run_dir
+        )
+        try:
+            rmtree(run_dir)
+            removed_paths.append(run_dir)
+        except Exception as e:
+            logger.warning("Failed to remove run directory %s: %s", run_dir, e)
+
+    return removed_paths
 
 
 # re-export at the module level

@@ -120,7 +120,7 @@ def test_partial_registered_in_database():
                 job_partials = list(JobPartialModel.select())
                 assert len(job_partials) == 1
                 assert job_partials[0].partial_id == partials[0].partial_id
-                assert job_partials[0].experiment_id == xp.workdir.name
+                assert job_partials[0].experiment_id == xp.name
         finally:
             provider.close()
 

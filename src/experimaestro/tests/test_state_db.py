@@ -390,8 +390,11 @@ def test_database_recovery_from_disk(tmp_path: Path):
         task2 = SimpleTask.C(value=100).tag("priority", "low").tag("env", "prod")
         task2.submit()
 
-    # Step 2: Verify jobs.jsonl was created
-    jobs_jsonl_path = workdir / "xp" / "recovery" / "jobs.jsonl"
+    # Step 2: Verify jobs.jsonl was created (new layout: experiments/{exp}/{run}/jobs.jsonl)
+    exp_dir = workdir / "experiments" / "recovery"
+    run_dirs = [d for d in exp_dir.iterdir() if d.is_dir()] if exp_dir.exists() else []
+    assert len(run_dirs) == 1, f"Should have exactly one run directory, got {run_dirs}"
+    jobs_jsonl_path = run_dirs[0] / "jobs.jsonl"
     assert jobs_jsonl_path.exists(), "jobs.jsonl should have been created"
 
     # Verify database exists
@@ -542,11 +545,12 @@ def test_mockexperiment_serialization_roundtrip(tmp_path: Path):
 
     workspace_path = tmp_path / "workspace"
     workspace_path.mkdir()
-    (workspace_path / "xp" / "test_exp").mkdir(parents=True)
+    # New layout: experiments/{exp-id}/{run-id}/
+    (workspace_path / "experiments" / "test_exp" / "run_001").mkdir(parents=True)
 
     # Create a MockExperiment with all fields populated
     original = MockExperiment(
-        workdir=workspace_path / "xp" / "test_exp",
+        workdir=workspace_path / "experiments" / "test_exp" / "run_001",
         current_run_id="run_001",
         total_jobs=10,
         finished_jobs=5,

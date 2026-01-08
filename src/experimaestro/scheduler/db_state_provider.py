@@ -667,9 +667,11 @@ class DbStateProvider(OfflineStateProvider):
             raise RuntimeError("Cannot create runs in read-only mode")
 
         # Auto-generate run_id from timestamp if not provided
+        # Note: For filesystem collision detection, experiment.py generates run_id
+        # This fallback uses simple timestamp format without microseconds
         if run_id is None:
             now = datetime.now()
-            run_id = now.strftime("%Y%m%d_%H%M%S") + f"_{now.microsecond:06d}"
+            run_id = now.strftime("%Y%m%d_%H%M%S")
 
         # Capture hostname
         hostname = socket.gethostname()
@@ -802,8 +804,17 @@ class DbStateProvider(OfflineStateProvider):
                 except ExperimentRunModel.DoesNotExist:
                     pass
 
-            # Compute experiment path from workspace_path and experiment_id
-            exp_path = self.workspace_path / "xp" / exp_model.experiment_id
+            # Compute experiment workdir path (includes run_id)
+            if exp_model.current_run_id:
+                exp_path = (
+                    self.workspace_path
+                    / "experiments"
+                    / exp_model.experiment_id
+                    / exp_model.current_run_id
+                )
+            else:
+                # Fallback for experiments without runs
+                exp_path = self.workspace_path / "experiments" / exp_model.experiment_id
 
             experiments.append(
                 MockExperiment(
@@ -880,8 +891,17 @@ class DbStateProvider(OfflineStateProvider):
             except ExperimentRunModel.DoesNotExist:
                 pass
 
-        # Compute experiment path from workspace_path and experiment_id
-        exp_path = self.workspace_path / "xp" / exp_model.experiment_id
+        # Compute experiment workdir path (includes run_id)
+        if exp_model.current_run_id:
+            exp_path = (
+                self.workspace_path
+                / "experiments"
+                / exp_model.experiment_id
+                / exp_model.current_run_id
+            )
+        else:
+            # Fallback for experiments without runs
+            exp_path = self.workspace_path / "experiments" / exp_model.experiment_id
 
         return MockExperiment(
             workdir=exp_path,
@@ -1691,8 +1711,8 @@ class DbStateProvider(OfflineStateProvider):
             ExperimentModel.experiment_id == experiment_id
         ).execute()
 
-        # Optionally delete experiment directory
-        exp_path = self.workspace_path / "xp" / experiment_id
+        # Optionally delete experiment directory (includes all runs)
+        exp_path = self.workspace_path / "experiments" / experiment_id
         if exp_path.exists():
             try:
                 rmtree(exp_path)
@@ -1919,8 +1939,8 @@ class DbStateProvider(OfflineStateProvider):
             for job_id, job in scheduler.jobs.items():
                 # Filter by experiment if needed
                 if hasattr(job, "experiment") and job.experiment is not None:
-                    if hasattr(job.experiment, "workdir"):
-                        job_exp_id = job.experiment.workdir.name
+                    if hasattr(job.experiment, "name"):
+                        job_exp_id = job.experiment.name
                         if job_exp_id == experiment_id:
                             live_states[job_id] = job.state.name
                         else:

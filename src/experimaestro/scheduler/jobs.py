@@ -275,7 +275,7 @@ class Job(BaseJob, Resource):
                 logger.debug(
                     "Job %s submitted, unfinished jobs for %s: %d",
                     self.identifier[:8],
-                    xp.workdir.name,
+                    xp.name,
                     xp.unfinishedJobs,
                 )
             elif not is_counted(new_state) and is_counted(old_state):
@@ -284,7 +284,7 @@ class Job(BaseJob, Resource):
                 logger.debug(
                     "Job %s finished, unfinished jobs for %s: %d",
                     self.identifier[:8],
-                    xp.workdir.name,
+                    xp.name,
                     xp.unfinishedJobs,
                 )
 

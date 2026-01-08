@@ -501,6 +501,8 @@ class MockExperiment(BaseExperiment):
         started_at: Optional[float] = None,
         ended_at: Optional[float] = None,
         hostname: Optional[str] = None,
+        *,
+        experiment_id: Optional[str] = None,
     ):
         self.workdir = workdir
         self.current_run_id = current_run_id
@@ -511,11 +513,16 @@ class MockExperiment(BaseExperiment):
         self.started_at = started_at
         self.ended_at = ended_at
         self.hostname = hostname
+        self._experiment_id = experiment_id
 
     @property
     def experiment_id(self) -> str:
-        """Experiment identifier derived from workdir name"""
-        return self.workdir.name
+        """Experiment identifier (explicitly set or derived from workdir structure)"""
+        if self._experiment_id:
+            return self._experiment_id
+        # In new layout, workdir is experiments/{exp-id}/{run-id}
+        # So parent.name gives experiment_id
+        return self.workdir.parent.name
 
     def db_state_dict(self) -> Dict:
         """Serialize experiment to dictionary for DB/network storage
@@ -547,11 +554,18 @@ class MockExperiment(BaseExperiment):
             MockExperiment instance
         """
         experiment_id = d["experiment_id"]
+        current_run_id = d.get("current_run_id")
 
         # Use workdir from dict if provided, otherwise compute it
         workdir = d.get("workdir")
         if workdir is None:
-            workdir = workspace_path / "xp" / experiment_id
+            # New layout: experiments/{experiment_id}/{run_id}/
+            if current_run_id:
+                workdir = (
+                    workspace_path / "experiments" / experiment_id / current_run_id
+                )
+            else:
+                workdir = workspace_path / "experiments" / experiment_id
         elif isinstance(workdir, str):
             workdir = Path(workdir)
 
@@ -565,6 +579,7 @@ class MockExperiment(BaseExperiment):
             started_at=d.get("started_at"),
             ended_at=d.get("ended_at"),
             hostname=d.get("hostname"),
+            experiment_id=experiment_id,
         )
 
 

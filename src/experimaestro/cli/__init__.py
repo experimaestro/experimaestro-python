@@ -1,7 +1,6 @@
 # flake8: noqa: T201
 import sys
 from typing import Set, Optional
-from itertools import chain
 from shutil import rmtree
 import click
 import logging
@@ -192,15 +191,10 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
         else:
             print(prefix, key, sep=None)
 
-    for p in (path / "xp").glob("*/jobs.bak"):
-        logging.warning("Experiment %s has not completed successfully", p.parent.name)
-
-    # Retrieve the jobs within expedriments (jobs and jobs.bak folder within experiments)
+    # New layout: experiments/{exp-id}/{run-id}/jobs
+    # Retrieve the jobs within experiments
     xpjobs = set()
-    if ignore_old:
-        paths = (path / "xp").glob("*/jobs")
-    else:
-        paths = chain((path / "xp").glob("*/jobs"), (path / "xp").glob("*/jobs.bak"))
+    paths = (path / "experiments").glob("*/*/jobs")
 
     for p in paths:
         if p.is_dir():
@@ -296,6 +290,129 @@ cli.add_command(refactor_cli)
 
 
 @cli.group()
+def migrate():
+    """Migration commands for experimaestro workspace upgrades"""
+    pass
+
+
+@migrate.command("v1-to-v2")
+@click.argument("workdir", type=Path, callback=check_xp_path)
+@click.option(
+    "--dry-run", is_flag=True, help="Show what would be done without making changes"
+)
+@click.option(
+    "--keep-old", is_flag=True, help="Keep the old xp directory after migration"
+)
+def migrate_v1_to_v2(workdir: Path, dry_run: bool, keep_old: bool):
+    """Migrate workspace from v1 (xp/) to v2 (experiments/) layout
+
+    This command migrates experiment directories from the old layout:
+        workdir/xp/{experiment-id}/
+    to the new layout:
+        workdir/experiments/{experiment-id}/{run-id}/
+
+    Each old experiment directory becomes a single run directory with the
+    run ID based on its modification time.
+    """
+    from datetime import datetime
+
+    old_xp_dir = workdir / "xp"
+    new_experiments_dir = workdir / "experiments"
+
+    if not old_xp_dir.exists():
+        cprint(f"No old 'xp' directory found at {old_xp_dir}", "yellow")
+        return
+
+    # List all experiments in the old directory
+    old_experiments = [d for d in old_xp_dir.iterdir() if d.is_dir()]
+
+    if not old_experiments:
+        cprint("No experiments found in xp/ directory", "yellow")
+        return
+
+    cprint(f"Found {len(old_experiments)} experiment(s) to migrate:", "cyan")
+    for exp_dir in old_experiments:
+        cprint(f"  - {exp_dir.name}", "white")
+
+    if dry_run:
+        cprint("\nDRY RUN MODE - showing what would be done:", "yellow")
+
+    migrated = 0
+    for exp_dir in old_experiments:
+        exp_id = exp_dir.name
+
+        # Generate run_id from directory modification time
+        mtime = exp_dir.stat().st_mtime
+        mtime_dt = datetime.fromtimestamp(mtime)
+        run_id = mtime_dt.strftime("%Y%m%d_%H%M%S")
+
+        # Target path
+        new_exp_base = new_experiments_dir / exp_id
+        new_run_dir = new_exp_base / run_id
+
+        # Handle collision
+        suffix = 1
+        while new_run_dir.exists():
+            run_id = f"{mtime_dt.strftime('%Y%m%d_%H%M%S')}.{suffix}"
+            new_run_dir = new_exp_base / run_id
+            suffix += 1
+
+        if dry_run:
+            cprint(f"  {exp_dir} -> {new_run_dir}", "white")
+        else:
+            # Create the parent directory
+            new_exp_base.mkdir(parents=True, exist_ok=True)
+
+            # Move the experiment directory
+            import shutil
+
+            try:
+                shutil.move(str(exp_dir), str(new_run_dir))
+                cprint(
+                    f"  Migrated: {exp_id} -> {new_run_dir.relative_to(workdir)}",
+                    "green",
+                )
+                migrated += 1
+            except Exception as e:
+                cprint(f"  Failed to migrate {exp_id}: {e}", "red")
+
+    if not dry_run:
+        cprint(f"\nMigrated {migrated}/{len(old_experiments)} experiment(s)", "cyan")
+
+        # Handle old xp directory
+        remaining = list(old_xp_dir.iterdir())
+        if remaining:
+            if keep_old:
+                # Keep remaining files, rename directory
+                renamed_xp_dir = workdir / "xp_MIGRATED_TO_V2"
+                old_xp_dir.rename(renamed_xp_dir)
+                cprint(
+                    f"Renamed 'xp' -> 'xp_MIGRATED_TO_V2' ({len(remaining)} item(s))",
+                    "yellow",
+                )
+            else:
+                cprint(
+                    f"'xp' directory still contains {len(remaining)} item(s), not removing",
+                    "yellow",
+                )
+                cprint("Remove manually or use --keep-old to rename", "yellow")
+                return
+        else:
+            # Empty directory - remove it
+            old_xp_dir.rmdir()
+            cprint("Removed empty 'xp' directory", "green")
+
+        # Create a broken symlink to prevent v1 from recreating xp/
+        # v1 will find the symlink but fail when trying to use it
+        broken_link = workdir / "xp"
+        if not broken_link.exists() and not broken_link.is_symlink():
+            broken_link.symlink_to("/experimaestro_v2_migrated_workspace_do_not_use_v1")
+            cprint(
+                "Created broken 'xp' symlink to prevent experimaestro v1 usage", "green"
+            )
+
+
+@cli.group()
 @click.option("--workdir", type=Path, default=None)
 @click.option("--workspace", type=str, default=None)
 @click.pass_context
@@ -321,17 +438,25 @@ def list(workdir: Path):
     # Build lookup by experiment_id
     exp_info = {exp.experiment_id: exp for exp in experiments_list}
 
-    for p in (workdir / "xp").iterdir():
-        exp_id = p.name
+    # New layout: experiments/{exp-id}/{run-id}/
+    experiments_dir = workdir / "experiments"
+    if not experiments_dir.exists():
+        cprint("No experiments found", "yellow")
+        return
+
+    for exp_dir in experiments_dir.iterdir():
+        if not exp_dir.is_dir():
+            continue
+
+        exp_id = exp_dir.name
         exp = exp_info.get(exp_id)
 
         # Build display string
-        display_parts = []
+        display_parts = [exp_id]
 
-        if (p / "jobs.bak").exists():
-            display_parts.append("[unfinished]")
-
-        display_parts.append(exp_id)
+        # Add current run_id if available
+        if exp and getattr(exp, "current_run_id", None):
+            display_parts.append(f"[run: {exp.current_run_id}]")
 
         # Add hostname if available
         if exp and getattr(exp, "hostname", None):
@@ -342,11 +467,7 @@ def list(workdir: Path):
             display_parts.append(f"({exp.finished_jobs}/{exp.total_jobs} jobs)")
 
         display_str = " ".join(display_parts)
-
-        if (p / "jobs.bak").exists():
-            cprint(display_str, "yellow")
-        else:
-            cprint(display_str, "cyan")
+        cprint(display_str, "cyan")
 
 
 def _run_monitor_ui(

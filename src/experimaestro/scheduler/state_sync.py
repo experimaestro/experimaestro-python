@@ -533,29 +533,21 @@ def sync_workspace_from_disk(  # noqa: C901
             ]
         ):
             # Scan experiments directory - this is the source of truth
-            xp_dir = workspace_path / "xp"
+            # New layout: experiments/{experiment_id}/{run_id}/
+            experiments_dir = workspace_path / "experiments"
 
-            if not xp_dir.exists():
+            if not experiments_dir.exists():
                 logger.info("No experiments directory found")
                 return
 
-            for exp_dir in xp_dir.iterdir():
-                if not exp_dir.is_dir():
+            from experimaestro.utils.environment import ExperimentEnvironment
+
+            for exp_base_dir in experiments_dir.iterdir():
+                if not exp_base_dir.is_dir():
                     continue
 
-                experiment_id = exp_dir.name
+                experiment_id = exp_base_dir.name
                 experiments_found += 1
-
-                # Read jobs.jsonl to get tags for each job
-                job_records = read_jobs_jsonl(exp_dir)
-
-                # Read services.json to get services for this experiment
-                service_records = read_services_json(exp_dir)
-
-                # Read environment.json for run metadata (hostname, etc.)
-                from experimaestro.utils.environment import ExperimentEnvironment
-
-                env = ExperimentEnvironment.load(exp_dir / "environment.json")
 
                 if write_mode:
                     # Ensure experiment exists in database
@@ -570,278 +562,289 @@ def sync_workspace_from_disk(  # noqa: C901
                         },
                     ).execute()
 
-                # Determine or create run_id for experiment
-                existing_runs = list(
-                    ExperimentRunModel.select()
-                    .where(ExperimentRunModel.experiment_id == experiment_id)
-                    .order_by(ExperimentRunModel.started_at.desc())
+                # Scan run directories within experiment
+                # Sort by name (timestamp-based) to process in chronological order
+                run_dirs = sorted(
+                    [d for d in exp_base_dir.iterdir() if d.is_dir()],
+                    key=lambda d: d.name,
                 )
 
-                if existing_runs:
-                    # Use the most recent run as current
-                    current_run_id = existing_runs[0].run_id
-                    runs_found += len(existing_runs)
-
-                    # Update hostname from environment.json if available
-                    if write_mode:
-                        for run in existing_runs:
-                            hostname = env.run.hostname if env.run else None
-                            if hostname and not run.hostname:
-                                ExperimentRunModel.update(hostname=hostname).where(
-                                    (ExperimentRunModel.experiment_id == experiment_id)
-                                    & (ExperimentRunModel.run_id == run.run_id)
-                                ).execute()
-                else:
-                    # Create initial run
-                    current_run_id = "initial"
+                current_run_id = None
+                for run_dir in run_dirs:
+                    run_id = run_dir.name
+                    current_run_id = run_id  # Most recent processed becomes current
                     runs_found += 1
 
-                    # Get hostname from environment.json if available
+                    # Read jobs.jsonl to get tags for each job
+                    job_records = read_jobs_jsonl(run_dir)
+
+                    # Read services.json to get services for this run
+                    service_records = read_services_json(run_dir)
+
+                    # Read environment.json for run metadata (hostname, etc.)
+                    env = ExperimentEnvironment.load(run_dir / "environment.json")
                     hostname = env.run.hostname if env.run else None
 
                     if write_mode:
+                        # Create or update run record
                         ExperimentRunModel.insert(
                             experiment_id=experiment_id,
-                            run_id=current_run_id,
+                            run_id=run_id,
                             status="active",
                             hostname=hostname,
-                        ).on_conflict_ignore().execute()
-
-                        # Update experiment's current_run_id
-                        ExperimentModel.update(
-                            current_run_id=current_run_id,
-                            updated_at=datetime.now(),
-                        ).where(
-                            ExperimentModel.experiment_id == experiment_id
+                        ).on_conflict(
+                            conflict_target=[
+                                ExperimentRunModel.experiment_id,
+                                ExperimentRunModel.run_id,
+                            ],
+                            update={
+                                ExperimentRunModel.hostname: hostname,
+                            },
                         ).execute()
+
+                # Update experiment's current_run_id to the latest run
+                if write_mode and current_run_id:
+                    ExperimentModel.update(
+                        current_run_id=current_run_id,
+                        updated_at=datetime.now(),
+                    ).where(ExperimentModel.experiment_id == experiment_id).execute()
 
                 logger.debug(
                     "Experiment %s: current_run_id=%s", experiment_id, current_run_id
                 )
 
-                # Sync services from services.json
-                if write_mode and service_records:
-                    for service_id, service_data in service_records.items():
-                        now = datetime.now()
-                        # Extract only the state_dict keys (not metadata like
-                        # service_id, description, state, url, timestamp)
-                        # The state_dict should have __class__ and service-specific
-                        # fields like 'path' for TensorboardService
-                        metadata_keys = {
-                            "service_id",
-                            "description",
-                            "url",
-                            "timestamp",
-                        }
-                        state_dict = {
-                            k: v
-                            for k, v in service_data.items()
-                            if k not in metadata_keys
-                        }
-                        state_dict_json = json.dumps(state_dict)
-                        ServiceModel.insert(
-                            service_id=service_id,
-                            experiment_id=experiment_id,
-                            run_id=current_run_id,
-                            description=service_data.get("description", ""),
-                            state_dict=state_dict_json,
-                            created_at=now,
-                        ).on_conflict(
-                            conflict_target=[
-                                ServiceModel.service_id,
-                                ServiceModel.experiment_id,
-                                ServiceModel.run_id,
-                            ],
-                            update={
-                                ServiceModel.description: service_data.get(
-                                    "description", ""
-                                ),
-                                ServiceModel.state_dict: state_dict_json,
-                            },
-                        ).execute()
-                        logger.debug(
-                            "Synced service %s for experiment %s",
-                            service_id,
-                            experiment_id,
-                        )
+                # Process each run's jobs and services
+                for run_dir in run_dirs:
+                    run_id = run_dir.name
+                    job_records = read_jobs_jsonl(run_dir)
+                    service_records = read_services_json(run_dir)
 
-                # Scan jobs linked from this experiment
-                jobs_dir = exp_dir / "jobs"
-                if not jobs_dir.exists():
-                    continue
+                    # Sync services from services.json
+                    if write_mode and service_records:
+                        for service_id, service_data in service_records.items():
+                            now = datetime.now()
+                            # Extract only the state_dict keys (not metadata like
+                            # service_id, description, state, url, timestamp)
+                            # The state_dict should have __class__ and service-specific
+                            # fields like 'path' for TensorboardService
+                            metadata_keys = {
+                                "service_id",
+                                "description",
+                                "url",
+                                "timestamp",
+                            }
+                            state_dict = {
+                                k: v
+                                for k, v in service_data.items()
+                                if k not in metadata_keys
+                            }
+                            state_dict_json = json.dumps(state_dict)
+                            ServiceModel.insert(
+                                service_id=service_id,
+                                experiment_id=experiment_id,
+                                run_id=run_id,
+                                description=service_data.get("description", ""),
+                                state_dict=state_dict_json,
+                                created_at=now,
+                            ).on_conflict(
+                                conflict_target=[
+                                    ServiceModel.service_id,
+                                    ServiceModel.experiment_id,
+                                    ServiceModel.run_id,
+                                ],
+                                update={
+                                    ServiceModel.description: service_data.get(
+                                        "description", ""
+                                    ),
+                                    ServiceModel.state_dict: state_dict_json,
+                                },
+                            ).execute()
+                            logger.debug(
+                                "Synced service %s for experiment %s run %s",
+                                service_id,
+                                experiment_id,
+                                run_id,
+                            )
 
-                # Infer experiment run timestamps from jobs directory
-                if write_mode:
-                    try:
-                        from peewee import fn
-
-                        jobs_stat = jobs_dir.stat()
-                        # Use jobs dir creation time as started_at (fallback to mtime)
-                        started_at = datetime.fromtimestamp(
-                            getattr(jobs_stat, "st_birthtime", jobs_stat.st_ctime)
-                        )
-                        # Use jobs dir last modification time as ended_at
-                        ended_at = datetime.fromtimestamp(jobs_stat.st_mtime)
-
-                        # Update experiment run with inferred timestamps
-                        # Use COALESCE to only set started_at if not already set
-                        ExperimentRunModel.update(
-                            started_at=fn.COALESCE(
-                                ExperimentRunModel.started_at, started_at
-                            ),
-                            ended_at=ended_at,
-                        ).where(
-                            (ExperimentRunModel.experiment_id == experiment_id)
-                            & (ExperimentRunModel.run_id == current_run_id)
-                        ).execute()
-                    except OSError:
-                        pass
-
-                # Find all symlinks in experiment jobs directory
-                for symlink_path in jobs_dir.rglob("*"):
-                    if not symlink_path.is_symlink():
+                    # Scan jobs linked from this run
+                    jobs_dir = run_dir / "jobs"
+                    if not jobs_dir.exists():
                         continue
 
-                    jobs_scanned += 1
-
-                    # Try to resolve symlink to actual job directory
-                    try:
-                        job_path = symlink_path.resolve()
-                        job_exists = job_path.is_dir()
-                    except (OSError, RuntimeError):
-                        # Broken symlink
-                        job_path = None
-                        job_exists = False
-
-                    # Read job state from disk if job exists
-                    job_state = None
-                    if job_exists and job_path:
-                        # Try to determine scriptname
-                        scriptname = None
-                        for suffix in [".done", ".failed", ".pid"]:
-                            for file in job_path.glob(f"*{suffix}"):
-                                scriptname = file.name[: -len(suffix)]
-                                break
-                            if scriptname:
-                                break
-
-                        if not scriptname:
-                            # Infer from job_path name
-                            scriptname = job_path.name
-
-                        job_state = scan_job_state_from_disk(job_path, scriptname)
-
-                    # If we couldn't read state, create minimal entry from symlink
-                    if not job_state:
-                        # Extract job_id and task_id from symlink structure
-                        # Symlink structure: xp/{exp}/jobs/{task_id}/{hash}
-                        parts = symlink_path.parts
+                    # Infer run timestamps from jobs directory
+                    if write_mode:
                         try:
-                            jobs_idx = parts.index("jobs")
-                            if jobs_idx + 2 < len(parts):
-                                task_id = parts[jobs_idx + 1]
-                                job_id = parts[jobs_idx + 2]
-                            else:
-                                # Fallback
+                            from peewee import fn
+
+                            jobs_stat = jobs_dir.stat()
+                            # Use jobs dir creation time as started_at (fallback to mtime)
+                            started_at = datetime.fromtimestamp(
+                                getattr(jobs_stat, "st_birthtime", jobs_stat.st_ctime)
+                            )
+                            # Use jobs dir last modification time as ended_at
+                            ended_at = datetime.fromtimestamp(jobs_stat.st_mtime)
+
+                            # Update experiment run with inferred timestamps
+                            # Use COALESCE to only set started_at if not already set
+                            ExperimentRunModel.update(
+                                started_at=fn.COALESCE(
+                                    ExperimentRunModel.started_at, started_at
+                                ),
+                                ended_at=ended_at,
+                            ).where(
+                                (ExperimentRunModel.experiment_id == experiment_id)
+                                & (ExperimentRunModel.run_id == run_id)
+                            ).execute()
+                        except OSError:
+                            pass
+
+                    # Find all symlinks in run jobs directory
+                    for symlink_path in jobs_dir.rglob("*"):
+                        if not symlink_path.is_symlink():
+                            continue
+
+                        jobs_scanned += 1
+
+                        # Try to resolve symlink to actual job directory
+                        try:
+                            job_path = symlink_path.resolve()
+                            job_exists = job_path.is_dir()
+                        except (OSError, RuntimeError):
+                            # Broken symlink
+                            job_path = None
+                            job_exists = False
+
+                        # Read job state from disk if job exists
+                        job_state = None
+                        if job_exists and job_path:
+                            # Try to determine scriptname
+                            scriptname = None
+                            for suffix in [".done", ".failed", ".pid"]:
+                                for file in job_path.glob(f"*{suffix}"):
+                                    scriptname = file.name[: -len(suffix)]
+                                    break
+                                if scriptname:
+                                    break
+
+                            if not scriptname:
+                                # Infer from job_path name
+                                scriptname = job_path.name
+
+                            job_state = scan_job_state_from_disk(job_path, scriptname)
+
+                        # If we couldn't read state, create minimal entry from symlink
+                        if not job_state:
+                            # Extract job_id and task_id from symlink structure
+                            # Symlink structure: experiments/{exp}/{run}/jobs/{task_id}/{hash}
+                            parts = symlink_path.parts
+                            try:
+                                jobs_idx = parts.index("jobs")
+                                if jobs_idx + 2 < len(parts):
+                                    task_id = parts[jobs_idx + 1]
+                                    job_id = parts[jobs_idx + 2]
+                                else:
+                                    # Fallback
+                                    task_id = "unknown"
+                                    job_id = symlink_path.name
+                            except (ValueError, IndexError):
                                 task_id = "unknown"
                                 job_id = symlink_path.name
-                        except (ValueError, IndexError):
-                            task_id = "unknown"
-                            job_id = symlink_path.name
 
-                        job_state = {
-                            "job_id": job_id,
-                            "task_id": task_id,
-                            "state": "phantom",  # Job was deleted but symlink remains
-                            "submitted_time": None,
-                            "started_time": None,
-                            "ended_time": None,
-                            "exit_code": None,
-                            "failure_reason": None,
-                            "retry_count": 0,
-                            "process": None,
-                        }
+                            job_state = {
+                                "job_id": job_id,
+                                "task_id": task_id,
+                                "state": "phantom",  # Job was deleted but symlink remains
+                                "submitted_time": None,
+                                "started_time": None,
+                                "ended_time": None,
+                                "exit_code": None,
+                                "failure_reason": None,
+                                "retry_count": 0,
+                                "process": None,
+                            }
 
-                    # Update database
-                    if write_mode and job_state and job_state["job_id"]:
-                        job_now = datetime.now()
-                        JobModel.insert(
-                            job_id=job_state["job_id"],
-                            task_id=job_state["task_id"],
-                            state=job_state["state"],
-                            # Only set failure_reason if job is in error state
-                            failure_reason=(
-                                job_state.get("failure_reason")
-                                if job_state["state"] == "error"
-                                else None
-                            ),
-                            submitted_time=job_state.get("submitted_time"),
-                            started_time=job_state.get("started_time"),
-                            ended_time=job_state.get("ended_time"),
-                            progress="[]",
-                            updated_at=job_now,
-                        ).on_conflict(
-                            conflict_target=[JobModel.job_id, JobModel.task_id],
-                            update={
-                                JobModel.state: job_state["state"],
+                        # Update database
+                        if write_mode and job_state and job_state["job_id"]:
+                            job_now = datetime.now()
+                            JobModel.insert(
+                                job_id=job_state["job_id"],
+                                task_id=job_state["task_id"],
+                                state=job_state["state"],
                                 # Only set failure_reason if job is in error state
-                                # Otherwise clear it to avoid stale failure reasons
-                                JobModel.failure_reason: (
+                                failure_reason=(
                                     job_state.get("failure_reason")
                                     if job_state["state"] == "error"
                                     else None
                                 ),
-                                JobModel.submitted_time: job_state.get(
-                                    "submitted_time"
-                                ),
-                                JobModel.started_time: job_state.get("started_time"),
-                                JobModel.ended_time: job_state.get("ended_time"),
-                                JobModel.updated_at: job_now,
-                            },
-                        ).execute()
+                                submitted_time=job_state.get("submitted_time"),
+                                started_time=job_state.get("started_time"),
+                                ended_time=job_state.get("ended_time"),
+                                progress="[]",
+                                updated_at=job_now,
+                            ).on_conflict(
+                                conflict_target=[JobModel.job_id, JobModel.task_id],
+                                update={
+                                    JobModel.state: job_state["state"],
+                                    # Only set failure_reason if job is in error state
+                                    # Otherwise clear it to avoid stale failure reasons
+                                    JobModel.failure_reason: (
+                                        job_state.get("failure_reason")
+                                        if job_state["state"] == "error"
+                                        else None
+                                    ),
+                                    JobModel.submitted_time: job_state.get(
+                                        "submitted_time"
+                                    ),
+                                    JobModel.started_time: job_state.get(
+                                        "started_time"
+                                    ),
+                                    JobModel.ended_time: job_state.get("ended_time"),
+                                    JobModel.updated_at: job_now,
+                                },
+                            ).execute()
 
-                        # Create or update job-experiment relationship
-                        JobExperimentsModel.insert(
-                            job_id=job_state["job_id"],
-                            experiment_id=experiment_id,
-                            run_id=current_run_id,
-                        ).on_conflict_ignore().execute()
+                            # Create or update job-experiment relationship
+                            JobExperimentsModel.insert(
+                                job_id=job_state["job_id"],
+                                experiment_id=experiment_id,
+                                run_id=run_id,
+                            ).on_conflict_ignore().execute()
 
-                        jobs_updated += 1
+                            jobs_updated += 1
 
-                        # Sync tags from jobs.jsonl
-                        job_id = job_state["job_id"]
-                        if job_id in job_records:
-                            tags = job_records[job_id].get("tags", {})
-                            if tags:
-                                # Delete existing tags for this job+experiment+run
-                                JobTagModel.delete().where(
-                                    (JobTagModel.job_id == job_id)
-                                    & (JobTagModel.experiment_id == experiment_id)
-                                    & (JobTagModel.run_id == current_run_id)
-                                ).execute()
+                            # Sync tags from jobs.jsonl
+                            job_id = job_state["job_id"]
+                            if job_id in job_records:
+                                tags = job_records[job_id].get("tags", {})
+                                if tags:
+                                    # Delete existing tags for this job+experiment+run
+                                    JobTagModel.delete().where(
+                                        (JobTagModel.job_id == job_id)
+                                        & (JobTagModel.experiment_id == experiment_id)
+                                        & (JobTagModel.run_id == run_id)
+                                    ).execute()
 
-                                # Insert new tags
-                                for tag_key, tag_value in tags.items():
-                                    JobTagModel.insert(
-                                        job_id=job_id,
-                                        experiment_id=experiment_id,
-                                        run_id=current_run_id,
-                                        tag_key=tag_key,
-                                        tag_value=str(tag_value),
-                                    ).on_conflict_ignore().execute()
+                                    # Insert new tags
+                                    for tag_key, tag_value in tags.items():
+                                        JobTagModel.insert(
+                                            job_id=job_id,
+                                            experiment_id=experiment_id,
+                                            run_id=run_id,
+                                            tag_key=tag_key,
+                                            tag_value=str(tag_value),
+                                        ).on_conflict_ignore().execute()
 
-                                logger.debug(
-                                    "Synced %d tags for job %s", len(tags), job_id
-                                )
+                                    logger.debug(
+                                        "Synced %d tags for job %s", len(tags), job_id
+                                    )
 
-                        logger.debug(
-                            "Synced job %s for experiment %s run %s: state=%s",
-                            job_state["job_id"],
-                            experiment_id,
-                            current_run_id,
-                            job_state["state"],
-                        )
+                            logger.debug(
+                                "Synced job %s for experiment %s run %s: state=%s",
+                                job_state["job_id"],
+                                experiment_id,
+                                run_id,
+                                job_state["state"],
+                            )
 
             logger.info(
                 "Sync complete: %d experiments, %d runs, %d jobs scanned, %d jobs updated",

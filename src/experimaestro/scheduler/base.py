@@ -134,15 +134,15 @@ class Scheduler(StateProvider, threading.Thread):
 
     def register_experiment(self, xp: "experiment"):
         """Register an experiment with the scheduler"""
-        # Use experiment name as key for now
-        key = xp.workdir.name
+        # Use experiment name as key (not workdir.name which is now run_id)
+        key = xp.name
         self.experiments[key] = xp
 
         logger.debug("Registered experiment %s with scheduler", key)
 
     def unregister_experiment(self, xp: "experiment"):
         """Unregister an experiment from the scheduler"""
-        key = xp.workdir.name
+        key = xp.name
         if key in self.experiments:
             del self.experiments[key]
             logger.debug("Unregistered experiment %s from scheduler", key)
@@ -354,13 +354,13 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Update tags map for this experiment/run
         if job.tags:
-            exp_run_key = (xp.workdir.name, xp.run_id)
+            exp_run_key = (xp.name, xp.run_id)
             if exp_run_key not in self._tags_map:
                 self._tags_map[exp_run_key] = {}
             self._tags_map[exp_run_key][job.identifier] = dict(job.tags)
 
         # Update dependencies map for this experiment/run
-        exp_run_key = (xp.workdir.name, xp.run_id)
+        exp_run_key = (xp.name, xp.run_id)
         if exp_run_key not in self._dependencies_map:
             self._dependencies_map[exp_run_key] = {}
         depends_on_ids = [

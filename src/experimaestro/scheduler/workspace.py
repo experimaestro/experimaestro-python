@@ -124,7 +124,7 @@ class Workspace:
     @property
     def experimentspath(self):
         """Folder for experiments"""
-        return self.path / "xp"
+        return self.path / "experiments"
 
     @property
     def configcachepath(self):

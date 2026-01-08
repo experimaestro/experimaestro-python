@@ -24,6 +24,17 @@ class ServerSettings:
 
 
 @dataclass
+class HistorySettings:
+    """Settings for experiment history cleanup"""
+
+    max_done: int = 5
+    """Maximum number of successful runs to keep per experiment"""
+
+    max_failed: int = 1
+    """Maximum number of failed runs to keep per experiment"""
+
+
+@dataclass
 class WorkspaceSettings:
     """Defines the workspace"""
 
@@ -45,6 +56,9 @@ class WorkspaceSettings:
     triggers: List[str] = field(default_factory=list)
     """Glob patterns to automatically select this workspace based on experiment ID"""
 
+    history: HistorySettings = field(default_factory=HistorySettings)
+    """Settings for experiment history cleanup"""
+
     def __post_init__(self):
         self.path = self.path.expanduser().resolve()
 
@@ -56,6 +70,9 @@ class Settings:
 
     env: Dict[str, str] = field(default_factory=dict)
     """Default environment variables"""
+
+    history: HistorySettings = field(default_factory=HistorySettings)
+    """Default history settings (can be overridden per workspace)"""
 
 
 @lru_cache()

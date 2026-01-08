@@ -227,8 +227,9 @@ class TestExperimentSerialization:
 
     def test_serialize_mock_experiment(self):
         """Test serializing a MockExperiment using db_state_dict()"""
+        # New layout: experiments/{experiment_id}/{run_id}
         exp = MockExperiment(
-            workdir=Path("/tmp/xp/myexp"),
+            workdir=Path("/tmp/experiments/myexp/run_20240101"),
             current_run_id="run_20240101",
             total_jobs=10,
             finished_jobs=5,
@@ -237,12 +238,13 @@ class TestExperimentSerialization:
             started_at=1704067200.0,
             ended_at=None,
             hostname="server1",
+            experiment_id="myexp",
         )
 
         result = exp.db_state_dict()
 
         assert result["experiment_id"] == "myexp"
-        assert result["workdir"] == "/tmp/xp/myexp"
+        assert result["workdir"] == "/tmp/experiments/myexp/run_20240101"
         assert result["current_run_id"] == "run_20240101"
 
 
@@ -344,11 +346,12 @@ class TestSSHRoundTrip:
 
         workspace_path = tmp_path / "workspace"
         workspace_path.mkdir()
-        (workspace_path / "xp" / "test_exp").mkdir(parents=True)
+        # New layout: experiments/{exp-id}/{run-id}/
+        (workspace_path / "experiments" / "test_exp" / "run_001").mkdir(parents=True)
 
         # Create original MockExperiment
         original = MockExperiment(
-            workdir=workspace_path / "xp" / "test_exp",
+            workdir=workspace_path / "experiments" / "test_exp" / "run_001",
             current_run_id="run_001",
             total_jobs=10,
             finished_jobs=5,
@@ -357,6 +360,7 @@ class TestSSHRoundTrip:
             started_at=1234567890.0,
             ended_at=None,
             hostname="testhost",
+            experiment_id="test_exp",
         )
 
         # Server-side: serialize using db_state_dict
@@ -440,13 +444,15 @@ class TestServerRequestHandling:
 
     def test_handle_get_experiments(self, server_with_mock, mock_state_provider):
         """Test handling get_experiments request"""
+        # New layout: experiments/{exp-id}/{run-id}
         mock_exp = MockExperiment(
-            workdir=Path("/tmp/xp/exp1"),
+            workdir=Path("/tmp/experiments/exp1/run1"),
             current_run_id="run1",
             total_jobs=5,
             finished_jobs=3,
             failed_jobs=0,
             updated_at="2024-01-01T00:00:00",
+            experiment_id="exp1",
         )
         mock_state_provider.get_experiments.return_value = [mock_exp]
 
@@ -458,13 +464,15 @@ class TestServerRequestHandling:
 
     def test_handle_get_experiment(self, server_with_mock, mock_state_provider):
         """Test handling get_experiment request"""
+        # New layout: experiments/{exp-id}/{run-id}
         mock_exp = MockExperiment(
-            workdir=Path("/tmp/xp/exp1"),
+            workdir=Path("/tmp/experiments/exp1/run1"),
             current_run_id="run1",
             total_jobs=5,
             finished_jobs=3,
             failed_jobs=0,
             updated_at="2024-01-01T00:00:00",
+            experiment_id="exp1",
         )
         mock_state_provider.get_experiment.return_value = mock_exp
 
