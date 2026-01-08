@@ -113,6 +113,7 @@ class experiment(BaseExperiment):
         project_paths: Optional[list[Path]] = None,
         wait_for_quit: bool = False,
         dirty_git: DirtyGitAction = DirtyGitAction.WARN,
+        no_db: bool = False,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -142,6 +143,9 @@ class experiment(BaseExperiment):
         :param dirty_git: Action when git repository has uncommitted changes:
             DirtyGitAction.IGNORE (don't check), DirtyGitAction.WARN (log warning,
             default), or DirtyGitAction.ERROR (raise exception).
+
+        :param no_db: If True, disable database state tracking for this experiment.
+            Jobs will run but won't be tracked in the workspace SQLite database.
         """
 
         from experimaestro.scheduler import Listener, Scheduler
@@ -164,6 +168,7 @@ class experiment(BaseExperiment):
         self._job_listener: Optional[Listener] = None
         self._register_signals = register_signals
         self._dirty_git = dirty_git
+        self._no_db = no_db
 
         # Capture project paths for git info
         if project_paths is not None:
@@ -547,6 +552,7 @@ class experiment(BaseExperiment):
 
         # Initialize workspace state provider (singleton per workspace path)
         # Use read_only mode when not in NORMAL run mode to prevent DB changes
+        # Skip entirely if no_db is set
         from .db_state_provider import DbStateProvider
         from .state_db import DatabaseVersionError
 
@@ -554,24 +560,25 @@ class experiment(BaseExperiment):
         self.state_provider = None
         self._db_listener = None
 
-        try:
-            self.state_provider = DbStateProvider.get_instance(
-                self.workspace.path,
-                read_only=not is_normal_mode,
-                sync_on_start=False,  # Experiments don't sync on start
-            )
-        except DatabaseVersionError as e:
-            # Database version is newer than code - can't use it
-            # Log warning but continue without DB state tracking
-            logger.warning(
-                "Cannot use workspace database: %s. "
-                "Experiment will run without database state tracking.",
-                e,
-            )
+        if not self._no_db:
+            try:
+                self.state_provider = DbStateProvider.get_instance(
+                    self.workspace.path,
+                    read_only=not is_normal_mode,
+                    sync_on_start=False,  # Experiments don't sync on start
+                )
+            except DatabaseVersionError as e:
+                # Database version is newer than code - can't use it
+                # Log warning but continue without DB state tracking
+                logger.warning(
+                    "Cannot use workspace database: %s. "
+                    "Experiment will run without database state tracking.",
+                    e,
+                )
 
         # Register experiment in database and create a run (only in NORMAL mode)
         experiment_id = self.workdir.name
-        if is_normal_mode and self.state_provider is not None:
+        if is_normal_mode and self.state_provider is not None and not self._no_db:
             self.state_provider.ensure_experiment(experiment_id)
             self.run_id = self.state_provider.create_run(experiment_id)
 

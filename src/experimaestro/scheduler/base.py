@@ -431,7 +431,7 @@ class Scheduler(StateProvider, threading.Thread):
         for exp in job.experiments:
             experiment_id = exp.experiment_id
             run_id = exp.run_id
-            if experiment_id and run_id:
+            if experiment_id:
                 # Get tags and dependencies for this job
                 exp_run_key = (experiment_id, run_id)
                 tags = self._tags_map.get(exp_run_key, {}).get(job.identifier, {})
@@ -441,7 +441,7 @@ class Scheduler(StateProvider, threading.Thread):
 
                 event = JobExperimentUpdatedEvent(
                     experiment_id=experiment_id,
-                    run_id=run_id,
+                    run_id=run_id or "",
                     job_id=job.identifier,
                     tags=tags,
                     depends_on=depends_on,
@@ -459,10 +459,10 @@ class Scheduler(StateProvider, threading.Thread):
         for exp in job.experiments:
             experiment_id = exp.experiment_id
             run_id = exp.run_id
-            if experiment_id and run_id:
+            if experiment_id:
                 event = JobUpdatedEvent(
                     experiment_id=experiment_id,
-                    run_id=run_id,
+                    run_id=run_id or "",
                     job_id=job.identifier,
                     job=job,
                 )

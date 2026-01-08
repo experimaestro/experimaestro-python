@@ -139,6 +139,12 @@ class ConfigurationLoader:
     help="Launch Textual console UI for monitoring with logs",
 )
 @click.option(
+    "--no-db",
+    "no_db",
+    is_flag=True,
+    help="Disable database state tracking for this experiment",
+)
+@click.option(
     "--file",
     "xp_file",
     type=Path,
@@ -175,6 +181,7 @@ def experiments_cli(  # noqa: C901
     host: str,
     port: int,
     console: bool,
+    no_db: bool,
     xpm_config_dir: Path,
     workdir: Optional[Path],
     workspace: Optional[str],
@@ -383,6 +390,7 @@ def experiments_cli(  # noqa: C901
                 register_signals=register_signals,
                 project_paths=project_paths,
                 dirty_git=xp_configuration.dirty_git,
+                no_db=no_db,
             ) as xp:
                 if xp_holder is not None:
                     xp_holder["xp"] = xp
