@@ -173,11 +173,16 @@ def diff(path: Path):
 @cli.command()
 def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: bool):
     """Check for tasks that are not part of an experimental plan"""
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
     jobspath = path / "jobs"
 
-    def getjobs(path: Path):
-        return ((str(p.relative_to(path)), p) for p in path.glob("*/*") if p.is_dir())
+    def getjobs(jobs_path: Path):
+        return (
+            (str(p.relative_to(jobs_path)), p)
+            for p in jobs_path.glob("*/*")
+            if p.is_dir()
+        )
 
     def show(key: str, prefix=""):
         if size:
@@ -191,17 +196,21 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
         else:
             print(prefix, key, sep=None)
 
-    # New layout: experiments/{exp-id}/{run-id}/jobs
-    # Retrieve the jobs within experiments
+    # Use WorkspaceStateProvider to get all jobs from experiments
+    provider = WorkspaceStateProvider.get_instance(path)
     xpjobs = set()
-    paths = (path / "experiments").glob("*/*/jobs")
 
-    for p in paths:
-        if p.is_dir():
-            for relpath, path in getjobs(p):
-                xpjobs.add(relpath)
+    # Get all experiments and their jobs
+    for experiment in provider.get_experiments():
+        exp_id = experiment.experiment_id
+        for run in provider.get_experiment_runs(exp_id):
+            jobs = provider.get_jobs(experiment_id=exp_id, run_id=run.run_id)
+            for job in jobs:
+                # Job key is task_id/job_id
+                key = f"{job.task_id}/{job.identifier}"
+                xpjobs.add(key)
 
-    # Now, look at stored jobs
+    # Now, look at stored jobs in the workspace jobs directory
     found = 0
     for key, jobpath in getjobs(jobspath):
         if key not in xpjobs:
@@ -427,12 +436,10 @@ def experiments(ctx, workdir, workspace):
 @pass_cfg
 def list(workdir: Path):
     """List experiments in the workspace"""
-    from experimaestro.scheduler.db_state_provider import DbStateProvider
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
     # Get experiments from state provider for detailed info
-    state_provider = DbStateProvider.get_instance(
-        workdir, read_only=True, sync_on_start=True
-    )
+    state_provider = WorkspaceStateProvider.get_instance(workdir, standalone=True)
     experiments_list = state_provider.get_experiments()
 
     # Build lookup by experiment_id
@@ -530,25 +537,25 @@ def _run_monitor_ui(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
 )
 @click.option(
-    "--sync", is_flag=True, help="Force sync from disk before starting monitor"
+    "--sync",
+    is_flag=True,
+    hidden=True,
+    help="Deprecated: no longer needed (filesystem state is always current)",
 )
 @pass_cfg
 def monitor(workdir: Path, console: bool, port: int, sync: bool):
     """Monitor local experiments with web UI or console TUI"""
-    # Force sync from disk if requested
+    # --sync is deprecated (kept for backwards compatibility)
     if sync:
-        from experimaestro.scheduler.state_sync import sync_workspace_from_disk
+        cprint(
+            "Note: --sync is deprecated and no longer needed "
+            "(filesystem state is always current)",
+            "yellow",
+        )
 
-        cprint("Syncing workspace from disk...", "yellow")
-        sync_workspace_from_disk(workdir, write_mode=True, force=True)
-        cprint("Sync complete", "green")
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
-    from experimaestro.scheduler.db_state_provider import DbStateProvider
-
-    state_provider = DbStateProvider.get_instance(
-        workdir,
-        sync_on_start=not sync,  # Skip auto-sync if we just did a forced one
-    )
+    state_provider = WorkspaceStateProvider.get_instance(workdir, standalone=True)
 
     _run_monitor_ui(state_provider, workdir, console, port)
 
@@ -639,65 +646,28 @@ def monitor_server(workdir: Path):
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Don't write to database, only show what would be synced",
+    help="[DEPRECATED] No longer needed with filesystem-based state tracking",
 )
 @click.option(
     "--force",
     is_flag=True,
-    help="Force sync even if recently synced (bypasses time throttling)",
+    help="[DEPRECATED] No longer needed with filesystem-based state tracking",
 )
 @click.option(
     "--no-wait",
     is_flag=True,
-    help="Don't wait for lock, fail immediately if unavailable",
+    help="[DEPRECATED] No longer needed with filesystem-based state tracking",
 )
 @pass_cfg
 def sync(workdir: Path, dry_run: bool, force: bool, no_wait: bool):
-    """Synchronize workspace database from disk state
+    """[DEPRECATED] Synchronize workspace database from disk state
 
-    Scans experiment directories and job marker files to update the workspace
-    database. Uses exclusive locking to prevent conflicts with running experiments.
+    This command is deprecated. With the new filesystem-based state tracking,
+    state is read directly from status.json and events files. No synchronization
+    is needed.
     """
-    from experimaestro.scheduler.state_sync import sync_workspace_from_disk
-    from experimaestro.scheduler.workspace import Workspace
-    from experimaestro.settings import Settings
-
-    # Get settings and workspace settings
-    settings = Settings.instance()
-    ws_settings = find_workspace(workdir=workdir)
-
-    # Create workspace instance (manages database lifecycle)
-    workspace = Workspace(
-        settings=settings,
-        workspace_settings=ws_settings,
-        sync_on_init=False,  # Don't sync on init since we're explicitly syncing
+    cprint(
+        "Warning: 'sync' command is deprecated. "
+        "State is now tracked via filesystem (status.json) - no sync needed.",
+        "yellow",
     )
-
-    try:
-        # Enter workspace context to initialize database
-        with workspace:
-            cprint(f"Syncing workspace: {workspace.path}", "cyan")
-            if dry_run:
-                cprint("DRY RUN MODE: No changes will be written", "yellow")
-            if force:
-                cprint("FORCE MODE: Bypassing time throttling", "yellow")
-
-            # Run sync
-            sync_workspace_from_disk(
-                workspace=workspace,
-                write_mode=not dry_run,
-                force=force,
-                blocking=not no_wait,
-            )
-
-            cprint("Sync completed successfully", "green")
-
-    except RuntimeError as e:
-        cprint(f"Sync failed: {e}", "red")
-        sys.exit(1)
-    except Exception as e:
-        cprint(f"Unexpected error during sync: {e}", "red")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)

@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set
 
 from termcolor import colored
 
-from experimaestro.scheduler.db_state_provider import OfflineStateProvider
 from experimaestro.scheduler.state_provider import (
+    OfflineStateProvider,
     StateEvent,
     StateListener,
     ExperimentUpdatedEvent,

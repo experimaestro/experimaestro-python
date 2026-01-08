@@ -478,7 +478,7 @@ def experiments_cli(  # noqa: C901
 
         # Run TUI in main thread (handles signals via Textual)
         # Use the Scheduler as state provider - it only shows live experiments
-        # (not DbStateProvider which would show all historical experiments)
+        # (not WorkspaceStateProvider which would show all historical experiments)
         tui_app = ExperimentTUI(
             workdir=workdir,
             state_provider=xp_holder["xp"].scheduler,

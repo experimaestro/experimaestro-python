@@ -66,97 +66,90 @@ def process(
         count: Limit output to N most recent jobs (0 = no limit)
     """
     from .filter import createFilter, FilterContext
-    from experimaestro.scheduler.db_state_provider import DbStateProvider
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
     from experimaestro.scheduler import JobState
 
-    # Get state provider (write mode for kill/clean operations)
-    read_only = not (kill or clean)
-    provider = DbStateProvider.get_instance(workspace.path, read_only=read_only)
+    # Get state provider (read-only monitoring)
+    provider = WorkspaceStateProvider.get_instance(workspace.path, standalone=True)
 
-    try:
-        # Get jobs from the database, optionally filtered by experiment
-        if experiment:
-            all_jobs = provider.get_jobs(experiment_id=experiment)
-        else:
-            all_jobs = provider.get_all_jobs()
+    # Get jobs from the database, optionally filtered by experiment
+    if experiment:
+        all_jobs = provider.get_jobs(experiment_id=experiment)
+    else:
+        all_jobs = provider.get_all_jobs()
 
-        # Load tags map for the experiment (if specified)
-        tags_map = {}
-        if experiment:
-            tags_map = provider.get_tags_map(experiment_id=experiment)
+    # Load tags map for the experiment (if specified)
+    tags_map = {}
+    if experiment:
+        tags_map = provider.get_tags_map(experiment_id=experiment)
 
-        # Create filter context with tags map
-        filter_ctx = FilterContext(tags_map=tags_map)
+    # Create filter context with tags map
+    filter_ctx = FilterContext(tags_map=tags_map)
 
-        # Create filter function with context
-        _filter = createFilter(filter, filter_ctx) if filter else None
+    # Create filter function with context
+    _filter = createFilter(filter, filter_ctx) if filter else None
 
-        # Apply filter expression
-        if _filter:
-            all_jobs = [j for j in all_jobs if _filter(j)]
+    # Apply filter expression
+    if _filter:
+        all_jobs = [j for j in all_jobs if _filter(j)]
 
-        # Sort by submission time (most recent first)
-        # Jobs without submittime go to the end
-        all_jobs.sort(key=lambda j: j.submittime or 0, reverse=True)
+    # Sort by submission time (most recent first)
+    # Jobs without submittime go to the end
+    all_jobs.sort(key=lambda j: j.submittime or 0, reverse=True)
 
-        # Limit to N most recent jobs if count is specified
-        if count > 0:
-            all_jobs = all_jobs[:count]
+    # Limit to N most recent jobs if count is specified
+    if count > 0:
+        all_jobs = all_jobs[:count]
 
-        if not all_jobs:
-            cprint("No jobs found.", "yellow")
-            return
+    if not all_jobs:
+        cprint("No jobs found.", "yellow")
+        return
 
-        # Process each job
-        for job in all_jobs:
-            job_str = str(job.path) if fullpath else f"{job.task_id}/{job.identifier}"
+    # Process each job
+    for job in all_jobs:
+        job_str = str(job.path) if fullpath else f"{job.task_id}/{job.identifier}"
 
-            if job.state is None or job.state == JobState.UNSCHEDULED:
-                print(colored(f"UNSCHED {job_str}", "red"), end="")
-            elif job.state.running():
-                if kill:
-                    if perform:
-                        if provider.kill_job(job, perform=True):
-                            cprint(f"KILLED  {job_str}", "light_red")
-                        else:
-                            cprint(f"KILL FAILED {job_str}", "red")
+        if job.state is None or job.state == JobState.UNSCHEDULED:
+            print(colored(f"UNSCHED {job_str}", "red"), end="")
+        elif job.state.running():
+            if kill:
+                if perform:
+                    if provider.kill_job(job, perform=True):
+                        cprint(f"KILLED  {job_str}", "light_red")
                     else:
-                        cprint(f"KILLING {job_str} (dry run)", "yellow")
+                        cprint(f"KILL FAILED {job_str}", "red")
                 else:
-                    print(colored(f"{job.state.name:8}{job_str}", "yellow"), end="")
-            elif job.state == JobState.DONE:
-                print(colored(f"DONE    {job_str}", "green"), end="")
-            elif job.state == JobState.ERROR:
-                print(colored(f"FAIL    {job_str}", "red"), end="")
+                    cprint(f"KILLING {job_str} (dry run)", "yellow")
             else:
-                print(colored(f"{job.state.name:8}{job_str}", "red"), end="")
+                print(colored(f"{job.state.name:8}{job_str}", "yellow"), end="")
+        elif job.state == JobState.DONE:
+            print(colored(f"DONE    {job_str}", "green"), end="")
+        elif job.state == JobState.ERROR:
+            print(colored(f"FAIL    {job_str}", "red"), end="")
+        else:
+            print(colored(f"{job.state.name:8}{job_str}", "red"), end="")
 
-            # Show tags if requested (from tags_map)
-            if tags:
-                job_tags = tags_map.get(job.identifier, {})
-                if job_tags:
-                    print(f""" {" ".join(f"{k}={v}" for k, v in job_tags.items())}""")
-                elif not (kill and perform):
-                    print()
+        # Show tags if requested (from tags_map)
+        if tags:
+            job_tags = tags_map.get(job.identifier, {})
+            if job_tags:
+                print(f""" {" ".join(f"{k}={v}" for k, v in job_tags.items())}""")
             elif not (kill and perform):
                 print()
+        elif not (kill and perform):
+            print()
 
-            # Clean finished jobs
-            if clean and job.state and job.state.finished():
-                if perform:
-                    if provider.clean_job(job, perform=True):
-                        cprint("  Cleaned", "red")
-                    else:
-                        cprint("  Clean failed", "red")
+        # Clean finished jobs
+        if clean and job.state and job.state.finished():
+            if perform:
+                if provider.clean_job(job, perform=True):
+                    cprint("  Cleaned", "red")
                 else:
-                    cprint("  Would clean (dry run)", "yellow")
+                    cprint("  Clean failed", "red")
+            else:
+                cprint("  Would clean (dry run)", "yellow")
 
-        print()
-
-    finally:
-        # Close provider if we created it for write mode
-        if not read_only:
-            provider.close()
+    print()
 
 
 @click.option("--experiment", default=None, help="Restrict to this experiment")
@@ -298,10 +291,10 @@ def cleanup_partials(ctx, perform: bool):
     This command finds all orphan partials and deletes them (or shows
     what would be deleted in dry-run mode).
     """
-    from experimaestro.scheduler.db_state_provider import DbStateProvider
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
-    provider = DbStateProvider.get_instance(
-        ctx.obj.workspace.path, read_only=not perform
+    provider = WorkspaceStateProvider.get_instance(
+        ctx.obj.workspace.path, standalone=True
     )
 
     try:

@@ -1,6 +1,6 @@
 """SSH State Provider Server
 
-JSON-RPC server that wraps DbStateProvider and communicates via stdio.
+JSON-RPC server that wraps WorkspaceStateProvider and communicates via stdio.
 Designed to be run over SSH for remote experiment monitoring.
 
 Usage:
@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import IO, Callable, Dict, Optional
 
-from experimaestro.scheduler.db_state_provider import DbStateProvider
+from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from experimaestro.scheduler.state_provider import (
     StateEvent,
     ExperimentUpdatedEvent,
@@ -41,10 +41,10 @@ logger = logging.getLogger("xpm.remote.server")
 
 
 class SSHStateProviderServer:
-    """JSON-RPC server that wraps DbStateProvider for SSH-based monitoring
+    """JSON-RPC server that wraps WorkspaceStateProvider for SSH-based monitoring
 
     This server reads JSON-RPC requests from stdin and writes responses to stdout.
-    It registers as a listener with the DbStateProvider to push notifications
+    It registers as a listener with the WorkspaceStateProvider to push notifications
     when state changes occur.
 
     Thread safety:
@@ -69,7 +69,7 @@ class SSHStateProviderServer:
         self.workspace_path = workspace_path
         self.stdin = stdin if stdin is not None else sys.stdin.buffer
         self.stdout = stdout if stdout is not None else sys.stdout.buffer
-        self._state_provider: Optional[DbStateProvider] = None
+        self._state_provider: Optional[WorkspaceStateProvider] = None
         self._running = False
         self._write_lock = threading.Lock()
 
@@ -103,12 +103,11 @@ class SSHStateProviderServer:
             )
             return
 
-        # Initialize state provider in read-only mode
+        # Initialize state provider in read-only mode with event watcher
         try:
-            self._state_provider = DbStateProvider.get_instance(
+            self._state_provider = WorkspaceStateProvider.get_instance(
                 self.workspace_path,
-                read_only=True,
-                sync_on_start=True,
+                standalone=True,  # Start event file watcher for monitoring
             )
         except Exception as e:
             logger.exception("Failed to initialize state provider")

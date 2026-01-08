@@ -38,7 +38,6 @@ dependencies = [
     "huggingface-hub >0.17",
     "marshmallow >=3.20,<4",
     "omegaconf >=2.3,<3",
-    "peewee >=3.17,<4",
     "psutil >=7,<8",
     "pyparsing >=3.1,<4",
     "pyperclip >=1.8,<2",

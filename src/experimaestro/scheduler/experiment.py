@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import time
 from shutil import rmtree
-from typing import Any, Dict, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, TypeVar, Union
 
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
@@ -19,6 +19,10 @@ from experimaestro.scheduler.interfaces import BaseExperiment
 from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
 from experimaestro.experiments.configuration import DirtyGitAction
 from experimaestro.utils import logger
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_status import StatusData
+    from experimaestro.scheduler.state_status import EventFileWriter
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
 
@@ -35,11 +39,18 @@ class DirtyGitError(HandledException):
     pass
 
 
-class DatabaseListener:
-    """Listener that updates job state in the database"""
+class StateListener:
+    """Listener that writes job/service events to filesystem and tracks state"""
 
-    def __init__(self, state_provider, experiment_id: str, run_id: str):
-        self.state_provider = state_provider
+    def __init__(
+        self,
+        event_writer: "EventFileWriter",
+        status_data: "StatusData",
+        experiment_id: str,
+        run_id: str,
+    ):
+        self.event_writer = event_writer
+        self.status_data = status_data
         self.experiment_id = experiment_id
         self.run_id = run_id
 
@@ -48,25 +59,54 @@ class DatabaseListener:
         pass
 
     def job_state(self, job):
-        """Update job state in database"""
-        self.state_provider.update_job_state(job, self.experiment_id, self.run_id)
+        """Write job state change event to filesystem and update status"""
+        from .state_status import JobStateChangedEvent
+
+        # Get failure reason if error state
+        failure_reason = None
+        if hasattr(job.state, "failure_reason") and job.state.failure_reason:
+            failure_reason = job.state.failure_reason.name
+
+        # Get progress as list of dicts
+        progress = []
+        if hasattr(job, "_progress") and job._progress:
+            progress = [
+                {"level": p.level, "progress": p.progress, "desc": p.desc}
+                for p in job._progress
+            ]
+
+        event = JobStateChangedEvent(
+            job_id=job.identifier,
+            state=job.state.name,
+            failure_reason=failure_reason,
+            submitted_time=job.submittime,
+            started_time=job.starttime,
+            ended_time=job.endtime,
+            exit_code=getattr(job, "exit_code", None),
+            retry_count=getattr(job, "retry_count", 0),
+            progress=progress,
+        )
+        self.event_writer.write_event(event)
+        self.status_data.apply_event(event)
 
     def service_add(self, service):
-        """Register service in database"""
+        """Write service added event to filesystem and update status"""
         from experimaestro.scheduler.services import Service
+        from .state_status import ServiceAddedEvent
 
         state_dict = Service.serialize_state_dict(service._full_state_dict())
-        self.state_provider.register_service(
-            service.id,
-            self.experiment_id,
-            self.run_id,
-            service.description(),
-            state_dict=json.dumps(state_dict),
+        event = ServiceAddedEvent(
+            service_id=service.id,
+            description=service.description(),
+            state=service.state.name if hasattr(service.state, "name") else "STOPPED",
+            state_dict=state_dict,
         )
+        self.event_writer.write_event(event)
+        self.status_data.apply_event(event)
 
     def service_state_changed(self, service):
         """Called when service state changes (runtime only, not persisted)"""
-        # Service state is managed at runtime, not persisted to DB
+        # Service state is managed at runtime, not persisted
         pass
 
 
@@ -144,8 +184,9 @@ class experiment(BaseExperiment):
             DirtyGitAction.IGNORE (don't check), DirtyGitAction.WARN (log warning,
             default), or DirtyGitAction.ERROR (raise exception).
 
-        :param no_db: If True, disable database state tracking for this experiment.
-            Jobs will run but won't be tracked in the workspace SQLite database.
+        :param no_db: Deprecated, kept for backwards compatibility. This parameter
+            is now a no-op as the database has been replaced with filesystem-based
+            state tracking.
         """
 
         from experimaestro.scheduler import Listener, Scheduler
@@ -380,10 +421,50 @@ class experiment(BaseExperiment):
         with self.jobs_jsonl_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
 
-        # Also register in database for TUI/monitoring (only in NORMAL mode)
-        if self._db_listener is not None:
-            experiment_id = self.name
-            self.state_provider.update_job_submitted(job, experiment_id, self.run_id)
+        # Write job submitted event to filesystem (only in NORMAL mode)
+        if self._event_writer is not None:
+            from .state_status import JobSubmittedEvent
+
+            # Get dependency job IDs
+            depends_on = []
+            if hasattr(job, "dependencies"):
+                for dep in job.dependencies:
+                    if hasattr(dep, "identifier"):
+                        depends_on.append(dep.identifier)
+
+            event = JobSubmittedEvent(
+                job_id=job.identifier,
+                task_id=str(job.type.identifier),
+                transient=job.transient.value if hasattr(job, "transient") else 0,
+                tags=dict(job.tags.items()) if job.tags else {},
+                depends_on=depends_on,
+            )
+            self._event_writer.write_event(event)
+            if self._status_data is not None:
+                self._status_data.apply_event(event)
+
+    def _finalize_run(self, status: str) -> None:
+        """Finalize the run: write final status.json and cleanup event files
+
+        Args:
+            status: Final status ("completed" or "failed")
+        """
+        from datetime import datetime
+        from .state_status import StatusFile
+
+        # Close the event writer to flush any buffered events
+        self._event_writer.close()
+
+        # Update final status in the in-memory data
+        self._status_data.status = status
+        self._status_data.ended_at = datetime.now().isoformat()
+
+        # Write final status.json
+        status_file = StatusFile(self.workdir)
+        status_file.write(self._status_data)
+
+        # Cleanup event files (delete them)
+        self._event_writer.cleanup()
 
     def stop(self):
         """Stop the experiment as soon as possible"""
@@ -587,56 +668,51 @@ class experiment(BaseExperiment):
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()
 
-        # Initialize workspace state provider (singleton per workspace path)
-        # Use read_only mode when not in NORMAL run mode to prevent DB changes
-        # Skip entirely if no_db is set
-        from .db_state_provider import DbStateProvider
-        from .state_db import DatabaseVersionError
+        # Initialize filesystem-based state tracking (only in NORMAL mode)
+        from .state_status import (
+            EventFileWriter,
+            init_status,
+            create_experiment_symlink,
+        )
 
         is_normal_mode = self.workspace.run_mode == RunMode.NORMAL
-        self.state_provider = None
-        self._db_listener = None
+        self._event_writer = None
+        self._state_listener = None
+        self._status_data = None
 
-        if not self._no_db:
-            try:
-                self.state_provider = DbStateProvider.get_instance(
-                    self.workspace.path,
-                    read_only=not is_normal_mode,
-                    sync_on_start=False,  # Experiments don't sync on start
-                )
-            except DatabaseVersionError as e:
-                # Database version is newer than code - can't use it
-                # Log warning but continue without DB state tracking
-                logger.warning(
-                    "Cannot use workspace database: %s. "
-                    "Experiment will run without database state tracking.",
-                    e,
-                )
+        if is_normal_mode:
+            import socket
+            from .state_status import StatusFile
 
-        # Register experiment in database and create a run (only in NORMAL mode)
-        experiment_id = self.name
-        if is_normal_mode and self.state_provider is not None and not self._no_db:
-            self.state_provider.ensure_experiment(experiment_id)
-            # Pass the run_id we generated (with filesystem collision detection)
-            self.state_provider.create_run(experiment_id, run_id=self.run_id)
+            # Initialize status.json for this run
+            hostname = socket.gethostname()
+            init_status(self.workdir, self.name, self.run_id, hostname)
+
+            # Read the initial status data (we'll update it in memory)
+            status_file = StatusFile(self.workdir)
+            self._status_data = status_file.read()
+
+            # Create symlink to current run
+            experiments_dir = self.workspace.path / ".experimaestro" / "experiments"
+            create_experiment_symlink(experiments_dir, self.name, self.workdir)
+
+            # Create event writer for this experiment
+            self._event_writer = EventFileWriter(experiments_dir, self.name, 0)
 
             # Add run info to environment.json
-            import socket
-            from datetime import datetime
-
             env_path = self.workdir / "environment.json"
             env = ExperimentEnvironment.load(env_path)
             env.run = ExperimentRunInfo(
-                hostname=socket.gethostname(),
+                hostname=hostname,
                 started_at=datetime.now().isoformat(),
             )
             env.save(env_path)
 
-            # Add database listener to update job state in database
-            self._db_listener = DatabaseListener(
-                self.state_provider, experiment_id, self.run_id
+            # Add state listener to write events to filesystem and update status
+            self._state_listener = StateListener(
+                self._event_writer, self._status_data, self.name, self.run_id
             )
-            self.scheduler.addlistener(self._db_listener)
+            self.scheduler.addlistener(self._state_listener)
 
         # Number of unfinished jobs
         self.unfinishedJobs = 0
@@ -691,15 +767,12 @@ class experiment(BaseExperiment):
             # Unregister experiment from scheduler
             self.scheduler.unregister_experiment(self)
 
-            # Remove database listener and mark run as completed (only in NORMAL mode)
+            # Remove state listener and finalize run (only in NORMAL mode)
             status = "failed" if exc_type else "completed"
 
-            if self._db_listener is not None:
-                self.scheduler.removelistener(self._db_listener)
-
-                # Mark run as completed in database
-                experiment_id = self.name
-                self.state_provider.complete_run(experiment_id, self.run_id, status)
+            if self._state_listener is not None:
+                self.scheduler.removelistener(self._state_listener)
+                self._finalize_run(status)
 
             # Update environment.json with run status
             if self.workspace.run_mode == RunMode.NORMAL and self.workdir:
@@ -818,8 +891,9 @@ class experiment(BaseExperiment):
         # Allow service to access experiment context
         service.set_experiment(self)
 
-        # Register database listener for state changes
-        service.add_listener(self._db_listener)
+        # Register state listener for state changes (writes events)
+        if self._state_listener is not None:
+            service.add_listener(self._state_listener)
 
         # Register file listener for state changes (writes to services.json)
         service.add_listener(self)

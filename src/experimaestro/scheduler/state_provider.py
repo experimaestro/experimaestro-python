@@ -28,6 +28,7 @@ from experimaestro.scheduler.interfaces import (
     JobState,
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
+    deserialize_timestamp,
 )
 from experimaestro.scheduler.transient import TransientMode
 from experimaestro.notifications import (
@@ -130,6 +131,9 @@ class StateProvider(ABC):
     State listener management is provided by the base class with default implementations.
     """
 
+    #: Whether this provider is connected to a live scheduler
+    is_live: bool = False
+
     def __init__(self) -> None:
         """Initialize state listener management"""
         self._state_listeners: Set[StateListener] = set()
@@ -162,6 +166,9 @@ class StateProvider(ABC):
         with self._state_listener_lock:
             listeners = list(self._state_listeners)
 
+        logger.debug(
+            "Notifying %d listeners of %s", len(listeners), type(event).__name__
+        )
         for listener in listeners:
             try:
                 listener(event)
@@ -333,6 +340,99 @@ class StateProvider(ABC):
 
 
 # =============================================================================
+# Offline State Provider (with service caching)
+# =============================================================================
+
+
+class OfflineStateProvider(StateProvider):
+    """State provider for offline/cached state access
+
+    Provides state listener management and service caching shared by
+    WorkspaceStateProvider and SSHStateProviderClient.
+
+    This is an intermediate class between StateProvider (the ABC) and concrete
+    implementations that need state listener support and service caching.
+    """
+
+    def __init__(self):
+        """Initialize offline state provider with service cache and listener management"""
+        super().__init__()  # Initialize state listener management
+        self._init_service_cache()
+
+    # =========================================================================
+    # Service caching methods
+    # =========================================================================
+
+    def _init_service_cache(self) -> None:
+        """Initialize service cache - call from subclass __init__"""
+        self._service_cache: Dict[tuple[str, str], Dict[str, "BaseService"]] = {}
+        self._service_cache_lock = threading.Lock()
+
+    def _clear_service_cache(self) -> None:
+        """Clear the service cache"""
+        with self._service_cache_lock:
+            self._service_cache.clear()
+
+    def get_services(
+        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
+    ) -> List["BaseService"]:
+        """Get services for an experiment
+
+        Uses caching to preserve service instances (and their URLs) across calls.
+        Subclasses can override _get_live_services() for live service support
+        and must implement _fetch_services_from_storage() for persistent storage.
+        """
+        # Resolve run_id if needed
+        if experiment_id is not None and run_id is None:
+            run_id = self.get_current_run(experiment_id)
+            if run_id is None:
+                return []
+
+        cache_key = (experiment_id or "", run_id or "")
+
+        with self._service_cache_lock:
+            # Try to get live services (scheduler, etc.) - may return None
+            live_services = self._get_live_services(experiment_id, run_id)
+            if live_services is not None:
+                # Cache and return live services
+                self._service_cache[cache_key] = {s.id: s for s in live_services}
+                return live_services
+
+            # Check cache
+            cached = self._service_cache.get(cache_key)
+            if cached is not None:
+                return list(cached.values())
+
+            # Fetch from persistent storage (filesystem or remote)
+            services = self._fetch_services_from_storage(experiment_id, run_id)
+            self._service_cache[cache_key] = {s.id: s for s in services}
+            return services
+
+    def _get_live_services(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> Optional[List["BaseService"]]:
+        """Get live services if available (e.g., from scheduler).
+
+        Returns None if no live services are available (default).
+        Subclasses may override to check for live services.
+        """
+        return None
+
+    @abstractmethod
+    def _fetch_services_from_storage(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> List["BaseService"]:
+        """Fetch services from persistent storage (filesystem or remote).
+
+        Called when no live services and cache is empty.
+        """
+        ...
+
+    # State listener methods (add_listener, remove_listener, _notify_state_listeners)
+    # are inherited from StateProvider base class
+
+
+# =============================================================================
 # Mock Classes for Database-Loaded State
 # =============================================================================
 
@@ -472,9 +572,9 @@ class MockJob(BaseJob):
             task_id=task_id,
             path=path,
             state=d["state"],
-            submittime=d.get("submittime"),
-            starttime=d.get("starttime"),
-            endtime=d.get("endtime"),
+            submittime=deserialize_timestamp(d.get("submittime")),
+            starttime=deserialize_timestamp(d.get("starttime")),
+            endtime=deserialize_timestamp(d.get("endtime")),
             progress=progress_list,
             updated_at=d.get("updated_at", ""),
             exit_code=d.get("exit_code"),
@@ -660,10 +760,12 @@ __all__ = [
     "ExperimentUpdatedEvent",
     "RunUpdatedEvent",
     "JobUpdatedEvent",
+    "JobExperimentUpdatedEvent",
     "ServiceUpdatedEvent",
     "StateListener",
     # ABC
     "StateProvider",
+    "OfflineStateProvider",
     # Mock classes
     "MockJob",
     "MockExperiment",

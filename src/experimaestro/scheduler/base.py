@@ -59,6 +59,9 @@ class Scheduler(StateProvider, threading.Thread):
     _instance: ClassVar[Optional["Scheduler"]] = None
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
+    #: Scheduler is always live
+    is_live: bool = True
+
     def __init__(self, name: str = "Global"):
         StateProvider.__init__(self)  # Initialize state listener management
         threading.Thread.__init__(self, name=f"Scheduler ({name})", daemon=True)
@@ -75,6 +78,9 @@ class Scheduler(StateProvider, threading.Thread):
 
         # List of all jobs
         self.jobs: Dict[str, "Job"] = {}
+
+        # Services: (experiment_id, run_id) -> {service_id -> Service}
+        self.services: Dict[tuple[str, str], Dict[str, Service]] = {}
 
         # Tags map: (experiment_id, run_id) -> {job_id -> {tag_key: tag_value}}
         self._tags_map: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
@@ -473,6 +479,13 @@ class Scheduler(StateProvider, threading.Thread):
     ):
         """Notify the listeners that a service has been added"""
         self._notify_listeners(lambda lst, s: lst.service_add(s), service)
+
+        # Store service in scheduler's services dict (persists after experiment ends)
+        if experiment_id:
+            key = (experiment_id, run_id or "")
+            if key not in self.services:
+                self.services[key] = {}
+            self.services[key][service.id] = service
 
         # Also notify StateProvider-style listeners (for TUI etc.)
         from experimaestro.scheduler.state_provider import ServiceUpdatedEvent
@@ -989,32 +1002,41 @@ class Scheduler(StateProvider, threading.Thread):
     def get_services(
         self,
         experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,  # noqa: ARG002 - not used in live scheduler
+        run_id: Optional[str] = None,
     ) -> List[BaseService]:
-        """Get services for an experiment"""
+        """Get services for an experiment
+
+        Services are stored in the scheduler and persist after experiments finish.
+        """
         if experiment_id is None:
             # Return all services from all experiments
             services = []
-            for exp in self.experiments.values():
-                services.extend(exp.services.values())
+            for services_dict in self.services.values():
+                services.extend(services_dict.values())
             logger.debug(
-                "get_services(None): returning %d services from %d experiments",
+                "get_services(None): returning %d services",
                 len(services),
-                len(self.experiments),
             )
             return services
 
-        exp = self.experiments.get(experiment_id)
-        if not exp:
-            logger.debug(
-                "get_services(%s): experiment not found in %s",
-                experiment_id,
-                list(self.experiments.keys()),
-            )
-            return []
-        services = list(exp.services.values())
+        # Get services for specific experiment
+        services = []
+        if run_id is not None:
+            # Specific run requested
+            key = (experiment_id, run_id)
+            services_dict = self.services.get(key, {})
+            services = list(services_dict.values())
+        else:
+            # No run_id specified - return services from all runs of this experiment
+            for (exp_id, _run_id), services_dict in self.services.items():
+                if exp_id == experiment_id:
+                    services.extend(services_dict.values())
+
         logger.debug(
-            "get_services(%s): returning %d services", experiment_id, len(services)
+            "get_services(%s, %s): returning %d services",
+            experiment_id,
+            run_id,
+            len(services),
         )
         return services
 

@@ -47,6 +47,26 @@ def serialize_timestamp(ts: Optional[Union[float, datetime, str]]) -> Optional[s
     return str(ts)
 
 
+def deserialize_timestamp(ts: Optional[Union[float, str]]) -> Optional[float]:
+    """Deserialize timestamp from ISO format string to Unix timestamp
+
+    Handles:
+    - None: returns None
+    - float/int: returns as-is (already a Unix timestamp)
+    - str: parses ISO format and converts to Unix timestamp
+    """
+    if ts is None:
+        return None
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
 # =============================================================================
 # Job State Classes
 # =============================================================================

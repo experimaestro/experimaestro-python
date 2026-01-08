@@ -52,7 +52,7 @@ class WebUIServer:
                     if state_provider is None:
                         raise ValueError(
                             "state_provider parameter is required. "
-                            "Pass the Scheduler instance or DbStateProvider."
+                            "Pass the Scheduler instance or WorkspaceStateProvider."
                         )
 
                     WebUIServer._instance = WebUIServer(

@@ -349,6 +349,8 @@ class ExperimentsList(Widget):
         """Initialize the experiments table"""
         table = self.query_one("#experiments-table", DataTable)
         table.add_column("ID", key="id")
+        table.add_column("Run", key="run")
+        table.add_column("#", key="runs", width=3)
         table.add_column("Host", key="host")
         table.add_column("Jobs", key="jobs")
         table.add_column("Status", key="status")
@@ -358,14 +360,20 @@ class ExperimentsList(Widget):
 
         # If there's only one experiment, automatically select it
         if len(self.experiments) == 1:
-            exp_id = self.experiments[0].experiment_id
+            exp = self.experiments[0]
+            exp_id = exp.experiment_id
+            run_id = getattr(exp, "current_run_id", None)
             self.current_experiment = exp_id
             self.collapse_to_experiment(exp_id)
-            self.post_message(ExperimentSelected(exp_id))
+            self.post_message(ExperimentSelected(exp_id, run_id))
 
     def refresh_experiments(self) -> None:
         """Refresh the experiments list from state provider"""
         table = self.query_one("#experiments-table", DataTable)
+
+        self.log.info(
+            f"State provider: {type(self.state_provider).__name__}, is_live={self.state_provider.is_live}"
+        )
 
         try:
             self.experiments = self.state_provider.get_experiments()
@@ -428,9 +436,26 @@ class ExperimentsList(Widget):
             # Get hostname (may be None for older experiments)
             hostname = getattr(exp, "hostname", None) or "-"
 
+            # Get run_id
+            run_id = getattr(exp, "current_run_id", None) or "-"
+
+            # Get runs count for this experiment (only for offline monitoring)
+            runs_count = "-"
+            if not self.state_provider.is_live:
+                try:
+                    runs = self.state_provider.get_experiment_runs(exp_id)
+                    runs_count = str(len(runs))
+                except Exception as e:
+                    self.log.error(f"Error getting runs for {exp_id}: {e}")
+                    import traceback
+
+                    self.log.error(traceback.format_exc())
+
             # Update existing row or add new one
             if exp_id in existing_keys:
                 table.update_cell(exp_id, "id", exp_id, update_width=True)
+                table.update_cell(exp_id, "run", run_id, update_width=True)
+                table.update_cell(exp_id, "runs", runs_count, update_width=True)
                 table.update_cell(exp_id, "host", hostname, update_width=True)
                 table.update_cell(exp_id, "jobs", jobs_text, update_width=True)
                 table.update_cell(exp_id, "status", status, update_width=True)
@@ -438,7 +463,15 @@ class ExperimentsList(Widget):
                 table.update_cell(exp_id, "duration", duration, update_width=True)
             else:
                 table.add_row(
-                    exp_id, hostname, jobs_text, status, started, duration, key=exp_id
+                    exp_id,
+                    run_id,
+                    runs_count,
+                    hostname,
+                    jobs_text,
+                    status,
+                    started,
+                    duration,
+                    key=exp_id,
                 )
 
         # Remove rows for experiments that no longer exist
@@ -452,9 +485,16 @@ class ExperimentsList(Widget):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle experiment selection"""
         if event.row_key:
-            self.current_experiment = str(event.row_key.value)
+            exp_id = str(event.row_key.value)
+            self.current_experiment = exp_id
             self.collapse_to_experiment(self.current_experiment)
-            self.post_message(ExperimentSelected(str(event.row_key.value)))
+            # Find run_id from experiments list
+            exp_info = next(
+                (exp for exp in self.experiments if exp.experiment_id == exp_id),
+                None,
+            )
+            run_id = getattr(exp_info, "current_run_id", None) if exp_info else None
+            self.post_message(ExperimentSelected(exp_id, run_id))
 
     def _update_collapsed_header(self, experiment_id: str) -> None:
         """Update the collapsed experiment header with current stats"""
@@ -468,6 +508,7 @@ class ExperimentsList(Widget):
         total = exp_info.total_jobs
         finished = exp_info.finished_jobs
         failed = exp_info.failed_jobs
+        run_id = getattr(exp_info, "current_run_id", None)
 
         if failed > 0:
             status = f"❌ {failed} failed"
@@ -479,7 +520,10 @@ class ExperimentsList(Widget):
             status = "Empty"
 
         collapsed_label = self.query_one("#collapsed-experiment-info", Label)
-        collapsed_label.update(f"📊 {experiment_id} - {status} (click to go back)")
+        run_text = f" [{run_id}]" if run_id else ""
+        collapsed_label.update(
+            f"📊 {experiment_id}{run_text} - {status} (click to go back)"
+        )
 
     def collapse_to_experiment(self, experiment_id: str) -> None:
         """Collapse the experiments list to show only the selected experiment"""
@@ -512,9 +556,10 @@ class ExperimentsList(Widget):
 class ExperimentSelected(Message):
     """Message sent when an experiment is selected"""
 
-    def __init__(self, experiment_id: str) -> None:
+    def __init__(self, experiment_id: str, run_id: Optional[str] = None) -> None:
         super().__init__()
         self.experiment_id = experiment_id
+        self.run_id = run_id
 
 
 class ExperimentDeselected(Message):
@@ -707,7 +752,10 @@ class ServicesList(Vertical):
         if not service:
             return
 
-        self.log.info(f"Starting service {service.id} (id={id(service)})")
+        self.log.info(
+            f"Starting service {service.id} (type={type(service).__name__}, "
+            f"has_get_url={hasattr(service, 'get_url')}, is_live={self.state_provider.is_live})"
+        )
 
         try:
             if hasattr(service, "get_url"):
@@ -715,7 +763,11 @@ class ServicesList(Vertical):
                 self.log.info(f"Service started, url={url}, service.url={service.url}")
                 self.notify(f"Service started: {url}", severity="information")
             else:
-                self.notify("Service does not support starting", severity="warning")
+                # MockService - service state loaded from file but not the actual service
+                self.notify(
+                    "Service not available (loaded from saved state)",
+                    severity="warning",
+                )
             self.refresh_services()
         except Exception as e:
             self.notify(f"Failed to start service: {e}", severity="error")
@@ -1106,6 +1158,7 @@ class JobsTable(Vertical):
         self.state_provider = state_provider
         self.filter_fn = None
         self.current_experiment: Optional[str] = None
+        self.current_run_id: Optional[str] = None
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
         self.dependencies_map: dict[
             str, list[str]
@@ -1369,9 +1422,12 @@ class JobsTable(Vertical):
             self._update_column_headers()
             self.refresh_jobs()
 
-    def set_experiment(self, experiment_id: Optional[str]) -> None:
+    def set_experiment(
+        self, experiment_id: Optional[str], run_id: Optional[str] = None
+    ) -> None:
         """Set the current experiment and refresh jobs"""
         self.current_experiment = experiment_id
+        self.current_run_id = run_id
         # Load tags map and dependencies map for this experiment
         if experiment_id:
             self.tags_map = self.state_provider.get_tags_map(experiment_id)
@@ -2049,29 +2105,27 @@ class ExperimaestroUI(App):
         if state_provider:
             self.state_provider = state_provider
             self.owns_provider = False  # Don't close external provider
-            self._has_active_experiment = True  # External provider = active experiment
         else:
-            from experimaestro.scheduler.db_state_provider import DbStateProvider
+            from experimaestro.scheduler.workspace_state_provider import (
+                WorkspaceStateProvider,
+            )
 
             # Get singleton provider instance for this workspace
-            self.state_provider = DbStateProvider.get_instance(
+            self.state_provider = WorkspaceStateProvider.get_instance(
                 self.workdir,
-                read_only=False,
-                sync_on_start=True,
-                sync_interval_minutes=5,
+                standalone=True,  # Start event file watcher for monitoring
             )
             self.owns_provider = False  # Provider is singleton, don't close
-            self._has_active_experiment = False  # Just viewing, no active experiment
 
         # Set subtitle to show scheduler status
         self._update_scheduler_status()
 
     def _update_scheduler_status(self) -> None:
         """Update the subtitle to reflect scheduler status"""
-        if self._has_active_experiment:
+        if self.state_provider.is_live:
             self.sub_title = "● Scheduler Running"
         else:
-            self.sub_title = "○ Offline (Database)"
+            self.sub_title = "○ Offline"
 
     def compose(self) -> ComposeResult:
         """Compose the TUI layout"""
@@ -2144,9 +2198,15 @@ class ExperimaestroUI(App):
             handler(self, event)
 
     def _handle_experiment_updated(self, event: ExperimentUpdatedEvent) -> None:
-        """Handle ExperimentUpdatedEvent - refresh experiments list"""
+        """Handle ExperimentUpdatedEvent - refresh experiments list and jobs"""
         for exp_list in self.query(ExperimentsList):
             exp_list.refresh_experiments()
+
+        # Also refresh jobs table if we're viewing the affected experiment
+        # (this handles the case when experiment finishes and events are deleted)
+        for jobs_table in self.query(JobsTable):
+            if jobs_table.current_experiment == event.experiment_id:
+                jobs_table.refresh_jobs()
 
     def _handle_job_updated(self, event: JobUpdatedEvent) -> None:
         """Handle JobUpdatedEvent - refresh job display"""
@@ -2211,7 +2271,9 @@ class ExperimaestroUI(App):
 
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
         """Handle experiment selection - show jobs/services tabs"""
-        self.log(f"Experiment selected: {message.experiment_id}")
+        self.log(
+            f"Experiment selected: {message.experiment_id} (run: {message.run_id})"
+        )
 
         # Set up services list
         services_list = self.query_one(ServicesList)
@@ -2219,7 +2281,7 @@ class ExperimaestroUI(App):
 
         # Set up jobs table
         jobs_table_widget = self.query_one(JobsTable)
-        jobs_table_widget.set_experiment(message.experiment_id)
+        jobs_table_widget.set_experiment(message.experiment_id, message.run_id)
 
         # Show the tabbed content
         tabs = self.query_one("#experiment-tabs", TabbedContent)
@@ -2561,7 +2623,7 @@ class ExperimaestroUI(App):
                 self.exit()
 
         self.push_screen(
-            QuitConfirmScreen(has_active_experiment=self._has_active_experiment),
+            QuitConfirmScreen(has_active_experiment=self.state_provider.is_live),
             handle_quit_response,
         )
 

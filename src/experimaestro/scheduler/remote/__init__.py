@@ -3,7 +3,7 @@
 This package provides SSH-based remote monitoring capabilities for experiments.
 
 Main components:
-- SSHStateProviderServer: JSON-RPC server that wraps DbStateProvider
+- SSHStateProviderServer: JSON-RPC server that wraps WorkspaceStateProvider
 - SSHStateProviderClient: Client that connects via SSH and implements StateProvider interface
 - RemoteFileSynchronizer: Rsync-based file synchronization
 
