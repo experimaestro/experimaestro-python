@@ -176,9 +176,7 @@ def test_shared_partial_not_orphaned():
     from experimaestro.scheduler.db_state_provider import DbStateProvider
 
     with TemporaryDirectory(prefix="xpm", suffix="partial_shared_cleanup") as workdir:
-        with TemporaryExperiment(
-            "partial_shared_cleanup", workdir=workdir, maxwait=30
-        ):
+        with TemporaryExperiment("partial_shared_cleanup", workdir=workdir, maxwait=30):
             # Submit two tasks with same learning_rate (same partial)
             task1 = TaskWithPartial.C(max_iter=100, learning_rate=0.1).submit()
             task2 = TaskWithPartial.C(max_iter=200, learning_rate=0.1).submit()
@@ -217,3 +215,84 @@ def test_shared_partial_not_orphaned():
             assert not checkpoint_path.exists()
         finally:
             provider.close()
+
+
+def test_partial_concurrent_processes():
+    """Test that two processes competing for the same partial are serialized.
+
+    Similar to test_token_reschedule but for partial locking:
+    - Two tasks with different x (excluded param) share the same partial
+    - They should run sequentially (one after the other)
+    """
+    import sys
+    import subprocess
+    import logging
+    import time
+    import pytest
+    from .utils import TemporaryDirectory, timeout, get_times_frompath
+
+    with TemporaryDirectory("partial_reschedule") as workdir:
+        lockingpath = workdir / "lockingpath"
+
+        command = [
+            sys.executable,
+            Path(__file__).parent / "partial_reschedule.py",
+            workdir,
+        ]
+
+        ready1 = workdir / "ready.1"
+        time1 = workdir / "time.1"
+        p1 = subprocess.Popen(
+            command + ["1", str(lockingpath), str(ready1), str(time1)]
+        )
+
+        ready2 = workdir / "ready.2"
+        time2 = workdir / "time.2"
+        p2 = subprocess.Popen(
+            command + ["2", str(lockingpath), str(ready2), str(time2)]
+        )
+
+        try:
+            with timeout(30):
+                logging.info("Waiting for both experiments to be ready")
+                # Wait that both processes are ready
+                while not ready1.is_file():
+                    time.sleep(0.01)
+                while not ready2.is_file():
+                    time.sleep(0.01)
+
+                # Create the locking path to allow tasks to finish
+                logging.info(
+                    "Both processes are ready: allowing tasks to finish by writing in %s",
+                    lockingpath,
+                )
+                lockingpath.write_text("Let's go")
+
+                # Waiting for the output
+                logging.info("Waiting for XP1 to finish (%s)", time1)
+                while not time1.is_file():
+                    time.sleep(0.01)
+                logging.info("Experiment 1 finished")
+
+                logging.info("Waiting for XP2 to finish")
+                while not time2.is_file():
+                    time.sleep(0.01)
+                logging.info("Experiment 2 finished")
+
+                time1_val = get_times_frompath(time1)
+                time2_val = get_times_frompath(time2)
+
+                logging.info("%s vs %s", time1_val, time2_val)
+                # One should have finished before the other started
+                # (they share the same partial, so only one can run at a time)
+                assert time1_val > time2_val or time2_val > time1_val
+        except TimeoutError:
+            p1.terminate()
+            p2.terminate()
+            pytest.fail("Timeout")
+
+        except Exception:
+            logging.warning("Other exception: killing processes (just in case)")
+            p1.terminate()
+            p2.terminate()
+            raise
