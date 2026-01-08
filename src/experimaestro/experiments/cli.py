@@ -79,6 +79,11 @@ class ConfigurationLoader:
             if not path.is_absolute():
                 _data["file"] = str((yaml_file.parent / path).resolve())
 
+        if "pre_experiment" in _data:
+            path = Path(_data["pre_experiment"])
+            if not path.is_absolute():
+                _data["pre_experiment"] = str((yaml_file.parent / path).resolve())
+
         if "module" in _data:
             # Keeps track of the YAML file where the module was defined
             self.yaml_module_file = yaml_file
@@ -234,6 +239,27 @@ def experiments_cli(  # noqa: C901
     # Modifies the Python path
     for path in python_path:
         sys.path.append(str(path))
+
+    # --- Execute pre-experiment script if specified
+    pre_experiment = configuration.get("pre_experiment", None)
+    if pre_experiment:
+        pre_exp_path = Path(pre_experiment)
+        if pre_exp_path.exists():
+            logging.info("Executing pre-experiment script: %s", pre_exp_path)
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    "pre_experiment", str(pre_exp_path.absolute())
+                )
+                pre_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(pre_mod)
+            except Exception as e:
+                raise click.ClickException(
+                    f"Failed to execute pre-experiment script '{pre_exp_path}': {e}"
+                )
+        else:
+            raise click.ClickException(
+                f"Pre-experiment script not found: {pre_exp_path}"
+            )
 
     # --- Adds automatically the experiment module if not found
     if module_name and conf_loader.yaml_module_file:

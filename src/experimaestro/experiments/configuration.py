@@ -54,6 +54,13 @@ class ConfigurationBase:
     parent: Optional[str] = None
     """Relative path of a YAML file that should be merged"""
 
+    pre_experiment: Optional[str] = None
+    """Relative path to a Python file to execute before importing the experiment.
+
+    This is useful for setting environment variables or mocking modules to speed up
+    the experiment setup phase (e.g., mocking torch.compile or torch.nn).
+    The actual job execution will use real modules."""
+
     title: str = ""
     """Short description of the experiment"""
 

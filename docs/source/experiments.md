@@ -87,6 +87,7 @@ The YAML configuration file supports the following options from {py:class}`~expe
 | `module` | string | `None` | Python module containing the `run` function (mutually exclusive with `file`) |
 | `pythonpath` | list | `None` | List of paths to add to Python path (relative to YAML file directory) |
 | `parent` | string | `None` | Relative path to a parent YAML file to inherit from |
+| `pre_experiment` | string | `None` | Relative path to a Python file to execute before importing the experiment |
 | `title` | string | `""` | Short description of the experiment |
 | `subtitle` | string | `""` | Additional details about the experiment |
 | `description` | string | `""` | Full description of the experiment |
@@ -145,6 +146,73 @@ experimaestro run-experiment --show experiment.yaml
 
 # With overrides - see the final result
 experimaestro run-experiment --show -c learning_rate=1e-5 --pre-yaml base.yaml experiment.yaml
+```
+
+### Pre-experiment Setup
+
+The `pre_experiment` option allows you to run Python code **before** the experiment module is imported. This is useful for:
+
+- Setting environment variables to control library behavior
+- Mocking heavy modules to speed up the experiment setup phase (the actual job execution will use real modules)
+- Configuring logging or other global state
+
+#### Example: Speed up PyTorch imports
+
+PyTorch's `torch.compile` and module initialization can significantly slow down experiment startup. You can use `pre_experiment` to mock these components:
+
+Create a `pre_setup.py` file:
+```python
+import os
+import sys
+from unittest.mock import MagicMock
+
+# Reduce torch compile threads
+os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
+
+# Make torch.compile a no-op decorator
+class MockCompile:
+    def __call__(self, fn=None, **kwargs):
+        if fn is not None:
+            return fn
+        def decorator(func):
+            return func
+        return decorator
+
+# Mock torch module with no-op compile
+class TorchMock(MagicMock):
+    compile = MockCompile()
+
+sys.modules['torch'] = TorchMock()
+sys.modules['torch.nn'] = MagicMock()
+sys.modules['torch.nn.functional'] = MagicMock()
+sys.modules['torch.optim'] = MagicMock()
+```
+
+Then reference it in your YAML:
+```yaml
+id: my-experiment
+pre_experiment: pre_setup.py
+file: experiment
+```
+
+#### Example: Set environment variables
+
+For simpler use cases like setting environment variables:
+
+```python
+# pre_env.py
+import os
+
+# Control threading behavior
+os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+```
+
+```yaml
+id: my-experiment
+pre_experiment: pre_env.py
+file: experiment
 ```
 
 ### Dirty Git Check
