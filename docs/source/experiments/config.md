@@ -620,15 +620,15 @@ config/task path, i.e. if the executed task has a parameter `model`, `model` has
 a parameter `optimization`, and optimization a path parameter `loss.txt`, then
 the file will be `./out/model/optimization/loss.txt`.
 
-(subparameters-and-partial-identifiers)=
-### Subparameters and Partial Identifiers
+(partial-identifiers)=
+### Partial Identifiers
 
 Sometimes you want to share directories (like checkpoints) across tasks that
 differ only in certain parameters. For example, when training a model with
 different numbers of iterations but the same learning rate, you might want
 all runs to share the same checkpoint directory.
 
-**Subparameters** allow you to define parameter subsets that compute partial
+**Partial identifiers** allow you to define parameter subsets that compute partial
 identifiers by excluding certain parameter groups. This enables:
 
 - Sharing checkpoint directories across training runs with different iteration counts
@@ -647,19 +647,19 @@ iter_group = param_group("iter")
 model_group = param_group("model")
 ```
 
-#### Using Subparameters in Tasks
+#### Using Partial Identifiers in Tasks
 
-Define subparameters as class attributes and assign parameters to groups:
+Define partial identifiers as class attributes and assign parameters to groups:
 
 ```python
-from experimaestro import Task, Param, Meta, field, PathGenerator, subparameters, param_group
+from experimaestro import Task, Param, Meta, field, PathGenerator, partial, param_group
 from pathlib import Path
 
 iter_group = param_group("iter")
 
 class Learn(Task):
-    # Define a subparameters set that excludes iteration-related parameters
-    checkpoints = subparameters(exclude_groups=[iter_group])
+    # Define a partial identifier that excludes iteration-related parameters
+    checkpoints = partial(exclude_groups=[iter_group])
 
     # This parameter is in the iter group - excluded from partial identifier
     max_iter: Param[int] = field(groups=[iter_group])
@@ -696,9 +696,9 @@ task2 = Learn.C(max_iter=200, learning_rate=0.1)
 task3 = Learn.C(max_iter=100, learning_rate=0.2)
 ```
 
-#### Subparameters Options
+#### Partial Identifier Options
 
-The `subparameters()` function supports several options:
+The `partial()` function supports several options:
 
 | Option | Description |
 |--------|-------------|
@@ -708,19 +708,19 @@ The `subparameters()` function supports several options:
 | `exclude_no_group` | If True, exclude parameters with no group assigned |
 
 ```python
-from experimaestro import subparameters, param_group
+from experimaestro import partial, param_group
 
 iter_group = param_group("iter")
 model_group = param_group("model")
 
 # Exclude specific groups
-checkpoints = subparameters(exclude_groups=[iter_group])
+checkpoints = partial(exclude_groups=[iter_group])
 
 # Include only specific groups (exclude everything else)
-model_params = subparameters(exclude_all=True, include_groups=[model_group])
+model_params = partial(exclude_all=True, include_groups=[model_group])
 
 # Exclude ungrouped parameters
-grouped_only = subparameters(exclude_no_group=True)
+grouped_only = partial(exclude_no_group=True)
 ```
 
 #### Parameters in Multiple Groups
@@ -728,13 +728,13 @@ grouped_only = subparameters(exclude_no_group=True)
 A parameter can belong to multiple groups:
 
 ```python
-from experimaestro import Task, Param, field, subparameters, param_group
+from experimaestro import Task, Param, field, partial, param_group
 
 iter_group = param_group("iter")
 model_group = param_group("model")
 
 class MyTask(Task):
-    checkpoints = subparameters(exclude_groups=[iter_group])
+    checkpoints = partial(exclude_groups=[iter_group])
 
     # This parameter is in both groups
     x: Param[int] = field(groups=[iter_group, model_group])

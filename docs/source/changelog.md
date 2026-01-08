@@ -93,7 +93,7 @@ Provides:
 - `submit()` return type inference (including `task_outputs`)
 - `ConfigMixin` methods available on all Config subclasses
 
-#### [Subparameters (Partial Identifiers)](experiments/config.md#subparameters-and-partial-identifiers)
+#### [Partial Identifiers](experiments/config.md#partial-identifiers)
 
 Share directories across tasks that differ only in excluded parameters. This is particularly useful for:
 
@@ -103,7 +103,7 @@ Share directories across tasks that differ only in excluded parameters. This is 
 
 ```python
 class Learn(Task):
-    checkpoints = subparameters(exclude_groups=["iter"])
+    checkpoints = partial(exclude_groups=["iter"])
 
     max_iter: Param[int] = field(group="iter")
     learning_rate: Param[float]
@@ -114,7 +114,7 @@ class Learn(Task):
     )
 ```
 
-[Read more about subparameters...](experiments/config.md#subparameters-and-partial-identifiers)
+[Read more about partial identifiers...](experiments/config.md#partial-identifiers)
 
 #### [Configuration Composition](experiments/config.md#composition-operator)
 

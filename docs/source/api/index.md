@@ -200,10 +200,10 @@ Type annotations are used to declare parameters in configurations and tasks.
 .. autofunction:: experimaestro.param_group
 ```
 
-### subparameters
+### partial
 
 ```{eval-rst}
-.. autofunction:: experimaestro.subparameters
+.. autofunction:: experimaestro.partial
 ```
 
 ### PathGenerator

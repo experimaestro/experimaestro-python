@@ -201,7 +201,7 @@ RUNNING mymodule.MyTask/def456 [my_experiment] model=splade dataset=msmarco
 
 ### Cleanup Partial Directories
 
-Partial directories are shared checkpoint locations created by `subparameters`.
+Partial directories are shared checkpoint locations created by `partial()`.
 When all jobs using a partial are deleted, the partial becomes orphaned:
 
 ```bash
