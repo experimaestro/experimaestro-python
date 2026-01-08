@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 import json
 import logging
@@ -7,20 +8,21 @@ import os.path
 from pathlib import Path
 import threading
 import time
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Callable, Optional
 import weakref
 
 import fasteners
 from watchdog.events import FileSystemEventHandler
 
 from experimaestro.utils.asyncio import asyncThreadcheck
+from experimaestro.dynamic import DynamicResource
 
 logger = logging.getLogger("xpm.locking")
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.jobs import Job
     from experimaestro.connectors import Process
-    from experimaestro.scheduler.dependencies import DynamicDependency
+    from experimaestro.dynamic import DynamicDependency
 
 
 def get_job_lock_relpath(task_id: str, identifier: str) -> Path:
@@ -220,7 +222,7 @@ class DynamicDependencyLocks(Lock):
 
     def __init__(self):
         super().__init__()
-        self.locks: List[DynamicDependencyLock] = []
+        self.locks: list[DynamicDependencyLock] = []
 
     def append(self, lock: DynamicDependencyLock) -> None:
         """Add a lock to the container."""
@@ -257,7 +259,7 @@ class DynamicDependencyLocks(Lock):
         for lock in self.locks:
             await lock.aio_job_finished(job)
 
-    def to_json(self) -> List[dict]:
+    def to_json(self) -> list[dict]:
         """Serialize all locks for job process."""
         return [lock.to_json() for lock in self.locks]
 
@@ -315,9 +317,9 @@ class JobDependencyLock:
 class _JobDependencyLocksContext:
     """Context manager for acquiring/releasing job dependency locks."""
 
-    def __init__(self, locks: List[JobDependencyLock]):
+    def __init__(self, locks: list[JobDependencyLock]):
         self._locks = locks
-        self._acquired: List[JobDependencyLock] = []
+        self._acquired: list[JobDependencyLock] = []
 
     def __enter__(self):
         for lock in self._locks:
@@ -341,14 +343,14 @@ class JobDependencyLocks:
     """
 
     def __init__(self):
-        self.locks: List[JobDependencyLock] = []
+        self.locks: list[JobDependencyLock] = []
 
     def dependency_locks(self) -> _JobDependencyLocksContext:
         """Return a context manager that acquires locks on enter, releases on exit."""
         return _JobDependencyLocksContext(self.locks)
 
     @classmethod
-    def from_json(cls, locks_data: List[dict]) -> JobDependencyLocks:
+    def from_json(cls, locks_data: list[dict]) -> JobDependencyLocks:
         """Create from serialized lock data.
 
         Each lock entry must have 'module' and 'class' keys specifying
@@ -557,14 +559,17 @@ class _TrackedResourceProxy(FileSystemEventHandler):
             return resource.on_created(event)
 
 
-class TrackedDynamicResource(ABC):
+class TrackedDynamicResource(DynamicResource, ABC):
     """Base class for resources with file-based lock tracking.
+
+    Inherits from DynamicResource to provide async_wait() via ResourcePoller.
 
     This provides:
     - File system watching for lock files
     - IPC and thread locking
     - Condition variable for waiting on availability
     - Cache of lock files
+    - Async waiting via ResourcePoller
 
     File structure:
     - {lock_folder}/informations.json: Resource-level info (e.g., token counts)
@@ -580,7 +585,7 @@ class TrackedDynamicResource(ABC):
     """
 
     #: Subclass of DynamicLockFile to use for lock files
-    lock_file_class: Type[DynamicLockFile]
+    lock_file_class: type[DynamicLockFile]
 
     @property
     @abstractmethod
@@ -612,7 +617,7 @@ class TrackedDynamicResource(ABC):
         self.name = name
         self.lock_folder.mkdir(exist_ok=True, parents=True)
 
-        self.cache: Dict[str, DynamicLockFile] = {}
+        self.cache: dict[str, DynamicLockFile] = {}
 
         self.ipc_lock = fasteners.InterProcessLock(self.ipc_lock_path)
         self.lock = threading.Lock()
@@ -644,11 +649,43 @@ class TrackedDynamicResource(ABC):
         """Refresh state from disk.
 
         This is a fallback for when file system notifications are missed.
-        Call this periodically when waiting for resource availability.
+        Called by ResourcePoller periodically.
         """
         with self.lock, self.ipc_lock:
             self._update()
             self.available_condition.notify_all()
+
+    async def async_wait(self, timeout: float = 0) -> bool:
+        """Wait asynchronously until the resource state may have changed.
+
+        Uses ResourcePoller for efficient polling across all resources.
+
+        Args:
+            timeout: Maximum time to wait in seconds (0 = wait indefinitely)
+
+        Returns:
+            True if notified of a change, False if timed out
+        """
+        from experimaestro.dynamic import ResourcePoller
+
+        loop = asyncio.get_running_loop()
+        poller = ResourcePoller.instance()
+
+        event = poller.register(self, loop, timeout)
+
+        try:
+            if timeout > 0:
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=timeout)
+                    return True
+                except asyncio.TimeoutError:
+                    return False
+            else:
+                await event.wait()
+                return True
+        finally:
+            # Event cleanup is handled by poller
+            pass
 
     def _lock_file_key(self, path: Path) -> str:
         """Get the cache key for a lock file path.
@@ -697,6 +734,7 @@ class TrackedDynamicResource(ABC):
                 del self.cache[name]
                 self._unaccount_lock_file(lf)
                 self.available_condition.notify_all()
+        self._notify_poller()
 
     def _is_job_lock_file(self, path: Path) -> bool:
         """Check if path is a job lock file (under jobs_folder)."""
@@ -705,6 +743,16 @@ class TrackedDynamicResource(ABC):
             return path.suffix == ".json"
         except ValueError:
             return False
+
+    def _notify_poller(self) -> None:
+        """Notify the ResourcePoller that state has changed.
+
+        Called after file system events to wake up async waiters.
+        """
+        from experimaestro.dynamic import ResourcePoller
+
+        if ResourcePoller._instance is not None:
+            ResourcePoller._instance.notify(self)
 
     def on_deleted(self, event) -> None:
         """Handle file deletion event."""
@@ -726,6 +774,7 @@ class TrackedDynamicResource(ABC):
                     del self.cache[key]
                     self._unaccount_lock_file(lf)
                     self.available_condition.notify_all()
+            self._notify_poller()
 
     def on_created(self, event) -> None:
         """Handle file creation event."""

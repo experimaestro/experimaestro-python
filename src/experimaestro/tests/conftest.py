@@ -3,6 +3,9 @@ import pytest
 import os
 import shutil
 
+# Set shorter poll interval for tests (before any imports that read it)
+os.environ.setdefault("XPM_POLL_INTERVAL_MAX", "5.0")
+
 
 @pytest.fixture(scope="session")
 def xpmdirectory(tmp_path_factory):
@@ -26,10 +29,14 @@ def reset_scheduler():
     from experimaestro.webui import WebUIServer
     from experimaestro.tokens import CounterToken
     from experimaestro.core.partial_lock import PartialJobResource
+    from experimaestro.dynamic import ResourcePoller
 
     # Clear token and resource caches
     CounterToken.TOKENS.clear()
     PartialJobResource.RESOURCES.clear()
+
+    # Reset ResourcePoller singleton
+    ResourcePoller.reset()
 
     # Get the singleton instance if it exists
     if Scheduler._instance is not None:
@@ -107,6 +114,9 @@ def reset_scheduler():
     # Clear token and resource caches after test
     CounterToken.TOKENS.clear()
     PartialJobResource.RESOURCES.clear()
+
+    # Reset ResourcePoller singleton after test
+    ResourcePoller.reset()
 
 
 # Sets a flag

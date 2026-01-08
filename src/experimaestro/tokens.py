@@ -25,7 +25,8 @@ from .locking import (
     LockError,
     TrackedDynamicResource,
 )
-from .scheduler.dependencies import DynamicDependency, Resource
+from .dynamic import DynamicDependency
+from .scheduler.dependencies import Resource
 import logging
 
 

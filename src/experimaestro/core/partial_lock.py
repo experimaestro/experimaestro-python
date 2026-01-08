@@ -19,7 +19,8 @@ from experimaestro.locking import (
     LockError,
     TrackedDynamicResource,
 )
-from experimaestro.scheduler.dependencies import DynamicDependency, Resource
+from experimaestro.dynamic import DynamicDependency
+from experimaestro.scheduler.dependencies import Resource
 
 
 logger = logging.getLogger("xpm.partial")
