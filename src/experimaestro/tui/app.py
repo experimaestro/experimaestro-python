@@ -146,18 +146,19 @@ class KillConfirmScreen(ModalScreen[bool]):
             self.dismiss(False)
 
 
-def get_status_icon(status: str, failure_reason=None):
+def get_status_icon(status: str, failure_reason=None, transient=None):
     """Get status icon for a job state.
 
     Args:
         status: Job state name (e.g., "done", "error", "running")
         failure_reason: Optional JobFailureStatus enum for error states
+        transient: Optional TransientMode enum
 
     Returns:
         Status icon string
     """
     if status == "done":
-        return "✓"
+        return "✅"
     elif status == "error":
         # Show different icons for different failure types
         if failure_reason is not None:
@@ -175,6 +176,9 @@ def get_status_icon(status: str, failure_reason=None):
         return "▶"
     elif status == "waiting":
         return "⌛"  # Waiting for dependencies
+    elif status == "unscheduled" and transient is not None and transient.is_transient:
+        # Transient job that was skipped (not needed)
+        return "💤"  # Sleeping - dormant, not activated
     else:
         # phantom, unscheduled or unknown
         return "👻"
@@ -831,7 +835,8 @@ class JobDetailView(Widget):
         # Format status with icon and name
         status_name = job.state.name if job.state else "unknown"
         failure_reason = getattr(job, "failure_reason", None)
-        status_icon = get_status_icon(status_name, failure_reason)
+        transient = getattr(job, "transient", None)
+        status_icon = get_status_icon(status_name, failure_reason, transient)
         status_text = f"{status_icon} {status_name}"
         if failure_reason:
             status_text += f" ({failure_reason.name})"
@@ -1438,7 +1443,8 @@ class JobsTable(Vertical):
                     status_text = "▶"
             else:
                 failure_reason = getattr(job, "failure_reason", None)
-                status_text = get_status_icon(status, failure_reason)
+                transient = getattr(job, "transient", None)
+                status_text = get_status_icon(status, failure_reason, transient)
 
             # Tags are stored in JobTagModel, accessed via tags_map
             job_tags = self.tags_map.get(job.identifier, {})
@@ -1645,8 +1651,9 @@ class OrphanJobsScreen(Screen):
 
         for job in self._get_sorted_jobs():
             failure_reason = getattr(job, "failure_reason", None)
+            transient = getattr(job, "transient", None)
             status_icon = get_status_icon(
-                job.state.name if job.state else "unknown", failure_reason
+                job.state.name if job.state else "unknown", failure_reason, transient
             )
             if job.identifier in self._size_cache:
                 size_text = self._size_cache[job.identifier]

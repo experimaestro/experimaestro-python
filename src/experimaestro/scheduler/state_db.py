@@ -39,7 +39,8 @@ logger = logging.getLogger("xpm.state_db")
 # - Version 5: Changed JobTagModel to be experiment-run-scoped (fixes GH #128)
 # and introduced JobExperimentsModel for job-experiment/run membership tracking
 # - Version 6: Added JobDependenciesModel to store job dependencies
-CURRENT_DB_VERSION = 6
+# - Version 7: Added transient field to JobModel (for transient task support)
+CURRENT_DB_VERSION = 7
 
 
 class DatabaseVersionError(Exception):
@@ -162,6 +163,7 @@ class JobModel(BaseModel):
         Together (job_id, task_id) form the PRIMARY KEY
         state: Current job state (e.g., "unscheduled", "waiting", "running", "done", "error")
         failure_reason: Optional failure reason for error states (e.g., "TIMEOUT", "DEPENDENCY")
+        transient: Transient mode (0=NONE, 1=TRANSIENT, 2=REMOVE)
         submitted_time: When job was submitted (Unix timestamp)
         started_time: When job started running (Unix timestamp)
         ended_time: When job finished (Unix timestamp)
@@ -178,6 +180,7 @@ class JobModel(BaseModel):
     task_id = CharField(index=True)
     state = CharField(default="unscheduled", index=True)
     failure_reason = CharField(null=True)
+    transient = IntegerField(default=0)  # TransientMode: 0=NONE, 1=TRANSIENT, 2=REMOVE
     submitted_time = FloatField(null=True)
     started_time = FloatField(null=True)
     ended_time = FloatField(null=True)

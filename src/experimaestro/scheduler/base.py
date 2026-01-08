@@ -301,12 +301,35 @@ class Scheduler(StateProvider, threading.Thread):
             xp = experiment.current()
             xp.add_job(other)
 
+            # Merge transient modes: more conservative mode wins
+            # NONE(0) > TRANSIENT(1) > REMOVE(2) - lower value wins
+            was_transient = other.transient.is_transient
+            if job.transient < other.transient:
+                other.transient = job.transient
+                # If job was transient and is now non-transient, mark it as needed
+                # This flag tells aio_submit not to skip the job
+                if was_transient and not other.transient.is_transient:
+                    other._needed_transient = True
+
             # Copy watched outputs from new job to existing job
             # This ensures new callbacks are registered even for resubmitted jobs
             other.watched_outputs.extend(job.watched_outputs)
 
+            # Check if job needs to be re-started
+            need_restart = False
             if other.state.is_error():
-                logger.info("Re-submitting job")
+                logger.info("Re-submitting job (was in error state)")
+                need_restart = True
+            elif (
+                was_transient
+                and not other.transient.is_transient
+                and other.state == JobState.UNSCHEDULED
+            ):
+                # Job was transient and skipped, but now is non-transient - restart it
+                logger.info("Re-submitting job (was transient, now non-transient)")
+                need_restart = True
+
+            if need_restart:
                 # Clean up old process info so it will be re-started
                 other._process = None
                 if other.pidpath.is_file():
@@ -314,6 +337,7 @@ class Scheduler(StateProvider, threading.Thread):
                 # Use set_state to handle experiment statistics updates
                 other.set_state(JobState.WAITING)
                 self.notify_job_state(other)  # Notify listeners of re-submit
+                # The calling aio_submit will continue with this job and start it
             else:
                 logger.warning("Job %s already submitted", job.identifier)
 
@@ -539,19 +563,27 @@ class Scheduler(StateProvider, threading.Thread):
 
         # If not done or running, start the job
         if not job.state.finished():
-            try:
-                state = await self.aio_start(job)
-                # Set endtime before set_state so database gets the timestamp
-                job.endtime = time.time()
-                job.set_state(state)
-            except Exception:
-                logger.exception("Got an exception while starting the job")
-                raise
+            # Check if this is a transient job that is not needed
+            if job.transient.is_transient and not job._needed_transient:
+                job.set_state(JobState.UNSCHEDULED)
+
+            # Start the job if not skipped (state is still WAITING)
+            if job.state == JobState.WAITING:
+                try:
+                    state = await self.aio_start(job)
+                    if state is not None:
+                        job.endtime = time.time()
+                        job.set_state(state)
+                except Exception:
+                    logger.exception("Got an exception while starting the job")
+                    raise
 
         # Job is finished - experiment statistics already updated by set_state
 
         # Write final metadata with end time and final state
-        job.write_metadata()
+        # Only for jobs that actually started (starttime is set in aio_start)
+        if job.starttime is not None:
+            job.write_metadata()
 
         if job in self.waitingjobs:
             self.waitingjobs.remove(job)

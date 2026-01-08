@@ -1,7 +1,7 @@
 """Dependency between tasks and tokens"""
 
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -17,10 +17,20 @@ class Dependents:
     def __init__(self):
         self.lock = threading.Lock()
         self._dependents: set[Dependency] = set()  # as source
+        self._on_add_callback: Optional[Callable[[], None]] = None
+
+    def set_on_add_callback(self, callback: Optional[Callable[[], None]]):
+        """Set a callback to be called when a dependent is added"""
+        with self.lock:
+            self._on_add_callback = callback
 
     def add(self, dependency):
         with self.lock:
             self._dependents.add(dependency)
+            callback = self._on_add_callback
+        # Call callback outside the lock to avoid deadlocks
+        if callback is not None:
+            callback()
 
     def __enter__(self):
         # Returns the set after locking

@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from ..partial import Partial
     from experimaestro.scheduler.base import Job
     from experimaestro.scheduler.workspace import RunMode
+    from experimaestro.scheduler.transient import TransientMode
     from experimaestro.launchers import Launcher
     from experimaestro.scheduler import Workspace
 
@@ -694,10 +695,16 @@ class ConfigInformation:
         run_mode=None,
         init_tasks: List["LightweightTask"] = [],
         max_retries: Optional[int] = None,
+        transient: "TransientMode" = None,
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
+        from experimaestro.scheduler.transient import TransientMode
         from ..callbacks import TaskEventListener
+
+        # Use default transient mode if not specified
+        if transient is None:
+            transient = TransientMode.NONE
 
         # --- Prepare the object
 
@@ -718,6 +725,7 @@ class ConfigInformation:
             workspace=workspace,
             run_mode=run_mode,
             max_retries=max_retries,
+            transient=transient,
         )
 
         # Validate the object
@@ -1738,6 +1746,7 @@ class ConfigMixin:
         run_mode: "RunMode" = None,
         init_tasks: List["LightweightTask"] = [],
         max_retries: Optional[int] = None,
+        transient: "TransientMode" = None,
     ):
         """Submit this task
 
@@ -1745,6 +1754,7 @@ class ConfigMixin:
         :param launcher: The launcher, defaults to None
         :param run_mode: Run mode (if None, uses the workspace default)
         :param max_retries: Maximum number of retries for resumable tasks that timeout (default: from workspace settings or 3)
+        :param transient: Transient mode for intermediary tasks (see TransientMode)
         :return: an object object
         """
         return self.__xpm__.submit(
@@ -1753,6 +1763,7 @@ class ConfigMixin:
             run_mode=run_mode,
             init_tasks=init_tasks,
             max_retries=max_retries,
+            transient=transient,
         )
 
     def stdout(self):

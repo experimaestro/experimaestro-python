@@ -19,7 +19,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.transient import TransientMode
 
 logger = logging.getLogger("xpm.interfaces")
 
@@ -246,7 +249,7 @@ class JobStateError(JobState):
         return True
 
 
-# FIXME: Get rid of those
+# NOTE: Consider removing these singleton instances in a future refactor
 # Create singleton instances for backward compatibility
 # These can be used in comparisons: if state == JobState.DONE: ...
 JobState.UNSCHEDULED = JobStateUnscheduled()
@@ -293,6 +296,7 @@ class BaseJob:
         progress: List of progress updates
         exit_code: Process exit code (optional)
         retry_count: Number of retries
+        transient: Transient mode (NONE, TRANSIENT, or REMOVE)
     """
 
     identifier: str
@@ -305,6 +309,7 @@ class BaseJob:
     progress: List[Dict]
     exit_code: Optional[int]
     retry_count: int
+    transient: "TransientMode"
 
     @property
     def locator(self) -> str:

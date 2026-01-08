@@ -14,6 +14,7 @@ from experimaestro.notifications import LevelInformation, Reporter
 # from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.dependencies import Dependency, Resource
 from experimaestro.scheduler.workspace import RunMode, Workspace
+from experimaestro.scheduler.transient import TransientMode
 from experimaestro.scheduler.interfaces import (
     BaseJob,
     JobState,
@@ -47,6 +48,7 @@ __all__ = [
     "JobStateError",
     "JobFailureStatus",
     "Job",
+    "TransientMode",
 ]
 
 
@@ -63,8 +65,39 @@ class JobLock(Lock):
 
 
 class JobDependency(Dependency):
+    origin: "Job"
+
     def __init__(self, job):
         super().__init__(job)
+
+    async def ensure_started(self):
+        """Ensure the dependency job is started.
+
+        If the dependency is a transient job that was skipped (state is UNSCHEDULED),
+        this will start it so it actually runs.
+        """
+        origin_job = self.origin
+        if (
+            origin_job.transient.is_transient
+            and origin_job.state == JobState.UNSCHEDULED
+        ):
+            # Transient job was skipped but now is needed - start it
+            from experimaestro.utils import logger
+
+            logger.info(
+                "Starting transient job %s (needed by dependent job)",
+                origin_job.identifier,
+            )
+            # Mark as needed so aio_submit won't skip it again
+            origin_job._needed_transient = True
+            # Mark as WAITING and start the job via aio_submit
+            # Use aio_submit (not aio_start) to properly handle all job lifecycle
+            origin_job.set_state(JobState.WAITING)
+            if origin_job.scheduler is not None:
+                # Create a new future for the job so aio_lock can wait on it
+                origin_job._future = asyncio.ensure_future(
+                    origin_job.scheduler.aio_submit(origin_job)
+                )
 
     async def aio_lock(self, timeout: float = 0):
         """Acquire lock on job dependency by waiting for job to complete
@@ -80,6 +113,9 @@ class JobDependency(Dependency):
             raise ValueError(
                 "Job dependencies only support timeout=0 (wait indefinitely)"
             )
+
+        # Ensure the dependency job is started (handles transient jobs)
+        await self.ensure_started()
 
         # Wait for the job to finish
         if self.origin._future is None:
@@ -112,6 +148,7 @@ class Job(BaseJob, Resource):
         launcher: "Launcher" = None,
         run_mode: RunMode = RunMode.NORMAL,
         max_retries: Optional[int] = None,
+        transient: TransientMode = TransientMode.NONE,
     ):
         from experimaestro.scheduler.base import Scheduler
 
@@ -148,6 +185,12 @@ class Job(BaseJob, Resource):
             max_retries = self.workspace.workspace_settings.max_retries
         self.max_retries = max_retries if max_retries is not None else 3
         self.retry_count = 0
+
+        # Transient mode for intermediary tasks
+        self.transient = transient if transient is not None else TransientMode.NONE
+        # Flag set when a transient job's mode is merged to non-transient,
+        # indicating the job should run even though it was originally transient
+        self._needed_transient = False
 
         # Watched outputs (stored for deferred registration with scheduler)
         self.watched_outputs: List["WatchedOutput"] = list(

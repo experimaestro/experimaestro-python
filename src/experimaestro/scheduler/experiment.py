@@ -681,6 +681,25 @@ class experiment(BaseExperiment):
             experiment.CURRENT = self.old_experiment
 
         if self.workspace.run_mode == RunMode.NORMAL:
+            # Remove job directories for transient jobs with REMOVE mode
+            if exc_type is None:
+                for job in list(self.scheduler.jobs.values()):
+                    if (
+                        self in job.experiments
+                        and job.transient.should_remove
+                        and job.state.finished()
+                    ):
+                        job_path = job.path
+                        if job_path.exists():
+                            logger.info(
+                                "Removing transient job directory: %s", job_path
+                            )
+                            rmtree(job_path)
+                        # Also remove the symlink in the experiment's jobs folder
+                        symlink_path = self.jobspath / job.relpath
+                        if symlink_path.is_symlink():
+                            symlink_path.unlink()
+
             # Write the state
             logging.info("Saving the experiment state")
             from experimaestro.scheduler.state import ExperimentState

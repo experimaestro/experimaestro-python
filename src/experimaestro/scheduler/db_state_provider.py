@@ -61,6 +61,7 @@ from experimaestro.scheduler.state_provider import (
     MockService,
 )
 from experimaestro.notifications import get_progress_information_from_dict
+from experimaestro.scheduler.transient import TransientMode
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.jobs import Job
@@ -1117,12 +1118,14 @@ class DbStateProvider(OfflineStateProvider):
             task_id=task_id,
             state=job.state.name,
             submitted_time=job.submittime,
+            transient=int(job.transient),
             updated_at=now,
         ).on_conflict(
             conflict_target=[JobModel.job_id, JobModel.task_id],
             update={
                 JobModel.state: job.state.name,
                 JobModel.submitted_time: job.submittime,
+                JobModel.transient: int(job.transient),
                 JobModel.updated_at: now,
                 JobModel.failure_reason: None,  # Clear old failure reason on resubmit
             },
@@ -2291,6 +2294,7 @@ class DbStateProvider(OfflineStateProvider):
             progress=progress_list,
             updated_at=job_model.updated_at.isoformat(),
             failure_reason=failure_reason,
+            transient=TransientMode(job_model.transient),
         )
 
     def _format_time(self, timestamp: Optional[float]) -> str:

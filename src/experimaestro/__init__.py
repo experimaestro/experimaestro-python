@@ -64,6 +64,7 @@ from .launchers import Launcher
 from .scheduler import Scheduler, experiment, FailedExperiment, DirtyGitError
 from .exceptions import GracefulTimeout
 from .scheduler.workspace import Workspace, RunMode
+from .scheduler.transient import TransientMode
 from .scheduler.state import get_experiment
 from .notifications import progress, tqdm
 from .checkers import Choices

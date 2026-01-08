@@ -29,6 +29,7 @@ from experimaestro.scheduler.interfaces import (
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
 )
+from experimaestro.scheduler.transient import TransientMode
 from experimaestro.notifications import (
     ProgressInformation,
     get_progress_information_from_dict,
@@ -357,6 +358,7 @@ class MockJob(BaseJob):
         exit_code: Optional[int] = None,
         retry_count: int = 0,
         failure_reason: Optional[JobFailureStatus] = None,
+        transient: TransientMode = TransientMode.NONE,
     ):
         self.identifier = identifier
         self.task_id = task_id
@@ -371,6 +373,7 @@ class MockJob(BaseJob):
         self.exit_code = exit_code
         self.retry_count = retry_count
         self.failure_reason = failure_reason
+        self.transient = transient
 
     @classmethod
     def from_disk(cls, path: Path) -> Optional["MockJob"]:
