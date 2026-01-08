@@ -909,7 +909,30 @@ class JobDetailView(Widget):
                 pct = p.progress * 100
                 desc = p.desc or ""
                 indent = "  " * level
-                progress_lines.append(f"{indent}{pct:.1f}% {desc}")
+
+                # Create visual progress bar (20 chars wide)
+                bar_width = 20
+                filled = int(p.progress * bar_width)
+                remaining = bar_width - filled
+
+                # Use Unicode block characters with colors
+                filled_bar = "█" * filled
+                remaining_bar = "░" * remaining
+
+                # Color based on progress level
+                if pct >= 100:
+                    bar_color = "green"
+                elif pct >= 50:
+                    bar_color = "cyan"
+                else:
+                    bar_color = "yellow"
+
+                # Format: [bar] percentage description
+                bar_text = f"[{bar_color}]{filled_bar}[/][dim]{remaining_bar}[/]"
+                pct_text = f"[bold]{pct:5.1f}%[/bold]"
+                desc_text = f" [italic]{desc}[/]" if desc else ""
+
+                progress_lines.append(f"{indent}{bar_text} {pct_text}{desc_text}")
             progress_text = "\n".join(progress_lines) if progress_lines else "-"
         else:
             progress_text = "-"
@@ -1436,7 +1459,8 @@ class JobsTable(Vertical):
             if status == "running":
                 progress_list = job.progress or []
                 if progress_list:
-                    last_progress = progress_list[-1]
+                    # We only report main progress here (level 0)
+                    last_progress = progress_list[0]
                     progress_pct = last_progress.progress * 100
                     status_text = f"▶ {progress_pct:.0f}%"
                 else:
