@@ -331,21 +331,49 @@ class WorkspaceStateProvider(StateProvider):
         self, experiment_id: str, exp_dir: Path
     ) -> Optional[MockExperiment]:
         """Load experiment from v1 layout (xp/{exp-id}/ with jobs/, jobs.bak/)"""
+        from experimaestro.scheduler.interfaces import JobState as JobStateClass
+
         # Count jobs from jobs/ and jobs.bak/ directories
-        total_jobs = 0
         jobs_dir = exp_dir / "jobs"
         jobs_bak_dir = exp_dir / "jobs.bak"
 
-        job_paths = set()
-        for jdir in [jobs_dir, jobs_bak_dir]:
-            if jdir.exists():
-                for job_path in jdir.glob("*/*"):
-                    if job_path.is_dir():
-                        # Job key is task_id/job_id
-                        key = str(job_path.relative_to(jdir))
-                        job_paths.add(key)
+        total_jobs = 0
+        finished_jobs = 0
+        failed_jobs = 0
+        seen_jobs = set()
 
-        total_jobs = len(job_paths)
+        for jdir in [jobs_dir, jobs_bak_dir]:
+            if not jdir.exists():
+                continue
+
+            for job_link in jdir.glob("*/*"):
+                # Job key is task_id/job_id
+                key = str(job_link.relative_to(jdir))
+                if key in seen_jobs:
+                    continue
+                seen_jobs.add(key)
+
+                # Resolve symlink to check if job exists
+                try:
+                    job_path = job_link.resolve()
+                    if not job_path.is_dir():
+                        continue
+                except OSError:
+                    # Broken symlink - skip
+                    continue
+
+                total_jobs += 1
+
+                # Read state from .done/.failed files
+                task_id = job_link.parent.name
+                scriptname = task_id.rsplit(".", 1)[-1]
+                state = JobStateClass.from_path(job_path, scriptname)
+
+                if state is not None:
+                    if state == JobState.DONE:
+                        finished_jobs += 1
+                    elif state.is_error():
+                        failed_jobs += 1
 
         # Get modification time for updated_at
         try:
@@ -358,14 +386,19 @@ class WorkspaceStateProvider(StateProvider):
             workdir=exp_dir,
             current_run_id="v1",  # Mark as v1 experiment
             total_jobs=total_jobs,
-            finished_jobs=0,  # Can't determine from v1 layout
-            failed_jobs=0,
+            finished_jobs=finished_jobs,
+            failed_jobs=failed_jobs,
             updated_at=updated_at,
             experiment_id=experiment_id,
         )
 
     def _get_v1_jobs(self, experiment_id: str) -> List[MockJob]:
-        """Get jobs from v1 experiment layout"""
+        """Get jobs from v1 experiment layout
+
+        v1 layout: xp/{exp-id}/jobs/{task_id}/{job_hash} -> symlink to jobs/{task_id}/{job_hash}
+        """
+        from experimaestro.scheduler.interfaces import JobState as JobStateClass
+
         exp_dir = self.workspace_path / "xp" / experiment_id
         if not exp_dir.exists():
             return []
@@ -378,25 +411,43 @@ class WorkspaceStateProvider(StateProvider):
             if not jdir.exists():
                 continue
 
-            for job_path in jdir.glob("*/*"):
-                if not job_path.is_dir():
+            for job_link in jdir.glob("*/*"):
+                # Resolve symlinks to get actual job path
+                try:
+                    job_path = job_link.resolve()
+                    if not job_path.is_dir():
+                        continue
+                except OSError:
+                    # Broken symlink
                     continue
 
-                task_id = job_path.parent.name
-                job_id = job_path.name
+                task_id = job_link.parent.name
+                job_id = job_link.name
 
-                # Try to load job from metadata
+                # Try to load job from metadata (v2 style)
                 job = MockJob.from_disk(job_path)
                 if job is None:
-                    # Create minimal MockJob
+                    # v1 jobs: read state from .done/.failed files
+                    # Script name is the last component of task_id
+                    scriptname = task_id.rsplit(".", 1)[-1]
+                    state = JobStateClass.from_path(job_path, scriptname)
+                    if state is None:
+                        state = JobState.UNSCHEDULED
+
+                    # Get modification time for timestamps
+                    try:
+                        mtime = job_path.stat().st_mtime
+                    except OSError:
+                        mtime = None
+
                     job = MockJob(
                         identifier=job_id,
                         task_id=task_id,
                         path=job_path,
-                        state=JobState.UNSCHEDULED,
-                        submittime=None,
-                        starttime=None,
-                        endtime=None,
+                        state=state,
+                        submittime=mtime,
+                        starttime=mtime,
+                        endtime=mtime if state.finished() else None,
                         progress=[],
                         updated_at="",
                     )

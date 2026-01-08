@@ -14,9 +14,7 @@ WORKSPACE_DIR/
 │       ├── lock                    # Lock file (prevents concurrent runs)
 │       └── {run-id}/               # One directory per run
 │           ├── environment.json    # Python environment and git info
-│           ├── state.json          # Final experiment state
-│           ├── jobs.jsonl          # Job submissions log
-│           ├── services.json       # Active services during run
+│           ├── status.json         # Complete state snapshot (jobs, services, etc.)
 │           ├── jobs/               # Symlinks to job directories
 │           ├── results/            # Saved experiment results
 │           └── data/               # Serialized configurations
@@ -33,7 +31,9 @@ WORKSPACE_DIR/
 │           └── {partial-hash}/
 ├── config/                         # Configuration cache
 └── .experimaestro/
-    └── workspace.db                # SQLite database for state tracking
+    └── experiments/
+        ├── events-{count}@{experiment-id}.jsonl  # Event log (active experiments)
+        └── {experiment-id}                       # Symlink to current run
 ```
 
 ## Run ID Format
@@ -127,10 +127,32 @@ workspaces:
 - Only the most recent `max_failed` failed runs are kept
 - Runs with unknown status are never automatically deleted
 
-## Migration from v1
+## v1 Experiment Layout
 
-If you have an existing workspace with the old v1 layout (`xp/` directory),
-you can migrate to the new v2 layout using the CLI:
+Experimaestro v2 can read experiments created with v1 (the `xp/` directory layout).
+The state provider automatically detects and handles both layouts:
+
+**v1 layout** (legacy):
+```
+WORKSPACE_DIR/
+└── xp/
+    └── {experiment-id}/
+        ├── jobs/           # Symlinks to job directories (current run)
+        └── jobs.bak/       # Symlinks to job directories (previous run)
+```
+
+**v2 layout** (current):
+```
+WORKSPACE_DIR/
+└── experiments/
+    └── {experiment-id}/
+        └── {run-id}/
+            └── status.json
+```
+
+### Migration (Optional)
+
+If you want to migrate v1 experiments to v2 layout:
 
 ```bash
 # Preview what will be migrated
@@ -149,30 +171,73 @@ The migration:
 - Removes the empty `xp/` directory
 - Creates a broken symlink `xp -> /experimaestro_v2_migrated_workspace_do_not_use_v1`
 
-The broken symlink prevents experimaestro v1 from recreating the `xp/` directory
-and causes it to fail clearly if accidentally used on a migrated workspace.
-
-:::{warning}
-After migrating to v2, do not use experimaestro v1 commands on the workspace.
-The orphan cleanup and other commands have different expectations about the
-directory structure.
+:::{note}
+Migration is optional. The TUI, web UI, and CLI commands work with both layouts.
+However, new experiments always use the v2 layout.
 :::
 
-## Database
+## State Tracking
 
-The SQLite database at `.experimaestro/workspace.db` stores:
+Experimaestro uses a filesystem-based state tracking system instead of a database.
+This approach is more robust on network filesystems (NFS) and easier to inspect.
 
-- Experiment metadata and run history
-- Job states and relationships
-- Service registrations
-- Partial path tracking for cleanup
+### Status File (`status.json`)
 
-The database is automatically synchronized from disk state when needed. You can
-force a sync using:
+Each experiment run has a `status.json` file containing the complete state:
 
-```bash
-experimaestro experiments sync --workdir /path/to/workspace
+```json
+{
+  "version": 1,
+  "experiment_id": "my-experiment",
+  "run_id": "20250108_143022",
+  "events_count": 42,
+  "hostname": "compute-node-01",
+  "started_at": "2025-01-08T14:30:22.123456",
+  "ended_at": "2025-01-08T15:45:10.654321",
+  "status": "completed",
+  "jobs": {
+    "<job_id>": {
+      "job_id": "...",
+      "task_id": "...",
+      "state": "done",
+      "submittime": "2025-01-08T14:30:25.000000",
+      "starttime": "2025-01-08T14:31:00.000000",
+      "endtime": "2025-01-08T14:35:00.000000",
+      "progress": 1.0
+    }
+  },
+  "tags": {"<job_id>": {"key": "value"}},
+  "dependencies": {"<job_id>": ["<depends_on_job_id>"]},
+  "services": {
+    "<service_id>": {
+      "service_id": "...",
+      "description": "...",
+      "state": "running",
+      "state_dict": {}
+    }
+  }
+}
 ```
+
+### Event Log
+
+While an experiment is running, events are streamed to a JSONL file at
+`.experimaestro/experiments/events-{count}@{experiment-id}.jsonl`:
+
+```jsonl
+{"type": "job_submitted", "job_id": "...", "task_id": "...", "timestamp": ...}
+{"type": "job_state_changed", "job_id": "...", "state": "running", "timestamp": ...}
+{"type": "service_added", "service_id": "...", "description": "...", "timestamp": ...}
+```
+
+When the experiment completes, events are consolidated into `status.json` and
+the event log is cleaned up.
+
+### Current Run Symlink
+
+A symlink at `.experimaestro/experiments/{experiment-id}` points to the current
+(or most recent) run directory. This allows quick access to the active run
+without scanning all run directories
 
 ## Related Commands
 
