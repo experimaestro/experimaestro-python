@@ -46,6 +46,8 @@ extensions = [
     "sphinx.ext.napoleon",
     # Auto-link code in code blocks to documentation
     "sphinx_codeautolink",
+    # Copy button for code blocks
+    "sphinx_copybutton",
 ]
 
 # Add any paths that contain templates here, relative to this directory.

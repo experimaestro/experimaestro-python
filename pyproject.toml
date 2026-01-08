@@ -69,6 +69,7 @@ docs = [
     "myst-parser>=2.0",
     "sphinx-rtd-theme>=2.0",
     "sphinx-codeautolink>=0.15",
+    "sphinx-copybutton>=0.5",
 ]
 ssh = [
     "paramiko>=3.3",
