@@ -113,6 +113,9 @@ class FSEventsMarkerWorkaround:
         with self._lock:
             self._timer = None
 
+        if not self._enabled:
+            return
+
         try:
             marker_path = self._db_dir / DB_CHANGE_MARKER
             marker_path.touch()

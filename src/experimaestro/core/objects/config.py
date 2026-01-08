@@ -1628,10 +1628,51 @@ class ConfigMixin:
         return f"Config[{self.__xpmtype__.identifier}]"
 
     def __str__(self):
-        params = ", ".join(
-            [f"{key}={value}" for key, value in self.__xpm__.values.items()]
-        )
-        return f"{self.__xpmtype__.value_type.__module__}.{self.__xpmtype__.value_type.__qualname__}({params})"
+        return self.to_str()
+
+    def to_str(self, max_depth: int = 3, _visited: set = None) -> str:
+        """Convert config to string with cycle detection and depth limiting.
+
+        Args:
+            max_depth: Maximum depth for nested configs (default: 3)
+            _visited: Internal set to track visited objects for cycle detection
+        """
+        if _visited is None:
+            _visited = set()
+
+        obj_id = id(self)
+        if obj_id in _visited:
+            return "..."
+
+        _visited.add(obj_id)
+        try:
+            if max_depth <= 0:
+                return f"{self.__xpmtype__.value_type.__qualname__}(...)"
+
+            def format_value(value):
+                if isinstance(value, Config):
+                    return value.to_str(max_depth - 1, _visited)
+                elif isinstance(value, (list, tuple)):
+                    formatted = [format_value(v) for v in value]
+                    return (
+                        f"[{', '.join(formatted)}]"
+                        if isinstance(value, list)
+                        else f"({', '.join(formatted)})"
+                    )
+                elif isinstance(value, dict):
+                    items = [f"{k}: {format_value(v)}" for k, v in value.items()]
+                    return "{" + ", ".join(items) + "}"
+                return str(value)
+
+            params = ", ".join(
+                [
+                    f"{key}={format_value(value)}"
+                    for key, value in self.__xpm__.values.items()
+                ]
+            )
+            return f"{self.__xpmtype__.value_type.__module__}.{self.__xpmtype__.value_type.__qualname__}({params})"
+        finally:
+            _visited.discard(obj_id)
 
     def tag(self, name, value):
         # Capture caller's location and pass to addtag

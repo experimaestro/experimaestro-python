@@ -14,12 +14,29 @@ import fasteners
 from watchdog.events import FileSystemEventHandler
 
 from experimaestro.utils.asyncio import asyncThreadcheck
-from .utils import logger
+
+logger = logging.getLogger("xpm.locking")
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.jobs import Job
     from experimaestro.connectors import Process
     from experimaestro.scheduler.dependencies import DynamicDependency
+
+
+def get_job_lock_relpath(task_id: str, identifier: str) -> Path:
+    """Get the lock relative path for a job.
+
+    Creates a unique relative path combining task_id and identifier.
+    Limited to 256 characters to avoid filesystem issues.
+
+    Args:
+        task_id: The task identifier
+        identifier: The job identifier (hash)
+
+    Returns:
+        Relative path in format "{task_id}@{identifier}.json"
+    """
+    return Path(f"{task_id}@{identifier}"[:256] + ".json")
 
 
 class Lock:
@@ -100,7 +117,7 @@ class DynamicDependencyLock(Lock, ABC):
     File structure (standardized):
     - {lock_folder}/informations.json: Resource-level info (e.g., token counts)
     - {lock_folder}/ipc.lock: IPC lock for inter-process coordination
-    - {lock_folder}/jobs/{task_id}/{identifier}.json: Per-job lock file
+    - {lock_folder}/jobs/{task_specific_path}.json: Per-job lock file
 
     Subclasses must implement:
     - lock_folder: Path to the lock folder
@@ -130,7 +147,11 @@ class DynamicDependencyLock(Lock, ABC):
     def lock_file_path(self) -> Path:
         """Path to the lock file for the current job."""
         job = self.dependency.target
-        return self.lock_folder / "jobs" / job.task_id / f"{job.identifier}.json"
+        return (
+            self.lock_folder
+            / "jobs"
+            / get_job_lock_relpath(job.task_id, job.identifier)
+        )
 
     async def aio_job_before_start(self, job: Job) -> None:
         """Called before the job is started.
@@ -548,7 +569,7 @@ class TrackedDynamicResource(ABC):
     File structure:
     - {lock_folder}/informations.json: Resource-level info (e.g., token counts)
     - {lock_folder}/ipc.lock: IPC lock for inter-process coordination
-    - {lock_folder}/jobs/{task_id}/{identifier}.json: Per-job lock files
+    - {lock_folder}/jobs/{task_specific_path}.json: Per-job lock files
 
     Subclasses must implement:
     - lock_folder: Path to the lock folder (abstract property)
@@ -622,7 +643,7 @@ class TrackedDynamicResource(ABC):
     def _lock_file_key(self, path: Path) -> str:
         """Get the cache key for a lock file path.
 
-        The key is the relative path from jobs_folder (e.g., "task_id/identifier.json").
+        The key is the relative path from jobs_folder (e.g., "task_id@identifier.json").
         """
         return str(path.relative_to(self.jobs_folder))
 
@@ -638,7 +659,7 @@ class TrackedDynamicResource(ABC):
         self._reset_state()
 
         if self.jobs_folder.exists():
-            for path in self.jobs_folder.glob("**/*.json"):
+            for path in self.jobs_folder.glob("*.json"):
                 key = self._lock_file_key(path)
                 lf = old_cache.get(key)
                 if lf is None:
@@ -853,10 +874,10 @@ class TrackedDynamicResource(ABC):
     def _get_job_lock_path(self, dependency: "DynamicDependency") -> Path:
         """Get the lock file path for a dependency.
 
-        Returns path under jobs_folder: jobs/{task_id}/{identifier}.json
+        Returns path under jobs_folder: jobs/{task_id}@{identifier}.json
         """
         job = dependency.target
-        return self.jobs_folder / job.task_id / f"{job.identifier}.json"
+        return self.jobs_folder / get_job_lock_relpath(job.task_id, job.identifier)
 
     def acquire(self, dependency: "DynamicDependency") -> None:
         """Acquire the resource for a dependency.

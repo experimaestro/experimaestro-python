@@ -41,8 +41,8 @@ class TestGetGitInfo:
         assert len(git_info["commit"]) == 40
         assert all(c in "0123456789abcdef" for c in git_info["commit"])
 
-        # Short commit should be 7 characters
-        assert len(git_info["commit_short"]) == 7
+        # Short commit should be 7-12 characters (git uses more if needed for uniqueness)
+        assert 7 <= len(git_info["commit_short"]) <= 12
 
     def test_returns_none_for_non_git_dir(self, tmp_path):
         """Test that get_git_info returns None for non-git directories"""

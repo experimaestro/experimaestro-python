@@ -8,7 +8,7 @@ from pathlib import Path
 
 import subprocess
 from experimaestro import Task, Param
-from experimaestro.tokens import CounterToken, TokenFile
+from experimaestro.tokens import CounterToken, TokenLockFile
 from experimaestro.scheduler import JobState
 from .utils import (
     TemporaryExperiment,
@@ -101,7 +101,7 @@ def test_token_cleanup():
         # Just lock directly (but without process)
         # The absence of process should be detected right away
         logging.info("Lock without process")
-        TokenFile.from_dependency(dependency)
+        TokenLockFile.from_dependency(dependency)
         task2 = dummy_task.C(x=2)
         task2.add_dependencies(token.dependency(1)).submit()
         xp.wait()
@@ -111,7 +111,7 @@ def test_token_cleanup():
         job = dependency.target
         with fasteners.InterProcessLock(job.lockpath):
             logging.info("Creating dependency %s", dependency)
-            TokenFile.from_dependency(dependency)
+            TokenLockFile.from_dependency(dependency)
             lockingpath = job.path / "testtoken.signal"
             command = [
                 sys.executable,

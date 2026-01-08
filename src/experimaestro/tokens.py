@@ -203,10 +203,6 @@ class TokenLockFile(DynamicLockFile):
         return cls.create(path, job_uri, information={"count": dependency.count})
 
 
-# Backwards compatibility alias
-TokenFile = TokenLockFile
-
-
 class CounterToken(Token, TrackedDynamicResource):
     """File-based counter token
 

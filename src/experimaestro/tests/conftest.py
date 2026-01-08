@@ -24,6 +24,12 @@ def reset_scheduler():
     """Reset scheduler state between tests to avoid state leakage with singleton pattern"""
     from experimaestro.scheduler.base import Scheduler
     from experimaestro.webui import WebUIServer
+    from experimaestro.tokens import CounterToken
+    from experimaestro.core.partial_lock import PartialJobResource
+
+    # Clear token and resource caches
+    CounterToken.TOKENS.clear()
+    PartialJobResource.RESOURCES.clear()
 
     # Get the singleton instance if it exists
     if Scheduler._instance is not None:
@@ -98,12 +104,19 @@ def reset_scheduler():
     if WebUIServer._instance is not None:
         WebUIServer.clear_instance()
 
+    # Clear token and resource caches after test
+    CounterToken.TOKENS.clear()
+    PartialJobResource.RESOURCES.clear()
+
 
 # Sets a flag
 def pytest_configure(config):
     import sys
 
     sys._called_from_test = True
+
+    # Disable peewee logging by default (too verbose)
+    logging.getLogger("peewee").setLevel(logging.WARNING)
 
 
 def pytest_unconfigure(config):
