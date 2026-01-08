@@ -117,6 +117,14 @@ class Process:
         """Wait until the process finishes and returns the error code"""
         raise NotImplementedError(f"Not implemented: {self.__class__}.wait")
 
+    async def aio_wait(self) -> int:
+        """Asynchronously wait until the process finishes and returns the error code.
+
+        Subclasses should override this with a truly async implementation.
+        Default implementation uses asyncThreadcheck to run wait() in a thread.
+        """
+        return await asyncThreadcheck("aio_wait", self.wait)
+
     async def aio_state(self, timeout: float | None = None) -> ProcessState:
         """Returns the job state
 
@@ -134,7 +142,7 @@ class Process:
         Returns None if the process has already finished – and no information is
         known about the process.
         """
-        code = await asyncThreadcheck("aio_code", self.wait)
+        code = await self.aio_wait()
         logger.debug("Got return code %s for %s", code, self)
         return code
 

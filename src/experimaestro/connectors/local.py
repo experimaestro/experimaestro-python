@@ -1,5 +1,6 @@
 """All classes related to localhost management"""
 
+import asyncio
 import subprocess
 from typing import Optional
 from pathlib import Path, WindowsPath, PosixPath
@@ -39,6 +40,26 @@ class PsutilProcess(Process):
         )
         return code
 
+    async def aio_wait(self) -> int:
+        """Asynchronously wait for process to finish"""
+        logger.debug(
+            "Async waiting (psutil) for process with PID %s", self._process.pid
+        )
+        poll_interval = 0.01  # start at 0.01 seconds, max 10 seconds
+
+        while self._process.is_running():
+            await asyncio.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 10.0)
+
+        # Process has finished, wait() returns immediately
+        code = self._process.wait()
+        logger.debug(
+            "Finished async wait (psutil) for process with PID %s: code %s",
+            self._process.pid,
+            code,
+        )
+        return code
+
     async def aio_state(self, timeout: float | None = None) -> ProcessState:
         if self._process.is_running():
             return ProcessState.RUNNING
@@ -60,6 +81,25 @@ class LocalProcess(Process):
         code = self._process.wait()
         logger.debug(
             "Finished to wait (python) for process with PID %s: %s",
+            self._process.pid,
+            code,
+        )
+        return code
+
+    async def aio_wait(self) -> int:
+        """Asynchronously wait for process to finish"""
+        logger.debug(
+            "Async waiting (python) for process with PID %s", self._process.pid
+        )
+        poll_interval = 0.01  # start at 0.01 seconds, max 10 seconds
+
+        while self._process.poll() is None:
+            await asyncio.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 10.0)
+
+        code = self._process.returncode
+        logger.debug(
+            "Finished async wait (python) for process with PID %s: %s",
             self._process.pid,
             code,
         )

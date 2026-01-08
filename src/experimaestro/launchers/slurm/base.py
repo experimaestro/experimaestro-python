@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import threading
 from pathlib import Path
@@ -219,6 +220,13 @@ class SlurmProcessWatcher(threading.Thread):
         self.cv = ThreadingCondition()
         self.fetched_event = threading.Event()
         self.updating_jobs = threading.Lock()
+
+        # Async waiters: jobid -> list of (asyncio.Event, event_loop)
+        self.async_waiters: Dict[
+            str, List[Tuple[asyncio.Event, asyncio.AbstractEventLoop]]
+        ] = {}
+        self.async_waiters_lock = threading.Lock()
+
         self.start()
 
     @staticmethod
@@ -250,6 +258,35 @@ class SlurmProcessWatcher(threading.Thread):
         with self.updating_jobs:
             return self.jobs.get(jobid)
 
+    def register_async_waiter(
+        self, jobid: str, loop: asyncio.AbstractEventLoop
+    ) -> asyncio.Event:
+        """Register an async waiter for a job.
+
+        Returns an asyncio.Event that will be set when the job finishes.
+        """
+        event = loop.create_future()
+        with self.async_waiters_lock:
+            if jobid not in self.async_waiters:
+                self.async_waiters[jobid] = []
+            self.async_waiters[jobid].append((event, loop))
+        return event
+
+    def _notify_async_waiters(self):
+        """Notify async waiters for finished jobs"""
+        with self.async_waiters_lock:
+            finished_jobs = []
+            for jobid, waiters in self.async_waiters.items():
+                state = self.jobs.get(jobid)
+                if state and state.finished():
+                    finished_jobs.append(jobid)
+                    for future, loop in waiters:
+                        # Set the result from watcher thread to asyncio loop
+                        loop.call_soon_threadsafe(future.set_result, state)
+
+            for jobid in finished_jobs:
+                del self.async_waiters[jobid]
+
     def run(self):
         while self.count > 0:
             builder = self.launcher.connector.processbuilder()
@@ -280,6 +317,9 @@ class SlurmProcessWatcher(threading.Thread):
                             logger.error("Could not parse line %s", line)
             process.kill()
 
+            # Notify async waiters for finished jobs
+            self._notify_async_waiters()
+
             with self.cv:
                 logger.debug("Jobs %s", self.jobs)
                 self.fetched_event.set()
@@ -309,6 +349,28 @@ class BatchSlurmProcess(Process):
                 if state and state.finished():
                     self._last_state = state
                     return 0 if state.slurm_state == "COMPLETED" else 1
+
+    async def aio_wait(self) -> int:
+        """Asynchronously wait for SLURM job to finish (event-driven)"""
+        logger.debug("Async waiting for SLURM job %s", self.jobid)
+        loop = asyncio.get_running_loop()
+
+        with SlurmProcessWatcher.get(self.launcher) as watcher:
+            # Check if already finished
+            state = watcher.getjob(self.jobid)
+            if state and state.finished():
+                self._last_state = state
+                return 0 if state.slurm_state == "COMPLETED" else 1
+
+            # Register and wait for the job to finish
+            future = watcher.register_async_waiter(self.jobid, loop)
+            self._last_state = await future
+
+            code = 0 if self._last_state.slurm_state == "COMPLETED" else 1
+            logger.debug(
+                "Finished async wait for SLURM job %s: code %s", self.jobid, code
+            )
+            return code
 
     def get_job_state(self, code: int) -> "JobState":
         """Convert SLURM exit code to JobState, detecting timeouts"""
