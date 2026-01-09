@@ -337,9 +337,9 @@ class JobsTable(Vertical):
     """Widget displaying jobs for selected experiment"""
 
     BINDINGS = [
-        Binding("d", "delete_job", "Delete", show=False),
+        Binding("ctrl+d", "delete_job", "Delete", show=False),
         Binding("k", "kill_job", "Kill", show=False),
-        Binding("l", "view_logs", "Logs"),
+        Binding("l", "view_logs", "Logs", key_display="l"),
         Binding("f", "copy_path", "Copy Path", show=False),
         Binding("/", "toggle_search", "Search"),
         Binding("c", "clear_filter", "Clear", show=False),
@@ -361,12 +361,14 @@ class JobsTable(Vertical):
         self.filter_fn = None
         self.current_experiment: Optional[str] = None
         self.current_run_id: Optional[str] = None
+        self.is_past_run: bool = False
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
         self.dependencies_map: dict[
             str, list[str]
         ] = {}  # job_id -> [depends_on_job_ids]
 
     def compose(self) -> ComposeResult:
+        yield Static("", id="past-run-banner", classes="hidden")
         yield SearchBar()
         yield DataTable(id="jobs-table", cursor_type="row")
 
@@ -625,16 +627,35 @@ class JobsTable(Vertical):
             self.refresh_jobs()
 
     def set_experiment(
-        self, experiment_id: Optional[str], run_id: Optional[str] = None
+        self,
+        experiment_id: Optional[str],
+        run_id: Optional[str] = None,
+        is_past_run: bool = False,
     ) -> None:
-        """Set the current experiment and refresh jobs"""
+        """Set the current experiment and refresh jobs
+
+        Args:
+            experiment_id: The experiment ID to show jobs for
+            run_id: The specific run ID (optional)
+            is_past_run: Whether this is a past (non-current) run
+        """
         self.current_experiment = experiment_id
         self.current_run_id = run_id
+        self.is_past_run = is_past_run
+
+        # Update the past run banner
+        banner = self.query_one("#past-run-banner", Static)
+        if is_past_run and run_id:
+            banner.update(f"[bold yellow]Viewing past run: {run_id}[/bold yellow]")
+            banner.remove_class("hidden")
+        else:
+            banner.add_class("hidden")
+
         # Load tags map and dependencies map for this experiment
         if experiment_id:
-            self.tags_map = self.state_provider.get_tags_map(experiment_id)
+            self.tags_map = self.state_provider.get_tags_map(experiment_id, run_id)
             self.dependencies_map = self.state_provider.get_dependencies_map(
-                experiment_id
+                experiment_id, run_id
             )
         else:
             self.tags_map = {}
@@ -648,9 +669,11 @@ class JobsTable(Vertical):
         if not self.current_experiment:
             return
 
-        jobs = self.state_provider.get_jobs(self.current_experiment)
+        jobs = self.state_provider.get_jobs(
+            self.current_experiment, run_id=self.current_run_id
+        )
         self.log.debug(
-            f"Refreshing jobs for {self.current_experiment}: {len(jobs)} jobs"
+            f"Refreshing jobs for {self.current_experiment}/{self.current_run_id}: {len(jobs)} jobs"
         )
 
         # Apply filter if set

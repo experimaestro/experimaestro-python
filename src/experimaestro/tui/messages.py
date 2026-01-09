@@ -125,3 +125,24 @@ class SizeCalculated(Message):
         self.job_id = job_id
         self.size = size
         self.size_bytes = size_bytes
+
+
+class ShowRunsRequest(Message):
+    """Message sent when user wants to see experiment runs"""
+
+    def __init__(self, experiment_id: str, current_run_id: Optional[str]) -> None:
+        super().__init__()
+        self.experiment_id = experiment_id
+        self.current_run_id = current_run_id
+
+
+class RunSelected(Message):
+    """Message sent when a run is selected from the runs screen"""
+
+    def __init__(
+        self, experiment_id: str, run_id: str, is_current: bool = True
+    ) -> None:
+        super().__init__()
+        self.experiment_id = experiment_id
+        self.run_id = run_id
+        self.is_current = is_current

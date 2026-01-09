@@ -11,6 +11,7 @@ Classes:
 
 import json
 import logging
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -459,6 +460,34 @@ class WorkspaceStateProvider(StateProvider):
         """Get all runs for an experiment"""
         runs = []
         exp_dir = self.workspace_path / "experiments" / experiment_id
+
+        # Check for v1 layout first (xp/{exp-id}/ without separate runs)
+        v1_exp_dir = self.workspace_path / "xp" / experiment_id
+        if v1_exp_dir.exists() and not exp_dir.exists():
+            # v1 experiment: return single synthetic run
+            exp = self._load_v1_experiment(experiment_id, v1_exp_dir)
+            if exp:
+                # Get modification time for started_at
+                try:
+                    mtime = v1_exp_dir.stat().st_mtime
+                except OSError:
+                    mtime = None
+
+                runs.append(
+                    ExperimentRun(
+                        run_id="v1",
+                        experiment_id=experiment_id,
+                        started_at=mtime,
+                        ended_at=mtime,
+                        status="completed",
+                        hostname=None,
+                        total_jobs=exp.total_jobs,
+                        finished_jobs=exp.finished_jobs,
+                        failed_jobs=exp.failed_jobs,
+                    )
+                )
+            return runs
+
         if not exp_dir.exists():
             return runs
 
@@ -483,6 +512,7 @@ class WorkspaceStateProvider(StateProvider):
             runs.append(
                 ExperimentRun(
                     run_id=run_id,
+                    experiment_id=experiment_id,
                     started_at=status.started_at,
                     ended_at=status.ended_at,
                     status=status.status,
@@ -730,6 +760,11 @@ class WorkspaceStateProvider(StateProvider):
                         service_id,
                         e,
                     )
+                    if isinstance(e, ModuleNotFoundError):
+                        logger.warning(
+                            "Missing module for service recreation. Python Path: %s",
+                            sys.path,
+                        )
             else:
                 # No valid state_dict - use MockService with error
                 from experimaestro.scheduler.state_provider import MockService

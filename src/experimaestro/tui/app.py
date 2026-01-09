@@ -42,6 +42,8 @@ from experimaestro.tui.messages import (
     FilterChanged,  # noqa: F401
     SearchApplied,  # noqa: F401
     SizeCalculated,  # noqa: F401
+    ShowRunsRequest,
+    RunSelected,
 )
 from experimaestro.tui.dialogs import (
     QuitConfirmScreen,
@@ -56,6 +58,7 @@ from experimaestro.tui.widgets import (
     JobsTable,
     JobDetailView,
     OrphanJobsScreen,
+    RunsList,
 )
 
 
@@ -141,8 +144,10 @@ class ExperimaestroUI(App):
         yield Footer()
 
     def _compose_monitor_view(self):
-        """Compose the monitor view with experiments, jobs/services tabs, and job details"""
+        """Compose the monitor view with experiments, runs, jobs/services tabs, and job details"""
         yield ExperimentsList(self.state_provider)
+        # Runs list (hidden initially, shown when 'd' pressed on experiment)
+        yield RunsList(self.state_provider)
         # Tabbed view for jobs and services (hidden initially)
         with TabbedContent(id="experiment-tabs", classes="hidden"):
             with TabPane("Jobs", id="jobs-tab"):
@@ -573,6 +578,42 @@ class ExperimaestroUI(App):
             KillConfirmScreen("experiment", f"{len(running_jobs)} running jobs"),
             handle_kill_response,
         )
+
+    def on_show_runs_request(self, message: ShowRunsRequest) -> None:
+        """Handle request to show experiment runs"""
+        runs_list = self.query_one(RunsList)
+        runs_list.set_experiment(message.experiment_id, message.current_run_id)
+
+    def on_run_selected(self, message: RunSelected) -> None:
+        """Handle run selection - show jobs for the selected run"""
+        self.log(
+            f"Run selected: {message.run_id} (current={message.is_current}) "
+            f"for {message.experiment_id}"
+        )
+
+        # Set up jobs table with the selected run
+        jobs_table_widget = self.query_one(JobsTable)
+        jobs_table_widget.set_experiment(
+            message.experiment_id,
+            message.run_id,
+            is_past_run=not message.is_current,
+        )
+
+        # Set up services list
+        services_list = self.query_one(ServicesList)
+        services_list.set_experiment(message.experiment_id)
+
+        # Show the tabbed content
+        tabs = self.query_one("#experiment-tabs", TabbedContent)
+        tabs.remove_class("hidden")
+
+        # Collapse experiments list
+        experiments_list = self.query_one(ExperimentsList)
+        experiments_list.collapse_to_experiment(message.experiment_id)
+
+        # Focus the jobs table
+        jobs_table = self.query_one("#jobs-table", DataTable)
+        jobs_table.focus()
 
     def action_focus_jobs(self) -> None:
         """Switch to the jobs tab"""

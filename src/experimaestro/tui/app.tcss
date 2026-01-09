@@ -10,6 +10,10 @@ ExperimentsList {
     height: auto;
 }
 
+ExperimentsList.expanded {
+    height: 1fr;
+}
+
 Monitor {
     height: 100%;
 }
@@ -90,6 +94,10 @@ JobsTable {
 #experiments-table {
     height: auto;
     min-height: 5;
+}
+
+ExperimentsList.expanded #experiments-table {
+    height: 1fr;
 }
 
 TabbedContent {
@@ -352,4 +360,43 @@ HelpScreen {
 #help-close-btn {
     width: 100%;
     height: auto;
+}
+
+/* Past run banner */
+#past-run-banner {
+    background: $warning-darken-2;
+    color: $text;
+    padding: 0 1;
+    text-align: center;
+    text-style: bold;
+    height: auto;
+}
+
+/* Runs List */
+RunsList {
+    height: 1fr;
+    width: 100%;
+    display: none;
+}
+
+RunsList.hidden {
+    display: none;
+}
+
+#runs-container {
+    height: 100%;
+    width: 100%;
+    border: solid $primary;
+    padding: 0 1;
+}
+
+#runs-title {
+    text-style: bold;
+    color: $primary;
+    height: auto;
+}
+
+#runs-table {
+    height: 1fr;
+    min-height: 3;
 }

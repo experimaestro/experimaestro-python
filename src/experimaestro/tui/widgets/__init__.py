@@ -5,6 +5,7 @@ from experimaestro.tui.widgets.experiments import ExperimentsList
 from experimaestro.tui.widgets.services import ServicesList
 from experimaestro.tui.widgets.jobs import JobsTable, JobDetailView, SearchBar
 from experimaestro.tui.widgets.orphans import OrphanJobsScreen
+from experimaestro.tui.widgets.runs import RunsList
 
 __all__ = [
     "CaptureLog",
@@ -14,4 +15,5 @@ __all__ = [
     "JobDetailView",
     "SearchBar",
     "OrphanJobsScreen",
+    "RunsList",
 ]

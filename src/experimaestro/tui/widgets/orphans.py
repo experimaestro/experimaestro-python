@@ -17,8 +17,8 @@ class OrphanJobsScreen(Screen):
     """Screen for viewing and managing orphan jobs"""
 
     BINDINGS = [
-        Binding("d", "delete_selected", "Delete"),
-        Binding("D", "delete_all", "Delete All", key_display="D"),
+        Binding("ctrl+d", "delete_selected", "Delete"),
+        Binding("ctrl+shift+d", "delete_all", "Delete All", key_display="^D"),
         Binding("escape", "go_back", "Back"),
         Binding("q", "go_back", "Quit"),
         Binding("r", "refresh", "Refresh"),

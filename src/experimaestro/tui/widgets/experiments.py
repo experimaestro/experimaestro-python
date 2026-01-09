@@ -17,6 +17,7 @@ from experimaestro.tui.messages import (
     ExperimentDeselected,
     DeleteExperimentRequest,
     KillExperimentRequest,
+    ShowRunsRequest,
 )
 
 
@@ -24,7 +25,8 @@ class ExperimentsList(Widget):
     """Widget displaying list of experiments"""
 
     BINDINGS = [
-        Binding("d", "delete_experiment", "Delete", show=False),
+        Binding("d", "show_runs", "Runs"),
+        Binding("ctrl+d", "delete_experiment", "Delete", show=False),
         Binding("k", "kill_experiment", "Kill", show=False),
     ]
 
@@ -58,6 +60,20 @@ class ExperimentsList(Widget):
         if exp_id:
             self.post_message(KillExperimentRequest(exp_id))
 
+    def action_show_runs(self) -> None:
+        """Show runs for the selected experiment"""
+        exp_id = self._get_selected_experiment_id()
+        if exp_id:
+            # Get current run_id for this experiment
+            exp_info = next(
+                (exp for exp in self.experiments if exp.experiment_id == exp_id),
+                None,
+            )
+            current_run_id = (
+                getattr(exp_info, "current_run_id", None) if exp_info else None
+            )
+            self.post_message(ShowRunsRequest(exp_id, current_run_id))
+
     def compose(self) -> ComposeResult:
         # Collapsed header (hidden initially)
         with Horizontal(id="collapsed-header", classes="hidden"):
@@ -70,6 +86,9 @@ class ExperimentsList(Widget):
 
     def on_mount(self) -> None:
         """Initialize the experiments table"""
+        # Start expanded
+        self.add_class("expanded")
+
         table = self.query_one("#experiments-table", DataTable)
         table.add_column("ID", key="id")
         table.add_column("Run", key="run")
@@ -253,6 +272,7 @@ class ExperimentsList(Widget):
         self.query_one("#experiments-table-container").add_class("hidden")
         self.query_one("#collapsed-header").remove_class("hidden")
         self.collapsed = True
+        self.remove_class("expanded")
 
     def expand_experiments(self) -> None:
         """Expand back to full experiments list"""
@@ -261,6 +281,7 @@ class ExperimentsList(Widget):
         self.query_one("#experiments-table-container").remove_class("hidden")
         self.collapsed = False
         self.current_experiment = None
+        self.add_class("expanded")
 
         # Focus the experiments table
         table = self.query_one("#experiments-table", DataTable)
