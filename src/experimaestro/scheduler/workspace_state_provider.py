@@ -445,7 +445,7 @@ class WorkspaceStateProvider(StateProvider):
                         identifier=job_id,
                         task_id=task_id,
                         path=job_path,
-                        state=state,
+                        state=state.name,  # Convert JobState to string name
                         submittime=mtime,
                         starttime=mtime,
                         endtime=mtime if state.finished() else None,
@@ -818,6 +818,153 @@ class WorkspaceStateProvider(StateProvider):
         except Exception as e:
             logger.warning("Failed to clean job %s: %s", job.identifier, e)
             return False
+
+    # =========================================================================
+    # Orphan job detection
+    # =========================================================================
+
+    def get_orphan_jobs(self) -> List[MockJob]:
+        """Get orphan jobs (jobs not associated with any experiment run)
+
+        Scans workspace/jobs/ for all job directories and compares against
+        jobs referenced by experiments (both v1 and v2 layouts).
+
+        Returns:
+            List of MockJob objects for jobs that exist on disk but are not
+            referenced by any experiment.
+        """
+        jobs_base = self.workspace_path / "jobs"
+        if not jobs_base.exists():
+            return []
+
+        # Collect all job paths referenced by experiments
+        referenced_jobs = self._collect_referenced_job_paths()
+
+        # Scan workspace/jobs/ for all job directories
+        orphan_jobs = []
+        for task_dir in jobs_base.iterdir():
+            if not task_dir.is_dir():
+                continue
+
+            task_id = task_dir.name
+
+            for job_dir in task_dir.iterdir():
+                if not job_dir.is_dir():
+                    continue
+
+                job_id = job_dir.name
+
+                # Resolve to canonical path for comparison
+                try:
+                    job_path = job_dir.resolve()
+                except OSError:
+                    continue
+
+                # Check if this job is referenced by any experiment
+                if job_path not in referenced_jobs:
+                    # This is an orphan job
+                    job = MockJob.from_disk(job_path)
+                    if job is None:
+                        # No metadata file - create minimal MockJob from filesystem
+                        job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                    orphan_jobs.append(job)
+
+        return orphan_jobs
+
+    def _collect_referenced_job_paths(self) -> set[Path]:
+        """Collect all job paths referenced by experiments (v1 and v2 layouts)
+
+        Returns:
+            Set of resolved job paths that are referenced by at least one experiment
+        """
+        referenced = set()
+
+        # v2 layout: experiments/{exp-id}/{run-id}/status.json
+        experiments_base = self.workspace_path / "experiments"
+        if experiments_base.exists():
+            for exp_dir in experiments_base.iterdir():
+                if not exp_dir.is_dir():
+                    continue
+
+                experiment_id = exp_dir.name
+
+                for run_dir in exp_dir.iterdir():
+                    if not run_dir.is_dir() or run_dir.name.startswith("."):
+                        continue
+
+                    # Read status.json for this run
+                    status_file = StatusFile(
+                        run_dir, workspace_path=self.workspace_path
+                    )
+                    status = status_file.read()
+
+                    # Also apply pending events
+                    events = read_events_since(
+                        self._experiments_dir, experiment_id, status.events_count
+                    )
+                    for event in events:
+                        status.apply_event(event)
+
+                    # Add all job paths from this run
+                    for job in status.jobs.values():
+                        if job.path:
+                            try:
+                                referenced.add(job.path.resolve())
+                            except OSError:
+                                pass
+
+        # v1 layout: xp/{exp-id}/jobs/{task_id}/{job_hash} -> symlinks
+        old_xp_dir = self.workspace_path / "xp"
+        if old_xp_dir.exists():
+            for exp_dir in old_xp_dir.iterdir():
+                if not exp_dir.is_dir():
+                    continue
+
+                # Check jobs/ and jobs.bak/ directories
+                for jdir_name in ["jobs", "jobs.bak"]:
+                    jobs_dir = exp_dir / jdir_name
+                    if not jobs_dir.exists():
+                        continue
+
+                    for job_link in jobs_dir.glob("*/*"):
+                        try:
+                            job_path = job_link.resolve()
+                            referenced.add(job_path)
+                        except OSError:
+                            # Broken symlink - skip
+                            pass
+
+        return referenced
+
+    def _create_mock_job_from_path(
+        self, job_path: Path, task_id: str, job_id: str
+    ) -> MockJob:
+        """Create a MockJob from a job directory path (when no metadata exists)"""
+        from experimaestro.scheduler.interfaces import JobState as JobStateClass
+
+        # Try to determine state from marker files
+        scriptname = task_id.rsplit(".", 1)[-1]
+        state = JobStateClass.from_path(job_path, scriptname)
+        if state is None:
+            state = JobState.UNSCHEDULED
+
+        # Get modification time for timestamps
+        try:
+            mtime = job_path.stat().st_mtime
+        except OSError:
+            mtime = None
+
+        return MockJob(
+            identifier=job_id,
+            task_id=task_id,
+            path=job_path,
+            state=state.name,
+            submittime=mtime,
+            starttime=mtime,
+            endtime=mtime if state.finished() else None,
+            progress=[],
+            updated_at="",
+        )
 
     # =========================================================================
     # Lifecycle

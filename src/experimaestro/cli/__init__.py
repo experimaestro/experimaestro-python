@@ -163,32 +163,23 @@ def diff(path: Path):
     check(".", job, new_job, set())
 
 
-@click.option("--show-all", is_flag=True, help="Show even not orphans")
-@click.option(
-    "--ignore-old", is_flag=True, help="Ignore old jobs for unfinished experiments"
-)
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")
 @click.option("--size", is_flag=True, help="Show size of each folder")
 @click.argument("path", type=Path, callback=check_xp_path)
 @cli.command()
-def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: bool):
-    """Check for tasks that are not part of an experimental plan"""
+def orphans(path: Path, clean: bool, size: bool):
+    """Check for tasks that are not part of an experimental plan
+
+    Uses the same orphan detection as the TUI (WorkspaceStateProvider.get_orphan_jobs).
+    """
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
-    jobspath = path / "jobs"
-
-    def getjobs(jobs_path: Path):
-        return (
-            (str(p.relative_to(jobs_path)), p)
-            for p in jobs_path.glob("*/*")
-            if p.is_dir()
-        )
-
-    def show(key: str, prefix=""):
+    def show(job, prefix=""):
+        key = f"{job.task_id}/{job.identifier}"
         if size:
             print(
                 prefix,
-                subprocess.check_output(["du", "-hs", key], cwd=jobspath)
+                subprocess.check_output(["du", "-hs", str(job.path)])
                 .decode("utf-8")
                 .strip(),
                 sep=None,
@@ -196,34 +187,21 @@ def orphans(path: Path, clean: bool, size: bool, show_all: bool, ignore_old: boo
         else:
             print(prefix, key, sep=None)
 
-    # Use WorkspaceStateProvider to get all jobs from experiments
+    # Use WorkspaceStateProvider.get_orphan_jobs() - same as TUI
     provider = WorkspaceStateProvider.get_instance(path)
-    xpjobs = set()
+    orphan_jobs = provider.get_orphan_jobs()
 
-    # Get all experiments and their jobs
-    for experiment in provider.get_experiments():
-        exp_id = experiment.experiment_id
-        for run in provider.get_experiment_runs(exp_id):
-            jobs = provider.get_jobs(experiment_id=exp_id, run_id=run.run_id)
-            for job in jobs:
-                # Job key is task_id/job_id
-                key = f"{job.task_id}/{job.identifier}"
-                xpjobs.add(key)
+    if not orphan_jobs:
+        print("No orphan jobs found.")
+        return
 
-    # Now, look at stored jobs in the workspace jobs directory
-    found = 0
-    for key, jobpath in getjobs(jobspath):
-        if key not in xpjobs:
-            show(key)
-            if clean:
-                logging.info("Removing data in %s", jobpath)
-                rmtree(jobpath)
-        else:
-            if show_all:
-                show(key, prefix="[not orphan] ")
-            found += 1
-
-    print(f"{found} jobs are not orphans")
+    print(f"Found {len(orphan_jobs)} orphan job(s):")
+    for job in orphan_jobs:
+        show(job)
+        if clean:
+            logging.info("Removing data in %s", job.path)
+            if job.path and job.path.exists():
+                rmtree(job.path)
 
 
 def arg_split(ctx, param, value):

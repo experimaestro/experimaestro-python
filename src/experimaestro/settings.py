@@ -25,7 +25,26 @@ class ServerSettings:
 
 @dataclass
 class HistorySettings:
-    """Settings for experiment history cleanup"""
+    """Settings for experiment history cleanup.
+
+    When an experiment ends, old runs are cleaned up according to these rules
+    (applied in order):
+
+    1. If current run succeeded, all past failed runs are removed
+    2. Failed runs that occurred before the newest successful run are removed
+       (since the success supersedes the earlier failures)
+    3. Keep at most `max_done` successful runs (oldest removed first)
+    4. Keep at most `max_failed` failed runs (oldest removed first)
+
+    Example: With max_done=2, max_failed=1 and runs:
+        - 10:00 completed
+        - 11:00 failed
+        - 12:00 completed
+        - 13:00 failed
+
+    Result: 11:00 failed is removed (before 12:00 success), 10:00 completed
+    is removed (max_done=2), leaving: 12:00 completed, 13:00 failed.
+    """
 
     max_done: int = 5
     """Maximum number of successful runs to keep per experiment"""

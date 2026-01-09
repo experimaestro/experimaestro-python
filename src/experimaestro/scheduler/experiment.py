@@ -1040,8 +1040,20 @@ def cleanup_experiment_history(
         if d.is_dir() and d.name != current_run_id:
             run_dirs.append(d)
 
-    # Sort by modification time (oldest first)
-    run_dirs.sort(key=lambda d: d.stat().st_mtime)
+    # Sort by directory name (oldest first)
+    # Directory names are in format YYYYMMDD_HHMMSS or YYYYMMDD_HHMMSS.N (with modifier)
+    def run_sort_key(d: Path) -> tuple[str, int]:
+        """Parse run_id for sorting, handling modifiers like 20250501_102315.1"""
+        name = d.name
+        if "." in name:
+            parts = name.split(".", 1)
+            try:
+                return (parts[0], int(parts[1]))
+            except (ValueError, IndexError):
+                return (name, 0)
+        return (name, 0)
+
+    run_dirs.sort(key=run_sort_key)
 
     # Categorize runs by status
     completed_runs = []
@@ -1068,8 +1080,26 @@ def cleanup_experiment_history(
                 logger.warning("Failed to remove run directory %s: %s", run_dir, e)
         failed_runs = []
 
+    # Remove failed runs that come after any successful run
+    # (if there's a success before a failure, that failure is stale)
+    if completed_runs:
+        # Find the newest completed run
+        newest_completed = run_sort_key(completed_runs[-1])
+        remaining_failed = []
+        for run_dir in failed_runs:
+            if run_sort_key(run_dir) < newest_completed:
+                logger.info("Removing failed run (success exists after): %s", run_dir)
+                try:
+                    rmtree(run_dir)
+                    removed_paths.append(run_dir)
+                except Exception as e:
+                    logger.warning("Failed to remove run directory %s: %s", run_dir, e)
+            else:
+                remaining_failed.append(run_dir)
+        failed_runs = remaining_failed
+
     # Keep only max_done completed runs (remove oldest ones)
-    while len(completed_runs) >= history.max_done:
+    while len(completed_runs) > history.max_done:
         run_dir = completed_runs.pop(0)  # Remove oldest
         logger.info(
             "Removing old completed run (keeping %d): %s", history.max_done, run_dir
@@ -1081,7 +1111,7 @@ def cleanup_experiment_history(
             logger.warning("Failed to remove run directory %s: %s", run_dir, e)
 
     # Keep only max_failed failed runs (remove oldest ones)
-    while len(failed_runs) >= history.max_failed:
+    while len(failed_runs) > history.max_failed:
         run_dir = failed_runs.pop(0)  # Remove oldest
         logger.info(
             "Removing old failed run (keeping %d): %s", history.max_failed, run_dir
