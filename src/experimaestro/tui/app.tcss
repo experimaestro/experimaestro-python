@@ -400,3 +400,116 @@ RunsList.hidden {
     height: 1fr;
     min-height: 3;
 }
+
+/* Stray Jobs Tab */
+StrayJobsTab {
+    height: 100%;
+    width: 100%;
+    padding: 1;
+}
+
+#stray-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+    color: $warning;
+}
+
+#stray-warning {
+    background: $warning-darken-2;
+    color: $text;
+    padding: 0 1;
+    margin-bottom: 1;
+    text-align: center;
+    height: auto;
+}
+
+#stray-warning.hidden {
+    display: none;
+}
+
+.warning-banner {
+    height: auto;
+}
+
+#stray-stats {
+    margin-bottom: 1;
+}
+
+#stray-controls {
+    height: auto;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+#stray-controls Button {
+    margin-right: 1;
+}
+
+#stray-controls Switch {
+    margin-right: 0;
+}
+
+#show-orphans-label {
+    margin-right: 2;
+}
+
+.controls-bar {
+    height: auto;
+}
+
+#stray-table {
+    height: 1fr;
+}
+
+#stray-job-info {
+    height: auto;
+    margin-top: 1;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* Orphan Jobs Tab */
+OrphanJobsTab {
+    height: 1fr;
+    width: 100%;
+    padding: 1;
+}
+
+OrphanJobsTab #orphan-warning {
+    background: $warning-darken-2;
+    color: $text;
+    padding: 0 1;
+    margin-bottom: 1;
+    text-align: center;
+    height: auto;
+}
+
+OrphanJobsTab #orphan-warning.hidden {
+    display: none;
+}
+
+OrphanJobsTab #orphan-controls {
+    height: auto;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+OrphanJobsTab #orphan-controls Button {
+    margin-right: 1;
+    min-width: 8;
+    height: auto;
+    padding: 0 1;
+}
+
+OrphanJobsTab #orphan-table {
+    height: 1fr;
+    min-height: 10;
+}
+
+OrphanJobsTab #orphan-job-info {
+    height: auto;
+    margin-top: 1;
+    padding: 0 1;
+    color: $text-muted;
+}

@@ -872,6 +872,133 @@ class WorkspaceStateProvider(StateProvider):
 
         return orphan_jobs
 
+    def get_stray_jobs(self) -> list[MockJob]:
+        """Get stray jobs (running jobs not in the latest run of any experiment)
+
+        A stray job is a running job that was submitted by a previous run of an
+        experiment, but the experiment has since been relaunched with different
+        parameters (i.e., a new run was started).
+
+        This differs from orphan jobs which considers ALL runs. Stray jobs only
+        look at the LATEST run of each experiment.
+
+        Returns:
+            List of MockJob objects for running jobs not in any current experiment
+        """
+        jobs_base = self.workspace_path / "jobs"
+        if not jobs_base.exists():
+            return []
+
+        # Collect job paths from LATEST runs only
+        latest_run_jobs = self._collect_latest_run_job_paths()
+
+        # Scan workspace/jobs/ for all running job directories
+        stray_jobs = []
+        for task_dir in jobs_base.iterdir():
+            if not task_dir.is_dir():
+                continue
+
+            task_id = task_dir.name
+
+            for job_dir in task_dir.iterdir():
+                if not job_dir.is_dir():
+                    continue
+
+                job_id = job_dir.name
+
+                # Resolve to canonical path for comparison
+                try:
+                    job_path = job_dir.resolve()
+                except OSError:
+                    continue
+
+                # Check if this job is in any latest run
+                if job_path not in latest_run_jobs:
+                    # Always verify running state from PID file (don't trust metadata)
+                    scriptname = task_id.rsplit(".", 1)[-1]
+                    actual_state = self._check_running_from_pid(job_path, scriptname)
+
+                    # Only include if the job is actually running
+                    if actual_state == JobState.RUNNING:
+                        # Create MockJob for the running job
+                        job = MockJob.from_disk(job_path)
+                        if job is None:
+                            job = self._create_mock_job_from_path(
+                                job_path, task_id, job_id
+                            )
+                        else:
+                            # Update state to verified running state
+                            job.state = JobState.RUNNING
+                        stray_jobs.append(job)
+
+        return stray_jobs
+
+    def _collect_latest_run_job_paths(self) -> set[Path]:
+        """Collect job paths from the latest run of each experiment only
+
+        Returns:
+            Set of resolved job paths that are in the latest run of any experiment
+        """
+        referenced = set()
+
+        # v2 layout: experiments/{exp-id}/{run-id}/status.json
+        experiments_base = self.workspace_path / "experiments"
+        if experiments_base.exists():
+            for exp_dir in experiments_base.iterdir():
+                if not exp_dir.is_dir():
+                    continue
+
+                experiment_id = exp_dir.name
+
+                # Get the latest run for this experiment
+                latest_run_id = self.get_current_run(experiment_id)
+                if latest_run_id is None:
+                    continue
+
+                run_dir = exp_dir / latest_run_id
+                if not run_dir.is_dir():
+                    continue
+
+                # Read status.json for this run
+                status_file = StatusFile(run_dir, workspace_path=self.workspace_path)
+                status = status_file.read()
+
+                # Also apply pending events
+                events = read_events_since(
+                    self._experiments_dir, experiment_id, status.events_count
+                )
+                for event in events:
+                    status.apply_event(event)
+
+                # Add all job paths from this run
+                for job in status.jobs.values():
+                    if job.path:
+                        try:
+                            referenced.add(job.path.resolve())
+                        except OSError:
+                            pass
+
+        # v1 layout: only most recent jobs/ (not jobs.bak/)
+        old_xp_dir = self.workspace_path / "xp"
+        if old_xp_dir.exists():
+            for exp_dir in old_xp_dir.iterdir():
+                if not exp_dir.is_dir():
+                    continue
+
+                # Only check current jobs/ (not jobs.bak/)
+                jobs_dir = exp_dir / "jobs"
+                if not jobs_dir.exists():
+                    continue
+
+                for job_link in jobs_dir.glob("*/*"):
+                    try:
+                        job_path = job_link.resolve()
+                        referenced.add(job_path)
+                    except OSError:
+                        pass
+
+        return referenced
+
     def _collect_referenced_job_paths(self) -> set[Path]:
         """Collect all job paths referenced by experiments (v1 and v2 layouts)
 
@@ -946,6 +1073,11 @@ class WorkspaceStateProvider(StateProvider):
         # Try to determine state from marker files
         scriptname = task_id.rsplit(".", 1)[-1]
         state = JobStateClass.from_path(job_path, scriptname)
+
+        # If no done/failed marker, check if job is running via PID file
+        if state is None:
+            state = self._check_running_from_pid(job_path, scriptname)
+
         if state is None:
             state = JobState.UNSCHEDULED
 
@@ -966,6 +1098,46 @@ class WorkspaceStateProvider(StateProvider):
             progress=[],
             updated_at="",
         )
+
+    def _check_running_from_pid(
+        self, job_path: Path, scriptname: str
+    ) -> Optional[JobState]:
+        """Check if a job is running by reading its PID file and checking the process
+
+        Args:
+            job_path: Path to the job directory
+            scriptname: The script name (used for file naming)
+
+        Returns:
+            JobState.RUNNING if the process is still running, None otherwise
+        """
+        pid_file = job_path / f"{scriptname}.pid"
+        if not pid_file.exists():
+            return None
+
+        try:
+            pinfo = json.loads(pid_file.read_text())
+            pid = pinfo.get("pid")
+            if pid is None:
+                return None
+
+            # Ensure pid is an integer (JSON may store it as string)
+            pid = int(pid)
+
+            # Check if the process is still running
+            try:
+                import psutil
+
+                proc = psutil.Process(pid)
+                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                    return JobState.RUNNING
+            except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        except (json.JSONDecodeError, OSError, ValueError, TypeError):
+            pass
+
+        return None
 
     # =========================================================================
     # Process information

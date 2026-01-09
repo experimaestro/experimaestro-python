@@ -61,7 +61,13 @@ from .core.context import SerializationContext
 from .core.serializers import SerializationLWTask, PathSerializationLWTask
 from .core.types import Any, SubmitHook
 from .launchers import Launcher
-from .scheduler import Scheduler, experiment, FailedExperiment, DirtyGitError
+from .scheduler import (
+    Scheduler,
+    experiment,
+    FailedExperiment,
+    DirtyGitError,
+    GracefulExperimentExit,
+)
 from .exceptions import GracefulTimeout
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler.transient import TransientMode

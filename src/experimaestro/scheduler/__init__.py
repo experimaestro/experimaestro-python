@@ -1,6 +1,11 @@
 from .base import Scheduler, Listener
 from .workspace import Workspace, RunMode
-from .experiment import experiment, FailedExperiment, DirtyGitError
+from .experiment import (
+    experiment,
+    FailedExperiment,
+    DirtyGitError,
+    GracefulExperimentExit,
+)
 from .jobs import Job, JobState, JobFailureStatus, JobDependency, JobContext
 
 __all__ = [
@@ -11,6 +16,7 @@ __all__ = [
     "experiment",
     "FailedExperiment",
     "DirtyGitError",
+    "GracefulExperimentExit",
     "Job",
     "JobState",
     "JobFailureStatus",

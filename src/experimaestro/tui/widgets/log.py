@@ -15,6 +15,7 @@ class CaptureLog(RichLog):
     - Toggle follow mode (auto-scroll) with Ctrl+F
     - Save log to file with Ctrl+S
     - Copy log to clipboard with Ctrl+Y
+    - Tracks unread lines when tab is not visible
     """
 
     BINDINGS = [
@@ -22,6 +23,27 @@ class CaptureLog(RichLog):
         Binding("ctrl+s", "save_log", "Save"),
         Binding("ctrl+y", "copy_log", "Copy"),
     ]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._has_unread = False
+
+    @property
+    def has_unread(self) -> bool:
+        """Whether there are unread log lines"""
+        return self._has_unread
+
+    def mark_as_read(self) -> None:
+        """Mark all log lines as read"""
+        self._has_unread = False
+        self._update_tab_title()
+
+    def _update_tab_title(self) -> None:
+        """Update the Logs tab title to show unread indicator"""
+        try:
+            self.app.update_logs_tab_title()
+        except Exception:
+            pass
 
     def on_mount(self) -> None:
         """Enable print capturing when widget is mounted"""
@@ -55,6 +77,10 @@ class CaptureLog(RichLog):
         """Handle print events from captured stdout/stderr"""
         if text := event.text.strip():
             self.write(self._format_log_line(text))
+            # Mark as unread if Logs tab is not active
+            if not self._has_unread:
+                self._has_unread = True
+                self._update_tab_title()
 
     def action_toggle_follow(self) -> None:
         """Toggle auto-scroll (follow) mode"""

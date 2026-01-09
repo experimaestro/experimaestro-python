@@ -39,6 +39,23 @@ class DirtyGitError(HandledException):
     pass
 
 
+class GracefulExperimentExit(Exception):
+    """Raised to exit an experiment context without waiting for running jobs.
+
+    This is useful in tests or when you want to detach from an experiment
+    while keeping jobs running (e.g., to test stray job detection).
+
+    Example::
+
+        with experiment(workdir, "my-experiment") as xp:
+            task = MyTask.C(value=1).submit()
+            # Wait for task to start...
+            raise GracefulExperimentExit()  # Exit without waiting for task to finish
+    """
+
+    pass
+
+
 class StateListener:
     """Listener that writes job/service events to filesystem and tracks state"""
 
@@ -740,7 +757,10 @@ class experiment(BaseExperiment):
 
         # Close the different locks
         try:
-            if exc_type:
+            if exc_type is GracefulExperimentExit:
+                # Graceful exit - don't wait for jobs, don't log error
+                logger.info("Graceful experiment exit - not waiting for running jobs")
+            elif exc_type:
                 # import faulthandler
                 # faulthandler.dump_traceback()
                 logger.error(
@@ -768,7 +788,12 @@ class experiment(BaseExperiment):
             self.scheduler.unregister_experiment(self)
 
             # Remove state listener and finalize run (only in NORMAL mode)
-            status = "failed" if exc_type else "completed"
+            if exc_type is GracefulExperimentExit:
+                status = "detached"  # Graceful exit, jobs may still be running
+            elif exc_type:
+                status = "failed"
+            else:
+                status = "completed"
 
             if self._state_listener is not None:
                 self.scheduler.removelistener(self._state_listener)
@@ -846,6 +871,10 @@ class experiment(BaseExperiment):
                 )
             except Exception as e:
                 logger.warning("Failed to cleanup old runs: %s", e)
+
+        # Suppress GracefulExperimentExit exception
+        if exc_type is GracefulExperimentExit:
+            return True
 
     async def update_task_output_count(self, delta: int):
         """Change in the number of task outputs to process"""

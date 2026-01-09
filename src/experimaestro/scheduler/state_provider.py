@@ -334,6 +334,19 @@ class StateProvider(ABC):
         """Get orphan jobs (jobs not associated with any experiment run)"""
         return []
 
+    def get_stray_jobs(self) -> List[BaseJob]:
+        """Get stray jobs (running jobs not associated with any active experiment)
+
+        Stray jobs are a subset of orphan jobs - they are orphan jobs that are
+        currently running or scheduled. These represent jobs where the experimental
+        plan changed but the job process is still running.
+
+        Returns:
+            List of running/scheduled jobs not in any active experiment
+        """
+        # Default implementation: filter orphan jobs to running ones
+        return [j for j in self.get_orphan_jobs() if j.state and j.state.running()]
+
     def delete_job_safely(self, job: BaseJob, perform: bool = True) -> Tuple[bool, str]:
         """Safely delete a job and its data"""
         return False, "Not implemented"

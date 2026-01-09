@@ -54,10 +54,10 @@ from experimaestro.tui.widgets import (
     ServicesList,
     JobsTable,
     JobDetailView,
-    OrphanJobsScreen,
     RunsList,
     GlobalServiceSyncs,
 )
+from experimaestro.tui.widgets.stray_jobs import OrphanJobsTab
 
 
 class ExperimaestroUI(App):
@@ -71,7 +71,6 @@ class ExperimaestroUI(App):
         Binding("?", "show_help", "Help"),
         Binding("escape", "go_back", "Back", show=False),
         Binding("l", "view_logs", "Logs", show=False),
-        Binding("o", "show_orphans", "Orphans", show=False),
         Binding("j", "focus_jobs", "Jobs", show=False),
         Binding("s", "focus_services", "Services", show=False),
     ]
@@ -134,6 +133,8 @@ class ExperimaestroUI(App):
                     yield from self._compose_monitor_view()
                 with TabPane("Services (0)", id="services-sync-tab"):
                     yield GlobalServiceSyncs(self.state_provider)
+                with TabPane("Orphans (0)", id="orphan-tab"):
+                    yield OrphanJobsTab(self.state_provider)
                 with TabPane("Logs", id="logs-tab"):
                     yield CaptureLog(id="logs", auto_scroll=True, wrap=True)
         else:
@@ -143,6 +144,8 @@ class ExperimaestroUI(App):
                     yield from self._compose_monitor_view()
                 with TabPane("Services (0)", id="services-sync-tab"):
                     yield GlobalServiceSyncs(self.state_provider)
+                with TabPane("Orphans (0)", id="orphan-tab"):
+                    yield OrphanJobsTab(self.state_provider)
 
         yield Footer()
 
@@ -189,6 +192,52 @@ class ExperimaestroUI(App):
                 tab.label = f"Services ({count})"
         except Exception:
             pass
+
+    def update_orphan_tab_title(self) -> None:
+        """Update the Orphans tab title with orphan job count
+
+        Format: Orphans (X/Y) where X=running (stray), Y=non-running (finished)
+        """
+        try:
+            orphan_tab = self.query_one(OrphanJobsTab)
+            running = orphan_tab.running_count
+            finished = orphan_tab.finished_count
+            # Find and update the tab pane title
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            tab = tabs.get_tab("orphan-tab")
+            if tab:
+                tab.label = f"Orphans ({running}/{finished})"
+        except Exception:
+            pass
+
+    def update_logs_tab_title(self) -> None:
+        """Update the Logs tab title to show unread indicator (bold when unread)"""
+        if not self.show_logs:
+            return
+        try:
+            from rich.text import Text
+
+            log_widget = self.query_one(CaptureLog)
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            tab = tabs.get_tab("logs-tab")
+            if tab:
+                if log_widget.has_unread:
+                    tab.label = Text("Logs *", style="bold")
+                else:
+                    tab.label = "Logs"
+        except Exception:
+            pass
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        """Handle tab switching - mark logs as read when Logs tab is activated"""
+        if event.tab.id == "logs-tab" and self.show_logs:
+            try:
+                log_widget = self.query_one(CaptureLog)
+                log_widget.mark_as_read()
+            except Exception:
+                pass
 
     def _on_state_event(self, event: StateEvent) -> None:
         """Handle state change events from the state provider
@@ -381,13 +430,6 @@ class ExperimaestroUI(App):
         if not job_detail_container.has_class("hidden"):
             job_detail_view = self.query_one(JobDetailView)
             job_detail_view.action_view_logs()
-
-    def action_show_orphans(self) -> None:
-        """Show orphan jobs screen (only for local/workspace providers)"""
-        if self.state_provider.is_remote:
-            self.notify("Orphan detection not available for remote workspaces")
-            return
-        self.push_screen(OrphanJobsScreen(self.state_provider))
 
     def on_view_job_logs(self, message: ViewJobLogs) -> None:
         """Handle request to view job logs - push LogViewerScreen
