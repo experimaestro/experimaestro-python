@@ -28,10 +28,42 @@ class ExperimentsList(Widget):
         Binding("d", "show_runs", "Runs"),
         Binding("ctrl+d", "delete_experiment", "Delete", show=False),
         Binding("k", "kill_experiment", "Kill", show=False),
+        Binding("S", "sort_by_status", "Sort ⚑", show=False),
+        Binding("D", "sort_by_date", "Sort Date", show=False),
     ]
 
     current_experiment: reactive[Optional[str]] = reactive(None)
     collapsed: reactive[bool] = reactive(False)
+
+    # Track current sort state
+    _sort_column: Optional[str] = None
+    _sort_reverse: bool = False
+
+    # Status sort order (for sorting by status)
+    STATUS_ORDER = {
+        "failed": 0,  # Failed experiments first (need attention)
+        "running": 1,  # Running experiments
+        "done": 2,  # Completed experiments
+        "empty": 3,  # Empty experiments last
+    }
+
+    # Column key to display name mapping
+    COLUMN_LABELS = {
+        "id": "ID",
+        "run": "Run",
+        "runs": "#",
+        "host": "Host",
+        "jobs": "Jobs",
+        "status": "Status",
+        "started": "Started",
+        "duration": "Duration",
+    }
+
+    # Columns that support sorting (column key -> sort column name)
+    SORTABLE_COLUMNS = {
+        "status": "status",
+        "started": "started",
+    }
 
     def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
@@ -73,6 +105,83 @@ class ExperimentsList(Widget):
                 getattr(exp_info, "current_run_id", None) if exp_info else None
             )
             self.post_message(ShowRunsRequest(exp_id, current_run_id))
+
+    def action_sort_by_status(self) -> None:
+        """Sort experiments by status"""
+        if self._sort_column == "status":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "status"
+            self._sort_reverse = False
+        self._update_column_headers()
+        self.refresh_experiments()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted by status ({order})", severity="information")
+
+    def action_sort_by_date(self) -> None:
+        """Sort experiments by start date"""
+        if self._sort_column == "started":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "started"
+            self._sort_reverse = True  # Default to newest first for date
+        self._update_column_headers()
+        self.refresh_experiments()
+        order = "newest first" if self._sort_reverse else "oldest first"
+        self.notify(f"Sorted by date ({order})", severity="information")
+
+    def _get_status_category(self, exp) -> str:
+        """Get status category for an experiment (for sorting)"""
+        failed = exp.failed_jobs
+        total = exp.total_jobs
+        finished = exp.finished_jobs
+
+        if failed > 0:
+            return "failed"
+        elif finished == total and total > 0:
+            return "done"
+        elif finished < total:
+            return "running"
+        else:
+            return "empty"
+
+    def _get_status_sort_key(self, exp):
+        """Get sort key for an experiment based on status"""
+        status_category = self._get_status_category(exp)
+        status_order = self.STATUS_ORDER.get(status_category, 99)
+        # Secondary sort by failed count (more failures first)
+        failed_count = exp.failed_jobs if status_category == "failed" else 0
+        return (status_order, -failed_count)
+
+    def _update_column_headers(self) -> None:
+        """Update column headers with sort indicators"""
+        table = self.query_one("#experiments-table", DataTable)
+        for column in table.columns.values():
+            col_key = str(column.key.value) if column.key else None
+            if col_key and col_key in self.COLUMN_LABELS:
+                label = self.COLUMN_LABELS[col_key]
+                sort_col = self.SORTABLE_COLUMNS.get(col_key)
+                if sort_col and self._sort_column == sort_col:
+                    # Add sort indicator
+                    indicator = "▼" if self._sort_reverse else "▲"
+                    new_label = f"{label} {indicator}"
+                else:
+                    new_label = label
+                column.label = new_label
+
+    def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
+        """Handle column header click for sorting"""
+        col_key = str(event.column_key.value) if event.column_key else None
+        if col_key and col_key in self.SORTABLE_COLUMNS:
+            sort_col = self.SORTABLE_COLUMNS[col_key]
+            if self._sort_column == sort_col:
+                self._sort_reverse = not self._sort_reverse
+            else:
+                self._sort_column = sort_col
+                # Default to reverse for date (newest first)
+                self._sort_reverse = sort_col == "started"
+            self._update_column_headers()
+            self.refresh_experiments()
 
     def compose(self) -> ComposeResult:
         # Collapsed header (hidden initially)
@@ -130,11 +239,33 @@ class ExperimentsList(Widget):
             self.experiments = []
             return
 
+        # Sort experiments based on selected column
+        experiments_sorted = list(self.experiments)
+        if self._sort_column == "status":
+            experiments_sorted.sort(
+                key=self._get_status_sort_key,
+                reverse=self._sort_reverse,
+            )
+        elif self._sort_column == "started":
+            # Sort by started time (experiments without start time go to end)
+            experiments_sorted.sort(
+                key=lambda e: e.started_at or 0,
+                reverse=self._sort_reverse,
+            )
+        # Default: no sorting, use order from state provider
+
         # Get existing row keys
         existing_keys = set(table.rows.keys())
         current_exp_ids = set()
 
-        for exp in self.experiments:
+        # Check if we need to rebuild (sort order may have changed)
+        current_order = [e.experiment_id for e in experiments_sorted]
+        existing_order = [str(k.value) for k in table.rows.keys()]
+        needs_rebuild = current_order != existing_order
+
+        # Build row data for all experiments
+        rows_data = {}
+        for exp in experiments_sorted:
             exp_id = exp.experiment_id
             current_exp_ids.add(exp_id)
             total = exp.total_jobs
@@ -190,32 +321,66 @@ class ExperimentsList(Widget):
 
                     self.log.error(traceback.format_exc())
 
-            # Update existing row or add new one
-            if exp_id in existing_keys:
-                table.update_cell(exp_id, "id", exp_id, update_width=True)
-                table.update_cell(exp_id, "run", run_id, update_width=True)
-                table.update_cell(exp_id, "runs", runs_count, update_width=True)
-                table.update_cell(exp_id, "host", hostname, update_width=True)
-                table.update_cell(exp_id, "jobs", jobs_text, update_width=True)
-                table.update_cell(exp_id, "status", status, update_width=True)
-                table.update_cell(exp_id, "started", started, update_width=True)
-                table.update_cell(exp_id, "duration", duration, update_width=True)
-            else:
-                table.add_row(
-                    exp_id,
-                    run_id,
-                    runs_count,
-                    hostname,
-                    jobs_text,
-                    status,
-                    started,
-                    duration,
-                    key=exp_id,
-                )
+            rows_data[exp_id] = (
+                exp_id,
+                run_id,
+                runs_count,
+                hostname,
+                jobs_text,
+                status,
+                started,
+                duration,
+            )
 
-        # Remove rows for experiments that no longer exist
-        for old_exp_id in existing_keys - current_exp_ids:
-            table.remove_row(old_exp_id)
+        if needs_rebuild:
+            # Full rebuild needed - save selection, clear, rebuild
+            selected_key = None
+            if table.cursor_row is not None and table.row_count > 0:
+                try:
+                    row_keys = list(table.rows.keys())
+                    if table.cursor_row < len(row_keys):
+                        selected_key = str(row_keys[table.cursor_row].value)
+                except (IndexError, KeyError):
+                    pass
+
+            table.clear()
+            new_cursor_row = None
+            for idx, exp in enumerate(experiments_sorted):
+                exp_id = exp.experiment_id
+                table.add_row(*rows_data[exp_id], key=exp_id)
+                if selected_key == exp_id:
+                    new_cursor_row = idx
+
+            if new_cursor_row is not None and table.row_count > 0:
+                table.move_cursor(row=new_cursor_row)
+        else:
+            # Update cells in place (no reordering needed)
+            for exp_id, row_data in rows_data.items():
+                if exp_id in existing_keys:
+                    (
+                        _,
+                        run_id,
+                        runs_count,
+                        hostname,
+                        jobs_text,
+                        status,
+                        started,
+                        duration,
+                    ) = row_data
+                    table.update_cell(exp_id, "id", exp_id, update_width=True)
+                    table.update_cell(exp_id, "run", run_id, update_width=True)
+                    table.update_cell(exp_id, "runs", runs_count, update_width=True)
+                    table.update_cell(exp_id, "host", hostname, update_width=True)
+                    table.update_cell(exp_id, "jobs", jobs_text, update_width=True)
+                    table.update_cell(exp_id, "status", status, update_width=True)
+                    table.update_cell(exp_id, "started", started, update_width=True)
+                    table.update_cell(exp_id, "duration", duration, update_width=True)
+                else:
+                    table.add_row(*row_data, key=exp_id)
+
+            # Remove rows for experiments that no longer exist
+            for old_exp_id in existing_keys - current_exp_ids:
+                table.remove_row(old_exp_id)
 
         # Update collapsed header if viewing an experiment
         if self.collapsed and self.current_experiment:
