@@ -59,6 +59,7 @@ class RPCMethod(str, Enum):
     KILL_JOB = "kill_job"
     CLEAN_JOB = "clean_job"
     GET_SYNC_INFO = "get_sync_info"
+    GET_PROCESS_INFO = "get_process_info"
 
 
 @dataclass

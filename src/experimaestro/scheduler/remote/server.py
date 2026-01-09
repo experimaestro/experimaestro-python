@@ -87,6 +87,7 @@ class SSHStateProviderServer:
             RPCMethod.KILL_JOB.value: self._handle_kill_job,
             RPCMethod.CLEAN_JOB.value: self._handle_clean_job,
             RPCMethod.GET_SYNC_INFO.value: self._handle_get_sync_info,
+            RPCMethod.GET_PROCESS_INFO.value: self._handle_get_process_info,
         }
 
     def start(self):
@@ -433,4 +434,30 @@ class SSHStateProviderServer:
                 if hasattr(self._state_provider, "get_last_sync_time")
                 else None
             ),
+        }
+
+    def _handle_get_process_info(self, params: Dict) -> Optional[Dict]:
+        """Handle get_process_info request"""
+        job_id = params.get("job_id")
+        experiment_id = params.get("experiment_id")
+        run_id = params.get("run_id")
+
+        if not job_id or not experiment_id:
+            raise TypeError("job_id and experiment_id are required")
+
+        # Get the job first
+        job = self._state_provider.get_job(job_id, experiment_id, run_id)
+        if job is None:
+            return None
+
+        # Get process info
+        pinfo = self._state_provider.get_process_info(job)
+        if pinfo is None:
+            return None
+
+        # Serialize ProcessInfo to dict
+        return {
+            "pid": pinfo.pid,
+            "type": pinfo.type,
+            "running": pinfo.running,
         }

@@ -1119,6 +1119,51 @@ class Scheduler(StateProvider, threading.Thread):
         # Live scheduler doesn't support cleaning jobs
         return False
 
+    def get_process_info(self, job: BaseJob):
+        """Get process information for a job
+
+        For the scheduler, we can access the actual Job and its process.
+        """
+        from experimaestro.scheduler.state_provider import ProcessInfo
+
+        # Get the actual Job from our jobs dict
+        actual_job = self.jobs.get(job.identifier)
+        if actual_job is None:
+            return None
+
+        # Try to get process info
+        process = actual_job.getprocess()
+        if process is None:
+            return None
+
+        # Get PID and type from process
+        try:
+            spec = process.tospec()
+            pid = spec.get("pid")
+            proc_type = spec.get("type", "unknown")
+
+            if pid is None:
+                return None
+
+            # Check if running
+            import asyncio
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # We're in an async context, can't use run_until_complete
+                    # Just assume running based on job state
+                    running = job.state == JobState.RUNNING
+                else:
+                    running = loop.run_until_complete(process.aio_isrunning())
+            except RuntimeError:
+                # No event loop, just check job state
+                running = job.state == JobState.RUNNING
+
+            return ProcessInfo(pid=pid, type=proc_type, running=running)
+        except Exception:
+            return None
+
     def close(self) -> None:
         """Close the state provider
 

@@ -708,6 +708,34 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.CLEAN_JOB, params)
         return result.get("success", False)
 
+    def get_process_info(self, job: BaseJob):
+        """Get process information for a job
+
+        Returns None if the remote server doesn't support this method.
+        """
+        from experimaestro.scheduler.state_provider import ProcessInfo
+
+        params = {
+            "job_id": job.identifier,
+            "experiment_id": getattr(job, "experiment_id", ""),
+            "run_id": getattr(job, "run_id", ""),
+        }
+
+        try:
+            result = self._call_sync(RPCMethod.GET_PROCESS_INFO, params)
+        except RuntimeError:
+            # Server doesn't support this method (older version)
+            return None
+
+        if result is None:
+            return None
+
+        return ProcessInfo(
+            pid=result["pid"],
+            type=result["type"],
+            running=result.get("running", False),
+        )
+
     # -------------------------------------------------------------------------
     # Data Conversion
     # -------------------------------------------------------------------------

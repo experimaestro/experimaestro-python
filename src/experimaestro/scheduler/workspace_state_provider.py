@@ -36,6 +36,7 @@ from experimaestro.scheduler.state_provider import (
     ServiceUpdatedEvent,
     MockJob,
     MockExperiment,
+    ProcessInfo,
 )
 from experimaestro.scheduler.state_status import (
     StatusFile,
@@ -965,6 +966,57 @@ class WorkspaceStateProvider(StateProvider):
             progress=[],
             updated_at="",
         )
+
+    # =========================================================================
+    # Process information
+    # =========================================================================
+
+    def get_process_info(self, job: MockJob) -> Optional[ProcessInfo]:
+        """Get process information for a job
+
+        Returns a ProcessInfo dataclass or None if not available.
+        """
+        if not job.path or not job.task_id:
+            return None
+
+        # Get script name from task_id
+        scriptname = job.task_id.rsplit(".", 1)[-1]
+        pid_file = job.path / f"{scriptname}.pid"
+
+        if not pid_file.exists():
+            return None
+
+        try:
+            pinfo = json.loads(pid_file.read_text())
+            pid = pinfo.get("pid")
+            proc_type = pinfo.get("type", "unknown")
+
+            if pid is None:
+                return None
+
+            result = ProcessInfo(pid=pid, type=proc_type, running=False)
+
+            # Try to get more info for running jobs
+            if job.state and job.state.running():
+                try:
+                    import psutil
+
+                    proc = psutil.Process(pid)
+                    if proc.is_running():
+                        result.running = True
+                        # Get CPU and memory usage
+                        result.cpu_percent = proc.cpu_percent(interval=0.1)
+                        mem_info = proc.memory_info()
+                        result.memory_mb = mem_info.rss / (1024 * 1024)
+                        result.num_threads = proc.num_threads()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+                except ImportError:
+                    pass  # psutil not available
+
+            return result
+        except (json.JSONDecodeError, OSError):
+            return None
 
     # =========================================================================
     # Lifecycle

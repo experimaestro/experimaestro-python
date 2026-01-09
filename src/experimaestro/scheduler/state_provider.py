@@ -40,6 +40,34 @@ logger = logging.getLogger("xpm.state")
 
 
 # =============================================================================
+# Process Information
+# =============================================================================
+
+
+@dataclass
+class ProcessInfo:
+    """Information about a running or completed process"""
+
+    pid: int
+    """Process ID"""
+
+    type: str
+    """Process type (e.g., 'local', 'slurm', 'oar')"""
+
+    running: bool = False
+    """Whether the process is currently running"""
+
+    cpu_percent: Optional[float] = None
+    """CPU usage percentage (if available)"""
+
+    memory_mb: Optional[float] = None
+    """Memory usage in MB (if available)"""
+
+    num_threads: Optional[int] = None
+    """Number of threads (if available)"""
+
+
+# =============================================================================
 # State Event Classes
 # =============================================================================
 
@@ -319,6 +347,13 @@ class StateProvider(ABC):
     def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
         """Clean up orphan partial directories"""
         return []
+
+    def get_process_info(self, job: BaseJob) -> Optional[ProcessInfo]:
+        """Get process information for a job
+
+        Returns a ProcessInfo dataclass or None if not available.
+        """
+        return None
 
     def get_last_sync_time(self) -> Optional[datetime]:
         """Get the last sync time (for incremental updates)"""
@@ -755,6 +790,8 @@ class MockService(BaseService):
 
 
 __all__ = [
+    # Data classes
+    "ProcessInfo",
     # Events
     "StateEvent",
     "ExperimentUpdatedEvent",

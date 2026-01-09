@@ -166,6 +166,8 @@ class JobDetailView(Widget):
             yield Label("", id="job-status-label")
             yield Label("", id="job-path-label")
             yield Label("", id="job-times-label")
+            yield Label("Process:", classes="subsection-title")
+            yield Label("", id="job-process-label")
             yield Label("Tags:", classes="subsection-title")
             yield Label("", id="job-tags-label")
             yield Label("Dependencies:", classes="subsection-title")
@@ -180,6 +182,30 @@ class JobDetailView(Widget):
             self.post_message(
                 ViewJobLogs(str(self.job_data.path), self.job_data.task_id)
             )
+
+    def _get_process_info(self, job) -> str:
+        """Get process information for a job using the state provider"""
+        pinfo = self.state_provider.get_process_info(job)
+
+        if pinfo is None:
+            if job.state and job.state.finished():
+                return "(process completed)"
+            return "(no process info)"
+
+        # Build process info string
+        parts = [f"PID: [bold]{pinfo.pid}[/bold]", f"Type: {pinfo.type}"]
+
+        if pinfo.running:
+            if pinfo.cpu_percent is not None:
+                parts.append(f"CPU: {pinfo.cpu_percent:.1f}%")
+            if pinfo.memory_mb is not None:
+                parts.append(f"Mem: {pinfo.memory_mb:.1f}MB")
+            if pinfo.num_threads is not None:
+                parts.append(f"Threads: {pinfo.num_threads}")
+        elif job.state and job.state.running():
+            parts.append("[dim](process not found)[/dim]")
+
+        return " | ".join(parts)
 
     def set_job(self, job_id: str, experiment_id: str) -> None:
         """Set the job to display"""
@@ -248,6 +274,10 @@ class JobDetailView(Widget):
 
         times_text = f"Submitted: {submitted} | Start: {start} | End: {end} | Duration: {duration}"
         self.query_one("#job-times-label", Label).update(times_text)
+
+        # Process information
+        process_text = self._get_process_info(job)
+        self.query_one("#job-process-label", Label).update(process_text)
 
         # Tags are stored in JobTagModel, accessed via tags_map
         tags = self.tags_map.get(job.identifier, {})
