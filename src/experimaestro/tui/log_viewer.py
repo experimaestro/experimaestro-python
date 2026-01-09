@@ -1,12 +1,15 @@
 """Log viewer screen for viewing job logs efficiently"""
 
 from pathlib import Path
+from typing import Callable, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Footer, Header, RichLog, Static, TabbedContent, TabPane
+
+from experimaestro.scheduler.interfaces import JobState
 
 
 # Default chunk size for reading file (64KB)
@@ -129,7 +132,12 @@ class LogWidget(Vertical):
 
 
 class LogViewerScreen(Screen, inherit_bindings=False):
-    """Screen for viewing job logs efficiently"""
+    """Screen for viewing job logs efficiently
+
+    Supports both local and remote log viewing:
+    - Local: reads log files directly
+    - Remote: uses adaptive sync to periodically rsync logs from remote
+    """
 
     CSS = """
     LogViewerScreen {
@@ -141,6 +149,21 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         padding: 0 1;
         height: auto;
         text-style: bold;
+        color: $text-muted;
+    }
+
+    .loading-message {
+        content-align: center middle;
+        height: 100%;
+        text-style: italic;
+        color: $text-muted;
+    }
+
+    .sync-status {
+        background: $boost;
+        padding: 0 1;
+        height: auto;
+        text-style: italic;
         color: $text-muted;
     }
 
@@ -158,21 +181,53 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         Binding("f", "toggle_follow", "Follow"),
         Binding("g", "go_to_top", "Top"),
         Binding("G", "go_to_bottom", "Bottom"),
+        Binding("r", "sync_now", "Sync", show=False),
         Binding("escape", "close_viewer", "Back", priority=True),
         Binding("q", "close_viewer", "Quit", priority=True),
     ]
 
-    def __init__(self, log_files: list[str], job_id: str):
+    def __init__(
+        self,
+        log_files: list[str],
+        job_id: str,
+        sync_func: Optional[Callable[[str], Optional[Path]]] = None,
+        remote_path: Optional[str] = None,
+        task_id: Optional[str] = None,
+        job_state: Optional[JobState] = None,
+    ):
+        """Initialize the log viewer
+
+        Args:
+            log_files: List of local log file paths
+            job_id: Job identifier
+            sync_func: Function to sync remote path (for remote monitoring)
+            remote_path: Remote job directory path (for remote monitoring)
+            task_id: Task ID for log file naming (for remote monitoring)
+            job_state: Current job state (for adaptive sync decisions)
+        """
         super().__init__()
         self.log_files = log_files
         self.job_id = job_id
         self.following = True
         self.log_widgets: list[LogWidget] = []
 
+        # Remote sync support
+        self.sync_func = sync_func
+        self.remote_path = remote_path
+        self.task_id = task_id
+        self.job_state = job_state
+        self._synchronizer = None
+        self._loading = bool(sync_func and not log_files)
+
     def compose(self) -> ComposeResult:
         yield Header()
 
-        if len(self.log_files) == 1:
+        if self._loading:
+            # Show loading message while waiting for first sync
+            yield Static(
+                "Syncing logs from remote...", id="loading", classes="loading-message"
+            )
+        elif len(self.log_files) == 1:
             # Single file - simple view
             widget = LogWidget(self.log_files[0], "log-0")
             self.log_widgets.append(widget)
@@ -187,11 +242,182 @@ class LogViewerScreen(Screen, inherit_bindings=False):
                         self.log_widgets.append(widget)
                         yield widget
 
+        # Sync status for remote monitoring
+        if self.sync_func:
+            yield Static("", id="sync-status", classes="sync-status")
+
         yield Footer()
 
     def on_mount(self) -> None:
         """Start watching for changes"""
         self.set_interval(0.5, self._refresh_logs)
+
+        # Start adaptive sync for remote monitoring
+        if self.sync_func and self.remote_path:
+            self._start_adaptive_sync()
+
+    def _start_adaptive_sync(self) -> None:
+        """Start adaptive sync for remote log files"""
+        import logging
+
+        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
+
+        logger = logging.getLogger("xpm.tui.log_viewer")
+
+        # Only use adaptive sync for running jobs
+        is_running = self.job_state and self.job_state.running()
+        logger.info(
+            f"Starting sync: job_state={self.job_state}, "
+            f"is_running={is_running}, remote_path={self.remote_path}"
+        )
+
+        # Update loading message to show we're syncing
+        try:
+            loading = self.query_one("#loading", Static)
+            loading.update("Syncing logs from remote (this may take a moment)...")
+        except Exception:
+            pass
+
+        if is_running:
+            # Build a name for logging
+            sync_name = f"job:{self.task_id}" if self.task_id else f"job:{self.job_id}"
+            self._synchronizer = AdaptiveSynchronizer(
+                sync_func=self.sync_func,
+                remote_path=self.remote_path,
+                name=sync_name,
+                on_sync_start=lambda: self.app.call_from_thread(self._on_sync_start),
+                on_sync_complete=lambda p: self.app.call_from_thread(
+                    self._on_sync_complete, p
+                ),
+                on_sync_error=lambda e: self.app.call_from_thread(
+                    self._on_sync_error, e
+                ),
+            )
+            self._synchronizer.start()
+        else:
+            # For completed jobs, just sync once
+            self._do_single_sync()
+
+    def _do_single_sync(self) -> None:
+        """Do a single sync for completed jobs"""
+        import threading
+
+        def sync_thread():
+            try:
+                local_path = self.sync_func(self.remote_path)
+                if local_path:
+                    self.app.call_from_thread(self._on_sync_complete, local_path)
+                else:
+                    self.app.call_from_thread(self._on_sync_error, "Sync failed")
+            except Exception as e:
+                self.app.call_from_thread(self._on_sync_error, str(e))
+
+        thread = threading.Thread(target=sync_thread, daemon=True)
+        thread.start()
+
+    def _on_sync_start(self) -> None:
+        """Handle sync start - update status"""
+        try:
+            status = self.query_one("#sync-status", Static)
+            status.update("⟳ Syncing...")
+        except Exception:
+            pass
+
+    def _on_sync_complete(self, local_path) -> None:
+        """Handle sync completion - update log widgets"""
+        import logging
+
+        logger = logging.getLogger("xpm.tui.log_viewer")
+
+        # Ensure local_path is a Path object
+        if not isinstance(local_path, Path):
+            local_path = Path(local_path)
+
+        logger.info(f"Sync complete: {local_path}, loading={self._loading}")
+
+        # Update sync status
+        try:
+            status = self.query_one("#sync-status", Static)
+            if self._synchronizer:
+                status.update(f"✓ Next sync: {self._synchronizer.interval:.0f}s")
+            else:
+                status.update("✓ Synced")
+        except Exception as e:
+            logger.warning(f"Failed to update sync status: {e}")
+
+        # If loading, find log files and create widgets
+        if self._loading:
+            self._loading = False
+            task_name = self.task_id.split(".")[-1] if self.task_id else "task"
+            stdout_path = local_path / f"{task_name}.out"
+            stderr_path = local_path / f"{task_name}.err"
+
+            logger.info(f"Looking for log files: {stdout_path}, {stderr_path}")
+
+            log_files = []
+            if stdout_path.exists():
+                log_files.append(str(stdout_path))
+            if stderr_path.exists():
+                log_files.append(str(stderr_path))
+
+            if not log_files:
+                try:
+                    loading = self.query_one("#loading", Static)
+                    loading.update(
+                        f"No log files found: {task_name}.out/.err in {local_path}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to update loading: {e}")
+                return
+
+            logger.info(f"Found log files: {log_files}")
+            self.log_files = log_files
+            self._rebuild_log_widgets()
+        else:
+            # Just refresh existing widgets
+            for widget in self.log_widgets:
+                widget.refresh_content()
+
+    def _on_sync_error(self, error: str) -> None:
+        """Handle sync error"""
+        try:
+            status = self.query_one("#sync-status", Static)
+            status.update(f"Sync error: {error}")
+        except Exception:
+            pass
+
+        if self._loading:
+            try:
+                loading = self.query_one("#loading", Static)
+                loading.update(f"Error: {error}")
+            except Exception:
+                pass
+
+    def _rebuild_log_widgets(self) -> None:
+        """Rebuild log widgets after first sync"""
+        # Remove loading message
+        try:
+            loading = self.query_one("#loading", Static)
+            loading.remove()
+        except Exception:
+            pass
+
+        # Add log widgets
+        self.log_widgets = []
+        if len(self.log_files) == 1:
+            widget = LogWidget(self.log_files[0], "log-0")
+            self.log_widgets.append(widget)
+            self.mount(widget, before=self.query_one("#sync-status"))
+        else:
+            tabbed = TabbedContent()
+            self.mount(tabbed, before=self.query_one("#sync-status"))
+            for i, log_file in enumerate(self.log_files):
+                file_name = Path(log_file).name
+                pane = TabPane(file_name, id=f"tab-{i}")
+                widget = LogWidget(log_file, f"log-{i}")
+                self.log_widgets.append(widget)
+                pane.compose_add_child(widget)
+                tabbed.add_pane(pane)
 
     def _refresh_logs(self) -> None:
         """Refresh all log widgets"""
@@ -203,6 +429,20 @@ class LogViewerScreen(Screen, inherit_bindings=False):
 
     def action_close_viewer(self) -> None:
         """Go back to the job detail view"""
+        import logging
+
+        logger = logging.getLogger("xpm.tui.log_viewer")
+
+        # Warn if closing during first sync
+        if self._loading:
+            self.notify("Sync in progress, please wait...", severity="warning")
+            logger.info("User tried to close during first sync, ignoring")
+            return
+
+        logger.info("Closing log viewer, stopping sync")
+        # Stop adaptive sync
+        if self._synchronizer:
+            self._synchronizer.stop()
         self.dismiss()
 
     def action_toggle_follow(self) -> None:
@@ -226,3 +466,12 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         for widget in self.log_widgets:
             widget.following = True
             widget.scroll_to_end()
+
+    def action_sync_now(self) -> None:
+        """Trigger immediate sync (for remote monitoring)"""
+        if self._synchronizer:
+            self._synchronizer.sync_now()
+            self.notify("Syncing...")
+        elif self.sync_func and self.remote_path:
+            self._do_single_sync()
+            self.notify("Syncing...")

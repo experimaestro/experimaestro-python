@@ -31,6 +31,10 @@ class QuitConfirmScreen(ModalScreen[bool]):
                 yield Button("Quit", variant="error", id="quit-yes")
                 yield Button("Cancel", variant="primary", id="quit-no")
 
+    def on_mount(self) -> None:
+        """Focus Cancel button by default"""
+        self.query_one("#quit-no", Button).focus()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "quit-yes":
             self.dismiss(True)

@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 from textual.app import App, ComposeResult
-from textual import work
 from textual.containers import Vertical
 from textual.widgets import (
     Header,
@@ -33,8 +32,6 @@ from experimaestro.tui.messages import (
     JobDeselected,
     ViewJobLogs,
     ViewJobLogsRequest,
-    LogsSyncComplete,
-    LogsSyncFailed,
     DeleteJobRequest,
     DeleteExperimentRequest,
     KillJobRequest,
@@ -59,6 +56,7 @@ from experimaestro.tui.widgets import (
     JobDetailView,
     OrphanJobsScreen,
     RunsList,
+    GlobalServiceSyncs,
 )
 
 
@@ -130,16 +128,21 @@ class ExperimaestroUI(App):
         yield Header()
 
         if self.show_logs:
-            # Tabbed layout with logs
+            # Tabbed layout with logs and services
             with TabbedContent(id="main-tabs"):
                 with TabPane("Monitor", id="monitor-tab"):
                     yield from self._compose_monitor_view()
+                with TabPane("Services (0)", id="services-sync-tab"):
+                    yield GlobalServiceSyncs(self.state_provider)
                 with TabPane("Logs", id="logs-tab"):
                     yield CaptureLog(id="logs", auto_scroll=True, wrap=True)
         else:
-            # Simple layout without logs
-            with Vertical(id="main-container"):
-                yield from self._compose_monitor_view()
+            # Simple layout without logs but with services
+            with TabbedContent(id="main-tabs"):
+                with TabPane("Monitor", id="monitor-tab"):
+                    yield from self._compose_monitor_view()
+                with TabPane("Services (0)", id="services-sync-tab"):
+                    yield GlobalServiceSyncs(self.state_provider)
 
         yield Footer()
 
@@ -173,6 +176,19 @@ class ExperimaestroUI(App):
             self.state_provider.add_listener(self._on_state_event)
             self._listener_registered = True
             self.log("Registered state listener for notifications")
+
+    def update_services_tab_title(self) -> None:
+        """Update the Services tab title with sync count"""
+        try:
+            global_services = self.query_one(GlobalServiceSyncs)
+            count = global_services.sync_count
+            # Find and update the tab pane title
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            tab = tabs.get_tab("services-sync-tab")
+            if tab:
+                tab.label = f"Services ({count})"
+        except Exception:
+            pass
 
     def _on_state_event(self, event: StateEvent) -> None:
         """Handle state change events from the state provider
@@ -367,62 +383,34 @@ class ExperimaestroUI(App):
             job_detail_view.action_view_logs()
 
     def action_show_orphans(self) -> None:
-        """Show orphan jobs screen"""
+        """Show orphan jobs screen (only for local/workspace providers)"""
+        if self.state_provider.is_remote:
+            self.notify("Orphan detection not available for remote workspaces")
+            return
         self.push_screen(OrphanJobsScreen(self.state_provider))
 
-    @work(thread=True, exclusive=True)
-    def _sync_and_view_logs(self, job_path: Path, task_id: str) -> None:
-        """Sync logs from remote and then view them (runs in worker thread)"""
-        try:
-            # Sync the job directory
-            local_path = self.state_provider.sync_path(str(job_path))
-            if not local_path:
-                self.post_message(LogsSyncFailed("Failed to sync logs from remote"))
-                return
-
-            job_path = local_path
-
-            # Log files are named after the last part of the task ID
-            task_name = task_id.split(".")[-1]
-            stdout_path = job_path / f"{task_name}.out"
-            stderr_path = job_path / f"{task_name}.err"
-
-            # Collect existing log files
-            log_files = []
-            if stdout_path.exists():
-                log_files.append(str(stdout_path))
-            if stderr_path.exists():
-                log_files.append(str(stderr_path))
-
-            if not log_files:
-                self.post_message(
-                    LogsSyncFailed(f"No log files found: {task_name}.out/.err")
-                )
-                return
-
-            # Signal completion via message
-            job_id = job_path.name
-            self.post_message(LogsSyncComplete(log_files, job_id))
-
-        except Exception as e:
-            self.post_message(LogsSyncFailed(str(e)))
-
-    def on_logs_sync_complete(self, message: LogsSyncComplete) -> None:
-        """Handle successful log sync - show log viewer"""
-        self.push_screen(LogViewerScreen(message.log_files, message.job_id))
-
-    def on_logs_sync_failed(self, message: LogsSyncFailed) -> None:
-        """Handle failed log sync"""
-        self.notify(message.error, severity="warning")
-
     def on_view_job_logs(self, message: ViewJobLogs) -> None:
-        """Handle request to view job logs - push LogViewerScreen"""
-        job_path = Path(message.job_path)
+        """Handle request to view job logs - push LogViewerScreen
 
-        # For remote monitoring, sync the job directory first (in worker thread)
+        For remote monitoring, switches to log viewer immediately with loading state,
+        then starts adaptive sync in background.
+        """
+        job_path = Path(message.job_path)
+        job_id = job_path.name
+
+        # For remote monitoring, switch screen immediately with loading state
         if self.state_provider.is_remote:
-            self.notify("Syncing logs from remote...", timeout=5)
-            self._sync_and_view_logs(job_path, message.task_id)
+            # Push screen immediately - it will handle sync and show loading state
+            self.push_screen(
+                LogViewerScreen(
+                    log_files=[],  # Will be populated after sync
+                    job_id=job_id,
+                    sync_func=self.state_provider.sync_path,
+                    remote_path=str(job_path),
+                    task_id=message.task_id,
+                    job_state=message.job_state,
+                )
+            )
             return
 
         # Local monitoring - no sync needed
@@ -445,7 +433,6 @@ class ExperimaestroUI(App):
             return
 
         # Push the log viewer screen
-        job_id = job_path.name
         self.push_screen(LogViewerScreen(log_files, job_id))
 
     def on_view_job_logs_request(self, message: ViewJobLogsRequest) -> None:
@@ -454,7 +441,7 @@ class ExperimaestroUI(App):
         if not job or not job.path or not job.task_id:
             self.notify("Cannot find job logs", severity="warning")
             return
-        self.post_message(ViewJobLogs(str(job.path), job.task_id))
+        self.post_message(ViewJobLogs(str(job.path), job.task_id, job.state))
 
     def on_delete_job_request(self, message: DeleteJobRequest) -> None:
         """Handle job deletion request"""

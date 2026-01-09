@@ -3,6 +3,7 @@
 from datetime import datetime
 import time as time_module
 from typing import Optional
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Label, Input, Static
@@ -160,6 +161,9 @@ class JobDetailView(Widget):
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
+        yield Static(
+            "Loading job details...", id="job-detail-loading", classes="hidden"
+        )
         with VerticalScroll(id="job-detail-content"):
             yield Label("", id="job-id-label")
             yield Label("", id="job-task-label")
@@ -180,7 +184,9 @@ class JobDetailView(Widget):
         """View job logs with toolong"""
         if self.job_data and self.job_data.path and self.job_data.task_id:
             self.post_message(
-                ViewJobLogs(str(self.job_data.path), self.job_data.task_id)
+                ViewJobLogs(
+                    str(self.job_data.path), self.job_data.task_id, self.job_data.state
+                )
             )
 
     def _get_process_info(self, job) -> str:
@@ -209,28 +215,54 @@ class JobDetailView(Widget):
 
     def set_job(self, job_id: str, experiment_id: str) -> None:
         """Set the job to display"""
-        # Load tags map and dependencies map if experiment changed
-        if experiment_id != self.current_experiment_id:
-            self.tags_map = self.state_provider.get_tags_map(experiment_id)
-            self.dependencies_map = self.state_provider.get_dependencies_map(
-                experiment_id
-            )
         self.current_job_id = job_id
         self.current_experiment_id = experiment_id
-        self.refresh_job_detail()
+
+        # Show loading for remote
+        if self.state_provider.is_remote:
+            self.query_one("#job-detail-loading", Static).remove_class("hidden")
+
+        # Load in background
+        self._load_job_detail(job_id, experiment_id)
+
+    @work(thread=True, exclusive=True, group="job_detail_load")
+    def _load_job_detail(self, job_id: str, experiment_id: str) -> None:
+        """Load job details in background thread"""
+        # Load tags and dependencies if needed
+        tags_map = self.state_provider.get_tags_map(experiment_id)
+        deps_map = self.state_provider.get_dependencies_map(experiment_id)
+        job = self.state_provider.get_job(job_id, experiment_id)
+
+        self.app.call_from_thread(self._on_job_loaded, job, tags_map, deps_map)
+
+    def _on_job_loaded(self, job, tags_map: dict, deps_map: dict) -> None:
+        """Handle loaded job on main thread"""
+        self.query_one("#job-detail-loading", Static).add_class("hidden")
+        self.tags_map = tags_map
+        self.dependencies_map = deps_map
+
+        if not job:
+            self.log(f"Job not found: {self.current_job_id}")
+            return
+
+        self._update_job_display(job)
 
     def refresh_job_detail(self) -> None:
         """Refresh job details from state provider"""
         if not self.current_job_id or not self.current_experiment_id:
             return
 
-        job = self.state_provider.get_job(
-            self.current_job_id, self.current_experiment_id
-        )
-        if not job:
-            self.log(f"Job not found: {self.current_job_id}")
-            return
+        if self.state_provider.is_remote:
+            self._load_job_detail(self.current_job_id, self.current_experiment_id)
+        else:
+            job = self.state_provider.get_job(
+                self.current_job_id, self.current_experiment_id
+            )
+            if job:
+                self._update_job_display(job)
 
+    def _update_job_display(self, job) -> None:
+        """Update the display with job data"""
         self.job_data = job
 
         # Update labels
@@ -399,6 +431,7 @@ class JobsTable(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="past-run-banner", classes="hidden")
+        yield Static("Loading jobs...", id="jobs-loading", classes="hidden")
         yield SearchBar()
         yield DataTable(id="jobs-table", cursor_type="row")
 
@@ -681,27 +714,79 @@ class JobsTable(Vertical):
         else:
             banner.add_class("hidden")
 
-        # Load tags map and dependencies map for this experiment
-        if experiment_id:
-            self.tags_map = self.state_provider.get_tags_map(experiment_id, run_id)
-            self.dependencies_map = self.state_provider.get_dependencies_map(
-                experiment_id, run_id
-            )
-        else:
+        # Clear table and show loading for remote providers
+        if self.state_provider.is_remote:
+            table = self.query_one("#jobs-table", DataTable)
+            table.clear()
+            self.query_one("#jobs-loading", Static).remove_class("hidden")
+
+        # Load data in background worker
+        self._load_experiment_data(experiment_id, run_id)
+
+    @work(thread=True, exclusive=True, group="jobs_load")
+    def _load_experiment_data(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> None:
+        """Load experiment data in background thread"""
+        if not experiment_id:
             self.tags_map = {}
             self.dependencies_map = {}
-        self.refresh_jobs()
+            self.app.call_from_thread(self._on_data_loaded, [])
+            return
 
-    def refresh_jobs(self) -> None:  # noqa: C901
-        """Refresh the jobs list from state provider"""
-        table = self.query_one("#jobs-table", DataTable)
+        # Fetch data (this is the slow part for remote)
+        tags_map = self.state_provider.get_tags_map(experiment_id, run_id)
+        dependencies_map = self.state_provider.get_dependencies_map(
+            experiment_id, run_id
+        )
+        jobs = self.state_provider.get_jobs(experiment_id, run_id=run_id)
 
+        # Update on main thread
+        self.app.call_from_thread(
+            self._on_data_loaded, jobs, tags_map, dependencies_map
+        )
+
+    def _on_data_loaded(
+        self,
+        jobs: list,
+        tags_map: dict = None,
+        dependencies_map: dict = None,
+    ) -> None:
+        """Handle loaded data on main thread"""
+        # Hide loading indicator
+        self.query_one("#jobs-loading", Static).add_class("hidden")
+
+        # Update maps
+        if tags_map is not None:
+            self.tags_map = tags_map
+        if dependencies_map is not None:
+            self.dependencies_map = dependencies_map
+
+        # Refresh display with loaded jobs
+        self._refresh_jobs_with_data(jobs)
+
+    def refresh_jobs(self) -> None:
+        """Refresh the jobs list from state provider
+
+        For remote providers, this runs in background. For local, it's synchronous.
+        """
         if not self.current_experiment:
             return
 
-        jobs = self.state_provider.get_jobs(
-            self.current_experiment, run_id=self.current_run_id
-        )
+        if self.state_provider.is_remote:
+            # Use background worker for remote
+            self._load_experiment_data(self.current_experiment, self.current_run_id)
+        else:
+            # Synchronous for local (fast)
+            jobs = self.state_provider.get_jobs(
+                self.current_experiment, run_id=self.current_run_id
+            )
+            self._refresh_jobs_with_data(jobs)
+
+    def _refresh_jobs_with_data(self, jobs: list) -> None:  # noqa: C901
+        """Refresh the jobs display with provided job data"""
+        table = self.query_one("#jobs-table", DataTable)
+
         self.log.debug(
             f"Refreshing jobs for {self.current_experiment}/{self.current_run_id}: {len(jobs)} jobs"
         )

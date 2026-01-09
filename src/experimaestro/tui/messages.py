@@ -1,7 +1,10 @@
 """Message classes for TUI inter-widget communication"""
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from textual.message import Message
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.interfaces import JobState
 
 
 class ExperimentSelected(Message):
@@ -37,10 +40,13 @@ class JobDeselected(Message):
 class ViewJobLogs(Message):
     """Message sent when user wants to view job logs"""
 
-    def __init__(self, job_path: str, task_id: str) -> None:
+    def __init__(
+        self, job_path: str, task_id: str, job_state: Optional["JobState"] = None
+    ) -> None:
         super().__init__()
         self.job_path = job_path
         self.task_id = task_id
+        self.job_state = job_state
 
 
 class ViewJobLogsRequest(Message):
@@ -50,23 +56,6 @@ class ViewJobLogsRequest(Message):
         super().__init__()
         self.job_id = job_id
         self.experiment_id = experiment_id
-
-
-class LogsSyncComplete(Message):
-    """Message sent when remote log sync is complete"""
-
-    def __init__(self, log_files: list, job_id: str) -> None:
-        super().__init__()
-        self.log_files = log_files
-        self.job_id = job_id
-
-
-class LogsSyncFailed(Message):
-    """Message sent when remote log sync fails"""
-
-    def __init__(self, error: str) -> None:
-        super().__init__()
-        self.error = error
 
 
 class DeleteJobRequest(Message):
