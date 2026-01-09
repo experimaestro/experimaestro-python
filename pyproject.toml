@@ -107,9 +107,14 @@ local_scheme = "no-local-version"
 [tool.hatch.build.hooks.vcs]
 version-file = "src/experimaestro/version.py"
 
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
+    "/app",
+    "/hatch_build.py",
     "/README.md",
     "/LICENSE",
     "/pyproject.toml",
