@@ -915,9 +915,8 @@ class JobsTable(Vertical):
 
             table.clear()
             new_cursor_row = None
-            for idx, job in enumerate(jobs):
-                job_id = job.identifier
-                table.add_row(*rows_data[job_id], key=job_id)
+            for idx, (job_id, row_data) in enumerate(rows_data.items()):
+                table.add_row(*row_data, key=job_id)
                 if selected_key == job_id:
                     new_cursor_row = idx
 
