@@ -104,6 +104,18 @@ class ConfigurationLoader:
 @click.option("--debug", is_flag=True, help="Print debug information")
 @click.option("--show", is_flag=True, help="Print configuration and exits")
 @click.option(
+    "--watcher",
+    type=click.Choice(["auto", "polling", "inotify", "fsevents", "kqueue", "windows"]),
+    default="auto",
+    help="Filesystem watcher type (auto=platform default, polling=network mounts)",
+)
+@click.option(
+    "--polling-interval",
+    type=float,
+    default=1.0,
+    help="Polling interval in seconds (only for --watcher=polling)",
+)
+@click.option(
     "--env",
     help="Define one environment variable",
     type=(str, str),
@@ -201,6 +213,8 @@ def experiments_cli(  # noqa: C901
     module_name: Optional[str],
     args: List[str],
     show: bool,
+    watcher: str,
+    polling_interval: float,
     debug: bool,
 ):
     """Run an experiment"""
@@ -208,6 +222,15 @@ def experiments_cli(  # noqa: C901
 
     # --- Set the logger with colors if outputting to terminal
     setup_logging(debug=debug)
+
+    # --- Configure filesystem watcher type
+    from experimaestro.ipc import IPCom, WatcherType
+
+    if watcher != "auto":
+        IPCom.set_watcher_type(WatcherType(watcher), polling_interval)
+    elif polling_interval != 1.0:
+        # If polling interval is specified but watcher is auto, use polling
+        IPCom.set_watcher_type(WatcherType.POLLING, polling_interval)
 
     # --- Warn about deprecated options
     if host is not None:

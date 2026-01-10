@@ -510,13 +510,32 @@ def _run_monitor_ui(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
 )
 @click.option(
+    "--watcher",
+    type=click.Choice(["auto", "polling", "inotify", "fsevents", "kqueue", "windows"]),
+    default="auto",
+    help="Filesystem watcher type (auto=platform default, polling=network mounts)",
+)
+@click.option(
+    "--polling-interval",
+    type=float,
+    default=1.0,
+    help="Polling interval in seconds (only for --watcher=polling)",
+)
+@click.option(
     "--sync",
     is_flag=True,
     hidden=True,
     help="Deprecated: no longer needed (filesystem state is always current)",
 )
 @pass_cfg
-def monitor(workdir: Path, console: bool, port: int, sync: bool):
+def monitor(
+    workdir: Path,
+    console: bool,
+    port: int,
+    watcher: str,
+    polling_interval: float,
+    sync: bool,
+):
     """Monitor local experiments with web UI or console TUI"""
     # --sync is deprecated (kept for backwards compatibility)
     if sync:
@@ -525,6 +544,14 @@ def monitor(workdir: Path, console: bool, port: int, sync: bool):
             "(filesystem state is always current)",
             "yellow",
         )
+
+    # Configure filesystem watcher type
+    from experimaestro.ipc import IPCom, WatcherType
+
+    if watcher != "auto":
+        IPCom.set_watcher_type(WatcherType(watcher), polling_interval)
+    elif polling_interval != 1.0:
+        IPCom.set_watcher_type(WatcherType.POLLING, polling_interval)
 
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
@@ -539,6 +566,18 @@ def monitor(workdir: Path, console: bool, port: int, sync: bool):
 @click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
 @click.option(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
+)
+@click.option(
+    "--watcher",
+    type=click.Choice(["auto", "polling", "inotify", "fsevents", "kqueue", "windows"]),
+    default="auto",
+    help="Filesystem watcher type (auto=platform default, polling=network mounts)",
+)
+@click.option(
+    "--polling-interval",
+    type=float,
+    default=1.0,
+    help="Polling interval in seconds (only for --watcher=polling)",
 )
 @click.option(
     "--remote-xpm",
@@ -557,6 +596,8 @@ def ssh_monitor(
     remote_workdir: str,
     console: bool,
     port: int,
+    watcher: str,
+    polling_interval: float,
     remote_xpm: str,
     ssh_option: tuple,
 ):
@@ -570,6 +611,14 @@ def ssh_monitor(
         experimaestro experiments ssh-monitor user@host /workspace --console
         experimaestro experiments ssh-monitor host /workspace --remote-xpm /opt/xpm/bin/experimaestro
     """
+    # Configure filesystem watcher type
+    from experimaestro.ipc import IPCom, WatcherType
+
+    if watcher != "auto":
+        IPCom.set_watcher_type(WatcherType(watcher), polling_interval)
+    elif polling_interval != 1.0:
+        IPCom.set_watcher_type(WatcherType.POLLING, polling_interval)
+
     from experimaestro.scheduler.remote.client import SSHStateProviderClient
 
     cprint(f"Connecting to {host}...", "yellow")
