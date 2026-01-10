@@ -6,7 +6,6 @@ based DbStateProvider.
 
 Classes:
 - WorkspaceStateProvider: Filesystem-backed state provider (read-only for monitoring)
-- EventFileWatcher: Watches event files and notifies listeners
 """
 
 import json
@@ -17,9 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers.polling import PollingObserver as Observer
-
 from experimaestro.scheduler.interfaces import (
     BaseService,
     ExperimentRun,
@@ -28,12 +24,6 @@ from experimaestro.scheduler.interfaces import (
 )
 from experimaestro.scheduler.state_provider import (
     StateProvider,
-    StateEvent,
-    ExperimentUpdatedEvent,
-    RunUpdatedEvent,
-    JobUpdatedEvent,
-    JobExperimentUpdatedEvent,
-    ServiceUpdatedEvent,
     MockJob,
     MockExperiment,
     ProcessInfo,
@@ -44,8 +34,13 @@ from experimaestro.scheduler.state_status import (
     EventBase,
     JobSubmittedEvent,
     JobStateChangedEvent,
+    JobProgressEvent,
+    ExperimentUpdatedEvent,
+    RunUpdatedEvent,
     ServiceAddedEvent,
-    read_events_since,
+    EventReader,
+    WatchedDirectory,
+    job_entity_id_extractor,
 )
 
 if TYPE_CHECKING:
@@ -111,22 +106,90 @@ class WorkspaceStateProvider(StateProvider):
         self._service_cache: Dict[tuple[str, str], Dict[str, BaseService]] = {}
         self._service_cache_lock = threading.Lock()
 
-        # Event file watcher
-        self._event_watcher: Optional[EventFileWatcher] = None
+        # Event reader (with built-in watching capability)
+        self._event_reader: Optional[EventReader] = None
+        self._jobs_dir = self.workspace_path / ".experimaestro" / "jobs"
         if standalone:
             self._start_watcher()
 
     def _start_watcher(self) -> None:
-        """Start the event file watcher"""
-        if self._event_watcher is None:
-            self._event_watcher = EventFileWatcher(self)
-            self._event_watcher.start()
+        """Start the event file watcher for experiments and jobs"""
+        if self._event_reader is None:
+            self._event_reader = EventReader(
+                [
+                    WatchedDirectory(path=self._experiments_dir),
+                    WatchedDirectory(
+                        path=self._jobs_dir,
+                        glob_pattern="*/event-*-*.jsonl",
+                        entity_id_extractor=job_entity_id_extractor,
+                    ),
+                ]
+            )
+            # Start buffering before watching to avoid race condition:
+            # events arriving before scan_existing_files completes should be
+            # queued and processed after initial state is loaded
+            self._event_reader.start_buffering()
+            self._event_reader.start_watching(
+                on_event=self._on_event,
+                on_deleted=self._on_deleted,
+            )
+            self._event_reader.scan_existing_files()
+            # Now flush any events that arrived during initialization
+            self._event_reader.flush_buffer()
 
     def _stop_watcher(self) -> None:
         """Stop the event file watcher"""
-        if self._event_watcher is not None:
-            self._event_watcher.stop()
-            self._event_watcher = None
+        if self._event_reader is not None:
+            self._event_reader.stop_watching()
+            self._event_reader = None
+
+    def _on_event(self, entity_id: str, event: EventBase) -> None:
+        """Unified callback for events from file watcher
+
+        Detects whether the event is from experiments or jobs based on event type.
+        """
+        # Experiment events: JobSubmittedEvent, ServiceAddedEvent
+        # Job events: JobStateChangedEvent, JobProgressEvent (can appear in both)
+        if isinstance(event, JobSubmittedEvent):
+            # This is an experiment event (job submitted to experiment)
+            experiment_id = entity_id
+            self._apply_event_to_cache(experiment_id, event)
+            # Forward the event directly - it already has all needed info
+            self._notify_state_listeners(event)
+        elif isinstance(event, ServiceAddedEvent):
+            # This is an experiment event - forward directly
+            experiment_id = entity_id
+            self._apply_event_to_cache(experiment_id, event)
+            self._notify_state_listeners(event)
+        elif isinstance(event, JobStateChangedEvent):
+            # Could be experiment event or job event
+            # Try as experiment first
+            if (self._experiments_dir / entity_id).exists():
+                experiment_id = entity_id
+                self._apply_event_to_cache(experiment_id, event)
+            # Forward the event directly
+            self._notify_state_listeners(event)
+        elif isinstance(event, JobProgressEvent):
+            # Job event (progress from job process) - forward directly
+            self._notify_state_listeners(event)
+
+    def _on_deleted(self, entity_id: str) -> None:
+        """Unified callback when event files are deleted"""
+        # Check if this is an experiment directory
+        if (self._experiments_dir / entity_id).exists() or self.get_current_run(
+            entity_id
+        ):
+            # Experiment event files deleted (experiment finalized)
+            experiment_id = entity_id
+            self._clear_status_cache(experiment_id)
+            run_id = self.get_current_run(experiment_id) or ""
+            self._notify_state_listeners(
+                ExperimentUpdatedEvent(experiment_id=experiment_id)
+            )
+            self._notify_state_listeners(
+                RunUpdatedEvent(experiment_id=experiment_id, run_id=run_id)
+            )
+        # Job deletion doesn't need special handling
 
     @property
     def read_only(self) -> bool:
@@ -173,9 +236,9 @@ class WorkspaceStateProvider(StateProvider):
             status.workspace_path = self.workspace_path
 
             # Apply pending events from event files
-            events = read_events_since(
-                self._experiments_dir, experiment_id, status.events_count
-            )
+            # Events are in experiments/{experiment_id}/events-{count}.jsonl
+            reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
+            events = reader.read_events_since_count(experiment_id, status.events_count)
             for event in events:
                 status.apply_event(event)
 
@@ -188,8 +251,9 @@ class WorkspaceStateProvider(StateProvider):
 
     def _has_event_files(self, experiment_id: str) -> bool:
         """Check if experiment has any event files (is active)"""
-        pattern = f"events-*@{experiment_id}.jsonl"
-        return any(self._experiments_dir.glob(pattern))
+        # Format: experiments/{experiment_id}/events-*.jsonl
+        exp_events_dir = self._experiments_dir / experiment_id
+        return exp_events_dir.is_dir() and any(exp_events_dir.glob("events-*.jsonl"))
 
     def _apply_event_to_cache(self, experiment_id: str, event: EventBase) -> None:
         """Apply an event to the cached status (called by EventFileWatcher)"""
@@ -528,11 +592,21 @@ class WorkspaceStateProvider(StateProvider):
 
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current run ID for an experiment"""
-        # Check symlink first
-        symlink = self._experiments_dir / experiment_id
+        # Check new symlink location: .experimaestro/experiments/{experiment_id}/current
+        exp_events_dir = self._experiments_dir / experiment_id
+        symlink = exp_events_dir / "current"
         if symlink.is_symlink():
             try:
                 target = symlink.resolve()
+                return target.name
+            except OSError:
+                pass
+
+        # Check legacy symlink location: .experimaestro/experiments/{experiment_id}
+        legacy_symlink = self._experiments_dir / experiment_id
+        if legacy_symlink.is_symlink():
+            try:
+                target = legacy_symlink.resolve()
                 return target.name
             except OSError:
                 pass
@@ -697,9 +771,16 @@ class WorkspaceStateProvider(StateProvider):
 
         Tries to recreate real Service objects from state_dict, falls back to
         MockService if recreation fails.
+
+        If experiment_id is None, returns services from all experiments.
         """
         if experiment_id is None:
-            return []
+            # Return services from all experiments
+            all_services = []
+            for exp in self.get_experiments():
+                exp_services = self.get_services(exp.experiment_id)
+                all_services.extend(exp_services)
+            return all_services
 
         if run_id is None:
             run_id = self.get_current_run(experiment_id)
@@ -716,6 +797,10 @@ class WorkspaceStateProvider(StateProvider):
 
             # Fetch and try to recreate services
             services = self._fetch_services_from_storage(experiment_id, run_id)
+            # Store experiment_id on services for global view
+            for s in services:
+                s._experiment_id = experiment_id
+                s._run_id = run_id
             self._service_cache[cache_key] = {s.id: s for s in services}
             return services
 
@@ -742,6 +827,11 @@ class WorkspaceStateProvider(StateProvider):
             if state_dict and "__class__" in state_dict:
                 try:
                     service = Service.from_state_dict(state_dict)
+                    # Store experiment info on the service
+                    service._experiment_id = experiment_id
+                    service._run_id = run_id
+                    # Register as listener to emit events when state changes
+                    service.add_listener(self)
                     services.append(service)
                     logger.debug("Recreated service %s from state_dict", service_id)
                 except Exception as e:
@@ -964,8 +1054,10 @@ class WorkspaceStateProvider(StateProvider):
                 status = status_file.read()
 
                 # Also apply pending events
-                events = read_events_since(
-                    self._experiments_dir, experiment_id, status.events_count
+                # Events are in experiments/{experiment_id}/events-{count}.jsonl
+                reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
+                events = reader.read_events_since_count(
+                    experiment_id, status.events_count
                 )
                 for event in events:
                     status.apply_event(event)
@@ -1027,8 +1119,10 @@ class WorkspaceStateProvider(StateProvider):
                     status = status_file.read()
 
                     # Also apply pending events
-                    events = read_events_since(
-                        self._experiments_dir, experiment_id, status.events_count
+                    # Events are in experiments/{experiment_id}/events-{count}.jsonl
+                    reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
+                    events = reader.read_events_since_count(
+                        experiment_id, status.events_count
                     )
                     for event in events:
                         status.apply_event(event)
@@ -1203,194 +1297,6 @@ class WorkspaceStateProvider(StateProvider):
                 del self._instances[self.workspace_path]
 
 
-class EventFileWatcher(FileSystemEventHandler):
-    """Watches event files for changes and notifies listeners
-
-    Monitors workspace/.experimaestro/experiments/ for .jsonl event file changes.
-    When events are detected, reads new lines and converts them to StateEvents.
-    """
-
-    def __init__(self, state_provider: WorkspaceStateProvider):
-        super().__init__()
-        self.state_provider = state_provider
-        self._observer: Optional[Observer] = None
-        self._file_positions: Dict[Path, int] = {}
-
-    def start(self) -> None:
-        """Start watching for file changes"""
-        # Watch .experimaestro/experiments for event files only
-        events_dir = self.state_provider._experiments_dir
-        events_dir.mkdir(parents=True, exist_ok=True)
-
-        logger.info("Starting file watcher on %s", events_dir)
-
-        # Use polling observer with 0.5s interval for reliable cross-platform support
-        self._observer = Observer(timeout=0.5)
-        self._observer.schedule(self, str(events_dir), recursive=False)
-        self._observer.start()
-
-        # Process any existing event files
-        self._scan_existing_files()
-
-    def stop(self) -> None:
-        """Stop watching for file changes"""
-        if self._observer is not None:
-            self._observer.stop()
-            self._observer.join(timeout=5)
-            self._observer = None
-
-    def _scan_existing_files(self) -> None:
-        """Scan for existing event files and set initial positions"""
-        experiments_dir = self.state_provider._experiments_dir
-        for path in experiments_dir.glob("events-*@*.jsonl"):
-            # Just record the position at end of file
-            try:
-                self._file_positions[path] = path.stat().st_size
-            except OSError:
-                pass
-
-    def on_any_event(self, event) -> None:
-        """Log all file system events for debugging"""
-        logger.debug("FSEvent: %s %s", event.event_type, event.src_path)
-
-    def on_modified(self, event) -> None:
-        """Handle file modification events"""
-        if event.is_directory:
-            return
-
-        path = Path(event.src_path)
-        logger.debug("File modified: %s", path)
-        if path.suffix == ".jsonl" and path.name.startswith("events-"):
-            self._process_event_file(path)
-
-    def on_created(self, event) -> None:
-        """Handle file creation events"""
-        if event.is_directory:
-            return
-
-        path = Path(event.src_path)
-        logger.debug("File created: %s", path)
-        if path.suffix == ".jsonl" and path.name.startswith("events-"):
-            self._file_positions[path] = 0
-            self._process_event_file(path)
-
-    def on_deleted(self, event) -> None:
-        """Handle file deletion events - triggers when experiment finalizes"""
-        if event.is_directory:
-            return
-
-        path = Path(event.src_path)
-        if path.suffix == ".jsonl" and path.name.startswith("events-"):
-            # Extract experiment_id from filename: events-{count}@{experiment_id}.jsonl
-            filename = path.stem
-            parts = filename.split("@", 1)
-            if len(parts) == 2:
-                experiment_id = parts[1]
-                # Clean up position tracking
-                self._file_positions.pop(path, None)
-                # Clear status cache for this experiment (it's finalized)
-                self.state_provider._clear_status_cache(experiment_id)
-                # Notify that experiment was updated (finalized)
-                run_id = self.state_provider.get_current_run(experiment_id) or ""
-                self.state_provider._notify_state_listeners(
-                    ExperimentUpdatedEvent(
-                        experiment_id=experiment_id,
-                        experiment=None,  # Will be loaded on demand
-                    )
-                )
-                self.state_provider._notify_state_listeners(
-                    RunUpdatedEvent(
-                        experiment_id=experiment_id,
-                        run_id=run_id,
-                        run=None,
-                    )
-                )
-
-    def _process_event_file(self, path: Path) -> None:
-        """Read new events from file and notify listeners
-
-        No locking needed - event files are append-only.
-        """
-        last_pos = self._file_positions.get(path, 0)
-        logger.debug("Processing event file %s from position %d", path, last_pos)
-
-        # Extract experiment_id from filename: events-{count}@{experiment_id}.jsonl
-        filename = path.stem
-        parts = filename.split("@", 1)
-        experiment_id = parts[1] if len(parts) == 2 else None
-
-        try:
-            with path.open("r") as f:
-                f.seek(last_pos)
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            event_dict = json.loads(line)
-                            event = EventBase.from_dict(event_dict)
-
-                            # Apply event to cache
-                            if experiment_id:
-                                self.state_provider._apply_event_to_cache(
-                                    experiment_id, event
-                                )
-
-                            # Notify listeners
-                            state_event = self._to_state_event(event, path)
-                            if state_event:
-                                logger.debug(
-                                    "Notifying listeners of %s",
-                                    type(state_event).__name__,
-                                )
-                                self.state_provider._notify_state_listeners(state_event)
-                        except json.JSONDecodeError:
-                            pass
-
-                self._file_positions[path] = f.tell()
-        except FileNotFoundError:
-            # File may have been deleted - ignore
-            pass
-        except OSError as e:
-            logger.warning("Failed to read event file %s: %s", path, e)
-
-    def _to_state_event(self, event: EventBase, path: Path) -> Optional[StateEvent]:
-        """Convert filesystem event to StateEvent"""
-        # Extract experiment_id from filename: events-{count}@{experiment_id}.jsonl
-        filename = path.stem  # events-{count}@{experiment_id}
-        parts = filename.split("@", 1)
-        if len(parts) != 2:
-            return None
-        experiment_id = parts[1]
-
-        # Get current run_id
-        run_id = self.state_provider.get_current_run(experiment_id) or ""
-
-        if isinstance(event, JobSubmittedEvent):
-            return JobExperimentUpdatedEvent(
-                experiment_id=experiment_id,
-                run_id=run_id,
-                job_id=event.job_id,
-                tags=event.tags,
-                depends_on=event.depends_on,
-            )
-        elif isinstance(event, JobStateChangedEvent):
-            return JobUpdatedEvent(
-                experiment_id=experiment_id,
-                run_id=run_id,
-                job_id=event.job_id,
-                job=None,  # Will be loaded on demand
-            )
-        elif isinstance(event, ServiceAddedEvent):
-            return ServiceUpdatedEvent(
-                experiment_id=experiment_id,
-                run_id=run_id,
-                service_id=event.service_id,
-                service=None,
-            )
-
-        return None
-
-
 def _parse_timestamp(ts: Optional[str]) -> Optional[float]:
     """Parse ISO format timestamp to Unix timestamp"""
     if ts is None:
@@ -1401,9 +1307,6 @@ def _parse_timestamp(ts: Optional[str]) -> Optional[float]:
         return None
 
 
-# Alias for backwards compatibility
-# (DbStateProvider was previously called WorkspaceStateProvider)
 __all__ = [
     "WorkspaceStateProvider",
-    "EventFileWatcher",
 ]

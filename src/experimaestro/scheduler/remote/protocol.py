@@ -36,10 +36,10 @@ TIMEOUT_ERROR = -32004
 class NotificationMethod(str, Enum):
     """Server-to-client notification methods"""
 
-    EXPERIMENT_UPDATED = "notification.experiment_updated"
-    RUN_UPDATED = "notification.run_updated"
-    JOB_UPDATED = "notification.job_updated"
-    SERVICE_UPDATED = "notification.service_updated"
+    # Generic state event notification (serialized dataclass)
+    STATE_EVENT = "notification.state_event"
+
+    # Control notifications
     FILE_CHANGED = "notification.file_changed"
     SHUTDOWN = "notification.shutdown"
 

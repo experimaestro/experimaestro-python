@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Optional
 
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
-from experimaestro.scheduler.state_provider import (
-    JobUpdatedEvent,
+from experimaestro.scheduler.state_status import (
+    JobStateChangedEvent,
+    JobProgressEvent,
     ExperimentUpdatedEvent,
 )
 
@@ -356,14 +357,14 @@ class TestEventWatcher:
         provider.add_listener(listener)
 
         try:
-            # Create events file
-            events_dir = mock_workspace / ".experimaestro" / "experiments"
-            events_dir.mkdir(parents=True, exist_ok=True)
-            events_file = events_dir / "events-1@v2-multi-run.jsonl"
+            # Create events file in new subdirectory format
+            exp_dir = mock_workspace / ".experimaestro" / "experiments" / "v2-multi-run"
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            events_file = exp_dir / "events-1.jsonl"
 
             # Write a job state change event
             event_data = {
-                "type": "job_state_changed",
+                "event_type": "JobStateChangedEvent",
                 "job_id": "new-job-1",
                 "state": "done",
                 "timestamp": time.time(),
@@ -375,7 +376,9 @@ class TestEventWatcher:
             time.sleep(1.0)
 
             # Check that event was detected
-            job_events = [e for e in events_received if isinstance(e, JobUpdatedEvent)]
+            job_events = [
+                e for e in events_received if isinstance(e, JobStateChangedEvent)
+            ]
             assert len(job_events) >= 1, f"Expected job event, got: {events_received}"
             assert any(e.job_id == "new-job-1" for e in job_events)
         finally:
@@ -389,16 +392,17 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            events_dir = mock_workspace / ".experimaestro" / "experiments"
-            events_dir.mkdir(parents=True, exist_ok=True)
-            events_file = events_dir / "events-1@v2-multi-run.jsonl"
+            # Create events file in new subdirectory format
+            exp_dir = mock_workspace / ".experimaestro" / "experiments" / "v2-multi-run"
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            events_file = exp_dir / "events-1.jsonl"
 
             # Write first event
             with open(events_file, "w") as f:
                 f.write(
                     json.dumps(
                         {
-                            "type": "job_state_changed",
+                            "event_type": "JobStateChangedEvent",
                             "job_id": "job-1",
                             "state": "running",
                         }
@@ -413,7 +417,7 @@ class TestEventWatcher:
                 f.write(
                     json.dumps(
                         {
-                            "type": "job_state_changed",
+                            "event_type": "JobStateChangedEvent",
                             "job_id": "job-2",
                             "state": "done",
                         }
@@ -423,10 +427,93 @@ class TestEventWatcher:
 
             time.sleep(0.7)
 
-            job_events = [e for e in events_received if isinstance(e, JobUpdatedEvent)]
+            job_events = [
+                e for e in events_received if isinstance(e, JobStateChangedEvent)
+            ]
             job_ids = {e.job_id for e in job_events}
             assert "job-1" in job_ids
             assert "job-2" in job_ids
+        finally:
+            provider.close()
+
+    def test_detects_job_state_from_job_events(self, mock_workspace):
+        """Should detect job state changes from job event files"""
+        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+
+        events_received = []
+        provider.add_listener(lambda e: events_received.append(e))
+
+        try:
+            # Create job events file in .experimaestro/jobs/{task_id}/event-{job_id}-{count}.jsonl
+            task_id = "my.test.task"
+            job_id = "test-job-123"
+            task_dir = mock_workspace / ".experimaestro" / "jobs" / task_id
+            task_dir.mkdir(parents=True, exist_ok=True)
+            events_file = task_dir / f"event-{job_id}-0.jsonl"
+
+            # Write job state changed event (from job process)
+            with open(events_file, "w") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "event_type": "JobStateChangedEvent",
+                            "job_id": job_id,
+                            "state": "running",
+                            "started_time": time.time(),
+                        }
+                    )
+                    + "\n"
+                )
+
+            time.sleep(1.0)
+
+            # Should have received job updated event
+            job_events = [
+                e for e in events_received if isinstance(e, JobStateChangedEvent)
+            ]
+            assert len(job_events) >= 1, f"Expected job event, got: {events_received}"
+            assert any(e.job_id == job_id for e in job_events)
+        finally:
+            provider.close()
+
+    def test_detects_job_progress_from_job_events(self, mock_workspace):
+        """Should detect job progress updates from job event files"""
+        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+
+        events_received = []
+        provider.add_listener(lambda e: events_received.append(e))
+
+        try:
+            # Create job events file in .experimaestro/jobs/{task_id}/event-{job_id}-{count}.jsonl
+            task_id = "my.progress.task"
+            job_id = "test-job-progress"
+            task_dir = mock_workspace / ".experimaestro" / "jobs" / task_id
+            task_dir.mkdir(parents=True, exist_ok=True)
+            events_file = task_dir / f"event-{job_id}-0.jsonl"
+
+            # Write job progress event
+            with open(events_file, "w") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "event_type": "JobProgressEvent",
+                            "job_id": job_id,
+                            "level": 0,
+                            "progress": 0.5,
+                            "desc": "Halfway done",
+                        }
+                    )
+                    + "\n"
+                )
+
+            time.sleep(1.0)
+
+            # Should have received job progress event
+            job_events = [e for e in events_received if isinstance(e, JobProgressEvent)]
+            assert len(job_events) >= 1, (
+                f"Expected job progress event, got: {events_received}"
+            )
+            assert any(e.job_id == job_id for e in job_events)
         finally:
             provider.close()
 
@@ -438,9 +525,10 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            events_dir = mock_workspace / ".experimaestro" / "experiments"
-            events_dir.mkdir(parents=True, exist_ok=True)
-            events_file = events_dir / "events-1@v2-multi-run.jsonl"
+            # Create events file in new subdirectory format
+            exp_dir = mock_workspace / ".experimaestro" / "experiments" / "v2-multi-run"
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            events_file = exp_dir / "events-1.jsonl"
 
             # Create then delete events file (simulates finalization)
             events_file.touch()

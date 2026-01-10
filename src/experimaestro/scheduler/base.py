@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import (
     Dict,
     List,
@@ -22,6 +23,13 @@ from experimaestro.scheduler.interfaces import (
     ExperimentRun,
 )
 from experimaestro.scheduler.state_provider import StateProvider
+from experimaestro.scheduler.state_status import (
+    EventReader,
+    JobProgressEvent,
+    JobStateChangedEvent,
+    WatchedDirectory,
+    job_entity_id_extractor,
+)
 
 
 from experimaestro.utils import logger
@@ -103,6 +111,11 @@ class Scheduler(StateProvider, threading.Thread):
         # Server (managed by scheduler)
         self.server: Optional["WebUIServer"] = None
 
+        # Job event readers per workspace
+        # Uses EventReader to watch .experimaestro/jobs/ directory
+        self._job_event_readers: Dict[Path, EventReader] = {}
+        self._job_event_readers_lock = threading.Lock()
+
     @staticmethod
     def has_instance() -> bool:
         """Check if a scheduler instance exists without creating one"""
@@ -143,6 +156,9 @@ class Scheduler(StateProvider, threading.Thread):
         # Use experiment name as key (not workdir.name which is now run_id)
         key = xp.name
         self.experiments[key] = xp
+
+        # Start watching job events for this workspace
+        self._start_job_event_reader(xp.workspace.path)
 
         logger.debug("Registered experiment %s with scheduler", key)
 
@@ -386,6 +402,113 @@ class Scheduler(StateProvider, threading.Thread):
 
         return None
 
+    def _start_job_event_reader(self, workspace_path: Path) -> None:
+        """Start watching job events in a workspace
+
+        Uses EventReader to watch .experimaestro/jobs/ for job progress events.
+        Job state events are emitted by the job process itself.
+        Only starts one reader per workspace.
+
+        Args:
+            workspace_path: Path to the workspace directory
+        """
+        with self._job_event_readers_lock:
+            # Already watching this workspace
+            if workspace_path in self._job_event_readers:
+                return
+
+            jobs_dir = workspace_path / ".experimaestro" / "jobs"
+
+            # Create new reader for this workspace
+            reader = EventReader(
+                [
+                    WatchedDirectory(
+                        path=jobs_dir,
+                        glob_pattern="*/event-*-*.jsonl",
+                        entity_id_extractor=job_entity_id_extractor,
+                    )
+                ]
+            )
+            reader.start_watching(
+                on_event=self._on_job_event,
+            )
+            self._job_event_readers[workspace_path] = reader
+            logger.debug("Started job event reader for %s", jobs_dir)
+
+    def _stop_job_event_reader(self, workspace_path: Optional[Path] = None) -> None:
+        """Stop watching job events
+
+        Args:
+            workspace_path: If provided, stop only this workspace's reader.
+                           If None, stop all readers.
+        """
+        with self._job_event_readers_lock:
+            if workspace_path is not None:
+                reader = self._job_event_readers.pop(workspace_path, None)
+                if reader is not None:
+                    reader.stop_watching()
+                    logger.debug("Stopped job event reader for %s", workspace_path)
+            else:
+                # Stop all readers
+                for path, reader in self._job_event_readers.items():
+                    reader.stop_watching()
+                    logger.debug("Stopped job event reader for %s", path)
+                self._job_event_readers.clear()
+
+    def _on_job_event(self, entity_id: str, event) -> None:
+        """Handle job events from EventReader
+
+        Args:
+            entity_id: The job ID
+            event: The event (JobProgressEvent or JobStateChangedEvent)
+        """
+        job = self.jobs.get(entity_id)
+        if job is None:
+            logger.debug(
+                "Job event for unknown job %s",
+                entity_id,
+            )
+            return
+        logger.debug("Received event for job %s: %s", job, event)
+
+        if isinstance(event, JobProgressEvent):
+            # Update job's in-memory progress
+            job.set_progress(event.level, event.progress, event.desc)
+            # Notify listeners of progress update
+            self.notify_job_state(job)
+        elif isinstance(event, JobStateChangedEvent):
+            # Job process reported state change (start/end/etc)
+            # Log the event but don't update scheduler state directly
+            self.notify_job_state(job)
+
+    def _cleanup_job_event_files(self, job: Job) -> None:
+        """Clean up old job event files from previous runs
+
+        Removes event files at .experimaestro/jobs/{task_id}/event-{job_id}-*.jsonl
+        Called when a job is about to start to ensure clean state.
+
+        Args:
+            job: The job being started
+        """
+        # Get the workspace path from the job's path
+        # job.path is workspace/jobs/task_id/job_id
+        workspace_path = job.path.parent.parent.parent
+        task_id = str(job.type.identifier)
+        job_id = job.identifier
+
+        events_dir = workspace_path / ".experimaestro" / "jobs" / task_id
+        if not events_dir.exists():
+            return
+
+        # Find and delete old event files for this job
+        pattern = f"event-{job_id}-*.jsonl"
+        for event_file in events_dir.glob(pattern):
+            try:
+                event_file.unlink()
+                logger.debug("Removed old job event file: %s", event_file)
+            except OSError as e:
+                logger.warning("Failed to remove job event file %s: %s", event_file, e)
+
     def _notify_listeners(self, notification_func, job: Job):
         """Execute notification in thread pool with error isolation.
 
@@ -431,54 +554,59 @@ class Scheduler(StateProvider, threading.Thread):
         self._notify_listeners(lambda lst, j: lst.job_submitted(j), job)
 
         # Also notify StateProvider-style listeners (for TUI etc.)
-        from experimaestro.scheduler.state_provider import JobExperimentUpdatedEvent
+        from experimaestro.scheduler.state_status import JobSubmittedEvent, JobTag
 
         # Get experiment info from job's experiments list
         for exp in job.experiments:
             experiment_id = exp.experiment_id
             run_id = exp.run_id
-            if experiment_id:
-                # Get tags and dependencies for this job
-                exp_run_key = (experiment_id, run_id)
-                tags = self._tags_map.get(exp_run_key, {}).get(job.identifier, {})
-                depends_on = self._dependencies_map.get(exp_run_key, {}).get(
-                    job.identifier, []
-                )
 
-                event = JobExperimentUpdatedEvent(
-                    experiment_id=experiment_id,
-                    run_id=run_id or "",
-                    job_id=job.identifier,
-                    tags=tags,
-                    depends_on=depends_on,
-                )
-                self._notify_state_listeners_async(event)
+            # Get tags and dependencies for this job
+            exp_run_key = (experiment_id, run_id)
+            tags_dict = self._tags_map.get(exp_run_key, {}).get(job.identifier, {})
+            tags = [JobTag(key=k, value=v) for k, v in tags_dict.items()]
+            depends_on = self._dependencies_map.get(exp_run_key, {}).get(
+                job.identifier, []
+            )
+
+            event = JobSubmittedEvent(
+                experiment_id=experiment_id,
+                run_id=run_id,
+                job_id=job.identifier,
+                tags=tags,
+                depends_on=depends_on,
+            )
+            self._notify_state_listeners_async(event)
 
     def notify_job_state(self, job: Job):
-        """Notify the listeners that a job has changed state"""
+        """Notify the listeners that a job has changed state
+
+        Note: This does NOT write to job event files. Job events are written
+        by the job process itself. The scheduler only forwards notifications
+        to listeners.
+        """
+        # Legacy listener notification (per-experiment)
         self._notify_listeners(lambda lst, j: lst.job_state(j), job)
 
-        # Also notify StateProvider-style listeners (for TUI etc.)
-        from experimaestro.scheduler.state_provider import JobUpdatedEvent
+        # Notify StateProvider-style listeners with experiment-independent event
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
 
-        # Get experiment info from job's experiments list
-        for exp in job.experiments:
-            experiment_id = exp.experiment_id
-            run_id = exp.run_id
-            if experiment_id:
-                event = JobUpdatedEvent(
-                    experiment_id=experiment_id,
-                    run_id=run_id or "",
-                    job_id=job.identifier,
-                    job=job,
-                )
-                self._notify_state_listeners_async(event)
+        event = JobStateChangedEvent(
+            job_id=job.identifier,
+            state=job.state.name.lower(),
+        )
+        self._notify_state_listeners_async(event)
 
     def notify_service_add(
         self, service: Service, experiment_id: str = "", run_id: str = ""
     ):
         """Notify the listeners that a service has been added"""
         self._notify_listeners(lambda lst, s: lst.service_add(s), service)
+
+        # Store experiment info on the service for later retrieval
+        if experiment_id:
+            service._experiment_id = experiment_id
+            service._run_id = run_id or ""
 
         # Store service in scheduler's services dict (persists after experiment ends)
         if experiment_id:
@@ -488,14 +616,13 @@ class Scheduler(StateProvider, threading.Thread):
             self.services[key][service.id] = service
 
         # Also notify StateProvider-style listeners (for TUI etc.)
-        from experimaestro.scheduler.state_provider import ServiceUpdatedEvent
+        from experimaestro.scheduler.state_status import ServiceAddedEvent
 
         if experiment_id:
-            event = ServiceUpdatedEvent(
+            event = ServiceAddedEvent(
                 experiment_id=experiment_id,
                 run_id=run_id or "",
                 service_id=service.id,
-                service=service,
             )
             self._notify_state_listeners_async(event)
 
@@ -543,10 +670,6 @@ class Scheduler(StateProvider, threading.Thread):
                 # Notify listeners that job is running
                 job.set_state(JobState.RUNNING)
                 self.notify_job_state(job)
-
-                # Adds to the listeners
-                if self.server is not None:
-                    job.add_notification_server(self.server)
 
                 # And now, we wait...
                 logger.info("Got a process for job %s - waiting to complete", job)
@@ -747,12 +870,11 @@ class Scheduler(StateProvider, threading.Thread):
                         if not directory.is_dir():
                             directory.mkdir(parents=True, exist_ok=True)
 
+                        # Clean up old job event files from previous runs
+                        self._cleanup_job_event_files(job)
+
                         # Write metadata with submit and start time (after directory creation)
                         job.write_metadata()
-
-                        # Sets up the notification URL
-                        if self.server is not None:
-                            job.add_notification_server(self.server)
 
                         # Notify locks before job starts (e.g., create symlinks)
                         await locks.aio_job_before_start(job)
@@ -1013,10 +1135,6 @@ class Scheduler(StateProvider, threading.Thread):
             services = []
             for services_dict in self.services.values():
                 services.extend(services_dict.values())
-            logger.debug(
-                "get_services(None): returning %d services",
-                len(services),
-            )
             return services
 
         # Get services for specific experiment
@@ -1154,11 +1272,9 @@ class Scheduler(StateProvider, threading.Thread):
             return None
 
     def close(self) -> None:
-        """Close the state provider
-
-        For the scheduler, this is a no-op since it manages its own lifecycle.
-        """
-        pass
+        """Close the state provider and clean up resources"""
+        # Stop all job event readers
+        self._stop_job_event_reader()
 
     @property
     def read_only(self) -> bool:

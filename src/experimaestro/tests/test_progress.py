@@ -65,10 +65,7 @@ class ProgressListener(Listener):
 
 def test_progress_basic():
     """Test that we get all the progress reports"""
-    with TemporaryExperiment("progress-basic", maxwait=5, port=0) as xp:
-        assert xp.server is not None
-        assert xp.server.port > 0
-
+    with TemporaryExperiment("progress-basic", maxwait=5) as xp:
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
@@ -162,10 +159,7 @@ def check_nested(
 
 def test_progress_nested():
     """Test that we get all the progress reports"""
-    with TemporaryExperiment("progress-nested", maxwait=20, port=0) as xp:
-        assert xp.server is not None
-        assert xp.server.port > 0
-
+    with TemporaryExperiment("progress-nested", maxwait=20) as xp:
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 

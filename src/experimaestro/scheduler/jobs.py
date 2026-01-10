@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Set
 import concurrent
 
 from experimaestro.core.objects import Config, ConfigWalkContext, WatchedOutput
-from experimaestro.notifications import LevelInformation, Reporter
+from experimaestro.notifications import LevelInformation
 
 # from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.dependencies import Dependency, Resource
@@ -342,16 +342,6 @@ class Job(BaseJob, Resource):
         if desc:
             self._progress[-1].desc = desc
         self._progress[-1].progress = value
-
-        # Notify listeners via scheduler's thread-safe mechanism
-        self.scheduler.notify_job_state(self)
-
-    def add_notification_server(self, server):
-        """Adds a notification server"""
-        key, baseurl = server.getNotificationSpec()
-        dirpath = self.path / Reporter.NOTIFICATION_FOLDER
-        dirpath.mkdir(exist_ok=True)
-        (dirpath / key).write_text(f"{baseurl}/{self.identifier}")
 
     @property
     def ready(self):

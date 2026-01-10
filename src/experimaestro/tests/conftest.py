@@ -128,6 +128,11 @@ def pytest_configure(config):
     # Disable peewee logging by default (too verbose)
     logging.getLogger("peewee").setLevel(logging.WARNING)
 
+    # Enable IPCom testing mode with polling for reliable file watching in tests
+    from experimaestro.ipc import IPCom
+
+    IPCom.set_testing_mode(enabled=True, polling_interval=0.01)
+
 
 def pytest_unconfigure(config):
     import sys  # This was missing from the manual

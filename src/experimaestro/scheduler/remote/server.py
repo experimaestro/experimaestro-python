@@ -14,13 +14,9 @@ from pathlib import Path
 from typing import IO, Callable, Dict, Optional
 
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
-from experimaestro.scheduler.state_provider import (
-    StateEvent,
-    ExperimentUpdatedEvent,
-    RunUpdatedEvent,
-    JobUpdatedEvent,
-    ServiceUpdatedEvent,
-)
+from dataclasses import asdict
+
+from experimaestro.scheduler.state_status import EventBase
 from experimaestro.scheduler.remote.protocol import (
     RPCMethod,
     NotificationMethod,
@@ -233,45 +229,34 @@ class SSHStateProviderServer:
             {"reason": "error", "code": code, "message": message},
         )
 
-    def _on_state_event(self, event: StateEvent):
+    def _on_state_event(self, event: EventBase):
         """Handle state change events from the state provider
 
         Converts events to JSON-RPC notifications and sends them to the client.
+        Uses generic serialization via dataclasses.asdict.
         """
         try:
-            if isinstance(event, ExperimentUpdatedEvent):
-                self._send_notification(
-                    NotificationMethod.EXPERIMENT_UPDATED,
-                    {
-                        "experiment_id": event.experiment_id,
-                    },
-                )
-            elif isinstance(event, RunUpdatedEvent):
-                self._send_notification(
-                    NotificationMethod.RUN_UPDATED,
-                    {
-                        "experiment_id": event.experiment_id,
-                        "run_id": event.run_id,
-                    },
-                )
-            elif isinstance(event, JobUpdatedEvent):
-                self._send_notification(
-                    NotificationMethod.JOB_UPDATED,
-                    {
-                        "job_id": event.job_id,
-                        "experiment_id": event.experiment_id,
-                        "run_id": event.run_id,
-                    },
-                )
-            elif isinstance(event, ServiceUpdatedEvent):
-                self._send_notification(
-                    NotificationMethod.SERVICE_UPDATED,
-                    {
-                        "service_id": event.service_id,
-                        "experiment_id": event.experiment_id,
-                        "run_id": event.run_id,
-                    },
-                )
+            # Serialize event to dict, filtering out None values and non-serializable objects
+            event_dict = {}
+            for key, value in asdict(event).items():
+                # Skip None values and complex objects (like job references)
+                if value is not None and not isinstance(value, (Path,)):
+                    # Try to serialize - skip if not JSON-serializable
+                    try:
+                        import json
+
+                        json.dumps(value)
+                        event_dict[key] = value
+                    except (TypeError, ValueError):
+                        pass
+
+            self._send_notification(
+                NotificationMethod.STATE_EVENT,
+                {
+                    "event_type": type(event).__name__,
+                    "data": event_dict,
+                },
+            )
         except Exception as e:
             logger.exception("Error sending notification: %s", e)
 

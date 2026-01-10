@@ -6,9 +6,10 @@ remote/client.py (SSHStateProviderClient).
 
 Key features:
 - StateProvider ABC: Abstract base class for all state providers
-- StateEvent classes: Typed dataclass events for state changes
 - Mock classes: Concrete implementations for database-loaded state objects
 - StateListener: Type alias for listener callbacks
+
+Note: Event classes are defined in state_status.py (EventBase and subclasses).
 """
 
 import json
@@ -35,6 +36,7 @@ from experimaestro.notifications import (
     ProgressInformation,
     get_progress_information_from_dict,
 )
+from experimaestro.scheduler.state_status import EventBase
 
 logger = logging.getLogger("xpm.state")
 
@@ -67,75 +69,8 @@ class ProcessInfo:
     """Number of threads (if available)"""
 
 
-# =============================================================================
-# State Event Classes
-# =============================================================================
-
-
-@dataclass
-class StateEvent:
-    """Base class for state change events
-
-    Each subclass represents a specific type of state change.
-    """
-
-    pass
-
-
-@dataclass
-class ExperimentUpdatedEvent(StateEvent):
-    """Event fired when an experiment is created or updated"""
-
-    experiment_id: str
-    experiment: Optional["BaseExperiment"] = None
-
-
-@dataclass
-class RunUpdatedEvent(StateEvent):
-    """Event fired when an experiment run is created or updated"""
-
-    experiment_id: str
-    run_id: str
-    run: Optional["ExperimentRun"] = None
-
-
-@dataclass
-class JobUpdatedEvent(StateEvent):
-    """Event fired when a job is created or updated"""
-
-    experiment_id: str
-    run_id: str
-    job_id: str
-    job: Optional["BaseJob"] = None
-
-
-@dataclass
-class JobExperimentUpdatedEvent(StateEvent):
-    """Event fired when a job is added to an experiment/run
-
-    This event signals that a job has been associated with an experiment.
-    UIs can use this to update their job lists for the affected experiment.
-    """
-
-    experiment_id: str
-    run_id: str
-    job_id: str
-    tags: Dict[str, str]  # Tags for this job in this experiment/run
-    depends_on: List[str]  # List of job IDs this job depends on
-
-
-@dataclass
-class ServiceUpdatedEvent(StateEvent):
-    """Event fired when a service is added or updated"""
-
-    experiment_id: str
-    run_id: str
-    service_id: str
-    service: Optional["BaseService"] = None
-
-
-# Type alias for listener callbacks
-StateListener = Callable[[StateEvent], None]
+# Type alias for listener callbacks (uses EventBase from state_status)
+StateListener = Callable[[EventBase], None]
 
 
 # =============================================================================
@@ -185,7 +120,7 @@ class StateProvider(ABC):
         with self._state_listener_lock:
             self._state_listeners.discard(listener)
 
-    def _notify_state_listeners(self, event: StateEvent) -> None:
+    def _notify_state_listeners(self, event: EventBase) -> None:
         """Notify all state listeners of an event
 
         Args:
@@ -202,6 +137,33 @@ class StateProvider(ABC):
                 listener(event)
             except Exception as e:
                 logger.exception("Error in state listener: %s", e)
+
+    def service_state_changed(self, service) -> None:
+        """Called when a service's state changes - emit event to listeners
+
+        StateProvider registers itself as a listener on services it returns,
+        so this method is called when those services' states change.
+        """
+        from experimaestro.scheduler.state_status import ServiceStateChangedEvent
+
+        experiment_id = getattr(service, "_experiment_id", "") or ""
+        run_id = getattr(service, "_run_id", "") or ""
+        state_name = service.state.name if hasattr(service.state, "name") else "UNKNOWN"
+
+        logger.debug(
+            "Service %s state changed to %s (experiment=%s)",
+            service.id,
+            state_name,
+            experiment_id,
+        )
+
+        event = ServiceStateChangedEvent(
+            experiment_id=experiment_id,
+            run_id=run_id,
+            service_id=service.id,
+            state=state_name,
+        )
+        self._notify_state_listeners(event)
 
     @abstractmethod
     def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
@@ -805,13 +767,7 @@ class MockService(BaseService):
 __all__ = [
     # Data classes
     "ProcessInfo",
-    # Events
-    "StateEvent",
-    "ExperimentUpdatedEvent",
-    "RunUpdatedEvent",
-    "JobUpdatedEvent",
-    "JobExperimentUpdatedEvent",
-    "ServiceUpdatedEvent",
+    # Listener type alias
     "StateListener",
     # ABC
     "StateProvider",

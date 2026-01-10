@@ -8,7 +8,7 @@ import platform
 import socket
 import threading
 import uuid
-from typing import ClassVar, Optional, Tuple
+from typing import ClassVar, Optional
 
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.settings import ServerSettings
@@ -111,16 +111,6 @@ class WebUIServer:
 
         # Uvicorn server reference
         self._uvicorn_server = None
-
-    def get_notification_spec(self) -> Tuple[str, str]:
-        """Returns a tuple (server ID, server URL) for task notifications"""
-        return (
-            f"{self.host}_{self.port}.url",
-            f"http://{self.host}:{self.port}/notifications",
-        )
-
-    # Alias for backward compatibility with jobs.py
-    getNotificationSpec = get_notification_spec
 
     def start(self):
         """Start the web server in a daemon thread"""

@@ -22,7 +22,7 @@ from experimaestro.utils import logger
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.state_status import StatusData
-    from experimaestro.scheduler.state_status import EventFileWriter
+    from experimaestro.scheduler.state_status import ExperimentEventWriter
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
 
@@ -57,11 +57,16 @@ class GracefulExperimentExit(Exception):
 
 
 class StateListener:
-    """Listener that writes job/service events to filesystem and tracks state"""
+    """Listener that writes service events to filesystem and tracks experiment state
+
+    Job state events are now written to per-job event files by the scheduler.
+    This listener only handles experiment-level events (services) and updates
+    the in-memory status for job tracking.
+    """
 
     def __init__(
         self,
-        event_writer: "EventFileWriter",
+        event_writer: "ExperimentEventWriter",
         status_data: "StatusData",
         experiment_id: str,
         run_id: str,
@@ -76,7 +81,7 @@ class StateListener:
         pass
 
     def job_state(self, job):
-        """Write job state change event to filesystem and update status"""
+        """Write job state change event to experiment event file and update in-memory status"""
         from .state_status import JobStateChangedEvent
 
         # Get failure reason if error state
@@ -103,6 +108,7 @@ class StateListener:
             retry_count=getattr(job, "retry_count", 0),
             progress=progress,
         )
+        # Write to experiment event file and update in-memory status
         self.event_writer.write_event(event)
         self.status_data.apply_event(event)
 
@@ -194,8 +200,8 @@ class experiment(BaseExperiment):
         :param project_paths: Paths to the project files (for git info). If not
             provided, will be inferred from the caller's location.
 
-        :param wait_for_quit: If True, wait for explicit quit from web interface
-            instead of exiting when experiment completes. Similar to TUI behavior.
+        :param wait_for_quit: Deprecated, no longer used. Web server is no longer
+            started automatically.
 
         :param dirty_git: Action when git repository has uncommitted changes:
             DirtyGitAction.IGNORE (don't check), DirtyGitAction.WARN (log warning,
@@ -204,9 +210,45 @@ class experiment(BaseExperiment):
         :param no_db: Deprecated, kept for backwards compatibility. This parameter
             is now a no-op as the database has been replaced with filesystem-based
             state tracking.
+
+        .. deprecated::
+            The ``host``, ``port``, ``token``, and ``wait_for_quit`` parameters are
+            deprecated. Use ``--web`` flag with ``run-experiment`` CLI or start the
+            web server separately.
         """
+        import warnings
 
         from experimaestro.scheduler import Listener, Scheduler
+
+        # Warn about deprecated server parameters
+        if host is not None:
+            warnings.warn(
+                "The 'host' parameter is deprecated. Use '--web' flag with "
+                "'run-experiment' CLI or start the web server separately.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if port is not None:
+            warnings.warn(
+                "The 'port' parameter is deprecated. Use '--web' flag with "
+                "'run-experiment' CLI or start the web server separately.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if token is not None:
+            warnings.warn(
+                "The 'token' parameter is deprecated. Use '--web' flag with "
+                "'run-experiment' CLI or start the web server separately.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if wait_for_quit:
+            warnings.warn(
+                "The 'wait_for_quit' parameter is deprecated. Use '--web' flag with "
+                "'run-experiment' CLI or start the web server separately.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         settings = get_settings()
         if not isinstance(env, WorkspaceSettings):
@@ -252,26 +294,8 @@ class experiment(BaseExperiment):
             except Exception:
                 pass
 
-        # Get configuration settings
-
-        if host is not None:
-            settings.server.host = host
-
-        if port is not None:
-            settings.server.port = port
-
-        if token is not None:
-            settings.server.token = token
-
         # Use singleton scheduler
         self.scheduler = Scheduler.instance()
-
-        # Determine if we need a server
-        self._needs_server = (
-            settings.server.port is not None and settings.server.port >= 0
-        ) and self.workspace.run_mode == RunMode.NORMAL
-        self._server_settings = settings.server if self._needs_server else None
-        self._wait_for_quit = wait_for_quit and self._needs_server
 
         if os.environ.get("XPM_ENABLEFAULTHANDLER", "0") == "1":
             import faulthandler
@@ -467,14 +491,19 @@ class experiment(BaseExperiment):
             status: Final status ("completed" or "failed")
         """
         from datetime import datetime
-        from .state_status import StatusFile
+        from .state_status import StatusFile, RunCompletedEvent
+
+        # Update final status in the in-memory data
+        ended_at = datetime.now().isoformat()
+        self._status_data.status = status
+        self._status_data.ended_at = ended_at
+
+        # Write RunCompletedEvent before closing the event writer
+        event = RunCompletedEvent(status=status, ended_at=ended_at)
+        self._event_writer.write_event(event)
 
         # Close the event writer to flush any buffered events
         self._event_writer.close()
-
-        # Update final status in the in-memory data
-        self._status_data.status = status
-        self._status_data.ended_at = datetime.now().isoformat()
 
         # Write final status.json
         status_file = StatusFile(self.workdir)
@@ -674,23 +703,11 @@ class experiment(BaseExperiment):
         self._started_at = time.time()
         self._ended_at = None
 
-        # Start server via scheduler if needed
-        if self._needs_server:
-            self.scheduler.start_server(
-                self._server_settings,
-                workspace=self.workspace,
-                wait_for_quit=self._wait_for_quit,
-            )
-
         self.workspace.__enter__()
         (self.workspace.path / ".__experimaestro__").touch()
 
         # Initialize filesystem-based state tracking (only in NORMAL mode)
-        from .state_status import (
-            EventFileWriter,
-            init_status,
-            create_experiment_symlink,
-        )
+        from .state_status import ExperimentEventWriter
 
         is_normal_mode = self.workspace.run_mode == RunMode.NORMAL
         self._event_writer = None
@@ -701,20 +718,22 @@ class experiment(BaseExperiment):
             import socket
             from .state_status import StatusFile
 
+            # Create event writer for this experiment
+            # Events are written to experiments/{experiment_id}/events-{count}.jsonl
+            self._event_writer = ExperimentEventWriter(
+                self.workspace.path, self.name, 0
+            )
+
             # Initialize status.json for this run
             hostname = socket.gethostname()
-            init_status(self.workdir, self.name, self.run_id, hostname)
+            self._event_writer.init_status(self.workdir, self.run_id, hostname)
 
             # Read the initial status data (we'll update it in memory)
             status_file = StatusFile(self.workdir)
             self._status_data = status_file.read()
 
             # Create symlink to current run
-            experiments_dir = self.workspace.path / ".experimaestro" / "experiments"
-            create_experiment_symlink(experiments_dir, self.name, self.workdir)
-
-            # Create event writer for this experiment
-            self._event_writer = EventFileWriter(experiments_dir, self.name, 0)
+            self._event_writer.create_symlink(self.workdir)
 
             # Add run info to environment.json
             env_path = self.workdir / "environment.json"
@@ -763,7 +782,7 @@ class experiment(BaseExperiment):
             elif exc_type:
                 # import faulthandler
                 # faulthandler.dump_traceback()
-                logger.error(
+                logger.exception(
                     "Not waiting since an exception was thrown (some jobs may be running)"
                 )
             else:
@@ -816,11 +835,6 @@ class experiment(BaseExperiment):
                         logger.warning("Failed to update environment.json: %s", e)
 
             # Note: Don't stop scheduler - it's shared!
-            # Wait for explicit quit from web interface if requested
-            if self._wait_for_quit:
-                logger.info("Waiting for quit from web interface...")
-                self.scheduler.wait_for_server_quit()
-                logger.info("Quit signal received from web interface")
 
             if self.taskOutputsWorker is not None:
                 logger.info("Stopping tasks outputs worker")
@@ -935,8 +949,27 @@ class experiment(BaseExperiment):
         return service
 
     def service_state_changed(self, service):
-        """Called when a service state changes - update services.json"""
+        """Called when a service state changes - update services.json and notify listeners"""
+        state_name = service.state.name if hasattr(service.state, "name") else "UNKNOWN"
+        logger.debug(
+            "Service %s state changed to %s (experiment=%s)",
+            service.id,
+            state_name,
+            self.name,
+        )
         self._write_services_json()
+
+        # Notify state listeners (for TUI tab title updates etc.)
+        from experimaestro.scheduler.state_status import ServiceStateChangedEvent
+
+        if self.scheduler is not None:
+            event = ServiceStateChangedEvent(
+                experiment_id=self.name,
+                run_id=self.run_id or "",
+                service_id=service.id,
+                state=state_name,
+            )
+            self.scheduler._notify_state_listeners_async(event)
 
     def save(self, obj: Any, name: str = "default"):
         """Serializes configurations.

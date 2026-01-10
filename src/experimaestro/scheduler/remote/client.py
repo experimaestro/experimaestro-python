@@ -25,16 +25,12 @@ from termcolor import colored
 
 from experimaestro.scheduler.state_provider import (
     OfflineStateProvider,
-    StateEvent,
     StateListener,
-    ExperimentUpdatedEvent,
-    RunUpdatedEvent,
-    JobUpdatedEvent,
-    ServiceUpdatedEvent,
     MockJob,
     MockExperiment,
     MockService,
 )
+from experimaestro.scheduler.state_status import EventBase
 from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
@@ -85,7 +81,7 @@ class SSHStateProviderClient(OfflineStateProvider):
     Features:
     - JSON-RPC over SSH stdin/stdout
     - Async request/response handling with futures
-    - Server push notifications converted to StateEvents
+    - Server push notifications converted to EventBases
     - On-demand rsync for specific paths (used by services like TensorboardService)
     """
 
@@ -144,7 +140,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._synchronizer: Optional["RemoteFileSynchronizer"] = None
 
         # Throttled notification delivery to avoid flooding UI
-        self._pending_events: List[StateEvent] = []
+        self._pending_events: List[EventBase] = []
         self._pending_events_lock = threading.Lock()
         self._notify_interval = 2.0  # Seconds between notification batches
 
@@ -404,7 +400,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         logger.debug("Received notification: %s", method)
 
-        # Convert notification to StateEvent and queue for throttled delivery
+        # Convert notification to EventBase and queue for throttled delivery
         event = self._notification_to_event(method, params)
         if event:
             with self._pending_events_lock:
@@ -452,33 +448,31 @@ class SSHStateProviderClient(OfflineStateProvider):
             for event in unique_events:
                 self._notify_listeners(event)
 
-    def _notification_to_event(self, method: str, params: Dict) -> Optional[StateEvent]:
-        """Convert a notification to a StateEvent"""
-        data = params.get("data", params)
-        if method == NotificationMethod.EXPERIMENT_UPDATED.value:
-            return ExperimentUpdatedEvent(
-                experiment_id=data.get("experiment_id", ""),
-            )
-        elif method == NotificationMethod.RUN_UPDATED.value:
-            return RunUpdatedEvent(
-                experiment_id=data.get("experiment_id", ""),
-                run_id=data.get("run_id", ""),
-            )
-        elif method == NotificationMethod.JOB_UPDATED.value:
-            return JobUpdatedEvent(
-                experiment_id=data.get("experiment_id", ""),
-                run_id=data.get("run_id", ""),
-                job_id=data.get("job_id", ""),
-            )
-        elif method == NotificationMethod.SERVICE_UPDATED.value:
-            return ServiceUpdatedEvent(
-                experiment_id=data.get("experiment_id", ""),
-                run_id=data.get("run_id", ""),
-                service_id=data.get("service_id", ""),
-            )
-        return None
+    def _notification_to_event(self, method: str, params: Dict) -> Optional[EventBase]:
+        """Convert a notification to a EventBase"""
+        if method != NotificationMethod.STATE_EVENT.value:
+            # Don't warn for known control notifications (handled elsewhere)
+            if method not in (
+                NotificationMethod.SHUTDOWN.value,
+                NotificationMethod.FILE_CHANGED.value,
+            ):
+                logger.warning("Unhandled notification method: %s", method)
+            return None
 
-    def _notify_listeners(self, event: StateEvent):
+        event_type = params.get("event_type")
+        data = params.get("data", {})
+        event_class = EventBase.get_class(event_type)
+        if event_class is None:
+            logger.warning("Unknown event type: %s", event_type)
+            return None
+
+        try:
+            return event_class(**data)
+        except TypeError as e:
+            logger.warning("Error deserializing event %s: %s", event_type, e)
+            return None
+
+    def _notify_listeners(self, event: EventBase):
         """Notify all registered listeners of a state event"""
         with self._listener_lock:
             listeners = list(self._listeners)

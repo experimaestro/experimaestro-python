@@ -145,7 +145,7 @@ def test_token_monitor():
         )
         return task
 
-    with TemporaryExperiment("tokens1", maxwait=20, port=0) as xp1:
+    with TemporaryExperiment("tokens1", maxwait=20) as xp1:
         # Use the same workspace for both experiments
         with TemporaryExperiment(
             "tokens2", workdir=xp1.workspace.path, maxwait=20

@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse, Response
 
 from experimaestro.webui.websocket import WebSocketHandler
 from experimaestro.webui.state_bridge import StateBridge
-from experimaestro.webui.routes import auth, proxy, notifications
+from experimaestro.webui.routes import auth, proxy
 
 if TYPE_CHECKING:
     from experimaestro.webui.server import WebUIServer
@@ -61,7 +61,6 @@ def create_app(server: "WebUIServer") -> FastAPI:
     # Include route modules
     app.include_router(auth.router)
     app.include_router(proxy.router)
-    app.include_router(notifications.router)
 
     # WebSocket endpoint
     @app.websocket("/ws")

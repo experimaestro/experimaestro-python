@@ -73,12 +73,22 @@ class CaptureLog(RichLog):
 
         return result
 
+    def _is_logs_tab_active(self) -> bool:
+        """Check if the Logs tab is currently active"""
+        try:
+            from textual.widgets import TabbedContent
+
+            tabs = self.app.query_one("#main-tabs", TabbedContent)
+            return tabs.active == "logs-tab"
+        except Exception:
+            return False
+
     def on_print(self, event: events.Print) -> None:
         """Handle print events from captured stdout/stderr"""
         if text := event.text.strip():
             self.write(self._format_log_line(text))
-            # Mark as unread if Logs tab is not active
-            if not self._has_unread:
+            # Mark as unread only if Logs tab is not active
+            if not self._has_unread and not self._is_logs_tab_active():
                 self._has_unread = True
                 self._update_tab_title()
 

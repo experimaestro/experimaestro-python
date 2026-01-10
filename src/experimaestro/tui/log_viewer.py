@@ -439,10 +439,11 @@ class LogViewerScreen(Screen, inherit_bindings=False):
             logger.info("User tried to close during first sync, ignoring")
             return
 
-        logger.info("Closing log viewer, stopping sync")
-        # Stop adaptive sync
+        # Stop adaptive sync if running
         if self._synchronizer:
+            logger.info("Closing log viewer, stopping sync")
             self._synchronizer.stop()
+
         self.dismiss()
 
     def action_toggle_follow(self) -> None:

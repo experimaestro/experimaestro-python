@@ -1,32 +1,29 @@
-import urllib.parse
+"""File-based progress notification system for experimaestro tasks.
+
+Progress is reported by writing to job event files, which are then read
+by monitors (TUI, web UI) via file watching.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Dict, Iterator, Optional, TypeVar, overload
-import os.path
-from urllib.request import urlopen
-from urllib.error import HTTPError, URLError
-import threading
 import sys
-import socket
 from tqdm.auto import tqdm as std_tqdm
 
 from .utils import logger
 from experimaestro.taskglobals import Env as TaskEnv
 from .progress import FileBasedProgressReporter
 
-# --- Progress and other notifications
-
 T = TypeVar("T")
 
 
 @dataclass
 class LevelInformation:
+    """Progress information for a single nesting level"""
+
     level: int
     desc: Optional[str]
     progress: float
-
-    previous_progress: float = -1
-    previous_desc: Optional[str] = None
 
     def to_dict(self) -> Dict:
         """Convert to a dictionary for JSON serialization."""
@@ -52,19 +49,6 @@ class LevelInformation:
             progress=d.get("progress", 0),
         )
 
-    def modified(self, reporter: "Reporter"):
-        return (
-            abs(self.progress - self.previous_progress) > reporter.progress_threshold
-        ) or (self.previous_desc != self.desc)
-
-    def report(self):
-        self.previous_progress = self.progress
-        result = {"level": self.level, "progress": self.progress}
-        if self.previous_desc != self.desc:
-            self.previous_desc = self.desc
-            result["desc"] = self.desc
-        return result
-
     def __repr__(self) -> str:
         return f"[{self.level}] {self.desc} {int(self.progress * 1000) / 10}%"
 
@@ -87,214 +71,73 @@ def get_progress_information_from_dict(dicts: list[dict]) -> ProgressInformation
     return [LevelInformation.from_dict(p) if isinstance(p, dict) else p for p in dicts]
 
 
-class ListenerInformation:
-    def __init__(self, url: str):
-        self.url = url
-        self.error_count = 0
+class Reporter:
+    """File-based progress reporter for running tasks.
 
+    Progress events are written to job event files at:
+    .experimaestro/jobs/{job_id}/events-*.jsonl
 
-class Reporter(threading.Thread):
-    NOTIFICATION_FOLDER = ".notifications"
-
-    console: bool
-    """Whether to output to the console if no notification server is up"""
+    These files are watched by monitors (TUI, web UI) to display progress.
+    """
 
     def __init__(self, path: Path):
-        """Starts a notification thread
+        """Initialize the file-based reporter.
 
-        Arguments:
-            path: The path where notification URLs will be put (one file per URL)
+        Args:
+            path: The task path ({workspace}/jobs/{task_id}/{job_id}/)
         """
-        super().__init__(daemon=True)
-        self.path = path / Reporter.NOTIFICATION_FOLDER
-        self.path.mkdir(exist_ok=True)
-        self.urls: Dict[str, ListenerInformation] = {}
-
-        # Last check of notification URLs
-        self.lastcheck = 0
-
-        self.levels = [LevelInformation(0, None, -1)]
-
-        self.stopping = False
-
+        self.path = path
+        self.file_reporter = FileBasedProgressReporter(task_path=path)
+        self.levels: list[LevelInformation] = [LevelInformation(0, None, -1)]
         self.console = False
 
-        self.progress_threshold = 0.01
-        self.cv = threading.Condition()
-
-        # File-based progress reporter
-        self.file_reporter = FileBasedProgressReporter(task_path=path)
-
-    def stop(self):
-        self.stopping = True
-        with self.cv:
-            # self.cv.notifyAll()
-            self.cv.notify_all()
-
-    @staticmethod
-    def isfatal_httperror(e: Exception, info: ListenerInformation) -> bool:
-        """Returns True if this HTTP error indicates that the server won't recover"""
-        if isinstance(e, HTTPError):
-            if e.code >= 400 and e.code < 500:
-                return True
-        elif isinstance(e, URLError):
-            if isinstance(e.reason, ConnectionRefusedError):
-                return True
-            if isinstance(e.reason, socket.gaierror) and e.reason.errno == -2:
-                return True
-            if isinstance(e.reason, TimeoutError):
-                info.error_count += 1
-
-            # Too many errors
-            if info.error_count > 3:
-                logger.info("Too many errors with %s", info.error_count)
-                return True
-
-        return False
-
-    def modified(self):
-        return any(level.modified(self) for level in self.levels)
-
-    def check_urls(self):
-        """Check whether we have new schedulers to notify"""
-        # Check if path exists (it might have been deleted during cleanup)
-        if not self.path.exists():
-            return
-
-        try:
-            mtime = os.path.getmtime(self.path)
-        except (OSError, FileNotFoundError):
-            # Path was deleted while we were checking
-            return
-
-        if mtime > self.lastcheck:
-            for f in self.path.iterdir():
-                self.urls[f.name] = ListenerInformation(f.read_text().strip())
-                logger.info("Added new notification URL: %s", self.urls[f.name].url)
-                f.unlink()
-
-            try:
-                self.lastcheck = os.path.getmtime(self.path)
-            except (OSError, FileNotFoundError):
-                # Path was deleted during iteration
-                return
-
-    def run(self):
-        logger.info("Running notification thread")
-
-        while True:
-            with self.cv:
-                self.cv.wait_for(lambda: self.stopping or self.modified())
-                if self.stopping:
-                    break
-
-            # Notify (out of the CV locking)
-            toremove = []
-
-            # Check if new notification servers are on
-            self.check_urls()
-
-            if self.urls:
-                # OK, let's go
-                for level in self.levels:
-                    if level.modified(self):
-                        params = level.report()
-
-                        # Go over all URLs
-                        for key, info in self.urls.items():
-                            baseurl = info.url
-
-                            url = "{}/progress?{}".format(
-                                baseurl, urllib.parse.urlencode(params)
-                            )
-                            logger.debug("Reporting progress %s", params)
-                            try:
-                                with urlopen(url) as _:
-                                    logger.debug(
-                                        "Notification send for %s [%s]",
-                                        baseurl,
-                                        level,
-                                    )
-                            except Exception as e:
-                                logger.warning(
-                                    "Progress: %s [error while notifying %s]: %s",
-                                    level,
-                                    url,
-                                    e,
-                                )
-                                if Reporter.isfatal_httperror(e, info):
-                                    toremove.append(key)
-
-                # Removes unvalid URLs
-                for key in toremove:
-                    logger.info("Removing notification URL %s", self.urls[key])
-                    del self.urls[key]
-            elif self.console:
-                for level in self.levels:
-                    if level.modified(self):
-                        params = level.report()
-                        logger.info("Progress: %s", level)
-
     def eoj(self):
-        with self.cv:
-            self.check_urls()
-            if self.urls:
-                # Go over all URLs
-                for key, info in self.urls.items():
-                    baseurl = info.url
-                    url = "{}?status=eoj".format(baseurl)
-                    try:
-                        with urlopen(url) as _:
-                            logger.debug(
-                                "EOJ notification sent for %s",
-                                baseurl,
-                            )
-                    except Exception:
-                        logger.warning(
-                            "Could not report EOJ",
-                        )
-
-            self.file_reporter.eoj()
+        """End of job notification"""
+        self.file_reporter.eoj()
 
     def set_progress(
         self, progress: float, level: int, desc: Optional[str], console=False
     ):
-        """Sets the new progress if sufficiently different"""
-        with self.cv:
-            if (
-                (level + 1) != len(self.levels)
-                or (progress != self.levels[level].progress)
-                or (desc != self.levels[level].desc)
-            ):
-                self.console = console
-                self.levels = self.levels[: (level + 1)]
-                while level >= len(self.levels):
-                    self.levels.append(LevelInformation(level, None, 0.0))
-                if desc:
-                    self.levels[level].desc = desc
-                self.levels[level].progress = progress
+        """Set progress for a specific level.
 
-                self.file_reporter.set_progress(progress, level, desc)
+        Args:
+            progress: Progress value between 0.0 and 1.0
+            level: Nesting level (0 is top level)
+            desc: Optional description
+            console: If True, also print to console
+        """
+        # Update in-memory levels
+        self.levels = self.levels[: (level + 1)]
+        while level >= len(self.levels):
+            self.levels.append(LevelInformation(level, None, 0.0))
+        if desc:
+            self.levels[level].desc = desc
+        self.levels[level].progress = progress
 
-                self.cv.notify_all()
+        # Write to file
+        self.file_reporter.set_progress(progress, level, desc)
+
+        # Optionally log to console
+        if console:
+            logger.info("Progress: %s", self.levels[level])
 
     INSTANCE: ClassVar[Optional["Reporter"]] = None
 
     @staticmethod
     def instance():
+        """Get or create the singleton Reporter instance."""
         if Reporter.INSTANCE is None:
             taskpath = TaskEnv.instance().taskpath
             assert taskpath is not None, "Task path is not defined"
             Reporter.INSTANCE = Reporter(taskpath)
-            Reporter.INSTANCE.start()
         return Reporter.INSTANCE
 
 
 def progress(value: float, level=0, desc: Optional[str] = None, console=False):
-    """Report task progress to the experimaestro server.
+    """Report task progress.
 
     Call this function from within a running task to report progress.
-    Progress is displayed in the web UI and TUI monitors.
+    Progress is written to job event files and displayed in monitors.
 
     Example::
 
@@ -305,7 +148,7 @@ def progress(value: float, level=0, desc: Optional[str] = None, console=False):
     :param value: Progress value between 0.0 and 1.0
     :param level: Nesting level for nested progress bars (default: 0)
     :param desc: Optional description of the current operation
-    :param console: If True, also print to console when no server is available
+    :param console: If True, also print to console
     """
     if TaskEnv.instance().slave:
         # Skip if in a slave process
@@ -318,11 +161,16 @@ def report_eoj():
     Reporter.instance().eoj()
 
 
+def start_of_job():
+    """Notify that the job has started running"""
+    Reporter.instance().file_reporter.start_of_job()
+
+
 class xpm_tqdm(std_tqdm):
     """Experimaestro-aware tqdm progress bar.
 
     A drop-in replacement for ``tqdm`` that automatically reports progress
-    to the experimaestro server. Use this instead of the standard ``tqdm``
+    to job event files. Use this instead of the standard ``tqdm``
     in your task's ``execute()`` method.
 
     Example::
@@ -336,8 +184,6 @@ class xpm_tqdm(std_tqdm):
     """
 
     def __init__(self, iterable=None, file=None, *args, **kwargs):
-        # Report progress bar
-        # newprogress(title=, pos=abs(self.pos))
         _file = file or sys.stderr
         self.is_tty = hasattr(_file, "isatty") or _file.isatty()
 
@@ -367,7 +213,7 @@ def tqdm(*args, **kwargs):
     """Create an experimaestro-aware progress bar.
 
     A drop-in replacement for ``tqdm.tqdm`` that automatically reports progress
-    to the experimaestro server. Use this in task ``execute()`` methods.
+    to job event files. Use this in task ``execute()`` methods.
 
     Example::
 

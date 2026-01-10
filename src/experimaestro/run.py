@@ -7,7 +7,7 @@ import sys
 import json
 from typing import List
 import fasteners
-from experimaestro.notifications import progress, report_eoj
+from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
 from experimaestro.exceptions import GracefulTimeout
 from experimaestro.locking import JobDependencyLocks
@@ -168,6 +168,9 @@ class TaskRunner:
                 logger.info("Running task")
                 rmfile(self.failedpath)
                 self.started = True
+
+                # Notify that the job has started
+                start_of_job()
 
                 # Acquire dynamic dependency locks while running the task
                 with self.dynamic_locks.dependency_locks():

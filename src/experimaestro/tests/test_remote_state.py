@@ -119,13 +119,17 @@ class TestProtocolMessages:
     def test_notification_creation(self):
         """Test creating a JSON-RPC notification"""
         notif_json = create_notification(
-            NotificationMethod.JOB_UPDATED, {"job_id": "job1", "state": "running"}
+            NotificationMethod.STATE_EVENT,
+            {"event_type": "JobStateChangedEvent", "data": {"job_id": "job1"}},
         )
         data = json.loads(notif_json)
 
         assert data["jsonrpc"] == JSONRPC_VERSION
-        assert data["method"] == "notification.job_updated"
-        assert data["params"] == {"job_id": "job1", "state": "running"}
+        assert data["method"] == "notification.state_event"
+        assert data["params"] == {
+            "event_type": "JobStateChangedEvent",
+            "data": {"job_id": "job1"},
+        }
         assert "id" not in data
 
     def test_notification_parsing(self):
@@ -783,70 +787,81 @@ class TestClientServerIntegration:
         assert resp_msg.result == []
 
     def test_notification_job_updated(self):
-        """Test job_updated notification message handling"""
+        """Test job_updated notification message handling via STATE_EVENT"""
         notification = create_notification(
-            NotificationMethod.JOB_UPDATED,
+            NotificationMethod.STATE_EVENT,
             {
-                "job_id": "job1",
-                "experiment_id": "exp1",
-                "run_id": "run1",
-                "state": "running",
+                "event_type": "JobStateChangedEvent",
+                "data": {
+                    "job_id": "job1",
+                    "experiment_id": "exp1",
+                    "run_id": "run1",
+                },
             },
         )
 
         msg = parse_message(notification)
         assert isinstance(msg, RPCNotification)
-        assert msg.method == "notification.job_updated"
-        assert msg.params["job_id"] == "job1"
+        assert msg.method == "notification.state_event"
+        assert msg.params["event_type"] == "JobStateChangedEvent"
+        assert msg.params["data"]["job_id"] == "job1"
 
     def test_notification_experiment_updated(self):
-        """Test experiment_updated notification message handling"""
+        """Test experiment_updated notification message handling via STATE_EVENT"""
         notification = create_notification(
-            NotificationMethod.EXPERIMENT_UPDATED,
+            NotificationMethod.STATE_EVENT,
             {
-                "experiment_id": "exp1",
-                "total_jobs": 10,
-                "finished_jobs": 5,
+                "event_type": "ExperimentUpdatedEvent",
+                "data": {
+                    "experiment_id": "exp1",
+                },
             },
         )
 
         msg = parse_message(notification)
         assert isinstance(msg, RPCNotification)
-        assert msg.method == "notification.experiment_updated"
-        assert msg.params["experiment_id"] == "exp1"
+        assert msg.method == "notification.state_event"
+        assert msg.params["event_type"] == "ExperimentUpdatedEvent"
+        assert msg.params["data"]["experiment_id"] == "exp1"
 
     def test_notification_run_updated(self):
-        """Test run_updated notification message handling"""
+        """Test run_updated notification message handling via STATE_EVENT"""
         notification = create_notification(
-            NotificationMethod.RUN_UPDATED,
+            NotificationMethod.STATE_EVENT,
             {
-                "experiment_id": "exp1",
-                "run_id": "run1",
-                "status": "completed",
+                "event_type": "RunUpdatedEvent",
+                "data": {
+                    "experiment_id": "exp1",
+                    "run_id": "run1",
+                },
             },
         )
 
         msg = parse_message(notification)
         assert isinstance(msg, RPCNotification)
-        assert msg.method == "notification.run_updated"
-        assert msg.params["run_id"] == "run1"
+        assert msg.method == "notification.state_event"
+        assert msg.params["event_type"] == "RunUpdatedEvent"
+        assert msg.params["data"]["run_id"] == "run1"
 
     def test_notification_service_updated(self):
-        """Test service_updated notification message handling"""
+        """Test service_updated notification message handling via STATE_EVENT"""
         notification = create_notification(
-            NotificationMethod.SERVICE_UPDATED,
+            NotificationMethod.STATE_EVENT,
             {
-                "experiment_id": "exp1",
-                "run_id": "run1",
-                "service_id": "svc1",
-                "state": "RUNNING",
+                "event_type": "ServiceAddedEvent",
+                "data": {
+                    "experiment_id": "exp1",
+                    "run_id": "run1",
+                    "service_id": "svc1",
+                },
             },
         )
 
         msg = parse_message(notification)
         assert isinstance(msg, RPCNotification)
-        assert msg.method == "notification.service_updated"
-        assert msg.params["service_id"] == "svc1"
+        assert msg.method == "notification.state_event"
+        assert msg.params["event_type"] == "ServiceAddedEvent"
+        assert msg.params["data"]["service_id"] == "svc1"
 
     def test_notification_file_changed(self):
         """Test file_changed notification message handling"""

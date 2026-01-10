@@ -218,9 +218,18 @@ class ExperimentsList(Widget):
             self.collapse_to_experiment(exp_id)
             self.post_message(ExperimentSelected(exp_id, run_id))
 
-    def refresh_experiments(self) -> None:
+    def refresh_experiments(self) -> None:  # noqa: C901
         """Refresh the experiments list from state provider"""
-        table = self.query_one("#experiments-table", DataTable)
+        # Guard: ensure the table is mounted before querying
+        try:
+            table = self.query_one("#experiments-table", DataTable)
+        except Exception:
+            # Widget not yet fully composed, will be called again from on_mount
+            return
+
+        # Guard: ensure columns have been added (on_mount may not have run yet)
+        if len(table.columns) == 0:
+            return
 
         self.log.info(
             f"State provider: {type(self.state_provider).__name__}, is_live={self.state_provider.is_live}"

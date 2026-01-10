@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ServiceListener:
     """A service listener"""
 
-    def service_state_changed(service):
+    def service_state_changed(self, service):
         pass
 
 

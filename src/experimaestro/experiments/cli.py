@@ -113,7 +113,8 @@ class ConfigurationLoader:
     "--host",
     type=str,
     default=None,
-    help="Server hostname (default to localhost, not suitable if your jobs are remote)",
+    help="[DEPRECATED] Server hostname (use --web instead)",
+    hidden=True,
 )
 @click.option(
     "--run-mode",
@@ -131,7 +132,13 @@ class ConfigurationLoader:
     "--port",
     type=int,
     default=None,
-    help="Port for monitoring (can be defined in the settings.yaml file)",
+    help="[DEPRECATED] Port for monitoring (use --web instead)",
+    hidden=True,
+)
+@click.option(
+    "--web",
+    is_flag=True,
+    help="Start web server for monitoring (use settings.yaml for host/port config)",
 )
 @click.option(
     "--console",
@@ -180,6 +187,7 @@ def experiments_cli(  # noqa: C901
     xp_file: str,
     host: str,
     port: int,
+    web: bool,
     console: bool,
     no_db: bool,
     xpm_config_dir: Path,
@@ -196,9 +204,26 @@ def experiments_cli(  # noqa: C901
     debug: bool,
 ):
     """Run an experiment"""
+    import warnings
 
     # --- Set the logger with colors if outputting to terminal
     setup_logging(debug=debug)
+
+    # --- Warn about deprecated options
+    if host is not None:
+        warnings.warn(
+            "The '--host' option is deprecated. Use '--web' flag instead. "
+            "Configure host in settings.yaml.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if port is not None:
+        warnings.warn(
+            "The '--port' option is deprecated. Use '--web' flag instead. "
+            "Configure port in settings.yaml.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     # --- Loads the YAML
     conf_loader = ConfigurationLoader()
@@ -380,12 +405,11 @@ def experiments_cli(  # noqa: C901
         """Run the experiment code - optionally storing xp in xp_holder"""
         try:
             from experimaestro.scheduler.experiment import experiment
+            from experimaestro.settings import get_settings
 
             with experiment(
                 ws_env,
                 experiment_id,
-                host=host,
-                port=port,
                 run_mode=run_mode,
                 register_signals=register_signals,
                 project_paths=project_paths,
@@ -394,6 +418,21 @@ def experiments_cli(  # noqa: C901
             ) as xp:
                 if xp_holder is not None:
                     xp_holder["xp"] = xp
+
+                # Start web server if requested
+                if web and run_mode == RunMode.NORMAL:
+                    settings = get_settings()
+                    xp.scheduler.start_server(
+                        settings.server,
+                        workspace=xp.workspace,
+                        wait_for_quit=False,
+                    )
+                    logging.info(
+                        "Web server started at http://%s:%d",
+                        settings.server.host or "localhost",
+                        settings.server.port or 12345,
+                    )
+
                 if xp_ready_event is not None:
                     xp_ready_event.set()  # Signal that xp is ready
 
@@ -427,7 +466,8 @@ def experiments_cli(  # noqa: C901
         logging.warning("--console is ignored when run_mode is not NORMAL")
 
     if use_console:
-        # Run experiment in background thread, console UI in main thread
+        # Start TUI first, then run experiment in background thread
+        # This ensures all logs (including startup) are captured
         import threading
         from experimaestro.tui import ExperimentTUI
 
@@ -444,48 +484,73 @@ def experiments_cli(  # noqa: C901
 
         xp_holder = {"xp": None}
         exception_holder = {"exception": None}
-        xp_ready = threading.Event()
 
-        def run_in_thread():
+        # Create TUI first in deferred mode (no state_provider yet)
+        # This allows capturing all logs from experiment startup
+        tui_app = ExperimentTUI(show_logs=True)
+
+        def run_experiment_in_thread():
+            """Run experiment and connect state provider to TUI when ready"""
             try:
-                # Don't register signals in background thread
-                run_experiment_code(
-                    xp_holder, xp_ready, register_signals=False, in_thread=True
-                )
-                # Add a test message after experiment completes
+                from experimaestro.scheduler.experiment import experiment as exp_context
+                from experimaestro.settings import get_settings
+
+                with exp_context(
+                    ws_env,
+                    experiment_id,
+                    run_mode=run_mode,
+                    register_signals=False,  # TUI handles signals
+                    project_paths=project_paths,
+                    dirty_git=xp_configuration.dirty_git,
+                    no_db=no_db,
+                ) as xp:
+                    xp_holder["xp"] = xp
+
+                    # Connect TUI to the experiment's scheduler
+                    tui_app.call_from_thread(tui_app.set_state_provider, xp.scheduler)
+
+                    # Start web server if requested
+                    if web:
+                        settings = get_settings()
+                        xp.scheduler.start_server(
+                            settings.server,
+                            workspace=xp.workspace,
+                            wait_for_quit=False,
+                        )
+                        logging.info(
+                            "Web server started at http://%s:%d",
+                            settings.server.host or "localhost",
+                            settings.server.port or 12345,
+                        )
+
+                    logging.info("Experiment started")
+
+                    # Set up the environment
+                    for key, value in env:
+                        xp.setenv(key, value)
+
+                    # Sets the python path
+                    xp.workspace.python_path.extend(python_path)
+
+                    # Run the experiment
+                    helper.xp = xp
+                    helper.run(list(args), xp_configuration)
+
+                    # ... and wait
+                    xp.wait()
+
                 logging.info("Experiment thread completed")
+
             except BaseException as e:
                 # Use BaseException to also catch SystemExit from sys.exit()
                 exception_holder["exception"] = e
-                xp_ready.set()  # Signal even on error
 
         # Start experiment in background thread
-        exp_thread = threading.Thread(target=run_in_thread, daemon=True)
+        exp_thread = threading.Thread(target=run_experiment_in_thread, daemon=True)
         exp_thread.start()
 
-        # Wait for experiment to start (up to 30 seconds)
-        if not xp_ready.wait(timeout=30.0):
-            cprint("Timeout waiting for experiment to start", "red", file=sys.stderr)
-            sys.exit(1)
-
-        if xp_holder["xp"] is None:
-            exc = exception_holder["exception"]
-            if exc:
-                cprint(f"Failed to start experiment: {exc}", "red", file=sys.stderr)
-            else:
-                cprint("Failed to start experiment", "red", file=sys.stderr)
-            sys.exit(1)
-
-        # Run TUI in main thread (handles signals via Textual)
-        # Use the Scheduler as state provider - it only shows live experiments
-        # (not WorkspaceStateProvider which would show all historical experiments)
-        tui_app = ExperimentTUI(
-            workdir=workdir,
-            state_provider=xp_holder["xp"].scheduler,
-            show_logs=True,
-        )
-
         try:
+            # Run TUI in main thread (handles signals via Textual)
             # Textual automatically captures stdout/stderr via Print events
             tui_app.run()
         finally:

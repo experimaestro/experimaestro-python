@@ -14,14 +14,15 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 
-from experimaestro.scheduler.state_provider import (
-    StateProvider,
-    StateEvent,
+from experimaestro.scheduler.state_provider import StateProvider
+from experimaestro.scheduler.state_status import (
+    EventBase,
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
-    JobUpdatedEvent,
-    JobExperimentUpdatedEvent,
-    ServiceUpdatedEvent,
+    JobStateChangedEvent,
+    JobSubmittedEvent,
+    ServiceAddedEvent,
+    ServiceStateChangedEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
 from experimaestro.tui.utils import format_duration, get_status_icon  # noqa: F401
@@ -85,9 +86,13 @@ class ExperimaestroUI(App):
         """Initialize the TUI
 
         Args:
-            workdir: Workspace directory (required if state_provider not provided)
+            workdir: Workspace directory (required if state_provider not provided
+                and not using deferred mode)
             watch: Enable filesystem watching for workspace mode
-            state_provider: Pre-initialized state provider (for active experiments)
+            state_provider: Pre-initialized state provider (for active experiments).
+                If None and workdir is provided, creates a WorkspaceStateProvider.
+                If None and workdir is None, starts in deferred mode (logs only)
+                and waits for set_state_provider() to be called.
             show_logs: Whether to show the logs tab (for active experiments)
         """
         super().__init__()
@@ -95,12 +100,12 @@ class ExperimaestroUI(App):
         self.watch = watch
         self.show_logs = show_logs
         self._listener_registered = False
+        self._monitor_mounted = False
 
         # Initialize state provider before compose
         if state_provider:
             self.state_provider = state_provider
-            self.owns_provider = False  # Don't close external provider
-        else:
+        elif workdir:
             from experimaestro.scheduler.workspace_state_provider import (
                 WorkspaceStateProvider,
             )
@@ -110,14 +115,18 @@ class ExperimaestroUI(App):
                 self.workdir,
                 standalone=True,  # Start event file watcher for monitoring
             )
-            self.owns_provider = False  # Provider is singleton, don't close
+        else:
+            # Deferred mode: no provider yet, will be set later via set_state_provider()
+            self.state_provider = None
 
         # Set subtitle to show scheduler status
         self._update_scheduler_status()
 
     def _update_scheduler_status(self) -> None:
         """Update the subtitle to reflect scheduler status"""
-        if self.state_provider.is_live:
+        if self.state_provider is None:
+            self.sub_title = "○ Waiting for experiment..."
+        elif self.state_provider.is_live:
             self.sub_title = "● Scheduler Running"
         else:
             self.sub_title = "○ Offline"
@@ -126,7 +135,12 @@ class ExperimaestroUI(App):
         """Compose the TUI layout"""
         yield Header()
 
-        if self.show_logs:
+        if self.state_provider is None:
+            # Deferred mode: only show logs, monitor will be added later
+            with TabbedContent(id="main-tabs"):
+                with TabPane("Logs", id="logs-tab"):
+                    yield CaptureLog(id="logs", auto_scroll=True, wrap=True)
+        elif self.show_logs:
             # Tabbed layout with logs and services
             with TabbedContent(id="main-tabs"):
                 with TabPane("Monitor", id="monitor-tab"):
@@ -137,6 +151,7 @@ class ExperimaestroUI(App):
                     yield OrphanJobsTab(self.state_provider)
                 with TabPane("Logs", id="logs-tab"):
                     yield CaptureLog(id="logs", auto_scroll=True, wrap=True)
+            self._monitor_mounted = True
         else:
             # Simple layout without logs but with services
             with TabbedContent(id="main-tabs"):
@@ -146,6 +161,7 @@ class ExperimaestroUI(App):
                     yield GlobalServiceSyncs(self.state_provider)
                 with TabPane("Orphans (0)", id="orphan-tab"):
                     yield OrphanJobsTab(self.state_provider)
+            self._monitor_mounted = True
 
         yield Footer()
 
@@ -169,9 +185,10 @@ class ExperimaestroUI(App):
         # Resets logging
         logging.basicConfig(level=logging.INFO, force=True)
 
-        # Get the widgets
-        experiments_list = self.query_one(ExperimentsList)
-        experiments_list.refresh_experiments()
+        # If monitor is mounted, refresh experiments
+        if self._monitor_mounted:
+            experiments_list = self.query_one(ExperimentsList)
+            experiments_list.refresh_experiments()
 
         # Register as listener for state change notifications
         # The state provider handles its own notification strategy internally
@@ -180,16 +197,96 @@ class ExperimaestroUI(App):
             self._listener_registered = True
             self.log("Registered state listener for notifications")
 
+    def set_state_provider(self, state_provider: StateProvider) -> None:
+        """Set the state provider and mount monitor widgets (for deferred mode)
+
+        Call this method from a background thread after starting the experiment.
+        The TUI will add the Monitor, Services, and Orphans tabs.
+
+        Args:
+            state_provider: The state provider (typically the Scheduler)
+        """
+        self.state_provider = state_provider
+        self._update_scheduler_status()
+
+        # Mount monitor widgets if not already done
+        if not self._monitor_mounted:
+            self._mount_monitor_widgets()
+
+        # Register listener
+        if not self._listener_registered:
+            self.state_provider.add_listener(self._on_state_event)
+            self._listener_registered = True
+            self.log("Registered state listener for notifications")
+
+    def _mount_monitor_widgets(self) -> None:
+        """Mount the monitor widgets dynamically (for deferred mode)"""
+        tabs = self.query_one("#main-tabs", TabbedContent)
+
+        # Create monitor pane with all its children composed
+        monitor_pane = TabPane("Monitor", id="monitor-tab")
+        tabs.add_pane(monitor_pane, before="logs-tab")
+
+        # Create widgets
+        experiments_list = ExperimentsList(self.state_provider)
+        runs_list = RunsList(self.state_provider)
+        jobs_table = JobsTable(self.state_provider)
+        services_list = ServicesList(self.state_provider)
+        job_detail_view = JobDetailView(self.state_provider)
+
+        # Mount experiments and runs lists
+        monitor_pane.mount(experiments_list)
+        monitor_pane.mount(runs_list)
+
+        # Create experiment tabs with children using compose_add_child
+        experiment_tabs = TabbedContent(id="experiment-tabs", classes="hidden")
+        jobs_pane = TabPane("Jobs", id="jobs-tab")
+        services_pane = TabPane("Services", id="services-tab")
+        jobs_pane.compose_add_child(jobs_table)
+        services_pane.compose_add_child(services_list)
+        experiment_tabs.compose_add_child(jobs_pane)
+        experiment_tabs.compose_add_child(services_pane)
+        monitor_pane.mount(experiment_tabs)
+
+        # Create job detail container
+        job_detail_container = Vertical(id="job-detail-container", classes="hidden")
+        job_detail_container.compose_add_child(job_detail_view)
+        monitor_pane.mount(job_detail_container)
+
+        # Create and mount services sync tab
+        services_sync_pane = TabPane("Services (0)", id="services-sync-tab")
+        services_sync_pane.compose_add_child(GlobalServiceSyncs(self.state_provider))
+        tabs.add_pane(services_sync_pane, before="logs-tab")
+
+        # Create and mount orphans tab (only if not live)
+        if not self.state_provider.is_live:
+            orphan_pane = TabPane("Orphans (0)", id="orphan-tab")
+            orphan_pane.compose_add_child(OrphanJobsTab(self.state_provider))
+            tabs.add_pane(orphan_pane, before="logs-tab")
+
+        self._monitor_mounted = True
+
+        # Refresh experiments list
+        experiments_list.refresh_experiments()
+
     def update_services_tab_title(self) -> None:
-        """Update the Services tab title with sync count"""
+        """Update the Services tab title with running service count"""
         try:
-            global_services = self.query_one(GlobalServiceSyncs)
-            count = global_services.sync_count
+            # Count running services from state provider
+            from experimaestro.scheduler.services import ServiceState
+
+            all_services = self.state_provider.get_services()
+            running_count = sum(
+                1
+                for s in all_services
+                if hasattr(s, "state") and s.state == ServiceState.RUNNING
+            )
+
             # Find and update the tab pane title
             tabs = self.query_one("#main-tabs", TabbedContent)
             tab = tabs.get_tab("services-sync-tab")
             if tab:
-                tab.label = f"Services ({count})"
+                tab.label = f"Services ({running_count})"
         except Exception:
             pass
 
@@ -231,15 +328,23 @@ class ExperimaestroUI(App):
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
     ) -> None:
-        """Handle tab switching - mark logs as read when Logs tab is activated"""
-        if event.tab.id == "logs-tab" and self.show_logs:
+        """Handle tab switching"""
+        # event.pane is the TabPane, event.tab is the Tab widget (header)
+        if event.pane.id == "logs-tab" and self.show_logs:
             try:
                 log_widget = self.query_one(CaptureLog)
                 log_widget.mark_as_read()
             except Exception:
                 pass
+        elif event.pane.id == "services-sync-tab":
+            # Refresh global services when switching to Services tab
+            try:
+                global_services = self.query_one(GlobalServiceSyncs)
+                global_services.refresh_services()
+            except Exception:
+                pass
 
-    def _on_state_event(self, event: StateEvent) -> None:
+    def _on_state_event(self, event: EventBase) -> None:
         """Handle state change events from the state provider
 
         This may be called from the state provider's thread or the main thread,
@@ -254,9 +359,9 @@ class ExperimaestroUI(App):
             # From background thread, use call_from_thread
             self.call_from_thread(self._handle_state_event, event)
 
-    def _handle_state_event(self, event: StateEvent) -> None:
+    def _handle_state_event(self, event: EventBase) -> None:
         """Process state event on the main thread using handler dispatch"""
-        self.log.debug(f"State event {type(event).__name__}")
+        self.log.info(f"State event: {event}")
 
         # Dispatch to handler if one exists for this event type
         if handler := self.STATE_EVENT_HANDLERS.get(type(event)):
@@ -273,41 +378,50 @@ class ExperimaestroUI(App):
             if jobs_table.current_experiment == event.experiment_id:
                 jobs_table.refresh_jobs()
 
-    def _handle_job_updated(self, event: JobUpdatedEvent) -> None:
-        """Handle JobUpdatedEvent - refresh job display"""
-        event_exp_id = event.experiment_id
-
-        # Refresh jobs table if we're viewing the affected experiment
-        for jobs_table in self.query(JobsTable):
-            if jobs_table.current_experiment == event_exp_id:
-                jobs_table.refresh_jobs()
-
-        # Also refresh job detail if we're viewing the affected job
-        for job_detail_container in self.query("#job-detail-container"):
-            if not job_detail_container.has_class("hidden"):
-                for job_detail_view in self.query(JobDetailView):
-                    if job_detail_view.current_job_id == event.job_id:
-                        job_detail_view.refresh_job_detail()
-
-        # Also update the experiment stats in the experiments list
-        for exp_list in self.query(ExperimentsList):
-            exp_list.refresh_experiments()
-
     def _handle_run_updated(self, event: RunUpdatedEvent) -> None:
         """Handle RunUpdatedEvent - refresh experiments list"""
         for exp_list in self.query(ExperimentsList):
             exp_list.refresh_experiments()
 
-    def _handle_service_updated(self, event: ServiceUpdatedEvent) -> None:
-        """Handle ServiceUpdatedEvent - refresh services list"""
+    def _handle_service_added(self, event: ServiceAddedEvent) -> None:
+        """Handle ServiceAddedEvent - refresh services list and update tab title"""
         event_exp_id = event.experiment_id
+        self.log.info(
+            f"ServiceAddedEvent received: exp={event_exp_id}, service={event.service_id}"
+        )
 
+        # Refresh the global services widget
+        try:
+            global_services = self.query_one(GlobalServiceSyncs)
+            self.log.info("Calling GlobalServiceSyncs.refresh_services()")
+            global_services.refresh_services()
+        except Exception as e:
+            self.log.warning(f"Failed to refresh global services: {e}")
+
+        # Refresh per-experiment services list
         for services_list in self.query(ServicesList):
             if services_list.current_experiment == event_exp_id:
                 services_list.refresh_services()
 
-    def _handle_job_experiment_updated(self, event: JobExperimentUpdatedEvent) -> None:
-        """Handle JobExperimentUpdatedEvent - update tags, dependencies, and refresh job list"""
+    def _handle_service_state_changed(self, event: ServiceStateChangedEvent) -> None:
+        """Handle ServiceStateChangedEvent - update tab title when service state changes"""
+        # Update the Services tab title (running count may have changed)
+        self.update_services_tab_title()
+
+        # Also refresh global services widget if visible
+        try:
+            global_services = self.query_one(GlobalServiceSyncs)
+            global_services.refresh_services()
+        except Exception:
+            pass
+
+        # Refresh per-experiment services list
+        for services_list in self.query(ServicesList):
+            if services_list.current_experiment == event.experiment_id:
+                services_list.refresh_services()
+
+    def _handle_job_submitted(self, event: JobSubmittedEvent) -> None:
+        """Handle JobSubmittedEvent - update tags, dependencies, and refresh job list"""
         event_exp_id = event.experiment_id
 
         # Update tags_map, dependencies_map, and refresh jobs for the affected experiment
@@ -315,7 +429,9 @@ class ExperimaestroUI(App):
             if jobs_table.current_experiment == event_exp_id:
                 # Add the new job's tags to the cache
                 if event.tags:
-                    jobs_table.tags_map[event.job_id] = event.tags
+                    jobs_table.tags_map[event.job_id] = {
+                        tag.key: tag.value for tag in event.tags
+                    }
                 # Add the new job's dependencies to the cache
                 if event.depends_on:
                     jobs_table.dependencies_map[event.job_id] = event.depends_on
@@ -326,12 +442,34 @@ class ExperimaestroUI(App):
         for exp_list in self.query(ExperimentsList):
             exp_list.refresh_experiments()
 
+    def _handle_job_state_changed(self, event: JobStateChangedEvent) -> None:
+        """Handle JobStateChangedEvent - refresh job display
+
+        This event is dispatched once per job state change.
+        Used for progress updates and state changes from job processes.
+        """
+        # Refresh all jobs tables that might contain this job
+        for jobs_table in self.query(JobsTable):
+            jobs_table.refresh_jobs()
+
+        # Also refresh job detail if we're viewing this job
+        for job_detail_container in self.query("#job-detail-container"):
+            if not job_detail_container.has_class("hidden"):
+                for job_detail_view in self.query(JobDetailView):
+                    if job_detail_view.current_job_id == event.job_id:
+                        job_detail_view.refresh_job_detail()
+
+        # Also update the experiment stats in the experiments list
+        for exp_list in self.query(ExperimentsList):
+            exp_list.refresh_experiments()
+
     STATE_EVENT_HANDLERS = {
         ExperimentUpdatedEvent: _handle_experiment_updated,
-        JobUpdatedEvent: _handle_job_updated,
+        JobStateChangedEvent: _handle_job_state_changed,
         RunUpdatedEvent: _handle_run_updated,
-        ServiceUpdatedEvent: _handle_service_updated,
-        JobExperimentUpdatedEvent: _handle_job_experiment_updated,
+        ServiceAddedEvent: _handle_service_added,
+        ServiceStateChangedEvent: _handle_service_state_changed,
+        JobSubmittedEvent: _handle_job_submitted,
     }
 
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
@@ -703,7 +841,3 @@ class ExperimaestroUI(App):
             self.state_provider.remove_listener(self._on_state_event)
             self._listener_registered = False
             self.log("Unregistered state listener")
-
-        # Only close state provider if we own it (not external/active experiment)
-        if self.state_provider and self.owns_provider:
-            self.state_provider.close()

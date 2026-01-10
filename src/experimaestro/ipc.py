@@ -15,11 +15,35 @@ class IPCom:
     """IPC async thread"""
 
     INSTANCE: Optional["IPCom"] = None
+    # Testing mode: use polling observer with small interval
+    TESTING_MODE: bool = False
+    POLLING_INTERVAL: float = 0.01
 
     def __init__(self):
-        self.observer = Observer()
+        if IPCom.TESTING_MODE:
+            from watchdog.observers.polling import PollingObserver
+
+            self.observer = PollingObserver(timeout=IPCom.POLLING_INTERVAL)
+        else:
+            self.observer = Observer()
         self.observer.start()
         self.pid = os.getpid()
+
+    @classmethod
+    def set_testing_mode(cls, enabled: bool = True, polling_interval: float = 0.01):
+        """Enable testing mode with polling observer
+
+        Args:
+            enabled: Whether to enable testing mode
+            polling_interval: Polling interval in seconds (default 0.01)
+        """
+        cls.TESTING_MODE = enabled
+        cls.POLLING_INTERVAL = polling_interval
+        # Reset instance to apply new settings
+        if cls.INSTANCE is not None:
+            cls.INSTANCE.observer.stop()
+            cls.INSTANCE.observer.join(timeout=5)
+            cls.INSTANCE = None
 
     def fswatch(
         self, watcher: FileSystemEventHandler, path: Path, recursive=False
