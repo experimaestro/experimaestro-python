@@ -15,6 +15,10 @@ class WebUIBuildHook(BuildHookInterface):
 
     def initialize(self, version: str, build_data: dict) -> None:
         """Run npm build to compile the frontend."""
+        # Skip on ReadTheDocs - npm is not available there
+        if os.environ.get("READTHEDOCS"):
+            return
+
         root = Path(self.root)
         app_dir = root / "app"
         output_dir = root / "src" / "experimaestro" / "webui" / "data"
