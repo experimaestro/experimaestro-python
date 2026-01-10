@@ -29,7 +29,7 @@ from experimaestro.scheduler.state_provider import (
     ProcessInfo,
 )
 from experimaestro.scheduler.state_status import (
-    StatusFile,
+    ExperimentStatusFile,
     StatusData,
     EventBase,
     JobSubmittedEvent,
@@ -94,7 +94,7 @@ class WorkspaceStateProvider(StateProvider):
         """
         super().__init__()
         self.workspace_path = Path(workspace_path).resolve()
-        self._experiments_dir = self.workspace_path / ".experimaestro" / "experiments"
+        self._experiments_dir = self.workspace_path / ".events" / "experiments"
         self._standalone = standalone
 
         # Status cache: (experiment_id, run_id) -> StatusData
@@ -108,7 +108,7 @@ class WorkspaceStateProvider(StateProvider):
 
         # Event reader (with built-in watching capability)
         self._event_reader: Optional[EventReader] = None
-        self._jobs_dir = self.workspace_path / ".experimaestro" / "jobs"
+        self._jobs_dir = self.workspace_path / ".events" / "jobs"
         if standalone:
             self._start_watcher()
 
@@ -229,8 +229,8 @@ class WorkspaceStateProvider(StateProvider):
                 return self._status_cache[cache_key]
 
             # Load from disk - pass workspace_path so StatusData creates MockJob/MockService
-            status_file = StatusFile(run_dir, workspace_path=self.workspace_path)
-            status = status_file.read()
+            status_file = ExperimentStatusFile(run_dir, self.workspace_path)
+            status = status_file.read_status_data()
 
             # Set workspace_path for event application
             status.workspace_path = self.workspace_path
@@ -561,8 +561,8 @@ class WorkspaceStateProvider(StateProvider):
                 continue
 
             run_id = run_dir.name
-            status_file = StatusFile(run_dir, workspace_path=self.workspace_path)
-            status = status_file.read()
+            status_file = ExperimentStatusFile(run_dir, self.workspace_path)
+            status = status_file.read_status_data()
 
             # Count jobs by state (jobs are MockJob objects with JobState enum)
             total_jobs = len(status.jobs)
@@ -592,7 +592,7 @@ class WorkspaceStateProvider(StateProvider):
 
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current run ID for an experiment"""
-        # Check new symlink location: .experimaestro/experiments/{experiment_id}/current
+        # Check new symlink location: .events/experiments/{experiment_id}/current
         exp_events_dir = self._experiments_dir / experiment_id
         symlink = exp_events_dir / "current"
         if symlink.is_symlink():
@@ -602,8 +602,9 @@ class WorkspaceStateProvider(StateProvider):
             except OSError:
                 pass
 
-        # Check legacy symlink location: .experimaestro/experiments/{experiment_id}
-        legacy_symlink = self._experiments_dir / experiment_id
+        # Check legacy symlink location (old .experimaestro path)
+        legacy_experiments_dir = self.workspace_path / ".experimaestro" / "experiments"
+        legacy_symlink = legacy_experiments_dir / experiment_id
         if legacy_symlink.is_symlink():
             try:
                 target = legacy_symlink.resolve()
@@ -1050,8 +1051,8 @@ class WorkspaceStateProvider(StateProvider):
                     continue
 
                 # Read status.json for this run
-                status_file = StatusFile(run_dir, workspace_path=self.workspace_path)
-                status = status_file.read()
+                status_file = ExperimentStatusFile(run_dir, self.workspace_path)
+                status = status_file.read_status_data()
 
                 # Also apply pending events
                 # Events are in experiments/{experiment_id}/events-{count}.jsonl
@@ -1113,10 +1114,8 @@ class WorkspaceStateProvider(StateProvider):
                         continue
 
                     # Read status.json for this run
-                    status_file = StatusFile(
-                        run_dir, workspace_path=self.workspace_path
-                    )
-                    status = status_file.read()
+                    status_file = ExperimentStatusFile(run_dir, self.workspace_path)
+                    status = status_file.read_status_data()
 
                     # Also apply pending events
                     # Events are in experiments/{experiment_id}/events-{count}.jsonl

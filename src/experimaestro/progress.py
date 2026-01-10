@@ -9,7 +9,7 @@ class FileBasedProgressReporter:
     """File-based progress reporter that writes to job event files.
 
     Writes JobProgressEvent objects to:
-    workspace/.experimaestro/jobs/{task_id}/event-{job_id}-*.jsonl
+    workspace/.events/jobs/{task_id}/event-{job_id}-*.jsonl
 
     These files are watched by the scheduler's EventReader to forward
     progress updates to listeners.

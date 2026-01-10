@@ -12,14 +12,16 @@ Key components:
 - StatusFile: Class for locked read/write of status files
 
 File structure:
-- workspace/.experimaestro/experiments/{experiment-id}/events-{count}.jsonl
-- workspace/.experimaestro/jobs/{job-id}/events-{count}.jsonl
+- workspace/.events/experiments/{experiment-id}/events-{count}.jsonl
+- workspace/.events/jobs/{task-id}/event-{job-id}-{count}.jsonl
 - workspace/experiments/{experiment-id}/{run-id}/status.json
+- workspace/jobs/{task-id}/{job-id}/.experimaestro/information.json
 """
 
 import json
 import logging
 import os
+import shutil
 import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
@@ -36,6 +38,84 @@ logger = logging.getLogger("xpm.state_status")
 
 # Status file version
 STATUS_VERSION = 1
+
+
+# =============================================================================
+# Hardlink Support Utilities
+# =============================================================================
+
+
+def supports_hardlinks(path: Path) -> bool:
+    """Check if the filesystem at path supports hardlinks
+
+    Creates temporary test files to verify hardlink support. Useful for
+    determining whether to use hardlinks for event file archiving.
+
+    Args:
+        path: Directory to test for hardlink support
+
+    Returns:
+        True if hardlinks are supported, False otherwise
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    test_file = path / ".hardlink_test"
+    test_link = path / ".hardlink_test_link"
+    try:
+        # Clean up any leftover test files
+        if test_link.exists():
+            test_link.unlink()
+        if test_file.exists():
+            test_file.unlink()
+
+        # Create test file and hardlink
+        test_file.touch()
+        os.link(test_file, test_link)
+
+        # Verify it's actually a hardlink (same inode)
+        success = test_file.stat().st_ino == test_link.stat().st_ino
+
+        # Clean up
+        test_link.unlink()
+        test_file.unlink()
+        return success
+    except (OSError, AttributeError):
+        # Clean up on failure
+        try:
+            if test_link.exists():
+                test_link.unlink()
+            if test_file.exists():
+                test_file.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def safe_link_or_copy(src: Path, dst: Path, use_hardlinks: bool = True) -> bool:
+    """Create hardlink if supported, otherwise copy the file
+
+    Args:
+        src: Source file path
+        dst: Destination file path
+        use_hardlinks: If True, attempt hardlink first; if False, always copy
+
+    Returns:
+        True if hardlink was used, False if file was copied
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if use_hardlinks:
+        try:
+            # Remove destination if it exists (can't hardlink over existing file)
+            if dst.exists():
+                dst.unlink()
+            os.link(src, dst)
+            return True
+        except OSError:
+            pass
+
+    # Fall back to copy
+    shutil.copy2(src, dst)
+    return False
 
 
 # =============================================================================
@@ -407,87 +487,129 @@ class StatusData:
 
 
 class StatusFile:
-    """Handles reading/writing/locking of status.json files
+    """Base class for status file handling with locking
 
-    Uses file locking to coordinate between the running experiment (writer)
-    and monitoring tools (readers).
+    Provides atomic read/write operations with inter-process locking.
+    Works with plain dicts - the unified format from status_dict().
+
+    Subclasses:
+    - ExperimentStatusFile: For experiment status.json files
+    - JobStatusFile: For job information.json files
     """
 
-    def __init__(self, run_dir: Path, workspace_path: Optional[Path] = None):
-        self.run_dir = run_dir
-        self.path = run_dir / "status.json"
-        self._lock_path = run_dir / ".status.json.lock"
-        self.workspace_path = workspace_path
+    def __init__(self, directory: Path, filename: str):
+        """Initialize status file handler
 
-    def read_locked(self) -> tuple["StatusData", fasteners.InterProcessLock]:
-        """Acquire lock and read status
-
-        Returns:
-            Tuple of (StatusData, lock). Caller MUST release lock when done.
+        Args:
+            directory: Directory containing the status file
+            filename: Name of the status file
         """
+        self.directory = directory
+        self.path = directory / filename
+        self._lock_path = directory / f".{filename}.lock"
+
+    def read_locked(self) -> tuple[dict, fasteners.InterProcessLock]:
+        """Acquire lock and read status. Caller MUST release lock when done."""
         lock = fasteners.InterProcessLock(str(self._lock_path))
         lock.acquire()
         try:
-            data = self._read()
-            return data, lock
+            return self._read(), lock
         except Exception:
             lock.release()
             raise
 
-    def write_locked(self, data: StatusData, lock: fasteners.InterProcessLock) -> None:
-        """Write status and release lock
-
-        Args:
-            data: Status data to write
-            lock: Lock acquired from read_locked()
-        """
+    def write_locked(self, data: dict, lock: fasteners.InterProcessLock) -> None:
+        """Write status and release lock"""
         try:
             self._write(data)
         finally:
             lock.release()
 
-    def read(self) -> StatusData:
+    def read(self) -> dict:
         """Read status file (brief lock for consistency)"""
         if not self.path.exists():
-            return StatusData.empty()
+            return {}
         lock = fasteners.InterProcessLock(str(self._lock_path))
         with lock:
             return self._read()
 
-    def write(self, data: StatusData) -> None:
+    def write(self, data: dict) -> None:
         """Write status file (with lock)"""
+        self.directory.mkdir(parents=True, exist_ok=True)
         lock = fasteners.InterProcessLock(str(self._lock_path))
         with lock:
             self._write(data)
 
-    def _read(self) -> StatusData:
+    def _read(self) -> dict:
         """Internal read (no locking)"""
         if not self.path.exists():
-            return StatusData.empty()
+            return {}
         try:
             with self.path.open("r") as f:
-                data = json.load(f)
-                if self.workspace_path is not None:
-                    return StatusData.from_db_state_dict(data, self.workspace_path)
-                # Fallback for when workspace_path is not provided
-                return StatusData.from_db_state_dict(
-                    data, self.run_dir.parent.parent.parent
-                )
+                return json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to read status file %s: %s", self.path, e)
-            return StatusData.empty()
+            logger.warning("Failed to read %s: %s", self.path, e)
+            return {}
 
-    def _write(self, data: StatusData) -> None:
-        """Internal write (no locking)
-
-        Uses atomic write (write to temp file then rename) to prevent
-        partial writes from corrupting the file.
-        """
-        data.last_updated = datetime.now().isoformat()
+    def _write(self, data: dict) -> None:
+        """Internal write - atomic via temp + rename"""
+        data["last_updated"] = datetime.now().isoformat()
         temp_path = self.path.with_suffix(".json.tmp")
         with temp_path.open("w") as f:
-            json.dump(data.db_state_dict(), f, indent=2)
+            json.dump(data, f, indent=2)
         temp_path.replace(self.path)
+
+
+class ExperimentStatusFile(StatusFile):
+    """Handles experiment status.json files with StatusData conversion
+
+    Extends StatusFile to provide StatusData-specific read/write methods
+    for backward compatibility with existing code.
+    """
+
+    def __init__(self, run_dir: Path, workspace_path: Optional[Path] = None):
+        super().__init__(run_dir, "status.json")
+        self.run_dir = run_dir
+        self.workspace_path = workspace_path or run_dir.parent.parent.parent
+
+    def read_status_data(self) -> "StatusData":
+        """Read and convert to StatusData object"""
+        d = self.read()
+        if not d:
+            return StatusData.empty()
+        return StatusData.from_db_state_dict(d, self.workspace_path)
+
+    def write_status_data(self, data: "StatusData") -> None:
+        """Write StatusData object"""
+        self.write(data.db_state_dict())
+
+    # Backward compatible methods that return StatusData
+    def read_locked_status_data(
+        self,
+    ) -> tuple["StatusData", fasteners.InterProcessLock]:
+        """Acquire lock and read status as StatusData"""
+        d, lock = self.read_locked()
+        if not d:
+            return StatusData.empty(), lock
+        return StatusData.from_db_state_dict(d, self.workspace_path), lock
+
+    def write_locked_status_data(
+        self, data: "StatusData", lock: fasteners.InterProcessLock
+    ) -> None:
+        """Write StatusData and release lock"""
+        self.write_locked(data.db_state_dict(), lock)
+
+
+class JobStatusFile(StatusFile):
+    """Handles job information.json files
+
+    Provides access to job status stored in the job's .experimaestro directory.
+    """
+
+    def __init__(self, job_path: Path):
+        xpm_dir = job_path / ".experimaestro"
+        super().__init__(xpm_dir, "information.json")
+        self.job_path = job_path
 
 
 # =============================================================================
@@ -500,16 +622,29 @@ class EventWriter(ABC):
 
     Events are written to {events_dir}/events-{count}.jsonl
     Uses line buffering so each event is flushed immediately after write.
+
+    Supports proactive hardlinking: when a permanent_dir is set and hardlinks
+    are supported, a hardlink is created to permanent storage immediately when
+    the event file is opened. This ensures events are written to both locations
+    simultaneously and no data is lost if the process crashes.
     """
 
-    def __init__(self, initial_count: int = 0):
+    def __init__(self, initial_count: int = 0, permanent_dir: Path | None = None):
         """Initialize event writer
 
         Args:
             initial_count: Starting event file count for rotation
+            permanent_dir: Optional permanent storage directory for archiving.
+                If set and hardlinks are supported, events are written to both
+                temporary and permanent locations via hardlink.
         """
         self._count = initial_count
         self._file = None
+        self._permanent_dir = permanent_dir
+        self._use_hardlinks: bool | None = None  # None = not checked yet
+        self._hardlink_created_for_count: int | None = (
+            None  # Track which file has hardlink
+        )
 
     @property
     @abstractmethod
@@ -517,15 +652,55 @@ class EventWriter(ABC):
         """Get the directory where events are written"""
         ...
 
+    @property
+    def permanent_dir(self) -> Path | None:
+        """Get the permanent storage directory"""
+        return self._permanent_dir
+
+    def _check_hardlink_support(self) -> bool:
+        """Check and cache hardlink support"""
+        if self._use_hardlinks is None:
+            if self._permanent_dir:
+                self._permanent_dir.mkdir(parents=True, exist_ok=True)
+                self._use_hardlinks = supports_hardlinks(self._permanent_dir)
+            else:
+                self._use_hardlinks = False
+        return self._use_hardlinks
+
     def _get_event_file_path(self) -> Path:
         return self.events_dir / f"events-{self._count}.jsonl"
 
+    def _get_permanent_event_file_path(self) -> Path:
+        """Get path for permanent event file"""
+        if self._permanent_dir is None:
+            raise ValueError("No permanent directory configured")
+        return self._permanent_dir / f"event-{self._count}.jsonl"
+
     def write_event(self, event: EventBase) -> None:
-        """Write an event to the current event file"""
+        """Write an event to the current event file
+
+        If permanent storage is configured and hardlinks are supported,
+        creates a hardlink immediately when the file is first opened.
+        """
         if self._file is None:
             self.events_dir.mkdir(parents=True, exist_ok=True)
             # Use line buffering (buffering=1) so each line is flushed automatically
             self._file = self._get_event_file_path().open("a", buffering=1)
+
+            # Create hardlink to permanent storage immediately if supported
+            if self._check_hardlink_support() and self._permanent_dir:
+                temp_path = self._get_event_file_path()
+                perm_path = self._get_permanent_event_file_path()
+                try:
+                    perm_path.parent.mkdir(parents=True, exist_ok=True)
+                    if not perm_path.exists():
+                        os.link(temp_path, perm_path)
+                        self._hardlink_created_for_count = self._count
+                        logger.debug("Created hardlink %s -> %s", temp_path, perm_path)
+                except FileExistsError:
+                    pass  # Already linked
+                except OSError as e:
+                    logger.warning("Failed to create hardlink: %s", e)
 
         self._file.write(event.to_json() + "\n")
 
@@ -549,7 +724,7 @@ class EventWriter(ABC):
         self._count = new_count
 
     def cleanup(self) -> None:
-        """Delete all event files in this directory"""
+        """Delete all event files in this directory (temporary files only)"""
         self.close()
         for i in range(self._count + 1):
             path = self.events_dir / f"events-{i}.jsonl"
@@ -559,11 +734,51 @@ class EventWriter(ABC):
                 except OSError as e:
                     logger.warning("Failed to delete event file %s: %s", path, e)
 
+    def archive_events(self) -> None:
+        """Archive events to permanent storage (called on completion)
+
+        If hardlinks were used, the temp files are simply deleted (data persists
+        in permanent storage via hardlink). If no hardlinks, files are moved
+        to permanent storage.
+        """
+        self.close()
+
+        if not self._permanent_dir:
+            return
+
+        if self._check_hardlink_support():
+            # Hardlinks already created - just delete temp files
+            for i in range(self._count + 1):
+                temp_path = self._get_temp_event_file_path(i)
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except OSError as e:
+                        logger.warning(
+                            "Failed to delete temp file %s: %s", temp_path, e
+                        )
+        else:
+            # No hardlinks - move files to permanent storage
+            for i in range(self._count + 1):
+                temp_path = self._get_temp_event_file_path(i)
+                perm_path = self._permanent_dir / f"event-{i}.jsonl"
+                if temp_path.exists():
+                    try:
+                        perm_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(temp_path), str(perm_path))
+                    except OSError as e:
+                        logger.warning("Failed to archive %s: %s", temp_path, e)
+
+    def _get_temp_event_file_path(self, count: int) -> Path:
+        """Get path for temporary event file at a specific count"""
+        return self.events_dir / f"events-{count}.jsonl"
+
 
 class JobEventWriter(EventWriter):
     """Writes events to job event files
 
-    Events are stored in: {workspace}/.experimaestro/jobs/{task_id}/event-{job_id}-{count}.jsonl
+    Events are stored in: {workspace}/.events/jobs/{task_id}/event-{job_id}-{count}.jsonl
+    Permanent storage: {job_path}/.experimaestro/events/event-{count}.jsonl
     """
 
     def __init__(
@@ -572,6 +787,7 @@ class JobEventWriter(EventWriter):
         task_id: str,
         job_id: str,
         initial_count: int = 0,
+        job_path: Path | None = None,
     ):
         """Initialize job event writer
 
@@ -580,12 +796,16 @@ class JobEventWriter(EventWriter):
             task_id: Task identifier (groups events by task type)
             job_id: Job identifier (unique hash for this job instance)
             initial_count: Starting event file count for rotation
+            job_path: Optional job directory path for permanent storage
         """
-        super().__init__(initial_count)
+        # Permanent storage: job_path/.experimaestro/events/
+        permanent_dir = job_path / ".experimaestro" / "events" if job_path else None
+        super().__init__(initial_count, permanent_dir)
         self.workspace_path = workspace_path
         self.task_id = task_id
         self.job_id = job_id
-        self._events_dir = workspace_path / ".experimaestro" / "jobs" / task_id
+        self.job_path = job_path
+        self._events_dir = workspace_path / ".events" / "jobs" / task_id
 
     @property
     def events_dir(self) -> Path:
@@ -595,11 +815,16 @@ class JobEventWriter(EventWriter):
         """Get the path for job event file with job_id in filename"""
         return self.events_dir / f"event-{self.job_id}-{self._count}.jsonl"
 
+    def _get_temp_event_file_path(self, count: int) -> Path:
+        """Get path for temporary event file at a specific count"""
+        return self.events_dir / f"event-{self.job_id}-{count}.jsonl"
+
 
 class ExperimentEventWriter(EventWriter):
     """Writes events to experiment event files
 
-    Events are stored in: {workspace}/.experimaestro/experiments/{experiment_id}/events-{count}.jsonl
+    Events are stored in: {workspace}/.events/experiments/{experiment_id}/events-{count}.jsonl
+    Permanent storage: {run_dir}/events/event-{count}.jsonl
     """
 
     def __init__(
@@ -607,6 +832,7 @@ class ExperimentEventWriter(EventWriter):
         workspace_path: Path,
         experiment_id: str,
         initial_count: int = 0,
+        run_dir: Path | None = None,
     ):
         """Initialize experiment event writer
 
@@ -614,13 +840,15 @@ class ExperimentEventWriter(EventWriter):
             workspace_path: Path to workspace directory
             experiment_id: Experiment identifier
             initial_count: Starting event file count for rotation
+            run_dir: Optional run directory path for permanent storage
         """
-        super().__init__(initial_count)
+        # Permanent storage: run_dir/events/
+        permanent_dir = run_dir / "events" if run_dir else None
+        super().__init__(initial_count, permanent_dir)
         self.workspace_path = workspace_path
         self.experiment_id = experiment_id
-        self._events_dir = (
-            workspace_path / ".experimaestro" / "experiments" / experiment_id
-        )
+        self.run_dir = run_dir
+        self._events_dir = workspace_path / ".events" / "experiments" / experiment_id
 
     @property
     def events_dir(self) -> Path:
@@ -651,15 +879,15 @@ class ExperimentEventWriter(EventWriter):
             started_at=datetime.now().isoformat(),
             status="active",
         )
-        status_file = StatusFile(run_dir)
-        status_file.write(data)
+        status_file = ExperimentStatusFile(run_dir, self.workspace_path)
+        status_file.write_status_data(data)
         return data
 
     def create_symlink(self, run_dir: Path) -> None:
         """Create/update symlink to current run directory
 
         The symlink is created at:
-        .experimaestro/experiments/{experiment_id}/current -> run_dir
+        .events/experiments/{experiment_id}/current -> run_dir
 
         Args:
             run_dir: Path to the current run directory
@@ -668,10 +896,12 @@ class ExperimentEventWriter(EventWriter):
         self._events_dir.mkdir(parents=True, exist_ok=True)
 
         # Handle legacy: if experiment_id path is a symlink (old format), remove it
-        experiments_dir = self.workspace_path / ".experimaestro" / "experiments"
-        old_symlink = experiments_dir / self.experiment_id
-        if old_symlink.is_symlink():
-            old_symlink.unlink()
+        # Check both old .experimaestro and current .events paths
+        for events_base in [".experimaestro", ".events"]:
+            experiments_dir = self.workspace_path / events_base / "experiments"
+            old_symlink = experiments_dir / self.experiment_id
+            if old_symlink.is_symlink():
+                old_symlink.unlink()
 
         # Create symlink inside the experiment directory
         symlink = self._events_dir / "current"
@@ -717,7 +947,7 @@ def job_entity_id_extractor(path: Path) -> Optional[str]:
     Path format: {base_dir}/{task_id}/event-{job_id}-{count}.jsonl
     """
     # Job ID is extracted from the filename
-    # e.g., .experimaestro/jobs/my.task/event-abc123-0.jsonl -> abc123
+    # e.g., .events/jobs/my.task/event-abc123-0.jsonl -> abc123
     name = path.name
     if not name.startswith("event-"):
         return None
@@ -733,15 +963,32 @@ def job_entity_id_extractor(path: Path) -> Optional[str]:
     return None
 
 
+# Resolver type: given an entity_id, returns the permanent storage path
+PermanentStorageResolver = Callable[[str], Path]
+
+
 @dataclass
 class WatchedDirectory:
-    """Configuration for a directory to watch for events"""
+    """Configuration for a directory to watch for events
+
+    Attributes:
+        path: Temporary events directory (.events/...)
+        entity_id_extractor: Function to extract entity ID from event file path
+        glob_pattern: Pattern for matching event files
+        permanent_storage_resolver: Optional function that returns permanent storage
+            path for an entity. Used for hardlink archiving and deletion recovery.
+        status_file_class: Optional StatusFile subclass for reading entity status
+            when event files are deleted.
+    """
 
     path: Path
     entity_id_extractor: EntityIdExtractor = field(
         default_factory=lambda: default_entity_id_extractor
     )
     glob_pattern: str = "*/events-*.jsonl"
+    # NEW fields for archiving and deletion handling:
+    permanent_storage_resolver: PermanentStorageResolver | None = None
+    status_file_class: type[StatusFile] | None = None
 
 
 class EventReader:
@@ -777,11 +1024,17 @@ class EventReader:
 
     def _extract_entity_id(self, path: Path) -> Optional[str]:
         """Extract entity ID from event file path"""
-        # Find which directory this path belongs to
+        dir_config = self._find_dir_config(path)
+        if dir_config:
+            return dir_config.entity_id_extractor(path)
+        return None
+
+    def _find_dir_config(self, path: Path) -> WatchedDirectory | None:
+        """Find the WatchedDirectory config that contains the given path"""
         for dir_config in self.directories:
             try:
                 path.relative_to(dir_config.path)
-                return dir_config.entity_id_extractor(path)
+                return dir_config
             except ValueError:
                 continue
         return None
@@ -903,9 +1156,10 @@ class EventReader:
                 if self._is_event_file(path):
                     logger.debug("Detected deletion of event file: %s", path)
                     entity_id = reader._extract_entity_id(path)
+                    dir_config = reader._find_dir_config(path)
                     reader._file_positions.pop(path, None)
                     if entity_id:
-                        reader._handle_deletion(entity_id)
+                        reader._handle_deletion(entity_id, path, dir_config)
 
         self._handler = EventFileHandler()
         ipc = ipcom()
@@ -978,8 +1232,40 @@ class EventReader:
         except OSError as e:
             logger.warning("Failed to read event file %s: %s", path, e)
 
-    def _handle_deletion(self, entity_id: str) -> None:
-        """Handle entity deletion (notify callbacks or buffer)"""
+    def _handle_deletion(
+        self,
+        entity_id: str,
+        deleted_path: Path | None = None,
+        dir_config: WatchedDirectory | None = None,
+    ) -> None:
+        """Handle entity deletion - read from permanent storage if available
+
+        When event files are deleted from the temporary (.events/) directory,
+        this method attempts to read any remaining events from permanent storage
+        (if configured via permanent_storage_resolver).
+
+        Args:
+            entity_id: The entity identifier (job_id or experiment_id)
+            deleted_path: The path of the deleted file (optional)
+            dir_config: The WatchedDirectory config for this path (optional)
+        """
+        # Try to read remaining events from permanent storage
+        if dir_config and dir_config.permanent_storage_resolver:
+            permanent_dir = dir_config.permanent_storage_resolver(entity_id)
+
+            # Read any events from permanent storage that we haven't processed
+            events = self._read_events_from_permanent(permanent_dir, entity_id)
+            for event in events:
+                if self._buffering:
+                    self._event_buffer.append((entity_id, event))
+                else:
+                    for callback in self._event_callbacks:
+                        try:
+                            callback(entity_id, event)
+                        except Exception:
+                            logger.exception("Error in event callback")
+
+        # Notify deletion callbacks
         if self._buffering:
             self._deleted_buffer.append(entity_id)
         else:
@@ -988,6 +1274,50 @@ class EventReader:
                     callback(entity_id)
                 except Exception:
                     logger.exception("Error in deleted callback")
+
+    def _read_events_from_permanent(
+        self, permanent_dir: Path, entity_id: str
+    ) -> list[EventBase]:
+        """Read events from permanent storage directory
+
+        Args:
+            permanent_dir: Path to permanent storage directory
+            entity_id: Entity identifier (for logging)
+
+        Returns:
+            List of events read from permanent storage
+        """
+        events = []
+        if not permanent_dir.exists():
+            return events
+
+        # Read all event files in permanent storage
+        event_files = sorted(permanent_dir.glob("event-*.jsonl"))
+        for event_file in event_files:
+            try:
+                with event_file.open("r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event_dict = json.loads(line)
+                            event = EventBase.from_dict(event_dict)
+                            events.append(event)
+                        except json.JSONDecodeError:
+                            pass
+            except OSError as e:
+                logger.warning(
+                    "Failed to read permanent event file %s: %s", event_file, e
+                )
+
+        if events:
+            logger.debug(
+                "Read %d events from permanent storage for entity %s",
+                len(events),
+                entity_id,
+            )
+        return events
 
     def clear_callbacks(self) -> None:
         """Clear all registered callbacks"""
@@ -1090,11 +1420,12 @@ class JobProgressReader:
             job_path: Path to the job directory (workspace/jobs/task_id/job_id)
         """
         self.job_path = job_path
-        # Extract job_id from path
+        # Extract task_id and job_id from path
         self.job_id = job_path.name
-        # Progress events are stored in workspace/.experimaestro/jobs/{job_id}/
+        self.task_id = job_path.parent.name
+        # Progress events are stored in workspace/.events/jobs/{task_id}/
         self._events_dir = (
-            job_path.parent.parent.parent / ".experimaestro" / "jobs" / self.job_id
+            job_path.parent.parent.parent / ".events" / "jobs" / self.task_id
         )
 
     def get_event_files(self) -> list[Path]:
@@ -1180,6 +1511,9 @@ class JobProgressReader:
 
 
 __all__ = [
+    # Hardlink utilities
+    "supports_hardlinks",
+    "safe_link_or_copy",
     # Event classes
     "EventBase",
     "JobSubmittedEvent",
@@ -1192,6 +1526,8 @@ __all__ = [
     # Status classes
     "StatusData",
     "StatusFile",
+    "ExperimentStatusFile",
+    "JobStatusFile",
     # Event writer classes
     "EventWriter",
     "JobEventWriter",
@@ -1199,6 +1535,7 @@ __all__ = [
     # Event reader class
     "EventReader",
     "WatchedDirectory",
+    "PermanentStorageResolver",
     "job_entity_id_extractor",
     "JobProgressReader",
     # Callback types

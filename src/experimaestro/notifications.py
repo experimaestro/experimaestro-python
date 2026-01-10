@@ -75,7 +75,7 @@ class Reporter:
     """File-based progress reporter for running tasks.
 
     Progress events are written to job event files at:
-    .experimaestro/jobs/{job_id}/events-*.jsonl
+    .events/jobs/{task_id}/event-{job_id}-*.jsonl
 
     These files are watched by monitors (TUI, web UI) to display progress.
     """

@@ -405,26 +405,60 @@ class BaseJob:
         return BaseJob.get_failedfile(self.path, self.scriptname)
 
     # -------------------------------------------------------------------------
-    # Metadata I/O
+    # Status I/O (unified status_dict pattern)
     # -------------------------------------------------------------------------
 
-    def write_metadata(self, **extra_fields) -> None:
-        """Write or update job metadata in .experimaestro/information.json file
+    def status_dict(self) -> Dict[str, Any]:
+        """Get job status as dictionary (single source of truth)
 
-        Automatically extracts metadata from job attributes (identifier, state,
-        submittime, starttime, endtime, retry_count) and writes to the metadata file.
+        This is the canonical representation of job state used for both
+        serialization to status files and network communication.
 
-        Performs atomic write using temp file + rename. If metadata exists,
-        new fields are merged with existing ones. Updates last_updated timestamp.
+        Returns:
+            Dictionary with all job status fields
+        """
+        failure_reason = None
+        if (
+            self.state
+            and self.state.is_error()
+            and hasattr(self.state, "failure_reason")
+        ):
+            fr = self.state.failure_reason
+            if fr is not None:
+                failure_reason = fr.name
+
+        return {
+            "job_id": self.identifier,
+            "task_id": self.task_id,
+            "path": str(self.path) if self.path else None,
+            "state": self.state.name if self.state else None,
+            "failure_reason": failure_reason,
+            "submitted_time": self.submittime,
+            "started_time": self.starttime,
+            "ended_time": self.endtime,
+            "exit_code": self.exit_code,
+            "retry_count": self.retry_count,
+            "progress": [
+                p.to_dict() if hasattr(p, "to_dict") else p
+                for p in (self.progress or [])
+            ],
+        }
+
+    def write_status(self, **extra_fields) -> None:
+        """Write job status to .experimaestro/information.json file
+
+        Uses the unified status_dict() format. Performs atomic write using
+        temp file + rename. If status exists, new fields are merged with
+        existing ones. Updates last_updated timestamp.
 
         Args:
-            **extra_fields: Optional extra fields (e.g., launcher, launcher_job_id, exit_code)
+            **extra_fields: Optional extra fields (e.g., launcher, launcher_job_id)
         """
         # Ensure .experimaestro directory exists
         self.xpm_dir.mkdir(parents=True, exist_ok=True)
         metadata_path = self.metadata_path
 
-        # Read existing metadata
+        # Read existing metadata to preserve extra fields
         existing = {}
         if metadata_path.exists():
             try:
@@ -432,38 +466,16 @@ class BaseJob:
                     existing = json.load(f)
             except Exception as e:
                 logger.warning(
-                    "Failed to read existing metadata from %s: %s", metadata_path, e
+                    "Failed to read existing status from %s: %s", metadata_path, e
                 )
 
-        # Build metadata from job attributes
-        fields = {
-            "job_id": self.identifier,
-            "task_id": self.task_id,
-            "state": self.state.name if self.state else None,
-        }
-
-        # Add timing information if available
-        if self.submittime is not None:
-            fields["submitted_time"] = self.submittime
-        if self.starttime is not None:
-            fields["started_time"] = self.starttime
-        if self.endtime is not None:
-            fields["ended_time"] = self.endtime
-
-        # Add exit code if available
-        if self.exit_code is not None:
-            fields["exit_code"] = self.exit_code
-
-        # Add retry count
-        if hasattr(self, "retry_count"):
-            fields["retry_count"] = self.retry_count
-
-        # Merge with extra fields (for launcher info, exit_code, etc.)
+        # Build from status_dict and merge with extra fields
+        fields = self.status_dict()
         fields.update(extra_fields)
 
         # Merge with existing and update timestamp
         existing.update(fields)
-        existing["last_updated"] = datetime.now().timestamp()
+        existing["last_updated"] = datetime.now().isoformat()
 
         # Atomic write
         temp_path = metadata_path.with_suffix(".json.tmp")
@@ -471,18 +483,18 @@ class BaseJob:
             with temp_path.open("w") as f:
                 json.dump(existing, f, indent=2)
             temp_path.replace(metadata_path)
-            logger.debug("Wrote metadata to %s: %s", metadata_path, list(fields.keys()))
+            logger.debug("Wrote status to %s: %s", metadata_path, list(fields.keys()))
         except Exception as e:
-            logger.error("Failed to write metadata to %s: %s", metadata_path, e)
+            logger.error("Failed to write status to %s: %s", metadata_path, e)
             if temp_path.exists():
                 temp_path.unlink()
             raise
 
-    def read_metadata(self) -> Optional[dict]:
-        """Read job metadata from .experimaestro/information.json file
+    def read_status(self) -> Optional[dict]:
+        """Read job status from .experimaestro/information.json file
 
         Returns:
-            Dictionary of metadata fields, or None if file doesn't exist
+            Dictionary of status fields, or None if file doesn't exist
         """
         metadata_path = self.metadata_path
         if not metadata_path.exists():
@@ -492,38 +504,52 @@ class BaseJob:
             with metadata_path.open("r") as f:
                 return json.load(f)
         except Exception as e:
-            logger.warning("Failed to read metadata from %s: %s", metadata_path, e)
+            logger.warning("Failed to read status from %s: %s", metadata_path, e)
             return None
 
+    # DEPRECATED: Use status_dict() instead
     def db_state_dict(self) -> Dict[str, Any]:
-        """Serialize job to dictionary for DB/network storage"""
-        failure_reason = None
-        if self.state.is_error() and hasattr(self.state, "failure_reason"):
-            fr = self.state.failure_reason
-            if fr is not None:
-                failure_reason = fr.name
+        """Serialize job to dictionary for DB/network storage
 
+        DEPRECATED: Use status_dict() instead. This method is kept for
+        backward compatibility and delegates to status_dict().
+        """
+        # Convert to the old format for backward compatibility
+        status = self.status_dict()
         return {
-            "identifier": self.identifier,
-            "task_id": self.task_id,
-            "path": str(self.path) if self.path else None,
-            "state": self.state.name,
-            "failure_reason": failure_reason,
-            "submittime": serialize_timestamp(self.submittime),
-            "starttime": serialize_timestamp(self.starttime),
-            "endtime": serialize_timestamp(self.endtime),
-            "progress": [
-                p.to_dict() if hasattr(p, "to_dict") else p
-                for p in (self.progress or [])
-            ],
-            "exit_code": self.exit_code,
-            "retry_count": self.retry_count,
+            "identifier": status.get("job_id", ""),
+            "task_id": status.get("task_id", ""),
+            "path": status.get("path"),
+            "state": status.get("state", ""),
+            "failure_reason": status.get("failure_reason"),
+            "submittime": serialize_timestamp(status.get("submitted_time")),
+            "starttime": serialize_timestamp(status.get("started_time")),
+            "endtime": serialize_timestamp(status.get("ended_time")),
+            "progress": status.get("progress", []),
+            "exit_code": status.get("exit_code"),
+            "retry_count": status.get("retry_count", 0),
         }
+
+    # DEPRECATED: Use write_status() instead
+    def write_metadata(self, **extra_fields) -> None:
+        """Write job metadata to .experimaestro/information.json file
+
+        DEPRECATED: Use write_status() instead.
+        """
+        self.write_status(**extra_fields)
+
+    # DEPRECATED: Use read_status() instead
+    def read_metadata(self) -> Optional[dict]:
+        """Read job metadata from .experimaestro/information.json file
+
+        DEPRECATED: Use read_status() instead.
+        """
+        return self.read_status()
 
     @staticmethod
     def db_state_eq(a: "BaseJob", b: "BaseJob") -> bool:
         """Check if two jobs have equivalent DB state"""
-        return a.db_state_dict() == b.db_state_dict()
+        return a.status_dict() == b.status_dict()
 
 
 # =============================================================================
@@ -550,18 +576,109 @@ class BaseExperiment:
         """Experiment identifier derived from workdir name"""
         return self.workdir.name
 
-    def db_state_dict(self) -> Dict[str, Any]:
-        """Serialize experiment to dictionary for DB/network storage"""
+    @property
+    def run_dir(self) -> Optional[Path]:
+        """Path to current run directory"""
+        if self.workdir and self.current_run_id:
+            return self.workdir / self.current_run_id
+        return None
+
+    @staticmethod
+    def get_status_path(run_dir: Path) -> Path:
+        """Get status file path for a run directory"""
+        return run_dir / "status.json"
+
+    def status_dict(self) -> Dict[str, Any]:
+        """Get experiment status as dictionary (single source of truth)
+
+        This is the canonical representation of experiment state used for both
+        serialization to status files and network communication.
+
+        Returns:
+            Dictionary with all experiment status fields
+        """
         return {
             "experiment_id": self.experiment_id,
+            "run_id": self.current_run_id,
             "workdir": str(self.workdir) if self.workdir else None,
-            "current_run_id": self.current_run_id,
         }
+
+    def write_status(self, **extra_fields) -> None:
+        """Write experiment status to status.json file
+
+        Uses the unified status_dict() format. Performs atomic write using
+        temp file + rename.
+
+        Args:
+            **extra_fields: Optional extra fields (e.g., hostname, started_at)
+        """
+        run_dir = self.run_dir
+        if not run_dir:
+            return
+
+        run_dir.mkdir(parents=True, exist_ok=True)
+        status_path = self.get_status_path(run_dir)
+
+        # Read existing to preserve extra fields
+        existing = {}
+        if status_path.exists():
+            try:
+                with status_path.open("r") as f:
+                    existing = json.load(f)
+            except Exception as e:
+                logger.warning("Failed to read existing status: %s", e)
+
+        # Build from status_dict and merge with extra fields
+        fields = self.status_dict()
+        fields.update(extra_fields)
+        existing.update(fields)
+        existing["last_updated"] = datetime.now().isoformat()
+
+        # Atomic write
+        temp_path = status_path.with_suffix(".json.tmp")
+        try:
+            with temp_path.open("w") as f:
+                json.dump(existing, f, indent=2)
+            temp_path.replace(status_path)
+        except Exception as e:
+            logger.error("Failed to write experiment status: %s", e)
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+
+    def read_status(self) -> Optional[dict]:
+        """Read experiment status from status.json file
+
+        Returns:
+            Dictionary of status fields, or None if file doesn't exist
+        """
+        run_dir = self.run_dir
+        if not run_dir:
+            return None
+
+        status_path = self.get_status_path(run_dir)
+        if not status_path.exists():
+            return None
+
+        try:
+            with status_path.open("r") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Failed to read experiment status: %s", e)
+            return None
+
+    # DEPRECATED: Use status_dict() instead
+    def db_state_dict(self) -> Dict[str, Any]:
+        """Serialize experiment to dictionary for DB/network storage
+
+        DEPRECATED: Use status_dict() instead.
+        """
+        return self.status_dict()
 
     @staticmethod
     def db_state_eq(a: "BaseExperiment", b: "BaseExperiment") -> bool:
         """Check if two experiments have equivalent DB state"""
-        return a.db_state_dict() == b.db_state_dict()
+        return a.status_dict() == b.status_dict()
 
 
 # =============================================================================

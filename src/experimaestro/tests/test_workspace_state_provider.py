@@ -78,7 +78,7 @@ def create_v2_experiment(
 
     v2 layout:
       experiments/{exp-id}/{run-id}/status.json
-      .experimaestro/experiments/{exp-id} -> ../../experiments/{exp-id}/{current_run}
+      .events/experiments/{exp-id} -> ../../experiments/{exp-id}/{current_run}
     """
     exp_dir = workspace / "experiments" / experiment_id
     exp_dir.mkdir(parents=True, exist_ok=True)
@@ -122,7 +122,7 @@ def create_v2_experiment(
 
     # Create symlink for current run
     if current_run:
-        symlinks_dir = workspace / ".experimaestro" / "experiments"
+        symlinks_dir = workspace / ".events" / "experiments"
         symlinks_dir.mkdir(parents=True, exist_ok=True)
         symlink = symlinks_dir / experiment_id
         if symlink.exists():
@@ -139,7 +139,7 @@ def mock_workspace(tmp_path):
 
     Structure:
       workspace/
-        .experimaestro/experiments/
+        .events/experiments/
           v2-multi-run -> ../../experiments/v2-multi-run/20260101_120000
           v2-failed -> ../../experiments/v2-failed/20260101_110000
         xp/                              # v1 layout
@@ -358,7 +358,7 @@ class TestEventWatcher:
 
         try:
             # Create events file in new subdirectory format
-            exp_dir = mock_workspace / ".experimaestro" / "experiments" / "v2-multi-run"
+            exp_dir = mock_workspace / ".events" / "experiments" / "v2-multi-run"
             exp_dir.mkdir(parents=True, exist_ok=True)
             events_file = exp_dir / "events-1.jsonl"
 
@@ -393,7 +393,7 @@ class TestEventWatcher:
 
         try:
             # Create events file in new subdirectory format
-            exp_dir = mock_workspace / ".experimaestro" / "experiments" / "v2-multi-run"
+            exp_dir = mock_workspace / ".events" / "experiments" / "v2-multi-run"
             exp_dir.mkdir(parents=True, exist_ok=True)
             events_file = exp_dir / "events-1.jsonl"
 
@@ -444,10 +444,10 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            # Create job events file in .experimaestro/jobs/{task_id}/event-{job_id}-{count}.jsonl
+            # Create job events file in .events/jobs/{task_id}/event-{job_id}-{count}.jsonl
             task_id = "my.test.task"
             job_id = "test-job-123"
-            task_dir = mock_workspace / ".experimaestro" / "jobs" / task_id
+            task_dir = mock_workspace / ".events" / "jobs" / task_id
             task_dir.mkdir(parents=True, exist_ok=True)
             events_file = task_dir / f"event-{job_id}-0.jsonl"
 
@@ -484,10 +484,10 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            # Create job events file in .experimaestro/jobs/{task_id}/event-{job_id}-{count}.jsonl
+            # Create job events file in .events/jobs/{task_id}/event-{job_id}-{count}.jsonl
             task_id = "my.progress.task"
             job_id = "test-job-progress"
-            task_dir = mock_workspace / ".experimaestro" / "jobs" / task_id
+            task_dir = mock_workspace / ".events" / "jobs" / task_id
             task_dir.mkdir(parents=True, exist_ok=True)
             events_file = task_dir / f"event-{job_id}-0.jsonl"
 
@@ -526,7 +526,7 @@ class TestEventWatcher:
 
         try:
             # Create events file in new subdirectory format
-            exp_dir = mock_workspace / ".experimaestro" / "experiments" / "v2-multi-run"
+            exp_dir = mock_workspace / ".events" / "experiments" / "v2-multi-run"
             exp_dir.mkdir(parents=True, exist_ok=True)
             events_file = exp_dir / "events-1.jsonl"
 

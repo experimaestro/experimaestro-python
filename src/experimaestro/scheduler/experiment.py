@@ -485,13 +485,13 @@ class experiment(BaseExperiment):
                 self._status_data.apply_event(event)
 
     def _finalize_run(self, status: str) -> None:
-        """Finalize the run: write final status.json and cleanup event files
+        """Finalize the run: write final status.json and archive event files
 
         Args:
             status: Final status ("completed" or "failed")
         """
         from datetime import datetime
-        from .state_status import StatusFile, RunCompletedEvent
+        from .state_status import ExperimentStatusFile, RunCompletedEvent
 
         # Update final status in the in-memory data
         ended_at = datetime.now().isoformat()
@@ -506,11 +506,11 @@ class experiment(BaseExperiment):
         self._event_writer.close()
 
         # Write final status.json
-        status_file = StatusFile(self.workdir)
-        status_file.write(self._status_data)
+        status_file = ExperimentStatusFile(self.workdir, self.workspace.path)
+        status_file.write_status_data(self._status_data)
 
-        # Cleanup event files (delete them)
-        self._event_writer.cleanup()
+        # Archive event files to permanent storage
+        self._event_writer.archive_events()
 
     def stop(self):
         """Stop the experiment as soon as possible"""
@@ -716,12 +716,13 @@ class experiment(BaseExperiment):
 
         if is_normal_mode:
             import socket
-            from .state_status import StatusFile
+            from .state_status import ExperimentStatusFile
 
             # Create event writer for this experiment
             # Events are written to experiments/{experiment_id}/events-{count}.jsonl
+            # Permanent storage: workdir/events/
             self._event_writer = ExperimentEventWriter(
-                self.workspace.path, self.name, 0
+                self.workspace.path, self.name, 0, run_dir=self.workdir
             )
 
             # Initialize status.json for this run
@@ -729,8 +730,8 @@ class experiment(BaseExperiment):
             self._event_writer.init_status(self.workdir, self.run_id, hostname)
 
             # Read the initial status data (we'll update it in memory)
-            status_file = StatusFile(self.workdir)
-            self._status_data = status_file.read()
+            status_file = ExperimentStatusFile(self.workdir, self.workspace.path)
+            self._status_data = status_file.read_status_data()
 
             # Create symlink to current run
             self._event_writer.create_symlink(self.workdir)

@@ -405,7 +405,7 @@ class Scheduler(StateProvider, threading.Thread):
     def _start_job_event_reader(self, workspace_path: Path) -> None:
         """Start watching job events in a workspace
 
-        Uses EventReader to watch .experimaestro/jobs/ for job progress events.
+        Uses EventReader to watch .events/jobs/ for job progress events.
         Job state events are emitted by the job process itself.
         Only starts one reader per workspace.
 
@@ -417,7 +417,7 @@ class Scheduler(StateProvider, threading.Thread):
             if workspace_path in self._job_event_readers:
                 return
 
-            jobs_dir = workspace_path / ".experimaestro" / "jobs"
+            jobs_dir = workspace_path / ".events" / "jobs"
 
             # Create new reader for this workspace
             reader = EventReader(
@@ -484,7 +484,7 @@ class Scheduler(StateProvider, threading.Thread):
     def _cleanup_job_event_files(self, job: Job) -> None:
         """Clean up old job event files from previous runs
 
-        Removes event files at .experimaestro/jobs/{task_id}/event-{job_id}-*.jsonl
+        Removes event files at .events/jobs/{task_id}/event-{job_id}-*.jsonl
         Called when a job is about to start to ensure clean state.
 
         Args:
@@ -496,7 +496,7 @@ class Scheduler(StateProvider, threading.Thread):
         task_id = str(job.type.identifier)
         job_id = job.identifier
 
-        events_dir = workspace_path / ".experimaestro" / "jobs" / task_id
+        events_dir = workspace_path / ".events" / "jobs" / task_id
         if not events_dir.exists():
             return
 
