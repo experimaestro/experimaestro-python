@@ -127,9 +127,9 @@ class ExperimaestroUI(App):
         if self.state_provider is None:
             self.sub_title = "○ Waiting for experiment..."
         elif self.state_provider.is_live:
-            self.sub_title = "● Scheduler Running"
+            self.sub_title = "● Running experiment"
         else:
-            self.sub_title = "○ Offline"
+            self.sub_title = "○ Monitoring workspace"
 
     def compose(self) -> ComposeResult:
         """Compose the TUI layout"""
