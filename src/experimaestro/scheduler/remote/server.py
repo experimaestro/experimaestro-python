@@ -103,8 +103,7 @@ class SSHStateProviderServer:
         # Initialize state provider in read-only mode with event watcher
         try:
             self._state_provider = WorkspaceStateProvider.get_instance(
-                self.workspace_path,
-                standalone=True,  # Start event file watcher for monitoring
+                self.workspace_path
             )
         except Exception as e:
             logger.exception("Failed to initialize state provider")

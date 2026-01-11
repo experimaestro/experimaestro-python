@@ -454,6 +454,50 @@ class MockJob(BaseJob):
     as opposed to live Job instances which are created during experiment runs.
     """
 
+    def apply_event(self, event: "EventBase") -> None:
+        """Apply a job event to update this job's state"""
+        from experimaestro.scheduler.state_status import (
+            JobStateChangedEvent,
+            JobProgressEvent,
+        )
+        from experimaestro.notifications import LevelInformation
+
+        if isinstance(event, JobStateChangedEvent):
+            self.state = STATE_NAME_TO_JOBSTATE.get(event.state, self.state)
+            if event.failure_reason:
+                try:
+                    self.failure_reason = JobFailureStatus[event.failure_reason]
+                except KeyError:
+                    pass
+            if event.submitted_time is not None:
+                self.submittime = event.submitted_time
+            if event.started_time is not None:
+                self.starttime = event.started_time
+            if event.ended_time is not None:
+                self.endtime = event.ended_time
+            if event.exit_code is not None:
+                self.exit_code = event.exit_code
+            if event.retry_count:
+                self.retry_count = event.retry_count
+            logger.debug(
+                "Applied state change to job %s: %s", self.identifier, self.state
+            )
+
+        elif isinstance(event, JobProgressEvent):
+            level = event.level
+            # Truncate to level + 1 entries
+            self.progress = self.progress[: (level + 1)]
+            # Extend if needed
+            while len(self.progress) <= level:
+                self.progress.append(LevelInformation(len(self.progress), None, 0.0))
+            # Update the level's progress and description
+            if event.desc:
+                self.progress[-1].desc = event.desc
+            self.progress[-1].progress = event.progress
+            logger.debug(
+                "Applied progress to job %s: %s", self.identifier, self.progress
+            )
+
     def __init__(
         self,
         identifier: str,

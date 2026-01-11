@@ -112,7 +112,7 @@ class Scheduler(StateProvider, threading.Thread):
         self.server: Optional["WebUIServer"] = None
 
         # Job event readers per workspace
-        # Uses EventReader to watch .experimaestro/jobs/ directory
+        # Uses EventReader to watch .events/jobs/ directory
         self._job_event_readers: Dict[Path, EventReader] = {}
         self._job_event_readers_lock = threading.Lock()
 
@@ -458,6 +458,8 @@ class Scheduler(StateProvider, threading.Thread):
     def _on_job_event(self, entity_id: str, event) -> None:
         """Handle job events from EventReader
 
+        Updates job state from file-based events and notifies listeners.
+
         Args:
             entity_id: The job ID
             event: The event (JobProgressEvent or JobStateChangedEvent)
@@ -472,14 +474,16 @@ class Scheduler(StateProvider, threading.Thread):
         logger.debug("Received event for job %s: %s", job, event)
 
         if isinstance(event, JobProgressEvent):
-            # Update job's in-memory progress
+            # Update job's in-memory progress and notify legacy listeners
             job.set_progress(event.level, event.progress, event.desc)
-            # Notify listeners of progress update
             self.notify_job_state(job)
-        elif isinstance(event, JobStateChangedEvent):
-            # Job process reported state change (start/end/etc)
-            # Log the event but don't update scheduler state directly
-            self.notify_job_state(job)
+
+        # Notify StateProvider-style listeners (TUI/WebUI)
+        state_event = JobStateChangedEvent(
+            job_id=job.identifier,
+            state=job.state.name.lower(),
+        )
+        self._notify_state_listeners_async(state_event)
 
     def _cleanup_job_event_files(self, job: Job) -> None:
         """Clean up old job event files from previous runs

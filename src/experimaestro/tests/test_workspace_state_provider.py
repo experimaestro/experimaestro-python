@@ -347,7 +347,7 @@ class TestEventWatcher:
 
     def test_detects_new_job_event(self, mock_workspace):
         """Should detect new events written to events-*.jsonl"""
-        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+        provider = WorkspaceStateProvider(mock_workspace)
 
         events_received = []
 
@@ -386,7 +386,7 @@ class TestEventWatcher:
 
     def test_detects_multiple_events(self, mock_workspace):
         """Should detect multiple events appended to file"""
-        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+        provider = WorkspaceStateProvider(mock_workspace)
 
         events_received = []
         provider.add_listener(lambda e: events_received.append(e))
@@ -438,7 +438,7 @@ class TestEventWatcher:
 
     def test_detects_job_state_from_job_events(self, mock_workspace):
         """Should detect job state changes from job event files"""
-        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+        provider = WorkspaceStateProvider(mock_workspace)
 
         events_received = []
         provider.add_listener(lambda e: events_received.append(e))
@@ -478,7 +478,7 @@ class TestEventWatcher:
 
     def test_detects_job_progress_from_job_events(self, mock_workspace):
         """Should detect job progress updates from job event files"""
-        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+        provider = WorkspaceStateProvider(mock_workspace)
 
         events_received = []
         provider.add_listener(lambda e: events_received.append(e))
@@ -519,7 +519,7 @@ class TestEventWatcher:
 
     def test_detects_experiment_finalization(self, mock_workspace):
         """Should detect when experiment finalizes (events file deleted)"""
-        provider = WorkspaceStateProvider(mock_workspace, standalone=True)
+        provider = WorkspaceStateProvider(mock_workspace)
 
         events_received = []
         provider.add_listener(lambda e: events_received.append(e))

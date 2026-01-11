@@ -32,12 +32,11 @@ from experimaestro.scheduler.state_status import (
     ExperimentStatusFile,
     StatusData,
     EventBase,
+    JobEventBase,
+    ExperimentEventBase,
     JobSubmittedEvent,
-    JobStateChangedEvent,
-    JobProgressEvent,
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
-    ServiceAddedEvent,
     EventReader,
     WatchedDirectory,
     job_entity_id_extractor,
@@ -65,13 +64,11 @@ class WorkspaceStateProvider(StateProvider):
     def get_instance(
         cls,
         workspace_path: Path,
-        standalone: bool = False,
     ) -> "WorkspaceStateProvider":
         """Get or create singleton instance for workspace
 
         Args:
             workspace_path: Path to workspace directory
-            standalone: If True, start event file watcher automatically
 
         Returns:
             WorkspaceStateProvider instance
@@ -81,26 +78,29 @@ class WorkspaceStateProvider(StateProvider):
         with cls._lock:
             instance = cls._instances.get(workspace_path)
             if instance is None:
-                instance = cls(workspace_path, standalone=standalone)
+                instance = cls(workspace_path)
                 cls._instances[workspace_path] = instance
             return instance
 
-    def __init__(self, workspace_path: Path, standalone: bool = False):
+    def __init__(self, workspace_path: Path):
         """Initialize workspace state provider
 
         Args:
             workspace_path: Path to workspace directory
-            standalone: If True, start event file watcher automatically
         """
         super().__init__()
         self.workspace_path = Path(workspace_path).resolve()
         self._experiments_dir = self.workspace_path / ".events" / "experiments"
-        self._standalone = standalone
 
         # Status cache: (experiment_id, run_id) -> StatusData
         # Only caches active experiments (those with event files)
         self._status_cache: Dict[tuple[str, str], StatusData] = {}
         self._status_cache_lock = threading.Lock()
+
+        # Job cache: job_id -> MockJob
+        # Shared cache for all jobs, updated directly by job events
+        self._job_cache: Dict[str, MockJob] = {}
+        self._job_cache_lock = threading.Lock()
 
         # Service cache
         self._service_cache: Dict[tuple[str, str], Dict[str, BaseService]] = {}
@@ -109,8 +109,7 @@ class WorkspaceStateProvider(StateProvider):
         # Event reader (with built-in watching capability)
         self._event_reader: Optional[EventReader] = None
         self._jobs_dir = self.workspace_path / ".events" / "jobs"
-        if standalone:
-            self._start_watcher()
+        self._start_watcher()
 
     def _start_watcher(self) -> None:
         """Start the event file watcher for experiments and jobs"""
@@ -146,32 +145,27 @@ class WorkspaceStateProvider(StateProvider):
     def _on_event(self, entity_id: str, event: EventBase) -> None:
         """Unified callback for events from file watcher
 
-        Detects whether the event is from experiments or jobs based on event type.
+        Uses event class hierarchy to determine how to handle events:
+        - ExperimentEventBase: update experiment status cache
+        - JobEventBase: update job cache directly
         """
-        # Experiment events: JobSubmittedEvent, ServiceAddedEvent
-        # Job events: JobStateChangedEvent, JobProgressEvent (can appear in both)
-        if isinstance(event, JobSubmittedEvent):
-            # This is an experiment event (job submitted to experiment)
+        logger.debug("Received event for entity %s: %s", entity_id, event)
+
+        # Handle experiment events (update experiment status cache)
+        if isinstance(event, ExperimentEventBase):
             experiment_id = entity_id
             self._apply_event_to_cache(experiment_id, event)
-            # Forward the event directly - it already has all needed info
-            self._notify_state_listeners(event)
-        elif isinstance(event, ServiceAddedEvent):
-            # This is an experiment event - forward directly
-            experiment_id = entity_id
-            self._apply_event_to_cache(experiment_id, event)
-            self._notify_state_listeners(event)
-        elif isinstance(event, JobStateChangedEvent):
-            # Could be experiment event or job event
-            # Try as experiment first
-            if (self._experiments_dir / entity_id).exists():
-                experiment_id = entity_id
-                self._apply_event_to_cache(experiment_id, event)
-            # Forward the event directly
-            self._notify_state_listeners(event)
-        elif isinstance(event, JobProgressEvent):
-            # Job event (progress from job process) - forward directly
-            self._notify_state_listeners(event)
+
+        # Handle job events (update job cache directly)
+        # Note: JobSubmittedEvent is both, but job is created when status loads
+        if isinstance(event, JobEventBase) and not isinstance(event, JobSubmittedEvent):
+            with self._job_cache_lock:
+                job = self._job_cache.get(event.job_id)
+                if job is not None:
+                    job.apply_event(event)
+
+        # Always forward to listeners
+        self._notify_state_listeners(event)
 
     def _on_deleted(self, entity_id: str) -> None:
         """Unified callback when event files are deleted"""
@@ -241,6 +235,16 @@ class WorkspaceStateProvider(StateProvider):
             events = reader.read_events_since_count(experiment_id, status.events_count)
             for event in events:
                 status.apply_event(event)
+
+            # Populate job cache with jobs from this status
+            # Jobs in status.jobs will reference the same objects as job cache
+            with self._job_cache_lock:
+                for job_id, job in status.jobs.items():
+                    if job_id not in self._job_cache:
+                        self._job_cache[job_id] = job
+                    else:
+                        # Use the cached job object in status.jobs
+                        status.jobs[job_id] = self._job_cache[job_id]
 
             # Only cache if experiment is active (has event files)
             # This avoids caching finished experiments that won't change

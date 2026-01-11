@@ -94,7 +94,7 @@ def test_stray_job_detection():
                 time.sleep(0.5)
 
                 # Check for stray jobs using a fresh state provider
-                provider = WorkspaceStateProvider(workdir_path, standalone=True)
+                provider = WorkspaceStateProvider(workdir_path)
 
                 stray_jobs = provider.get_stray_jobs()
 
@@ -166,7 +166,7 @@ def test_running_state_detection():
                     raise AssertionError("Timeout waiting for task to start")
 
             # Create a fresh provider to check the running state
-            provider = WorkspaceStateProvider(workdir_path, standalone=True)
+            provider = WorkspaceStateProvider(workdir_path)
 
             # Get all jobs on disk
             jobs_base = workdir_path / "jobs"
@@ -244,7 +244,7 @@ def test_completed_job_not_stray():
                     raise AssertionError("Timeout waiting for task2 to start")
 
             # Now check that the first job is NOT stray (it's completed)
-            provider = WorkspaceStateProvider(workdir_path, standalone=True)
+            provider = WorkspaceStateProvider(workdir_path)
 
             stray_jobs = provider.get_stray_jobs()
 

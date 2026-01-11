@@ -20,6 +20,7 @@ from experimaestro.scheduler.state_status import (
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
     JobStateChangedEvent,
+    JobProgressEvent,
     JobSubmittedEvent,
     ServiceAddedEvent,
     ServiceStateChangedEvent,
@@ -111,10 +112,7 @@ class ExperimaestroUI(App):
             )
 
             # Get singleton provider instance for this workspace
-            self.state_provider = WorkspaceStateProvider.get_instance(
-                self.workdir,
-                standalone=True,  # Start event file watcher for monitoring
-            )
+            self.state_provider = WorkspaceStateProvider.get_instance(self.workdir)
         else:
             # Deferred mode: no provider yet, will be set later via set_state_provider()
             self.state_provider = None
@@ -352,6 +350,8 @@ class ExperimaestroUI(App):
         """
         import threading
 
+        self.log.info(f"_on_state_event called with: {type(event).__name__}")
+
         if threading.current_thread() is threading.main_thread():
             # Already in main thread, call directly
             self._handle_state_event(event)
@@ -364,8 +364,15 @@ class ExperimaestroUI(App):
         self.log.info(f"State event: {event}")
 
         # Dispatch to handler if one exists for this event type
-        if handler := self.STATE_EVENT_HANDLERS.get(type(event)):
-            handler(self, event)
+        handler = self.STATE_EVENT_HANDLERS.get(type(event))
+        if handler:
+            self.log.info(f"Dispatching to handler: {handler.__name__}")
+            try:
+                handler(self, event)
+            except Exception as e:
+                self.log.error(f"Error in handler: {e}")
+        else:
+            self.log.warning(f"No handler for event type: {type(event).__name__}")
 
     def _handle_experiment_updated(self, event: ExperimentUpdatedEvent) -> None:
         """Handle ExperimentUpdatedEvent - refresh experiments list and jobs"""
@@ -463,9 +470,26 @@ class ExperimaestroUI(App):
         for exp_list in self.query(ExperimentsList):
             exp_list.refresh_experiments()
 
+    def _handle_job_progress(self, event: JobProgressEvent) -> None:
+        """Handle JobProgressEvent - refresh job progress display
+
+        This event is dispatched when a job reports progress updates.
+        """
+        # Refresh all jobs tables that might contain this job
+        for jobs_table in self.query(JobsTable):
+            jobs_table.refresh_jobs()
+
+        # Also refresh job detail if we're viewing this job
+        for job_detail_container in self.query("#job-detail-container"):
+            if not job_detail_container.has_class("hidden"):
+                for job_detail_view in self.query(JobDetailView):
+                    if job_detail_view.current_job_id == event.job_id:
+                        job_detail_view.refresh_job_detail()
+
     STATE_EVENT_HANDLERS = {
         ExperimentUpdatedEvent: _handle_experiment_updated,
         JobStateChangedEvent: _handle_job_state_changed,
+        JobProgressEvent: _handle_job_progress,
         RunUpdatedEvent: _handle_run_updated,
         ServiceAddedEvent: _handle_service_added,
         ServiceStateChangedEvent: _handle_service_state_changed,

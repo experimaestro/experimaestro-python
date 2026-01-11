@@ -173,6 +173,32 @@ class EventBase:
 
 
 # -----------------------------------------------------------------------------
+# Event Base Classes (for filtering)
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class JobEventBase(EventBase):
+    """Base class for job-related events (have job_id)"""
+
+    job_id: str = ""
+
+
+@dataclass
+class ExperimentEventBase(EventBase):
+    """Base class for experiment-related events (have experiment_id)"""
+
+    experiment_id: str = ""
+
+
+@dataclass
+class ServiceEventBase(ExperimentEventBase):
+    """Base class for service-related events (have service_id)"""
+
+    service_id: str = ""
+
+
+# -----------------------------------------------------------------------------
 # Supporting Dataclasses
 # -----------------------------------------------------------------------------
 
@@ -211,15 +237,14 @@ class JobTag:
 
 
 @dataclass
-class JobSubmittedEvent(EventBase):
+class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
     """Event: Job was submitted to the scheduler
 
     Fired when a job is added to an experiment run.
+    This is both a job event and an experiment event.
     """
 
-    job_id: str = ""
     task_id: str = ""
-    experiment_id: str = ""
     run_id: str = ""
     transient: int = 0
     tags: list[JobTag] = field(default_factory=list)
@@ -227,13 +252,12 @@ class JobSubmittedEvent(EventBase):
 
 
 @dataclass
-class JobStateChangedEvent(EventBase):
+class JobStateChangedEvent(JobEventBase):
     """Event: Job state changed
 
     Fired when a job's state changes (scheduled, running, done, error, etc.)
     """
 
-    job_id: str = ""
     state: str = ""
     failure_reason: Optional[str] = None
     submitted_time: Optional[float] = None
@@ -245,13 +269,12 @@ class JobStateChangedEvent(EventBase):
 
 
 @dataclass
-class JobProgressEvent(EventBase):
+class JobProgressEvent(JobEventBase):
     """Event: Job progress update
 
     Written by the running job process to report progress.
     """
 
-    job_id: str = ""
     level: int = 0
     progress: float = 0.0
     desc: Optional[str] = None
@@ -263,25 +286,23 @@ class JobProgressEvent(EventBase):
 
 
 @dataclass
-class ExperimentUpdatedEvent(EventBase):
+class ExperimentUpdatedEvent(ExperimentEventBase):
     """Event: Experiment was created or updated"""
 
-    experiment_id: str = ""
+    pass
 
 
 @dataclass
-class RunUpdatedEvent(EventBase):
+class RunUpdatedEvent(ExperimentEventBase):
     """Event: Experiment run was created or updated"""
 
-    experiment_id: str = ""
     run_id: str = ""
 
 
 @dataclass
-class RunCompletedEvent(EventBase):
+class RunCompletedEvent(ExperimentEventBase):
     """Event: Experiment run completed"""
 
-    experiment_id: str = ""
     run_id: str = ""
     status: str = "completed"
     ended_at: str = ""
@@ -293,24 +314,20 @@ class RunCompletedEvent(EventBase):
 
 
 @dataclass
-class ServiceAddedEvent(EventBase):
+class ServiceAddedEvent(ServiceEventBase):
     """Event: Service was added to the experiment"""
 
-    experiment_id: str = ""
     run_id: str = ""
-    service_id: str = ""
     description: str = ""
     state: str = "STOPPED"
     state_dict: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class ServiceStateChangedEvent(EventBase):
+class ServiceStateChangedEvent(ServiceEventBase):
     """Event: Service state changed (STOPPED, STARTING, RUNNING, STOPPING)"""
 
-    experiment_id: str = ""
     run_id: str = ""
-    service_id: str = ""
     state: str = ""
 
 
@@ -465,6 +482,22 @@ class StatusData:
                     )
 
                     job.progress = get_progress_information_from_dict(event.progress)
+
+        elif isinstance(event, JobProgressEvent):
+            if event.job_id in self.jobs:
+                from experimaestro.notifications import LevelInformation
+
+                job = self.jobs[event.job_id]
+                level = event.level
+                # Truncate to level + 1 entries
+                job.progress = job.progress[: (level + 1)]
+                # Extend if needed
+                while len(job.progress) <= level:
+                    job.progress.append(LevelInformation(len(job.progress), None, 0.0))
+                # Update the level's progress and description
+                if event.desc:
+                    job.progress[-1].desc = event.desc
+                job.progress[-1].progress = event.progress
 
         elif isinstance(event, ServiceAddedEvent):
             self.services[event.service_id] = MockService(

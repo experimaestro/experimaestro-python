@@ -412,7 +412,7 @@ def list(workdir: Path):
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
     # Get experiments from state provider for detailed info
-    state_provider = WorkspaceStateProvider.get_instance(workdir, standalone=True)
+    state_provider = WorkspaceStateProvider.get_instance(workdir)
     experiments_list = state_provider.get_experiments()
 
     # Build lookup by experiment_id
@@ -555,7 +555,7 @@ def monitor(
 
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
-    state_provider = WorkspaceStateProvider.get_instance(workdir, standalone=True)
+    state_provider = WorkspaceStateProvider.get_instance(workdir)
 
     _run_monitor_ui(state_provider, workdir, console, port)
 

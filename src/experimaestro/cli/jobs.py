@@ -70,7 +70,7 @@ def process(
     from experimaestro.scheduler import JobState
 
     # Get state provider (read-only monitoring)
-    provider = WorkspaceStateProvider.get_instance(workspace.path, standalone=True)
+    provider = WorkspaceStateProvider.get_instance(workspace.path)
 
     # Get jobs from the database, optionally filtered by experiment
     if experiment:
@@ -293,9 +293,7 @@ def cleanup_partials(ctx, perform: bool):
     """
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
-    provider = WorkspaceStateProvider.get_instance(
-        ctx.obj.workspace.path, standalone=True
-    )
+    provider = WorkspaceStateProvider.get_instance(ctx.obj.workspace.path)
 
     try:
         orphan_paths = provider.cleanup_orphan_partials(perform=perform)
@@ -387,9 +385,7 @@ def stray(
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
     from experimaestro.scheduler import JobState
 
-    provider = WorkspaceStateProvider.get_instance(
-        ctx.obj.workspace.path, standalone=True
-    )
+    provider = WorkspaceStateProvider.get_instance(ctx.obj.workspace.path)
 
     # Safety check: warn if scheduler appears to be running
     if provider.is_live and not force:
