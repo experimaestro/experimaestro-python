@@ -31,7 +31,10 @@ class FileBasedProgressReporter:
         workspace_path = task_path.parent.parent.parent
 
         # Create event writer for this job's events
-        self.event_writer = JobEventWriter(workspace_path, self.task_id, self.job_id, 0)
+        # Pass job_path for permanent storage of events
+        self.event_writer = JobEventWriter(
+            workspace_path, self.task_id, self.job_id, 0, job_path=task_path
+        )
         self.current_progress: dict[int, tuple[float | None, str | None]] = {}
         self.lock = threading.Lock()
 
@@ -93,3 +96,6 @@ class FileBasedProgressReporter:
             )
             self.event_writer.write_event(event)
             self.event_writer.flush()
+
+            # Archive events from .events/ to job directory
+            self.event_writer.archive_events()

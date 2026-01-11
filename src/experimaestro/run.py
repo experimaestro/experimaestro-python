@@ -181,6 +181,7 @@ class TaskRunner:
 
                 # Everything went OK
                 logger.info("Task ended successfully")
+                self.cleanup()
                 sys.exit(0)
         except GracefulTimeout as e:
             logger.info("Task requested graceful timeout: %s", e.message)

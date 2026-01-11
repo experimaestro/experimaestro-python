@@ -336,6 +336,9 @@ class ServiceStateChangedEvent(ServiceEventBase):
 # =============================================================================
 
 
+# FIXME: Get rid of this => BaseJob/MockJob, BaseExperiment/MockExperiment handle this directly
+# FIXME: alway use `state.json` as the state file name for consistency (no more information.json for jobs)
+# FIXME: and dot not keep
 @dataclass
 class StatusData:
     """Complete status data stored in status.json
@@ -770,37 +773,36 @@ class EventWriter(ABC):
     def archive_events(self) -> None:
         """Archive events to permanent storage (called on completion)
 
-        If hardlinks were used, the temp files are simply deleted (data persists
-        in permanent storage via hardlink). If no hardlinks, files are moved
-        to permanent storage.
+        For each temp file:
+        - If permanent file exists (hardlink already created): just delete temp
+        - If permanent file doesn't exist: move temp to permanent
         """
         self.close()
 
         if not self._permanent_dir:
             return
 
-        if self._check_hardlink_support():
-            # Hardlinks already created - just delete temp files
-            for i in range(self._count + 1):
-                temp_path = self._get_temp_event_file_path(i)
-                if temp_path.exists():
-                    try:
-                        temp_path.unlink()
-                    except OSError as e:
-                        logger.warning(
-                            "Failed to delete temp file %s: %s", temp_path, e
-                        )
-        else:
-            # No hardlinks - move files to permanent storage
-            for i in range(self._count + 1):
-                temp_path = self._get_temp_event_file_path(i)
-                perm_path = self._permanent_dir / f"event-{i}.jsonl"
-                if temp_path.exists():
-                    try:
-                        perm_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(temp_path), str(perm_path))
-                    except OSError as e:
-                        logger.warning("Failed to archive %s: %s", temp_path, e)
+        self._permanent_dir.mkdir(parents=True, exist_ok=True)
+
+        for i in range(self._count + 1):
+            temp_path = self._get_temp_event_file_path(i)
+            perm_path = self._permanent_dir / f"event-{i}.jsonl"
+
+            if not temp_path.exists():
+                continue
+
+            if perm_path.exists():
+                # Permanent file exists (hardlink) - just delete temp
+                try:
+                    temp_path.unlink()
+                except OSError as e:
+                    logger.warning("Failed to delete temp file %s: %s", temp_path, e)
+            else:
+                # No permanent file - move temp to permanent
+                try:
+                    shutil.move(str(temp_path), str(perm_path))
+                except OSError as e:
+                    logger.warning("Failed to archive %s: %s", temp_path, e)
 
     def _get_temp_event_file_path(self, count: int) -> Path:
         """Get path for temporary event file at a specific count"""
