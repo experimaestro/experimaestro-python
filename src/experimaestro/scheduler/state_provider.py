@@ -513,6 +513,7 @@ class MockJob(BaseJob):
         retry_count: int = 0,
         failure_reason: Optional[JobFailureStatus] = None,
         transient: TransientMode = TransientMode.NONE,
+        process: dict | None = None,
     ):
         self.identifier = identifier
         self.task_id = task_id
@@ -528,43 +529,11 @@ class MockJob(BaseJob):
         self.retry_count = retry_count
         self.failure_reason = failure_reason
         self.transient = transient
+        self._process_dict = process
 
-    @classmethod
-    def from_disk(cls, path: Path) -> Optional["MockJob"]:
-        """Create a MockJob by reading metadata from disk
-
-        Args:
-            path: Path to the job directory
-
-        Returns:
-            MockJob instance if metadata exists, None otherwise
-        """
-        metadata_path = path / ".xpm_metadata.json"
-        if not metadata_path.exists():
-            return None
-
-        try:
-            with metadata_path.open("r") as f:
-                metadata = json.load(f)
-
-            return cls(
-                identifier=metadata.get("job_id", path.name),
-                task_id=metadata.get(
-                    "task_id", path.parent.name if path.parent else "unknown"
-                ),
-                path=path,
-                state=metadata.get("state", "unscheduled"),
-                submittime=metadata.get("submitted_time"),
-                starttime=metadata.get("started_time"),
-                endtime=metadata.get("ended_time"),
-                progress=[],  # Progress not stored in metadata
-                updated_at=str(metadata.get("last_updated", "")),
-                exit_code=metadata.get("exit_code"),
-                retry_count=metadata.get("retry_count", 0),
-            )
-        except Exception as e:
-            logger.warning("Failed to read job metadata from %s: %s", path, e)
-            return None
+    def process_state_dict(self) -> dict | None:
+        """Get process state as dictionary."""
+        return self._process_dict
 
     def getprocess(self):
         """Get process handle for running job
@@ -594,18 +563,18 @@ class MockJob(BaseJob):
             return None
 
     @classmethod
-    def from_db_state_dict(cls, d: Dict, workspace_path: Path) -> "MockJob":
-        """Create MockJob from serialized dictionary
+    def from_state_dict(cls, d: Dict, workspace_path: Path) -> "MockJob":
+        """Create MockJob from state dictionary
 
         Args:
-            d: Dictionary from db_state_dict()
+            d: Dictionary from state_dict()
             workspace_path: Workspace path to compute job path if not provided
 
         Returns:
             MockJob instance
         """
         task_id = d["task_id"]
-        identifier = d["identifier"]
+        identifier = d["job_id"]
 
         # Use path from dict if it's already a Path, otherwise compute it
         path = d.get("path")
@@ -626,14 +595,15 @@ class MockJob(BaseJob):
             task_id=task_id,
             path=path,
             state=d["state"],
-            submittime=deserialize_timestamp(d.get("submittime")),
-            starttime=deserialize_timestamp(d.get("starttime")),
-            endtime=deserialize_timestamp(d.get("endtime")),
+            submittime=deserialize_timestamp(d.get("submitted_time")),
+            starttime=deserialize_timestamp(d.get("started_time")),
+            endtime=deserialize_timestamp(d.get("ended_time")),
             progress=progress_list,
             updated_at=d.get("updated_at", ""),
             exit_code=d.get("exit_code"),
             retry_count=d.get("retry_count", 0),
             failure_reason=failure_reason,
+            process=d.get("process"),
         )
 
 
@@ -678,10 +648,10 @@ class MockExperiment(BaseExperiment):
         # So parent.name gives experiment_id
         return self.workdir.parent.name
 
-    def db_state_dict(self) -> Dict:
-        """Serialize experiment to dictionary for DB/network storage
+    def state_dict(self) -> Dict:
+        """Serialize experiment to dictionary
 
-        Overrides BaseExperiment.db_state_dict() to include all MockExperiment fields.
+        Overrides BaseExperiment.state_dict() to include all MockExperiment fields.
         """
         return {
             "experiment_id": self.experiment_id,
@@ -697,11 +667,11 @@ class MockExperiment(BaseExperiment):
         }
 
     @classmethod
-    def from_db_state_dict(cls, d: Dict, workspace_path: Path) -> "MockExperiment":
-        """Create MockExperiment from serialized dictionary
+    def from_state_dict(cls, d: Dict, workspace_path: Path) -> "MockExperiment":
+        """Create MockExperiment from state dictionary
 
         Args:
-            d: Dictionary from db_state_dict()
+            d: Dictionary from state_dict()
             workspace_path: Workspace path to compute experiment path if not provided
 
         Returns:
@@ -749,7 +719,7 @@ class MockService(BaseService):
         self,
         service_id: str,
         description_text: str,
-        state_dict_data: dict,
+        service_config_data: dict,
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
         url: Optional[str] = None,
@@ -758,7 +728,7 @@ class MockService(BaseService):
         self.id = service_id
         self._description = description_text
         self._state_name = state
-        self._state_dict_data = state_dict_data
+        self._service_config_data = service_config_data
         self.experiment_id = experiment_id
         self.run_id = run_id
         self.url = url
@@ -783,16 +753,16 @@ class MockService(BaseService):
         """Return service description"""
         return self._description
 
-    def state_dict(self) -> dict:
-        """Return state dictionary for service recreation"""
-        return self._state_dict_data
+    def service_config(self) -> dict:
+        """Return service-specific configuration for recreation"""
+        return self._service_config_data
 
     @classmethod
-    def from_db_state_dict(cls, d: Dict) -> "MockService":
-        """Create MockService from serialized dictionary
+    def from_state_dict(cls, d: Dict) -> "MockService":
+        """Create MockService from state dictionary
 
         Args:
-            d: Dictionary from db_state_dict()
+            d: Dictionary from state_dict()
 
         Returns:
             MockService instance
@@ -800,7 +770,7 @@ class MockService(BaseService):
         return cls(
             service_id=d["service_id"],
             description_text=d.get("description", ""),
-            state_dict_data=d.get("state_dict", {}),
+            service_config_data=d.get("service_config", {}),
             experiment_id=d.get("experiment_id"),
             run_id=d.get("run_id"),
             url=d.get("url"),

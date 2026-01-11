@@ -267,7 +267,7 @@ class SSHStateProviderServer:
         """Handle get_experiments request"""
         since = deserialize_datetime(params.get("since"))
         experiments = self._state_provider.get_experiments(since=since)
-        return [exp.db_state_dict() for exp in experiments]
+        return [exp.state_dict() for exp in experiments]
 
     def _handle_get_experiment(self, params: Dict) -> Optional[Dict]:
         """Handle get_experiment request"""
@@ -278,7 +278,7 @@ class SSHStateProviderServer:
         experiment = self._state_provider.get_experiment(experiment_id)
         if experiment is None:
             return None
-        return experiment.db_state_dict()
+        return experiment.state_dict()
 
     def _handle_get_experiment_runs(self, params: Dict) -> list:
         """Handle get_experiment_runs request"""
@@ -287,7 +287,7 @@ class SSHStateProviderServer:
             raise TypeError("experiment_id is required")
 
         runs = self._state_provider.get_experiment_runs(experiment_id)
-        return [run.db_state_dict() for run in runs]
+        return [run.state_dict() for run in runs]
 
     def _handle_get_jobs(self, params: Dict) -> list:
         """Handle get_jobs request"""
@@ -300,7 +300,7 @@ class SSHStateProviderServer:
             tags=params.get("tags"),
             since=since,
         )
-        return [job.db_state_dict() for job in jobs]
+        return [job.state_dict() for job in jobs]
 
     def _handle_get_job(self, params: Dict) -> Optional[Dict]:
         """Handle get_job request"""
@@ -316,7 +316,7 @@ class SSHStateProviderServer:
         )
         if job is None:
             return None
-        return job.db_state_dict()
+        return job.state_dict()
 
     def _handle_get_all_jobs(self, params: Dict) -> list:
         """Handle get_all_jobs request"""
@@ -326,18 +326,18 @@ class SSHStateProviderServer:
             tags=params.get("tags"),
             since=since,
         )
-        return [job.db_state_dict() for job in jobs]
+        return [job.state_dict() for job in jobs]
 
     def _handle_get_services(self, params: Dict) -> list:
         """Handle get_services request
 
-        Returns serialized service data using db_state_dict().
+        Returns serialized service data using state_dict().
         """
         services = self._state_provider.get_services(
             experiment_id=params.get("experiment_id"),
             run_id=params.get("run_id"),
         )
-        return [svc.db_state_dict() for svc in services]
+        return [svc.state_dict() for svc in services]
 
     def _handle_get_tags_map(self, params: Dict) -> Dict[str, Dict[str, str]]:
         """Handle get_tags_map request

@@ -92,7 +92,7 @@ def create_v2_experiment(
         tags_dict = {}
         for task_id, job_id, job_status in jobs:
             jobs_dict[job_id] = {
-                "identifier": job_id,
+                "job_id": job_id,
                 "task_id": task_id,
                 "state": job_status,  # "waiting", "running", "done", "error"
                 "path": str(workspace / "jobs" / task_id / job_id),

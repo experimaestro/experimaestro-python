@@ -467,7 +467,6 @@ class WorkspaceStateProvider(StateProvider):
 
         v1 layout: xp/{exp-id}/jobs/{task_id}/{job_hash} -> symlink to jobs/{task_id}/{job_hash}
         """
-        from experimaestro.scheduler.interfaces import JobState as JobStateClass
 
         exp_dir = self.workspace_path / "xp" / experiment_id
         if not exp_dir.exists():
@@ -494,33 +493,8 @@ class WorkspaceStateProvider(StateProvider):
                 task_id = job_link.parent.name
                 job_id = job_link.name
 
-                # Try to load job from metadata (v2 style)
-                job = MockJob.from_disk(job_path)
-                if job is None:
-                    # v1 jobs: read state from .done/.failed files
-                    # Script name is the last component of task_id
-                    scriptname = task_id.rsplit(".", 1)[-1]
-                    state = JobStateClass.from_path(job_path, scriptname)
-                    if state is None:
-                        state = JobState.UNSCHEDULED
-
-                    # Get modification time for timestamps
-                    try:
-                        mtime = job_path.stat().st_mtime
-                    except OSError:
-                        mtime = None
-
-                    job = MockJob(
-                        identifier=job_id,
-                        task_id=task_id,
-                        path=job_path,
-                        state=state.name,  # Convert JobState to string name
-                        submittime=mtime,
-                        starttime=mtime,
-                        endtime=mtime if state.finished() else None,
-                        progress=[],
-                        updated_at="",
-                    )
+                # Create MockJob from filesystem state (done/failed files, etc.)
+                job = self._create_mock_job_from_path(job_path, task_id, job_id)
                 jobs.append(job)
 
         return jobs
@@ -774,7 +748,7 @@ class WorkspaceStateProvider(StateProvider):
     ) -> List[BaseService]:
         """Get services for an experiment
 
-        Tries to recreate real Service objects from state_dict, falls back to
+        Tries to recreate real Service objects from service_config, falls back to
         MockService if recreation fails.
 
         If experiment_id is None, returns services from all experiments.
@@ -827,18 +801,18 @@ class WorkspaceStateProvider(StateProvider):
 
         services = []
         for service_id, mock_service in status.services.items():
-            # Try to recreate service from state_dict
-            state_dict = mock_service.state_dict()
-            if state_dict and "__class__" in state_dict:
+            # Try to recreate service from service_config
+            service_config = mock_service.service_config()
+            if service_config and "__class__" in service_config:
                 try:
-                    service = Service.from_state_dict(state_dict)
+                    service = Service.from_service_config(service_config)
                     # Store experiment info on the service
                     service._experiment_id = experiment_id
                     service._run_id = run_id
                     # Register as listener to emit events when state changes
                     service.add_listener(self)
                     services.append(service)
-                    logger.debug("Recreated service %s from state_dict", service_id)
+                    logger.debug("Recreated service %s from service_config", service_id)
                 except Exception as e:
                     # Failed to recreate - use MockService with error description
                     from experimaestro.scheduler.state_provider import MockService
@@ -846,13 +820,13 @@ class WorkspaceStateProvider(StateProvider):
                     service = MockService(
                         service_id=service_id,
                         description_text=f"error: {e}",
-                        state_dict_data={},
+                        service_config_data={},
                         experiment_id=experiment_id,
                         run_id=run_id,
                     )
                     services.append(service)
                     logger.warning(
-                        "Failed to recreate service %s from state_dict: %s",
+                        "Failed to recreate service %s from service_config: %s",
                         service_id,
                         e,
                     )
@@ -862,18 +836,20 @@ class WorkspaceStateProvider(StateProvider):
                             sys.path,
                         )
             else:
-                # No valid state_dict - use MockService with error
+                # No valid service_config - use MockService with error
                 from experimaestro.scheduler.state_provider import MockService
 
                 service = MockService(
                     service_id=service_id,
-                    description_text="error: no state_dict",
-                    state_dict_data={},
+                    description_text="error: no service_config",
+                    service_config_data={},
                     experiment_id=experiment_id,
                     run_id=run_id,
                 )
                 services.append(service)
-                logger.debug("Service %s has no state_dict for recreation", service_id)
+                logger.debug(
+                    "Service %s has no service_config for recreation", service_id
+                )
 
         return services
 
@@ -958,11 +934,8 @@ class WorkspaceStateProvider(StateProvider):
 
                 # Check if this job is referenced by any experiment
                 if job_path not in referenced_jobs:
-                    # This is an orphan job
-                    job = MockJob.from_disk(job_path)
-                    if job is None:
-                        # No metadata file - create minimal MockJob from filesystem
-                        job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                    # This is an orphan job - create MockJob from filesystem state
+                    job = self._create_mock_job_from_path(job_path, task_id, job_id)
                     orphan_jobs.append(job)
 
         return orphan_jobs
@@ -1016,14 +989,9 @@ class WorkspaceStateProvider(StateProvider):
                     # Only include if the job is actually running
                     if actual_state == JobState.RUNNING:
                         # Create MockJob for the running job
-                        job = MockJob.from_disk(job_path)
-                        if job is None:
-                            job = self._create_mock_job_from_path(
-                                job_path, task_id, job_id
-                            )
-                        else:
-                            # Update state to verified running state
-                            job.state = JobState.RUNNING
+                        job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                        # Update state to verified running state
+                        job.state = JobState.RUNNING
                         stray_jobs.append(job)
 
         return stray_jobs

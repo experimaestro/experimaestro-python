@@ -117,12 +117,12 @@ class StateListener:
         from experimaestro.scheduler.services import Service
         from .state_status import ServiceAddedEvent
 
-        state_dict = Service.serialize_state_dict(service._full_state_dict())
+        service_config = Service.serialize_state_dict(service._full_service_config())
         event = ServiceAddedEvent(
             service_id=service.id,
             description=service.description(),
             state=service.state.name if hasattr(service.state, "name") else "STOPPED",
-            state_dict=state_dict,
+            service_config=service_config,
         )
         self.event_writer.write_event(event)
         self.status_data.apply_event(event)
@@ -406,9 +406,9 @@ class experiment(BaseExperiment):
 
         services_data = {}
         for service_id, service in self.services.items():
-            # Get state_dict from service (includes __class__ for recreation)
+            # Get service_config from service (includes __class__ for recreation)
             # and serialize paths to JSON-compatible format
-            service_state = Service.serialize_state_dict(service._full_state_dict())
+            service_state = Service.serialize_state_dict(service._full_service_config())
             # Add runtime state info
             service_state.update(
                 {

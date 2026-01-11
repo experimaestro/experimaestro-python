@@ -1,3 +1,4 @@
+import json
 import socket
 import threading
 import time
@@ -737,7 +738,7 @@ class Scheduler(StateProvider, threading.Thread):
         # Write final metadata with end time and final state
         # Only for jobs that actually started (starttime is set in aio_start)
         if job.starttime is not None:
-            job.write_metadata()
+            job.status_path.write_text(json.dumps(job.state_dict()))
 
         if job in self.waitingjobs:
             self.waitingjobs.remove(job)
@@ -878,7 +879,8 @@ class Scheduler(StateProvider, threading.Thread):
                         self._cleanup_job_event_files(job)
 
                         # Write metadata with submit and start time (after directory creation)
-                        job.write_metadata()
+                        job.status_path.parent.mkdir(parents=True, exist_ok=True)
+                        job.status_path.write_text(json.dumps(job.state_dict()))
 
                         # Notify locks before job starts (e.g., create symlinks)
                         await locks.aio_job_before_start(job)
@@ -896,7 +898,6 @@ class Scheduler(StateProvider, threading.Thread):
 
                         # Write locks.json for job process (if there are dynamic locks)
                         if locks.locks:
-                            import json
                             import tempfile
 
                             locks_path = job.path / "locks.json"
@@ -1246,8 +1247,6 @@ class Scheduler(StateProvider, threading.Thread):
 
         For the scheduler, we can access the actual Job and read its PID file.
         """
-        import json
-
         from experimaestro.scheduler.state_provider import ProcessInfo
 
         # Get the actual Job from our jobs dict

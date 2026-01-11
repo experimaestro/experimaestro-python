@@ -307,11 +307,10 @@ class CommandLineJob(Job):
         self._process = processbuilder.start(True)
 
         with self.pidpath.open("w") as fp:
-            process_spec = self._process.tospec()
-            json.dump(process_spec, fp)
+            json.dump(self._process.tospec(), fp)
 
-        # Write process spec to metadata (contains launcher type, job ID, etc.)
-        self.write_metadata(process=process_spec)
+        # Write status with process info
+        self.status_path.write_text(json.dumps(self.state_dict()))
 
         self.state = JobState.RUNNING
         logger.info("Process started (%s)", self._process)

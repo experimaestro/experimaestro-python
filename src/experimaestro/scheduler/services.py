@@ -62,7 +62,7 @@ class Service(BaseService):
         """
         pass
 
-    def state_dict(self) -> dict:
+    def service_config(self) -> dict:
         """Return parameters needed to recreate this service.
 
         Subclasses should override this to return constructor arguments.
@@ -71,7 +71,7 @@ class Service(BaseService):
 
         Example::
 
-            def state_dict(self):
+            def service_config(self):
                 return {
                     "log_dir": self.log_dir,  # Path is auto-handled
                     "name": self.name,
@@ -82,16 +82,16 @@ class Service(BaseService):
         """
         return {}
 
-    def _full_state_dict(self) -> dict:
-        """Get complete state_dict including __class__ for serialization."""
-        d = self.state_dict()
+    def _full_service_config(self) -> dict:
+        """Get complete service_config including __class__ for serialization."""
+        d = self.service_config()
         d["__class__"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         return d
 
-    def db_state_dict(self) -> dict:
-        """Serialize service to dictionary for DB/network storage.
+    def state_dict(self) -> dict:
+        """Serialize service to dictionary (single source of truth).
 
-        Overrides BaseService.db_state_dict() to properly serialize Path objects.
+        Overrides BaseService.state_dict() to properly serialize Path objects.
         """
         state = self.state
         state_str = state.name if hasattr(state, "name") else str(state)
@@ -99,7 +99,7 @@ class Service(BaseService):
             "service_id": self.id,
             "description": self.description(),
             "state": state_str,
-            "state_dict": self.serialize_state_dict(self._full_state_dict()),
+            "service_config": self.serialize_state_dict(self._full_service_config()),
         }
 
     @staticmethod
@@ -129,13 +129,13 @@ class Service(BaseService):
         return {k: serialize_value(v) for k, v in data.items()}
 
     @staticmethod
-    def from_state_dict(
+    def from_service_config(
         data: dict, path_translator: Optional[Callable[[str], Path]] = None
     ) -> "Service":
-        """Recreate a service from a state dictionary.
+        """Recreate a service from a service configuration.
 
         Args:
-            data: Dictionary from :meth:`state_dict` (may be serialized)
+            data: Dictionary from :meth:`service_config` (may be serialized)
             path_translator: Optional function to translate remote paths to local.
                 Used by remote clients to map paths to local cache.
 
@@ -155,7 +155,7 @@ class Service(BaseService):
 
         class_path = data.get("__class__")
         if not class_path:
-            raise ValueError("Missing '__class__' in service state_dict")
+            raise ValueError("Missing '__class__' in service_config")
 
         module_name, class_name = class_path.rsplit(".", 1)
         module = importlib.import_module(module_name)

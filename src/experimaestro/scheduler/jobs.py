@@ -460,6 +460,12 @@ class Job(BaseJob, Resource):
                 logger.info("Rotating log file %s -> %s", log_path.name, new_name)
                 log_path.rename(new_path)
 
+    def process_state_dict(self) -> dict | None:
+        """Get process state as dictionary."""
+        if self._process is not None:
+            return self._process.tospec()
+        return None
+
     @property
     def basepath(self) -> Path:
         return self.jobpath / self.name

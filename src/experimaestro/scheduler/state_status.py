@@ -320,7 +320,7 @@ class ServiceAddedEvent(ServiceEventBase):
     run_id: str = ""
     description: str = ""
     state: str = "STOPPED"
-    state_dict: dict[str, Any] = field(default_factory=dict)
+    service_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -336,15 +336,12 @@ class ServiceStateChangedEvent(ServiceEventBase):
 # =============================================================================
 
 
-# FIXME: Get rid of this => BaseJob/MockJob, BaseExperiment/MockExperiment handle this directly
-# FIXME: alway use `state.json` as the state file name for consistency (no more information.json for jobs)
-# FIXME: and dot not keep
 @dataclass
 class StatusData:
     """Complete status data stored in status.json
 
     Stores structured objects (MockJob, MockService) for easy access.
-    Uses db_state_dict() for JSON serialization and from_db_state_dict() for loading.
+    Uses state_dict() for JSON serialization and from_state_dict() for loading.
     """
 
     version: int = STATUS_VERSION
@@ -368,7 +365,7 @@ class StatusData:
         """Create empty status data"""
         return cls()
 
-    def db_state_dict(self) -> dict:
+    def state_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
         return {
             "version": self.version,
@@ -379,19 +376,19 @@ class StatusData:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "status": self.status,
-            "jobs": {k: v.db_state_dict() for k, v in self.jobs.items()},
+            "jobs": {k: v.state_dict() for k, v in self.jobs.items()},
             "tags": self.tags,
             "dependencies": self.dependencies,
-            "services": {k: v.db_state_dict() for k, v in self.services.items()},
+            "services": {k: v.state_dict() for k, v in self.services.items()},
             "last_updated": self.last_updated,
         }
 
     @classmethod
-    def from_db_state_dict(cls, d: dict, workspace_path: Path) -> "StatusData":
+    def from_state_dict(cls, d: dict, workspace_path: Path) -> "StatusData":
         """Create StatusData from dictionary
 
         Args:
-            d: Dictionary from db_state_dict() or JSON file
+            d: Dictionary from state_dict() or JSON file
             workspace_path: Workspace path for computing job paths
         """
         from experimaestro.scheduler.state_provider import MockJob, MockService
@@ -399,15 +396,12 @@ class StatusData:
         # Parse jobs
         jobs_dict = d.get("jobs", {})
         jobs = {
-            k: MockJob.from_db_state_dict(v, workspace_path)
-            for k, v in jobs_dict.items()
+            k: MockJob.from_state_dict(v, workspace_path) for k, v in jobs_dict.items()
         }
 
         # Parse services
         services_dict = d.get("services", {})
-        services = {
-            k: MockService.from_db_state_dict(v) for k, v in services_dict.items()
-        }
+        services = {k: MockService.from_state_dict(v) for k, v in services_dict.items()}
 
         return cls(
             version=d.get("version", STATUS_VERSION),
@@ -506,7 +500,7 @@ class StatusData:
             self.services[event.service_id] = MockService(
                 service_id=event.service_id,
                 description_text=event.description,
-                state_dict_data=event.state_dict,
+                service_config_data=event.service_config,
                 experiment_id=self.experiment_id,
                 run_id=self.run_id,
                 state=event.state,
@@ -613,11 +607,11 @@ class ExperimentStatusFile(StatusFile):
         d = self.read()
         if not d:
             return StatusData.empty()
-        return StatusData.from_db_state_dict(d, self.workspace_path)
+        return StatusData.from_state_dict(d, self.workspace_path)
 
     def write_status_data(self, data: "StatusData") -> None:
         """Write StatusData object"""
-        self.write(data.db_state_dict())
+        self.write(data.state_dict())
 
     # Backward compatible methods that return StatusData
     def read_locked_status_data(
@@ -627,13 +621,13 @@ class ExperimentStatusFile(StatusFile):
         d, lock = self.read_locked()
         if not d:
             return StatusData.empty(), lock
-        return StatusData.from_db_state_dict(d, self.workspace_path), lock
+        return StatusData.from_state_dict(d, self.workspace_path), lock
 
     def write_locked_status_data(
         self, data: "StatusData", lock: fasteners.InterProcessLock
     ) -> None:
         """Write StatusData and release lock"""
-        self.write_locked(data.db_state_dict(), lock)
+        self.write_locked(data.state_dict(), lock)
 
 
 class JobStatusFile(StatusFile):
