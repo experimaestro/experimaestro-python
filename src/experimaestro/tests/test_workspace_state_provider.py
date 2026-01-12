@@ -565,6 +565,107 @@ class TestEventWatcher:
         finally:
             provider.close()
 
+    def test_event_file_ordering_enforced(self, mock_workspace):
+        """Events from events-2.jsonl must not be processed before events-1.jsonl
+
+        This test verifies that even if events-2.jsonl is created while events-1.jsonl
+        exists, all events from events-1.jsonl are processed first.
+
+        Uses synchronization primitives to fail immediately if order is violated.
+        """
+        import threading
+
+        provider = WorkspaceStateProvider(mock_workspace)
+
+        # Synchronization state
+        lock = threading.Lock()
+        file1_events_received = []
+        file2_events_received = []
+        all_file1_received = threading.Event()
+        order_violation = None
+        expected_file1_count = 3
+        expected_file2_count = 3
+        all_events_received = threading.Event()
+
+        def listener(event):
+            nonlocal order_violation
+            if not isinstance(event, JobStateChangedEvent):
+                return
+
+            with lock:
+                job_id = event.job_id
+                if job_id.startswith("file1-"):
+                    # Receiving file1 event after file2 started is OK
+                    # (file2 events wait for file1 to finish)
+                    file1_events_received.append(job_id)
+                    if len(file1_events_received) == expected_file1_count:
+                        all_file1_received.set()
+                elif job_id.startswith("file2-"):
+                    # Receiving file2 event BEFORE all file1 events is a violation
+                    if len(file1_events_received) < expected_file1_count:
+                        order_violation = (
+                            f"Received file2 event '{job_id}' before all file1 events. "
+                            f"File1 received: {file1_events_received}"
+                        )
+                    file2_events_received.append(job_id)
+
+                # Check if all events received
+                total = len(file1_events_received) + len(file2_events_received)
+                if total >= expected_file1_count + expected_file2_count:
+                    all_events_received.set()
+
+        provider.add_listener(listener)
+
+        try:
+            # Create events directory
+            exp_dir = mock_workspace / ".events" / "experiments" / "test-order"
+            exp_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create events-1.jsonl with events
+            events_file_1 = exp_dir / "events-1.jsonl"
+            with open(events_file_1, "w") as f:
+                for i in range(expected_file1_count):
+                    f.write(
+                        json.dumps(
+                            {
+                                "event_type": "JobStateChangedEvent",
+                                "job_id": f"file1-job-{i}",
+                                "state": "running",
+                            }
+                        )
+                        + "\n"
+                    )
+
+            # Immediately create events-2.jsonl (simulating rapid file switch)
+            events_file_2 = exp_dir / "events-2.jsonl"
+            with open(events_file_2, "w") as f:
+                for i in range(expected_file2_count):
+                    f.write(
+                        json.dumps(
+                            {
+                                "event_type": "JobStateChangedEvent",
+                                "job_id": f"file2-job-{i}",
+                                "state": "done",
+                            }
+                        )
+                        + "\n"
+                    )
+
+            # Wait for all events with timeout
+            received = all_events_received.wait(timeout=10.0)
+
+            # Check results
+            with lock:
+                assert received, (
+                    f"Timeout waiting for events. "
+                    f"File1: {file1_events_received}, File2: {file2_events_received}"
+                )
+                assert order_violation is None, order_violation
+                assert len(file1_events_received) == expected_file1_count
+                assert len(file2_events_received) == expected_file2_count
+        finally:
+            provider.close()
+
 
 # =============================================================================
 # Tests: Tags and Dependencies
@@ -766,3 +867,236 @@ class TestOrphanJobDetection:
         assert "orphan-2" in orphan_ids
         assert "v1-job" not in orphan_ids
         assert "v2-job" not in orphan_ids
+
+
+# =============================================================================
+# Tests: EventWriter Rotation
+# =============================================================================
+
+
+class TestEventWriterRotation:
+    """Tests for EventWriter automatic file rotation"""
+
+    def test_event_writer_rotates_at_max_events(self, tmp_path):
+        """EventWriter should rotate to a new file after MAX_EVENTS_PER_FILE events"""
+        from experimaestro.scheduler.state_status import (
+            EventWriter,
+            JobStateChangedEvent,
+        )
+
+        # Create a test EventWriter subclass with low rotation threshold
+        class TestEventWriter(EventWriter):
+            MAX_EVENTS_PER_FILE = 5  # Very low for testing
+
+            def __init__(self, events_dir: Path):
+                super().__init__(initial_count=1)
+                self._events_dir = events_dir
+                self.rotation_counts = []
+
+            @property
+            def events_dir(self) -> Path:
+                return self._events_dir
+
+            def _on_rotate(self, new_count: int) -> None:
+                self.rotation_counts.append(new_count)
+
+        events_dir = tmp_path / ".events" / "test"
+        writer = TestEventWriter(events_dir)
+
+        try:
+            # Write 12 events (should trigger 2 rotations: at 5 and at 10)
+            for i in range(12):
+                event = JobStateChangedEvent(job_id=f"job-{i}", state="running")
+                writer.write_event(event)
+
+            # Should have rotated twice (5->6, 10->11)
+            assert len(writer.rotation_counts) == 2
+            assert writer.rotation_counts[0] == 2  # First rotation from count 1 to 2
+            assert writer.rotation_counts[1] == 3  # Second rotation from count 2 to 3
+
+            # Final count should be 3
+            assert writer._count == 3
+            assert writer._events_in_current_file == 2  # 12 - 5 - 5 = 2
+
+            # Verify files were created
+            assert (events_dir / "events-1.jsonl").exists()
+            assert (events_dir / "events-2.jsonl").exists()
+            assert (events_dir / "events-3.jsonl").exists()
+
+            # Verify event counts per file
+            with open(events_dir / "events-1.jsonl") as f:
+                assert len(f.readlines()) == 5
+            with open(events_dir / "events-2.jsonl") as f:
+                assert len(f.readlines()) == 5
+            with open(events_dir / "events-3.jsonl") as f:
+                assert len(f.readlines()) == 2
+        finally:
+            writer.close()
+
+    def test_event_writer_rotation_count_persisted(self, tmp_path):
+        """EventWriter rotation count should be accessible after each rotation"""
+        from experimaestro.scheduler.state_status import (
+            EventWriter,
+            JobStateChangedEvent,
+        )
+
+        class TestEventWriter(EventWriter):
+            MAX_EVENTS_PER_FILE = 3
+
+            def __init__(self, events_dir: Path):
+                super().__init__(initial_count=1)
+                self._events_dir = events_dir
+                self.counts_at_rotation = []
+
+            @property
+            def events_dir(self) -> Path:
+                return self._events_dir
+
+            def _on_rotate(self, new_count: int) -> None:
+                self.counts_at_rotation.append((self._count, new_count))
+
+        events_dir = tmp_path / ".events" / "test"
+        writer = TestEventWriter(events_dir)
+
+        try:
+            # Write events to trigger rotation
+            for i in range(7):
+                event = JobStateChangedEvent(job_id=f"job-{i}", state="running")
+                writer.write_event(event)
+
+            # Check rotation history
+            assert len(writer.counts_at_rotation) == 2
+            assert writer.counts_at_rotation[0] == (1, 2)  # Before first rotate
+            assert writer.counts_at_rotation[1] == (2, 3)  # Before second rotate
+        finally:
+            writer.close()
+
+
+class TestEventFileOrderingWithStartCount:
+    """Tests for event file ordering when starting from a higher events_count"""
+
+    def test_event_ordering_starts_from_status_count(self, mock_workspace):
+        """Events should only be read from events_count onwards, ignoring earlier files
+
+        When status.json has events_count=1, events-0.jsonl should be ignored
+        and events-1.jsonl, events-2.jsonl should be read in order.
+        """
+        import threading
+
+        provider = WorkspaceStateProvider(mock_workspace)
+
+        # Synchronization state
+        lock = threading.Lock()
+        file0_events_received = []
+        file1_events_received = []
+        file2_events_received = []
+        order_violation = None
+        expected_file1_count = 3
+        expected_file2_count = 3
+        all_events_received = threading.Event()
+
+        def listener(event):
+            nonlocal order_violation
+            if not isinstance(event, JobStateChangedEvent):
+                return
+
+            with lock:
+                job_id = event.job_id
+                if job_id.startswith("file0-"):
+                    # Events from file0 should NOT be received if status says count=1
+                    file0_events_received.append(job_id)
+                elif job_id.startswith("file1-"):
+                    file1_events_received.append(job_id)
+                elif job_id.startswith("file2-"):
+                    # Receiving file2 event BEFORE all file1 events is a violation
+                    if len(file1_events_received) < expected_file1_count:
+                        order_violation = (
+                            f"Received file2 event '{job_id}' before all file1 events. "
+                            f"File1 received: {file1_events_received}"
+                        )
+                    file2_events_received.append(job_id)
+
+                # Check if expected events received
+                total = len(file1_events_received) + len(file2_events_received)
+                if total >= expected_file1_count + expected_file2_count:
+                    all_events_received.set()
+
+        provider.add_listener(listener)
+
+        try:
+            # Create events directory structure
+            exp_dir = mock_workspace / ".events" / "experiments" / "test-start-count"
+            exp_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create status.json that says we're at events_count=1
+            # This means events-0.jsonl should be ignored
+            status_file = exp_dir / "status.json"
+            with open(status_file, "w") as f:
+                json.dump({"events_count": 1, "status": "running"}, f)
+
+            # Create events-0.jsonl (should be IGNORED because status says count=1)
+            events_file_0 = exp_dir / "events-0.jsonl"
+            with open(events_file_0, "w") as f:
+                for i in range(3):
+                    f.write(
+                        json.dumps(
+                            {
+                                "event_type": "JobStateChangedEvent",
+                                "job_id": f"file0-job-{i}",
+                                "state": "pending",
+                            }
+                        )
+                        + "\n"
+                    )
+
+            # Create events-1.jsonl with events
+            events_file_1 = exp_dir / "events-1.jsonl"
+            with open(events_file_1, "w") as f:
+                for i in range(expected_file1_count):
+                    f.write(
+                        json.dumps(
+                            {
+                                "event_type": "JobStateChangedEvent",
+                                "job_id": f"file1-job-{i}",
+                                "state": "running",
+                            }
+                        )
+                        + "\n"
+                    )
+
+            # Create events-2.jsonl
+            events_file_2 = exp_dir / "events-2.jsonl"
+            with open(events_file_2, "w") as f:
+                for i in range(expected_file2_count):
+                    f.write(
+                        json.dumps(
+                            {
+                                "event_type": "JobStateChangedEvent",
+                                "job_id": f"file2-job-{i}",
+                                "state": "done",
+                            }
+                        )
+                        + "\n"
+                    )
+
+            # Wait for events with timeout
+            received = all_events_received.wait(timeout=10.0)
+
+            # Check results
+            with lock:
+                assert received, (
+                    f"Timeout waiting for events. "
+                    f"File0: {file0_events_received}, "
+                    f"File1: {file1_events_received}, "
+                    f"File2: {file2_events_received}"
+                )
+                # file0 events should be ignored
+                assert len(file0_events_received) == 0, (
+                    f"events-0.jsonl should be ignored when status.events_count=1, "
+                    f"but got: {file0_events_received}"
+                )
+                assert order_violation is None, order_violation
+                assert len(file1_events_received) == expected_file1_count
+                assert len(file2_events_received) == expected_file2_count
+        finally:
+            provider.close()

@@ -374,8 +374,10 @@ class experiment(BaseExperiment):
 
     @property
     def events_count(self) -> int:
-        """Number of events processed"""
-        return self._events_count
+        """Number of events processed - delegated to EventWriter"""
+        if self._event_writer is not None:
+            return self._event_writer._count
+        return 0
 
     @property
     def started_at(self) -> Optional[float]:
@@ -707,7 +709,6 @@ class experiment(BaseExperiment):
         # Track job tags and dependencies directly (no more StatusData)
         self._tags: Dict[str, Dict[str, str]] = {}
         self._dependencies: Dict[str, List[str]] = {}
-        self._events_count = 0
         self._hostname: Optional[str] = None
         self._started_at: Optional[float] = None
         self._ended_at: Optional[float] = None

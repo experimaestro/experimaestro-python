@@ -338,11 +338,18 @@ class EventWriter(ABC):
     Events are written to {events_dir}/events-{count}.jsonl
     Uses line buffering so each event is flushed immediately after write.
 
+    Supports automatic file rotation when files exceed MAX_EVENT_FILE_SIZE.
+    When rotating, subclasses should override _on_rotate() to update status
+    files before the new event file is created.
+
     Supports proactive hardlinking: when a permanent_dir is set and hardlinks
     are supported, a hardlink is created to permanent storage immediately when
     the event file is opened. This ensures events are written to both locations
     simultaneously and no data is lost if the process crashes.
     """
+
+    # Maximum events per file before rotation (~100 bytes/event, targeting ~128KB)
+    MAX_EVENTS_PER_FILE = 1280
 
     def __init__(self, initial_count: int = 0, permanent_dir: Path | None = None):
         """Initialize event writer
@@ -356,6 +363,7 @@ class EventWriter(ABC):
         self._count = initial_count
         self._file = None
         self._permanent_dir = permanent_dir
+        self._events_in_current_file = 0
         self._use_hardlinks: bool | None = None  # None = not checked yet
         self._hardlink_created_for_count: int | None = (
             None  # Track which file has hardlink
@@ -418,6 +426,26 @@ class EventWriter(ABC):
                     logger.warning("Failed to create hardlink: %s", e)
 
         self._file.write(event.to_json() + "\n")
+        self._events_in_current_file += 1
+
+        # Check if rotation is needed
+        if self._events_in_current_file >= self.MAX_EVENTS_PER_FILE:
+            new_count = self._count + 1
+            # Call hook to update status file before rotation
+            self._on_rotate(new_count)
+            # Then rotate the file
+            self.rotate(new_count)
+
+    def _on_rotate(self, new_count: int) -> None:
+        """Hook called before rotation - subclasses override to update status
+
+        This is called BEFORE the new event file is created, allowing subclasses
+        to update status files (with the new events_count) first.
+
+        Args:
+            new_count: The new event file count after rotation
+        """
+        pass  # Base implementation does nothing
 
     def flush(self) -> None:
         """Flush the current event file to disk"""
@@ -437,6 +465,7 @@ class EventWriter(ABC):
         """Rotate to a new event file (called after status file update)"""
         self.close()
         self._count = new_count
+        self._events_in_current_file = 0
 
     def cleanup(self) -> None:
         """Delete all event files in this directory (temporary files only)"""
@@ -630,6 +659,19 @@ class ExperimentEventWriter(EventWriter):
 
         symlink.symlink_to(rel_path)
 
+    def _on_rotate(self, new_count: int) -> None:
+        """Update experiment status with new events_count before rotation
+
+        This ensures the status file is updated BEFORE the new event file is
+        created, so listeners reading the status know which file to read.
+
+        Note: We update self._count first so experiment.events_count returns
+        the new value when write_status() serializes it.
+        """
+        # Update count first (experiment.events_count delegates to us)
+        self._count = new_count
+        self.experiment.write_status()
+
 
 # =============================================================================
 # Event Reader Class
@@ -729,6 +771,8 @@ class EventReader:
         self._buffering = False
         self._event_buffer: list[tuple[str, EventBase]] = []
         self._deleted_buffer: list[str] = []
+        # Cache for events_count from status.json (entity_dir -> count)
+        self._events_count_cache: dict[Path, int] = {}
 
     def _extract_entity_id(self, path: Path) -> Optional[str]:
         """Extract entity ID from event file path"""
@@ -746,6 +790,29 @@ class EventReader:
             except ValueError:
                 continue
         return None
+
+    def _get_entity_events_count(self, entity_dir: Path) -> int:
+        """Get events_count from status.json in the entity directory
+
+        Returns the events_count from status.json, or 1 if not found.
+        Caches the result and updates when status.json is modified.
+        """
+        status_path = entity_dir / "status.json"
+
+        # Check if status.json exists
+        if not status_path.exists():
+            return 1
+
+        # Read status.json for events_count
+        try:
+            with status_path.open("r") as f:
+                status = json.load(f)
+                events_count = status.get("events_count", 1)
+                self._events_count_cache[entity_dir] = events_count
+                return events_count
+        except (OSError, json.JSONDecodeError):
+            # Fall back to cached value or default
+            return self._events_count_cache.get(entity_dir, 1)
 
     def get_all_event_files(self) -> list[Path]:
         """Get all event files across all directories, sorted by modification time"""
@@ -890,12 +957,63 @@ class EventReader:
         self._handler = None
         logger.debug("Stopped watching all directories")
 
+    def _extract_file_number(self, path: Path) -> int | None:
+        """Extract the file number from event file name.
+
+        E.g., "events-2.jsonl" -> 2, "events-10.jsonl" -> 10
+        Returns None if the file name doesn't match the expected pattern.
+        """
+        import re
+
+        name = path.name
+        # Match events-{number}.jsonl pattern
+        match = re.match(r"events-(\d+)\.jsonl$", name)
+        if match:
+            return int(match.group(1))
+        return None
+
     def _process_file_change(self, path: Path) -> None:
-        """Process a changed event file and notify callbacks (or buffer)"""
+        """Process a changed event file and notify callbacks (or buffer)
+
+        IMPORTANT: When processing a file like events-N.jsonl, we first ensure
+        all earlier files (events-{min_count}.jsonl through events-(N-1).jsonl)
+        have been fully read. This guarantees event ordering even when file
+        system notifications arrive out of order.
+
+        Files numbered below the entity's events_count (from status.json) are
+        skipped, as they have already been processed in a previous run.
+        """
         entity_id = self._extract_entity_id(path)
         if not entity_id:
             return
 
+        entity_dir = path.parent
+        file_number = self._extract_file_number(path)
+
+        # Get the minimum event file number to process
+        min_count = self._get_entity_events_count(entity_dir)
+
+        # Skip files below the events_count threshold
+        if file_number is not None and file_number < min_count:
+            logger.debug(
+                "Skipping %s (file_number=%d < events_count=%d)",
+                path,
+                file_number,
+                min_count,
+            )
+            return
+
+        # Process all earlier files first (from min_count onwards) to maintain ordering
+        if file_number is not None and file_number > min_count:
+            for earlier_num in range(min_count, file_number):
+                earlier_path = entity_dir / f"events-{earlier_num}.jsonl"
+                if earlier_path.exists():
+                    self._process_single_file(earlier_path, entity_id)
+
+        self._process_single_file(path, entity_id)
+
+    def _process_single_file(self, path: Path, entity_id: str) -> None:
+        """Process a single event file and notify callbacks (or buffer)"""
         last_pos = self._file_positions.get(path, 0)
         try:
             with path.open("r") as f:
@@ -943,7 +1061,7 @@ class EventReader:
     def _handle_deletion(
         self,
         entity_id: str,
-        deleted_path: Path | None = None,
+        _deleted_path: Path | None = None,
         dir_config: WatchedDirectory | None = None,
     ) -> None:
         """Handle entity deletion - read from permanent storage if available
