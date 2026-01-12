@@ -271,6 +271,47 @@ class WorkspaceStateProvider(StateProvider):
             for key in keys_to_remove:
                 del self._experiment_cache[key]
 
+    def _get_or_load_job(
+        self, job_id: str, task_id: str, submit_time: float | None
+    ) -> MockJob:
+        """Get job from cache or load from disk and cache it.
+
+        This ensures that job events (progress, state changes) can be applied
+        to cached jobs, keeping them up to date between get_jobs() calls.
+
+        Args:
+            job_id: Job identifier
+            task_id: Task identifier (for job path)
+            submit_time: Submit timestamp (fallback if job directory doesn't exist)
+
+        Returns:
+            MockJob from cache or freshly loaded from disk
+        """
+        with self._job_cache_lock:
+            if job_id in self._job_cache:
+                return self._job_cache[job_id]
+
+            # Load from disk
+            job_path = self.workspace_path / "jobs" / task_id / job_id
+            if job_path.exists():
+                job = self._create_mock_job_from_path(job_path, task_id, job_id)
+            else:
+                # Job directory doesn't exist - create minimal MockJob
+                job = MockJob(
+                    identifier=job_id,
+                    task_id=task_id,
+                    path=job_path,
+                    state="unscheduled",
+                    submittime=submit_time,
+                    starttime=None,
+                    endtime=None,
+                    progress=[],
+                    updated_at="",
+                )
+
+            self._job_cache[job_id] = job
+            return job
+
     # =========================================================================
     # Experiment methods
     # =========================================================================
@@ -588,25 +629,8 @@ class WorkspaceStateProvider(StateProvider):
                 if not all(job_info.tags.get(k) == v for k, v in tags.items()):
                     continue
 
-            # Load full job data from job directory
-            job_path = self.workspace_path / "jobs" / job_info.task_id / job_id
-            if job_path.exists():
-                job = self._create_mock_job_from_path(
-                    job_path, job_info.task_id, job_id
-                )
-            else:
-                # Job directory doesn't exist - create minimal MockJob
-                job = MockJob(
-                    identifier=job_id,
-                    task_id=job_info.task_id,
-                    path=job_path,
-                    state="unscheduled",
-                    submittime=job_info.timestamp,
-                    starttime=None,
-                    endtime=None,
-                    progress=[],
-                    updated_at="",
-                )
+            # Get job from cache or load from disk
+            job = self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
 
             # Apply state filter on loaded job
             if state:
@@ -639,22 +663,7 @@ class WorkspaceStateProvider(StateProvider):
         if job_info is None:
             return None
 
-        job_path = self.workspace_path / "jobs" / job_info.task_id / job_id
-        if job_path.exists():
-            return self._create_mock_job_from_path(job_path, job_info.task_id, job_id)
-        else:
-            # Job directory doesn't exist - create minimal MockJob
-            return MockJob(
-                identifier=job_id,
-                task_id=job_info.task_id,
-                path=job_path,
-                state="unscheduled",
-                submittime=job_info.timestamp,
-                starttime=None,
-                endtime=None,
-                progress=[],
-                updated_at="",
-            )
+        return self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
 
     def get_all_jobs(
         self,

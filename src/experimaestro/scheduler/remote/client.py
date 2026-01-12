@@ -576,7 +576,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         exp = self.get_experiment(experiment_id)
         if exp is None:
             return None
-        return exp.current_run_id
+        return exp.run_id
 
     def get_jobs(
         self,
