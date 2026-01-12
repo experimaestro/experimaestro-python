@@ -282,10 +282,7 @@ def migrate():
 @click.option(
     "--dry-run", is_flag=True, help="Show what would be done without making changes"
 )
-@click.option(
-    "--keep-old", is_flag=True, help="Keep the old xp directory after migration"
-)
-def migrate_v1_to_v2(workdir: Path, dry_run: bool, keep_old: bool):
+def migrate_v1_to_v2(workdir: Path, dry_run: bool):
     """Migrate workspace from v1 (xp/) to v2 (experiments/) layout
 
     This command migrates experiment directories from the old layout:
@@ -364,21 +361,13 @@ def migrate_v1_to_v2(workdir: Path, dry_run: bool, keep_old: bool):
         # Handle old xp directory
         remaining = list(old_xp_dir.iterdir())
         if remaining:
-            if keep_old:
-                # Keep remaining files, rename directory
-                renamed_xp_dir = workdir / "xp_MIGRATED_TO_V2"
-                old_xp_dir.rename(renamed_xp_dir)
-                cprint(
-                    f"Renamed 'xp' -> 'xp_MIGRATED_TO_V2' ({len(remaining)} item(s))",
-                    "yellow",
-                )
-            else:
-                cprint(
-                    f"'xp' directory still contains {len(remaining)} item(s), not removing",
-                    "yellow",
-                )
-                cprint("Remove manually or use --keep-old to rename", "yellow")
-                return
+            # Rename directory to preserve any leftover files
+            renamed_xp_dir = workdir / "xp_MIGRATED_TO_V2"
+            old_xp_dir.rename(renamed_xp_dir)
+            cprint(
+                f"Renamed 'xp' -> 'xp_MIGRATED_TO_V2' ({len(remaining)} leftover item(s))",
+                "yellow",
+            )
         else:
             # Empty directory - remove it
             old_xp_dir.rmdir()
@@ -405,9 +394,9 @@ def experiments(ctx, workdir, workspace):
     ctx.obj = path
 
 
-@experiments.command()
+@experiments.command("list")
 @pass_cfg
-def list(workdir: Path):
+def list_experiments(workdir: Path):
     """List experiments in the workspace"""
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
