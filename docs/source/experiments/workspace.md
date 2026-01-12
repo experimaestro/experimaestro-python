@@ -14,7 +14,8 @@ WORKSPACE_DIR/
 │       ├── lock                    # Lock file (prevents concurrent runs)
 │       └── {run-id}/               # One directory per run
 │           ├── environment.json    # Python environment and git info
-│           ├── status.json         # Complete state snapshot (jobs, services, etc.)
+│           ├── status.json         # Experiment metadata and services state
+│           ├── jobs.jsonl          # Lightweight job information (one per line)
 │           ├── jobs/               # Symlinks to job directories
 │           ├── results/            # Saved experiment results
 │           └── data/               # Serialized configurations
@@ -147,7 +148,8 @@ WORKSPACE_DIR/
 └── experiments/
     └── {experiment-id}/
         └── {run-id}/
-            └── status.json
+            ├── status.json
+            └── jobs.jsonl
 ```
 
 ### Migration (Optional)
@@ -183,7 +185,7 @@ This approach is more robust on network filesystems (NFS) and easier to inspect.
 
 ### Status File (`status.json`)
 
-Each experiment run has a `status.json` file containing the complete state:
+Each experiment run has a `status.json` file containing the experiment metadata and service state:
 
 ```json
 {
@@ -195,34 +197,43 @@ Each experiment run has a `status.json` file containing the complete state:
   "started_at": "2025-01-08T14:30:22.123456",
   "ended_at": "2025-01-08T15:45:10.654321",
   "status": "completed",
-  "jobs": {
-    "<job_id>": {
-      "job_id": "...",
-      "task_id": "...",
-      "state": "done",
-      "submittime": "2025-01-08T14:30:25.000000",
-      "starttime": "2025-01-08T14:31:00.000000",
-      "endtime": "2025-01-08T14:35:00.000000",
-      "progress": 1.0
-    }
-  },
-  "tags": {"<job_id>": {"key": "value"}},
-  "dependencies": {"<job_id>": ["<depends_on_job_id>"]},
+  "finished_jobs": 10,
+  "failed_jobs": 1,
   "services": {
     "<service_id>": {
       "service_id": "...",
       "description": "...",
-      "state": "running",
+      "class": "mypackage.services.MyService",
       "state_dict": {}
     }
   }
 }
 ```
 
+:::{note}
+Job details are stored separately in `jobs.jsonl` rather than in `status.json`.
+This reduces memory usage and allows for efficient streaming of job information.
+:::
+
+### Jobs File (`jobs.jsonl`)
+
+Lightweight job information is stored in a separate JSONL file (one JSON object per line):
+
+```jsonl
+{"job_id": "abc123", "task_id": "my.task.Train", "tags": {"experiment": "v1"}, "timestamp": 1736343025.0}
+{"job_id": "def456", "task_id": "my.task.Evaluate", "tags": {}, "timestamp": 1736343030.5}
+```
+
+Each record contains:
+- `job_id`: Unique job identifier
+- `task_id`: Task type identifier
+- `tags`: Dictionary of job tags
+- `timestamp`: When the job was submitted (Unix timestamp)
+
 ### Event Log
 
 While an experiment is running, events are streamed to a JSONL file at
-`.experimaestro/experiments/events-{count}@{experiment-id}.jsonl`:
+`.events/experiments/events-{count}@{experiment-id}.jsonl`:
 
 ```jsonl
 {"type": "job_submitted", "job_id": "...", "task_id": "...", "timestamp": ...}
@@ -235,7 +246,7 @@ the event log is cleaned up.
 
 ### Current Run Symlink
 
-A symlink at `.experimaestro/experiments/{experiment-id}` points to the current
+A symlink at `.events/experiments/{experiment-id}/current` points to the current
 (or most recent) run directory. This allows quick access to the active run
 without scanning all run directories
 
