@@ -25,7 +25,7 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     BaseService,
-    ExperimentRun,
+    ExperimentStatus,
     JobState,
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
@@ -176,11 +176,12 @@ class StateProvider(ABC):
         ...
 
     @abstractmethod
-    def get_experiment_runs(self, experiment_id: str) -> List[ExperimentRun]:
+    def get_experiment_runs(self, experiment_id: str) -> List[BaseExperiment]:
         """Get all runs for an experiment
 
         Returns:
-            List of ExperimentRun dataclass instances with job statistics
+            List of BaseExperiment instances (MockExperiment for past runs,
+            or live experiment for the current run in Scheduler)
         """
         ...
 
@@ -608,63 +609,121 @@ class MockJob(BaseJob):
 
 
 class MockExperiment(BaseExperiment):
-    """Concrete implementation of BaseExperiment for database-loaded experiments
+    """Concrete implementation of BaseExperiment for loaded experiments
 
-    This class is used when loading experiment information from the database,
+    This class is used when loading experiment information from disk,
     as opposed to live experiment instances which are created during runs.
+
+    It stores all experiment state including jobs, services, tags,
+    dependencies, and event tracking (replaces StatusData).
     """
 
     def __init__(
         self,
         workdir: Path,
-        current_run_id: Optional[str],
-        total_jobs: int,
-        finished_jobs: int,
-        failed_jobs: int,
-        updated_at: str,
+        run_id: str,
+        *,
+        status: ExperimentStatus = ExperimentStatus.RUNNING,
+        events_count: int = 0,
+        hostname: Optional[str] = None,
         started_at: Optional[float] = None,
         ended_at: Optional[float] = None,
-        hostname: Optional[str] = None,
-        *,
-        experiment_id: Optional[str] = None,
+        jobs: Optional[Dict[str, "BaseJob"]] = None,
+        services: Optional[Dict[str, "MockService"]] = None,
+        tags: Optional[Dict[str, Dict[str, str]]] = None,
+        dependencies: Optional[Dict[str, List[str]]] = None,
+        experiment_id_override: Optional[str] = None,
     ):
         self.workdir = workdir
-        self.current_run_id = current_run_id
-        self.total_jobs = total_jobs
-        self.finished_jobs = finished_jobs
-        self.failed_jobs = failed_jobs
-        self.updated_at = updated_at
-        self.started_at = started_at
-        self.ended_at = ended_at
-        self.hostname = hostname
-        self._experiment_id = experiment_id
+        self.run_id = run_id
+        self._status = status
+        self._events_count = events_count
+        self._hostname = hostname
+        self._started_at = started_at
+        self._ended_at = ended_at
+        self._jobs = jobs or {}
+        self._services = services or {}
+        self._tags = tags or {}
+        self._dependencies = dependencies or {}
+        self._experiment_id_override = experiment_id_override
 
     @property
     def experiment_id(self) -> str:
-        """Experiment identifier (explicitly set or derived from workdir structure)"""
-        if self._experiment_id:
-            return self._experiment_id
-        # In new layout, workdir is experiments/{exp-id}/{run-id}
-        # So parent.name gives experiment_id
-        return self.workdir.parent.name
+        """Return experiment_id (overriding base class if needed for v1 layout)"""
+        if self._experiment_id_override:
+            return self._experiment_id_override
+        return super().experiment_id
 
-    def state_dict(self) -> Dict:
-        """Serialize experiment to dictionary
+    # Implement abstract properties from BaseExperiment
 
-        Overrides BaseExperiment.state_dict() to include all MockExperiment fields.
+    @property
+    def status(self) -> ExperimentStatus:
+        return self._status
+
+    @property
+    def jobs(self) -> Dict[str, "BaseJob"]:
+        return self._jobs
+
+    @property
+    def services(self) -> Dict[str, "BaseService"]:
+        return self._services
+
+    @property
+    def tags(self) -> Dict[str, Dict[str, str]]:
+        return self._tags
+
+    @property
+    def dependencies(self) -> Dict[str, List[str]]:
+        return self._dependencies
+
+    @property
+    def events_count(self) -> int:
+        return self._events_count
+
+    @property
+    def hostname(self) -> Optional[str]:
+        return self._hostname
+
+    @property
+    def started_at(self) -> Optional[float]:
+        return self._started_at
+
+    @property
+    def ended_at(self) -> Optional[float]:
+        return self._ended_at
+
+    # state_dict() is inherited from BaseExperiment
+
+    @classmethod
+    def from_disk(
+        cls, run_dir: Path, workspace_path: Path
+    ) -> Optional["MockExperiment"]:
+        """Load MockExperiment from status.json on disk
+
+        Args:
+            run_dir: Path to the run directory containing status.json
+            workspace_path: Workspace path for resolving relative paths
+
+        Returns:
+            MockExperiment instance or None if status.json doesn't exist
         """
-        return {
-            "experiment_id": self.experiment_id,
-            "workdir": str(self.workdir) if self.workdir else None,
-            "current_run_id": self.current_run_id,
-            "total_jobs": self.total_jobs,
-            "finished_jobs": self.finished_jobs,
-            "failed_jobs": self.failed_jobs,
-            "updated_at": self.updated_at,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
-            "hostname": self.hostname,
-        }
+        import fasteners
+
+        status_path = run_dir / "status.json"
+        if not status_path.exists():
+            return None
+
+        lock_path = status_path.parent / f".{status_path.name}.lock"
+        lock = fasteners.InterProcessLock(str(lock_path))
+        with lock:
+            try:
+                with status_path.open("r") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to read %s: %s", status_path, e)
+                return None
+
+        return cls.from_state_dict(data, workspace_path)
 
     @classmethod
     def from_state_dict(cls, d: Dict, workspace_path: Path) -> "MockExperiment":
@@ -677,34 +736,157 @@ class MockExperiment(BaseExperiment):
         Returns:
             MockExperiment instance
         """
-        experiment_id = d["experiment_id"]
-        current_run_id = d.get("current_run_id")
+        experiment_id = d.get("experiment_id", "")
+        run_id = d.get("run_id", "")
 
         # Use workdir from dict if provided, otherwise compute it
         workdir = d.get("workdir")
         if workdir is None:
             # New layout: experiments/{experiment_id}/{run_id}/
-            if current_run_id:
-                workdir = (
-                    workspace_path / "experiments" / experiment_id / current_run_id
-                )
-            else:
-                workdir = workspace_path / "experiments" / experiment_id
+            workdir = workspace_path / "experiments" / experiment_id / run_id
         elif isinstance(workdir, str):
             workdir = Path(workdir)
 
+        # Parse status from string to enum
+        status_str = d.get("status", "running")
+        try:
+            status = ExperimentStatus(status_str)
+        except ValueError:
+            # Handle legacy status values
+            if status_str in ("active", "running"):
+                status = ExperimentStatus.RUNNING
+            elif status_str in ("completed", "done"):
+                status = ExperimentStatus.DONE
+            elif status_str == "failed":
+                status = ExperimentStatus.FAILED
+            else:
+                status = ExperimentStatus.RUNNING
+
+        # Parse jobs from dict
+        jobs_dict = d.get("jobs", {})
+        jobs = {
+            k: MockJob.from_state_dict(v, workspace_path) for k, v in jobs_dict.items()
+        }
+
+        # Parse services from dict (can be list or dict)
+        services_data = d.get("services", {})
+        if isinstance(services_data, list):
+            services = {
+                s.get("service_id", ""): MockService.from_full_state_dict(s)
+                for s in services_data
+            }
+        else:
+            services = {
+                k: MockService.from_full_state_dict(v) for k, v in services_data.items()
+            }
+
         return cls(
             workdir=workdir,
-            current_run_id=d.get("current_run_id"),
-            total_jobs=d.get("total_jobs", 0),
-            finished_jobs=d.get("finished_jobs", 0),
-            failed_jobs=d.get("failed_jobs", 0),
-            updated_at=d.get("updated_at", ""),
+            run_id=run_id,
+            status=status,
+            events_count=d.get("events_count", 0),
+            hostname=d.get("hostname"),
             started_at=d.get("started_at"),
             ended_at=d.get("ended_at"),
-            hostname=d.get("hostname"),
-            experiment_id=experiment_id,
+            jobs=jobs,
+            services=services,
+            tags=d.get("tags", {}),
+            dependencies=d.get("dependencies", {}),
         )
+
+    def apply_event(self, event: "EventBase", workspace_path: Path) -> None:
+        """Apply an event to update experiment state
+
+        Args:
+            event: Event to apply
+            workspace_path: Workspace path for creating job paths
+        """
+        from experimaestro.scheduler.state_status import (
+            JobSubmittedEvent,
+            JobStateChangedEvent,
+            JobProgressEvent,
+            ServiceAddedEvent,
+            RunCompletedEvent,
+        )
+
+        if isinstance(event, JobSubmittedEvent):
+            # Create MockJob for the new job
+            job_path = workspace_path / "jobs" / event.task_id / event.job_id
+            self._jobs[event.job_id] = MockJob(
+                identifier=event.job_id,
+                task_id=event.task_id,
+                path=job_path,
+                state="unscheduled",
+                submittime=event.timestamp,
+                starttime=None,
+                endtime=None,
+                progress=[],
+                updated_at="",
+                transient=TransientMode(event.transient),
+            )
+            if event.tags:
+                self._tags[event.job_id] = event.tags
+            if event.depends_on:
+                self._dependencies[event.job_id] = event.depends_on
+
+        elif isinstance(event, JobStateChangedEvent):
+            if event.job_id in self._jobs:
+                job = self._jobs[event.job_id]
+                # Update job state
+                job.state = STATE_NAME_TO_JOBSTATE.get(event.state, job.state)
+                if event.failure_reason:
+                    try:
+                        job.failure_reason = JobFailureStatus[event.failure_reason]
+                    except KeyError:
+                        pass
+                if event.submitted_time is not None:
+                    job.submittime = event.submitted_time
+                if event.started_time is not None:
+                    job.starttime = event.started_time
+                if event.ended_time is not None:
+                    job.endtime = event.ended_time
+                if event.exit_code is not None:
+                    job.exit_code = event.exit_code
+                if event.retry_count:
+                    job.retry_count = event.retry_count
+                if event.progress:
+                    job.progress = get_progress_information_from_dict(event.progress)
+
+        elif isinstance(event, JobProgressEvent):
+            if event.job_id in self._jobs:
+                from experimaestro.notifications import LevelInformation
+
+                job = self._jobs[event.job_id]
+                level = event.level
+                # Truncate to level + 1 entries
+                job.progress = job.progress[: (level + 1)]
+                # Extend if needed
+                while len(job.progress) <= level:
+                    job.progress.append(LevelInformation(len(job.progress), None, 0.0))
+                # Update the level's progress and description
+                if event.desc:
+                    job.progress[-1].desc = event.desc
+                job.progress[-1].progress = event.progress
+
+        elif isinstance(event, ServiceAddedEvent):
+            self._services[event.service_id] = MockService(
+                service_id=event.service_id,
+                description_text=event.description,
+                service_config_data=event.service_config,
+                experiment_id=self.experiment_id,
+                run_id=self.run_id,
+                state=event.state,
+            )
+
+        elif isinstance(event, RunCompletedEvent):
+            # Map status string to ExperimentStatus
+            if event.status in ("completed", "done"):
+                self._status = ExperimentStatus.DONE
+            elif event.status == "failed":
+                self._status = ExperimentStatus.FAILED
+            else:
+                self._status = ExperimentStatus.RUNNING
+            self._ended_at = event.ended_at
 
 
 class MockService(BaseService):
@@ -758,11 +940,11 @@ class MockService(BaseService):
         return self._service_config_data
 
     @classmethod
-    def from_state_dict(cls, d: Dict) -> "MockService":
-        """Create MockService from state dictionary
+    def from_full_state_dict(cls, d: Dict) -> "MockService":
+        """Create MockService from full state dictionary
 
         Args:
-            d: Dictionary from state_dict()
+            d: Dictionary from full_state_dict()
 
         Returns:
             MockService instance
@@ -776,6 +958,18 @@ class MockService(BaseService):
             url=d.get("url"),
             state=d.get("state", "STOPPED"),
         )
+
+    def to_service(self) -> "BaseService":
+        """Try to recreate a live Service instance from this mock.
+
+        Attempts to recreate the service using the stored configuration.
+        If recreation fails, returns self.
+
+        Returns:
+            A live Service instance or self if recreation is not possible
+        """
+        # Just return self - service recreation from config not implemented
+        return self
 
 
 __all__ = [

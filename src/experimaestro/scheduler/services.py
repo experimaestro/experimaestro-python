@@ -88,10 +88,10 @@ class Service(BaseService):
         d["__class__"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         return d
 
-    def state_dict(self) -> dict:
-        """Serialize service to dictionary (single source of truth).
+    def full_state_dict(self) -> dict:
+        """Serialize service to dictionary for JSON serialization.
 
-        Overrides BaseService.state_dict() to properly serialize Path objects.
+        Overrides BaseService.full_state_dict() to properly serialize Path objects.
         """
         state = self.state
         state_str = state.name if hasattr(state, "name") else str(state)

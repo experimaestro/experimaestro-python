@@ -226,25 +226,23 @@ class TestExperimentSerialization:
 
     def test_serialize_mock_experiment(self):
         """Test serializing a MockExperiment using state_dict()"""
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
         # New layout: experiments/{experiment_id}/{run_id}
         exp = MockExperiment(
             workdir=Path("/tmp/experiments/myexp/run_20240101"),
-            current_run_id="run_20240101",
-            total_jobs=10,
-            finished_jobs=5,
-            failed_jobs=1,
-            updated_at="2024-01-01T12:00:00",
+            run_id="run_20240101",
+            status=ExperimentStatus.RUNNING,
             started_at=1704067200.0,
             ended_at=None,
             hostname="server1",
-            experiment_id="myexp",
         )
 
         result = exp.state_dict()
 
         assert result["experiment_id"] == "myexp"
-        assert result["workdir"] == "/tmp/experiments/myexp/run_20240101"
-        assert result["current_run_id"] == "run_20240101"
+        assert result["run_id"] == "run_20240101"
+        assert result["status"] == "running"
 
 
 class TestServiceSerialization:
@@ -262,7 +260,7 @@ class TestServiceSerialization:
             state="RUNNING",
         )
 
-        result = service.state_dict()
+        result = service.full_state_dict()
 
         assert result["service_id"] == "svc123"
         assert result["description"] == "Test service"
@@ -271,7 +269,7 @@ class TestServiceSerialization:
 
 
 # =============================================================================
-# SSH Round-Trip Tests (Mock → state_dict → client → Mock)
+# SSH Round-Trip Tests (Mock → full_state_dict → client → Mock)
 # =============================================================================
 
 
@@ -341,6 +339,7 @@ class TestSSHRoundTrip:
 
     def test_mockexperiment_ssh_roundtrip(self, tmp_path: Path):
         """Test MockExperiment round-trip through SSH serialization path"""
+        from experimaestro.scheduler.interfaces import ExperimentStatus
         from experimaestro.scheduler.remote.client import SSHStateProviderClient
 
         workspace_path = tmp_path / "workspace"
@@ -351,15 +350,11 @@ class TestSSHRoundTrip:
         # Create original MockExperiment
         original = MockExperiment(
             workdir=workspace_path / "experiments" / "test_exp" / "run_001",
-            current_run_id="run_001",
-            total_jobs=10,
-            finished_jobs=5,
-            failed_jobs=1,
-            updated_at="2024-01-01T12:00:00",
+            run_id="run_001",
+            status=ExperimentStatus.RUNNING,
             started_at=1234567890.0,
             ended_at=None,
             hostname="testhost",
-            experiment_id="test_exp",
         )
 
         # Server-side: serialize using state_dict
@@ -390,8 +385,8 @@ class TestSSHRoundTrip:
             state="RUNNING",
         )
 
-        # Server-side: serialize using state_dict
-        serialized = original.state_dict()
+        # Server-side: serialize using full_state_dict
+        serialized = original.full_state_dict()
 
         # Client-side: deserialize using _dict_to_service
         mock_client = MockSSHClient(
@@ -400,8 +395,8 @@ class TestSSHRoundTrip:
         )
         restored = SSHStateProviderClient._dict_to_service(mock_client, serialized)
 
-        # Verify equality by comparing state_dict outputs
-        assert original.state_dict() == restored.state_dict()
+        # Verify equality by comparing full_state_dict outputs
+        assert original.full_state_dict() == restored.full_state_dict()
 
 
 # =============================================================================
@@ -443,15 +438,13 @@ class TestServerRequestHandling:
 
     def test_handle_get_experiments(self, server_with_mock, mock_state_provider):
         """Test handling get_experiments request"""
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
         # New layout: experiments/{exp-id}/{run-id}
         mock_exp = MockExperiment(
             workdir=Path("/tmp/experiments/exp1/run1"),
-            current_run_id="run1",
-            total_jobs=5,
-            finished_jobs=3,
-            failed_jobs=0,
-            updated_at="2024-01-01T00:00:00",
-            experiment_id="exp1",
+            run_id="run1",
+            status=ExperimentStatus.RUNNING,
         )
         mock_state_provider.get_experiments.return_value = [mock_exp]
 
@@ -463,22 +456,20 @@ class TestServerRequestHandling:
 
     def test_handle_get_experiment(self, server_with_mock, mock_state_provider):
         """Test handling get_experiment request"""
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
         # New layout: experiments/{exp-id}/{run-id}
         mock_exp = MockExperiment(
             workdir=Path("/tmp/experiments/exp1/run1"),
-            current_run_id="run1",
-            total_jobs=5,
-            finished_jobs=3,
-            failed_jobs=0,
-            updated_at="2024-01-01T00:00:00",
-            experiment_id="exp1",
+            run_id="run1",
+            status=ExperimentStatus.RUNNING,
         )
         mock_state_provider.get_experiment.return_value = mock_exp
 
         result = server_with_mock._handle_get_experiment({"experiment_id": "exp1"})
 
         assert result["experiment_id"] == "exp1"
-        assert result["current_run_id"] == "run1"
+        assert result["run_id"] == "run1"
         mock_state_provider.get_experiment.assert_called_once_with("exp1")
 
     def test_handle_get_experiment_not_found(
@@ -495,18 +486,15 @@ class TestServerRequestHandling:
 
     def test_handle_get_experiment_runs(self, server_with_mock, mock_state_provider):
         """Test handling get_experiment_runs request"""
-        from experimaestro.scheduler.interfaces import ExperimentRun
+        from experimaestro.scheduler.interfaces import ExperimentStatus
 
-        mock_run = ExperimentRun(
+        mock_run = MockExperiment(
+            workdir=Path("/tmp/experiments/exp1/run1"),
             run_id="run1",
-            experiment_id="exp1",
+            status=ExperimentStatus.DONE,
             hostname="server1",
             started_at=1704067200.0,
             ended_at=1704070800.0,
-            status="completed",
-            total_jobs=10,
-            finished_jobs=10,
-            failed_jobs=0,
         )
         mock_state_provider.get_experiment_runs.return_value = [mock_run]
 
@@ -514,7 +502,7 @@ class TestServerRequestHandling:
 
         assert len(result) == 1
         assert result[0]["run_id"] == "run1"
-        assert result[0]["status"] == "completed"
+        assert result[0]["status"] == "done"
 
     def test_handle_get_jobs(self, server_with_mock, mock_state_provider):
         """Test handling get_jobs request"""
@@ -937,14 +925,12 @@ class TestClientDataConversion:
 
     def test_dict_to_experiment(self, client, tmp_path):
         """Test converting dictionary to MockExperiment"""
+        # New layout: experiments/{experiment_id}/{run_id}
         exp_dict = {
             "experiment_id": "myexp",
-            "workdir": "/remote/workspace/xp/myexp",
-            "current_run_id": "run1",
-            "total_jobs": 10,
-            "finished_jobs": 5,
-            "failed_jobs": 1,
-            "updated_at": "2024-01-01T12:00:00",
+            "workdir": "/remote/workspace/experiments/myexp/run1",
+            "run_id": "run1",
+            "status": "running",
             "hostname": "server1",
         }
 
@@ -952,8 +938,7 @@ class TestClientDataConversion:
 
         assert exp.experiment_id == "myexp"
         # Path should be mapped to local cache
-        assert exp.workdir == tmp_path / "xp/myexp"
-        assert exp.total_jobs == 10
+        assert exp.workdir == tmp_path / "experiments/myexp/run1"
         assert exp.hostname == "server1"
 
     def test_path_mapping_outside_workspace(self, client):

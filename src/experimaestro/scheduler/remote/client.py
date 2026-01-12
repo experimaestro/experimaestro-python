@@ -836,8 +836,8 @@ class SSHStateProviderClient(OfflineStateProvider):
                     url=d.get("url"),
                 )
 
-        # No service_config or no __class__ - use MockService.from_state_dict
-        return MockService.from_state_dict(d)
+        # No service_config or no __class__ - use MockService.from_full_state_dict
+        return MockService.from_full_state_dict(d)
 
     def _parse_datetime_to_timestamp(self, value) -> Optional[float]:
         """Convert datetime value to Unix timestamp

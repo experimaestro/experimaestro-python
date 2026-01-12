@@ -8,8 +8,6 @@ Key components:
 - EventWriter/EventReader: Base classes for event I/O
 - JobEventWriter: Job-specific event handling
 - ExperimentEventWriter/ExperimentEventReader: Experiment-specific event handling
-- StatusData: Dataclass representing status.json content
-- StatusFile: Class for locked read/write of status files
 
 File structure:
 - workspace/.events/experiments/{experiment-id}/events-{count}.jsonl
@@ -25,14 +23,12 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-import fasteners
 
 if TYPE_CHECKING:
-    from experimaestro.scheduler.interfaces import BaseJob, BaseService
+    from experimaestro.scheduler.interfaces import BaseExperiment
 
 logger = logging.getLogger("xpm.state_status")
 
@@ -332,317 +328,6 @@ class ServiceStateChangedEvent(ServiceEventBase):
 
 
 # =============================================================================
-# Status File Data Structure
-# =============================================================================
-
-
-@dataclass
-class StatusData:
-    """Complete status data stored in status.json
-
-    Stores structured objects (MockJob, MockService) for easy access.
-    Uses state_dict() for JSON serialization and from_state_dict() for loading.
-    """
-
-    version: int = STATUS_VERSION
-    experiment_id: str = ""
-    run_id: str = ""
-    events_count: int = 0
-    hostname: Optional[str] = None
-    started_at: Optional[str] = None
-    ended_at: Optional[str] = None
-    status: str = "active"
-    jobs: dict[str, "BaseJob"] = field(default_factory=dict)
-    tags: dict[str, dict[str, str]] = field(default_factory=dict)
-    dependencies: dict[str, list[str]] = field(default_factory=dict)
-    services: dict[str, "BaseService"] = field(default_factory=dict)
-    last_updated: str = ""
-    # Workspace path needed for creating MockJob instances
-    workspace_path: Optional[Path] = field(default=None, repr=False)
-
-    @classmethod
-    def empty(cls) -> "StatusData":
-        """Create empty status data"""
-        return cls()
-
-    def state_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization"""
-        return {
-            "version": self.version,
-            "experiment_id": self.experiment_id,
-            "run_id": self.run_id,
-            "events_count": self.events_count,
-            "hostname": self.hostname,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
-            "status": self.status,
-            "jobs": {k: v.state_dict() for k, v in self.jobs.items()},
-            "tags": self.tags,
-            "dependencies": self.dependencies,
-            "services": {k: v.state_dict() for k, v in self.services.items()},
-            "last_updated": self.last_updated,
-        }
-
-    @classmethod
-    def from_state_dict(cls, d: dict, workspace_path: Path) -> "StatusData":
-        """Create StatusData from dictionary
-
-        Args:
-            d: Dictionary from state_dict() or JSON file
-            workspace_path: Workspace path for computing job paths
-        """
-        from experimaestro.scheduler.state_provider import MockJob, MockService
-
-        # Parse jobs
-        jobs_dict = d.get("jobs", {})
-        jobs = {
-            k: MockJob.from_state_dict(v, workspace_path) for k, v in jobs_dict.items()
-        }
-
-        # Parse services
-        services_dict = d.get("services", {})
-        services = {k: MockService.from_state_dict(v) for k, v in services_dict.items()}
-
-        return cls(
-            version=d.get("version", STATUS_VERSION),
-            experiment_id=d.get("experiment_id", ""),
-            run_id=d.get("run_id", ""),
-            events_count=d.get("events_count", 0),
-            hostname=d.get("hostname"),
-            started_at=d.get("started_at"),
-            ended_at=d.get("ended_at"),
-            status=d.get("status", "active"),
-            jobs=jobs,
-            tags=d.get("tags", {}),
-            dependencies=d.get("dependencies", {}),
-            services=services,
-            last_updated=d.get("last_updated", ""),
-            workspace_path=workspace_path,
-        )
-
-    def apply_event(self, event: EventBase) -> None:
-        """Apply an event to update the status data"""
-        from experimaestro.scheduler.state_provider import MockJob, MockService
-        from experimaestro.scheduler.transient import TransientMode
-
-        if isinstance(event, JobSubmittedEvent):
-            # Create MockJob for the new job
-            job_path = (
-                self.workspace_path / "jobs" / event.task_id / event.job_id
-                if self.workspace_path
-                else Path(f"/jobs/{event.task_id}/{event.job_id}")
-            )
-            self.jobs[event.job_id] = MockJob(
-                identifier=event.job_id,
-                task_id=event.task_id,
-                path=job_path,
-                state="unscheduled",
-                submittime=event.timestamp,
-                starttime=None,
-                endtime=None,
-                progress=[],
-                updated_at="",
-                transient=TransientMode(event.transient),
-            )
-            if event.tags:
-                self.tags[event.job_id] = event.tags
-            if event.depends_on:
-                self.dependencies[event.job_id] = event.depends_on
-
-        elif isinstance(event, JobStateChangedEvent):
-            if event.job_id in self.jobs:
-                job = self.jobs[event.job_id]
-                # Update job state - MockJob stores state as JobState enum
-                from experimaestro.scheduler.interfaces import STATE_NAME_TO_JOBSTATE
-
-                job.state = STATE_NAME_TO_JOBSTATE.get(event.state, job.state)
-                if event.failure_reason:
-                    from experimaestro.scheduler.interfaces import JobFailureStatus
-
-                    try:
-                        job.failure_reason = JobFailureStatus[event.failure_reason]
-                    except KeyError:
-                        pass
-                if event.submitted_time is not None:
-                    job.submittime = event.submitted_time
-                if event.started_time is not None:
-                    job.starttime = event.started_time
-                if event.ended_time is not None:
-                    job.endtime = event.ended_time
-                if event.exit_code is not None:
-                    job.exit_code = event.exit_code
-                if event.retry_count:
-                    job.retry_count = event.retry_count
-                if event.progress:
-                    from experimaestro.notifications import (
-                        get_progress_information_from_dict,
-                    )
-
-                    job.progress = get_progress_information_from_dict(event.progress)
-
-        elif isinstance(event, JobProgressEvent):
-            if event.job_id in self.jobs:
-                from experimaestro.notifications import LevelInformation
-
-                job = self.jobs[event.job_id]
-                level = event.level
-                # Truncate to level + 1 entries
-                job.progress = job.progress[: (level + 1)]
-                # Extend if needed
-                while len(job.progress) <= level:
-                    job.progress.append(LevelInformation(len(job.progress), None, 0.0))
-                # Update the level's progress and description
-                if event.desc:
-                    job.progress[-1].desc = event.desc
-                job.progress[-1].progress = event.progress
-
-        elif isinstance(event, ServiceAddedEvent):
-            self.services[event.service_id] = MockService(
-                service_id=event.service_id,
-                description_text=event.description,
-                service_config_data=event.service_config,
-                experiment_id=self.experiment_id,
-                run_id=self.run_id,
-                state=event.state,
-            )
-
-        elif isinstance(event, RunCompletedEvent):
-            self.status = event.status
-            self.ended_at = event.ended_at
-
-
-# =============================================================================
-# Status File Handler
-# =============================================================================
-
-
-class StatusFile:
-    """Base class for status file handling with locking
-
-    Provides atomic read/write operations with inter-process locking.
-    Works with plain dicts - the unified format from status_dict().
-
-    Subclasses:
-    - ExperimentStatusFile: For experiment status.json files
-    - JobStatusFile: For job information.json files
-    """
-
-    def __init__(self, directory: Path, filename: str):
-        """Initialize status file handler
-
-        Args:
-            directory: Directory containing the status file
-            filename: Name of the status file
-        """
-        self.directory = directory
-        self.path = directory / filename
-        self._lock_path = directory / f".{filename}.lock"
-
-    def read_locked(self) -> tuple[dict, fasteners.InterProcessLock]:
-        """Acquire lock and read status. Caller MUST release lock when done."""
-        lock = fasteners.InterProcessLock(str(self._lock_path))
-        lock.acquire()
-        try:
-            return self._read(), lock
-        except Exception:
-            lock.release()
-            raise
-
-    def write_locked(self, data: dict, lock: fasteners.InterProcessLock) -> None:
-        """Write status and release lock"""
-        try:
-            self._write(data)
-        finally:
-            lock.release()
-
-    def read(self) -> dict:
-        """Read status file (brief lock for consistency)"""
-        if not self.path.exists():
-            return {}
-        lock = fasteners.InterProcessLock(str(self._lock_path))
-        with lock:
-            return self._read()
-
-    def write(self, data: dict) -> None:
-        """Write status file (with lock)"""
-        self.directory.mkdir(parents=True, exist_ok=True)
-        lock = fasteners.InterProcessLock(str(self._lock_path))
-        with lock:
-            self._write(data)
-
-    def _read(self) -> dict:
-        """Internal read (no locking)"""
-        if not self.path.exists():
-            return {}
-        try:
-            with self.path.open("r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to read %s: %s", self.path, e)
-            return {}
-
-    def _write(self, data: dict) -> None:
-        """Internal write - atomic via temp + rename"""
-        data["last_updated"] = datetime.now().isoformat()
-        temp_path = self.path.with_suffix(".json.tmp")
-        with temp_path.open("w") as f:
-            json.dump(data, f, indent=2)
-        temp_path.replace(self.path)
-
-
-class ExperimentStatusFile(StatusFile):
-    """Handles experiment status.json files with StatusData conversion
-
-    Extends StatusFile to provide StatusData-specific read/write methods
-    for backward compatibility with existing code.
-    """
-
-    def __init__(self, run_dir: Path, workspace_path: Optional[Path] = None):
-        super().__init__(run_dir, "status.json")
-        self.run_dir = run_dir
-        self.workspace_path = workspace_path or run_dir.parent.parent.parent
-
-    def read_status_data(self) -> "StatusData":
-        """Read and convert to StatusData object"""
-        d = self.read()
-        if not d:
-            return StatusData.empty()
-        return StatusData.from_state_dict(d, self.workspace_path)
-
-    def write_status_data(self, data: "StatusData") -> None:
-        """Write StatusData object"""
-        self.write(data.state_dict())
-
-    # Backward compatible methods that return StatusData
-    def read_locked_status_data(
-        self,
-    ) -> tuple["StatusData", fasteners.InterProcessLock]:
-        """Acquire lock and read status as StatusData"""
-        d, lock = self.read_locked()
-        if not d:
-            return StatusData.empty(), lock
-        return StatusData.from_state_dict(d, self.workspace_path), lock
-
-    def write_locked_status_data(
-        self, data: "StatusData", lock: fasteners.InterProcessLock
-    ) -> None:
-        """Write StatusData and release lock"""
-        self.write_locked(data.state_dict(), lock)
-
-
-class JobStatusFile(StatusFile):
-    """Handles job information.json files
-
-    Provides access to job status stored in the job's .experimaestro directory.
-    """
-
-    def __init__(self, job_path: Path):
-        xpm_dir = job_path / ".experimaestro"
-        super().__init__(xpm_dir, "information.json")
-        self.job_path = job_path
-
-
-# =============================================================================
 # Event Writer Classes
 # =============================================================================
 
@@ -858,69 +543,66 @@ class ExperimentEventWriter(EventWriter):
 
     def __init__(
         self,
+        experiment: "BaseExperiment",
         workspace_path: Path,
-        experiment_id: str,
         initial_count: int = 0,
-        run_dir: Path | None = None,
     ):
         """Initialize experiment event writer
 
         Args:
+            experiment: The experiment (BaseExperiment) to write events for
             workspace_path: Path to workspace directory
-            experiment_id: Experiment identifier
             initial_count: Starting event file count for rotation
-            run_dir: Optional run directory path for permanent storage
         """
+        from experimaestro.scheduler.interfaces import BaseExperiment
+
+        assert isinstance(experiment, BaseExperiment), (
+            f"experiment must be a BaseExperiment, got {type(experiment)}"
+        )
         # Permanent storage: run_dir/events/
+        run_dir = experiment.run_dir
         permanent_dir = run_dir / "events" if run_dir else None
         super().__init__(initial_count, permanent_dir)
+        self.experiment = experiment
         self.workspace_path = workspace_path
-        self.experiment_id = experiment_id
-        self.run_dir = run_dir
-        self._events_dir = workspace_path / ".events" / "experiments" / experiment_id
+        self._events_dir = (
+            workspace_path / ".events" / "experiments" / experiment.experiment_id
+        )
 
     @property
     def events_dir(self) -> Path:
         return self._events_dir
 
-    def init_status(
-        self,
-        run_dir: Path,
-        run_id: str,
-        hostname: str,
-    ) -> StatusData:
+    @property
+    def experiment_id(self) -> str:
+        return self.experiment.experiment_id
+
+    @property
+    def run_dir(self) -> Path | None:
+        return self.experiment.run_dir
+
+    def init_status(self) -> None:
         """Initialize status.json for a new run
 
-        Args:
-            run_dir: Path to the run directory
-            run_id: Run identifier
-            hostname: Hostname where experiment is running
-
-        Returns:
-            Initialized StatusData
+        Uses the experiment's write_status() method to write the initial status.
         """
-        data = StatusData(
-            version=STATUS_VERSION,
-            experiment_id=self.experiment_id,
-            run_id=run_id,
-            events_count=0,
-            hostname=hostname,
-            started_at=datetime.now().isoformat(),
-            status="active",
-        )
-        status_file = ExperimentStatusFile(run_dir, self.workspace_path)
-        status_file.write_status_data(data)
-        return data
+        # Ensure run directory exists
+        run_dir = self.experiment.run_dir
+        if run_dir:
+            run_dir.mkdir(parents=True, exist_ok=True)
+            # Write initial status using experiment's write_status method
+            self.experiment.write_status()
 
-    def create_symlink(self, run_dir: Path) -> None:
+    def create_symlink(self) -> None:
         """Create/update symlink to current run directory
 
         The symlink is created at:
         .events/experiments/{experiment_id}/current -> run_dir
-
-        Args:
-            run_dir: Path to the current run directory
         """
+        run_dir = self.experiment.run_dir
+        if run_dir is None:
+            return
+
         # Ensure the experiment events directory exists
         self._events_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1006,8 +688,6 @@ class WatchedDirectory:
         glob_pattern: Pattern for matching event files
         permanent_storage_resolver: Optional function that returns permanent storage
             path for an entity. Used for hardlink archiving and deletion recovery.
-        status_file_class: Optional StatusFile subclass for reading entity status
-            when event files are deleted.
     """
 
     path: Path
@@ -1015,9 +695,8 @@ class WatchedDirectory:
         default_factory=lambda: default_entity_id_extractor
     )
     glob_pattern: str = "*/events-*.jsonl"
-    # NEW fields for archiving and deletion handling:
+    # For archiving and deletion handling:
     permanent_storage_resolver: PermanentStorageResolver | None = None
-    status_file_class: type[StatusFile] | None = None
 
 
 class EventReader:
@@ -1552,11 +1231,6 @@ __all__ = [
     "ServiceStateChangedEvent",
     "RunCompletedEvent",
     "EVENT_TYPES",
-    # Status classes
-    "StatusData",
-    "StatusFile",
-    "ExperimentStatusFile",
-    "JobStatusFile",
     # Event writer classes
     "EventWriter",
     "JobEventWriter",

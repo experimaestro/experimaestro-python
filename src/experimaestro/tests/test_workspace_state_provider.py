@@ -246,7 +246,7 @@ class TestGetExperiments:
         exp = provider.get_experiment("v2-multi-run")
 
         assert exp is not None
-        assert exp.current_run_id == "20260101_120000"
+        assert exp.run_id == "20260101_120000"
         assert exp.total_jobs == 3
         assert exp.finished_jobs == 1  # 1 done
         assert exp.failed_jobs == 0
@@ -281,11 +281,13 @@ class TestGetExperimentRuns:
 
     def test_v2_run_metadata(self, mock_workspace):
         """Run should contain correct metadata"""
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
         provider = WorkspaceStateProvider(mock_workspace)
         runs = provider.get_experiment_runs("v2-multi-run")
 
         current_run = next(r for r in runs if r.run_id == "20260101_120000")
-        assert current_run.status == "active"
+        assert current_run.status == ExperimentStatus.RUNNING
         assert current_run.hostname == "test-host"
         assert current_run.total_jobs == 3
 

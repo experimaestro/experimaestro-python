@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import time
 from shutil import rmtree
-from typing import TYPE_CHECKING, Any, Dict, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeVar, Union
 
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
@@ -15,13 +15,13 @@ from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
 from experimaestro.scheduler.jobs import Job
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
-from experimaestro.scheduler.interfaces import BaseExperiment
+from experimaestro.scheduler.interfaces import BaseExperiment, BaseService
 from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
 from experimaestro.experiments.configuration import DirtyGitAction
 from experimaestro.utils import logger
 
 if TYPE_CHECKING:
-    from experimaestro.scheduler.state_status import StatusData
+    from experimaestro.scheduler.interfaces import ExperimentStatus
     from experimaestro.scheduler.state_status import ExperimentEventWriter
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
@@ -57,22 +57,22 @@ class GracefulExperimentExit(Exception):
 
 
 class StateListener:
-    """Listener that writes service events to filesystem and tracks experiment state
+    """Listener that writes events to filesystem
 
-    Job state events are now written to per-job event files by the scheduler.
-    This listener only handles experiment-level events (services) and updates
-    the in-memory status for job tracking.
+    Job state events are written to per-job event files by the scheduler.
+    This listener writes experiment-level events (job state, services) to
+    the experiment event file.
     """
 
     def __init__(
         self,
         event_writer: "ExperimentEventWriter",
-        status_data: "StatusData",
+        experiment: "experiment",
         experiment_id: str,
         run_id: str,
     ):
         self.event_writer = event_writer
-        self.status_data = status_data
+        self.experiment = experiment
         self.experiment_id = experiment_id
         self.run_id = run_id
 
@@ -81,7 +81,7 @@ class StateListener:
         pass
 
     def job_state(self, job):
-        """Write job state change event to experiment event file and update in-memory status"""
+        """Write job state change event to experiment event file"""
         from .state_status import JobStateChangedEvent
 
         # Get failure reason if error state
@@ -108,12 +108,11 @@ class StateListener:
             retry_count=getattr(job, "retry_count", 0),
             progress=progress,
         )
-        # Write to experiment event file and update in-memory status
+        # Write to experiment event file
         self.event_writer.write_event(event)
-        self.status_data.apply_event(event)
 
     def service_add(self, service):
-        """Write service added event to filesystem and update status"""
+        """Write service added event to filesystem"""
         from experimaestro.scheduler.services import Service
         from .state_status import ServiceAddedEvent
 
@@ -125,7 +124,6 @@ class StateListener:
             service_config=service_config,
         )
         self.event_writer.write_event(event)
-        self.status_data.apply_event(event)
 
     def service_state_changed(self, service):
         """Called when service state changes (runtime only, not persisted)"""
@@ -272,7 +270,7 @@ class experiment(BaseExperiment):
         self.workdir = None
         self.xplock = None
         self.old_experiment = None
-        self.services: Dict[str, Service] = {}
+        self._services: Dict[str, Service] = {}
         self._job_listener: Optional[Listener] = None
         self._register_signals = register_signals
         self._dirty_git = dirty_git
@@ -344,45 +342,55 @@ class experiment(BaseExperiment):
         return self.name
 
     @property
-    def current_run_id(self) -> Optional[str]:
-        """Current run ID for this experiment"""
-        return self.run_id
+    def status(self) -> "ExperimentStatus":
+        """Experiment status - RUNNING for live experiments, updated on finalization"""
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
+        return getattr(self, "_status", ExperimentStatus.RUNNING)
 
     @property
-    def total_jobs(self) -> int:
-        """Total number of jobs in this experiment"""
-        return sum(1 for job in self.scheduler.jobs.values() if self in job.experiments)
-
-    @property
-    def finished_jobs(self) -> int:
-        """Number of completed jobs"""
-        return sum(
-            1
+    def jobs(self) -> Dict[str, "Job"]:
+        """Jobs in this experiment"""
+        return {
+            job.identifier: job
             for job in self.scheduler.jobs.values()
-            if self in job.experiments and job.state.name == "done"
-        )
+            if self in job.experiments
+        }
 
     @property
-    def failed_jobs(self) -> int:
-        """Number of failed jobs"""
-        return len(self.failedJobs)
+    def tags(self) -> Dict[str, Dict[str, str]]:
+        """Tags for jobs - tracked directly in experiment"""
+        return self._tags
+
+    @property
+    def dependencies(self) -> Dict[str, List[str]]:
+        """Job dependencies - tracked directly in experiment"""
+        return self._dependencies
+
+    @property
+    def events_count(self) -> int:
+        """Number of events processed"""
+        return self._events_count
 
     @property
     def started_at(self) -> Optional[float]:
         """Timestamp when experiment started"""
-        return getattr(self, "_started_at", None)
+        return self._started_at
 
     @property
     def ended_at(self) -> Optional[float]:
         """Timestamp when experiment ended (None if still running)"""
-        return getattr(self, "_ended_at", None)
+        return self._ended_at
 
     @property
     def hostname(self) -> Optional[str]:
         """Hostname where experiment is running"""
-        import socket
+        return self._hostname
 
-        return socket.gethostname()
+    @property
+    def services(self) -> Dict[str, "BaseService"]:
+        """Services in this experiment"""
+        return self._services
 
     @property
     def alt_jobspaths(self):
@@ -473,16 +481,21 @@ class experiment(BaseExperiment):
                     if hasattr(dep, "identifier"):
                         depends_on.append(dep.identifier)
 
+            job_tags = dict(job.tags.items()) if job.tags else {}
             event = JobSubmittedEvent(
                 job_id=job.identifier,
                 task_id=str(job.type.identifier),
                 transient=job.transient.value if hasattr(job, "transient") else 0,
-                tags=dict(job.tags.items()) if job.tags else {},
+                tags=job_tags,
                 depends_on=depends_on,
             )
             self._event_writer.write_event(event)
-            if self._status_data is not None:
-                self._status_data.apply_event(event)
+
+            # Track tags and dependencies directly in experiment
+            if job_tags:
+                self._tags[job.identifier] = job_tags
+            if depends_on:
+                self._dependencies[job.identifier] = depends_on
 
     def _finalize_run(self, status: str) -> None:
         """Finalize the run: write final status.json and archive event files
@@ -491,23 +504,25 @@ class experiment(BaseExperiment):
             status: Final status ("completed" or "failed")
         """
         from datetime import datetime
-        from .state_status import ExperimentStatusFile, RunCompletedEvent
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+        from .state_status import RunCompletedEvent
 
-        # Update final status in the in-memory data
-        ended_at = datetime.now().isoformat()
-        self._status_data.status = status
-        self._status_data.ended_at = ended_at
+        # Update final status in the experiment
+        self._ended_at = datetime.now().timestamp()
+        if status in ("completed", "done"):
+            self._status = ExperimentStatus.DONE
+        elif status == "failed":
+            self._status = ExperimentStatus.FAILED
 
         # Write RunCompletedEvent before closing the event writer
-        event = RunCompletedEvent(status=status, ended_at=ended_at)
+        event = RunCompletedEvent(status=status, ended_at=datetime.now().isoformat())
         self._event_writer.write_event(event)
 
         # Close the event writer to flush any buffered events
         self._event_writer.close()
 
-        # Write final status.json
-        status_file = ExperimentStatusFile(self.workdir, self.workspace.path)
-        status_file.write_status_data(self._status_data)
+        # Write final status.json using write_status()
+        self.write_status()
 
         # Archive event files to permanent storage
         self._event_writer.archive_events()
@@ -712,42 +727,43 @@ class experiment(BaseExperiment):
         is_normal_mode = self.workspace.run_mode == RunMode.NORMAL
         self._event_writer = None
         self._state_listener = None
-        self._status_data = None
+
+        # Track job tags and dependencies directly (no more StatusData)
+        self._tags: Dict[str, Dict[str, str]] = {}
+        self._dependencies: Dict[str, List[str]] = {}
+        self._events_count = 0
+        self._hostname: Optional[str] = None
+        self._started_at: Optional[float] = None
+        self._ended_at: Optional[float] = None
 
         if is_normal_mode:
             import socket
-            from .state_status import ExperimentStatusFile
 
             # Create event writer for this experiment
             # Events are written to experiments/{experiment_id}/events-{count}.jsonl
             # Permanent storage: workdir/events/
-            self._event_writer = ExperimentEventWriter(
-                self.workspace.path, self.name, 0, run_dir=self.workdir
-            )
+            self._event_writer = ExperimentEventWriter(self, self.workspace.path, 0)
 
             # Initialize status.json for this run
-            hostname = socket.gethostname()
-            self._event_writer.init_status(self.workdir, self.run_id, hostname)
-
-            # Read the initial status data (we'll update it in memory)
-            status_file = ExperimentStatusFile(self.workdir, self.workspace.path)
-            self._status_data = status_file.read_status_data()
+            self._hostname = socket.gethostname()
+            self._started_at = datetime.now().timestamp()
+            self._event_writer.init_status()
 
             # Create symlink to current run
-            self._event_writer.create_symlink(self.workdir)
+            self._event_writer.create_symlink()
 
             # Add run info to environment.json
             env_path = self.workdir / "environment.json"
             env = ExperimentEnvironment.load(env_path)
             env.run = ExperimentRunInfo(
-                hostname=hostname,
+                hostname=self._hostname,
                 started_at=datetime.now().isoformat(),
             )
             env.save(env_path)
 
-            # Add state listener to write events to filesystem and update status
+            # Add state listener to write events to filesystem
             self._state_listener = StateListener(
-                self._event_writer, self._status_data, self.name, self.run_id
+                self._event_writer, self, self.name, self.run_id
             )
             self.scheduler.addlistener(self._state_listener)
 
@@ -868,14 +884,6 @@ class experiment(BaseExperiment):
                         if symlink_path.is_symlink():
                             symlink_path.unlink()
 
-            # Write the state
-            logging.info("Saving the experiment state")
-            from experimaestro.scheduler.state import ExperimentState
-
-            ExperimentState.save(
-                self.workdir / "state.json", self.scheduler.jobs.values()
-            )
-
             # Cleanup old runs based on history settings
             try:
                 cleanup_experiment_history(
@@ -930,7 +938,7 @@ class experiment(BaseExperiment):
                     id(service),
                 )
 
-        self.services[service.id] = service
+        self._services[service.id] = service
 
         # Allow service to access experiment context
         service.set_experiment(self)
@@ -1031,7 +1039,7 @@ class experiment(BaseExperiment):
 
 
 def get_run_status(run_dir: Path) -> Optional[str]:
-    """Get the status of a run from its state.json or environment.json.
+    """Get the status of a run from its status.json or environment.json.
 
     Args:
         run_dir: Path to the run directory
@@ -1051,16 +1059,21 @@ def get_run_status(run_dir: Path) -> Optional[str]:
         except Exception:
             pass
 
-    # Fall back to state.json
-    state_path = run_dir / "state.json"
-    if state_path.exists():
+    # Fall back to status.json
+    status_path = run_dir / "status.json"
+    if status_path.exists():
         try:
-            with state_path.open() as f:
-                state = json.load(f)
-                # If state exists and all jobs succeeded, it's completed
-                # Failed jobs are indicated in the state
-                jobs = state.get("jobs", [])
-                if any(j.get("state") == "error" for j in jobs):
+            with status_path.open() as f:
+                status = json.load(f)
+                # Check the experiment status field
+                exp_status = status.get("status")
+                if exp_status == "done":
+                    return "completed"
+                elif exp_status == "failed":
+                    return "failed"
+                # Check job states as fallback
+                jobs = status.get("jobs", {})
+                if any(j.get("state") == "error" for j in jobs.values()):
                     return "failed"
                 return "completed"
         except Exception:

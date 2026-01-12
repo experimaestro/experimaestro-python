@@ -992,7 +992,7 @@ class ConfigInformation:
 
         Note: Tags are no longer stored in params.json. They are managed by the
         experiment state provider (scoped to job_id, experiment_id, run_id) and
-        also stored in experiment state.json for full experiment details.
+        also stored in experiment status.json.
 
         Arguments:
             out {io.TextIOBase} -- The output stream

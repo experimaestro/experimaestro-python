@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from experimaestro import Task, Param, get_experiment, tag
+from experimaestro import Task, Param
 from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
 from experimaestro.scheduler.experiment import cleanup_experiment_history
 from experimaestro.settings import HistorySettings
@@ -20,41 +20,6 @@ class TaskB(Task):
 
     def execute(self):
         pass
-
-
-# xp = get_experiment(id="my-xp-1")
-
-# # Returns a list of tasks which were submitted and successful
-# tasks = xp.get_tasks(myxps.evaluation.Evaluation, status=Job.DONE)
-
-# for task in tasks:
-#     # Look at the tags
-#     print(task.tags)
-
-#     # Get some information
-#     print("Task ran in {task.workdir}")
-
-#     # Look at the parent jobs
-#    print(task.depends_on)
-
-#    # Look at the dependant
-#    print(task.dependents)
-
-
-def test_experiment_history():
-    """Test retrieving experiment history"""
-    with TemporaryDirectory() as workdir:
-        with TemporaryExperiment("experiment", workdir=workdir):
-            task_a = TaskA.C().submit()
-            TaskB.C(task_a=task_a, x=tag(1)).submit()
-
-        # Look at the experiment
-        xp = get_experiment("experiment", workdir=workdir)
-
-        (task_a_info,) = xp.get_jobs(TaskA)
-        (task_b_info,) = xp.get_jobs(TaskB)
-        assert task_b_info.tags == {"x": 1}
-        assert task_b_info.depends_on == [task_a_info]
 
 
 class FlagHandler:

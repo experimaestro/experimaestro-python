@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from experimaestro.scheduler.interfaces import (
+    BaseExperiment,
     BaseService,
-    ExperimentRun,
     JobState,
     STATE_NAME_TO_JOBSTATE,
 )
@@ -29,8 +29,6 @@ from experimaestro.scheduler.state_provider import (
     ProcessInfo,
 )
 from experimaestro.scheduler.state_status import (
-    ExperimentStatusFile,
-    StatusData,
     EventBase,
     JobEventBase,
     ExperimentEventBase,
@@ -92,10 +90,10 @@ class WorkspaceStateProvider(StateProvider):
         self.workspace_path = Path(workspace_path).resolve()
         self._experiments_dir = self.workspace_path / ".events" / "experiments"
 
-        # Status cache: (experiment_id, run_id) -> StatusData
+        # Experiment cache: (experiment_id, run_id) -> MockExperiment
         # Only caches active experiments (those with event files)
-        self._status_cache: Dict[tuple[str, str], StatusData] = {}
-        self._status_cache_lock = threading.Lock()
+        self._experiment_cache: Dict[tuple[str, str], MockExperiment] = {}
+        self._experiment_cache_lock = threading.Lock()
 
         # Job cache: job_id -> MockJob
         # Shared cache for all jobs, updated directly by job events
@@ -175,7 +173,7 @@ class WorkspaceStateProvider(StateProvider):
         ):
             # Experiment event files deleted (experiment finalized)
             experiment_id = entity_id
-            self._clear_status_cache(experiment_id)
+            self._clear_experiment_cache(experiment_id)
             run_id = self.get_current_run(experiment_id) or ""
             self._notify_state_listeners(
                 ExperimentUpdatedEvent(experiment_id=experiment_id)
@@ -199,10 +197,10 @@ class WorkspaceStateProvider(StateProvider):
     # Status cache methods
     # =========================================================================
 
-    def _get_cached_status(
+    def _get_cached_experiment(
         self, experiment_id: str, run_id: str, run_dir: Path
-    ) -> StatusData:
-        """Get status from cache or load from disk
+    ) -> MockExperiment:
+        """Get experiment from cache or load from disk
 
         For active experiments (with event files), maintains an in-memory cache
         that is updated when events arrive via the file watcher.
@@ -213,45 +211,46 @@ class WorkspaceStateProvider(StateProvider):
             run_dir: Path to run directory
 
         Returns:
-            StatusData with all events applied (contains MockJob and MockService objects)
+            MockExperiment with all events applied
         """
         cache_key = (experiment_id, run_id)
 
-        with self._status_cache_lock:
+        with self._experiment_cache_lock:
             # Check cache first
-            if cache_key in self._status_cache:
-                return self._status_cache[cache_key]
+            if cache_key in self._experiment_cache:
+                return self._experiment_cache[cache_key]
 
-            # Load from disk - pass workspace_path so StatusData creates MockJob/MockService
-            status_file = ExperimentStatusFile(run_dir, self.workspace_path)
-            status = status_file.read_status_data()
-
-            # Set workspace_path for event application
-            status.workspace_path = self.workspace_path
+            # Load from disk using MockExperiment.from_disk
+            exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+            if exp is None:
+                # Create empty experiment if no status.json exists
+                exp = MockExperiment(
+                    workdir=run_dir,
+                    run_id=run_id,
+                )
 
             # Apply pending events from event files
             # Events are in experiments/{experiment_id}/events-{count}.jsonl
             reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
-            events = reader.read_events_since_count(experiment_id, status.events_count)
+            events = reader.read_events_since_count(experiment_id, exp.events_count)
             for event in events:
-                status.apply_event(event)
+                exp.apply_event(event, self.workspace_path)
 
-            # Populate job cache with jobs from this status
-            # Jobs in status.jobs will reference the same objects as job cache
+            # Populate job cache with jobs from this experiment
             with self._job_cache_lock:
-                for job_id, job in status.jobs.items():
+                for job_id, job in exp.jobs.items():
                     if job_id not in self._job_cache:
                         self._job_cache[job_id] = job
                     else:
-                        # Use the cached job object in status.jobs
-                        status.jobs[job_id] = self._job_cache[job_id]
+                        # Use the cached job object
+                        exp._jobs[job_id] = self._job_cache[job_id]
 
             # Only cache if experiment is active (has event files)
             # This avoids caching finished experiments that won't change
             if self._has_event_files(experiment_id):
-                self._status_cache[cache_key] = status
+                self._experiment_cache[cache_key] = exp
 
-            return status
+            return exp
 
     def _has_event_files(self, experiment_id: str) -> bool:
         """Check if experiment has any event files (is active)"""
@@ -260,24 +259,28 @@ class WorkspaceStateProvider(StateProvider):
         return exp_events_dir.is_dir() and any(exp_events_dir.glob("events-*.jsonl"))
 
     def _apply_event_to_cache(self, experiment_id: str, event: EventBase) -> None:
-        """Apply an event to the cached status (called by EventFileWatcher)"""
+        """Apply an event to the cached experiment (called by EventFileWatcher)"""
         run_id = self.get_current_run(experiment_id)
         if run_id is None:
             return
 
         cache_key = (experiment_id, run_id)
 
-        with self._status_cache_lock:
-            if cache_key in self._status_cache:
-                self._status_cache[cache_key].apply_event(event)
+        with self._experiment_cache_lock:
+            if cache_key in self._experiment_cache:
+                self._experiment_cache[cache_key].apply_event(
+                    event, self.workspace_path
+                )
 
-    def _clear_status_cache(self, experiment_id: str) -> None:
-        """Clear cached status for an experiment (called when experiment finishes)"""
-        with self._status_cache_lock:
+    def _clear_experiment_cache(self, experiment_id: str) -> None:
+        """Clear cached experiment for an experiment (called when experiment finishes)"""
+        with self._experiment_cache_lock:
             # Remove all cache entries for this experiment
-            keys_to_remove = [k for k in self._status_cache if k[0] == experiment_id]
+            keys_to_remove = [
+                k for k in self._experiment_cache if k[0] == experiment_id
+            ]
             for key in keys_to_remove:
-                del self._status_cache[key]
+                del self._experiment_cache[key]
 
     # =========================================================================
     # Experiment methods
@@ -359,58 +362,26 @@ class WorkspaceStateProvider(StateProvider):
             # No runs yet, return empty experiment
             return MockExperiment(
                 workdir=exp_dir,
-                current_run_id=None,
-                total_jobs=0,
-                finished_jobs=0,
-                failed_jobs=0,
-                updated_at="",
-                experiment_id=experiment_id,
+                run_id="",
             )
 
         run_dir = exp_dir / current_run_id
         if not run_dir.exists():
             return None
 
-        # Get status from cache or load from disk
-        status = self._get_cached_status(experiment_id, current_run_id, run_dir)
-
-        # Count jobs by state (jobs are MockJob objects with JobState enum)
-        total_jobs = len(status.jobs)
-        finished_jobs = 0
-        failed_jobs = 0
-        for job in status.jobs.values():
-            if job.state == JobState.DONE:
-                finished_jobs += 1
-            elif job.state == JobState.ERROR:
-                failed_jobs += 1
-
-        return MockExperiment(
-            workdir=run_dir,
-            current_run_id=current_run_id,
-            total_jobs=total_jobs,
-            finished_jobs=finished_jobs,
-            failed_jobs=failed_jobs,
-            updated_at=status.last_updated,
-            started_at=_parse_timestamp(status.started_at),
-            ended_at=_parse_timestamp(status.ended_at),
-            hostname=status.hostname,
-            experiment_id=experiment_id,
-        )
+        # Get experiment from cache or load from disk
+        return self._get_cached_experiment(experiment_id, current_run_id, run_dir)
 
     def _load_v1_experiment(
         self, experiment_id: str, exp_dir: Path
     ) -> Optional[MockExperiment]:
         """Load experiment from v1 layout (xp/{exp-id}/ with jobs/, jobs.bak/)"""
-        from experimaestro.scheduler.interfaces import JobState as JobStateClass
-
-        # Count jobs from jobs/ and jobs.bak/ directories
+        # Build jobs dict from jobs/ and jobs.bak/ directories
         jobs_dir = exp_dir / "jobs"
         jobs_bak_dir = exp_dir / "jobs.bak"
 
-        total_jobs = 0
-        finished_jobs = 0
-        failed_jobs = 0
-        seen_jobs = set()
+        jobs: Dict[str, MockJob] = {}
+        seen_jobs: set[str] = set()
 
         for jdir in [jobs_dir, jobs_bak_dir]:
             if not jdir.exists():
@@ -432,34 +403,37 @@ class WorkspaceStateProvider(StateProvider):
                     # Broken symlink - skip
                     continue
 
-                total_jobs += 1
-
-                # Read state from .done/.failed files
                 task_id = job_link.parent.name
-                scriptname = task_id.rsplit(".", 1)[-1]
-                state = JobStateClass.from_path(job_path, scriptname)
+                job_id = job_link.name
 
-                if state is not None:
-                    if state == JobState.DONE:
-                        finished_jobs += 1
-                    elif state.is_error():
-                        failed_jobs += 1
+                # Create MockJob from filesystem state
+                job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                jobs[job_id] = job
 
-        # Get modification time for updated_at
+        # Determine status: if all jobs done -> DONE, if any failed -> FAILED
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
+        status = ExperimentStatus.DONE
+        for job in jobs.values():
+            if job.state.is_error():
+                status = ExperimentStatus.FAILED
+                break
+            elif not job.state.finished():
+                status = ExperimentStatus.RUNNING
+
+        # Get modification time for started_at
         try:
             mtime = exp_dir.stat().st_mtime
-            updated_at = datetime.fromtimestamp(mtime).isoformat()
         except OSError:
-            updated_at = ""
+            mtime = None
 
         return MockExperiment(
             workdir=exp_dir,
-            current_run_id="v1",  # Mark as v1 experiment
-            total_jobs=total_jobs,
-            finished_jobs=finished_jobs,
-            failed_jobs=failed_jobs,
-            updated_at=updated_at,
-            experiment_id=experiment_id,
+            run_id="v1",  # Mark as v1 experiment
+            status=status,
+            jobs=jobs,
+            started_at=mtime,
+            experiment_id_override=experiment_id,
         )
 
     def _get_v1_jobs(self, experiment_id: str) -> List[MockJob]:
@@ -499,9 +473,9 @@ class WorkspaceStateProvider(StateProvider):
 
         return jobs
 
-    def get_experiment_runs(self, experiment_id: str) -> List[ExperimentRun]:
+    def get_experiment_runs(self, experiment_id: str) -> List[BaseExperiment]:
         """Get all runs for an experiment"""
-        runs = []
+        runs: List[BaseExperiment] = []
         exp_dir = self.workspace_path / "experiments" / experiment_id
 
         # Check for v1 layout first (xp/{exp-id}/ without separate runs)
@@ -510,25 +484,7 @@ class WorkspaceStateProvider(StateProvider):
             # v1 experiment: return single synthetic run
             exp = self._load_v1_experiment(experiment_id, v1_exp_dir)
             if exp:
-                # Get modification time for started_at
-                try:
-                    mtime = v1_exp_dir.stat().st_mtime
-                except OSError:
-                    mtime = None
-
-                runs.append(
-                    ExperimentRun(
-                        run_id="v1",
-                        experiment_id=experiment_id,
-                        started_at=mtime,
-                        ended_at=mtime,
-                        status="completed",
-                        hostname=None,
-                        total_jobs=exp.total_jobs,
-                        finished_jobs=exp.finished_jobs,
-                        failed_jobs=exp.failed_jobs,
-                    )
-                )
+                runs.append(exp)
             return runs
 
         if not exp_dir.exists():
@@ -538,33 +494,10 @@ class WorkspaceStateProvider(StateProvider):
             if not run_dir.is_dir() or run_dir.name.startswith("."):
                 continue
 
-            run_id = run_dir.name
-            status_file = ExperimentStatusFile(run_dir, self.workspace_path)
-            status = status_file.read_status_data()
-
-            # Count jobs by state (jobs are MockJob objects with JobState enum)
-            total_jobs = len(status.jobs)
-            finished_jobs = 0
-            failed_jobs = 0
-            for job in status.jobs.values():
-                if job.state == JobState.DONE:
-                    finished_jobs += 1
-                elif job.state == JobState.ERROR:
-                    failed_jobs += 1
-
-            runs.append(
-                ExperimentRun(
-                    run_id=run_id,
-                    experiment_id=experiment_id,
-                    started_at=status.started_at,
-                    ended_at=status.ended_at,
-                    status=status.status,
-                    hostname=status.hostname,
-                    total_jobs=total_jobs,
-                    finished_jobs=finished_jobs,
-                    failed_jobs=failed_jobs,
-                )
-            )
+            # Use MockExperiment.from_disk to load the experiment
+            mock_exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+            if mock_exp is not None:
+                runs.append(mock_exp)
 
         return runs
 
@@ -634,12 +567,12 @@ class WorkspaceStateProvider(StateProvider):
         if not run_dir.exists():
             return []
 
-        # Get status from cache or load from disk (contains MockJob objects)
-        status = self._get_cached_status(experiment_id, run_id, run_dir)
+        # Get experiment from cache or load from disk (contains MockJob objects)
+        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
 
         # Filter MockJob objects
         jobs = []
-        for job_id, job in status.jobs.items():
+        for job_id, job in exp.jobs.items():
             # Apply filters
             if task_id and job.task_id != task_id:
                 continue
@@ -649,7 +582,7 @@ class WorkspaceStateProvider(StateProvider):
                 if state_enum and job.state != state_enum:
                     continue
             if tags:
-                job_tags = status.tags.get(job_id, {})
+                job_tags = exp.tags.get(job_id, {})
                 if not all(job_tags.get(k) == v for k, v in tags.items()):
                     continue
 
@@ -670,11 +603,11 @@ class WorkspaceStateProvider(StateProvider):
         if not run_dir.exists():
             return None
 
-        # Get status from cache or load from disk (contains MockJob objects)
-        status = self._get_cached_status(experiment_id, run_id, run_dir)
+        # Get experiment from cache or load from disk (contains MockJob objects)
+        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
 
         # Return MockJob directly
-        return status.jobs.get(job_id)
+        return exp.jobs.get(job_id)
 
     def get_all_jobs(
         self,
@@ -716,10 +649,10 @@ class WorkspaceStateProvider(StateProvider):
         if not run_dir.exists():
             return {}
 
-        # Get status from cache or load from disk
-        status = self._get_cached_status(experiment_id, run_id, run_dir)
+        # Get experiment from cache or load from disk
+        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
 
-        return status.tags
+        return exp.tags
 
     def get_dependencies_map(
         self, experiment_id: str, run_id: Optional[str] = None
@@ -734,10 +667,10 @@ class WorkspaceStateProvider(StateProvider):
         if not run_dir.exists():
             return {}
 
-        # Get status from cache or load from disk
-        status = self._get_cached_status(experiment_id, run_id, run_dir)
+        # Get experiment from cache or load from disk
+        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
 
-        return status.dependencies
+        return exp.dependencies
 
     # =========================================================================
     # Services
@@ -796,11 +729,11 @@ class WorkspaceStateProvider(StateProvider):
         if not run_dir.exists():
             return []
 
-        # Get status from cache or load from disk
-        status = self._get_cached_status(experiment_id, run_id, run_dir)
+        # Get experiment from cache or load from disk
+        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
 
         services = []
-        for service_id, mock_service in status.services.items():
+        for service_id, mock_service in exp.services.items():
             # Try to recreate service from service_config
             service_config = mock_service.service_config()
             if service_config and "__class__" in service_config:
@@ -1022,21 +955,20 @@ class WorkspaceStateProvider(StateProvider):
                 if not run_dir.is_dir():
                     continue
 
-                # Read status.json for this run
-                status_file = ExperimentStatusFile(run_dir, self.workspace_path)
-                status = status_file.read_status_data()
+                # Load experiment from disk (with locking)
+                exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+                if exp is None:
+                    continue
 
                 # Also apply pending events
                 # Events are in experiments/{experiment_id}/events-{count}.jsonl
                 reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
-                events = reader.read_events_since_count(
-                    experiment_id, status.events_count
-                )
+                events = reader.read_events_since_count(experiment_id, exp.events_count)
                 for event in events:
-                    status.apply_event(event)
+                    exp.apply_event(event, self.workspace_path)
 
                 # Add all job paths from this run
-                for job in status.jobs.values():
+                for job in exp.jobs.values():
                     if job.path:
                         try:
                             referenced.add(job.path.resolve())
@@ -1085,21 +1017,22 @@ class WorkspaceStateProvider(StateProvider):
                     if not run_dir.is_dir() or run_dir.name.startswith("."):
                         continue
 
-                    # Read status.json for this run
-                    status_file = ExperimentStatusFile(run_dir, self.workspace_path)
-                    status = status_file.read_status_data()
+                    # Load experiment from disk (with locking)
+                    exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+                    if exp is None:
+                        continue
 
                     # Also apply pending events
                     # Events are in experiments/{experiment_id}/events-{count}.jsonl
                     reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
                     events = reader.read_events_since_count(
-                        experiment_id, status.events_count
+                        experiment_id, exp.events_count
                     )
                     for event in events:
-                        status.apply_event(event)
+                        exp.apply_event(event, self.workspace_path)
 
                     # Add all job paths from this run
-                    for job in status.jobs.values():
+                    for job in exp.jobs.values():
                         if job.path:
                             try:
                                 referenced.add(job.path.resolve())
@@ -1266,16 +1199,6 @@ class WorkspaceStateProvider(StateProvider):
         with self._lock:
             if self.workspace_path in self._instances:
                 del self._instances[self.workspace_path]
-
-
-def _parse_timestamp(ts: Optional[str]) -> Optional[float]:
-    """Parse ISO format timestamp to Unix timestamp"""
-    if ts is None:
-        return None
-    try:
-        return datetime.fromisoformat(ts).timestamp()
-    except ValueError:
-        return None
 
 
 __all__ = [

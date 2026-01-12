@@ -1,5 +1,4 @@
 import json
-import socket
 import threading
 import time
 from datetime import datetime
@@ -21,7 +20,6 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     BaseService,
-    ExperimentRun,
 )
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
@@ -1032,34 +1030,17 @@ class Scheduler(StateProvider, threading.Thread):
         """Get a specific experiment by ID"""
         return self.experiments.get(experiment_id)
 
-    def get_experiment_runs(self, experiment_id: str) -> List[ExperimentRun]:
+    def get_experiment_runs(self, experiment_id: str) -> List[BaseExperiment]:
         """Get all runs for an experiment
 
-        For a live scheduler, returns only the current run.
+        For a live scheduler, returns the live experiment directly.
         """
         exp = self.experiments.get(experiment_id)
         if not exp:
             return []
 
-        # Count job statistics
-        jobs = [j for j in self.jobs.values() if j.experiments and exp in j.experiments]
-        total_jobs = len(jobs)
-        finished_jobs = sum(1 for j in jobs if j.state.finished())
-        failed_jobs = sum(1 for j in jobs if j.state.is_error())
-
-        return [
-            ExperimentRun(
-                run_id=exp.run_id,
-                experiment_id=experiment_id,
-                hostname=socket.gethostname(),
-                started_at=exp.start_time,
-                ended_at=None,
-                status="active",
-                total_jobs=total_jobs,
-                finished_jobs=finished_jobs,
-                failed_jobs=failed_jobs,
-            )
-        ]
+        # Return the live experiment (it already implements BaseExperiment)
+        return [exp]
 
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current run ID for an experiment"""

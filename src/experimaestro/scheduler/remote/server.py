@@ -331,13 +331,13 @@ class SSHStateProviderServer:
     def _handle_get_services(self, params: Dict) -> list:
         """Handle get_services request
 
-        Returns serialized service data using state_dict().
+        Returns serialized service data using full_state_dict().
         """
         services = self._state_provider.get_services(
             experiment_id=params.get("experiment_id"),
             run_id=params.get("run_id"),
         )
-        return [svc.state_dict() for svc in services]
+        return [svc.full_state_dict() for svc in services]
 
     def _handle_get_tags_map(self, params: Dict) -> Dict[str, Dict[str, str]]:
         """Handle get_tags_map request

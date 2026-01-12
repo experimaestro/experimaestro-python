@@ -16,7 +16,6 @@ to enable unified access in the TUI and other monitoring tools.
 import enum
 import json
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
@@ -230,6 +229,19 @@ class JobFailureStatus(enum.Enum):
 
     #: Timeout (can retry for resumable tasks)
     TIMEOUT = 3
+
+
+class ExperimentStatus(enum.Enum):
+    """Status of an experiment run"""
+
+    #: Experiment is currently running
+    RUNNING = "running"
+
+    #: Experiment completed successfully
+    DONE = "done"
+
+    #: Experiment failed
+    FAILED = "failed"
 
 
 class JobStateError(JobState):
@@ -459,27 +471,107 @@ class BaseExperiment:
     """Base interface for experiment information
 
     This class defines the interface for experiment data. Both live experiment
-    instances and database-loaded MockExperiment instances should provide these attributes.
+    instances and MockExperiment instances should provide these attributes.
 
-    Attributes:
-        workdir: Path to experiment directory
-        current_run_id: Current/latest run ID (or None)
+    Core attributes:
+        workdir: Path to run directory (experiments/{exp-id}/{run-id}/)
+        run_id: Run identifier
+
+    State tracking (replaces StatusData):
+        jobs: Dict mapping job_id to BaseJob
+        services: Dict mapping service_id to BaseService
+        tags: Dict mapping job_id to tag dict
+        dependencies: Dict mapping job_id to list of dependency job_ids
+        events_count: Number of events processed
+        hostname: Hostname where experiment runs
+        started_at: Start timestamp
+        ended_at: End timestamp (None if running)
     """
 
+    # Status file version
+    STATUS_VERSION = 1
+
     workdir: Path
-    current_run_id: Optional[str]
+    run_id: str
 
     @property
     def experiment_id(self) -> str:
-        """Experiment identifier derived from workdir name"""
-        return self.workdir.name
+        """Experiment identifier derived from workdir structure"""
+        # workdir is experiments/{exp-id}/{run-id}, so parent.name is exp-id
+        return self.workdir.parent.name
 
     @property
-    def run_dir(self) -> Optional[Path]:
-        """Path to current run directory"""
-        if self.workdir and self.current_run_id:
-            return self.workdir / self.current_run_id
-        return None
+    def run_dir(self) -> Path:
+        """Path to run directory (same as workdir)"""
+        return self.workdir
+
+    @property
+    def status(self) -> "ExperimentStatus":
+        """Experiment status - override in subclasses"""
+        raise NotImplementedError
+
+    # State tracking properties (abstract - must be implemented by subclasses)
+
+    @property
+    def jobs(self) -> Dict[str, "BaseJob"]:
+        """Jobs in this experiment"""
+        raise NotImplementedError
+
+    @property
+    def services(self) -> Dict[str, "BaseService"]:
+        """Services in this experiment"""
+        raise NotImplementedError
+
+    @property
+    def tags(self) -> Dict[str, Dict[str, str]]:
+        """Tags for jobs"""
+        raise NotImplementedError
+
+    @property
+    def dependencies(self) -> Dict[str, List[str]]:
+        """Job dependencies"""
+        raise NotImplementedError
+
+    @property
+    def events_count(self) -> int:
+        """Number of events processed"""
+        raise NotImplementedError
+
+    @property
+    def hostname(self) -> Optional[str]:
+        """Hostname where experiment runs"""
+        raise NotImplementedError
+
+    @property
+    def started_at(self) -> Optional[float]:
+        """Start timestamp"""
+        raise NotImplementedError
+
+    @property
+    def ended_at(self) -> Optional[float]:
+        """End timestamp (None if running)"""
+        raise NotImplementedError
+
+    # Computed properties
+
+    @property
+    def total_jobs(self) -> int:
+        """Total number of jobs"""
+        return len(self.jobs)
+
+    @property
+    def finished_jobs(self) -> int:
+        """Number of finished jobs"""
+        return sum(1 for j in self.jobs.values() if j.state == JobState.DONE)
+
+    @property
+    def failed_jobs(self) -> int:
+        """Number of failed jobs"""
+        return sum(1 for j in self.jobs.values() if j.state.is_error())
+
+    def get_services(self) -> List["BaseService"]:
+        """Get services for this experiment as a list"""
+        return list(self.services.values())
 
     @staticmethod
     def get_status_path(run_dir: Path) -> Path:
@@ -491,79 +583,51 @@ class BaseExperiment:
 
         This is the canonical representation of experiment state used for both
         serialization to status files and network communication.
-
-        Returns:
-            Dictionary with all experiment state fields
         """
+        try:
+            status_value = self.status.value
+        except NotImplementedError:
+            status_value = None
+
         return {
+            "version": self.STATUS_VERSION,
             "experiment_id": self.experiment_id,
-            "run_id": self.current_run_id,
-            "workdir": str(self.workdir) if self.workdir else None,
-        }
-
-
-# =============================================================================
-# Experiment Run Dataclass
-# =============================================================================
-
-
-@dataclass
-class ExperimentRun:
-    """Represents a single run of an experiment
-
-    A run is a single execution session of an experiment. Each experiment
-    can have multiple runs over time.
-
-    Attributes:
-        run_id: Unique identifier for this run
-        experiment_id: ID of the parent experiment
-        hostname: Host where the run is/was executing
-        started_at: Unix timestamp when run started
-        ended_at: Unix timestamp when run ended (None if still running)
-        status: Run status ("active", "completed", "failed")
-        total_jobs: Total number of jobs in this run
-        finished_jobs: Number of successfully completed jobs
-        failed_jobs: Number of failed jobs
-    """
-
-    run_id: str
-    experiment_id: str
-    hostname: Optional[str] = None
-    started_at: Optional[float] = None
-    ended_at: Optional[float] = None
-    status: str = "active"
-    total_jobs: int = 0
-    finished_jobs: int = 0
-    failed_jobs: int = 0
-
-    def state_dict(self) -> Dict[str, Any]:
-        """Get run state as dictionary"""
-        return {
             "run_id": self.run_id,
-            "experiment_id": self.experiment_id,
+            "status": status_value,
+            "events_count": self.events_count,
             "hostname": self.hostname,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
-            "status": self.status,
-            "total_jobs": self.total_jobs,
-            "finished_jobs": self.finished_jobs,
-            "failed_jobs": self.failed_jobs,
+            "jobs": {k: v.state_dict() for k, v in self.jobs.items()},
+            "tags": self.tags,
+            "dependencies": self.dependencies,
+            "services": {k: v.full_state_dict() for k, v in self.services.items()},
         }
 
-    @classmethod
-    def from_state_dict(cls, d: Dict[str, Any]) -> "ExperimentRun":
-        """Create ExperimentRun from state dictionary"""
-        return cls(
-            run_id=d["run_id"],
-            experiment_id=d["experiment_id"],
-            hostname=d.get("hostname"),
-            started_at=d.get("started_at"),
-            ended_at=d.get("ended_at"),
-            status=d.get("status", "active"),
-            total_jobs=d.get("total_jobs", 0),
-            finished_jobs=d.get("finished_jobs", 0),
-            failed_jobs=d.get("failed_jobs", 0),
-        )
+    def write_status(self) -> None:
+        """Write status.json to disk (calls state_dict internally)
+
+        Uses file locking to ensure atomic writes across processes.
+        """
+        import fasteners
+
+        run_dir = self.run_dir
+        if run_dir is None:
+            return
+
+        status_path = run_dir / "status.json"
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = status_path.parent / f".{status_path.name}.lock"
+        lock = fasteners.InterProcessLock(str(lock_path))
+
+        data = self.state_dict()
+        data["last_updated"] = datetime.now().isoformat()
+
+        with lock:
+            temp_path = status_path.with_suffix(".json.tmp")
+            with temp_path.open("w") as f:
+                json.dump(data, f, indent=2)
+            temp_path.replace(status_path)
 
 
 class BaseService:
@@ -592,8 +656,11 @@ class BaseService:
         """Return service-specific configuration for recreation"""
         raise NotImplementedError
 
-    def state_dict(self) -> Dict[str, Any]:
-        """Get service state as dictionary (single source of truth)"""
+    def full_state_dict(self) -> Dict[str, Any]:
+        """Get service state as dictionary for JSON serialization.
+
+        This method properly serializes Path objects and other non-JSON types.
+        """
         state = self.state
         state_str = state.name if hasattr(state, "name") else str(state)
         return {
@@ -602,3 +669,14 @@ class BaseService:
             "state": state_str,
             "service_config": self.service_config(),
         }
+
+    def to_service(self) -> "BaseService":
+        """Convert to a live Service instance.
+
+        For live Service instances, returns self.
+        For MockService instances, tries to recreate the service from config.
+
+        Returns:
+            A live Service instance, or self if conversion is not possible
+        """
+        return self  # Default: return self (for live services)

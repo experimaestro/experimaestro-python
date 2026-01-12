@@ -71,7 +71,6 @@ from .scheduler import (
 from .exceptions import GracefulTimeout
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler.transient import TransientMode
-from .scheduler.state import get_experiment
 from .notifications import progress, tqdm
 from .checkers import Choices
 from .xpmutils import DirectoryContext
