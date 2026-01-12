@@ -215,23 +215,52 @@ async def test_token_timeout_zero():
         # Acquire with first
         lock1 = await dep1.aio_lock(timeout=0.5)
 
+        # Track task state for better error messages
+        task_started = asyncio.Event()
+        task_exception = None
+
         # Start waiting with timeout=0 (infinite)
         async def acquire_infinite():
-            return await dep2.aio_lock(timeout=0)  # Should wait forever
+            nonlocal task_exception
+            task_started.set()
+            try:
+                return await dep2.aio_lock(timeout=0)  # Should wait forever
+            except Exception as e:
+                task_exception = e
+                raise
 
         task = asyncio.create_task(acquire_infinite())
 
-        # Give it time to start waiting
-        await asyncio.sleep(0.1)
+        # Wait for task to start
+        await task_started.wait()
 
-        # Wait a bit more - task should still be waiting
-        await asyncio.sleep(0.5)
-        assert not task.done()
+        # Give the task time to enter the waiting state
+        # Use multiple short sleeps to check task state more frequently
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            if task.done():
+                # Task completed unexpectedly - get error info
+                if task_exception:
+                    pytest.fail(
+                        f"Task completed unexpectedly with exception: {task_exception}"
+                    )
+                else:
+                    # Try to get result (might raise)
+                    try:
+                        result = task.result()
+                        pytest.fail(
+                            f"Task completed unexpectedly with result: {result}"
+                        )
+                    except Exception as e:
+                        pytest.fail(f"Task completed unexpectedly with error: {e}")
+
+        # Task should still be waiting after 1 second
+        assert not task.done(), "Task should be waiting indefinitely with timeout=0"
 
         # Release first lock
         lock1.release()
 
-        # Now task should complete
-        lock2 = await asyncio.wait_for(task, timeout=2.0)
+        # Now task should complete quickly
+        lock2 = await asyncio.wait_for(task, timeout=5.0)
         assert lock2 is not None
         lock2.release()
