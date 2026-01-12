@@ -16,6 +16,7 @@ to enable unified access in the TUI and other monitoring tools.
 import enum
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
@@ -24,6 +25,40 @@ if TYPE_CHECKING:
     from experimaestro.scheduler.transient import TransientMode
 
 logger = logging.getLogger("xpm.interfaces")
+
+
+@dataclass
+class ExperimentJobInformation:
+    """Lightweight job information for experiment state serialization
+
+    This class contains the minimal job metadata stored in status.json and jobs.jsonl.
+    Full job state (progress, state changes, etc.) comes from events.jsonl replay
+    or from the state provider.
+    """
+
+    job_id: str
+    task_id: str
+    tags: Dict[str, str] = field(default_factory=dict)
+    timestamp: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dictionary for JSON"""
+        return {
+            "job_id": self.job_id,
+            "task_id": self.task_id,
+            "tags": self.tags,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ExperimentJobInformation":
+        """Create from dictionary"""
+        return cls(
+            job_id=d["job_id"],
+            task_id=d["task_id"],
+            tags=d.get("tags", {}),
+            timestamp=d.get("timestamp"),
+        )
 
 
 def serialize_timestamp(ts: Optional[Union[float, datetime, str]]) -> Optional[str]:
@@ -583,6 +618,8 @@ class BaseExperiment:
 
         This is the canonical representation of experiment state used for both
         serialization to status files and network communication.
+
+        Note: Jobs are not included here - they are stored in jobs.jsonl.
         """
         try:
             status_value = self.status.value
@@ -598,9 +635,8 @@ class BaseExperiment:
             "hostname": self.hostname,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
-            "jobs": {k: v.state_dict() for k, v in self.jobs.items()},
-            "tags": self.tags,
-            "dependencies": self.dependencies,
+            "finished_jobs": self.finished_jobs,
+            "failed_jobs": self.failed_jobs,
             "services": {k: v.full_state_dict() for k, v in self.services.items()},
         }
 
@@ -652,22 +688,20 @@ class BaseService:
         """Human-readable description of the service"""
         raise NotImplementedError
 
-    def service_config(self) -> dict:
-        """Return service-specific configuration for recreation"""
-        raise NotImplementedError
+    def state_dict(self) -> dict:
+        """Return service state for serialization/recreation"""
+        return {}
 
     def full_state_dict(self) -> Dict[str, Any]:
         """Get service state as dictionary for JSON serialization.
 
         This method properly serializes Path objects and other non-JSON types.
         """
-        state = self.state
-        state_str = state.name if hasattr(state, "name") else str(state)
         return {
             "service_id": self.id,
             "description": self.description(),
-            "state": state_str,
-            "service_config": self.service_config(),
+            "class": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "state_dict": self.state_dict(),
         }
 
     def to_service(self) -> "BaseService":

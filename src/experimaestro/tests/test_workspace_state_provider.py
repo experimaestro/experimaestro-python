@@ -87,18 +87,36 @@ def create_v2_experiment(
         run_dir = exp_dir / run_id
         run_dir.mkdir(exist_ok=True)
 
-        # Create status.json with jobs
-        jobs_dict = {}
-        tags_dict = {}
+        # Create jobs.jsonl with job info and count finished/failed
+        jobs_jsonl_lines = []
+        finished_count = 0
+        failed_count = 0
         for task_id, job_id, job_status in jobs:
-            jobs_dict[job_id] = {
+            job_info = {
                 "job_id": job_id,
                 "task_id": task_id,
-                "state": job_status,  # "waiting", "running", "done", "error"
-                "path": str(workspace / "jobs" / task_id / job_id),
+                "tags": {"task": task_id.split(".")[-1]},
+                "timestamp": 1704103200.0,  # 2024-01-01T10:00:00
             }
-            # Add some tags for testing
-            tags_dict[job_id] = {"task": task_id.split(".")[-1]}
+            jobs_jsonl_lines.append(json.dumps(job_info))
+
+            # Count finished and failed jobs
+            if job_status == "done":
+                finished_count += 1
+            elif job_status == "error":
+                failed_count += 1
+
+            # Create job directory with status marker
+            job_dir = workspace / "jobs" / task_id / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+            scriptname = task_id.rsplit(".", 1)[-1]
+            if job_status == "done":
+                (job_dir / f"{scriptname}.done").touch()
+            elif job_status == "error":
+                (job_dir / f"{scriptname}.failed").touch()
+            # "running" and "waiting" have no marker files
+
+        (run_dir / "jobs.jsonl").write_text("\n".join(jobs_jsonl_lines))
 
         status_data = {
             "version": 1,
@@ -109,8 +127,8 @@ def create_v2_experiment(
             "started_at": "2026-01-01T10:00:00",
             "ended_at": "2026-01-01T11:00:00" if run_status != "active" else None,
             "status": run_status,
-            "jobs": jobs_dict,
-            "tags": tags_dict,
+            "finished_jobs": finished_count,
+            "failed_jobs": failed_count,
             "dependencies": {},
             "services": {},
         }

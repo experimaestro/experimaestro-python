@@ -140,7 +140,7 @@ class OrphanJobsTab(Vertical):
         running_experiments = [
             e
             for e in self.state_provider.get_experiments()
-            if e.current_run_id and getattr(e, "ended_at", None) is None
+            if e.run_id and getattr(e, "ended_at", None) is None
         ]
 
         if running_experiments or self.state_provider.is_live:

@@ -771,26 +771,28 @@ class SSHStateProviderClient(OfflineStateProvider):
     def _dict_to_service(self, d: Dict) -> BaseService:
         """Convert a dictionary to a Service or MockService
 
-        Tries to recreate the actual Service from service_config first.
+        Tries to recreate the actual Service from state_dict first.
         Falls back to MockService with error message if module is missing.
         """
-        service_config = d.get("service_config", {})
+        state_dict = d.get("state_dict", {})
+        service_class = d.get("class", "")
         service_id = d.get("service_id", "")
 
         # Check for unserializable marker
-        if service_config.get("__unserializable__"):
-            reason = service_config.get("__reason__", "Service cannot be recreated")
+        if state_dict.get("__unserializable__"):
+            reason = state_dict.get("__reason__", "Service cannot be recreated")
             return MockService(
                 service_id=service_id,
                 description_text=f"[{reason}]",
-                service_config_data=service_config,
+                state_dict_data=state_dict,
+                service_class=service_class,
                 experiment_id=d.get("experiment_id"),
                 run_id=d.get("run_id"),
                 url=d.get("url"),
             )
 
-        # Try to recreate actual Service from service_config
-        if service_config and "__class__" in service_config:
+        # Try to recreate actual Service from state_dict
+        if service_class:
             try:
                 from experimaestro.scheduler.services import Service
 
@@ -806,7 +808,9 @@ class SSHStateProviderClient(OfflineStateProvider):
                         return self.local_cache_dir / relative
                     return Path(remote_path)
 
-                service = Service.from_service_config(service_config, path_translator)
+                service = Service.from_state_dict(
+                    service_class, state_dict, path_translator
+                )
                 service.id = service_id
                 # Copy additional attributes
                 if d.get("experiment_id"):
@@ -820,7 +824,8 @@ class SSHStateProviderClient(OfflineStateProvider):
                 return MockService(
                     service_id=service_id,
                     description_text=f"[Missing module: {missing_module}]",
-                    service_config_data=service_config,
+                    state_dict_data=state_dict,
+                    service_class=service_class,
                     experiment_id=d.get("experiment_id"),
                     run_id=d.get("run_id"),
                     url=d.get("url"),
@@ -830,13 +835,14 @@ class SSHStateProviderClient(OfflineStateProvider):
                 return MockService(
                     service_id=service_id,
                     description_text=f"[Error: {e}]",
-                    service_config_data=service_config,
+                    state_dict_data=state_dict,
+                    service_class=service_class,
                     experiment_id=d.get("experiment_id"),
                     run_id=d.get("run_id"),
                     url=d.get("url"),
                 )
 
-        # No service_config or no __class__ - use MockService.from_full_state_dict
+        # No class - use MockService.from_full_state_dict
         return MockService.from_full_state_dict(d)
 
     def _parse_datetime_to_timestamp(self, value) -> Optional[float]:

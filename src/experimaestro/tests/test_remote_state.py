@@ -249,23 +249,45 @@ class TestServiceSerialization:
     """Test service serialization using state_dict"""
 
     def test_serialize_mock_service(self):
-        """Test serializing a MockService using state_dict()"""
+        """Test serializing a MockService using full_state_dict()
+
+        MockService.full_state_dict() preserves the original service class name
+        (not MockService's class name) to enable proper round-trip serialization.
+        """
         service = MockService(
             service_id="svc123",
             description_text="Test service",
-            service_config_data={"port": 8080},
+            state_dict_data={"port": 8080},
+            service_class="mymodule.MyService",
             experiment_id="exp1",
             run_id="run1",
             url="http://localhost:8080",
-            state="RUNNING",
         )
 
         result = service.full_state_dict()
 
         assert result["service_id"] == "svc123"
         assert result["description"] == "Test service"
-        assert result["state"] == "RUNNING"
-        assert result["service_config"] == {"port": 8080}
+        # Preserves original service class, not MockService's class name
+        assert result["class"] == "mymodule.MyService"
+        assert result["state_dict"] == {"port": 8080}
+
+    def test_serialize_mock_service_no_class(self):
+        """Test serializing a MockService with service_class=None"""
+        service = MockService(
+            service_id="svc123",
+            description_text="Test service",
+            state_dict_data={"port": 8080},
+            service_class=None,
+        )
+
+        result = service.full_state_dict()
+
+        # class is always present, even when None
+        assert result["class"] is None
+        assert result["service_id"] == "svc123"
+        assert result["description"] == "Test service"
+        assert result["state_dict"] == {"port": 8080}
 
 
 # =============================================================================
@@ -374,15 +396,15 @@ class TestSSHRoundTrip:
         """Test MockService round-trip through SSH serialization path"""
         from experimaestro.scheduler.remote.client import SSHStateProviderClient
 
-        # Create original MockService
+        # Create original MockService (no service_class to avoid Service recreation)
         original = MockService(
             service_id="svc_123",
             description_text="Test service description",
-            service_config_data={"port": 8080, "host": "localhost"},
+            state_dict_data={"port": 8080, "host": "localhost"},
+            service_class=None,
             experiment_id="exp1",
             run_id="run1",
             url="http://localhost:8080",
-            state="RUNNING",
         )
 
         # Server-side: serialize using full_state_dict
@@ -598,11 +620,11 @@ class TestServerRequestHandling:
         mock_service = MockService(
             service_id="svc1",
             description_text="Test service",
-            service_config_data={"port": 8080},
+            state_dict_data={"port": 8080},
+            service_class="mymodule.MyService",
             experiment_id="exp1",
             run_id="run1",
             url="http://localhost:8080",
-            state="RUNNING",
         )
         mock_state_provider.get_services.return_value = [mock_service]
 
@@ -612,7 +634,7 @@ class TestServerRequestHandling:
 
         assert len(result) == 1
         assert result[0]["service_id"] == "svc1"
-        assert result[0]["state"] == "RUNNING"
+        assert result[0]["description"] == "Test service"
 
     def test_handle_get_tags_map(self, server_with_mock, mock_state_provider):
         """Test handling get_tags_map request"""

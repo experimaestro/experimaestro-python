@@ -315,8 +315,8 @@ class ServiceAddedEvent(ServiceEventBase):
 
     run_id: str = ""
     description: str = ""
-    state: str = "STOPPED"
-    service_config: dict[str, Any] = field(default_factory=dict)
+    service_class: str = ""
+    state_dict: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -198,7 +198,7 @@ class TestExperimentEnvironmentSaving:
         from experimaestro import experiment
 
         # Just enter the experiment context, no need to run any tasks
-        with experiment(xpmdirectory, "test-env-save", port=-1) as xp:
+        with experiment(xpmdirectory, "test-env-save") as xp:
             pass  # environment.json should be saved on __enter__
 
         env_path = xp.workdir / "environment.json"

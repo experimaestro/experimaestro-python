@@ -62,7 +62,7 @@ class Service(BaseService):
         """
         pass
 
-    def service_config(self) -> dict:
+    def state_dict(self) -> dict:
         """Return parameters needed to recreate this service.
 
         Subclasses should override this to return constructor arguments.
@@ -71,35 +71,27 @@ class Service(BaseService):
 
         Example::
 
-            def service_config(self):
+            def state_dict(self):
                 return {
                     "log_dir": self.log_dir,  # Path is auto-handled
                     "name": self.name,
                 }
 
         Returns:
-            Dict with constructor kwargs (no need to include __class__).
+            Dict with constructor kwargs.
         """
         return {}
-
-    def _full_service_config(self) -> dict:
-        """Get complete service_config including __class__ for serialization."""
-        d = self.service_config()
-        d["__class__"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
-        return d
 
     def full_state_dict(self) -> dict:
         """Serialize service to dictionary for JSON serialization.
 
         Overrides BaseService.full_state_dict() to properly serialize Path objects.
         """
-        state = self.state
-        state_str = state.name if hasattr(state, "name") else str(state)
         return {
             "service_id": self.id,
             "description": self.description(),
-            "state": state_str,
-            "service_config": self.serialize_state_dict(self._full_service_config()),
+            "class": f"{self.__class__.__module__}.{self.__class__.__name__}",
+            "state_dict": self.serialize_state_dict(self.state_dict()),
         }
 
     @staticmethod
@@ -129,13 +121,16 @@ class Service(BaseService):
         return {k: serialize_value(v) for k, v in data.items()}
 
     @staticmethod
-    def from_service_config(
-        data: dict, path_translator: Optional[Callable[[str], Path]] = None
+    def from_state_dict(
+        service_class: str,
+        data: dict,
+        path_translator: Optional[Callable[[str], Path]] = None,
     ) -> "Service":
-        """Recreate a service from a service configuration.
+        """Recreate a service from a state dictionary.
 
         Args:
-            data: Dictionary from :meth:`service_config` (may be serialized)
+            service_class: Fully qualified class name (e.g., "module.ClassName")
+            data: Dictionary from :meth:`state_dict` (may be serialized)
             path_translator: Optional function to translate remote paths to local.
                 Used by remote clients to map paths to local cache.
 
@@ -143,7 +138,7 @@ class Service(BaseService):
             A new Service instance, or raises if the class cannot be loaded.
 
         Raises:
-            ValueError: If __unserializable__ is True or __class__ is missing
+            ValueError: If __unserializable__ is True or class cannot be loaded
         """
         import importlib
 
@@ -153,11 +148,10 @@ class Service(BaseService):
                 f"Service cannot be recreated: {data.get('__reason__', 'unknown reason')}"
             )
 
-        class_path = data.get("__class__")
-        if not class_path:
-            raise ValueError("Missing '__class__' in service_config")
+        if not service_class:
+            raise ValueError("Missing service_class")
 
-        module_name, class_name = class_path.rsplit(".", 1)
+        module_name, class_name = service_class.rsplit(".", 1)
         module = importlib.import_module(module_name)
         cls = getattr(module, class_name)
 

@@ -25,6 +25,7 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     BaseService,
+    ExperimentJobInformation,
     ExperimentStatus,
     JobState,
     JobFailureStatus,
@@ -628,11 +629,12 @@ class MockExperiment(BaseExperiment):
         hostname: Optional[str] = None,
         started_at: Optional[float] = None,
         ended_at: Optional[float] = None,
-        jobs: Optional[Dict[str, "BaseJob"]] = None,
+        job_infos: Optional[Dict[str, "ExperimentJobInformation"]] = None,
         services: Optional[Dict[str, "MockService"]] = None,
-        tags: Optional[Dict[str, Dict[str, str]]] = None,
         dependencies: Optional[Dict[str, List[str]]] = None,
         experiment_id_override: Optional[str] = None,
+        finished_jobs: int = 0,
+        failed_jobs: int = 0,
     ):
         self.workdir = workdir
         self.run_id = run_id
@@ -641,11 +643,12 @@ class MockExperiment(BaseExperiment):
         self._hostname = hostname
         self._started_at = started_at
         self._ended_at = ended_at
-        self._jobs = jobs or {}
+        self._job_infos = job_infos or {}
         self._services = services or {}
-        self._tags = tags or {}
         self._dependencies = dependencies or {}
         self._experiment_id_override = experiment_id_override
+        self._finished_jobs = finished_jobs
+        self._failed_jobs = failed_jobs
 
     @property
     def experiment_id(self) -> str:
@@ -661,8 +664,9 @@ class MockExperiment(BaseExperiment):
         return self._status
 
     @property
-    def jobs(self) -> Dict[str, "BaseJob"]:
-        return self._jobs
+    def job_infos(self) -> Dict[str, "ExperimentJobInformation"]:
+        """Lightweight job info from jobs.jsonl (job_id, task_id, tags, timestamp)"""
+        return self._job_infos
 
     @property
     def services(self) -> Dict[str, "BaseService"]:
@@ -670,7 +674,12 @@ class MockExperiment(BaseExperiment):
 
     @property
     def tags(self) -> Dict[str, Dict[str, str]]:
-        return self._tags
+        """Build tags dict from job_infos"""
+        return {
+            job_id: job_info.tags
+            for job_id, job_info in self._job_infos.items()
+            if job_info.tags
+        }
 
     @property
     def dependencies(self) -> Dict[str, List[str]]:
@@ -692,13 +701,25 @@ class MockExperiment(BaseExperiment):
     def ended_at(self) -> Optional[float]:
         return self._ended_at
 
+    @property
+    def total_jobs(self) -> int:
+        return len(self._job_infos)
+
+    @property
+    def finished_jobs(self) -> int:
+        return self._finished_jobs
+
+    @property
+    def failed_jobs(self) -> int:
+        return self._failed_jobs
+
     # state_dict() is inherited from BaseExperiment
 
     @classmethod
     def from_disk(
         cls, run_dir: Path, workspace_path: Path
     ) -> Optional["MockExperiment"]:
-        """Load MockExperiment from status.json on disk
+        """Load MockExperiment from status.json and jobs.jsonl on disk
 
         Args:
             run_dir: Path to the run directory containing status.json
@@ -723,7 +744,28 @@ class MockExperiment(BaseExperiment):
                 logger.warning("Failed to read %s: %s", status_path, e)
                 return None
 
-        return cls.from_state_dict(data, workspace_path)
+        # Create experiment from status.json
+        exp = cls.from_state_dict(data, workspace_path)
+
+        # Load jobs from jobs.jsonl
+        jobs_jsonl_path = run_dir / "jobs.jsonl"
+        if jobs_jsonl_path.exists():
+            try:
+                with jobs_jsonl_path.open("r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            job_info = ExperimentJobInformation.from_dict(record)
+                            exp._job_infos[job_info.job_id] = job_info
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+            except OSError as e:
+                logger.warning("Failed to read %s: %s", jobs_jsonl_path, e)
+
+        return exp
 
     @classmethod
     def from_state_dict(cls, d: Dict, workspace_path: Path) -> "MockExperiment":
@@ -762,12 +804,6 @@ class MockExperiment(BaseExperiment):
             else:
                 status = ExperimentStatus.RUNNING
 
-        # Parse jobs from dict
-        jobs_dict = d.get("jobs", {})
-        jobs = {
-            k: MockJob.from_state_dict(v, workspace_path) for k, v in jobs_dict.items()
-        }
-
         # Parse services from dict (can be list or dict)
         services_data = d.get("services", {})
         if isinstance(services_data, list):
@@ -788,95 +824,52 @@ class MockExperiment(BaseExperiment):
             hostname=d.get("hostname"),
             started_at=d.get("started_at"),
             ended_at=d.get("ended_at"),
-            jobs=jobs,
             services=services,
-            tags=d.get("tags", {}),
             dependencies=d.get("dependencies", {}),
+            finished_jobs=d.get("finished_jobs", 0),
+            failed_jobs=d.get("failed_jobs", 0),
         )
 
-    def apply_event(self, event: "EventBase", workspace_path: Path) -> None:
+    def apply_event(self, event: "EventBase") -> None:
         """Apply an event to update experiment state
 
         Args:
             event: Event to apply
-            workspace_path: Workspace path for creating job paths
         """
         from experimaestro.scheduler.state_status import (
             JobSubmittedEvent,
             JobStateChangedEvent,
-            JobProgressEvent,
             ServiceAddedEvent,
             RunCompletedEvent,
         )
 
         if isinstance(event, JobSubmittedEvent):
-            # Create MockJob for the new job
-            job_path = workspace_path / "jobs" / event.task_id / event.job_id
-            self._jobs[event.job_id] = MockJob(
-                identifier=event.job_id,
+            # Add lightweight job info (tags are stored in ExperimentJobInformation)
+            self._job_infos[event.job_id] = ExperimentJobInformation(
+                job_id=event.job_id,
                 task_id=event.task_id,
-                path=job_path,
-                state="unscheduled",
-                submittime=event.timestamp,
-                starttime=None,
-                endtime=None,
-                progress=[],
-                updated_at="",
-                transient=TransientMode(event.transient),
+                tags=event.tags or {},
+                timestamp=event.timestamp,
             )
-            if event.tags:
-                self._tags[event.job_id] = event.tags
             if event.depends_on:
                 self._dependencies[event.job_id] = event.depends_on
-
-        elif isinstance(event, JobStateChangedEvent):
-            if event.job_id in self._jobs:
-                job = self._jobs[event.job_id]
-                # Update job state
-                job.state = STATE_NAME_TO_JOBSTATE.get(event.state, job.state)
-                if event.failure_reason:
-                    try:
-                        job.failure_reason = JobFailureStatus[event.failure_reason]
-                    except KeyError:
-                        pass
-                if event.submitted_time is not None:
-                    job.submittime = event.submitted_time
-                if event.started_time is not None:
-                    job.starttime = event.started_time
-                if event.ended_time is not None:
-                    job.endtime = event.ended_time
-                if event.exit_code is not None:
-                    job.exit_code = event.exit_code
-                if event.retry_count:
-                    job.retry_count = event.retry_count
-                if event.progress:
-                    job.progress = get_progress_information_from_dict(event.progress)
-
-        elif isinstance(event, JobProgressEvent):
-            if event.job_id in self._jobs:
-                from experimaestro.notifications import LevelInformation
-
-                job = self._jobs[event.job_id]
-                level = event.level
-                # Truncate to level + 1 entries
-                job.progress = job.progress[: (level + 1)]
-                # Extend if needed
-                while len(job.progress) <= level:
-                    job.progress.append(LevelInformation(len(job.progress), None, 0.0))
-                # Update the level's progress and description
-                if event.desc:
-                    job.progress[-1].desc = event.desc
-                job.progress[-1].progress = event.progress
 
         elif isinstance(event, ServiceAddedEvent):
             self._services[event.service_id] = MockService(
                 service_id=event.service_id,
                 description_text=event.description,
-                service_config_data=event.service_config,
+                state_dict_data=event.state_dict,
+                service_class=event.service_class,
                 experiment_id=self.experiment_id,
                 run_id=self.run_id,
-                state=event.state,
             )
+
+        elif isinstance(event, JobStateChangedEvent):
+            # Update finished/failed counters when jobs complete
+            if event.state == "done":
+                self._finished_jobs += 1
+            elif event.state == "error":
+                self._failed_jobs += 1
 
         elif isinstance(event, RunCompletedEvent):
             # Map status string to ExperimentStatus
@@ -901,16 +894,17 @@ class MockService(BaseService):
         self,
         service_id: str,
         description_text: str,
-        service_config_data: dict,
+        state_dict_data: dict,
+        service_class: Optional[str] = None,
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
         url: Optional[str] = None,
-        state: str = "STOPPED",
     ):
         self.id = service_id
         self._description = description_text
-        self._state_name = state
-        self._service_config_data = service_config_data
+        self._state_name = "MOCK"  # MockService always has MOCK state
+        self._state_dict_data = state_dict_data
+        self._service_class = service_class
         self.experiment_id = experiment_id
         self.run_id = run_id
         self.url = url
@@ -935,9 +929,27 @@ class MockService(BaseService):
         """Return service description"""
         return self._description
 
-    def service_config(self) -> dict:
-        """Return service-specific configuration for recreation"""
-        return self._service_config_data
+    def state_dict(self) -> dict:
+        """Return service state for recreation"""
+        return self._state_dict_data
+
+    def full_state_dict(self) -> dict:
+        """Get full state as dictionary for JSON serialization.
+
+        Overrides BaseService.full_state_dict() to preserve the original
+        service class name instead of using MockService's class name.
+        """
+        return {
+            "service_id": self.id,
+            "description": self._description,
+            "class": self._service_class,
+            "state_dict": self._state_dict_data,
+        }
+
+    @property
+    def service_class(self) -> Optional[str]:
+        """Return service class name"""
+        return self._service_class
 
     @classmethod
     def from_full_state_dict(cls, d: Dict) -> "MockService":
@@ -947,16 +959,16 @@ class MockService(BaseService):
             d: Dictionary from full_state_dict()
 
         Returns:
-            MockService instance
+            MockService instance (state is always MOCK, not from dict)
         """
         return cls(
             service_id=d["service_id"],
             description_text=d.get("description", ""),
-            service_config_data=d.get("service_config", {}),
+            state_dict_data=d.get("state_dict", {}),
+            service_class=d.get("class"),
             experiment_id=d.get("experiment_id"),
             run_id=d.get("run_id"),
             url=d.get("url"),
-            state=d.get("state", "STOPPED"),
         )
 
     def to_service(self) -> "BaseService":

@@ -15,7 +15,11 @@ from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
 from experimaestro.scheduler.jobs import Job
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
-from experimaestro.scheduler.interfaces import BaseExperiment, BaseService
+from experimaestro.scheduler.interfaces import (
+    BaseExperiment,
+    BaseService,
+    ExperimentJobInformation,
+)
 from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
 from experimaestro.experiments.configuration import DirtyGitAction
 from experimaestro.utils import logger
@@ -116,12 +120,13 @@ class StateListener:
         from experimaestro.scheduler.services import Service
         from .state_status import ServiceAddedEvent
 
-        service_config = Service.serialize_state_dict(service._full_service_config())
+        state_dict = Service.serialize_state_dict(service.state_dict())
+        service_class = f"{service.__class__.__module__}.{service.__class__.__name__}"
         event = ServiceAddedEvent(
             service_id=service.id,
             description=service.description(),
-            state=service.state.name if hasattr(service.state, "name") else "STOPPED",
-            service_config=service_config,
+            service_class=service_class,
+            state_dict=state_dict,
         )
         self.event_writer.write_event(event)
 
@@ -403,35 +408,6 @@ class experiment(BaseExperiment):
         """Return the path to the jobs.jsonl file for this experiment"""
         return self.workdir / "jobs.jsonl"
 
-    @property
-    def services_json_path(self):
-        """Return the path to the services.json file for this experiment"""
-        return self.workdir / "services.json"
-
-    def _write_services_json(self):
-        """Write all services to services.json file"""
-        from experimaestro.scheduler.services import Service
-
-        services_data = {}
-        for service_id, service in self.services.items():
-            # Get service_config from service (includes __class__ for recreation)
-            # and serialize paths to JSON-compatible format
-            service_state = Service.serialize_state_dict(service._full_service_config())
-            # Add runtime state info
-            service_state.update(
-                {
-                    "service_id": service_id,
-                    "description": service.description(),
-                    "state": service.state.name,
-                    "url": getattr(service, "url", None),
-                    "timestamp": time.time(),
-                }
-            )
-            services_data[service_id] = service_state
-
-        with self.services_json_path.open("w") as f:
-            json.dump(services_data, f, indent=2)
-
     def add_job(self, job: "Job"):
         """Register a job and its tags to jobs.jsonl file and database
 
@@ -460,15 +436,15 @@ class experiment(BaseExperiment):
                 self.unfinishedJobs,
             )
 
-        record = {
-            "job_id": job.identifier,
-            "task_id": str(job.type.identifier),
-            "tags": dict(job.tags.items()) if job.tags else {},
-            "timestamp": time.time(),
-        }
+        job_info = ExperimentJobInformation(
+            job_id=job.identifier,
+            task_id=str(job.type.identifier),
+            tags=dict(job.tags.items()) if job.tags else {},
+            timestamp=time.time(),
+        )
 
         with self.jobs_jsonl_path.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+            f.write(json.dumps(job_info.to_dict()) + "\n")
 
         # Write job submitted event to filesystem (only in NORMAL mode)
         if self._event_writer is not None:
@@ -947,18 +923,15 @@ class experiment(BaseExperiment):
         if self._state_listener is not None:
             service.add_listener(self._state_listener)
 
-        # Register file listener for state changes (writes to services.json)
+        # Register listener for state changes
         service.add_listener(self)
 
         self.scheduler.notify_service_add(service, self.name, self.run_id or "")
 
-        # Write services.json file
-        self._write_services_json()
-
         return service
 
     def service_state_changed(self, service):
-        """Called when a service state changes - update services.json and notify listeners"""
+        """Called when a service state changes - notify listeners"""
         state_name = service.state.name if hasattr(service.state, "name") else "UNKNOWN"
         logger.debug(
             "Service %s state changed to %s (experiment=%s)",
@@ -966,7 +939,6 @@ class experiment(BaseExperiment):
             state_name,
             self.name,
         )
-        self._write_services_json()
 
         # Notify state listeners (for TUI tab title updates etc.)
         from experimaestro.scheduler.state_status import ServiceStateChangedEvent
