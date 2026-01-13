@@ -1,6 +1,5 @@
 """All classes related to localhost management"""
 
-import asyncio
 import subprocess
 from typing import Optional
 from pathlib import Path, WindowsPath, PosixPath
@@ -22,6 +21,7 @@ from . import (
 )
 from experimaestro.tokens import Token, CounterToken
 from experimaestro.utils import logger
+from experimaestro.utils.psutils import aio_wait_pid
 
 
 class PsutilProcess(Process):
@@ -41,18 +41,11 @@ class PsutilProcess(Process):
         return code
 
     async def aio_wait(self) -> int:
-        """Asynchronously wait for process to finish"""
+        """Asynchronously wait for process to finish (true async on Linux/macOS)"""
         logger.debug(
             "Async waiting (psutil) for process with PID %s", self._process.pid
         )
-        poll_interval = 0.01  # start at 0.01 seconds, max 10 seconds
-
-        while self._process.is_running():
-            await asyncio.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 10.0)
-
-        # Process has finished, wait() returns immediately
-        code = self._process.wait()
+        code = await aio_wait_pid(self._process.pid)
         logger.debug(
             "Finished async wait (psutil) for process with PID %s: code %s",
             self._process.pid,
@@ -87,17 +80,13 @@ class LocalProcess(Process):
         return code
 
     async def aio_wait(self) -> int:
-        """Asynchronously wait for process to finish"""
+        """Asynchronously wait for process to finish (true async on Linux/macOS)"""
         logger.debug(
             "Async waiting (python) for process with PID %s", self._process.pid
         )
-        poll_interval = 0.01  # start at 0.01 seconds, max 10 seconds
-
-        while self._process.poll() is None:
-            await asyncio.sleep(poll_interval)
-            poll_interval = min(poll_interval * 1.5, 10.0)
-
-        code = self._process.returncode
+        code = await aio_wait_pid(self._process.pid)
+        # Update the Popen returncode
+        self._process.returncode = code
         logger.debug(
             "Finished async wait (python) for process with PID %s: %s",
             self._process.pid,
