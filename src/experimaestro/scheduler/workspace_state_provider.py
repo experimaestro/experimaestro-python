@@ -10,6 +10,7 @@ Classes:
 
 import json
 import logging
+import os
 import sys
 import threading
 from datetime import datetime
@@ -53,6 +54,10 @@ class WorkspaceStateProvider(StateProvider):
     It is read-only and used by TUI/web monitors to observe running and past experiments.
 
     Singleton per workspace path - use get_instance() to obtain instances.
+
+    On initialization, this provider performs crash recovery:
+    - Consolidates orphaned event files from .events/ into status.json
+    - Recovers job state from marker files (.done, .failed, .pid)
     """
 
     _instances: Dict[Path, "WorkspaceStateProvider"] = {}
@@ -107,6 +112,10 @@ class WorkspaceStateProvider(StateProvider):
         # Event reader (with built-in watching capability)
         self._event_reader: Optional[EventReader] = None
         self._jobs_dir = self.workspace_path / ".events" / "jobs"
+
+        # Perform crash recovery: consolidate orphaned events
+        self._consolidate_orphaned_events()
+
         self._start_watcher()
 
     def _start_watcher(self) -> None:
@@ -139,6 +148,268 @@ class WorkspaceStateProvider(StateProvider):
         if self._event_reader is not None:
             self._event_reader.stop_watching()
             self._event_reader = None
+
+    # =========================================================================
+    # Crash recovery: Consolidate orphaned events
+    # =========================================================================
+
+    def _consolidate_orphaned_events(self) -> None:
+        """Consolidate orphaned event files from crashed experiments/jobs
+
+        This method is called during initialization to recover from crashes.
+        It scans the .events/ directory for orphaned event files and consolidates
+        them into status.json files.
+
+        Crash scenarios handled:
+        1. Experiment crashed after writing events but before finalizing status.json
+        2. Job crashed before writing final status
+
+        Logic:
+        - If status.json has NO 'events_count' field → already consolidated, just cleanup
+        - If status.json HAS 'events_count' field → events need to be processed
+        """
+        # Consolidate experiment events
+        if self._experiments_dir.exists():
+            for exp_events_dir in self._experiments_dir.iterdir():
+                if exp_events_dir.is_dir():
+                    experiment_id = exp_events_dir.name
+                    self._consolidate_experiment_events(experiment_id, exp_events_dir)
+
+    def _consolidate_experiment_events(
+        self, experiment_id: str, exp_events_dir: Path
+    ) -> None:
+        """Consolidate orphaned event files for a specific experiment
+
+        If there are event files in .events/experiments/{experiment_id}/ and
+        status.json has an events_count field, apply the events to update status.json.
+
+        If events_count is absent from status.json, all events have been processed
+        and we just need to cleanup the orphaned event files.
+
+        Args:
+            experiment_id: The experiment identifier
+            exp_events_dir: Path to .events/experiments/{experiment_id}/
+        """
+        # Find event files
+        event_files = list(exp_events_dir.glob("events-*.jsonl"))
+        if not event_files:
+            return  # No orphaned events
+
+        # Get current run_id from symlink
+        symlink = exp_events_dir / "current"
+        if not symlink.is_symlink():
+            logger.debug(
+                "No 'current' symlink for experiment %s, skipping consolidation",
+                experiment_id,
+            )
+            return
+
+        try:
+            run_dir = symlink.resolve()
+            run_id = run_dir.name
+        except OSError:
+            logger.warning(
+                "Could not resolve 'current' symlink for experiment %s", experiment_id
+            )
+            return
+
+        # Check if status.json exists and check for events_count
+        status_path = run_dir / "status.json"
+        exp_data = None
+        events_count = None  # None means "already consolidated"
+
+        if status_path.exists():
+            try:
+                with status_path.open("r") as f:
+                    exp_data = json.load(f)
+                # events_count absent means already consolidated
+                events_count = exp_data.get("events_count")
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(
+                    "Failed to read status.json for %s: %s", experiment_id, e
+                )
+
+        # If events_count is None (absent), events are already consolidated
+        # Just cleanup orphaned event files
+        if events_count is None:
+            logger.debug(
+                "Experiment %s already consolidated (no events_count), cleaning up",
+                experiment_id,
+            )
+            self._cleanup_event_files(exp_events_dir, event_files)
+            return
+
+        # We have unprocessed events - need to consolidate
+        logger.info(
+            "Consolidating orphaned events for experiment %s (events_count=%d)",
+            experiment_id,
+            events_count,
+        )
+
+        # Load or create experiment
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
+        if exp_data:
+            exp = MockExperiment.from_state_dict(exp_data, self.workspace_path)
+        else:
+            exp = MockExperiment(
+                workdir=run_dir,
+                run_id=run_id,
+                status=ExperimentStatus.RUNNING,
+            )
+
+        # Read and apply all events from events_count onwards
+        reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
+        events = reader.read_events_since_count(experiment_id, events_count)
+
+        for event in events:
+            exp.apply_event(event)
+            logger.debug(
+                "Applied event %s to experiment %s", type(event).__name__, experiment_id
+            )
+
+        # Check for RunCompletedEvent to determine final status
+        from experimaestro.scheduler.state_status import RunCompletedEvent
+
+        final_event = None
+        for event in reversed(events):
+            if isinstance(event, RunCompletedEvent):
+                final_event = event
+                break
+
+        if final_event:
+            # Experiment completed - write final status.json
+            if final_event.status in ("completed", "done"):
+                exp._status = ExperimentStatus.DONE
+            elif final_event.status == "failed":
+                exp._status = ExperimentStatus.FAILED
+            if final_event.ended_at:
+                from experimaestro.scheduler.interfaces import deserialize_to_datetime
+
+                exp._ended_at = deserialize_to_datetime(final_event.ended_at)
+
+        # Remove events_count from state_dict to mark as consolidated
+        # (MockExperiment.state_dict() includes events_count, so we set it to 0
+        # and then remove the key after getting state_dict)
+        exp._events_count = 0
+
+        # Write consolidated status.json (without events_count)
+        self._write_experiment_status(exp, status_path, remove_events_count=True)
+
+        # Archive event files to permanent storage
+        perm_events_dir = run_dir / "events"
+        self._archive_event_files(exp_events_dir, perm_events_dir, event_files)
+
+        logger.info(
+            "Consolidated experiment %s: %d events applied, status=%s",
+            experiment_id,
+            len(events),
+            exp.status.value,
+        )
+
+    def _write_experiment_status(
+        self, exp: MockExperiment, status_path: Path, remove_events_count: bool = False
+    ) -> None:
+        """Write experiment status.json atomically
+
+        Args:
+            exp: MockExperiment with current state
+            status_path: Path to status.json
+            remove_events_count: If True, remove events_count from the output
+                (indicates all events have been processed)
+        """
+        import fasteners
+        import tempfile
+
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Use file lock for atomic writes
+        lock_path = status_path.parent / f".{status_path.name}.lock"
+        lock = fasteners.InterProcessLock(str(lock_path))
+
+        state = exp.state_dict()
+        if remove_events_count:
+            state.pop("events_count", None)
+
+        with lock:
+            # Write to temp file first, then atomic rename
+            fd, temp_path = tempfile.mkstemp(
+                dir=status_path.parent, suffix=".tmp", prefix="status"
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(state, f, indent=2)
+                os.replace(temp_path, status_path)
+            except Exception:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                raise
+
+    def _cleanup_event_files(self, events_dir: Path, event_files: List[Path]) -> None:
+        """Remove temporary event files after consolidation
+
+        Args:
+            events_dir: Directory containing event files
+            event_files: List of event files to remove
+        """
+        for event_file in event_files:
+            try:
+                event_file.unlink()
+                logger.debug("Removed event file %s", event_file)
+            except OSError as e:
+                logger.warning("Failed to remove event file %s: %s", event_file, e)
+
+        # Remove empty events directory
+        try:
+            # Only remove if empty (may still have 'current' symlink)
+            remaining = list(events_dir.iterdir())
+            if not remaining or (
+                len(remaining) == 1 and remaining[0].name == "current"
+            ):
+                # Remove symlink if present
+                current = events_dir / "current"
+                if current.is_symlink():
+                    current.unlink()
+                events_dir.rmdir()
+                logger.debug("Removed empty events directory %s", events_dir)
+        except OSError:
+            pass  # Directory not empty or other error
+
+    def _archive_event_files(
+        self, temp_dir: Path, perm_dir: Path, event_files: List[Path]
+    ) -> None:
+        """Archive event files to permanent storage and clean up temp files
+
+        Args:
+            temp_dir: Temporary events directory (.events/experiments/{id}/)
+            perm_dir: Permanent events directory (run_dir/events/)
+            event_files: List of temporary event files
+        """
+        import shutil
+
+        perm_dir.mkdir(parents=True, exist_ok=True)
+
+        for temp_file in event_files:
+            # Convert filename: events-N.jsonl -> event-N.jsonl
+            perm_name = temp_file.name.replace("events-", "event-")
+            perm_path = perm_dir / perm_name
+
+            if perm_path.exists():
+                # Already archived (hardlink case) - just remove temp
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
+            else:
+                # Move to permanent storage
+                try:
+                    shutil.move(str(temp_file), str(perm_path))
+                    logger.debug("Archived %s -> %s", temp_file, perm_path)
+                except OSError as e:
+                    logger.warning("Failed to archive %s: %s", temp_file, e)
+
+        # Clean up empty temp directory
+        self._cleanup_event_files(temp_dir, [])
 
     def _on_event(self, entity_id: str, event: EventBase) -> None:
         """Unified callback for events from file watcher

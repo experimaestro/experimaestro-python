@@ -1100,3 +1100,350 @@ class TestEventFileOrderingWithStartCount:
                 assert len(file2_events_received) == expected_file2_count
         finally:
             provider.close()
+
+
+# =============================================================================
+# Tests: Crash Recovery / Event Consolidation
+# =============================================================================
+
+
+class TestCrashRecovery:
+    """Tests for crash recovery and orphaned event consolidation
+
+    These tests verify that WorkspaceStateProvider can recover from crashes:
+    1. Experiment crashes after writing events but before finalizing status.json
+    2. Events are already consolidated (no events_count in status.json)
+    """
+
+    def test_consolidates_orphaned_events_on_init(self, tmp_path):
+        """Provider should consolidate orphaned events during initialization
+
+        Scenario: Experiment crashed after writing events but before finalization.
+        The events-0.jsonl exists, status.json has events_count=0.
+        On init, provider should apply events and remove events_count from status.json.
+        """
+        workspace = tmp_path
+        experiment_id = "crashed-exp"
+        run_id = "20260101_100000"
+
+        # Create experiment directory structure
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True)
+
+        # Create events directory with symlink
+        events_dir = workspace / ".events" / "experiments" / experiment_id
+        events_dir.mkdir(parents=True)
+        symlink = events_dir / "current"
+        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+
+        # Create status.json WITH events_count (indicates unprocessed events)
+        status = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "status": "running",
+            "events_count": 0,
+            "started_at": "2026-01-01T10:00:00",
+        }
+        with open(exp_dir / "status.json", "w") as f:
+            json.dump(status, f)
+
+        # Create orphaned event file with events
+        events_file = events_dir / "events-0.jsonl"
+        events = [
+            {
+                "event_type": "JobSubmittedEvent",
+                "job_id": "job-1",
+                "task_id": "pkg.MyTask",
+                "experiment_id": experiment_id,
+                "run_id": run_id,
+                "timestamp": 1704103200.0,
+            },
+            {
+                "event_type": "JobStateChangedEvent",
+                "job_id": "job-1",
+                "state": "done",
+                "timestamp": 1704103300.0,
+            },
+            {
+                "event_type": "RunCompletedEvent",
+                "experiment_id": experiment_id,
+                "run_id": run_id,
+                "status": "completed",
+                "ended_at": "2026-01-01T11:00:00",
+                "timestamp": 1704106800.0,
+            },
+        ]
+        with open(events_file, "w") as f:
+            for event in events:
+                f.write(json.dumps(event) + "\n")
+
+        # Initialize provider - should trigger consolidation
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            # Verify status.json was updated
+            with open(exp_dir / "status.json") as f:
+                updated_status = json.load(f)
+
+            # events_count should be removed (indicates consolidation complete)
+            assert "events_count" not in updated_status
+            # Status should be updated to "done"
+            assert updated_status["status"] == "done"
+            # ended_at should be set
+            assert updated_status.get("ended_at") is not None
+
+            # Event files should be archived and cleaned up
+            assert not events_file.exists(), "Temp event file should be removed"
+            assert not events_dir.exists() or not any(events_dir.glob("events-*.jsonl"))
+
+            # Permanent events should be archived
+            perm_events_dir = exp_dir / "events"
+            assert (perm_events_dir / "event-0.jsonl").exists()
+        finally:
+            provider.close()
+
+    def test_skips_already_consolidated_experiments(self, tmp_path):
+        """Provider should skip experiments that are already consolidated
+
+        If status.json has no events_count, events are already processed.
+        Provider should just clean up orphaned event files without modifying status.
+        """
+        workspace = tmp_path
+        experiment_id = "consolidated-exp"
+        run_id = "20260101_100000"
+
+        # Create experiment directory structure
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True)
+
+        # Create events directory with symlink
+        events_dir = workspace / ".events" / "experiments" / experiment_id
+        events_dir.mkdir(parents=True)
+        symlink = events_dir / "current"
+        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+
+        # Create status.json WITHOUT events_count (already consolidated)
+        status = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "status": "done",
+            "started_at": "2026-01-01T10:00:00",
+            "ended_at": "2026-01-01T11:00:00",
+            # Note: no events_count field
+        }
+        with open(exp_dir / "status.json", "w") as f:
+            json.dump(status, f)
+
+        # Create stale event file (should be cleaned up)
+        events_file = events_dir / "events-0.jsonl"
+        with open(events_file, "w") as f:
+            f.write(json.dumps({"event_type": "TestEvent"}) + "\n")
+
+        # Initialize provider
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            # Verify status.json was NOT modified (check timestamp or content)
+            with open(exp_dir / "status.json") as f:
+                updated_status = json.load(f)
+
+            # Status should remain unchanged
+            assert updated_status["status"] == "done"
+            assert "events_count" not in updated_status
+
+            # Stale event file should be cleaned up
+            assert not events_file.exists(), "Stale event file should be removed"
+        finally:
+            provider.close()
+
+    def test_consolidates_multiple_event_files(self, tmp_path):
+        """Provider should consolidate multiple event files in order
+
+        When events_count=1, events-0.jsonl is already processed.
+        Events from events-1.jsonl and events-2.jsonl should be applied.
+        """
+        workspace = tmp_path
+        experiment_id = "multi-events-exp"
+        run_id = "20260101_100000"
+
+        # Create experiment directory structure
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True)
+
+        # Create events directory with symlink
+        events_dir = workspace / ".events" / "experiments" / experiment_id
+        events_dir.mkdir(parents=True)
+        symlink = events_dir / "current"
+        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+
+        # Create status.json with events_count=1 (events-0 already processed)
+        status = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "status": "running",
+            "events_count": 1,
+            "started_at": "2026-01-01T10:00:00",
+            "finished_jobs": 1,  # From events-0
+        }
+        with open(exp_dir / "status.json", "w") as f:
+            json.dump(status, f)
+
+        # Create events-0.jsonl (already processed, should be ignored for consolidation)
+        with open(events_dir / "events-0.jsonl", "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "event_type": "JobSubmittedEvent",
+                        "job_id": "old-job",
+                        "task_id": "pkg.OldTask",
+                        "timestamp": 1704103100.0,
+                    }
+                )
+                + "\n"
+            )
+
+        # Create events-1.jsonl (should be processed)
+        with open(events_dir / "events-1.jsonl", "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "event_type": "JobSubmittedEvent",
+                        "job_id": "new-job-1",
+                        "task_id": "pkg.NewTask1",
+                        "experiment_id": experiment_id,
+                        "run_id": run_id,
+                        "timestamp": 1704103200.0,
+                    }
+                )
+                + "\n"
+            )
+
+        # Create events-2.jsonl with completion event
+        with open(events_dir / "events-2.jsonl", "w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "event_type": "JobStateChangedEvent",
+                        "job_id": "new-job-1",
+                        "state": "done",
+                        "timestamp": 1704103300.0,
+                    }
+                )
+                + "\n"
+            )
+            f.write(
+                json.dumps(
+                    {
+                        "event_type": "RunCompletedEvent",
+                        "experiment_id": experiment_id,
+                        "run_id": run_id,
+                        "status": "completed",
+                        "ended_at": "2026-01-01T11:00:00",
+                        "timestamp": 1704106800.0,
+                    }
+                )
+                + "\n"
+            )
+
+        # Initialize provider
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            # Verify status.json was updated
+            with open(exp_dir / "status.json") as f:
+                updated_status = json.load(f)
+
+            # events_count should be removed
+            assert "events_count" not in updated_status
+            # Status should be done
+            assert updated_status["status"] == "done"
+            # finished_jobs should be updated (1 original + 1 from events-1/2)
+            assert updated_status["finished_jobs"] == 2
+
+            # All temp event files should be cleaned up
+            assert not any(events_dir.glob("events-*.jsonl"))
+        finally:
+            provider.close()
+
+    def test_handles_missing_status_json(self, tmp_path):
+        """Provider should handle case where status.json doesn't exist
+
+        If events exist but status.json is missing, create it from events.
+        """
+        workspace = tmp_path
+        experiment_id = "no-status-exp"
+        run_id = "20260101_100000"
+
+        # Create experiment directory structure (no status.json)
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True)
+
+        # Create events directory with symlink
+        events_dir = workspace / ".events" / "experiments" / experiment_id
+        events_dir.mkdir(parents=True)
+        symlink = events_dir / "current"
+        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+
+        # Create events-0.jsonl with events
+        events_file = events_dir / "events-0.jsonl"
+        events = [
+            {
+                "event_type": "JobSubmittedEvent",
+                "job_id": "job-1",
+                "task_id": "pkg.MyTask",
+                "experiment_id": experiment_id,
+                "run_id": run_id,
+                "timestamp": 1704103200.0,
+            },
+            {
+                "event_type": "RunCompletedEvent",
+                "experiment_id": experiment_id,
+                "run_id": run_id,
+                "status": "completed",
+                "ended_at": "2026-01-01T11:00:00",
+                "timestamp": 1704106800.0,
+            },
+        ]
+        with open(events_file, "w") as f:
+            for event in events:
+                f.write(json.dumps(event) + "\n")
+
+        # Initialize provider - missing status.json has no events_count, so
+        # consolidation is skipped. Events are just cleaned up.
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            # Event files should be cleaned up
+            assert not events_file.exists(), "Stale event file should be removed"
+        finally:
+            provider.close()
+
+    def test_no_op_when_no_orphaned_events(self, tmp_path):
+        """Provider should do nothing when there are no orphaned events"""
+        workspace = tmp_path
+        experiment_id = "clean-exp"
+        run_id = "20260101_100000"
+
+        # Create experiment directory structure
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True)
+
+        # Create status.json (finalized, no events_count)
+        status = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "status": "done",
+            "started_at": "2026-01-01T10:00:00",
+            "ended_at": "2026-01-01T11:00:00",
+        }
+        with open(exp_dir / "status.json", "w") as f:
+            json.dump(status, f)
+
+        # No .events directory created (clean state)
+
+        # Initialize provider
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            # Verify status.json remains unchanged
+            with open(exp_dir / "status.json") as f:
+                updated_status = json.load(f)
+
+            assert updated_status == status
+        finally:
+            provider.close()
