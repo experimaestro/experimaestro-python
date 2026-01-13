@@ -16,6 +16,7 @@ from watchdog.events import FileSystemEventHandler
 
 from experimaestro.utils.asyncio import asyncThreadcheck
 from experimaestro.dynamic import DynamicResource
+from experimaestro.ipc import AsyncEventBridge
 
 logger = logging.getLogger("xpm.locking")
 
@@ -462,8 +463,86 @@ class DynamicLockFile(ABC):
             logging.debug("Deleting lock file %s", self.path)
             self.path.unlink()
 
+    async def async_watch(
+        self, on_released: Optional[Callable[[], None]] = None
+    ) -> None:
+        """Watch the job process asynchronously and call callback when it finishes.
+
+        Uses Process.fromDefinition and aio_wait() for async process waiting.
+
+        Args:
+            on_released: Optional async callback to invoke when lock is released
+        """
+        if self.job_uri is None:
+            return
+
+        logger.debug("Async watching process for %s (%s)", self.path, self.job_uri)
+        job_path = Path(self.job_uri)
+        pidpath = job_path.with_suffix(".pid")
+
+        # Read process definition from PID file
+        process = await self._async_read_process(pidpath)
+        if process is None:
+            # Job already finished or PID file doesn't exist
+            logger.debug("Job already finished (no PID file or invalid) %s", pidpath)
+            self.delete()
+            if on_released is not None:
+                await on_released()
+            return
+
+        logger.debug("Waiting for process to finish: %s", process)
+
+        # Wait for process to finish using async wait
+        try:
+            await process.aio_wait()
+        except Exception as e:
+            logger.warning("Error waiting for process: %s", e)
+
+        logger.debug("Process finished, cleaning up lock file")
+        self.delete()
+        if on_released is not None:
+            await on_released()
+
+    async def _async_read_process(self, pidpath: Path):
+        """Read process definition from PID file asynchronously.
+
+        Args:
+            pidpath: Path to the PID file
+
+        Returns:
+            Process instance if found, None if file doesn't exist or is invalid
+        """
+        import asyncio
+
+        from experimaestro.connectors import Process
+        from experimaestro.connectors.local import LocalConnector
+
+        connector = LocalConnector.instance()
+
+        # Try a few times in case the file is being written
+        for _ in range(50):  # 5 second timeout
+            if not pidpath.is_file():
+                return None
+
+            try:
+                content = pidpath.read_text().strip()
+                if content:
+                    data = json.loads(content)
+                    return Process.fromDefinition(connector, data)
+            except (json.JSONDecodeError, ValueError, OSError):
+                pass
+            except Exception as e:
+                logger.debug("Error reading process file %s: %s", pidpath, e)
+
+            await asyncio.sleep(0.1)
+
+        logger.warning("Timeout reading PID file %s", pidpath)
+        return None
+
     def watch(self, on_released: Optional[Callable[[], None]] = None) -> None:
         """Watch the job process and call callback when it finishes.
+
+        DEPRECATED: Use async_watch() instead for better performance.
 
         This starts a background thread that:
         1. Waits for the job lock to be available (job started)
@@ -569,7 +648,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
     - IPC and thread locking
     - Condition variable for waiting on availability
     - Cache of lock files
-    - Async waiting via ResourcePoller
+    - Async waiting via ResourcePoller and AsyncEventBridge
 
     File structure:
     - {lock_folder}/informations.json: Resource-level info (e.g., token counts)
@@ -623,19 +702,28 @@ class TrackedDynamicResource(DynamicResource, ABC):
         self.lock = threading.Lock()
         self.available_condition = threading.Condition(self.lock)
 
+        # Async primitives for async event handling
+        self._async_lock = asyncio.Lock()
+        self._available_event = asyncio.Event()
+
         self.timestamp = os.path.getmtime(self.lock_folder)
 
         # Initial state update
         with self.lock, self.ipc_lock:
             self._update()
 
-        # Set up file system watching
+        # Set up file system watching (sync path via watchdog)
         from .ipc import ipcom
 
         self.watchedpath = str(self.lock_folder.absolute())
         self.proxy = _TrackedResourceProxy(self)
         self.watcher = ipcom().fswatch(self.proxy, self.lock_folder, recursive=True)
         logger.debug("Watching %s", self.watchedpath)
+
+        # Register with AsyncEventBridge for async event handling
+        self._unregister_async_handler = AsyncEventBridge.instance().register_handler(
+            self.lock_folder, self._handle_fs_event_async
+        )
 
     def __del__(self):
         if self.watcher is not None:
@@ -644,6 +732,139 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
             ipcom().fsunwatch(self.watcher)
             self.watcher = None
+
+        # Unregister from AsyncEventBridge
+        if hasattr(self, "_unregister_async_handler"):
+            self._unregister_async_handler()
+
+    # --- Async event handling ---
+
+    async def _handle_fs_event_async(
+        self, event_type: str, src_path: str, **kwargs
+    ) -> None:
+        """Handle file system event in async context.
+
+        Called by AsyncEventBridge when filesystem events occur.
+
+        Args:
+            event_type: Type of event ("created", "deleted", "modified", "moved")
+            src_path: Path to the affected file
+            **kwargs: Additional event data (e.g., dest_path for moved events)
+        """
+        path = Path(src_path)
+        logger.debug("Async FS event: %s on %s", event_type, path)
+
+        # Handle informations.json modification
+        if src_path == str(self.informations_path):
+            await self._on_information_modified_async()
+            return
+
+        # Handle job lock files
+        if not self._is_job_lock_file(path):
+            return
+
+        async with self._async_lock:
+            if event_type == "created":
+                await self._on_created_async(path)
+            elif event_type == "deleted":
+                await self._on_deleted_async(path)
+            elif event_type == "modified":
+                await self._on_modified_async(path)
+
+    async def _on_created_async(self, path: Path) -> None:
+        """Handle file creation event asynchronously."""
+        key = self._lock_file_key(path)
+        if key not in self.cache:
+            try:
+                lf = self.lock_file_class(path)
+                # Use async_watch for async lock file monitoring
+                asyncio.create_task(
+                    lf.async_watch(self._make_async_release_callback(key))
+                )
+                self.cache[key] = lf
+                self._account_lock_file(lf)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                logger.exception("Error in async on_created handler")
+
+    async def _on_deleted_async(self, path: Path) -> None:
+        """Handle file deletion event asynchronously."""
+        key = self._lock_file_key(path)
+        if key in self.cache:
+            logging.debug("Deleting %s from cache (async event)", key)
+            lf = self.cache[key]
+            del self.cache[key]
+            self._unaccount_lock_file(lf)
+            self._notify_async_waiters()
+
+    async def _on_modified_async(self, path: Path) -> None:
+        """Handle file modification event asynchronously."""
+        key = self._lock_file_key(path)
+        if key not in self.cache:
+            logger.debug("Lock file not in cache %s (async)", key)
+            try:
+                lf = self.lock_file_class(path)
+                asyncio.create_task(
+                    lf.async_watch(self._make_async_release_callback(key))
+                )
+                self.cache[key] = lf
+                self._account_lock_file(lf)
+            except FileNotFoundError:
+                pass
+
+    def _make_async_release_callback(self, key: str) -> Callable[[], None]:
+        """Create an async callback for lock release notification.
+
+        Args:
+            key: The lock file key
+
+        Returns:
+            Async function that handles lock release
+        """
+
+        async def callback():
+            await self._on_lock_released_async(key)
+
+        return callback
+
+    async def _on_information_modified_async(self) -> None:
+        """Handle informations.json modification asynchronously."""
+        import os
+
+        logger.debug("Resource information modified (async): %s", self.name)
+        async with self._async_lock:
+            timestamp = os.path.getmtime(self.informations_path)
+            if timestamp <= self.timestamp:
+                logger.debug(
+                    "Not reading information file [%f <= %f]",
+                    timestamp,
+                    self.timestamp,
+                )
+                return
+
+            self._handle_information_change()
+            self._notify_async_waiters()
+
+    async def _on_lock_released_async(self, name: str) -> None:
+        """Called when a watched lock is released (job finished) - async version."""
+        async with self._async_lock:
+            if name in self.cache:
+                logging.debug("Lock released (job finished, async): %s", name)
+                lf = self.cache[name]
+                del self.cache[name]
+                self._unaccount_lock_file(lf)
+                self._notify_async_waiters()
+        self._notify_poller()
+
+    def _notify_async_waiters(self) -> None:
+        """Notify async waiters that resource state has changed.
+
+        Sets the async event and then clears it (pulse notification).
+        """
+        self._available_event.set()
+        # Reset for next wait - waiters that were waiting will have been notified
+        self._available_event.clear()
 
     def refresh_state(self) -> None:
         """Refresh state from disk.
@@ -658,7 +879,8 @@ class TrackedDynamicResource(DynamicResource, ABC):
     async def async_wait(self, timeout: float = 0) -> bool:
         """Wait asynchronously until the resource state may have changed.
 
-        Uses ResourcePoller for efficient polling across all resources.
+        Uses both AsyncEventBridge notifications and ResourcePoller for fallback.
+        Returns as soon as either notifies of a change.
 
         Args:
             timeout: Maximum time to wait in seconds (0 = wait indefinitely)
@@ -671,17 +893,36 @@ class TrackedDynamicResource(DynamicResource, ABC):
         loop = asyncio.get_running_loop()
         poller = ResourcePoller.instance()
 
-        event = poller.register(self, loop, timeout)
+        # Register with ResourcePoller as fallback
+        poller_event = poller.register(self, loop, timeout)
+
+        # Create a task that waits for either event
+        async def wait_for_either():
+            # Wait for either the async event or the poller event
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(self._available_event.wait()),
+                    asyncio.create_task(poller_event.wait()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            # Cancel pending tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
         try:
             if timeout > 0:
                 try:
-                    await asyncio.wait_for(event.wait(), timeout=timeout)
+                    await asyncio.wait_for(wait_for_either(), timeout=timeout)
                     return True
                 except asyncio.TimeoutError:
                     return False
             else:
-                await event.wait()
+                await wait_for_either()
                 return True
         finally:
             # Event cleanup is handled by poller

@@ -1,15 +1,27 @@
 """IPC utilities"""
 
+from __future__ import annotations
+
+import asyncio
 from enum import Enum
-from typing import Optional
+from typing import Optional, Callable, Dict, List, Any, TYPE_CHECKING
 from pathlib import Path
 import os
 import sys
 import logging
+import threading
+
 from .utils import logger
 from watchdog.observers import Observer
 from watchdog.observers.api import ObservedWatch
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEventHandler, FileSystemEvent
+
+if TYPE_CHECKING:
+    pass
+
+
+# Type for async event handlers: (event_type, src_path, **kwargs) -> None
+AsyncEventHandler = Callable[..., Any]
 
 
 class WatcherType(str, Enum):
@@ -79,6 +91,203 @@ def _create_observer(watcher_type: WatcherType, polling_interval: float = 1.0):
 
         case _:
             raise ValueError(f"Unknown watcher type: {watcher_type}")
+
+
+class AsyncEventBridge:
+    """Bridge watchdog filesystem events to asyncio event loop.
+
+    This class allows filesystem events from the watchdog thread to be
+    processed in an asyncio event loop. Handlers are registered for specific
+    paths and events are posted via call_soon_threadsafe.
+
+    Usage:
+        bridge = AsyncEventBridge()
+        bridge.set_loop(asyncio.get_running_loop())
+
+        async def handler(event_type: str, src_path: str):
+            print(f"Event: {event_type} on {src_path}")
+
+        bridge.register_handler("/some/path", handler)
+    """
+
+    _instance: Optional["AsyncEventBridge"] = None
+    _instance_lock = threading.Lock()
+
+    @classmethod
+    def instance(cls) -> "AsyncEventBridge":
+        """Get or create the singleton AsyncEventBridge."""
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the singleton instance. Used for testing."""
+        with cls._instance_lock:
+            if cls._instance is not None:
+                cls._instance._loop = None
+                cls._instance._handlers.clear()
+            cls._instance = None
+
+    def __init__(self):
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._lock = threading.Lock()
+        # Maps watched path -> list of async handlers
+        self._handlers: Dict[str, List[AsyncEventHandler]] = {}
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Set the asyncio loop to post events to.
+
+        This must be called from the async context before events can be
+        processed. Typically called during scheduler startup.
+
+        Args:
+            loop: The asyncio event loop to use
+        """
+        with self._lock:
+            self._loop = loop
+        logger.debug("AsyncEventBridge: set event loop %s", loop)
+
+    def register_handler(
+        self, path: str | Path, handler: AsyncEventHandler
+    ) -> Callable[[], None]:
+        """Register an async handler for filesystem events at a path.
+
+        Args:
+            path: The path being watched (used as key for routing events)
+            handler: Async function called with (event_type, src_path, **kwargs)
+
+        Returns:
+            Unregister function - call to remove the handler
+        """
+        path_str = str(Path(path).absolute())
+
+        with self._lock:
+            if path_str not in self._handlers:
+                self._handlers[path_str] = []
+            self._handlers[path_str].append(handler)
+
+        logger.debug("AsyncEventBridge: registered handler for %s", path_str)
+
+        def unregister():
+            with self._lock:
+                if path_str in self._handlers:
+                    try:
+                        self._handlers[path_str].remove(handler)
+                        if not self._handlers[path_str]:
+                            del self._handlers[path_str]
+                    except ValueError:
+                        pass
+
+        return unregister
+
+    def post_event(
+        self,
+        watched_path: str | Path,
+        event_type: str,
+        src_path: str,
+        **kwargs,
+    ) -> None:
+        """Post a filesystem event from watchdog thread to asyncio loop.
+
+        This method is thread-safe and can be called from the watchdog thread.
+
+        Args:
+            watched_path: The root path being watched (for handler lookup)
+            event_type: Type of event ("created", "deleted", "modified", "moved")
+            src_path: Path to the affected file/directory
+            **kwargs: Additional event data (e.g., dest_path for moved events)
+        """
+        with self._lock:
+            loop = self._loop
+            watched_path_str = str(Path(watched_path).absolute())
+            handlers = self._handlers.get(watched_path_str, [])[:]
+
+        if not handlers:
+            return
+
+        if loop is None:
+            logger.debug(
+                "AsyncEventBridge: no loop set, dropping event %s on %s",
+                event_type,
+                src_path,
+            )
+            return
+
+        # Post to asyncio loop
+        for handler in handlers:
+            try:
+                loop.call_soon_threadsafe(
+                    lambda h=handler: asyncio.create_task(
+                        self._call_handler(h, event_type, src_path, **kwargs)
+                    )
+                )
+            except RuntimeError:
+                # Loop might be closed
+                logger.debug("AsyncEventBridge: loop closed, dropping event")
+
+    async def _call_handler(
+        self, handler: AsyncEventHandler, event_type: str, src_path: str, **kwargs
+    ) -> None:
+        """Call an async handler with error handling."""
+        try:
+            result = handler(event_type, src_path, **kwargs)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            logger.exception(
+                "AsyncEventBridge: error in handler for %s event on %s",
+                event_type,
+                src_path,
+            )
+
+
+class AsyncFileSystemEventHandler(FileSystemEventHandler):
+    """Watchdog event handler that posts events to AsyncEventBridge.
+
+    This handler is used with watchdog to bridge filesystem events to asyncio.
+    """
+
+    def __init__(self, watched_path: str | Path, bridge: AsyncEventBridge):
+        """Initialize the handler.
+
+        Args:
+            watched_path: The root path being watched
+            bridge: The AsyncEventBridge to post events to
+        """
+        super().__init__()
+        self.watched_path = str(Path(watched_path).absolute())
+        self.bridge = bridge
+
+    def on_created(self, event: FileSystemEvent) -> None:
+        if not event.is_directory:
+            self.bridge.post_event(
+                self.watched_path, "created", event.src_path, is_directory=False
+            )
+
+    def on_deleted(self, event: FileSystemEvent) -> None:
+        if not event.is_directory:
+            self.bridge.post_event(
+                self.watched_path, "deleted", event.src_path, is_directory=False
+            )
+
+    def on_modified(self, event: FileSystemEvent) -> None:
+        if not event.is_directory:
+            self.bridge.post_event(
+                self.watched_path, "modified", event.src_path, is_directory=False
+            )
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        if not event.is_directory:
+            self.bridge.post_event(
+                self.watched_path,
+                "moved",
+                event.src_path,
+                dest_path=event.dest_path,
+                is_directory=False,
+            )
 
 
 class IPCom:

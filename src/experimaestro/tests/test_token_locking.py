@@ -200,6 +200,11 @@ async def test_token_multiple_waiting():
 
 async def test_token_timeout_zero():
     """Test that timeout=0 waits indefinitely"""
+    from experimaestro.dynamic import ResourcePoller
+
+    # Reset ResourcePoller to ensure clean state from any previous tests
+    ResourcePoller.reset()
+
     with tempfile.TemporaryDirectory() as tmpdir:
         token = CounterToken("test-timeout-zero", Path(tmpdir) / "token", count=1)
 
@@ -236,7 +241,8 @@ async def test_token_timeout_zero():
 
         # Give the task time to enter the waiting state
         # Use multiple short sleeps to check task state more frequently
-        for _ in range(10):
+        # Extended wait time (2 seconds) for slower CI machines
+        for _ in range(20):
             await asyncio.sleep(0.1)
             if task.done():
                 # Task completed unexpectedly - get error info
@@ -254,7 +260,7 @@ async def test_token_timeout_zero():
                     except Exception as e:
                         pytest.fail(f"Task completed unexpectedly with error: {e}")
 
-        # Task should still be waiting after 1 second
+        # Task should still be waiting after 2 seconds
         assert not task.done(), "Task should be waiting indefinitely with timeout=0"
 
         # Release first lock
