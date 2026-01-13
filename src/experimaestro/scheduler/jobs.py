@@ -201,9 +201,9 @@ class Job(BaseJob, Resource):
         self._process = None
 
         # Meta-information
-        self.starttime: Optional[float] = None
-        self.submittime: Optional[float] = None
-        self.endtime: Optional[float] = None
+        self.starttime: Optional[datetime] = None
+        self.submittime: Optional[datetime] = None
+        self.endtime: Optional[datetime] = None
         self.exit_code: Optional[int] = None
         self._progress: List[LevelInformation] = []
         self.tags = config.tags()

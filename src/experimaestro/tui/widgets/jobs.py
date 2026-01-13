@@ -1,7 +1,6 @@
 """Jobs-related widgets for the TUI"""
 
 from datetime import datetime
-import time as time_module
 from typing import Optional
 from textual import work
 from textual.app import ComposeResult
@@ -284,24 +283,27 @@ class JobDetailView(Widget):
         locator = job.locator or "-"
         self.query_one("#job-path-label", Label).update(f"Locator: {locator}")
 
-        # Times - format timestamps
+        # Times - format timestamps (now datetime objects)
         def format_time(ts):
             if ts:
-                return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                return ts.strftime("%Y-%m-%d %H:%M:%S")
             return "-"
 
         submitted = format_time(job.submittime)
         start = format_time(job.starttime)
         end = format_time(job.endtime)
 
-        # Calculate duration
+        # Calculate duration (starttime/endtime are now datetime objects)
         duration = "-"
         if job.starttime:
             if job.endtime:
-                duration = format_duration(job.endtime - job.starttime)
+                duration = format_duration(
+                    (job.endtime - job.starttime).total_seconds()
+                )
             else:
                 duration = (
-                    format_duration(time_module.time() - job.starttime) + " (running)"
+                    format_duration((datetime.now() - job.starttime).total_seconds())
+                    + " (running)"
                 )
 
         times_text = f"Submitted: {submitted} | Start: {start} | End: {end} | Duration: {duration}"
@@ -813,7 +815,7 @@ class JobsTable(Vertical):
             # Default: sort by submission time (oldest first by default)
             # Jobs without submittime go to the end
             jobs.sort(
-                key=lambda j: j.submittime or float("inf"),
+                key=lambda j: j.submittime or datetime.max,
                 reverse=self._sort_reverse,
             )
 
@@ -877,19 +879,17 @@ class JobsTable(Vertical):
 
             submitted = "-"
             if job.submittime:
-                submitted = datetime.fromtimestamp(job.submittime).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                submitted = job.submittime.strftime("%Y-%m-%d %H:%M")
 
-            # Calculate duration
+            # Calculate duration (starttime/endtime are now datetime objects)
             start = job.starttime
             end = job.endtime
             duration = "-"
             if start:
                 if end:
-                    elapsed = end - start
+                    elapsed = (end - start).total_seconds()
                 else:
-                    elapsed = time_module.time() - start
+                    elapsed = (datetime.now() - start).total_seconds()
                 duration = self._format_duration(elapsed)
 
             job_id_short = job_id[:7]

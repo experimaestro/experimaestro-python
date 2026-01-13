@@ -101,42 +101,18 @@ class RunsList(Widget):
             # Format hostname
             hostname = run.hostname or "-"
 
-            # Format started time (can be float timestamp or ISO string)
+            # Format started time (datetime object)
             started = "-"
-            started_ts = None
             if run.started_at:
-                if isinstance(run.started_at, str):
-                    try:
-                        started_dt = datetime.fromisoformat(run.started_at)
-                        started = started_dt.strftime("%Y-%m-%d %H:%M")
-                        started_ts = started_dt.timestamp()
-                    except ValueError:
-                        started = run.started_at[:16]
-                else:
-                    started = datetime.fromtimestamp(run.started_at).strftime(
-                        "%Y-%m-%d %H:%M"
-                    )
-                    started_ts = run.started_at
+                started = run.started_at.strftime("%Y-%m-%d %H:%M")
 
             # Calculate duration
             duration = "-"
-            if started_ts:
-                ended_ts = None
+            if run.started_at:
                 if run.ended_at:
-                    if isinstance(run.ended_at, str):
-                        try:
-                            ended_ts = datetime.fromisoformat(run.ended_at).timestamp()
-                        except ValueError:
-                            pass
-                    else:
-                        ended_ts = run.ended_at
-
-                if ended_ts:
-                    elapsed = ended_ts - started_ts
+                    elapsed = (run.ended_at - run.started_at).total_seconds()
                 else:
-                    import time
-
-                    elapsed = time.time() - started_ts
+                    elapsed = (datetime.now() - run.started_at).total_seconds()
                 duration = format_duration(elapsed)
 
             table.add_row(

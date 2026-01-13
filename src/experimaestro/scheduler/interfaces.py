@@ -101,6 +101,31 @@ def deserialize_timestamp(ts: Optional[Union[float, str]]) -> Optional[float]:
     return None
 
 
+def deserialize_to_datetime(
+    ts: Optional[Union[float, int, str, datetime]],
+) -> Optional[datetime]:
+    """Deserialize timestamp to datetime object (backward-compatible)
+
+    Handles:
+    - None: returns None
+    - datetime: returns as-is
+    - float/int: Unix timestamp, converts to datetime
+    - str: parses ISO format to datetime
+    """
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        return ts
+    if isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(ts)
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts)
+        except ValueError:
+            return None
+    return None
+
+
 # =============================================================================
 # Job State Classes
 # =============================================================================
@@ -357,9 +382,9 @@ class BaseJob:
         task_id: Task class identifier (string)
         path: Path to job directory
         state: Current job state (JobState object or compatible)
-        submittime: When job was submitted (Unix timestamp or None)
-        starttime: When job started running (Unix timestamp or None)
-        endtime: When job finished (Unix timestamp or None)
+        submittime: When job was submitted (datetime or None)
+        starttime: When job started running (datetime or None)
+        endtime: When job finished (datetime or None)
         progress: List of progress updates
         exit_code: Process exit code (optional)
         retry_count: Number of retries
@@ -370,9 +395,9 @@ class BaseJob:
     task_id: str
     path: Path
     state: JobState
-    submittime: Optional[float]
-    starttime: Optional[float]
-    endtime: Optional[float]
+    submittime: Optional[datetime]
+    starttime: Optional[datetime]
+    endtime: Optional[datetime]
     progress: List[Dict]
     exit_code: Optional[int]
     retry_count: int
@@ -480,9 +505,9 @@ class BaseJob:
             "path": str(self.path) if self.path else None,
             "state": self.state.name if self.state else None,
             "failure_reason": failure_reason,
-            "submitted_time": self.submittime,
-            "started_time": self.starttime,
-            "ended_time": self.endtime,
+            "submitted_time": serialize_timestamp(self.submittime),
+            "started_time": serialize_timestamp(self.starttime),
+            "ended_time": serialize_timestamp(self.endtime),
             "exit_code": self.exit_code,
             "retry_count": self.retry_count,
             "progress": [
@@ -519,8 +544,8 @@ class BaseExperiment:
         dependencies: Dict mapping job_id to list of dependency job_ids
         events_count: Number of events processed
         hostname: Hostname where experiment runs
-        started_at: Start timestamp
-        ended_at: End timestamp (None if running)
+        started_at: Start datetime
+        ended_at: End datetime (None if running)
     """
 
     # Status file version
@@ -578,13 +603,13 @@ class BaseExperiment:
         raise NotImplementedError
 
     @property
-    def started_at(self) -> Optional[float]:
-        """Start timestamp"""
+    def started_at(self) -> Optional[datetime]:
+        """Start datetime"""
         raise NotImplementedError
 
     @property
-    def ended_at(self) -> Optional[float]:
-        """End timestamp (None if running)"""
+    def ended_at(self) -> Optional[datetime]:
+        """End datetime (None if running)"""
         raise NotImplementedError
 
     # Computed properties
@@ -633,8 +658,8 @@ class BaseExperiment:
             "status": status_value,
             "events_count": self.events_count,
             "hostname": self.hostname,
-            "started_at": self.started_at,
-            "ended_at": self.ended_at,
+            "started_at": serialize_timestamp(self.started_at),
+            "ended_at": serialize_timestamp(self.ended_at),
             "finished_jobs": self.finished_jobs,
             "failed_jobs": self.failed_jobs,
             "services": {k: v.full_state_dict() for k, v in self.services.items()},

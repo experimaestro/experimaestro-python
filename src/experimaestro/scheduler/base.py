@@ -1,6 +1,5 @@
 import json
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -370,7 +369,7 @@ class Scheduler(StateProvider, threading.Thread):
         self.jobs[job.identifier] = job
         # Set submittime now so that add_job can record it in the database
         # (aio_submit may update this later for re-submitted jobs)
-        job.submittime = time.time()
+        job.submittime = datetime.now()
         xp.add_job(job)
 
         # Update tags map for this experiment/run
@@ -636,7 +635,7 @@ class Scheduler(StateProvider, threading.Thread):
         from experimaestro.scheduler.jobs import JobStateError, JobFailureStatus
 
         logger.info("Submitting job %s", job)
-        job.submittime = time.time()
+        job.submittime = datetime.now()
         job.scheduler = self
         self.waitingjobs.add(job)
 
@@ -710,7 +709,7 @@ class Scheduler(StateProvider, threading.Thread):
                         logger.error("No .done or .failed file found for job %s", job)
                         state = JobState.ERROR
                 # Set endtime before set_state so database gets the timestamp
-                job.endtime = time.time()
+                job.endtime = datetime.now()
                 job.set_state(state)
                 self.notify_job_state(job)  # Notify listeners of final state
 
@@ -725,7 +724,7 @@ class Scheduler(StateProvider, threading.Thread):
                 try:
                     state = await self.aio_start(job)
                     if state is not None:
-                        job.endtime = time.time()
+                        job.endtime = datetime.now()
                         job.set_state(state)
                 except Exception:
                     logger.exception("Got an exception while starting the job")
@@ -848,7 +847,7 @@ class Scheduler(StateProvider, threading.Thread):
                                         break
 
                         # Dependencies have been locked, we can start the job
-                        job.starttime = time.time()
+                        job.starttime = datetime.now()
 
                         # Creates the main directory
                         directory = job.path

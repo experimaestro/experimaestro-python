@@ -745,10 +745,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             else:
                 d["path"] = Path(remote_path)
 
-        # Convert ISO datetime strings back to timestamps (floats)
-        for key in ("submitted_time", "started_time", "ended_time"):
-            d[key] = self._parse_datetime_to_timestamp(d.get(key))
-
+        # Note: timestamp conversion is handled by MockJob.from_state_dict
         return MockJob.from_state_dict(d, self.local_cache_dir)
 
     def _dict_to_experiment(self, d: Dict) -> MockExperiment:
@@ -762,10 +759,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             else:
                 d["workdir"] = Path(remote_path)
 
-        # Convert ISO datetime strings back to timestamps (floats)
-        for key in ("started_at", "ended_at"):
-            d[key] = self._parse_datetime_to_timestamp(d.get(key))
-
+        # Note: timestamp conversion is handled by MockExperiment.from_state_dict
         return MockExperiment.from_state_dict(d, self.local_cache_dir)
 
     def _dict_to_service(self, d: Dict) -> BaseService:

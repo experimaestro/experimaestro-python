@@ -30,7 +30,7 @@ from experimaestro.scheduler.interfaces import (
     JobState,
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
-    deserialize_timestamp,
+    deserialize_to_datetime,
 )
 from experimaestro.scheduler.transient import TransientMode
 from experimaestro.notifications import (
@@ -471,12 +471,13 @@ class MockJob(BaseJob):
                     self.failure_reason = JobFailureStatus[event.failure_reason]
                 except KeyError:
                     pass
+            # Convert ISO string timestamps to datetime
             if event.submitted_time is not None:
-                self.submittime = event.submitted_time
+                self.submittime = deserialize_to_datetime(event.submitted_time)
             if event.started_time is not None:
-                self.starttime = event.started_time
+                self.starttime = deserialize_to_datetime(event.started_time)
             if event.ended_time is not None:
-                self.endtime = event.ended_time
+                self.endtime = deserialize_to_datetime(event.ended_time)
             if event.exit_code is not None:
                 self.exit_code = event.exit_code
             if event.retry_count:
@@ -506,9 +507,9 @@ class MockJob(BaseJob):
         task_id: str,
         path: Path,
         state: str,  # State name string from DB
-        submittime: Optional[float],
-        starttime: Optional[float],
-        endtime: Optional[float],
+        submittime: Optional[datetime],
+        starttime: Optional[datetime],
+        endtime: Optional[datetime],
         progress: ProgressInformation,
         updated_at: str,
         exit_code: Optional[int] = None,
@@ -597,9 +598,9 @@ class MockJob(BaseJob):
             task_id=task_id,
             path=path,
             state=d["state"],
-            submittime=deserialize_timestamp(d.get("submitted_time")),
-            starttime=deserialize_timestamp(d.get("started_time")),
-            endtime=deserialize_timestamp(d.get("ended_time")),
+            submittime=deserialize_to_datetime(d.get("submitted_time")),
+            starttime=deserialize_to_datetime(d.get("started_time")),
+            endtime=deserialize_to_datetime(d.get("ended_time")),
             progress=progress_list,
             updated_at=d.get("updated_at", ""),
             exit_code=d.get("exit_code"),
@@ -627,8 +628,8 @@ class MockExperiment(BaseExperiment):
         status: ExperimentStatus = ExperimentStatus.RUNNING,
         events_count: int = 0,
         hostname: Optional[str] = None,
-        started_at: Optional[float] = None,
-        ended_at: Optional[float] = None,
+        started_at: Optional[datetime] = None,
+        ended_at: Optional[datetime] = None,
         job_infos: Optional[Dict[str, "ExperimentJobInformation"]] = None,
         services: Optional[Dict[str, "MockService"]] = None,
         dependencies: Optional[Dict[str, List[str]]] = None,
@@ -694,11 +695,11 @@ class MockExperiment(BaseExperiment):
         return self._hostname
 
     @property
-    def started_at(self) -> Optional[float]:
+    def started_at(self) -> Optional[datetime]:
         return self._started_at
 
     @property
-    def ended_at(self) -> Optional[float]:
+    def ended_at(self) -> Optional[datetime]:
         return self._ended_at
 
     @property
@@ -822,8 +823,8 @@ class MockExperiment(BaseExperiment):
             status=status,
             events_count=d.get("events_count", 0),
             hostname=d.get("hostname"),
-            started_at=d.get("started_at"),
-            ended_at=d.get("ended_at"),
+            started_at=deserialize_to_datetime(d.get("started_at")),
+            ended_at=deserialize_to_datetime(d.get("ended_at")),
             services=services,
             dependencies=d.get("dependencies", {}),
             finished_jobs=d.get("finished_jobs", 0),

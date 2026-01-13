@@ -70,14 +70,14 @@ class FileBasedProgressReporter:
     def start_of_job(self):
         """Start of job notification - called when job execution begins"""
         from experimaestro.scheduler.state_status import JobStateChangedEvent
-        import time
+        from datetime import datetime
 
         with self.lock:
             # Write JobStateChangedEvent with state="running" to event file
             event = JobStateChangedEvent(
                 job_id=self.job_id,
                 state="running",
-                started_time=time.time(),
+                started_time=datetime.now().isoformat(),
             )
             self.event_writer.write_event(event)
             self.event_writer.flush()
@@ -85,14 +85,14 @@ class FileBasedProgressReporter:
     def eoj(self):
         """End of job notification"""
         from experimaestro.scheduler.state_status import JobStateChangedEvent
-        import time
+        from datetime import datetime
 
         with self.lock:
             # Write JobStateChangedEvent with state="done" to event file
             event = JobStateChangedEvent(
                 job_id=self.job_id,
                 state="done",
-                ended_time=time.time(),
+                ended_time=datetime.now().isoformat(),
             )
             self.event_writer.write_event(event)
             self.event_writer.flush()

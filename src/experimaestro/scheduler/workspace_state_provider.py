@@ -272,7 +272,7 @@ class WorkspaceStateProvider(StateProvider):
                 del self._experiment_cache[key]
 
     def _get_or_load_job(
-        self, job_id: str, task_id: str, submit_time: float | None
+        self, job_id: str, task_id: str, submit_time: float | datetime | None
     ) -> MockJob:
         """Get job from cache or load from disk and cache it.
 
@@ -297,12 +297,19 @@ class WorkspaceStateProvider(StateProvider):
                 job = self._create_mock_job_from_path(job_path, task_id, job_id)
             else:
                 # Job directory doesn't exist - create minimal MockJob
+                # Convert float timestamp to datetime if needed
+                submittime_dt = None
+                if submit_time is not None:
+                    if isinstance(submit_time, datetime):
+                        submittime_dt = submit_time
+                    else:
+                        submittime_dt = datetime.fromtimestamp(submit_time)
                 job = MockJob(
                     identifier=job_id,
                     task_id=task_id,
                     path=job_path,
                     state="unscheduled",
-                    submittime=submit_time,
+                    submittime=submittime_dt,
                     starttime=None,
                     endtime=None,
                     progress=[],
@@ -468,7 +475,7 @@ class WorkspaceStateProvider(StateProvider):
 
         # Get modification time for started_at
         try:
-            mtime = exp_dir.stat().st_mtime
+            mtime = datetime.fromtimestamp(exp_dir.stat().st_mtime)
         except OSError:
             mtime = None
 
@@ -1146,9 +1153,9 @@ class WorkspaceStateProvider(StateProvider):
         if state is None:
             state = JobState.UNSCHEDULED
 
-        # Get modification time for timestamps
+        # Get modification time for timestamps (convert to datetime)
         try:
-            mtime = job_path.stat().st_mtime
+            mtime = datetime.fromtimestamp(job_path.stat().st_mtime)
         except OSError:
             mtime = None
 

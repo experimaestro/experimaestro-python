@@ -3,6 +3,7 @@ import inspect
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 import time
 from shutil import rmtree
@@ -87,6 +88,7 @@ class StateListener:
     def job_state(self, job):
         """Write job state change event to experiment event file"""
         from .state_status import JobStateChangedEvent
+        from experimaestro.scheduler.interfaces import serialize_timestamp
 
         # Get failure reason if error state
         failure_reason = None
@@ -101,13 +103,14 @@ class StateListener:
                 for p in job._progress
             ]
 
+        # Serialize datetime objects to ISO strings for event storage
         event = JobStateChangedEvent(
             job_id=job.identifier,
             state=job.state.name,
             failure_reason=failure_reason,
-            submitted_time=job.submittime,
-            started_time=job.starttime,
-            ended_time=job.endtime,
+            submitted_time=serialize_timestamp(job.submittime),
+            started_time=serialize_timestamp(job.starttime),
+            ended_time=serialize_timestamp(job.endtime),
             exit_code=getattr(job, "exit_code", None),
             retry_count=getattr(job, "retry_count", 0),
             progress=progress,
@@ -380,13 +383,13 @@ class experiment(BaseExperiment):
         return 0
 
     @property
-    def started_at(self) -> Optional[float]:
-        """Timestamp when experiment started"""
+    def started_at(self) -> Optional[datetime]:
+        """Datetime when experiment started"""
         return self._started_at
 
     @property
-    def ended_at(self) -> Optional[float]:
-        """Timestamp when experiment ended (None if still running)"""
+    def ended_at(self) -> Optional[datetime]:
+        """Datetime when experiment ended (None if still running)"""
         return self._ended_at
 
     @property
@@ -481,12 +484,11 @@ class experiment(BaseExperiment):
         Args:
             status: Final status ("completed" or "failed")
         """
-        from datetime import datetime
         from experimaestro.scheduler.interfaces import ExperimentStatus
         from .state_status import RunCompletedEvent
 
         # Update final status in the experiment
-        self._ended_at = datetime.now().timestamp()
+        self._ended_at = datetime.now()
         if status in ("completed", "done"):
             self._status = ExperimentStatus.DONE
         elif status == "failed":
@@ -585,7 +587,6 @@ class experiment(BaseExperiment):
         return self.workspace.connector.createtoken(name, count)
 
     def __enter__(self):
-        from datetime import datetime
         from .dynamic_outputs import TaskOutputsWorker
         from experimaestro.utils.environment import (
             ExperimentEnvironment,
@@ -693,7 +694,7 @@ class experiment(BaseExperiment):
         self.scheduler.register_experiment(self)
 
         # Set experiment start time for BaseExperiment interface
-        self._started_at = time.time()
+        self._started_at = datetime.now()
         self._ended_at = None
 
         self.workspace.__enter__()
@@ -710,8 +711,8 @@ class experiment(BaseExperiment):
         self._tags: Dict[str, Dict[str, str]] = {}
         self._dependencies: Dict[str, List[str]] = {}
         self._hostname: Optional[str] = None
-        self._started_at: Optional[float] = None
-        self._ended_at: Optional[float] = None
+        self._started_at: Optional[datetime] = None
+        self._ended_at: Optional[datetime] = None
 
         if is_normal_mode:
             import socket
@@ -723,7 +724,7 @@ class experiment(BaseExperiment):
 
             # Initialize status.json for this run
             self._hostname = socket.gethostname()
-            self._started_at = datetime.now().timestamp()
+            self._started_at = datetime.now()
             self._event_writer.init_status()
 
             # Create symlink to current run
@@ -795,7 +796,7 @@ class experiment(BaseExperiment):
                 service.stop()
 
             # Set end time for BaseExperiment interface
-            self._ended_at = time.time()
+            self._ended_at = datetime.now()
 
             # Unregister experiment from scheduler
             self.scheduler.unregister_experiment(self)
@@ -814,7 +815,6 @@ class experiment(BaseExperiment):
 
             # Update environment.json with run status
             if self.workspace.run_mode == RunMode.NORMAL and self.workdir:
-                from datetime import datetime
                 from experimaestro.utils.environment import ExperimentEnvironment
 
                 env_path = self.workdir / "environment.json"

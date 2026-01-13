@@ -1,7 +1,6 @@
 """Experiments list widget for the TUI"""
 
 from datetime import datetime
-import time as time_module
 from typing import Optional
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
@@ -258,7 +257,7 @@ class ExperimentsList(Widget):
         elif self._sort_column == "started":
             # Sort by started time (experiments without start time go to end)
             experiments_sorted.sort(
-                key=lambda e: e.started_at or 0,
+                key=lambda e: e.started_at or datetime.min,
                 reverse=self._sort_reverse,
             )
         # Default: no sorting, use order from state provider
@@ -295,9 +294,7 @@ class ExperimentsList(Widget):
 
             # Format started time
             if exp.started_at:
-                started = datetime.fromtimestamp(exp.started_at).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                started = exp.started_at.strftime("%Y-%m-%d %H:%M")
             else:
                 started = "-"
 
@@ -305,10 +302,10 @@ class ExperimentsList(Widget):
             duration = "-"
             if exp.started_at:
                 if exp.ended_at:
-                    elapsed = exp.ended_at - exp.started_at
+                    elapsed = (exp.ended_at - exp.started_at).total_seconds()
                 else:
                     # Still running - show elapsed time
-                    elapsed = time_module.time() - exp.started_at
+                    elapsed = (datetime.now() - exp.started_at).total_seconds()
                 # Format duration
                 duration = format_duration(elapsed)
 

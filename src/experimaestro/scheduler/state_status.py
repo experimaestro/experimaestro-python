@@ -252,13 +252,14 @@ class JobStateChangedEvent(JobEventBase):
     """Event: Job state changed
 
     Fired when a job's state changes (scheduled, running, done, error, etc.)
+    Timestamps are stored as ISO format strings for JSON serialization.
     """
 
     state: str = ""
     failure_reason: Optional[str] = None
-    submitted_time: Optional[float] = None
-    started_time: Optional[float] = None
-    ended_time: Optional[float] = None
+    submitted_time: Optional[str] = None  # ISO format timestamp
+    started_time: Optional[str] = None  # ISO format timestamp
+    ended_time: Optional[str] = None  # ISO format timestamp
     exit_code: Optional[int] = None
     retry_count: int = 0
     progress: list[ProgressLevel] = field(default_factory=list)
