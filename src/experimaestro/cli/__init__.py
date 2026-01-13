@@ -51,14 +51,31 @@ def pass_cfg(f):
 @click.option("--quiet", is_flag=True, help="Be quiet")
 @click.option("--debug", is_flag=True, help="Be even more verbose (implies traceback)")
 @click.option(
+    "--logging",
+    "log_levels",
+    help="Set logging levels (e.g., --logging xpm.state=DEBUG,xpm.webui=INFO)",
+)
+@click.option(
     "--traceback", is_flag=True, help="Display traceback if an exception occurs"
 )
 @click.pass_context
-def cli(ctx, quiet, debug, traceback):
+def cli(ctx, quiet, debug, log_levels: str | None, traceback):
     if quiet:
         logging.getLogger().setLevel(logging.WARN)
     elif debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Parse and apply custom log levels (e.g., "xpm.workspace_state=DEBUG,xpm.webui=INFO")
+    if log_levels:
+        for item in log_levels.split(","):
+            item = item.strip()
+            if "=" in item:
+                logger_name, level_str = item.split("=", 1)
+                level = getattr(logging, level_str.upper(), None)
+                if level is not None:
+                    logging.getLogger(logger_name.strip()).setLevel(level)
+                else:
+                    click.echo(f"Warning: Unknown log level '{level_str}'", err=True)
 
     ctx.obj = RunConfig()
     ctx.obj.traceback = traceback
