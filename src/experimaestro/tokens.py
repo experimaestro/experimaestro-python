@@ -8,7 +8,6 @@ import os
 import sys
 from pathlib import Path
 import threading
-import time
 from typing import Dict, Type
 
 from omegaconf import DictConfig
@@ -79,11 +78,22 @@ class CounterTokenLock(DynamicDependencyLock):
         """Path to the token lock folder."""
         return self.dependency.token.lock_folder
 
-    def _acquire(self):
-        self.dependency.token.acquire(self.dependency)
+    async def _aio_acquire(self):
+        await self.dependency.token.aio_acquire(self.dependency)
 
-    def _release(self):
-        self.dependency.token.release(self.dependency)
+    async def _aio_release(self):
+        await self.dependency.token.aio_release(self.dependency)
+
+    async def aio_job_started(self, job, process) -> None:
+        """Called when the job has started - write process info to lock file."""
+        token = self.dependency.token
+        lock_key = token._lock_file_key(self.lock_file_path)
+
+        async with token._async_lock, token.ipc_lock:
+            lf = token.cache.get(lock_key)
+            if lf is not None:
+                lf.write_process(process)
+                logger.debug("Wrote process info for %s", lock_key)
 
     def __str__(self):
         return "Lock(%s)" % self.dependency
@@ -130,45 +140,14 @@ class TokenLockFile(DynamicLockFile):
     The token file stores JSON with:
     - job_uri: Reference to the job holding the lock
     - information: {"count": number_of_tokens}
-
-    Also supports reading old line-based format for backward compatibility:
-    - Line 1: count
-    - Line 2: job_uri
     """
 
     count: int
 
-    def __init__(self, path: Path):
-        """Load token file from disk, supporting both JSON and old format."""
-        self.path = path
-        self.job_uri = None
+    def __init__(self, path: Path, resource: "TrackedDynamicResource"):
+        """Load token file from disk."""
         self.count = 0
-
-        retries = 0
-        while retries < 5:
-            retries += 1
-            try:
-                with path.open("rt") as fp:
-                    content = fp.read().strip()
-                    if content.startswith("{"):
-                        # New JSON format
-                        data = json.loads(content)
-                        self.job_uri = data.get("job_uri")
-                        info = data.get("information", {})
-                        self.count = info.get("count", 0)
-                    else:
-                        # Old line-based format: count, uri
-                        lines = content.split("\n")
-                        if len(lines) >= 2:
-                            self.count = int(lines[0])
-                            self.job_uri = lines[1]
-                    break
-            except FileNotFoundError:
-                break
-            except Exception:
-                logging.exception("Error while reading %s", self.path)
-                time.sleep(0.1)
-                continue
+        super().__init__(path, resource)
 
     def from_information(self, info) -> None:
         """Set count from information dict."""
@@ -201,7 +180,9 @@ class TokenLockFile(DynamicLockFile):
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         job_uri = str(dependency.target.basepath)
-        return cls.create(path, job_uri, information={"count": dependency.count})
+        return cls.create(
+            path, dependency._token, job_uri, information={"count": dependency.count}
+        )
 
 
 class CounterToken(Token, TrackedDynamicResource):

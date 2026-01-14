@@ -45,7 +45,9 @@ class TaskWithPartial(Task):
 def test_partial_path_created():
     """Test that partial paths are correctly created during task execution"""
     with TemporaryDirectory(prefix="xpm", suffix="partial") as workdir:
-        with TemporaryExperiment("partial_test", workdir=workdir, maxwait=30):
+        with TemporaryExperiment(
+            "partial_test", workdir=workdir, timeout_multiplier=12
+        ):
             task = TaskWithPartial.C(max_iter=100, learning_rate=0.1).submit()
 
         assert task.__xpm__.job.state == JobState.DONE
@@ -66,7 +68,9 @@ def test_partial_path_created():
 def test_partial_path_shared_across_tasks():
     """Test that tasks with same non-excluded params share partial paths"""
     with TemporaryDirectory(prefix="xpm", suffix="partial_shared") as workdir:
-        with TemporaryExperiment("partial_shared", workdir=workdir, maxwait=30):
+        with TemporaryExperiment(
+            "partial_shared", workdir=workdir, timeout_multiplier=12
+        ):
             # Submit two tasks with different max_iter but same learning_rate
             task1 = TaskWithPartial.C(max_iter=100, learning_rate=0.1).submit()
             task2 = TaskWithPartial.C(max_iter=200, learning_rate=0.1).submit()
@@ -81,7 +85,9 @@ def test_partial_path_shared_across_tasks():
 def test_partial_path_different_for_different_params():
     """Test that tasks with different non-excluded params have different partial paths"""
     with TemporaryDirectory(prefix="xpm", suffix="partial_diff") as workdir:
-        with TemporaryExperiment("partial_diff", workdir=workdir, maxwait=30):
+        with TemporaryExperiment(
+            "partial_diff", workdir=workdir, timeout_multiplier=12
+        ):
             # Submit two tasks with different learning_rate
             task1 = TaskWithPartial.C(max_iter=100, learning_rate=0.1).submit()
             task2 = TaskWithPartial.C(max_iter=100, learning_rate=0.2).submit()

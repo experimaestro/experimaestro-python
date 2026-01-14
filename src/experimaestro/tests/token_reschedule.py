@@ -5,6 +5,7 @@ if __name__ == "__main__":
     import time
 
     from experimaestro.scheduler import JobState
+    from experimaestro.tokens import CounterToken
     from experimaestro.tests.utils import (
         TemporaryExperiment,
     )
@@ -27,7 +28,10 @@ if __name__ == "__main__":
 
     with TemporaryExperiment("reschedule%s" % x, workdir=workdir) as xp:
         logging.info("Reschedule with token [%s]: starting task in %s", x, workdir)
-        token = xp.workspace.connector.createtoken("test-token-reschedule", 1)
+        # Use token in workdir (not global token store) - shared between processes
+        token = CounterToken(
+            "test-token-reschedule", Path(workdir) / "token-reschedule", 1
+        )
         task = (
             TokenTask.C(path=lockingpath, x=int(x))
             .add_dependencies(token.dependency(1))

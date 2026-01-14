@@ -5,6 +5,7 @@ without requiring full scheduler integration.
 """
 
 import asyncio
+import json
 import pytest
 import tempfile
 from pathlib import Path
@@ -13,8 +14,21 @@ import hashlib
 
 from experimaestro.tokens import CounterToken
 from experimaestro.locking import LockError
+from experimaestro.ipc import AsyncEventBridge
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+def reset_async_bridge():
+    """Reset AsyncEventBridge singleton before and after each test.
+
+    This ensures tests don't interfere with each other's event handling.
+    Note: EventLoopThread is not reset as it's the central event loop.
+    """
+    AsyncEventBridge.reset()
+    yield
+    AsyncEventBridge.reset()
 
 
 class MockIdentifier:
@@ -42,7 +56,7 @@ class MockConfig:
 
 
 def create_mock_job(name: str, tmpdir: str):
-    """Create a mock job with all required attributes."""
+    """Create a mock job with all required attributes and PID file."""
 
     class MockJob:
         task_id = "mock-task"
@@ -56,7 +70,14 @@ def create_mock_job(name: str, tmpdir: str):
         def basepath(self):
             return Path(tmpdir) / name
 
-    return MockJob()
+    job = MockJob()
+
+    # Create PID file with MockProcess data so lock files are valid
+    pid_path = job.basepath.with_suffix(".pid")
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(json.dumps({"type": "mock"}))
+
+    return job
 
 
 async def test_token_acquire_release():
@@ -76,7 +97,7 @@ async def test_token_acquire_release():
         assert token.available == 0
 
         # Release
-        lock.release()
+        await lock.aio_release()
         assert token.available == 1
 
 
@@ -106,13 +127,13 @@ async def test_token_blocking():
         assert 0.4 < elapsed < 0.7  # Should timeout around 0.5s
 
         # Release first lock
-        lock1.release()
+        await lock1.aio_release()
         assert token.available == 1
 
         # Now second should succeed
         lock2 = await dep2.aio_lock(timeout=0.5)
         assert lock2 is not None
-        lock2.release()
+        await lock2.aio_release()
 
 
 async def test_token_notification():
@@ -144,7 +165,7 @@ async def test_token_notification():
 
         # Release first lock - should notify waiting task
         start = time.time()
-        lock1.release()
+        await lock1.aio_release()
 
         # Second task should complete quickly (not timeout)
         lock2 = await task
@@ -152,7 +173,7 @@ async def test_token_notification():
 
         assert lock2 is not None
         assert elapsed < 1.0  # Should wake up immediately, not wait 5s
-        lock2.release()
+        await lock2.aio_release()
 
 
 async def test_token_multiple_waiting():
@@ -176,7 +197,7 @@ async def test_token_multiple_waiting():
             lock = await dep.aio_lock(timeout=10.0)
             acquired_order.append(name)
             await asyncio.sleep(0.05)  # Hold briefly
-            lock.release()
+            await lock.aio_release()
 
         tasks = [
             asyncio.create_task(acquire_task("2")),
@@ -188,7 +209,7 @@ async def test_token_multiple_waiting():
         await asyncio.sleep(0.1)
 
         # Release first lock
-        lock1.release()
+        await lock1.aio_release()
 
         # Wait for all tasks to complete
         await asyncio.gather(*tasks)
@@ -264,9 +285,9 @@ async def test_token_timeout_zero():
         assert not task.done(), "Task should be waiting indefinitely with timeout=0"
 
         # Release first lock
-        lock1.release()
+        await lock1.aio_release()
 
         # Now task should complete quickly
         lock2 = await asyncio.wait_for(task, timeout=5.0)
         assert lock2 is not None
-        lock2.release()
+        await lock2.aio_release()

@@ -32,7 +32,7 @@ dependencies = [
     "decorator >=5,<6",
     "docstring-parser >=0.15,<1",
     "fastapi >=0.109,<1",
-    "fasteners >=0.19,<1",
+    "filelock >=3.16,<4",
     "httpx >=0.26,<1",
     "humanfriendly >=10",
     "huggingface-hub >0.17",

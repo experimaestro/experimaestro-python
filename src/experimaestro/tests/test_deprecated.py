@@ -403,7 +403,7 @@ def _check_symlink_paths(task_new, task_old_path):
 
 def test_task_deprecated_config_identifier():
     """Test that tasks using deprecated configs have correct identifiers."""
-    with TemporaryExperiment("deprecated_config", maxwait=0):
+    with TemporaryExperiment("deprecated_config"):
         # Create tasks with new, old, and deprecated configs
         task_new = TaskWithDeprecatedConfig.C(p=NewConfigForTask.C()).submit(
             run_mode=RunMode.DRY_RUN
@@ -434,7 +434,7 @@ def test_task_deprecated_config_identifier():
 
 def test_task_deprecated_config_fix_deprecated():
     """Test fix_deprecated creates symlinks for tasks with deprecated configs."""
-    with TemporaryExperiment("deprecated_config_fix", maxwait=0) as xp:
+    with TemporaryExperiment("deprecated_config_fix") as xp:
         task_new = TaskWithDeprecatedConfig.C(p=NewConfigForTask.C()).submit(
             run_mode=RunMode.DRY_RUN
         )
@@ -479,7 +479,7 @@ class DeprecatedTask(NewTask):
 
 def test_task_deprecated_identifier():
     """Test that deprecated tasks have correct identifiers."""
-    with TemporaryExperiment("deprecated_task", maxwait=20):
+    with TemporaryExperiment("deprecated_task", timeout_multiplier=9):
         task_new = NewTask.C(x=1).submit(run_mode=RunMode.DRY_RUN)
         task_old = OldTask.C(x=1).submit(run_mode=RunMode.DRY_RUN)
         task_deprecated = DeprecatedTask.C(x=1).submit(run_mode=RunMode.DRY_RUN)
@@ -497,7 +497,7 @@ def test_task_deprecated_identifier():
 
 def test_task_deprecated_fix_deprecated():
     """Test fix_deprecated creates symlinks for deprecated tasks."""
-    with TemporaryExperiment("deprecated_task_fix", maxwait=20) as xp:
+    with TemporaryExperiment("deprecated_task_fix", timeout_multiplier=9) as xp:
         task_new = NewTask.C(x=1).submit(run_mode=RunMode.DRY_RUN)
 
         # Run old task (before deprecation)
@@ -544,7 +544,7 @@ class OldTaskWithConvert(Task):
 
 def test_task_deprecated_with_convert_identifier():
     """Test deprecated task with __convert__ has correct identifier."""
-    with TemporaryExperiment("deprecated_task_convert", maxwait=0):
+    with TemporaryExperiment("deprecated_task_convert"):
         # Old task should compute identifier via __convert__
         task_old = OldTaskWithConvert.C(value=42).submit(run_mode=RunMode.DRY_RUN)
         task_new = NewTaskWithConvert.C(values=[42]).submit(run_mode=RunMode.DRY_RUN)
@@ -571,7 +571,7 @@ class ReplacedTaskWithConvert(Task):
 
 def test_task_deprecated_replace_returns_new_type():
     """Test deprecated task with replace=True returns new task type."""
-    with TemporaryExperiment("deprecated_task_replace", maxwait=0):
+    with TemporaryExperiment("deprecated_task_replace"):
         # Creating old task should return new task
         result = ReplacedTaskWithConvert.C(value=42)
 

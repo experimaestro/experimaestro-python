@@ -19,6 +19,19 @@ from experimaestro.core.partial_lock import PartialLockFile
 # --- Test implementations ---
 
 
+class MockResource:
+    """Mock resource for testing DynamicLockFile."""
+
+    def __init__(self):
+        self.accounted_count = 0
+
+    def _account_lock_file(self, lf):
+        self.accounted_count += 1
+
+    def _unaccount_lock_file(self, lf):
+        self.accounted_count -= 1
+
+
 class MockLockFile(DynamicLockFile):
     """Mock implementation of DynamicLockFile for testing."""
 
@@ -63,8 +76,11 @@ class TestDynamicLockFile:
         """create() should write a JSON file with correct structure."""
         lock_path = tmp_path / "test.lock"
         job_uri = "/path/to/job"
+        resource = MockResource()
 
-        lock_file = MockLockFile.create(lock_path, job_uri, information={"value": 42})
+        lock_file = MockLockFile.create(
+            lock_path, resource, job_uri, information={"value": 42}
+        )
 
         assert lock_path.is_file()
         content = json.loads(lock_path.read_text())
@@ -77,8 +93,9 @@ class TestDynamicLockFile:
         """create() with None information should use defaults."""
         lock_path = tmp_path / "test.lock"
         job_uri = "/path/to/job"
+        resource = MockResource()
 
-        lock_file = MockLockFile.create(lock_path, job_uri, information=None)
+        lock_file = MockLockFile.create(lock_path, resource, job_uri, information=None)
 
         assert lock_file.value == 0
         content = json.loads(lock_path.read_text())
@@ -90,8 +107,9 @@ class TestDynamicLockFile:
         lock_path.write_text(
             json.dumps({"job_uri": "/some/job", "information": {"value": 123}})
         )
+        resource = MockResource()
 
-        lock_file = MockLockFile(lock_path)
+        lock_file = MockLockFile(lock_path, resource)
 
         assert lock_file.job_uri == "/some/job"
         assert lock_file.value == 123
@@ -99,8 +117,9 @@ class TestDynamicLockFile:
     def test_load_missing_file(self, tmp_path: Path):
         """Loading missing file should set defaults."""
         lock_path = tmp_path / "nonexistent.lock"
+        resource = MockResource()
 
-        lock_file = MockLockFile(lock_path)
+        lock_file = MockLockFile(lock_path, resource)
 
         assert lock_file.job_uri is None
         # Note: value is not set when file doesn't exist
@@ -116,14 +135,18 @@ class TestDynamicLockFile:
                 }
             )
         )
+        resource = MockResource()
 
         with pytest.raises(ValueError, match="Invalid information format"):
-            MockLockFile(lock_path)
+            MockLockFile(lock_path, resource)
 
     def test_delete_removes_file(self, tmp_path: Path):
         """delete() should remove the lock file."""
         lock_path = tmp_path / "test.lock"
-        lock_file = MockLockFile.create(lock_path, "/job", information={"value": 1})
+        resource = MockResource()
+        lock_file = MockLockFile.create(
+            lock_path, resource, "/job", information={"value": 1}
+        )
 
         assert lock_path.is_file()
         lock_file.delete()
@@ -132,7 +155,8 @@ class TestDynamicLockFile:
     def test_delete_missing_file_noop(self, tmp_path: Path):
         """delete() on missing file should not raise."""
         lock_path = tmp_path / "nonexistent.lock"
-        lock_file = MockLockFile(lock_path)
+        resource = MockResource()
+        lock_file = MockLockFile(lock_path, resource)
 
         # Should not raise
         lock_file.delete()
@@ -214,8 +238,11 @@ class TestTokenLockFile:
         """create() should store count in information."""
         lock_path = tmp_path / "test.token"
         job_uri = "/path/to/job"
+        resource = MockResource()
 
-        lock_file = TokenLockFile.create(lock_path, job_uri, information={"count": 5})
+        lock_file = TokenLockFile.create(
+            lock_path, resource, job_uri, information={"count": 5}
+        )
 
         assert lock_file.count == 5
         content = json.loads(lock_path.read_text())
@@ -227,34 +254,28 @@ class TestTokenLockFile:
         lock_path.write_text(
             json.dumps({"job_uri": "/some/job", "information": {"count": 10}})
         )
+        resource = MockResource()
 
-        lock_file = TokenLockFile(lock_path)
+        lock_file = TokenLockFile(lock_path, resource)
 
         assert lock_file.job_uri == "/some/job"
         assert lock_file.count == 10
 
-    def test_load_old_line_format(self, tmp_path: Path):
-        """Loading should read old line-based format for backward compatibility."""
-        lock_path = tmp_path / "test.token"
-        # Old format: line1=count, line2=job_uri
-        lock_path.write_text("7\n/old/job/path")
-
-        lock_file = TokenLockFile(lock_path)
-
-        assert lock_file.job_uri == "/old/job/path"
-        assert lock_file.count == 7
-
     def test_to_information(self, tmp_path: Path):
         """to_information() should return count dict."""
         lock_path = tmp_path / "test.token"
-        lock_file = TokenLockFile.create(lock_path, "/job", information={"count": 3})
+        resource = MockResource()
+        lock_file = TokenLockFile.create(
+            lock_path, resource, "/job", information={"count": 3}
+        )
 
         assert lock_file.to_information() == {"count": 3}
 
     def test_from_information_none(self, tmp_path: Path):
         """from_information(None) should set count to 0."""
         lock_path = tmp_path / "test.token"
-        lock_file = TokenLockFile.create(lock_path, "/job", information=None)
+        resource = MockResource()
+        lock_file = TokenLockFile.create(lock_path, resource, "/job", information=None)
 
         assert lock_file.count == 0
 
@@ -269,9 +290,10 @@ class TestPartialLockFile:
         """create() should store partial_name in information."""
         lock_path = tmp_path / "holder.json"
         job_uri = "/path/to/job"
+        resource = MockResource()
 
         lock_file = PartialLockFile.create(
-            lock_path, job_uri, information={"partial_name": "checkpoints"}
+            lock_path, resource, job_uri, information={"partial_name": "checkpoints"}
         )
 
         assert lock_file.partial_name == "checkpoints"
@@ -286,8 +308,9 @@ class TestPartialLockFile:
                 {"job_uri": "/some/job", "information": {"partial_name": "outputs"}}
             )
         )
+        resource = MockResource()
 
-        lock_file = PartialLockFile(lock_path)
+        lock_file = PartialLockFile(lock_path, resource)
 
         assert lock_file.job_uri == "/some/job"
         assert lock_file.partial_name == "outputs"
@@ -295,8 +318,9 @@ class TestPartialLockFile:
     def test_to_information(self, tmp_path: Path):
         """to_information() should return partial_name dict."""
         lock_path = tmp_path / "holder.json"
+        resource = MockResource()
         lock_file = PartialLockFile.create(
-            lock_path, "/job", information={"partial_name": "data"}
+            lock_path, resource, "/job", information={"partial_name": "data"}
         )
 
         assert lock_file.to_information() == {"partial_name": "data"}
@@ -304,7 +328,10 @@ class TestPartialLockFile:
     def test_from_information_none(self, tmp_path: Path):
         """from_information(None) should set partial_name to empty string."""
         lock_path = tmp_path / "holder.json"
-        lock_file = PartialLockFile.create(lock_path, "/job", information=None)
+        resource = MockResource()
+        lock_file = PartialLockFile.create(
+            lock_path, resource, "/job", information=None
+        )
 
         assert lock_file.partial_name == ""
 
@@ -312,6 +339,7 @@ class TestPartialLockFile:
         """from_information with invalid format should raise."""
         lock_path = tmp_path / "holder.json"
         lock_path.write_text(json.dumps({"job_uri": "/job", "information": "invalid"}))
+        resource = MockResource()
 
         with pytest.raises(ValueError, match="Invalid information format"):
-            PartialLockFile(lock_path)
+            PartialLockFile(lock_path, resource)

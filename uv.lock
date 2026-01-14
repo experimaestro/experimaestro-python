@@ -655,7 +655,7 @@ dependencies = [
     { name = "decorator" },
     { name = "docstring-parser" },
     { name = "fastapi" },
-    { name = "fasteners" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "humanfriendly" },
@@ -714,7 +714,7 @@ requires-dist = [
     { name = "docutils", marker = "extra == 'dev'", specifier = ">=0.18" },
     { name = "fabric", marker = "extra == 'ssh'", specifier = ">=3" },
     { name = "fastapi", specifier = ">=0.109,<1" },
-    { name = "fasteners", specifier = ">=0.19,<1" },
+    { name = "filelock", specifier = ">=3.16,<4" },
     { name = "httpx", specifier = ">=0.26,<1" },
     { name = "huggingface-hub", specifier = ">0.17" },
     { name = "humanfriendly", specifier = ">=10" },
@@ -782,15 +782,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/52/08/8c8508db6c7b9aae8f7175046af41baad690771c9bcde676419965e338c7/fastapi-0.128.0.tar.gz", hash = "sha256:1cc179e1cef10a6be60ffe429f79b829dce99d8de32d7acb7e6c8dfdf7f2645a", size = 365682, upload-time = "2025-12-27T15:21:13.714Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5c/05/5cbb59154b093548acd0f4c7c474a118eda06da25aa75c616b72d8fcd92a/fastapi-0.128.0-py3-none-any.whl", hash = "sha256:aebd93f9716ee3b4f4fcfe13ffb7cf308d99c9f3ab5622d8877441072561582d", size = 103094, upload-time = "2025-12-27T15:21:12.154Z" },
-]
-
-[[package]]
-name = "fasteners"
-version = "0.20"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2d/18/7881a99ba5244bfc82f06017316ffe93217dbbbcfa52b887caa1d4f2a6d3/fasteners-0.20.tar.gz", hash = "sha256:55dce8792a41b56f727ba6e123fcaee77fd87e638a6863cec00007bfea84c8d8", size = 25087, upload-time = "2025-08-11T10:19:37.785Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/ac/e5d886f892666d2d1e5cb8c1a41146e1d79ae8896477b1153a21711d3b44/fasteners-0.20-py3-none-any.whl", hash = "sha256:9422c40d1e350e4259f509fb2e608d6bc43c0136f79a00db1b49046029d0b3b7", size = 18702, upload-time = "2025-08-11T10:19:35.716Z" },
 ]
 
 [[package]]

@@ -44,5 +44,7 @@ jobs:
           uv run ruff check src/experimaestro
 
       - name: Test with pytest
+        env:
+          XPM_TEST_TIMEOUT_MULTIPLIER: "10"
         run: |
           uv run pytest

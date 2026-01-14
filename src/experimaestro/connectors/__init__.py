@@ -10,10 +10,11 @@ This module contains :
 
 import enum
 import logging
+from abc import ABC, abstractmethod
 from typing import Any, Dict, Mapping, Type, Union, Optional, TYPE_CHECKING
 from pathlib import Path
 from experimaestro.utils import logger
-from experimaestro.locking import Lock
+from experimaestro.locking import Lock, SyncLock
 from experimaestro.tokens import Token
 from experimaestro.utils.asyncio import asyncThreadcheck
 from importlib.metadata import entry_points
@@ -76,7 +77,8 @@ class ProcessState(enum.Enum):
 
 
 class Process:
-    HANDLERS = None
+    #: List of handlers
+    HANDLERS: dict[str, "Process"] = None
 
     @classmethod
     def fromspec(cls, connector: "Connector", definition: Dict[str, Any]) -> "Process":
@@ -192,7 +194,7 @@ class ProcessBuilder:
         raise NotImplementedError("Method not implemented in %s" % self.__class__)
 
 
-class Connector:
+class Connector(ABC):
     def __init__(self, localpath: Path):
         """Creates a new connector
 
@@ -211,22 +213,45 @@ class Connector:
     def localpath(self, localpath: Path):
         self._localpath = localpath
 
-    def processbuilder(self) -> ProcessBuilder:
-        raise NotImplementedError()
+    @abstractmethod
+    def processbuilder(self) -> ProcessBuilder: ...
 
-    def lock(self, path: Path, max_delay: int = -1) -> Lock:
-        """Returns a lock on a file"""
-        raise NotImplementedError()
+    @abstractmethod
+    def lock(self, path: Path, max_delay: int = -1) -> SyncLock:
+        """Returns a sync lock on a file
 
-    def resolve(self, path: Path, basepath: Path = None):
-        raise NotImplementedError()
+        Args:
+            path: Path to the lock file
+            max_delay: Maximum wait time in seconds (-1 for infinite)
 
-    def setExecutable(self, path: Path, flag: bool):
-        raise NotImplementedError()
+        Returns:
+            SyncLock instance
+        """
+        ...
 
+    @abstractmethod
+    def async_lock(self, path: Path, max_delay: int = -1) -> Lock:
+        """Returns an async lock on a file
+
+        Args:
+            path: Path to the lock file
+            max_delay: Maximum wait time in seconds (-1 for infinite)
+
+        Returns:
+            Lock instance (async)
+        """
+        ...
+
+    @abstractmethod
+    def resolve(self, path: Path, basepath: Path = None): ...
+
+    @abstractmethod
+    def setExecutable(self, path: Path, flag: bool): ...
+
+    @abstractmethod
     def createtoken(self, name: str, total: int) -> Token:
         """Returns a token in the default path for the connector"""
-        raise NotImplementedError()
+        ...
 
 
 class Locator:

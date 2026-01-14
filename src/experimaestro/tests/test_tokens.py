@@ -1,6 +1,6 @@
 import sys
 import json
-import fasteners
+import filelock
 import pytest
 import logging
 import time
@@ -65,13 +65,13 @@ def token_experiment(xp, token, ntasks=3):
 )
 def test_token_fail():
     """Simple token test: should fail without token (but may pass due to timing)"""
-    with TemporaryExperiment("tokens", maxwait=20) as xp:
+    with TemporaryExperiment("tokens") as xp:
         token_experiment(xp, None)
 
 
 def test_token_ok():
     """Simple token test: should succeed with token"""
-    with TemporaryExperiment("tokens", maxwait=20) as xp:
+    with TemporaryExperiment("tokens") as xp:
         token = CounterToken("token-ok", xp.workdir / "token", 1)
         token_experiment(xp, token)
 
@@ -87,7 +87,7 @@ class dummy_task(Task):
 
 def test_token_cleanup():
     """Test that tokens are correctly cleaned up if the process finished"""
-    with TemporaryExperiment("token_cleanup", maxwait=20) as xp:
+    with TemporaryExperiment("token_cleanup") as xp:
         token = CounterToken("token-cleanup", xp.workdir / "token-cleanup", 1)
 
         task = dummy_task.C(x=1)
@@ -109,7 +109,7 @@ def test_token_cleanup():
         # Just lock directly (with process)
         logging.info("Lock with process")
         job = dependency.target
-        with fasteners.InterProcessLock(job.lockpath):
+        with filelock.FileLock(job.lockpath):
             logging.info("Creating dependency %s", dependency)
             TokenLockFile.from_dependency(dependency)
             lockingpath = job.path / "testtoken.signal"
@@ -138,21 +138,22 @@ def test_token_monitor():
     Test the ability of the token to monitor the filesystem
     """
 
-    def run(xp, x, path):
-        token = xp.workspace.connector.createtoken("test-token-monitor", 1)
+    def run(xp, x, path, token):
         task = (
             TokenTask.C(path=path, x=x).add_dependencies(token.dependency(1)).submit()
         )
         return task
 
-    with TemporaryExperiment("tokens1", maxwait=20) as xp1:
+    with TemporaryExperiment("tokens1") as xp1:
         # Use the same workspace for both experiments
-        with TemporaryExperiment(
-            "tokens2", workdir=xp1.workspace.path, maxwait=20
-        ) as xp2:
+        with TemporaryExperiment("tokens2", workdir=xp1.workspace.path) as xp2:
             path = xp1.workspace.path / "test_token.file"
-            task1 = run(xp1, 1, path)
-            task2 = run(xp2, 2, path)
+            # Shared token in workdir (not global token store)
+            token = CounterToken(
+                "test-token-monitor", xp1.workspace.path / "token-monitor", 1
+            )
+            task1 = run(xp1, 1, path, token)
+            task2 = run(xp2, 2, path, token)
 
             time.sleep(0.5)
             path.write_text("Hello world")
@@ -193,7 +194,7 @@ def test_token_reschedule():
         p2 = subprocess.Popen(command + ["2", lockingpath, str(ready2), str(time2)])
 
         try:
-            with timeout(20):
+            with timeout():
                 logging.info("Waiting for both experiments to be ready")
                 # Wait that both processes are ready
                 while not ready1.is_file():

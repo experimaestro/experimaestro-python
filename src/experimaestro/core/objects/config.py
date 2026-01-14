@@ -3,7 +3,7 @@
 import json
 
 from attr import define
-import fasteners
+import filelock
 
 from experimaestro import taskglobals
 
@@ -30,7 +30,7 @@ from typing import (
 )
 import sys
 import experimaestro
-from experimaestro.utils import logger, get_caller_location
+from experimaestro.utils import get_caller_location
 from experimaestro.core.types import DeprecatedAttribute, ObjectType, TypeVarType
 from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
@@ -55,6 +55,7 @@ from .config_utils import (
 
 T = TypeVar("T", bound="Config")
 
+logger = logging.getLogger("xpm.core")
 
 DependentMarker = Callable[["Config"], None]
 """Type alias for dependency marker functions.
@@ -334,7 +335,7 @@ class ConfigInformation:
                     "Cannot set non existing attribute %s in %s" % (k, self.xpmtype)
                 )
         except Exception:
-            logger.error("Error while setting value %s in %s", k, self.xpmtype)
+            logger.exception("Error while setting value %s in %s", k, self.xpmtype)
             raise
 
     def fuse_concrete_typevars(self, typevars: Dict[TypeVar, type]):
@@ -2151,8 +2152,7 @@ def cache(fn, name: str):
             dir.mkdir(parents=True, exist_ok=True)
 
         path = dir / name
-        ipc_lock = fasteners.InterProcessLock(path.with_suffix(path.suffix + ".lock"))
-        with ipc_lock:
+        with filelock.FileLock(path.with_suffix(path.suffix + ".lock")):
             r = fn(config, path, *args, **kwargs)
             return r
 

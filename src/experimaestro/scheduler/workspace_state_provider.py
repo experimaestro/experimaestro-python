@@ -318,20 +318,19 @@ class WorkspaceStateProvider(StateProvider):
             remove_events_count: If True, remove events_count from the output
                 (indicates all events have been processed)
         """
-        import fasteners
+        import filelock
         import tempfile
 
         status_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Use file lock for atomic writes
         lock_path = status_path.parent / f".{status_path.name}.lock"
-        lock = fasteners.InterProcessLock(str(lock_path))
 
         state = exp.state_dict()
         if remove_events_count:
             state.pop("events_count", None)
 
-        with lock:
+        with filelock.FileLock(lock_path):
             # Write to temp file first, then atomic rename
             fd, temp_path = tempfile.mkstemp(
                 dir=status_path.parent, suffix=".tmp", prefix="status"

@@ -153,7 +153,7 @@ def test_multitoken_basic():
     """Test basic multi-token scheduling with two tokens"""
     import json
 
-    with TemporaryExperiment("multitoken", maxwait=60) as xp:
+    with TemporaryExperiment("multitoken", timeout_multiplier=3.0) as xp:
         # Create two tokens: memory (4 units) and cpu (2 cores)
         memory_limit = 4
         cpu_limit = 2
@@ -225,7 +225,7 @@ def test_multitoken_stress():
     """
     import json
 
-    with TemporaryExperiment("multitoken_stress", maxwait=120) as xp:
+    with TemporaryExperiment("multitoken_stress", timeout_multiplier=6.0) as xp:
         # Create tokens with limited capacity to force contention
         memory_limit = 8
         cpu_limit = 4
@@ -295,7 +295,7 @@ def test_multitoken_large_requirements():
     """
     import json
 
-    with TemporaryExperiment("multitoken_large", maxwait=60) as xp:
+    with TemporaryExperiment("multitoken_large", timeout_multiplier=3.0) as xp:
         memory_limit = 10
         cpu_limit = 4
 
@@ -355,7 +355,7 @@ def test_multitoken_single_task_all_tokens():
     """Test that a single task can acquire all available tokens"""
     import json
 
-    with TemporaryExperiment("multitoken_all", maxwait=30) as xp:
+    with TemporaryExperiment("multitoken_all", timeout_multiplier=1.5) as xp:
         memory_limit = 4
         cpu_limit = 2
 
@@ -394,7 +394,7 @@ def test_multitoken_sequential_dependency():
     """
     import json
 
-    with TemporaryExperiment("multitoken_seq", maxwait=60) as xp:
+    with TemporaryExperiment("multitoken_seq", timeout_multiplier=3.0) as xp:
         memory_limit = 2
         cpu_limit = 1
 

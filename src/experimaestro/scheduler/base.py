@@ -130,10 +130,11 @@ class Scheduler(StateProvider, threading.Thread):
 
     @staticmethod
     def _create(name: str = "Global"):
-        """Internal method to create and start scheduler"""
+        """Internal method to create and initialize scheduler"""
         instance = Scheduler(name)
-        instance.start()
-        instance._ready.wait()
+        # Initialize the scheduler (sets up loop variables)
+        # Don't call start() - scheduler uses EventLoopThread's loop
+        instance.run()
         return instance
 
     @staticmethod
@@ -205,28 +206,32 @@ class Scheduler(StateProvider, threading.Thread):
             self.server.wait()
 
     def run(self):
-        """Run the event loop forever"""
-        logger.debug("Starting event loop thread")
-        # Ported from SchedulerCentral
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        # Set loop-dependent variables
-        self.exitCondition = asyncio.Condition()
-        self.dependencyLock = asyncio.Lock()
+        """Initialize scheduler using EventLoopThread's event loop.
 
-        # Note: State provider removed - now managed at workspace level
-        # Each experiment has its own workspace with database
+        The scheduler shares the event loop with lock management and file watching,
+        ensuring all async operations happen in a single loop.
+        """
+        logger.debug("Initializing scheduler")
+        from experimaestro.locking import EventLoopThread
+
+        # Use the central event loop from EventLoopThread
+        event_loop_thread = EventLoopThread.instance()
+        self.loop = event_loop_thread.loop
+
+        # Set loop-dependent variables (must be created in the event loop's context)
+        # Schedule their creation on the event loop
+        init_done = threading.Event()
+
+        def init_loop_vars():
+            self.exitCondition = asyncio.Condition()
+            self.dependencyLock = asyncio.Lock()
+            init_done.set()
+
+        self.loop.call_soon_threadsafe(init_loop_vars)
+        init_done.wait()
 
         self._ready.set()
-        self.loop.run_forever()
-
-    def start_scheduler(self):
-        """Start the scheduler event loop in a thread"""
-        if not self.is_alive():
-            self.start()
-            self._ready.wait()
-        else:
-            logger.warning("Scheduler already started")
+        logger.debug("Scheduler initialized with EventLoopThread's loop")
 
     def addlistener(self, listener: Listener):
         with self._listeners_lock:
@@ -799,9 +804,9 @@ class Scheduler(StateProvider, threading.Thread):
                     return JobStateError(JobFailureStatus.DEPENDENCY)
 
             # We first lock the job before proceeding
-            with DynamicDependencyLocks() as locks:
+            async with DynamicDependencyLocks() as locks:
                 logger.debug("[starting] Locking job %s", job)
-                async with job.launcher.connector.lock(job.lockpath):
+                async with job.launcher.connector.async_lock(job.lockpath):
                     logger.debug("[starting] Locked job %s", job)
 
                     state = None
@@ -834,7 +839,7 @@ class Scheduler(StateProvider, threading.Thread):
                                             )
                                             # Release all locks and restart
                                             for lock in locks.locks:
-                                                lock.release()
+                                                await lock.aio_release()
                                             locks.locks.clear()
                                             # Put failed dependency first
                                             dynamic_deps.remove(dependency)

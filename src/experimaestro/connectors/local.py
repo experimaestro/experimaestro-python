@@ -6,10 +6,10 @@ from pathlib import Path, WindowsPath, PosixPath
 import os
 import threading
 from experimaestro.launcherfinder import LauncherRegistry
-import fasteners
+import filelock
 import psutil
 
-from experimaestro.locking import Lock
+from experimaestro.locking import Lock, SyncLock
 
 from . import (
     Connector,
@@ -174,21 +174,33 @@ class LocalProcessBuilder(ProcessBuilder):
         return process
 
 
-class InterProcessLock(fasteners.InterProcessLock, Lock):
-    def __init__(self, path, max_delay=-1):
-        super().__init__(path)
-        self.max_delay = max_delay
+class AsyncLock(Lock):
+    """Async inter-process lock using filelock.AsyncFileLock.
 
-    def __enter__(self):
-        logger.debug("Locking %s", self.path)
-        if not super().acquire(blocking=True, max_delay=self.max_delay, timeout=None):
+    Implements the Lock interface for use as an async context manager.
+    """
+
+    def __init__(self, path, timeout: float = -1):
+        Lock.__init__(self)
+        self.path = str(path)
+        self._lock = filelock.AsyncFileLock(self.path, timeout=timeout)
+
+    @property
+    def acquired(self) -> bool:
+        """Check if the lock is currently held."""
+        return self._lock.is_locked
+
+    async def _aio_acquire(self):
+        logger.debug("Locking %s (async)", self.path)
+        try:
+            await self._lock.acquire()
+        except filelock.Timeout:
             raise threading.ThreadError("Could not acquire lock")
-        logger.debug("Locked %s", self.path)
-        return self
+        logger.debug("Locked %s (async)", self.path)
 
-    def __exit__(self, *args):
-        logger.debug("Unlocking %s", self.path)
-        super().__exit__(*args)
+    async def _aio_release(self):
+        logger.debug("Unlocking %s (async)", self.path)
+        await self._lock.release()
 
 
 class LocalConnector(Connector):
@@ -224,14 +236,25 @@ class LocalConnector(Connector):
             ).expanduser()
         super().__init__(localpath)
 
-    def lock(self, path: Path, max_delay: int = -1) -> Lock:
-        """Returns a lockable path
+    def lock(self, path: Path, max_delay: int = -1) -> SyncLock:
+        """Returns a sync lock
 
         Arguments:
             path {Path} -- Path of the lockfile
             max_delay {int} -- Maximum wait duration (seconds)
         """
-        return InterProcessLock(path, max_delay)
+        timeout = max_delay if max_delay > 0 else -1
+        return SyncLock(path, timeout=timeout)
+
+    def async_lock(self, path: Path, max_delay: int = -1) -> Lock:
+        """Returns an async lock
+
+        Arguments:
+            path {Path} -- Path of the lockfile
+            max_delay {int} -- Maximum wait duration (seconds)
+        """
+        timeout = max_delay if max_delay > 0 else -1
+        return AsyncLock(path, timeout=timeout)
 
     def createtoken(self, name: str, total: int) -> Token:
         tokendir = self.localpath / "tokens"

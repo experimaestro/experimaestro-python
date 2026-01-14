@@ -62,7 +62,7 @@ def restart(terminate: Callable, experiment):
     p = None
     xpmprocess = None
     try:
-        with TemporaryExperiment("restart", maxwait=20) as xp:
+        with TemporaryExperiment("restart", timeout_multiplier=9) as xp:
             # Create the task with dry_run and so we can get the file paths
             task = Restart.C()
             task.submit(run_mode=RunMode.DRY_RUN)
@@ -101,7 +101,7 @@ def restart(terminate: Callable, experiment):
         logging.info("Checking that job (PID %s) is still running", pid)
         assert p.is_running()
 
-        with TemporaryExperiment("restart", maxwait=20) as xp:
+        with TemporaryExperiment("restart", timeout_multiplier=9) as xp:
             # Now, submit the job - it should pick up the process
             # where it was left
             logging.debug("Submitting the job (continues the submit)")

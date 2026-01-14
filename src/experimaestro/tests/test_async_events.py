@@ -15,7 +15,10 @@ pytestmark = pytest.mark.anyio
 
 @pytest.fixture
 def reset_async_bridge():
-    """Reset AsyncEventBridge singleton before and after each test."""
+    """Reset AsyncEventBridge singleton before and after each test.
+
+    Note: EventLoopThread is not reset as it's the central event loop.
+    """
     AsyncEventBridge.reset()
     yield
     AsyncEventBridge.reset()
@@ -43,8 +46,11 @@ async def test_async_event_bridge_register_handler(reset_async_bridge):
 
     events_received = []
 
-    async def handler(event_type: str, src_path: str, **kwargs):
-        events_received.append((event_type, src_path, kwargs))
+    class MockHandler:
+        async def on_created_async(self, event):
+            events_received.append(("created", event.src_path))
+
+    handler = MockHandler()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
@@ -75,16 +81,25 @@ async def test_async_event_bridge_post_event(reset_async_bridge):
     events_received = []
     event_received = asyncio.Event()
 
-    async def handler(event_type: str, src_path: str, **kwargs):
-        events_received.append((event_type, src_path, kwargs))
-        event_received.set()
+    class MockHandler:
+        async def on_created_async(self, event):
+            events_received.append(("created", event.src_path))
+            event_received.set()
+
+    handler = MockHandler()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
         unregister = bridge.register_handler(path, handler)
 
+        # Create a mock event
+        class MockEvent:
+            event_type = "created"
+            src_path = str(path / "test.txt")
+            is_directory = False
+
         # Post event
-        bridge.post_event(path, "created", str(path / "test.txt"), is_directory=False)
+        bridge.post_event(path, MockEvent())
 
         # Wait for event to be processed
         await asyncio.wait_for(event_received.wait(), timeout=2.0)
@@ -92,7 +107,6 @@ async def test_async_event_bridge_post_event(reset_async_bridge):
         assert len(events_received) == 1
         assert events_received[0][0] == "created"
         assert events_received[0][1] == str(path / "test.txt")
-        assert events_received[0][2] == {"is_directory": False}
 
         unregister()
 
@@ -104,15 +118,23 @@ async def test_async_event_bridge_no_loop(reset_async_bridge):
 
     events_received = []
 
-    async def handler(event_type: str, src_path: str, **kwargs):
-        events_received.append((event_type, src_path))
+    class MockHandler:
+        async def on_created_async(self, event):
+            events_received.append(("created", event.src_path))
+
+    handler = MockHandler()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
         unregister = bridge.register_handler(path, handler)
 
+        # Create a mock event
+        class MockEvent:
+            event_type = "created"
+            src_path = str(path / "test.txt")
+
         # Post event - should be dropped since no loop is set
-        bridge.post_event(path, "created", str(path / "test.txt"))
+        bridge.post_event(path, MockEvent())
 
         # Give time for any processing (should not happen)
         await asyncio.sleep(0.1)
@@ -133,27 +155,37 @@ async def test_async_event_bridge_multiple_handlers(reset_async_bridge):
     both_received = asyncio.Event()
     count = 0
 
-    async def handler1(event_type: str, src_path: str, **kwargs):
-        nonlocal count
-        events1.append(event_type)
-        count += 1
-        if count >= 2:
-            both_received.set()
+    class Handler1:
+        async def on_modified_async(self, event):
+            nonlocal count
+            events1.append(event.event_type)
+            count += 1
+            if count >= 2:
+                both_received.set()
 
-    async def handler2(event_type: str, src_path: str, **kwargs):
-        nonlocal count
-        events2.append(event_type)
-        count += 1
-        if count >= 2:
-            both_received.set()
+    class Handler2:
+        async def on_modified_async(self, event):
+            nonlocal count
+            events2.append(event.event_type)
+            count += 1
+            if count >= 2:
+                both_received.set()
+
+    handler1 = Handler1()
+    handler2 = Handler2()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
         unregister1 = bridge.register_handler(path, handler1)
         unregister2 = bridge.register_handler(path, handler2)
 
+        # Create a mock event
+        class MockEvent:
+            event_type = "modified"
+            src_path = str(path / "test.txt")
+
         # Post event
-        bridge.post_event(path, "modified", str(path / "test.txt"))
+        bridge.post_event(path, MockEvent())
 
         # Wait for both handlers to be called
         await asyncio.wait_for(both_received.wait(), timeout=2.0)
@@ -176,19 +208,23 @@ async def test_async_file_system_event_handler(reset_async_bridge):
     events_received = []
     event_received = asyncio.Event()
 
-    async def handler(event_type: str, src_path: str, **kwargs):
-        events_received.append((event_type, src_path, kwargs))
-        event_received.set()
+    class MockHandler:
+        async def on_created_async(self, event):
+            events_received.append(("created", event.src_path))
+            event_received.set()
+
+    handler = MockHandler()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
         unregister = bridge.register_handler(path, handler)
 
-        # Create the handler
+        # Create the watchdog handler
         fs_handler = AsyncFileSystemEventHandler(path, bridge)
 
         # Simulate a file creation event
         class MockEvent:
+            event_type = "created"
             is_directory = False
             src_path = str(path / "new_file.txt")
 
@@ -205,7 +241,7 @@ async def test_async_file_system_event_handler(reset_async_bridge):
 
 
 async def test_async_file_system_event_handler_moved(reset_async_bridge):
-    """Test AsyncFileSystemEventHandler handles moved events with dest_path."""
+    """Test AsyncFileSystemEventHandler handles moved events."""
     bridge = AsyncEventBridge.instance()
     loop = asyncio.get_running_loop()
     bridge.set_loop(loop)
@@ -213,9 +249,12 @@ async def test_async_file_system_event_handler_moved(reset_async_bridge):
     events_received = []
     event_received = asyncio.Event()
 
-    async def handler(event_type: str, src_path: str, **kwargs):
-        events_received.append((event_type, src_path, kwargs))
-        event_received.set()
+    class MockHandler:
+        async def on_moved_async(self, event):
+            events_received.append(("moved", event.src_path, event.dest_path))
+            event_received.set()
+
+    handler = MockHandler()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
@@ -225,6 +264,7 @@ async def test_async_file_system_event_handler_moved(reset_async_bridge):
 
         # Simulate a file move event
         class MockMoveEvent:
+            event_type = "moved"
             is_directory = False
             src_path = str(path / "old_name.txt")
             dest_path = str(path / "new_name.txt")
@@ -237,7 +277,7 @@ async def test_async_file_system_event_handler_moved(reset_async_bridge):
         assert len(events_received) == 1
         assert events_received[0][0] == "moved"
         assert events_received[0][1] == str(path / "old_name.txt")
-        assert events_received[0][2]["dest_path"] == str(path / "new_name.txt")
+        assert events_received[0][2] == str(path / "new_name.txt")
 
         unregister()
 
@@ -250,8 +290,17 @@ async def test_async_file_system_event_handler_ignores_directories(reset_async_b
 
     events_received = []
 
-    async def handler(event_type: str, src_path: str, **kwargs):
-        events_received.append((event_type, src_path))
+    class MockHandler:
+        async def on_created_async(self, event):
+            events_received.append(("created", event.src_path))
+
+        async def on_deleted_async(self, event):
+            events_received.append(("deleted", event.src_path))
+
+        async def on_modified_async(self, event):
+            events_received.append(("modified", event.src_path))
+
+    handler = MockHandler()
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
@@ -261,11 +310,14 @@ async def test_async_file_system_event_handler_ignores_directories(reset_async_b
 
         # Simulate directory events
         class MockDirEvent:
+            event_type = "created"
             is_directory = True
             src_path = str(path / "subdir")
 
         fs_handler.on_created(MockDirEvent())
+        MockDirEvent.event_type = "deleted"
         fs_handler.on_deleted(MockDirEvent())
+        MockDirEvent.event_type = "modified"
         fs_handler.on_modified(MockDirEvent())
 
         # Give time for any processing

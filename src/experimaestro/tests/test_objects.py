@@ -11,7 +11,7 @@ from experimaestro.tests.utils import TemporaryExperiment
 
 @pytest.fixture()
 def xp():
-    with TemporaryExperiment("deprecated", maxwait=0, run_mode=RunMode.DRY_RUN) as xp:
+    with TemporaryExperiment("deprecated", run_mode=RunMode.DRY_RUN) as xp:
         yield xp
 
 

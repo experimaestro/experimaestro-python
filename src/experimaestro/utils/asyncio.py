@@ -2,6 +2,8 @@ import logging
 from threading import Thread
 import asyncio
 
+logger = logging.getLogger("xpm.asyncio")
+
 
 def asyncThreadcheck(name, func, *args, **kwargs) -> asyncio.Future:
     """Launch a thread that will return a future"""
@@ -9,16 +11,16 @@ def asyncThreadcheck(name, func, *args, **kwargs) -> asyncio.Future:
     future = loop.create_future()
 
     def dowait():
-        logging.debug("Running %s", func)
+        logger.debug("Running %s", func)
         try:
             result = func(*args, **kwargs)
-            logging.debug("Got result from %s", func)
+            logger.debug("Got result from %s", func)
         except Exception:
-            logging.exception("Got an error in the thread")
+            logger.exception("Got an error in the thread")
             raise
         loop.call_soon_threadsafe(future.set_result, result)
 
     # Start thread
-    logging.debug("Starting thread to run %s", func)
+    logger.debug("Starting thread to run %s", func)
     Thread(name=name, target=dowait).start()
     return future

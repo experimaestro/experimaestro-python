@@ -43,7 +43,7 @@ class DynamicResource(ABC):
         ...
 
     @abstractmethod
-    def refresh_state(self) -> None:
+    async def refresh_state(self) -> None:
         """Refresh resource state from underlying storage.
 
         Called by ResourcePoller. Should update internal state and
@@ -52,12 +52,11 @@ class DynamicResource(ABC):
         ...
 
 
-class ResourcePoller(threading.Thread):
-    """Single thread that polls all DynamicResource instances.
+class ResourcePoller:
+    """Polls DynamicResource instances using EventLoopThread's event loop.
 
-    This consolidates polling into one thread instead of creating threads
-    per wait operation. Resources register themselves and get polled at
-    intervals determined by exponential backoff.
+    This consolidates polling into the same event loop used for lock management,
+    ensuring all locking operations happen in the same context.
     """
 
     _instance: Optional["ResourcePoller"] = None
@@ -70,7 +69,6 @@ class ResourcePoller(threading.Thread):
             with cls._instance_lock:
                 if cls._instance is None:
                     cls._instance = cls()
-                    cls._instance.start()
         return cls._instance
 
     @classmethod
@@ -78,36 +76,56 @@ class ResourcePoller(threading.Thread):
         """Reset the singleton instance. Used for testing."""
         with cls._instance_lock:
             if cls._instance is not None:
-                # Clear waiters to stop processing
-                with cls._instance._lock:
-                    cls._instance._waiters.clear()
-                    cls._instance._resources.clear()
+                cls._instance._waiters.clear()
+                cls._instance._resources.clear()
+                if cls._instance._poll_task is not None:
+                    try:
+                        cls._instance._poll_task.cancel()
+                    except RuntimeError:
+                        # Loop might be closed
+                        pass
+                    cls._instance._poll_task = None
             cls._instance = None
 
     def __init__(self):
-        super().__init__(daemon=True, name="ResourcePoller")
-        self._lock = threading.Lock()
-        self._cv = threading.Condition(self._lock)
-
         # Resources waiting to be polled (weak references)
         self._resources: WeakSet[DynamicResource] = WeakSet()
 
-        # Async waiters: resource_id -> list of (asyncio.Event, loop, deadline)
-        self._waiters: dict[
-            int, list[tuple[asyncio.Event, asyncio.AbstractEventLoop, Optional[float]]]
-        ] = {}
+        # Async waiters: resource_id -> list of (asyncio.Event, deadline)
+        self._waiters: dict[int, list[tuple[asyncio.Event, float | None]]] = {}
+
+        # Polling task handle
+        self._poll_task: asyncio.Task | None = None
+
+        # Event to wake up the polling loop
+        self._wake_event: asyncio.Event | None = None
+
+    def _ensure_polling(self) -> None:
+        """Ensure the polling task is running in EventLoopThread."""
+        if self._poll_task is not None and not self._poll_task.done():
+            return
+
+        from experimaestro.locking import EventLoopThread
+
+        manager = EventLoopThread.instance()
+        loop = manager.loop
+
+        # Schedule the polling coroutine on EventLoopThread's loop
+        def start_polling():
+            self._wake_event = asyncio.Event()
+            self._poll_task = asyncio.create_task(self._poll_loop())
+
+        loop.call_soon_threadsafe(start_polling)
 
     def register(
         self,
         resource: DynamicResource,
-        loop: asyncio.AbstractEventLoop,
         timeout: float = 0,
     ) -> asyncio.Event:
         """Register a resource for polling and return an event to wait on.
 
         Args:
             resource: The resource to poll
-            loop: The asyncio event loop to notify
             timeout: Timeout in seconds (0 = no timeout)
 
         Returns:
@@ -117,27 +135,32 @@ class ResourcePoller(threading.Thread):
         deadline = time.time() + timeout if timeout > 0 else None
         resource_id = id(resource)
 
-        with self._lock:
-            self._resources.add(resource)
-            if resource_id not in self._waiters:
-                self._waiters[resource_id] = []
-            self._waiters[resource_id].append((event, loop, deadline))
-            self._cv.notify()
+        self._resources.add(resource)
+        if resource_id not in self._waiters:
+            self._waiters[resource_id] = []
+        self._waiters[resource_id].append((event, deadline))
+
+        # Ensure polling is running and wake it up
+        self._ensure_polling()
+        if self._wake_event is not None:
+            # Wake up the polling loop from any thread
+            from experimaestro.locking import EventLoopThread
+
+            try:
+                loop = EventLoopThread.instance().loop
+                loop.call_soon_threadsafe(self._wake_event.set)
+            except RuntimeError:
+                pass
 
         return event
 
     def _notify_waiters(self, resource: DynamicResource) -> None:
         """Notify all waiters for a resource."""
         resource_id = id(resource)
-        with self._lock:
-            waiters = self._waiters.pop(resource_id, [])
+        waiters = self._waiters.pop(resource_id, [])
 
-        for event, loop, _ in waiters:
-            try:
-                loop.call_soon_threadsafe(event.set)
-            except RuntimeError:
-                # Loop might be closed
-                pass
+        for event, _ in waiters:
+            event.set()
 
     def notify(self, resource: DynamicResource) -> None:
         """Notify that a resource's state has changed.
@@ -145,56 +168,61 @@ class ResourcePoller(threading.Thread):
         Called by resources when they detect a state change (e.g., via watchdog).
         This wakes up any waiters for this resource immediately.
         """
-        self._notify_waiters(resource)
+        # Schedule notification on EventLoopThread's loop
+        from experimaestro.locking import EventLoopThread
 
-    def _check_timeouts(self) -> Optional[float]:
+        try:
+            loop = EventLoopThread.instance().loop
+            loop.call_soon_threadsafe(lambda: self._notify_waiters(resource))
+        except RuntimeError:
+            pass
+
+    def _check_timeouts(self) -> float | None:
         """Check for timed out waiters and return time until next timeout."""
         now = time.time()
         next_timeout = float("inf")
 
-        with self._lock:
-            for resource_id, waiters in list(self._waiters.items()):
-                remaining = []
-                for event, loop, deadline in waiters:
-                    if deadline is not None and now >= deadline:
-                        # Timed out - notify with event set
-                        try:
-                            loop.call_soon_threadsafe(event.set)
-                        except RuntimeError:
-                            pass
-                    else:
-                        remaining.append((event, loop, deadline))
-                        if deadline is not None:
-                            next_timeout = min(next_timeout, deadline - now)
-
-                if remaining:
-                    self._waiters[resource_id] = remaining
+        for resource_id, waiters in list(self._waiters.items()):
+            remaining = []
+            for event, deadline in waiters:
+                if deadline is not None and now >= deadline:
+                    # Timed out - notify
+                    event.set()
                 else:
-                    self._waiters.pop(resource_id, None)
+                    remaining.append((event, deadline))
+                    if deadline is not None:
+                        next_timeout = min(next_timeout, deadline - now)
+
+            if remaining:
+                self._waiters[resource_id] = remaining
+            else:
+                self._waiters.pop(resource_id, None)
 
         return next_timeout if next_timeout != float("inf") else None
 
-    def run(self):
-        """Main polling loop."""
+    async def _poll_loop(self):
+        """Main polling loop running in EventLoopThread."""
         poll_interval = POLL_INTERVAL_INITIAL
 
         while True:
-            # Get resources to poll
-            with self._lock:
-                resources = list(self._resources)
-                has_waiters = bool(self._waiters)
+            resources = list(self._resources)
+            has_waiters = bool(self._waiters)
 
             if not has_waiters:
                 # No active waiters, wait for registration
-                with self._lock:
-                    self._cv.wait(timeout=1.0)
+                if self._wake_event:
+                    self._wake_event.clear()
+                    try:
+                        await asyncio.wait_for(self._wake_event.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        pass
                 poll_interval = POLL_INTERVAL_INITIAL
                 continue
 
             # Poll each resource
             for resource in resources:
                 try:
-                    resource.refresh_state()
+                    await resource.refresh_state()
                     self._notify_waiters(resource)
                 except Exception:
                     logger.exception("Error polling resource %s", resource)
@@ -208,8 +236,14 @@ class ResourcePoller(threading.Thread):
                 sleep_time = min(sleep_time, next_timeout)
 
             # Sleep with ability to wake up on new registration
-            with self._lock:
-                self._cv.wait(timeout=max(0.01, sleep_time))
+            if self._wake_event:
+                self._wake_event.clear()
+                try:
+                    await asyncio.wait_for(
+                        self._wake_event.wait(), timeout=max(0.01, sleep_time)
+                    )
+                except asyncio.TimeoutError:
+                    pass
 
             # Increase poll interval (exponential backoff)
             poll_interval = min(
@@ -250,10 +284,11 @@ class DynamicDependency(ABC):
         """
         ...
 
-    async def aio_lock(self, timeout: float = 0) -> Lock:
+    async def aio_lock(self, timeout: float = 0) -> "Lock":
         """Acquire lock on the resource with async waiting.
 
         Uses the resource's async_wait() for efficient waiting without threads.
+        All async operations run in EventLoopThread's event loop.
 
         Args:
             timeout: Timeout in seconds (0 = wait indefinitely)
@@ -264,6 +299,10 @@ class DynamicDependency(ABC):
         Raises:
             LockError: If lock cannot be acquired within timeout
         """
+        return await self._aio_lock_impl(timeout)
+
+    async def _aio_lock_impl(self, timeout: float) -> "Lock":
+        """Implementation of aio_lock that runs in EventLoopThread."""
         from experimaestro.locking import LockError
 
         start_time = time.time()
@@ -271,7 +310,7 @@ class DynamicDependency(ABC):
         while True:
             try:
                 lock = self._create_lock()
-                lock.acquire()
+                await lock.aio_acquire()
                 return lock
             except LockError:
                 # Calculate remaining timeout

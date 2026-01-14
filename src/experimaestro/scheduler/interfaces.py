@@ -670,7 +670,7 @@ class BaseExperiment:
 
         Uses file locking to ensure atomic writes across processes.
         """
-        import fasteners
+        import filelock
 
         run_dir = self.run_dir
         if run_dir is None:
@@ -679,12 +679,11 @@ class BaseExperiment:
         status_path = run_dir / "status.json"
         status_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path = status_path.parent / f".{status_path.name}.lock"
-        lock = fasteners.InterProcessLock(str(lock_path))
 
         data = self.state_dict()
         data["last_updated"] = datetime.now().isoformat()
 
-        with lock:
+        with filelock.FileLock(lock_path):
             temp_path = status_path.with_suffix(".json.tmp")
             with temp_path.open("w") as f:
                 json.dump(data, f, indent=2)

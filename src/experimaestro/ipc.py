@@ -20,8 +20,9 @@ if TYPE_CHECKING:
     pass
 
 
-# Type for async event handlers: (event_type, src_path, **kwargs) -> None
-AsyncEventHandler = Callable[..., Any]
+# Type for async event handlers - should have on_created_async, on_deleted_async,
+# on_modified_async, on_moved_async methods that take a FileSystemEvent and return a coroutine
+AsyncEventHandler = Any  # Duck-typed: must have async on_*_async methods
 
 
 class WatcherType(str, Enum):
@@ -186,9 +187,7 @@ class AsyncEventBridge:
     def post_event(
         self,
         watched_path: str | Path,
-        event_type: str,
-        src_path: str,
-        **kwargs,
+        event: FileSystemEvent,
     ) -> None:
         """Post a filesystem event from watchdog thread to asyncio loop.
 
@@ -196,9 +195,7 @@ class AsyncEventBridge:
 
         Args:
             watched_path: The root path being watched (for handler lookup)
-            event_type: Type of event ("created", "deleted", "modified", "moved")
-            src_path: Path to the affected file/directory
-            **kwargs: Additional event data (e.g., dest_path for moved events)
+            event: The watchdog FileSystemEvent
         """
         with self._lock:
             loop = self._loop
@@ -211,8 +208,8 @@ class AsyncEventBridge:
         if loop is None:
             logger.debug(
                 "AsyncEventBridge: no loop set, dropping event %s on %s",
-                event_type,
-                src_path,
+                event.event_type,
+                event.src_path,
             )
             return
 
@@ -220,8 +217,8 @@ class AsyncEventBridge:
         for handler in handlers:
             try:
                 loop.call_soon_threadsafe(
-                    lambda h=handler: asyncio.create_task(
-                        self._call_handler(h, event_type, src_path, **kwargs)
+                    lambda h=handler, e=event: asyncio.create_task(
+                        self._call_handler(h, e)
                     )
                 )
             except RuntimeError:
@@ -229,18 +226,21 @@ class AsyncEventBridge:
                 logger.debug("AsyncEventBridge: loop closed, dropping event")
 
     async def _call_handler(
-        self, handler: AsyncEventHandler, event_type: str, src_path: str, **kwargs
+        self, handler: AsyncEventHandler, event: FileSystemEvent
     ) -> None:
-        """Call an async handler with error handling."""
+        """Call the appropriate async handler method based on event type."""
         try:
-            result = handler(event_type, src_path, **kwargs)
-            if asyncio.iscoroutine(result):
-                await result
+            method_name = f"on_{event.event_type}_async"
+            method = getattr(handler, method_name, None)
+            if method is not None:
+                result = method(event)
+                if asyncio.iscoroutine(result):
+                    await result
         except Exception:
             logger.exception(
                 "AsyncEventBridge: error in handler for %s event on %s",
-                event_type,
-                src_path,
+                event.event_type,
+                event.src_path,
             )
 
 
@@ -248,6 +248,8 @@ class AsyncFileSystemEventHandler(FileSystemEventHandler):
     """Watchdog event handler that posts events to AsyncEventBridge.
 
     This handler is used with watchdog to bridge filesystem events to asyncio.
+    Events are posted to the bridge which calls the corresponding async methods
+    (on_created, on_deleted, on_modified, on_moved) on registered handlers.
     """
 
     def __init__(self, watched_path: str | Path, bridge: AsyncEventBridge):
@@ -263,31 +265,30 @@ class AsyncFileSystemEventHandler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self.bridge.post_event(
-                self.watched_path, "created", event.src_path, is_directory=False
-            )
+            self.bridge.post_event(self.watched_path, event)
 
     def on_deleted(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self.bridge.post_event(
-                self.watched_path, "deleted", event.src_path, is_directory=False
-            )
+            self.bridge.post_event(self.watched_path, event)
 
     def on_modified(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self.bridge.post_event(
-                self.watched_path, "modified", event.src_path, is_directory=False
-            )
+            self.bridge.post_event(self.watched_path, event)
 
     def on_moved(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
-            self.bridge.post_event(
-                self.watched_path,
-                "moved",
-                event.src_path,
-                dest_path=event.dest_path,
-                is_directory=False,
-            )
+            self.bridge.post_event(self.watched_path, event)
+
+
+class AsyncObservedWatch:
+    """Wrapper for async filesystem watch that handles cleanup.
+
+    Combines the watchdog ObservedWatch with the AsyncEventBridge unregister function.
+    """
+
+    def __init__(self, watch: ObservedWatch, unregister: Callable[[], None]):
+        self.watch = watch
+        self.unregister = unregister
 
 
 class IPCom:
@@ -357,8 +358,46 @@ class IPCom:
             watcher, str(path.absolute()), recursive=recursive
         )
 
+    def async_fswatch(
+        self, handler: AsyncEventHandler, path: Path, recursive=False
+    ) -> "AsyncObservedWatch":
+        """Watch a path and call an async handler for filesystem events.
+
+        This is the async equivalent of fswatch(). It sets up:
+        1. A watchdog observer for filesystem events
+        2. An AsyncEventBridge to route events to the async handler
+
+        Args:
+            handler: Async function called with (event_type, src_path, **kwargs)
+            path: Path to watch
+            recursive: Whether to watch subdirectories
+
+        Returns:
+            AsyncObservedWatch that can be passed to fsunwatch()
+        """
+        if not self.observer.is_alive():
+            logging.error("Observer is not alive")
+
+        # Register async handler with the event bridge
+        bridge = AsyncEventBridge.instance()
+        unregister = bridge.register_handler(path, handler)
+
+        # Create watchdog handler that posts to the bridge
+        fs_handler = AsyncFileSystemEventHandler(path, bridge)
+
+        # Schedule with watchdog
+        watch = self.observer.schedule(
+            fs_handler, str(path.absolute()), recursive=recursive
+        )
+
+        return AsyncObservedWatch(watch, unregister)
+
     def fsunwatch(self, watcher):
-        self.observer.unschedule(watcher)
+        if isinstance(watcher, AsyncObservedWatch):
+            watcher.unregister()
+            self.observer.unschedule(watcher.watch)
+        else:
+            self.observer.unschedule(watcher)
 
 
 def fork_childhandler():

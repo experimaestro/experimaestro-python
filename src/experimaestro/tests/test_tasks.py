@@ -45,7 +45,7 @@ def test_task_types():
 def test_simple_task():
     with TemporaryDirectory(prefix="xpm", suffix="helloworld") as workdir:
         assert isinstance(workdir, Path)
-        with TemporaryExperiment("helloworld", workdir=workdir, maxwait=20):
+        with TemporaryExperiment("helloworld", workdir=workdir, timeout_multiplier=9):
             # Submit the tasks
             hello = Say.C(word="hello").submit()
             world = Say.C(word="world").submit()
@@ -59,7 +59,7 @@ def test_simple_task():
 
 def test_not_submitted():
     """A not submitted task should not be accepted as an argument"""
-    with TemporaryExperiment("helloworld", maxwait=2):
+    with TemporaryExperiment("helloworld"):
         hello = Say.C(word="hello")
         with pytest.raises(ValueError):
             Concat.C(strings=[hello])
@@ -68,14 +68,14 @@ def test_not_submitted():
 def test_fail_simple():
     """Failing task... should fail"""
     with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("failing", maxwait=20):
+        with TemporaryExperiment("failing", timeout_multiplier=9):
             fail = Fail.C().submit()
             fail.touch()
 
 
 def test_foreign_type():
     """When the argument real type is in an non imported module"""
-    with TemporaryExperiment("foreign_type", maxwait=2):
+    with TemporaryExperiment("foreign_type"):
         # Submit the tasks
         from .tasks.foreign import ForeignClassB2
 
@@ -131,7 +131,7 @@ def test_restart(terminate):
 
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
-    with TemporaryExperiment("duplicate", maxwait=20):
+    with TemporaryExperiment("duplicate", timeout_multiplier=9):
         task1 = SimpleTask.C(x=1)
         o1 = task1.submit()
 
@@ -146,7 +146,7 @@ def test_submitted_twice():
 def test_configcache():
     """Test a configuration cache"""
 
-    with TemporaryExperiment("configcache", maxwait=20):
+    with TemporaryExperiment("configcache", timeout_multiplier=9):
         task = CacheConfigTask.C(data=CacheConfig.C()).submit()
 
     assert task.__xpm__.job.wait() == JobState.DONE
@@ -200,7 +200,7 @@ class MyLightweightTask(Task):
 
 
 def test_task_lightweight_init():
-    with TemporaryExperiment("lightweight_init", maxwait=20):
+    with TemporaryExperiment("lightweight_init", timeout_multiplier=9):
         x = LightweightConfig.C()
         lwtask = LightweightTask.C(x=x)
         assert (
@@ -232,7 +232,7 @@ class ControllableResumableTask(ResumableTask):
 
 def test_resumable_task_resubmit():
     """Test resubmitting a failed ResumableTask within the same experiment"""
-    with TemporaryExperiment("resumable_resubmit", maxwait=30):
+    with TemporaryExperiment("resumable_resubmit", timeout_multiplier=12):
         task1 = ControllableResumableTask.C()
         task1.submit()
 
@@ -260,7 +260,9 @@ def test_resumable_task_resubmit_across_experiments():
     with TemporaryDirectory(prefix="xpm", suffix="resubmit_across") as workdir:
         # First experiment: task fails
         try:
-            with TemporaryExperiment("resubmit_across", maxwait=10, workdir=workdir):
+            with TemporaryExperiment(
+                "resubmit_across", timeout_multiplier=6, workdir=workdir
+            ):
                 task1 = ControllableResumableTask.C()
                 task1.submit()
 
@@ -271,7 +273,9 @@ def test_resumable_task_resubmit_across_experiments():
             logging.info("First experiment ended (expected): %s", e)
 
         # Second experiment: task completes
-        with TemporaryExperiment("resubmit_across", maxwait=30, workdir=workdir):
+        with TemporaryExperiment(
+            "resubmit_across", timeout_multiplier=12, workdir=workdir
+        ):
             task2 = ControllableResumableTask.C()
             task2.submit()
 
@@ -286,7 +290,9 @@ def test_task_resubmit_across_experiments():
     """Test resubmitting a completed task across two experiment instances"""
     with TemporaryDirectory(prefix="xpm", suffix="resubmit_across") as workdir:
         # First experiment: task completes
-        with TemporaryExperiment("resubmit_across", maxwait=30, workdir=workdir):
+        with TemporaryExperiment(
+            "resubmit_across", timeout_multiplier=12, workdir=workdir
+        ):
             task1 = ControllableResumableTask.C()
             task1.submit()
 
@@ -297,7 +303,9 @@ def test_task_resubmit_across_experiments():
             assert task1.__xpm__.job.wait() == JobState.DONE
 
         # Second experiment: resubmit completed task (uses same workdir)
-        with TemporaryExperiment("resubmit_across", maxwait=30, workdir=workdir):
+        with TemporaryExperiment(
+            "resubmit_across", timeout_multiplier=12, workdir=workdir
+        ):
             task2 = ControllableResumableTask.C()
             task2.submit()
 

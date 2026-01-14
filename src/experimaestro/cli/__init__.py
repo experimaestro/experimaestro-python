@@ -16,7 +16,9 @@ import experimaestro.launcherfinder.registry as launcher_registry
 from experimaestro.settings import ServerSettings, find_workspace
 
 # --- Command line main options
-logging.basicConfig(level=logging.INFO)
+# Only configure logging if not running under pytest (pytest has its own config)
+if not hasattr(sys, "_called_from_test"):
+    logging.basicConfig(level=logging.INFO)
 
 
 def check_xp_path(ctx, self, path: Path):

@@ -150,7 +150,9 @@ def test_task_dynamic_simple():
         evaluate(evaluations, checkpoint)
 
     with TemporaryDirectory() as workdir:
-        with TemporaryExperiment("dynamic", maxwait=10, workdir=workdir) as xp:
+        with TemporaryExperiment(
+            "dynamic", timeout_multiplier=6, workdir=workdir
+        ) as xp:
             xp_ref[0] = xp
             model = Model.C()
             validation = Validation.C(model=model)
@@ -180,7 +182,9 @@ def test_task_dynamic_replay():
         # First run: produce one checkpoint then exit
         evaluations_run1 = []
         try:
-            with TemporaryExperiment("dynamic_replay", maxwait=5, workdir=workdir):
+            with TemporaryExperiment(
+                "dynamic_replay", timeout_multiplier=3, workdir=workdir
+            ):
                 model = Model.C()
                 validation = Validation.C(model=model)
                 learn = Learn.C(model=model, validation=validation)
@@ -207,7 +211,9 @@ def test_task_dynamic_replay():
 
         # Second run: restart and continue
         evaluations_run2 = []
-        with TemporaryExperiment("dynamic_replay", maxwait=30, workdir=workdir):
+        with TemporaryExperiment(
+            "dynamic_replay", timeout_multiplier=12, workdir=workdir
+        ):
             model = Model.C()
             validation = Validation.C(model=model)
             learn = Learn.C(model=model, validation=validation)

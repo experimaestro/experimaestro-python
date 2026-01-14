@@ -19,7 +19,6 @@ from . import (
     RedirectType,
     Redirect,
 )
-from experimaestro.locking import Lock
 from experimaestro.tokens import Token
 
 try:
@@ -295,8 +294,12 @@ class SshConnector(Connector):
     def processbuilder(self) -> ProcessBuilder:
         return SshProcessBuilder(self)
 
-    def lock(self, path: Path, max_delay: int = -1) -> Lock:
-        """Returns a lock on a file"""
+    def lock(self, path: Path, max_delay: int = -1):
+        """Returns a sync lock on a file"""
+        raise NotImplementedError()
+
+    def async_lock(self, path: Path, max_delay: int = -1):
+        """Returns an async lock on a file"""
         raise NotImplementedError()
 
     def resolve(self, path: Path, basepath: Path = None):

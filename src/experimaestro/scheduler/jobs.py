@@ -57,11 +57,12 @@ class JobLock(Lock):
         super().__init__()
         self.job = job
 
-    def _acquire(self):
-        return self.job.state == JobState.DONE
+    async def _aio_acquire(self):
+        if self.job.state != JobState.DONE:
+            raise RuntimeError(f"Job {self.job.identifier} not done")
 
-    def _release(self):
-        return False
+    async def _aio_release(self):
+        pass
 
 
 class JobDependency(Dependency):
@@ -130,7 +131,7 @@ class JobDependency(Dependency):
 
         # Job succeeded, acquire and return the lock
         lock = JobLock(self.origin)
-        lock.acquire()
+        await lock.aio_acquire()
         return lock
 
 

@@ -131,7 +131,7 @@ class SlurmResumableTask(ResumableTask):
 @pytest.mark.timeout(30)
 def test_slurm_resumable_task(tmp_path: Path, slurmlauncher: SlurmLauncher):
     """Test that ResumableTask retries and resumes after SLURM timeouts"""
-    with TemporaryExperiment("slurm-resumable", workdir=tmp_path / "xp", maxwait=25):
+    with TemporaryExperiment("slurm-resumable", workdir=tmp_path / "xp"):
         checkpoint = tmp_path / "checkpoint.txt"
         output_file = tmp_path / "output.txt"
 

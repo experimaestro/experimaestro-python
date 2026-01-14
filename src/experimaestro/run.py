@@ -6,7 +6,7 @@ import signal
 import sys
 import json
 from typing import List
-import fasteners
+import filelock
 from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
 from experimaestro.exceptions import GracefulTimeout
@@ -139,13 +139,11 @@ class TaskRunner:
             for lockfile in self.lockfiles:
                 fullpath = str(Path(lockfile).resolve())
                 logger.info("Locking %s", fullpath)
-                lock = fasteners.InterProcessLock(fullpath)
+                lock = filelock.FileLock(fullpath)
                 # MAYBE: should have a clever way to lock
                 # Problem = slurm would have a job doing nothing...
                 # Fix = maybe with two files
-                if not lock.acquire(blocking=True):
-                    logger.info("Could not lock %s", lockfile)
-                    raise AssertionError("Could not lock %s", lockfile)
+                lock.acquire()
                 self.locks.append(lock)
 
             # Load and setup dynamic dependency locks from locks.json

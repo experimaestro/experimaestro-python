@@ -729,15 +729,14 @@ class MockExperiment(BaseExperiment):
         Returns:
             MockExperiment instance or None if status.json doesn't exist
         """
-        import fasteners
+        import filelock
 
         status_path = run_dir / "status.json"
         if not status_path.exists():
             return None
 
         lock_path = status_path.parent / f".{status_path.name}.lock"
-        lock = fasteners.InterProcessLock(str(lock_path))
-        with lock:
+        with filelock.FileLock(lock_path):
             try:
                 with status_path.open("r") as f:
                     data = json.load(f)

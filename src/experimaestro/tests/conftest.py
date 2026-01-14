@@ -3,8 +3,43 @@ import pytest
 import os
 import shutil
 
+from experimaestro.connectors import Process
+
 # Set shorter poll interval for tests (before any imports that read it)
 os.environ.setdefault("XPM_POLL_INTERVAL_MAX", "5.0")
+os.environ.setdefault("XPM_PROCESS_POLL_INTERVAL", "0.01")
+
+
+class MockProcess(Process):
+    """Mock process for testing that immediately returns success.
+
+    Used to create valid lock files in tests without actual job processes.
+    """
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def fromspec(cls, connector, definition):
+        return cls()
+
+    def tospec(self):
+        return {"type": "mock"}
+
+    def wait(self) -> int:
+        return 0
+
+    async def aio_wait(self) -> int:
+        return 0
+
+    def kill(self):
+        pass
+
+
+# Register MockProcess handler at module load time
+# Call handler() first to trigger real initialization from entry points
+Process.handler("mock")  # This initializes HANDLERS if needed
+Process.HANDLERS["mock"] = MockProcess
 
 
 @pytest.fixture(scope="session")

@@ -140,7 +140,7 @@ class SimpleNonResumableTask(Task):
 
 def test_resumable_task_has_resumable_flag():
     """Test that ResumableTask instances are correctly identified"""
-    with TemporaryExperiment("resumable_flag", maxwait=0):
+    with TemporaryExperiment("resumable_flag"):
         launcher = DirectLauncher(LocalConnector())
 
         # Submit resumable task
@@ -158,7 +158,7 @@ def test_resumable_task_has_resumable_flag():
 
 def test_max_retries_default():
     """Test that default max_retries is 3"""
-    with TemporaryExperiment("max_retries_default", maxwait=0):
+    with TemporaryExperiment("max_retries_default"):
         launcher = DirectLauncher(LocalConnector())
 
         task = SimpleResumableTask.C().submit(
@@ -172,7 +172,7 @@ def test_max_retries_default():
 
 def test_max_retries_custom():
     """Test that custom max_retries parameter is respected"""
-    with TemporaryExperiment("max_retries_custom", maxwait=0):
+    with TemporaryExperiment("max_retries_custom"):
         launcher = DirectLauncher(LocalConnector())
 
         task = SimpleResumableTask.C().submit(
@@ -185,7 +185,7 @@ def test_max_retries_custom():
 
 def test_max_retries_zero():
     """Test that max_retries=0 is allowed (no retries)"""
-    with TemporaryExperiment("max_retries_zero", maxwait=0):
+    with TemporaryExperiment("max_retries_zero"):
         launcher = DirectLauncher(LocalConnector())
 
         task = SimpleResumableTask.C().submit(
@@ -198,7 +198,7 @@ def test_max_retries_zero():
 
 def test_resumable_task_succeeds_after_timeouts():
     """Test that a resumable task retries and succeeds after timeouts"""
-    with TemporaryExperiment("resumable_timeout_success", maxwait=20) as xp:
+    with TemporaryExperiment("resumable_timeout_success", timeout_multiplier=9) as xp:
         checkpoint_file = xp.workspace.path / "checkpoint.txt"
         launcher = DirectLauncher(LocalConnector())
 
@@ -238,7 +238,7 @@ def test_resumable_task_fails_after_max_retries():
     import pytest
 
     with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("resumable_timeout_fail", maxwait=20) as xp:
+        with TemporaryExperiment("resumable_timeout_fail", timeout_multiplier=9) as xp:
             checkpoint_file = xp.workspace.path / "checkpoint.txt"
             launcher = DirectLauncher(LocalConnector())
 
@@ -450,7 +450,7 @@ class RemainingTimeTask(ResumableTask):
 
 def test_remaining_time_with_mock_launcher():
     """Test remaining_time() works with a mock launcher that provides launcher_info_code()"""
-    with TemporaryExperiment("remaining_time", maxwait=10) as xp:
+    with TemporaryExperiment("remaining_time", timeout_multiplier=6) as xp:
         output_file = xp.workspace.path / "remaining.txt"
         launcher = MockLauncherWithRemainingTime(remaining_time_value=1234.5)
 
@@ -466,7 +466,7 @@ def test_remaining_time_with_mock_launcher():
 
 def test_remaining_time_none_with_mock_launcher():
     """Test remaining_time() returns None when launcher has no time limit"""
-    with TemporaryExperiment("remaining_time_none", maxwait=10) as xp:
+    with TemporaryExperiment("remaining_time_none", timeout_multiplier=6) as xp:
         output_file = xp.workspace.path / "remaining.txt"
         launcher = MockLauncherWithRemainingTime(remaining_time_value=None)
 

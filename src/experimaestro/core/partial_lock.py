@@ -9,14 +9,13 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, Type
-import fasteners
+import filelock
 import logging
 
 from experimaestro.locking import (
     DynamicDependencyLock,
     DynamicLockFile,
     JobDependencyLock,
-    LockError,
     TrackedDynamicResource,
 )
 from experimaestro.dynamic import DynamicDependency
@@ -228,7 +227,7 @@ class PartialJobLock(JobDependencyLock):
     """Job-side lock for a partial directory.
 
     Inherits from JobDependencyLock to participate in the dynamic lock lifecycle.
-    Uses IPC locking (fasteners.InterProcessLock) for exclusive access.
+    Uses IPC locking (filelock.FileLock) for exclusive access.
 
     File structure:
     - {partial_path}/.experimaestro/locks/ipc.lock: IPC lock
@@ -248,7 +247,7 @@ class PartialJobLock(JobDependencyLock):
         self.lock_folder = self.partial_path / ".experimaestro" / "locks"
         self.ipc_lock_path = self.lock_folder / "ipc.lock"
         self.lock_file_path = Path(data["lock_file_path"])
-        self._lock = None
+        self._lock: filelock.FileLock | None = None
 
     def acquire(self) -> None:
         """Acquire exclusive lock on the partial directory.
@@ -262,15 +261,14 @@ class PartialJobLock(JobDependencyLock):
         logger.info("Acquiring partial lock: %s", self.partial_path)
 
         # Acquire the IPC lock (blocking - waits for other jobs to finish)
-        self._lock = fasteners.InterProcessLock(str(self.ipc_lock_path))
-        if not self._lock.acquire(blocking=True):
-            raise LockError(f"Could not lock partial: {self.partial_path}")
+        self._lock = filelock.FileLock(str(self.ipc_lock_path))
+        self._lock.acquire()
 
         logger.info("Acquired partial lock: %s", self.partial_path)
 
     def release(self) -> None:
         """Release the partial lock and delete the lock file."""
-        if self._lock is not None and self._lock.acquired:
+        if self._lock is not None and self._lock.is_locked:
             logger.info("Releasing partial lock: %s", self.partial_path)
             self._lock.release()
             self._lock = None
@@ -303,13 +301,13 @@ class PartialLock(DynamicDependencyLock):
         """Path to the lock folder within the partial directory."""
         return self.dependency.resource.lock_folder
 
-    def _acquire(self):
-        """Acquire exclusive lock via the resource."""
-        self.dependency.resource.acquire(self.dependency)
+    async def _aio_acquire(self):
+        """Acquire exclusive lock via the resource (async)."""
+        await self.dependency.resource.aio_acquire(self.dependency)
 
-    def _release(self):
-        """Release the lock via the resource."""
-        self.dependency.resource.release(self.dependency)
+    async def _aio_release(self):
+        """Release the lock via the resource (async)."""
+        await self.dependency.resource.aio_release(self.dependency)
 
     def __str__(self):
         return f"PartialLock({self.dependency.partial_name})"

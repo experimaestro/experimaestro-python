@@ -46,7 +46,7 @@ class ChainableTask(Task):
 
 def test_transient_with_dependents():
     """Transient task should run when it has dependents"""
-    with TemporaryExperiment("transient_with_deps", maxwait=30):
+    with TemporaryExperiment("transient_with_deps", timeout_multiplier=12):
         # Submit transient task
         a = TransientTask.C(x=1).submit(transient=TransientMode.TRANSIENT)
 
@@ -62,7 +62,7 @@ def test_transient_with_dependents():
 
 def test_transient_without_dependents():
     """Transient task should be skipped when it has no dependents"""
-    with TemporaryExperiment("transient_no_deps", maxwait=30):
+    with TemporaryExperiment("transient_no_deps", timeout_multiplier=12):
         # Submit transient task with no dependents
         a = TransientTask.C(x=1).submit(transient=TransientMode.TRANSIENT)
 
@@ -72,7 +72,7 @@ def test_transient_without_dependents():
 
 def test_transient_remove_mode():
     """Transient task with REMOVE mode should have its directory removed"""
-    with TemporaryExperiment("transient_remove", maxwait=30):
+    with TemporaryExperiment("transient_remove", timeout_multiplier=12):
         # Submit transient task with REMOVE mode
         a = TransientTask.C(x=1).submit(transient=TransientMode.REMOVE)
 
@@ -92,7 +92,7 @@ def test_transient_remove_mode():
 
 def test_transient_remove_without_dependents():
     """Transient task with REMOVE mode and no dependents should be skipped"""
-    with TemporaryExperiment("transient_remove_no_deps", maxwait=30):
+    with TemporaryExperiment("transient_remove_no_deps", timeout_multiplier=12):
         # Submit transient task with REMOVE mode and no dependents
         a = TransientTask.C(x=1).submit(transient=TransientMode.REMOVE)
 
@@ -102,7 +102,7 @@ def test_transient_remove_without_dependents():
 
 def test_transient_mode_merge_none_wins():
     """When resubmitting, NONE mode should win over transient modes"""
-    with TemporaryExperiment("transient_merge_none", maxwait=30):
+    with TemporaryExperiment("transient_merge_none", timeout_multiplier=12):
         # Submit with TRANSIENT mode first
         a1 = TransientTask.C(x=1).submit(transient=TransientMode.TRANSIENT)
 
@@ -119,7 +119,7 @@ def test_transient_mode_merge_none_wins():
 
 def test_transient_mode_merge_transient_wins_over_remove():
     """When resubmitting, TRANSIENT mode should win over REMOVE mode"""
-    with TemporaryExperiment("transient_merge_transient", maxwait=30):
+    with TemporaryExperiment("transient_merge_transient", timeout_multiplier=12):
         # Submit with REMOVE mode first
         a1 = TransientTask.C(x=2).submit(transient=TransientMode.REMOVE)
 
@@ -138,7 +138,7 @@ def test_transient_mode_merge_transient_wins_over_remove():
 
 def test_transient_chain():
     """Chain of transient tasks should work correctly"""
-    with TemporaryExperiment("transient_chain", maxwait=30):
+    with TemporaryExperiment("transient_chain", timeout_multiplier=12):
         # Create a chain: a -> b -> c where a and b are transient
         a = TransientTask.C(x=1).submit(transient=TransientMode.TRANSIENT)
         b = ChainableTask.C(dep=a).submit(transient=TransientMode.TRANSIENT)
@@ -152,7 +152,7 @@ def test_transient_chain():
 
 def test_transient_chain_all_transient():
     """Chain of all transient tasks - all should be skipped"""
-    with TemporaryExperiment("transient_chain_all", maxwait=30):
+    with TemporaryExperiment("transient_chain_all", timeout_multiplier=12):
         # Create a chain: a -> b where both are transient
         a = TransientTask.C(x=1).submit(transient=TransientMode.TRANSIENT)
         b = ChainableTask.C(dep=a).submit(transient=TransientMode.TRANSIENT)
@@ -167,7 +167,7 @@ def test_transient_chain_all_transient():
 
 def test_transient_resubmit_within_experiment():
     """When resubmitting transient job within same experiment, state should reflect final mode"""
-    with TemporaryExperiment("transient_resubmit", maxwait=30):
+    with TemporaryExperiment("transient_resubmit", timeout_multiplier=12):
         # Submit as transient first (will be skipped)
         a1 = TransientTask.C(x=3).submit(transient=TransientMode.TRANSIENT)
 
@@ -190,7 +190,9 @@ def test_transient_remove_then_transient_across_experiments():
     """
     with TemporaryDirectory(prefix="xpm_transient_") as workdir:
         # First experiment: A with REMOVE, B depends on A
-        with TemporaryExperiment("transient_across", maxwait=30, workdir=workdir):
+        with TemporaryExperiment(
+            "transient_across", timeout_multiplier=12, workdir=workdir
+        ):
             a1 = TransientTask.C(x=10).submit(transient=TransientMode.REMOVE)
             b1 = SingleDependentTask.C(dep=a1).submit()
 
@@ -208,7 +210,9 @@ def test_transient_remove_then_transient_across_experiments():
         Scheduler.instance().jobs.clear()
 
         # Second experiment: same workspace, A with TRANSIENT, B depends on A
-        with TemporaryExperiment("transient_across", maxwait=30, workdir=workdir):
+        with TemporaryExperiment(
+            "transient_across", timeout_multiplier=12, workdir=workdir
+        ):
             a2 = TransientTask.C(x=10).submit(transient=TransientMode.TRANSIENT)
             b2 = SingleDependentTask.C(dep=a2).submit()
 

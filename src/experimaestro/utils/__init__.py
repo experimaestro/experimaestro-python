@@ -6,7 +6,7 @@ import logging
 import shutil
 import inspect
 
-logger = logging.getLogger("xpm.scheduler")
+logger = logging.getLogger("xpm")
 
 
 def get_caller_location(skip_frames: int = 1) -> str:

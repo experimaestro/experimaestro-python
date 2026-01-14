@@ -2,7 +2,7 @@
 from copy import copy
 from pathlib import Path
 import time
-import fasteners
+import filelock
 from typing import List, Tuple, Union
 from experimaestro import Task, Annotated, pathgenerator, progress, tqdm
 from experimaestro.core.objects import logger
@@ -21,7 +21,7 @@ class ProgressingTask(Task):
         while True:
             time.sleep(1e-4)
             if self.path.is_file():
-                with fasteners.InterProcessLock(self.path.with_suffix(".lock")):
+                with filelock.FileLock(self.path.with_suffix(".lock")):
                     _level, _progress, _desc = self.path.read_text().split(
                         " ", maxsplit=2
                     )
@@ -40,7 +40,7 @@ def writeprogress(path: Path, progress, level=0, desc=None):
     by the XPM server"""
     while True:
         time.sleep(5e-2)
-        with fasteners.InterProcessLock(path.with_suffix(".lock")):
+        with filelock.FileLock(path.with_suffix(".lock")):
             if not path.is_file():
                 path.write_text(f"{level} {progress:.3f} {desc if desc else ''}")
                 break
@@ -65,7 +65,7 @@ class ProgressListener(Listener):
 
 def test_progress_basic():
     """Test that we get all the progress reports"""
-    with TemporaryExperiment("progress-basic", maxwait=5) as xp:
+    with TemporaryExperiment("progress-basic", timeout_multiplier=3) as xp:
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
@@ -159,7 +159,7 @@ def check_nested(
 
 def test_progress_nested():
     """Test that we get all the progress reports"""
-    with TemporaryExperiment("progress-nested", maxwait=20) as xp:
+    with TemporaryExperiment("progress-nested", timeout_multiplier=9) as xp:
         listener = ProgressListener()
         xp.scheduler.addlistener(listener)
 
