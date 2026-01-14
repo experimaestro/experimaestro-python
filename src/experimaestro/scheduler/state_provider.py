@@ -636,6 +636,7 @@ class MockExperiment(BaseExperiment):
         experiment_id_override: Optional[str] = None,
         finished_jobs: int = 0,
         failed_jobs: int = 0,
+        run_tags: Optional[set[str]] = None,
     ):
         self.workdir = workdir
         self.run_id = run_id
@@ -650,6 +651,7 @@ class MockExperiment(BaseExperiment):
         self._experiment_id_override = experiment_id_override
         self._finished_jobs = finished_jobs
         self._failed_jobs = failed_jobs
+        self._run_tags = run_tags or set()
 
     @property
     def experiment_id(self) -> str:
@@ -828,6 +830,7 @@ class MockExperiment(BaseExperiment):
             dependencies=d.get("dependencies", {}),
             finished_jobs=d.get("finished_jobs", 0),
             failed_jobs=d.get("failed_jobs", 0),
+            run_tags=set(d.get("run_tags", [])),
         )
 
     def apply_event(self, event: "EventBase") -> None:

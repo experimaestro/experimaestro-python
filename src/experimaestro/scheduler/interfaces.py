@@ -612,6 +612,14 @@ class BaseExperiment:
         """End datetime (None if running)"""
         raise NotImplementedError
 
+    # Run tags - concrete implementation at base level (set for efficient lookup)
+    _run_tags: set[str]
+
+    @property
+    def run_tags(self) -> list[str]:
+        """Tags assigned to this run (as sorted list for JSON serialization)"""
+        return sorted(self._run_tags)
+
     # Computed properties
 
     @property
@@ -663,6 +671,7 @@ class BaseExperiment:
             "finished_jobs": self.finished_jobs,
             "failed_jobs": self.failed_jobs,
             "services": {k: v.full_state_dict() for k, v in self.services.items()},
+            "run_tags": self.run_tags,
         }
 
     def write_status(self) -> None:

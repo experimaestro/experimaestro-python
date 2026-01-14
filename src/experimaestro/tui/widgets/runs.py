@@ -41,6 +41,7 @@ class RunsList(Widget):
         table = self.query_one("#runs-table", DataTable)
         table.add_column("Run ID", key="run_id")
         table.add_column("Status", key="status", width=12)
+        table.add_column("Tags", key="tags", width=15)
         table.add_column("Host", key="host")
         table.add_column("Jobs", key="jobs", width=10)
         table.add_column("Started", key="started")
@@ -98,6 +99,9 @@ class RunsList(Widget):
             if run.failed_jobs > 0:
                 jobs_text += f" ({run.failed_jobs}✗)"
 
+            # Format tags
+            tags_text = ", ".join(run.run_tags) if run.run_tags else "-"
+
             # Format hostname
             hostname = run.hostname or "-"
 
@@ -118,6 +122,7 @@ class RunsList(Widget):
             table.add_row(
                 run_id_display,
                 status,
+                tags_text,
                 hostname,
                 jobs_text,
                 started,

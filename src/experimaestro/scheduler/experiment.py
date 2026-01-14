@@ -713,6 +713,7 @@ class experiment(BaseExperiment):
         self._hostname: Optional[str] = None
         self._started_at: Optional[datetime] = None
         self._ended_at: Optional[datetime] = None
+        self._run_tags: set[str] = set()
 
         if is_normal_mode:
             import socket

@@ -701,3 +701,416 @@ def sync(workdir: Path, dry_run: bool, force: bool, no_wait: bool):
         "State is now tracked via filesystem (status.json) - no sync needed.",
         "yellow",
     )
+
+
+# === History and tagging commands ===
+
+
+def _get_experiment_base(workdir: Path, experiment_id: str) -> Path:
+    """Get the experiment base directory, checking it exists."""
+    experiment_base = workdir / "experiments" / experiment_id
+    if not experiment_base.exists():
+        cprint(f"Experiment '{experiment_id}' not found", "red")
+        sys.exit(1)
+    return experiment_base
+
+
+def _read_run_status(run_dir: Path) -> dict:
+    """Read status.json from a run directory."""
+    import json
+
+    status_path = run_dir / "status.json"
+    if status_path.exists():
+        try:
+            with status_path.open() as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _write_run_status(run_dir: Path, status: dict) -> None:
+    """Write status.json to a run directory."""
+    import json
+
+    status_path = run_dir / "status.json"
+    with status_path.open("w") as f:
+        json.dump(status, f, indent=2)
+
+
+def _get_run_info(run_dir: Path) -> dict:
+    """Get run information from status.json and environment.json."""
+    from experimaestro.utils.environment import ExperimentEnvironment
+    from experimaestro.scheduler.experiment import get_run_status
+
+    status_data = _read_run_status(run_dir)
+
+    info = {
+        "run_id": run_dir.name,
+        "status": get_run_status(run_dir),
+        "hostname": status_data.get("hostname"),
+        "started_at": status_data.get("started_at"),
+        "ended_at": status_data.get("ended_at"),
+        "jobs_count": 0,
+        "run_tags": status_data.get("run_tags", []),
+    }
+
+    # Get run info from environment.json if not in status
+    if not info["hostname"] or not info["started_at"]:
+        env_path = run_dir / "environment.json"
+        if env_path.exists():
+            env = ExperimentEnvironment.load(env_path)
+            if env.run:
+                info["hostname"] = info["hostname"] or env.run.hostname
+                info["started_at"] = info["started_at"] or env.run.started_at
+                info["ended_at"] = info["ended_at"] or env.run.ended_at
+
+    # Count jobs from jobs.jsonl
+    jobs_jsonl = run_dir / "jobs.jsonl"
+    if jobs_jsonl.exists():
+        with jobs_jsonl.open() as f:
+            info["jobs_count"] = sum(1 for _ in f)
+
+    return info
+
+
+def _find_run_with_tag(experiment_base: Path, tag_name: str) -> Path | None:
+    """Find the run directory that has a specific tag."""
+    for run_dir in experiment_base.iterdir():
+        if not run_dir.is_dir():
+            continue
+        status = _read_run_status(run_dir)
+        if tag_name in status.get("run_tags", []):
+            return run_dir
+    return None
+
+
+@experiments.command("history")
+@click.argument("experiment_id", type=str)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@pass_cfg
+def history(workdir: Path, experiment_id: str, as_json: bool):
+    """Show history of runs for an experiment
+
+    Lists all runs with their status, start/end times, and tags.
+    """
+    import json
+
+    experiment_base = _get_experiment_base(workdir, experiment_id)
+
+    # Get all run directories sorted by name (oldest first)
+    run_dirs = sorted(
+        [d for d in experiment_base.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+    )
+
+    if not run_dirs:
+        cprint(f"No runs found for experiment '{experiment_id}'", "yellow")
+        return
+
+    runs = []
+    for run_dir in run_dirs:
+        info = _get_run_info(run_dir)
+        runs.append(info)
+
+    if as_json:
+        print(json.dumps(runs, indent=2))
+        return
+
+    # Pretty print
+    cprint(f"Experiment: {experiment_id}", "cyan", attrs=["bold"])
+    cprint(f"{'Run ID':<20} {'Status':<12} {'Jobs':<6} {'Tags':<20} Started", "white")
+    cprint("-" * 80, "white")
+
+    for run in runs:
+        status = run["status"] or "unknown"
+        status_color = (
+            "green"
+            if status == "completed"
+            else "red"
+            if status == "failed"
+            else "yellow"
+        )
+        tags_str = ", ".join(run["run_tags"]) if run["run_tags"] else ""
+        started = run["started_at"][:19] if run["started_at"] else "N/A"
+
+        print(f"{run['run_id']:<20} ", end="")
+        cprint(f"{status:<12}", status_color, end=" ")
+        print(f"{run['jobs_count']:<6} {tags_str:<20} {started}")
+
+
+@experiments.command("history-prune")
+@click.argument("experiment_id", type=str)
+@click.option(
+    "--before", type=str, help="Remove runs before this timestamp (YYYYMMDD_HHMMSS)"
+)
+@click.option(
+    "--after", type=str, help="Remove runs after this timestamp (YYYYMMDD_HHMMSS)"
+)
+@click.option(
+    "--status",
+    type=click.Choice(["completed", "failed"]),
+    help="Only remove runs with this status",
+)
+@click.option("--keep-tagged", is_flag=True, help="Keep runs that have tags")
+@click.option(
+    "--keep",
+    type=int,
+    default=None,
+    help="Keep at least N most recent runs (per status if --status used)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be removed without actually removing",
+)
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@pass_cfg
+def history_prune(
+    workdir: Path,
+    experiment_id: str,
+    before: str | None,
+    after: str | None,
+    status: str | None,
+    keep_tagged: bool,
+    keep: int | None,
+    dry_run: bool,
+    force: bool,
+):
+    """Prune (remove) old runs from an experiment's history
+
+    Examples:
+        # Remove all runs before a specific date
+        experimaestro experiments history-prune my-exp --before 20250101_000000
+
+        # Remove all failed runs, keeping 2 most recent
+        experimaestro experiments history-prune my-exp --status failed --keep 2
+
+        # Remove runs between two dates (dry run)
+        experimaestro experiments history-prune my-exp --before 20250201 --after 20250101 --dry-run
+    """
+    from experimaestro.scheduler.experiment import get_run_status
+
+    experiment_base = _get_experiment_base(workdir, experiment_id)
+
+    # Get all run directories
+    run_dirs = sorted(
+        [d for d in experiment_base.iterdir() if d.is_dir()],
+        key=lambda d: d.name,
+    )
+
+    # Filter runs to remove
+    to_remove = []
+    for run_dir in run_dirs:
+        run_id = run_dir.name
+        run_status = get_run_status(run_dir)
+
+        # Check status filter
+        if status and run_status != status:
+            continue
+
+        # Check timestamp filters (compare as strings since format is consistent)
+        if before and run_id >= before:
+            continue
+        if after and run_id <= after:
+            continue
+
+        # Check tag filter
+        if keep_tagged:
+            status_data = _read_run_status(run_dir)
+            if status_data.get("run_tags", []):
+                continue
+
+        to_remove.append(run_dir)
+
+    # Apply --keep filter (keep N most recent)
+    if keep is not None and len(to_remove) > 0:
+        # Sort by name descending (newest first)
+        to_remove_sorted = sorted(to_remove, key=lambda d: d.name, reverse=True)
+        # Keep the first N (newest)
+        to_remove = to_remove_sorted[keep:]
+
+    if not to_remove:
+        cprint("No runs match the criteria for removal", "yellow")
+        return
+
+    # Show what will be removed
+    cprint(f"Runs to remove from '{experiment_id}':", "cyan")
+    for run_dir in to_remove:
+        run_status = get_run_status(run_dir) or "unknown"
+        status_data = _read_run_status(run_dir)
+        run_tags = status_data.get("run_tags", [])
+        tags_str = f" [tags: {', '.join(run_tags)}]" if run_tags else ""
+        cprint(f"  {run_dir.name} ({run_status}){tags_str}", "white")
+
+    if dry_run:
+        cprint(f"\nDry run: would remove {len(to_remove)} run(s)", "yellow")
+        return
+
+    # Confirm unless forced
+    if not force:
+        if not click.confirm(f"\nRemove {len(to_remove)} run(s)?"):
+            cprint("Aborted", "yellow")
+            return
+
+    # Remove runs
+    removed = 0
+    for run_dir in to_remove:
+        try:
+            rmtree(run_dir)
+            removed += 1
+            cprint(f"  Removed: {run_dir.name}", "green")
+        except Exception as e:
+            cprint(f"  Failed to remove {run_dir.name}: {e}", "red")
+
+    cprint(f"\nRemoved {removed}/{len(to_remove)} run(s)", "cyan")
+
+
+@experiments.command("tag")
+@click.argument("experiment_id", type=str)
+@click.argument("run_id", type=str)
+@click.argument("tag_name", type=str)
+@click.option("--force", is_flag=True, help="Overwrite existing tag")
+@pass_cfg
+def tag(workdir: Path, experiment_id: str, run_id: str, tag_name: str, force: bool):
+    """Tag an experiment run
+
+    Tags provide human-readable names for specific runs. A tag name can only
+    point to one run at a time.
+
+    Examples:
+        # Tag a specific run as 'baseline'
+        experimaestro experiments tag my-exp 20250115_103045 baseline
+
+        # Tag the latest run as 'best'
+        experimaestro experiments tag my-exp latest best
+
+    Special run IDs:
+        latest  - The most recent run
+        oldest  - The oldest run
+    """
+    experiment_base = _get_experiment_base(workdir, experiment_id)
+
+    # Handle special run IDs
+    if run_id == "latest":
+        run_dirs = sorted(
+            [d for d in experiment_base.iterdir() if d.is_dir()],
+            key=lambda d: d.name,
+            reverse=True,
+        )
+        if not run_dirs:
+            cprint(f"No runs found for experiment '{experiment_id}'", "red")
+            sys.exit(1)
+        run_id = run_dirs[0].name
+        cprint(f"Resolved 'latest' to {run_id}", "white")
+    elif run_id == "oldest":
+        run_dirs = sorted(
+            [d for d in experiment_base.iterdir() if d.is_dir()],
+            key=lambda d: d.name,
+        )
+        if not run_dirs:
+            cprint(f"No runs found for experiment '{experiment_id}'", "red")
+            sys.exit(1)
+        run_id = run_dirs[0].name
+        cprint(f"Resolved 'oldest' to {run_id}", "white")
+
+    # Verify run exists
+    run_dir = experiment_base / run_id
+    if not run_dir.exists():
+        cprint(f"Run '{run_id}' not found", "red")
+        sys.exit(1)
+
+    # Check if tag already exists on another run
+    existing_run = _find_run_with_tag(experiment_base, tag_name)
+    if existing_run:
+        if existing_run == run_dir:
+            cprint(f"Tag '{tag_name}' already on {run_id}", "yellow")
+            return
+        if not force:
+            cprint(
+                f"Tag '{tag_name}' already exists on {existing_run.name}. "
+                "Use --force to move it.",
+                "red",
+            )
+            sys.exit(1)
+        # Remove tag from existing run
+        old_status = _read_run_status(existing_run)
+        old_tags = old_status.get("run_tags", [])
+        if tag_name in old_tags:
+            old_tags.remove(tag_name)
+            old_status["run_tags"] = old_tags
+            _write_run_status(existing_run, old_status)
+        cprint(f"Moved tag '{tag_name}' from {existing_run.name}", "yellow")
+
+    # Add tag to target run
+    status = _read_run_status(run_dir)
+    tags = status.get("run_tags", [])
+    if tag_name not in tags:
+        tags.append(tag_name)
+        status["run_tags"] = tags
+        _write_run_status(run_dir, status)
+    cprint(f"Tagged {run_id} as '{tag_name}'", "green")
+
+
+@experiments.command("untag")
+@click.argument("experiment_id", type=str)
+@click.argument("tag_name", type=str)
+@pass_cfg
+def untag(workdir: Path, experiment_id: str, tag_name: str):
+    """Remove a tag from an experiment
+
+    Examples:
+        experimaestro experiments untag my-exp baseline
+    """
+    experiment_base = _get_experiment_base(workdir, experiment_id)
+
+    # Find run with this tag
+    run_dir = _find_run_with_tag(experiment_base, tag_name)
+    if not run_dir:
+        cprint(f"Tag '{tag_name}' not found", "red")
+        sys.exit(1)
+
+    # Remove tag
+    status = _read_run_status(run_dir)
+    tags = status.get("run_tags", [])
+    if tag_name in tags:
+        tags.remove(tag_name)
+        status["run_tags"] = tags
+        _write_run_status(run_dir, status)
+    cprint(f"Removed tag '{tag_name}' (was on {run_dir.name})", "green")
+
+
+@experiments.command("tags")
+@click.argument("experiment_id", type=str)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@pass_cfg
+def tags_list(workdir: Path, experiment_id: str, as_json: bool):
+    """List all tags for an experiment
+
+    Examples:
+        experimaestro experiments tags my-exp
+    """
+    import json
+
+    experiment_base = _get_experiment_base(workdir, experiment_id)
+
+    # Collect all tags from all runs
+    tags_map = {}  # tag_name -> run_id
+    for run_dir in experiment_base.iterdir():
+        if not run_dir.is_dir():
+            continue
+        status = _read_run_status(run_dir)
+        for tag_name in status.get("run_tags", []):
+            tags_map[tag_name] = run_dir.name
+
+    if not tags_map:
+        cprint(f"No tags found for experiment '{experiment_id}'", "yellow")
+        return
+
+    if as_json:
+        print(json.dumps(tags_map, indent=2))
+        return
+
+    cprint(f"Tags for experiment '{experiment_id}':", "cyan")
+    for tag_name, run_id in sorted(tags_map.items()):
+        print(f"  {tag_name:<20} -> {run_id}")
