@@ -60,6 +60,14 @@ changelog
 faq
 ```
 
+```{toctree}
+---
+maxdepth: 1
+caption: "Development"
+---
+development/scheduler
+```
+
 Experimaestro is a versatile tool for designing and managing complex workflows.
 It enables the definition of tasks and their dependencies, ensuring orderly
 execution within a workflow. Key features of Experimaestro include:
