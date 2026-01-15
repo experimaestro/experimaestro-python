@@ -1,6 +1,9 @@
 from functools import cached_property
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from experimaestro.carbon.base import BaseCarbonTracker
 
 
 class LauncherInformation:
@@ -31,6 +34,9 @@ class Env:
 
     # Launcher information (only set when running a task)
     launcher_info: Optional[LauncherInformation] = None
+
+    # Carbon tracker (only set when carbon tracking is enabled)
+    carbon_tracker: Optional["BaseCarbonTracker"] = None
 
     # Set to True when multi-processing when
     # in slave mode:

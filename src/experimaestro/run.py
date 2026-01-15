@@ -1,10 +1,12 @@
 """Command line parsing"""
 
 import os
+from datetime import datetime
 from pathlib import Path
 import signal
 import sys
 import json
+import threading
 from typing import List
 import filelock
 from experimaestro.notifications import progress, report_eoj, start_of_job
@@ -56,6 +58,259 @@ def rmfile(path: Path):
         path.unlink()
 
 
+# =============================================================================
+# Carbon Tracking Integration
+# =============================================================================
+
+
+def _init_carbon_tracking(
+    workspace_path: Path,
+    task_path: Path,
+    job_id: str,
+    report_interval_s: float = 60.0,
+) -> tuple["CarbonTracker | None", "threading.Thread | None", "threading.Event | None"]:
+    """Initialize carbon tracking for a job.
+
+    Args:
+        workspace_path: Path to the workspace.
+        task_path: Path to the task directory.
+        job_id: Job identifier.
+        report_interval_s: How often to emit periodic carbon events.
+
+    Returns:
+        Tuple of (tracker, reporter_thread, stop_event) or (None, None, None) if unavailable.
+    """
+    try:
+        from experimaestro.carbon import create_tracker, is_available
+        from experimaestro.settings import get_settings
+
+        settings = get_settings()
+        carbon_settings = settings.carbon
+
+        if not carbon_settings.enabled:
+            logger.debug("Carbon tracking disabled in settings")
+            return None, None, None
+
+        if not is_available():
+            logger.debug("CodeCarbon not installed, carbon tracking unavailable")
+            return None, None, None
+
+        # Create tracker with settings
+        tracker = create_tracker(
+            country_iso_code=carbon_settings.country_iso_code,
+            region=carbon_settings.region,
+        )
+
+        # Start tracking
+        tracker.start()
+        logger.info("Carbon tracking started")
+
+        # Set up in environment
+        env = taskglobals.Env.instance()
+        env.carbon_tracker = tracker
+
+        # Create periodic reporter thread
+        stop_event = threading.Event()
+        reporter_thread = threading.Thread(
+            target=_carbon_reporter_loop,
+            args=(
+                tracker,
+                workspace_path,
+                task_path,
+                job_id,
+                report_interval_s,
+                stop_event,
+            ),
+            daemon=True,
+            name="carbon-reporter",
+        )
+        reporter_thread.start()
+
+        return tracker, reporter_thread, stop_event
+
+    except Exception as e:
+        logger.warning("Failed to initialize carbon tracking: %s", e)
+        return None, None, None
+
+
+def _carbon_reporter_loop(
+    tracker,
+    workspace_path: Path,
+    task_path: Path,
+    job_id: str,
+    interval_s: float,
+    stop_event: threading.Event,
+):
+    """Background thread that periodically emits carbon metrics events.
+
+    Args:
+        tracker: Carbon tracker instance.
+        workspace_path: Path to the workspace.
+        task_path: Path to the task directory.
+        job_id: Job identifier.
+        interval_s: Reporting interval in seconds.
+        stop_event: Event to signal thread termination.
+    """
+    from experimaestro.scheduler.state_status import CarbonMetricsEvent, JobEventWriter
+
+    task_id = task_path.parent.name
+
+    # Create event writer for this job
+    try:
+        event_writer = JobEventWriter(
+            workspace_path, task_id, job_id, 0, job_path=task_path
+        )
+    except Exception as e:
+        logger.warning("Failed to create carbon event writer: %s", e)
+        return
+
+    try:
+        while not stop_event.wait(timeout=interval_s):
+            try:
+                metrics = tracker.get_current_metrics()
+                event = CarbonMetricsEvent(
+                    job_id=job_id,
+                    co2_kg=metrics.co2_kg,
+                    energy_kwh=metrics.energy_kwh,
+                    cpu_power_w=metrics.cpu_power_w,
+                    gpu_power_w=metrics.gpu_power_w,
+                    ram_power_w=metrics.ram_power_w,
+                    duration_s=metrics.duration_s,
+                    region=metrics.region,
+                    is_final=False,
+                )
+                event_writer.write_event(event)
+                logger.debug(
+                    "Carbon metrics: %.4f kg CO2, %.4f kWh",
+                    metrics.co2_kg,
+                    metrics.energy_kwh,
+                )
+            except Exception as e:
+                logger.debug("Failed to emit carbon metrics: %s", e)
+
+        # Write one final periodic update before exiting (before the main thread writes is_final=True)
+        try:
+            metrics = tracker.get_current_metrics()
+            event = CarbonMetricsEvent(
+                job_id=job_id,
+                co2_kg=metrics.co2_kg,
+                energy_kwh=metrics.energy_kwh,
+                cpu_power_w=metrics.cpu_power_w,
+                gpu_power_w=metrics.gpu_power_w,
+                ram_power_w=metrics.ram_power_w,
+                duration_s=metrics.duration_s,
+                region=metrics.region,
+                is_final=False,
+            )
+            event_writer.write_event(event)
+            logger.debug("Final periodic carbon metrics written before shutdown")
+        except Exception as e:
+            logger.debug("Failed to emit final periodic carbon metrics: %s", e)
+    finally:
+        event_writer.close()
+
+
+def _stop_carbon_tracking(
+    tracker,
+    reporter_thread: "threading.Thread | None",
+    stop_event: "threading.Event | None",
+    workspace_path: Path,
+    task_path: Path,
+    job_id: str,
+    task_id: str,
+    start_time: datetime,
+):
+    """Stop carbon tracking and record final metrics.
+
+    Args:
+        tracker: Carbon tracker instance.
+        reporter_thread: Periodic reporter thread.
+        stop_event: Event to signal thread termination.
+        workspace_path: Path to the workspace.
+        task_path: Path to the task directory.
+        job_id: Job identifier.
+        task_id: Task type identifier.
+        start_time: Job start time.
+    """
+    if tracker is None:
+        return
+
+    # Stop reporter thread
+    if stop_event is not None:
+        stop_event.set()
+    if reporter_thread is not None:
+        reporter_thread.join(timeout=5.0)
+
+    try:
+        # Stop tracker and get final metrics
+        metrics = tracker.stop()
+        logger.info(
+            "Carbon tracking stopped: %.4f kg CO2, %.4f kWh, %.0f s",
+            metrics.co2_kg,
+            metrics.energy_kwh,
+            metrics.duration_s,
+        )
+
+        # Emit final carbon event
+        from experimaestro.scheduler.state_status import (
+            CarbonMetricsEvent,
+            JobEventWriter,
+        )
+
+        task_id_from_path = task_path.parent.name
+        event_writer = JobEventWriter(
+            workspace_path, task_id_from_path, job_id, 0, job_path=task_path
+        )
+        try:
+            event = CarbonMetricsEvent(
+                job_id=job_id,
+                co2_kg=metrics.co2_kg,
+                energy_kwh=metrics.energy_kwh,
+                cpu_power_w=metrics.cpu_power_w,
+                gpu_power_w=metrics.gpu_power_w,
+                ram_power_w=metrics.ram_power_w,
+                duration_s=metrics.duration_s,
+                region=metrics.region,
+                is_final=True,
+            )
+            event_writer.write_event(event)
+        finally:
+            event_writer.close()
+
+        # Record to carbon storage
+        from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
+
+        storage = CarbonStorage(workspace_path)
+        record = CarbonRecord(
+            job_id=job_id,
+            task_id=task_id,
+            started_at=start_time.isoformat(),
+            ended_at=datetime.now().isoformat(),
+            co2_kg=metrics.co2_kg,
+            energy_kwh=metrics.energy_kwh,
+            cpu_power_w=metrics.cpu_power_w,
+            gpu_power_w=metrics.gpu_power_w,
+            ram_power_w=metrics.ram_power_w,
+            duration_s=metrics.duration_s,
+            region=metrics.region,
+        )
+        storage.write_record(record)
+
+    except Exception as e:
+        logger.warning("Failed to finalize carbon tracking: %s", e)
+
+    # Clear from environment
+    env = taskglobals.Env.instance()
+    env.carbon_tracker = None
+
+
+# Type hint for optional import
+try:
+    from experimaestro.carbon.base import CarbonTracker
+except ImportError:
+    CarbonTracker = None  # type: ignore
+
+
 class TaskRunner:
     """Runs a task, after locking"""
 
@@ -74,11 +329,48 @@ class TaskRunner:
 
         self.cleaned = False
 
+        # Carbon tracking state
+        self._carbon_tracker = None
+        self._carbon_reporter_thread = None
+        self._carbon_stop_event = None
+        self._job_start_time: datetime | None = None
+
     def cleanup(self):
         if not self.cleaned:
             self.cleaned = True
             logger.info("Cleaning up")
             rmfile(self.pidfile)
+
+            # Stop carbon tracking and record metrics
+            if self._carbon_tracker is not None:
+                workdir = self.scriptpath.parent
+                task_path = workdir
+                job_id = workdir.name
+                task_id = workdir.parent.name
+
+                # Load workspace path from params if available
+                workspace_path = None
+                params_path = workdir / "params.json"
+                if params_path.exists():
+                    try:
+                        with params_path.open() as f:
+                            params = json.load(f)
+                        workspace_path = Path(params.get("workspace", ""))
+                    except Exception:
+                        pass
+
+                if workspace_path and self._job_start_time:
+                    _stop_carbon_tracking(
+                        self._carbon_tracker,
+                        self._carbon_reporter_thread,
+                        self._carbon_stop_event,
+                        workspace_path,
+                        task_path,
+                        job_id,
+                        task_id,
+                        self._job_start_time,
+                    )
+                self._carbon_tracker = None
 
             # Release IPC locks
             for lock in self.locks:
@@ -169,6 +461,32 @@ class TaskRunner:
 
                 # Notify that the job has started
                 start_of_job()
+
+                # Initialize carbon tracking
+                self._job_start_time = datetime.now()
+                job_id = workdir.name
+
+                # Load workspace path from params
+                params_path = workdir / "params.json"
+                workspace_path = None
+                if params_path.exists():
+                    try:
+                        with params_path.open() as f:
+                            params_data = json.load(f)
+                        workspace_path = Path(params_data.get("workspace", ""))
+                    except Exception as e:
+                        logger.debug("Failed to load params for carbon tracking: %s", e)
+
+                if workspace_path:
+                    (
+                        self._carbon_tracker,
+                        self._carbon_reporter_thread,
+                        self._carbon_stop_event,
+                    ) = _init_carbon_tracking(
+                        workspace_path,
+                        workdir,
+                        job_id,
+                    )
 
                 # Acquire dynamic dependency locks while running the task
                 with self.dynamic_locks.dependency_locks():

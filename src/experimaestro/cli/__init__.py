@@ -20,6 +20,8 @@ from experimaestro.settings import ServerSettings, find_workspace
 if not hasattr(sys, "_called_from_test"):
     logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger(__name__)
+
 
 def check_xp_path(ctx, self, path: Path):
     if not (path / ".__experimaestro__").is_file():
@@ -1114,3 +1116,271 @@ def tags_list(workdir: Path, experiment_id: str, as_json: bool):
     cprint(f"Tags for experiment '{experiment_id}':", "cyan")
     for tag_name, run_id in sorted(tags_map.items()):
         print(f"  {tag_name:<20} -> {run_id}")
+
+
+# === Carbon tracking commands ===
+
+
+@experiments.group()
+def carbon():
+    """Carbon tracking commands"""
+    pass
+
+
+@carbon.command("summary")
+@click.option(
+    "--name",
+    "-n",
+    "name_pattern",
+    type=str,
+    default=None,
+    help="Filter experiments by name (regex pattern)",
+)
+@click.option(
+    "--tag",
+    "-t",
+    "tags",
+    multiple=True,
+    help="Filter experiments by run tag (can be repeated)",
+)
+@click.option(
+    "--latest-only",
+    is_flag=True,
+    help="Only count the latest run of each job (avoids counting retries)",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def _collect_carbon_job_ids(
+    experiments_dir: Path,
+    name_re,
+    tags_set: set | None,
+    verbose: bool,
+) -> tuple[set[str], dict[str, set[str]]]:
+    """Collect job IDs from experiments matching filters.
+
+    Returns:
+        Tuple of (all_job_ids, experiment_jobs dict for verbose output)
+    """
+    all_job_ids: set[str] = set()
+    experiment_jobs: dict[str, set[str]] = {}
+
+    for exp_dir in experiments_dir.iterdir():
+        if not exp_dir.is_dir():
+            continue
+
+        exp_id = exp_dir.name
+        if name_re and not name_re.search(exp_id):
+            continue
+
+        for run_dir in exp_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+
+            if tags_set:
+                status = _read_run_status(run_dir)
+                run_tags = set(status.get("run_tags", []))
+                if not tags_set.intersection(run_tags):
+                    continue
+
+            jobs_path = run_dir / "jobs.jsonl"
+            if not jobs_path.exists():
+                continue
+
+            _read_job_ids_from_jsonl(
+                jobs_path, exp_id, all_job_ids, experiment_jobs, verbose
+            )
+
+    return all_job_ids, experiment_jobs
+
+
+def _read_job_ids_from_jsonl(
+    jobs_path: Path,
+    exp_id: str,
+    all_job_ids: set[str],
+    experiment_jobs: dict[str, set[str]],
+    verbose: bool,
+) -> None:
+    """Read job IDs from a jobs.jsonl file."""
+    import json
+
+    try:
+        with jobs_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    job_data = json.loads(line)
+                    job_id = job_data.get("identifier") or job_data.get("job_id")
+                    if job_id:
+                        all_job_ids.add(job_id)
+                        if verbose:
+                            experiment_jobs.setdefault(exp_id, set()).add(job_id)
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        logger.debug("Failed to read jobs from %s: %s", jobs_path, e)
+
+
+def _print_carbon_summary(
+    totals: dict,
+    all_job_ids: set[str],
+    name_pattern: str | None,
+    tags: tuple,
+    latest_only: bool,
+    experiment_breakdown: dict,
+    verbose: bool,
+) -> None:
+    """Pretty print carbon summary."""
+    from experimaestro.carbon.utils import format_co2_kg, format_energy_kwh
+
+    cprint("Carbon Impact Summary", "cyan", attrs=["bold"])
+    cprint("-" * 50, "white")
+
+    if name_pattern:
+        print(f"  Name filter: {name_pattern}")
+    if tags:
+        print(f"  Tag filter: {', '.join(tags)}")
+    if latest_only:
+        print("  Mode: Latest run only (excluding retries)")
+    else:
+        print("  Mode: All runs (including retries)")
+    print()
+
+    co2_str = format_co2_kg(totals["co2_kg"])
+    energy_str = format_energy_kwh(totals["energy_kwh"])
+    duration_h = totals["duration_s"] / 3600
+
+    cprint("Total Emissions:", "green", attrs=["bold"])
+    print(f"  CO2:      {co2_str}")
+    print(f"  Energy:   {energy_str}")
+    print(f"  Duration: {duration_h:.1f} hours")
+    print(f"  Jobs:     {totals['job_count']} (unique: {len(all_job_ids)})")
+
+    if verbose and experiment_breakdown:
+        print()
+        cprint("Per-Experiment Breakdown:", "cyan")
+        for exp_id, exp_totals in sorted(experiment_breakdown.items()):
+            if exp_totals["job_count"] > 0:
+                exp_co2 = format_co2_kg(exp_totals["co2_kg"])
+                print(f"  {exp_id}: {exp_co2} ({exp_totals['job_count']} jobs)")
+
+
+@click.option("--verbose", "-v", is_flag=True, help="Show per-experiment breakdown")
+@pass_cfg
+def carbon_summary(
+    workdir: Path,
+    name_pattern: str | None,
+    tags: tuple,
+    latest_only: bool,
+    as_json: bool,
+    verbose: bool,
+):
+    """Aggregate CO2 emissions across experiments
+
+    This command aggregates carbon metrics from the carbon storage.
+    Jobs are counted only once even if they appear in multiple experiments.
+
+    Examples:
+        # Total CO2 for all experiments
+        experimaestro experiments carbon summary
+
+        # Filter by experiment name pattern
+        experimaestro experiments carbon summary --name "^train-.*"
+
+        # Filter by run tags
+        experimaestro experiments carbon summary --tag baseline --tag production
+
+        # Only count latest job runs (exclude retries)
+        experimaestro experiments carbon summary --latest-only
+
+        # JSON output with per-experiment breakdown
+        experimaestro experiments carbon summary --json --verbose
+    """
+    import re
+    import json
+
+    from experimaestro.carbon.storage import CarbonStorage
+
+    experiments_dir = workdir / "experiments"
+    if not experiments_dir.exists():
+        cprint("No experiments found", "yellow")
+        return
+
+    name_re = re.compile(name_pattern) if name_pattern else None
+    tags_set = set(tags) if tags else None
+
+    all_job_ids, experiment_jobs = _collect_carbon_job_ids(
+        experiments_dir, name_re, tags_set, verbose
+    )
+
+    if not all_job_ids:
+        cprint("No jobs found matching the filters", "yellow")
+        return
+
+    storage = CarbonStorage(workdir)
+    totals = storage.aggregate_for_jobs(all_job_ids, use_latest_only=latest_only)
+
+    experiment_breakdown = {}
+    if verbose:
+        for exp_id, job_ids in experiment_jobs.items():
+            experiment_breakdown[exp_id] = storage.aggregate_for_jobs(
+                job_ids, use_latest_only=latest_only
+            )
+
+    if as_json:
+        output = {
+            "totals": totals,
+            "filters": {
+                "name_pattern": name_pattern,
+                "tags": list(tags),
+                "latest_only": latest_only,
+            },
+            "unique_jobs": len(all_job_ids),
+        }
+        if verbose:
+            output["experiments"] = experiment_breakdown
+        print(json.dumps(output, indent=2))
+        return
+
+    _print_carbon_summary(
+        totals,
+        all_job_ids,
+        name_pattern,
+        tags,
+        latest_only,
+        experiment_breakdown,
+        verbose,
+    )
+
+
+@carbon.command("stats")
+@pass_cfg
+def carbon_stats(workdir: Path):
+    """Show carbon storage statistics
+
+    Displays information about the carbon storage including
+    total records, file count, and storage size.
+    """
+    from experimaestro.carbon.storage import CarbonStorage
+
+    storage = CarbonStorage(workdir)
+    stats = storage.get_stats()
+
+    if stats["total_records"] == 0:
+        cprint("No carbon records found", "yellow")
+        return
+
+    cprint("Carbon Storage Statistics", "cyan", attrs=["bold"])
+    cprint("-" * 40, "white")
+    print(f"  Total records: {stats['total_records']:,}")
+    print(f"  File count:    {stats['file_count']}")
+
+    # Format size
+    size_bytes = stats["size_bytes"]
+    if size_bytes < 1024:
+        size_str = f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        size_str = f"{size_bytes / 1024:.1f} KB"
+    else:
+        size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+    print(f"  Storage size:  {size_str}")

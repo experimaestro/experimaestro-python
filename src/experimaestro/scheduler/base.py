@@ -22,12 +22,14 @@ from experimaestro.scheduler.interfaces import (
 )
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
+    CarbonMetricsEvent,
     EventReader,
     JobProgressEvent,
     JobStateChangedEvent,
     WatchedDirectory,
     job_entity_id_extractor,
 )
+from experimaestro.scheduler.state_provider import CarbonMetricsData
 
 
 from experimaestro.utils import logger
@@ -465,7 +467,7 @@ class Scheduler(StateProvider, threading.Thread):
 
         Args:
             entity_id: The job ID
-            event: The event (JobProgressEvent or JobStateChangedEvent)
+            event: The event (JobProgressEvent, JobStateChangedEvent, CarbonMetricsEvent)
         """
         job = self.jobs.get(entity_id)
         if job is None:
@@ -480,13 +482,32 @@ class Scheduler(StateProvider, threading.Thread):
             # Update job's in-memory progress and notify legacy listeners
             job.set_progress(event.level, event.progress, event.desc)
             self.notify_job_state(job)
+            # Notify StateProvider-style listeners (TUI/WebUI)
+            state_event = JobStateChangedEvent(
+                job_id=job.identifier,
+                state=job.state.name.lower(),
+            )
+            self._notify_state_listeners_async(state_event)
 
-        # Notify StateProvider-style listeners (TUI/WebUI)
-        state_event = JobStateChangedEvent(
-            job_id=job.identifier,
-            state=job.state.name.lower(),
-        )
-        self._notify_state_listeners_async(state_event)
+        elif isinstance(event, CarbonMetricsEvent):
+            # Update job's carbon metrics and notify listeners
+            job.carbon_metrics = CarbonMetricsData(
+                co2_kg=event.co2_kg,
+                energy_kwh=event.energy_kwh,
+                cpu_power_w=event.cpu_power_w,
+                gpu_power_w=event.gpu_power_w,
+                ram_power_w=event.ram_power_w,
+                duration_s=event.duration_s,
+                region=event.region,
+                is_final=event.is_final,
+            )
+            logger.debug(
+                "Updated carbon metrics for job %s: %.4f kg CO2",
+                job.identifier,
+                event.co2_kg,
+            )
+            # Notify StateProvider-style listeners (TUI/WebUI)
+            self._notify_state_listeners_async(event)
 
     def _cleanup_job_event_files(self, job: Job) -> None:
         """Clean up old job event files from previous runs

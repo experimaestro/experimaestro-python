@@ -449,6 +449,24 @@ class OfflineStateProvider(StateProvider):
 # =============================================================================
 
 
+@dataclass
+class CarbonMetricsData:
+    """Carbon metrics data for a job."""
+
+    co2_kg: float = 0.0
+    energy_kwh: float = 0.0
+    cpu_power_w: float = 0.0
+    gpu_power_w: float = 0.0
+    ram_power_w: float = 0.0
+    duration_s: float = 0.0
+    region: str = ""
+    is_final: bool = False
+
+
+# Re-export aggregate data classes from carbon module
+from experimaestro.carbon.base import CarbonAggregateData, CarbonImpactData  # noqa: E402
+
+
 class MockJob(BaseJob):
     """Concrete implementation of BaseJob for database-loaded jobs
 
@@ -461,10 +479,28 @@ class MockJob(BaseJob):
         from experimaestro.scheduler.state_status import (
             JobStateChangedEvent,
             JobProgressEvent,
+            CarbonMetricsEvent,
         )
         from experimaestro.notifications import LevelInformation
 
-        if isinstance(event, JobStateChangedEvent):
+        if isinstance(event, CarbonMetricsEvent):
+            self.carbon_metrics = CarbonMetricsData(
+                co2_kg=event.co2_kg,
+                energy_kwh=event.energy_kwh,
+                cpu_power_w=event.cpu_power_w,
+                gpu_power_w=event.gpu_power_w,
+                ram_power_w=event.ram_power_w,
+                duration_s=event.duration_s,
+                region=event.region,
+                is_final=event.is_final,
+            )
+            logger.debug(
+                "Applied carbon metrics to job %s: %.4f kg CO2",
+                self.identifier,
+                event.co2_kg,
+            )
+
+        elif isinstance(event, JobStateChangedEvent):
             self.state = STATE_NAME_TO_JOBSTATE.get(event.state, self.state)
             if event.failure_reason:
                 try:
@@ -517,6 +553,7 @@ class MockJob(BaseJob):
         failure_reason: Optional[JobFailureStatus] = None,
         transient: TransientMode = TransientMode.NONE,
         process: dict | None = None,
+        carbon_metrics: CarbonMetricsData | None = None,
     ):
         self.identifier = identifier
         self.task_id = task_id
@@ -533,6 +570,7 @@ class MockJob(BaseJob):
         self.failure_reason = failure_reason
         self.transient = transient
         self._process_dict = process
+        self.carbon_metrics = carbon_metrics
 
     def process_state_dict(self) -> dict | None:
         """Get process state as dictionary."""
@@ -637,6 +675,7 @@ class MockExperiment(BaseExperiment):
         finished_jobs: int = 0,
         failed_jobs: int = 0,
         run_tags: Optional[set[str]] = None,
+        carbon_impact: Optional["CarbonImpactData"] = None,
     ):
         self.workdir = workdir
         self.run_id = run_id
@@ -652,6 +691,7 @@ class MockExperiment(BaseExperiment):
         self._finished_jobs = finished_jobs
         self._failed_jobs = failed_jobs
         self._run_tags = run_tags or set()
+        self._carbon_impact = carbon_impact
 
     @property
     def experiment_id(self) -> str:
@@ -711,6 +751,11 @@ class MockExperiment(BaseExperiment):
     @property
     def finished_jobs(self) -> int:
         return self._finished_jobs
+
+    @property
+    def carbon_impact(self) -> Optional["CarbonImpactData"]:
+        """Carbon impact metrics for this experiment"""
+        return self._carbon_impact
 
     @property
     def failed_jobs(self) -> int:
@@ -831,6 +876,7 @@ class MockExperiment(BaseExperiment):
             finished_jobs=d.get("finished_jobs", 0),
             failed_jobs=d.get("failed_jobs", 0),
             run_tags=set(d.get("run_tags", [])),
+            carbon_impact=CarbonImpactData.from_dict(d.get("carbon_impact")),
         )
 
     def apply_event(self, event: "EventBase") -> None:
@@ -990,6 +1036,9 @@ class MockService(BaseService):
 __all__ = [
     # Data classes
     "ProcessInfo",
+    "CarbonMetricsData",
+    "CarbonAggregateData",  # Re-exported from carbon.base
+    "CarbonImpactData",  # Re-exported from carbon.base
     # Listener type alias
     "StateListener",
     # ABC

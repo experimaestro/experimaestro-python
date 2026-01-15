@@ -24,6 +24,41 @@ class ServerSettings:
 
 
 @dataclass
+class CarbonSettings:
+    """Settings for environmental impact tracking.
+
+    Carbon tracking monitors CO2 emissions and energy consumption during
+    job execution using CodeCarbon as the backend.
+    """
+
+    enabled: bool = True
+    """Whether carbon tracking is enabled (default: True).
+
+    When True and CodeCarbon is not installed, a warning is shown.
+    Set to False to completely disable tracking and warnings.
+    """
+
+    provider: str = "codecarbon"
+    """Carbon tracking provider (currently only 'codecarbon' supported)."""
+
+    country_iso_code: Optional[str] = None
+    """Override auto-detected country (ISO 3166-1 alpha-3 code, e.g., 'FRA')."""
+
+    region: Optional[str] = None
+    """Override auto-detected region."""
+
+    report_interval_s: float = 60.0
+    """How often to emit carbon metrics events during job execution (seconds)."""
+
+    warn_if_unavailable: bool = True
+    """Show warning and pause if CodeCarbon is not installed.
+
+    Set to False to silently disable tracking when CodeCarbon is not available.
+    This is ignored if enabled=False.
+    """
+
+
+@dataclass
 class HistorySettings:
     """Settings for experiment history cleanup.
 
@@ -92,6 +127,9 @@ class Settings:
 
     history: HistorySettings = field(default_factory=HistorySettings)
     """Default history settings (can be overridden per workspace)"""
+
+    carbon: CarbonSettings = field(default_factory=CarbonSettings)
+    """Settings for environmental impact tracking"""
 
 
 @lru_cache()

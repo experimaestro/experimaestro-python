@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.transient import TransientMode
+    from experimaestro.scheduler.state_provider import CarbonMetricsData
+    from experimaestro.carbon.base import CarbonImpactData
 
 logger = logging.getLogger("xpm.interfaces")
 
@@ -402,6 +404,7 @@ class BaseJob:
     exit_code: Optional[int]
     retry_count: int
     transient: "TransientMode"
+    carbon_metrics: Optional["CarbonMetricsData"]
 
     @property
     def locator(self) -> str:
@@ -499,7 +502,7 @@ class BaseJob:
             if fr is not None:
                 failure_reason = fr.name
 
-        return {
+        result = {
             "job_id": self.identifier,
             "task_id": self.task_id,
             "path": str(self.path) if self.path else None,
@@ -516,6 +519,21 @@ class BaseJob:
             ],
             "process": self.process_state_dict(),
         }
+        # Include carbon_metrics if available
+        carbon_metrics = getattr(self, "carbon_metrics", None)
+        if carbon_metrics is not None:
+            # CarbonMetricsData is a dataclass, convert to dict
+            result["carbon_metrics"] = {
+                "co2_kg": carbon_metrics.co2_kg,
+                "energy_kwh": carbon_metrics.energy_kwh,
+                "cpu_power_w": carbon_metrics.cpu_power_w,
+                "gpu_power_w": carbon_metrics.gpu_power_w,
+                "ram_power_w": carbon_metrics.ram_power_w,
+                "duration_s": carbon_metrics.duration_s,
+                "region": carbon_metrics.region,
+                "is_final": carbon_metrics.is_final,
+            }
+        return result
 
     def process_state_dict(self) -> dict | None:
         """Get process state as dictionary. Override in subclasses."""
@@ -612,6 +630,11 @@ class BaseExperiment:
         """End datetime (None if running)"""
         raise NotImplementedError
 
+    @property
+    def carbon_impact(self) -> Optional["CarbonImpactData"]:
+        """Carbon impact metrics for this experiment (sum and latest aggregations)"""
+        return None  # Default: no carbon metrics
+
     # Run tags - concrete implementation at base level (set for efficient lookup)
     _run_tags: set[str]
 
@@ -659,7 +682,7 @@ class BaseExperiment:
         except NotImplementedError:
             status_value = None
 
-        return {
+        result = {
             "version": self.STATUS_VERSION,
             "experiment_id": self.experiment_id,
             "run_id": self.run_id,
@@ -673,6 +696,10 @@ class BaseExperiment:
             "services": {k: v.full_state_dict() for k, v in self.services.items()},
             "run_tags": self.run_tags,
         }
+        # Include carbon_impact if available
+        if self.carbon_impact:
+            result["carbon_impact"] = self.carbon_impact.to_dict()
+        return result
 
     def write_status(self) -> None:
         """Write status.json to disk (calls state_dict internally)

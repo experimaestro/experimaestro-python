@@ -28,6 +28,7 @@ from experimaestro.utils import logger
 if TYPE_CHECKING:
     from experimaestro.scheduler.interfaces import ExperimentStatus
     from experimaestro.scheduler.state_status import ExperimentEventWriter
+    from experimaestro.carbon.base import CarbonImpactData
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
 
@@ -183,6 +184,7 @@ class experiment(BaseExperiment):
         wait_for_quit: bool = False,
         dirty_git: DirtyGitAction = DirtyGitAction.WARN,
         no_db: bool = False,
+        no_environmental_impact: bool = False,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -216,6 +218,9 @@ class experiment(BaseExperiment):
         :param no_db: Deprecated, kept for backwards compatibility. This parameter
             is now a no-op as the database has been replaced with filesystem-based
             state tracking.
+
+        :param no_environmental_impact: Disable carbon tracking and the warning
+            shown when CodeCarbon is not installed. Default: False.
 
         .. deprecated::
             The ``host``, ``port``, ``token``, and ``wait_for_quit`` parameters are
@@ -283,6 +288,7 @@ class experiment(BaseExperiment):
         self._register_signals = register_signals
         self._dirty_git = dirty_git
         self._no_db = no_db
+        self._no_environmental_impact = no_environmental_impact
 
         # Capture project paths for git info
         if project_paths is not None:
@@ -315,6 +321,85 @@ class experiment(BaseExperiment):
     def prepare(self, job: Job):
         """Generate the file"""
         return self.scheduler.prepare(job)
+
+    def _display_carbon_tracking_status(self) -> None:
+        """Display carbon tracking status at experiment startup.
+
+        Shows a warning with a pause if CodeCarbon is not installed and
+        environmental impact tracking is not disabled.
+        """
+        settings = get_settings()
+        carbon_settings = settings.carbon
+
+        # Check if carbon tracking is explicitly disabled
+        if self._no_environmental_impact or not carbon_settings.enabled:
+            logger.info("[Carbon Tracking] Disabled by configuration")
+            return
+
+        # Check if carbon tracking is available
+        try:
+            from experimaestro.carbon import (
+                is_available,
+                get_backend_name,
+                get_unavailable_reason,
+                get_region_info,
+            )
+            from experimaestro.carbon.region import format_region_display
+
+            if is_available():
+                # Carbon tracking is available
+                backend = get_backend_name()
+                region_info = get_region_info()
+                region_display = format_region_display(region_info)
+                logger.info(
+                    "[Carbon Tracking] Enabled - Region: %s, Provider: %s",
+                    region_display,
+                    backend or carbon_settings.provider,
+                )
+            else:
+                # Not available - show reason
+                reason = get_unavailable_reason()
+                if carbon_settings.warn_if_unavailable:
+                    self._show_carbon_warning(reason)
+                else:
+                    logger.info(
+                        "[Carbon Tracking] Disabled - %s",
+                        reason or "Not available",
+                    )
+        except ImportError:
+            # Carbon module not available at all
+            if carbon_settings.warn_if_unavailable:
+                self._show_carbon_warning(None)
+            else:
+                logger.info("[Carbon Tracking] Disabled - module not available")
+
+    def _show_carbon_warning(self, reason: str | None) -> None:
+        """Show warning about missing carbon tracking and pause for 3 seconds."""
+        import sys
+
+        warning_box = """
+╔══════════════════════════════════════════════════════════════════╗
+║  ENVIRONMENTAL IMPACT TRACKING DISABLED                          ║
+║                                                                  ║
+║  Carbon tracking library not installed. To track CO2 emissions:  ║
+║    pip install experimaestro[carbon]                             ║
+║                                                                  ║
+║  Or disable this warning:                                        ║
+║    experiment(..., no_environmental_impact=True)                 ║
+║    Or set carbon.warn_if_unavailable: false in settings.yaml    ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+        # Print to stderr so it's visible even with log filtering
+        print(warning_box, file=sys.stderr)  # noqa: T201
+        logger.warning(
+            "Carbon tracking disabled - %s",
+            reason or "Library not installed",
+        )
+
+        # Pause for 3 seconds to ensure user sees the warning
+        import time
+
+        time.sleep(3)
 
     @property
     def run_mode(self):
@@ -403,6 +488,46 @@ class experiment(BaseExperiment):
         return self._services
 
     @property
+    def carbon_impact(self) -> Optional["CarbonImpactData"]:
+        """Carbon impact metrics aggregated from all jobs in this experiment.
+
+        For live experiments, this computes the aggregate in real-time.
+        For finalized experiments, returns the cached _carbon_impact.
+        """
+        from experimaestro.carbon.base import CarbonAggregateData, CarbonImpactData
+
+        # Return cached value if experiment has been finalized
+        if hasattr(self, "_carbon_impact") and self._carbon_impact is not None:
+            return self._carbon_impact
+
+        # Compute live aggregate from jobs
+        total_co2 = 0.0
+        total_energy = 0.0
+        total_duration = 0.0
+        job_count = 0
+
+        for job in self.jobs.values():
+            carbon_metrics = getattr(job, "carbon_metrics", None)
+            if carbon_metrics is not None:
+                total_co2 += carbon_metrics.co2_kg
+                total_energy += carbon_metrics.energy_kwh
+                total_duration += carbon_metrics.duration_s
+                job_count += 1
+
+        if job_count == 0:
+            return None
+
+        # Return live aggregate
+        return CarbonImpactData(
+            latest=CarbonAggregateData(
+                co2_kg=total_co2,
+                energy_kwh=total_energy,
+                duration_s=total_duration,
+                job_count=job_count,
+            )
+        )
+
+    @property
     def alt_jobspaths(self):
         """Return potential other directories"""
         for alt_workdir in self.workspace.alt_workdirs:
@@ -412,6 +537,21 @@ class experiment(BaseExperiment):
     def jobs_jsonl_path(self):
         """Return the path to the jobs.jsonl file for this experiment"""
         return self.workdir / "jobs.jsonl"
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Get experiment state as dictionary (extends BaseExperiment.state_dict).
+
+        Includes carbon impact metrics if available.
+        """
+        # Call parent state_dict
+        data = super().state_dict()
+
+        # Add carbon impact if available
+        carbon_impact = getattr(self, "_carbon_impact", None)
+        if carbon_impact is not None:
+            data["carbon_impact"] = carbon_impact.to_dict()
+
+        return data
 
     def add_job(self, job: "Job"):
         """Register a job and its tags to jobs.jsonl file and database
@@ -501,11 +641,87 @@ class experiment(BaseExperiment):
         # Close the event writer to flush any buffered events
         self._event_writer.close()
 
+        # Consolidate carbon metrics for this experiment
+        self._consolidate_carbon_metrics()
+
         # Write final status.json using write_status()
         self.write_status()
 
         # Archive event files to permanent storage
         self._event_writer.archive_events()
+
+    def _consolidate_carbon_metrics(self) -> None:
+        """Consolidate carbon metrics for this experiment's jobs.
+
+        Queries the carbon storage for all jobs in this experiment and
+        computes two aggregations:
+        - sum: Sum of all job runs (including retries)
+        - latest: Sum of only the latest run of each unique job
+
+        The results are stored in self._carbon_impact for inclusion in status.json.
+        """
+        settings = get_settings()
+
+        # Skip if carbon tracking is disabled
+        if self._no_environmental_impact or not settings.carbon.enabled:
+            return
+
+        try:
+            from experimaestro.carbon.storage import CarbonStorage
+
+            # Get list of job IDs from this experiment
+            # Read from jobs.jsonl
+            jobs_jsonl_path = self.workdir / "jobs.jsonl"
+            if not jobs_jsonl_path.exists():
+                return
+
+            job_ids = set()
+            with jobs_jsonl_path.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            job_ids.add(data.get("job_id", ""))
+                        except Exception:
+                            continue
+
+            if not job_ids:
+                return
+
+            from experimaestro.carbon.base import CarbonAggregateData, CarbonImpactData
+
+            # Query carbon metrics from carbon storage
+            storage = CarbonStorage(self.workspace.path)
+
+            # Compute both aggregations
+            sum_metrics = storage.aggregate_for_jobs(job_ids, use_latest_only=False)
+            latest_metrics = storage.aggregate_for_jobs(job_ids, use_latest_only=True)
+
+            # Store for inclusion in status.json using structured types
+            self._carbon_impact = CarbonImpactData(
+                sum=CarbonAggregateData(
+                    co2_kg=sum_metrics.get("co2_kg", 0.0),
+                    energy_kwh=sum_metrics.get("energy_kwh", 0.0),
+                    duration_s=sum_metrics.get("duration_s", 0.0),
+                    job_count=sum_metrics.get("job_count", 0),
+                ),
+                latest=CarbonAggregateData(
+                    co2_kg=latest_metrics.get("co2_kg", 0.0),
+                    energy_kwh=latest_metrics.get("energy_kwh", 0.0),
+                    duration_s=latest_metrics.get("duration_s", 0.0),
+                    job_count=latest_metrics.get("job_count", 0),
+                ),
+            )
+
+            logger.info(
+                "[Carbon Impact] Total: %.4f kg CO2 (sum), %.4f kg CO2 (latest)",
+                sum_metrics.get("co2_kg", 0),
+                latest_metrics.get("co2_kg", 0),
+            )
+
+        except Exception as e:
+            logger.warning("Failed to consolidate carbon metrics: %s", e)
 
     def stop(self):
         """Stop the experiment as soon as possible"""
@@ -603,6 +819,9 @@ class experiment(BaseExperiment):
                 "folders to the new structure.",
                 self.workspace.path,
             )
+
+        # Display carbon tracking status
+        self._display_carbon_tracking_status()
 
         # Only lock and save environment in NORMAL mode
         if self.workspace.run_mode == RunMode.NORMAL:

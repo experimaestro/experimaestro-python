@@ -277,6 +277,39 @@ class JobProgressEvent(JobEventBase):
     desc: Optional[str] = None
 
 
+@dataclass
+class CarbonMetricsEvent(JobEventBase):
+    """Event: Carbon metrics update during job execution.
+
+    Written periodically by the running job process to report environmental
+    impact metrics (CO2 emissions, energy consumption).
+    """
+
+    co2_kg: float = 0.0
+    """Cumulative CO2 equivalent emissions in kilograms."""
+
+    energy_kwh: float = 0.0
+    """Cumulative energy consumed in kilowatt-hours."""
+
+    cpu_power_w: float = 0.0
+    """Average CPU power consumption in watts."""
+
+    gpu_power_w: float = 0.0
+    """Average GPU power consumption in watts."""
+
+    ram_power_w: float = 0.0
+    """Average RAM power consumption in watts."""
+
+    duration_s: float = 0.0
+    """Duration of tracking in seconds."""
+
+    region: str = ""
+    """Region/country code used for carbon intensity."""
+
+    is_final: bool = False
+    """True if this is the final measurement (on job completion)."""
+
+
 # -----------------------------------------------------------------------------
 # Experiment Events
 # -----------------------------------------------------------------------------

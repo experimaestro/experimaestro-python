@@ -28,6 +28,7 @@ from experimaestro.scheduler.state_provider import (
     MockJob,
     MockExperiment,
     ProcessInfo,
+    CarbonMetricsData,
 )
 from experimaestro.scheduler.state_status import (
     EventBase,
@@ -541,6 +542,35 @@ class WorkspaceStateProvider(StateProvider):
             for key in keys_to_remove:
                 del self._experiment_cache[key]
 
+    def _load_carbon_metrics_for_job(self, job_id: str) -> CarbonMetricsData | None:
+        """Load carbon metrics from carbon storage for a job.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            CarbonMetricsData or None if not available
+        """
+        try:
+            from experimaestro.carbon.storage import CarbonStorage
+
+            storage = CarbonStorage(self.workspace_path)
+            record = storage.get_latest_job_record(job_id)
+            if record:
+                return CarbonMetricsData(
+                    co2_kg=record.co2_kg,
+                    energy_kwh=record.energy_kwh,
+                    cpu_power_w=record.cpu_power_w,
+                    gpu_power_w=record.gpu_power_w,
+                    ram_power_w=record.ram_power_w,
+                    duration_s=record.duration_s,
+                    region=record.region,
+                    is_final=True,  # Data from storage is always final
+                )
+        except Exception as e:
+            logger.debug("Failed to load carbon metrics for job %s: %s", job_id, e)
+        return None
+
     def _get_or_load_job(
         self, job_id: str, task_id: str, submit_time: float | datetime | None
     ) -> MockJob:
@@ -585,6 +615,10 @@ class WorkspaceStateProvider(StateProvider):
                     progress=[],
                     updated_at="",
                 )
+
+            # Load carbon metrics from carbon storage if not already set
+            if job.carbon_metrics is None:
+                job.carbon_metrics = self._load_carbon_metrics_for_job(job_id)
 
             self._job_cache[job_id] = job
             return job
@@ -1429,6 +1463,9 @@ class WorkspaceStateProvider(StateProvider):
         except OSError:
             mtime = None
 
+        # Load carbon metrics from carbon storage
+        carbon_metrics = self._load_carbon_metrics_for_job(job_id)
+
         return MockJob(
             identifier=job_id,
             task_id=task_id,
@@ -1439,6 +1476,7 @@ class WorkspaceStateProvider(StateProvider):
             endtime=mtime if state.finished() else None,
             progress=[],
             updated_at="",
+            carbon_metrics=carbon_metrics,
         )
 
     def _check_running_from_pid(

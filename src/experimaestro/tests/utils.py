@@ -168,6 +168,7 @@ class TemporaryExperiment:
         workdir: Working directory. If None, creates a temporary directory.
         timeout_multiplier: Multiplier for the centralized timeout.
         run_mode: Run mode for the experiment.
+        no_environmental_impact: Disable carbon tracking (True by default for tests).
     """
 
     def __init__(
@@ -176,11 +177,13 @@ class TemporaryExperiment:
         workdir: Path | None = None,
         timeout_multiplier: float = 1.0,
         run_mode: RunMode = RunMode.NORMAL,
+        no_environmental_impact: bool = True,
     ):
         self.name = name
         self.workdir = workdir
         self.clean_workdir = workdir is None
         self.run_mode = run_mode
+        self.no_environmental_impact = no_environmental_impact
         self.timeout = timeout(multiplier=timeout_multiplier)
 
     def __enter__(self) -> experiment:
@@ -192,7 +195,12 @@ class TemporaryExperiment:
         else:
             workdir = self.workdir
 
-        self.experiment = experiment(workdir, self.name, run_mode=self.run_mode)
+        self.experiment = experiment(
+            workdir,
+            self.name,
+            run_mode=self.run_mode,
+            no_environmental_impact=self.no_environmental_impact,
+        )
         self.experiment.__enter__()
 
         # Set some useful environment variables

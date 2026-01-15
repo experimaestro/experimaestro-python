@@ -18,6 +18,7 @@ from experimaestro.tui.messages import (
     KillExperimentRequest,
     ShowRunsRequest,
 )
+from experimaestro.carbon.utils import format_co2_kg
 
 
 class ExperimentsList(Widget):
@@ -56,6 +57,7 @@ class ExperimentsList(Widget):
         "status": "Status",
         "started": "Started",
         "duration": "Duration",
+        "co2": "CO2",
     }
 
     # Columns that support sorting (column key -> sort column name)
@@ -206,6 +208,7 @@ class ExperimentsList(Widget):
         table.add_column("Status", key="status")
         table.add_column("Started", key="started")
         table.add_column("Duration", key="duration")
+        table.add_column("CO2", key="co2", width=8)
         self.refresh_experiments()
 
         # If there's only one experiment, automatically select it
@@ -327,6 +330,20 @@ class ExperimentsList(Widget):
 
                     self.log.error(traceback.format_exc())
 
+            # Get CO2 impact (use 'latest' aggregation if available)
+            co2_text = "-"
+            carbon_impact = getattr(exp, "carbon_impact", None)
+            if carbon_impact:
+                # Handle both CarbonImpactData object and dict
+                if hasattr(carbon_impact, "latest"):
+                    latest = carbon_impact.latest
+                    co2_kg = latest.co2_kg if latest else 0
+                else:
+                    latest = carbon_impact.get("latest", {})
+                    co2_kg = latest.get("co2_kg", 0) if latest else 0
+                if co2_kg > 0:
+                    co2_text = format_co2_kg(co2_kg)
+
             rows_data[exp_id] = (
                 exp_id,
                 run_id,
@@ -336,6 +353,7 @@ class ExperimentsList(Widget):
                 status,
                 started,
                 duration,
+                co2_text,
             )
 
         if needs_rebuild:
@@ -372,6 +390,7 @@ class ExperimentsList(Widget):
                         status,
                         started,
                         duration,
+                        co2_text,
                     ) = row_data
                     table.update_cell(exp_id, "id", exp_id, update_width=True)
                     table.update_cell(exp_id, "run", run_id, update_width=True)
@@ -381,6 +400,7 @@ class ExperimentsList(Widget):
                     table.update_cell(exp_id, "status", status, update_width=True)
                     table.update_cell(exp_id, "started", started, update_width=True)
                     table.update_cell(exp_id, "duration", duration, update_width=True)
+                    table.update_cell(exp_id, "co2", co2_text, update_width=True)
                 else:
                     table.add_row(*row_data, key=exp_id)
 

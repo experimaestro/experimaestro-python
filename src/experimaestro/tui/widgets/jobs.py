@@ -22,6 +22,11 @@ from experimaestro.tui.messages import (
     FilterChanged,
     SearchApplied,
 )
+from experimaestro.carbon.utils import (
+    format_co2_kg,
+    format_energy_kwh,
+    format_power,
+)
 
 
 class SearchBar(Widget):
@@ -171,6 +176,8 @@ class JobDetailView(Widget):
             yield Label("", id="job-times-label")
             yield Label("Process:", classes="subsection-title")
             yield Label("", id="job-process-label")
+            yield Label("Carbon Impact:", classes="subsection-title")
+            yield Label("", id="job-carbon-label")
             yield Label("Tags:", classes="subsection-title")
             yield Label("", id="job-tags-label")
             yield Label("Dependencies:", classes="subsection-title")
@@ -209,6 +216,49 @@ class JobDetailView(Widget):
                 parts.append(f"Threads: {pinfo.num_threads}")
         elif job.state and job.state.running():
             parts.append("[dim](process not found)[/dim]")
+
+        return " | ".join(parts)
+
+    def _get_carbon_info(self, job) -> str:
+        """Get carbon impact information for a job"""
+        carbon_metrics = getattr(job, "carbon_metrics", None)
+
+        if carbon_metrics is None:
+            if job.state and job.state.finished():
+                return "(no carbon data)"
+            return "(carbon tracking not started)"
+
+        # Build carbon info string with detailed breakdown
+        parts = []
+
+        # CO2 emissions (primary metric)
+        co2_str = format_co2_kg(carbon_metrics.co2_kg)
+        parts.append(f"[bold green]CO2: {co2_str}[/bold green]")
+
+        # Energy consumption
+        energy_str = format_energy_kwh(carbon_metrics.energy_kwh)
+        parts.append(f"Energy: {energy_str}")
+
+        # Power breakdown (if available)
+        power_parts = []
+        if carbon_metrics.cpu_power_w > 0:
+            power_parts.append(f"CPU: {format_power(carbon_metrics.cpu_power_w)}")
+        if carbon_metrics.gpu_power_w > 0:
+            power_parts.append(f"GPU: {format_power(carbon_metrics.gpu_power_w)}")
+        if carbon_metrics.ram_power_w > 0:
+            power_parts.append(f"RAM: {format_power(carbon_metrics.ram_power_w)}")
+        if power_parts:
+            parts.append(f"Avg Power: {', '.join(power_parts)}")
+
+        # Region
+        if carbon_metrics.region:
+            parts.append(f"Region: {carbon_metrics.region}")
+
+        # Status indicator
+        if carbon_metrics.is_final:
+            parts.append("[dim](final)[/dim]")
+        elif job.state and job.state.running():
+            parts.append("[cyan](live)[/cyan]")
 
         return " | ".join(parts)
 
@@ -312,6 +362,10 @@ class JobDetailView(Widget):
         # Process information
         process_text = self._get_process_info(job)
         self.query_one("#job-process-label", Label).update(process_text)
+
+        # Carbon impact information
+        carbon_text = self._get_carbon_info(job)
+        self.query_one("#job-carbon-label", Label).update(carbon_text)
 
         # Tags are stored in JobTagModel, accessed via tags_map
         tags = self.tags_map.get(job.identifier, {})
@@ -640,6 +694,7 @@ class JobsTable(Vertical):
         "tags": "Tags",
         "submitted": "Submitted",
         "duration": "Duration",
+        "co2": "CO2",
     }
 
     # Columns that support sorting (column key -> sort column name)
@@ -658,6 +713,7 @@ class JobsTable(Vertical):
         table.add_column("Tags", key="tags")
         table.add_column("Submitted", key="submitted")
         table.add_column("Duration", key="duration")
+        table.add_column("CO2", key="co2", width=8)
         table.cursor_type = "row"
         table.zebra_stripes = True
 
@@ -892,6 +948,13 @@ class JobsTable(Vertical):
                     elapsed = (datetime.now() - start).total_seconds()
                 duration = self._format_duration(elapsed)
 
+            # Carbon metrics
+            carbon_metrics = getattr(job, "carbon_metrics", None)
+            if carbon_metrics is not None:
+                co2_text = format_co2_kg(carbon_metrics.co2_kg)
+            else:
+                co2_text = "-"
+
             job_id_short = job_id[:7]
             rows_data[job_id] = (
                 job_id_short,
@@ -900,6 +963,7 @@ class JobsTable(Vertical):
                 tags_text,
                 submitted,
                 duration,
+                co2_text,
             )
 
         if needs_rebuild:
@@ -932,6 +996,7 @@ class JobsTable(Vertical):
                     tags_text,
                     submitted,
                     duration,
+                    co2_text,
                 ) = row_data
                 table.update_cell(job_id, "job_id", job_id_short, update_width=True)
                 table.update_cell(job_id, "task", task_id, update_width=True)
@@ -939,6 +1004,7 @@ class JobsTable(Vertical):
                 table.update_cell(job_id, "tags", tags_text, update_width=True)
                 table.update_cell(job_id, "submitted", submitted, update_width=True)
                 table.update_cell(job_id, "duration", duration, update_width=True)
+                table.update_cell(job_id, "co2", co2_text, update_width=True)
 
         self.log.debug(
             f"Jobs table now has {table.row_count} rows (rebuild={needs_rebuild})"

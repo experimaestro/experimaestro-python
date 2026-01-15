@@ -74,6 +74,12 @@ ssh = [
     "paramiko>=3.3",
     "fabric>=3",
 ]
+carbon = [
+    # CodeCarbon for Linux/Windows (requires Intel RAPL or NVIDIA GPU)
+    "codecarbon>=2.0; sys_platform != 'darwin'",
+    # Zeus for macOS Apple Silicon (uses IOKit API via zeus[apple])
+    "zeus[apple]>=0.10.0; sys_platform == 'darwin'",
+]
 
 [project.urls]
 Homepage = "https://github.com/experimaestro/experimaestro-python"

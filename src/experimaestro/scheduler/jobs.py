@@ -209,6 +209,9 @@ class Job(BaseJob, Resource):
         self._progress: List[LevelInformation] = []
         self.tags = config.tags()
 
+        # Carbon metrics (updated via events)
+        self.carbon_metrics = None
+
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
 

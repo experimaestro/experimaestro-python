@@ -24,6 +24,7 @@ from experimaestro.scheduler.state_status import (
     JobSubmittedEvent,
     ServiceAddedEvent,
     ServiceStateChangedEvent,
+    CarbonMetricsEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
 from experimaestro.tui.utils import format_duration, get_status_icon  # noqa: F401
@@ -486,10 +487,31 @@ class ExperimaestroUI(App):
                     if job_detail_view.current_job_id == event.job_id:
                         job_detail_view.refresh_job_detail()
 
+    def _handle_carbon_metrics(self, event: CarbonMetricsEvent) -> None:
+        """Handle CarbonMetricsEvent - refresh job and experiment CO2 display
+
+        This event is dispatched when a job reports carbon metrics updates.
+        """
+        # Refresh all jobs tables to show updated CO2
+        for jobs_table in self.query(JobsTable):
+            jobs_table.refresh_jobs()
+
+        # Refresh experiments list to show aggregated CO2
+        for exp_list in self.query(ExperimentsList):
+            exp_list.refresh_experiments()
+
+        # Also refresh job detail if viewing this job
+        for job_detail_container in self.query("#job-detail-container"):
+            if not job_detail_container.has_class("hidden"):
+                for job_detail_view in self.query(JobDetailView):
+                    if job_detail_view.current_job_id == event.job_id:
+                        job_detail_view.refresh_job_detail()
+
     STATE_EVENT_HANDLERS = {
         ExperimentUpdatedEvent: _handle_experiment_updated,
         JobStateChangedEvent: _handle_job_state_changed,
         JobProgressEvent: _handle_job_progress,
+        CarbonMetricsEvent: _handle_carbon_metrics,
         RunUpdatedEvent: _handle_run_updated,
         ServiceAddedEvent: _handle_service_added,
         ServiceStateChangedEvent: _handle_service_state_changed,
