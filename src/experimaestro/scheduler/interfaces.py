@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
+    from experimaestro.connectors import Process
     from experimaestro.scheduler.transient import TransientMode
     from experimaestro.scheduler.state_provider import CarbonMetricsData
     from experimaestro.carbon.base import CarbonImpactData
@@ -156,7 +157,7 @@ class JobState:
         """Returns True if the job has finished (success or error)"""
         return self.value >= 5  # DONE or ERROR
 
-    def is_error(self):
+    def is_error(self) -> bool:
         return False
 
     def __eq__(self, other):
@@ -406,6 +407,17 @@ class BaseJob:
     transient: "TransientMode"
     carbon_metrics: Optional["CarbonMetricsData"]
 
+    #: The process
+    _process: Optional["Process"]
+
+    #: The process definition from JSON
+    _process_dict: Optional["Process"]
+
+    def __init__(self):
+        super().__init__()
+        self._process = None
+        self._process_dict = None
+
     @property
     def locator(self) -> str:
         """Full task locator (identifier): {task_id}/{identifier}"""
@@ -537,6 +549,172 @@ class BaseJob:
 
     def process_state_dict(self) -> dict | None:
         """Get process state as dictionary. Override in subclasses."""
+        return None
+
+    def load_from_disk(self):
+        """Load job state from disk, prioritizing marker files over status.json
+
+        This method is resilient - it returns False on any error instead of raising.
+
+        Priority for state:
+        1. Check .done/.failed marker files (most reliable, written atomically by job)
+        2. Fall back to status.json for state info
+        3. Check PID file for running state
+        4. Default to current state
+
+        Additional fields are loaded from status.json:
+        - timestamps (submittime, starttime, endtime)
+        - exit_code, retry_count
+        - progress, carbon_metrics
+        """
+        # Load from status.json
+        status_dict = None
+        if self.status_path.exists():
+            try:
+                with self.status_path.open() as f:
+                    status_dict = json.load(f)
+                    self._load_from_status_dict(status_dict)
+            except Exception as e:
+                logger.debug("Failed to load status.json: %s", e)
+
+        # If no state from any source, use directory mtime as fallback for timestamps
+        if status_dict is None:
+            self._load_fallback_timestamps()
+
+        # Marker files (.done/.failed) overrides stored state
+        if marker_state := JobState.from_path(self.path, self.scriptname):
+            self.state = marker_state
+            self._process_dict = None
+            return
+
+        # Check PID file for running state
+        if self.pidfile.exists():
+            try:
+                self._process_dict = json.loads(self.pidfile.read_text())
+                pid = self._process_dict.get("pid")
+                if pid is not None:
+                    pid = int(pid)
+                    # Check if the process is still running
+                    try:
+                        import psutil
+
+                        proc = psutil.Process(pid)
+                        if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                            self.state = JobState.RUNNING
+                    except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except (json.JSONDecodeError, OSError, ValueError, TypeError):
+                pass
+
+    def _load_from_status_dict(self, status_dict: Dict[str, Any]) -> None:
+        """Load fields from status.json dictionary"""
+        if status_dict.get("submitted_time"):
+            self.submittime = deserialize_to_datetime(status_dict["submitted_time"])
+        if status_dict.get("started_time"):
+            self.starttime = deserialize_to_datetime(status_dict["started_time"])
+        if status_dict.get("ended_time"):
+            self.endtime = deserialize_to_datetime(status_dict["ended_time"])
+        if status_dict.get("exit_code") is not None:
+            self.exit_code = status_dict["exit_code"]
+        if status_dict.get("retry_count") is not None:
+            self.retry_count = status_dict["retry_count"]
+
+        # Get state
+        state_str = status_dict.get("state", "").lower()
+        self.state = STATE_NAME_TO_JOBSTATE.get(state_str)
+        # Handle error state with failure reason
+        if state_str in ("error", "failed"):
+            failure_reason = status_dict.get("failure_reason")
+            if failure_reason:
+                try:
+                    self.state = JobStateError(JobFailureStatus[failure_reason])
+                except (KeyError, ValueError):
+                    self.state = JobStateError(JobFailureStatus.FAILED)
+            else:
+                self.state = JobStateError(JobFailureStatus.FAILED)
+
+        # Load process information
+        self._process_dict = status_dict.get("process", None)
+
+        # Load progress
+        progress_list = status_dict.get("progress", [])
+        self._set_progress(progress_list)
+
+        # Load carbon metrics
+        carbon_dict = status_dict.get("carbon_metrics")
+        if carbon_dict is not None:
+            from experimaestro.scheduler.state_provider import CarbonMetricsData
+
+            self.carbon_metrics = CarbonMetricsData(
+                co2_kg=carbon_dict.get("co2_kg", 0.0),
+                energy_kwh=carbon_dict.get("energy_kwh", 0.0),
+                cpu_power_w=carbon_dict.get("cpu_power_w", 0.0),
+                gpu_power_w=carbon_dict.get("gpu_power_w", 0.0),
+                ram_power_w=carbon_dict.get("ram_power_w", 0.0),
+                duration_s=carbon_dict.get("duration_s", 0.0),
+                region=carbon_dict.get("region", ""),
+                is_final=carbon_dict.get("is_final", False),
+            )
+
+    def _load_fallback_timestamps(self) -> None:
+        """Load timestamps from directory mtime as fallback"""
+        try:
+            mtime = datetime.fromtimestamp(self.path.stat().st_mtime)
+            if self.submittime is None:
+                self.submittime = mtime
+            if self.starttime is None:
+                self.starttime = mtime
+            if (
+                self.state is not None
+                and self.state.finished()
+                and self.endtime is None
+            ):
+                self.endtime = mtime
+        except OSError:
+            pass
+
+    def _clear_transient_fields(self) -> None:
+        """Clear transient fields when job will run. Override in subclasses."""
+        # Handle different attribute names (_progress vs progress)
+        if hasattr(self, "_progress"):
+            self._progress = []
+        elif hasattr(self, "progress") and not isinstance(
+            getattr(type(self), "progress", None), property
+        ):
+            self.progress = []
+        # Clear carbon metrics
+        if hasattr(self, "carbon_metrics"):
+            self.carbon_metrics = None
+
+    def _set_progress(self, progress_list: List) -> None:
+        """Set progress from a list. Override in subclasses if needed."""
+        # Handle different attribute names (_progress vs progress)
+        if hasattr(self, "_progress"):
+            self._progress = progress_list
+        elif hasattr(self, "progress") and not isinstance(
+            getattr(type(self), "progress", None), property
+        ):
+            self.progress = progress_list
+
+    async def aio_process(self) -> Optional["Process"]:
+        """Returns the process if there is one"""
+        if self._process:
+            return self._process
+
+        if self.pidpath.is_file():
+            # Get from pidpath file
+            from experimaestro.connectors import Process
+
+            pinfo = json.loads(self.pidpath.read_text())
+            p = Process.fromDefinition(self.launcher.connector, pinfo)
+            if p is None:
+                return None
+
+            if await p.aio_isrunning():
+                return p
+
+            return None
+
         return None
 
 

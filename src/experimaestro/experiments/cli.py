@@ -23,6 +23,8 @@ from experimaestro.utils.logging import setup_logging
 if TYPE_CHECKING:
     from experimaestro.scheduler.experiment import experiment
 
+logger = logging.getLogger("xpm.experiments.cli")
+
 
 class ExperimentHelper:
     """Helper for experiments"""
@@ -275,9 +277,7 @@ def experiments_cli(  # noqa: C901
             xp_file = Path(xp_file)
             if not python_path:
                 python_path.append(xp_file.parent.absolute())
-            logging.info(
-                "Using python path: %s", ", ".join(str(s) for s in python_path)
-            )
+            logger.info("Using python path: %s", ", ".join(str(s) for s in python_path))
 
     assert module_name or xp_file, (
         "Either the module name or experiment file should be given"
@@ -300,7 +300,7 @@ def experiments_cli(  # noqa: C901
     if pre_experiment:
         pre_exp_path = Path(pre_experiment)
         if pre_exp_path.exists():
-            logging.info("Executing pre-experiment script: %s", pre_exp_path)
+            logger.info("Executing pre-experiment script: %s", pre_exp_path)
             try:
                 spec = importlib.util.spec_from_file_location(
                     "pre_experiment", str(pre_exp_path.absolute())
@@ -326,7 +326,7 @@ def experiments_cli(  # noqa: C901
             for _ in range(len(module_name.split("."))):
                 path = path.parent
 
-            logging.info("Appending %s to python path", path)
+            logger.info("Appending %s to python path", path)
             sys.path.append(str(path))
             python_path.append(path)
 
@@ -345,7 +345,7 @@ def experiments_cli(  # noqa: C901
         try:
             mod = importlib.import_module(module_name)
         except ModuleNotFoundError as e:
-            logging.error("Module not found: %s with python path %s", e, sys.path)
+            logger.error("Module not found: %s with python path %s", e, sys.path)
             raise
 
     helper = getattr(mod, "run", None)
@@ -408,7 +408,7 @@ def experiments_cli(  # noqa: C901
 
     workdir = ws_env.path
 
-    logging.info(
+    logger.info(
         "Running experiment %s working directory %s",
         experiment_id,
         str(workdir.resolve()),
@@ -450,7 +450,7 @@ def experiments_cli(  # noqa: C901
                         workspace=xp.workspace,
                         wait_for_quit=False,
                     )
-                    logging.info(
+                    logger.info(
                         "Web server started at http://%s:%d",
                         settings.server.host or "localhost",
                         settings.server.port or 12345,
@@ -460,7 +460,7 @@ def experiments_cli(  # noqa: C901
                     xp_ready_event.set()  # Signal that xp is ready
 
                 # Test logging from experiment thread
-                logging.info("Experiment started in background thread")
+                logger.info("Experiment started in background thread")
 
                 # Set up the environment
                 for key, value in env:
@@ -486,7 +486,7 @@ def experiments_cli(  # noqa: C901
     # Console mode is only available in NORMAL run mode
     use_console = console and run_mode == RunMode.NORMAL
     if console and not use_console:
-        logging.warning("--console is ignored when run_mode is not NORMAL")
+        logger.warning("--console is ignored when run_mode is not NORMAL")
 
     if use_console:
         # Start TUI first, then run experiment in background thread
@@ -540,13 +540,13 @@ def experiments_cli(  # noqa: C901
                             workspace=xp.workspace,
                             wait_for_quit=False,
                         )
-                        logging.info(
+                        logger.info(
                             "Web server started at http://%s:%d",
                             settings.server.host or "localhost",
                             settings.server.port or 12345,
                         )
 
-                    logging.info("Experiment started")
+                    logger.info("Experiment started")
 
                     # Set up the environment
                     for key, value in env:
@@ -562,7 +562,7 @@ def experiments_cli(  # noqa: C901
                     # ... and wait
                     xp.wait()
 
-                logging.info("Experiment thread completed")
+                logger.info("Experiment thread completed")
 
             except BaseException as e:
                 # Use BaseException to also catch SystemExit from sys.exit()

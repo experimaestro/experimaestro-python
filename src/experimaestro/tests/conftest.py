@@ -1,9 +1,18 @@
-import logging
-import pytest
-import os
-import shutil
+import sys
 
-from experimaestro.connectors import Process
+# Set test flag immediately to prevent cli/__init__.py from calling basicConfig
+sys._called_from_test = True
+
+import logging  # noqa: E402
+import pytest  # noqa: E402
+import os  # noqa: E402
+import shutil  # noqa: E402
+
+# Add NullHandler to root logger to prevent lastResort handler from causing
+# double logging when using pytest -s with --log-cli-level
+logging.getLogger().addHandler(logging.NullHandler())
+
+from experimaestro.connectors import Process  # noqa: E402
 
 # Set shorter poll interval for tests (before any imports that read it)
 os.environ.setdefault("XPM_POLL_INTERVAL_MAX", "5.0")
@@ -154,11 +163,9 @@ def reset_scheduler():
     ResourcePoller.reset()
 
 
-# Sets a flag
 def pytest_configure(config):
-    import sys
-
-    sys._called_from_test = True
+    # Note: sys._called_from_test is set at module level (top of file)
+    # to ensure it's set before any imports that check for it
 
     # Disable peewee logging by default (too verbose)
     logging.getLogger("peewee").setLevel(logging.WARNING)

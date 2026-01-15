@@ -19,6 +19,8 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     BaseService,
+    JobStateUnscheduled,
+    JobStateWaiting,
 )
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
@@ -300,7 +302,18 @@ class Scheduler(StateProvider, threading.Thread):
             # Use 'other' for resubmission since it has the correct experiments list
             job = other
 
-        job._future = asyncio.run_coroutine_threadsafe(self.aio_submit(job), self.loop)
+        async def submit():
+            try:
+                state = await self.aio_submit(job)
+                if isinstance(job.state, (JobStateUnscheduled, JobStateWaiting)):
+                    logger.error("Job ended with unexpected state: %s", state)
+                else:
+                    logger.debug("Job ended: %s", state)
+                return state
+            except Exception:
+                logger.exception("Exception in aio_submit for job %s", job)
+
+        job._future = asyncio.run_coroutine_threadsafe(submit(), self.loop)
 
         return other
 
@@ -661,7 +674,6 @@ class Scheduler(StateProvider, threading.Thread):
         from experimaestro.scheduler.jobs import JobStateError, JobFailureStatus
 
         logger.info("Submitting job %s", job)
-        job.submittime = datetime.now()
         job.scheduler = self
         self.waitingjobs.add(job)
 
@@ -683,18 +695,29 @@ class Scheduler(StateProvider, threading.Thread):
             path.unlink()
         path.symlink_to(job.path)
 
-        job.set_state(JobState.WAITING)
+        # Load existing job status if available (from previous run)
+        old_state = job.state
+        job.load_from_disk()
+        new_state = job.state
+        if old_state != job.state:
+            job.state = old_state
+            job.set_state(new_state)
+
         self.notify_job_submitted(job)
 
-        # Check if already done
-        if job.donepath.exists():
-            job.set_state(JobState.DONE)
-            self.notify_job_state(job)  # Notify listeners of done state
+        was_done = job.state == JobState.DONE
+        if was_done:
+            self.notify_job_state(job)
+        else:
+            job._clear_transient_fields()
+            job.set_state(JobState.WAITING)
 
         # Check if we have a running process
         if not job.state.finished():
             process = await job.aio_process()
+
             if process is not None:
+                logger.debug("Got a process for %s", job)
                 # Notify listeners that job is running
                 job.set_state(JobState.RUNNING)
                 self.notify_job_state(job)
@@ -741,14 +764,19 @@ class Scheduler(StateProvider, threading.Thread):
 
         # If not done or running, start the job
         if not job.state.finished():
+            job.submittime = datetime.now()
+
             # Check if this is a transient job that is not needed
             if job.transient.is_transient and not job._needed_transient:
+                logger.debug("Job is transient and not needed, discarding for now")
                 job.set_state(JobState.UNSCHEDULED)
 
             # Start the job if not skipped (state is still WAITING)
+            logger.debug("No process for job %s (state %s), starting", job, job.state)
             if job.state == JobState.WAITING:
                 try:
                     state = await self.aio_start(job)
+                    logger.debug("aio_start returned %s", state)
                     if state is not None:
                         job.endtime = datetime.now()
                         job.set_state(state)
@@ -759,8 +787,8 @@ class Scheduler(StateProvider, threading.Thread):
         # Job is finished - experiment statistics already updated by set_state
 
         # Write final metadata with end time and final state
-        # Only for jobs that actually started (starttime is set in aio_start)
-        if job.starttime is not None:
+        # Only for jobs that actually ran this time (not loaded from disk)
+        if not was_done and job.starttime is not None:
             job.status_path.write_text(json.dumps(job.state_dict()))
 
         if job in self.waitingjobs:

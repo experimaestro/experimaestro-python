@@ -555,6 +555,7 @@ class MockJob(BaseJob):
         process: dict | None = None,
         carbon_metrics: CarbonMetricsData | None = None,
     ):
+        super().__init__()
         self.identifier = identifier
         self.task_id = task_id
         self.path = path
@@ -646,6 +647,45 @@ class MockJob(BaseJob):
             failure_reason=failure_reason,
             process=d.get("process"),
         )
+
+    @classmethod
+    def from_disk(
+        cls,
+        job_path: Path,
+        task_id: str,
+        job_id: str,
+        workspace_path: Path | None = None,  # noqa: ARG003 - kept for API compatibility
+    ) -> "MockJob":
+        """Create MockJob from job directory on disk
+
+        Creates a minimal instance and calls load_from_disk() to populate it.
+
+        Args:
+            job_path: Path to the job directory
+            task_id: Task identifier
+            job_id: Job identifier
+            workspace_path: Workspace path (unused, kept for compatibility)
+
+        Returns:
+            MockJob instance with state loaded from disk
+        """
+        # Create minimal instance with required fields
+        job = cls(
+            identifier=job_id,
+            task_id=task_id,
+            path=job_path,
+            state="unscheduled",
+            submittime=None,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+
+        # Load state from disk
+        job.load_from_disk()
+
+        return job
 
 
 class MockExperiment(BaseExperiment):

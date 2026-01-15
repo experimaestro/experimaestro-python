@@ -180,7 +180,7 @@ def test_running_state_detection():
             task_id = job_path.parent.name
             job_id = job_path.name
 
-            mock_job = provider._create_mock_job_from_path(job_path, task_id, job_id)
+            mock_job = provider._mock_job_from_disk(job_path, task_id, job_id)
             assert mock_job.state == JobState.RUNNING, (
                 f"Expected job state RUNNING, got {mock_job.state}"
             )

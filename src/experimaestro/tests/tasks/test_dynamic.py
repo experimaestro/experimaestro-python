@@ -106,7 +106,7 @@ class Learn(ResumableTask):
 
 
 def evaluate(evaluations, checkpoint: Checkpoint):
-    logging.warning("Evaluating checkpoint %s", checkpoint)
+    logging.info("Evaluating checkpoint %s", checkpoint)
     task = Evaluate.C(model=checkpoint.model)
     checkpoint_loader = CheckpointLoader.C(checkpoint=checkpoint)
     evaluations.append(task.submit(init_tasks=[checkpoint_loader]))

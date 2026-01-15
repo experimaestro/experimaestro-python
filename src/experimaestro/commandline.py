@@ -10,7 +10,7 @@ from experimaestro.scheduler.workspace import RunMode
 
 from experimaestro.utils import logger
 from .scheduler import Job, JobState
-from .connectors import Process, Redirect, RedirectType, Connector
+from .connectors import Redirect, RedirectType, Connector
 from .scheduler import Workspace
 from .core.objects import Config
 
@@ -244,27 +244,6 @@ class CommandLineJob(Job):
             transient=transient,
         )
         self.commandline = commandline
-
-    async def aio_process(self) -> Optional[Process]:
-        """Returns the process if there is one"""
-        if self._process:
-            return self._process
-
-        if self.pidpath.is_file():
-            # Get from pidpath file
-            from experimaestro.connectors import Process
-
-            pinfo = json.loads(self.pidpath.read_text())
-            p = Process.fromDefinition(self.launcher.connector, pinfo)
-            if p is None:
-                return None
-
-            if await p.aio_isrunning():
-                return p
-
-            return None
-
-        return None
 
     @property
     def notificationURL(self):

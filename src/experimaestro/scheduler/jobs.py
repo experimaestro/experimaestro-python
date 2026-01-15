@@ -265,6 +265,10 @@ class Job(BaseJob, Resource):
         old_state = self.state
         self.state = new_state
 
+        # Nothing changed
+        if old_state == new_state:
+            return
+
         # Helper to determine if a state should be "counted" in unfinishedJobs
         # A job is counted when it's been submitted and hasn't finished yet
         def is_counted(state):
@@ -299,6 +303,14 @@ class Job(BaseJob, Resource):
             # Handle recovery from error (e.g., resubmit)
             if old_state.is_error() and not new_state.is_error():
                 xp.failedJobs.pop(self.identifier, None)
+
+        # Clear process and progress when job finishes
+        if new_state.finished():
+            # Always clear process reference when finished
+            self._process = None
+            # Clear progress only when done (keep for failed jobs for debugging)
+            if new_state == JobState.DONE:
+                self._progress = []
 
         # Notify listeners via scheduler's thread-safe mechanism
         if self.scheduler:
@@ -412,10 +424,6 @@ class Job(BaseJob, Resource):
             A Process instance representing the running job
         """
         raise NotImplementedError(f"Method aio_run not implemented in {self.__class__}")
-
-    async def aio_process(self) -> Optional["Process"]:
-        """Returns the process if it exists"""
-        raise NotImplementedError("Not implemented")
 
     @property
     def pidpath(self):

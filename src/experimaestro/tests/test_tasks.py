@@ -311,3 +311,44 @@ def test_task_resubmit_across_experiments():
 
             # Task should recognize it's already done
             assert task2.__xpm__.job.wait() == JobState.DONE
+
+
+def test_resubmit_preserves_status():
+    """Test that resubmitting a completed job doesn't modify status.json"""
+    with TemporaryDirectory(prefix="xpm", suffix="preserve_status") as workdir:
+        # First experiment: task completes
+        with TemporaryExperiment(
+            "preserve_status", timeout_multiplier=12, workdir=workdir
+        ):
+            task1 = ControllableResumableTask.C()
+            task1.submit()
+
+            # Tell task to complete
+            task1.control_file.parent.mkdir(parents=True, exist_ok=True)
+            task1.control_file.write_text("complete")
+
+            assert task1.__xpm__.job.wait() == JobState.DONE
+
+            # Get the status.json path and record its modification time and content
+            status_path = task1.__xpm__.job.status_path
+            assert status_path.exists(), "status.json should exist after job completion"
+            original_mtime = status_path.stat().st_mtime
+            original_content = status_path.read_text()
+
+        # Second experiment: resubmit completed task
+        with TemporaryExperiment(
+            "preserve_status", timeout_multiplier=12, workdir=workdir
+        ):
+            task2 = ControllableResumableTask.C()
+            task2.submit()
+
+            assert task2.__xpm__.job.wait() == JobState.DONE
+
+            # Verify status.json was not modified
+            new_mtime = status_path.stat().st_mtime
+            new_content = status_path.read_text()
+
+            assert new_mtime == original_mtime, (
+                f"status.json mtime changed: {original_mtime} -> {new_mtime}"
+            )
+            assert new_content == original_content, "status.json content changed"

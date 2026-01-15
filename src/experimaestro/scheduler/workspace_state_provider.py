@@ -594,7 +594,7 @@ class WorkspaceStateProvider(StateProvider):
             # Load from disk
             job_path = self.workspace_path / "jobs" / task_id / job_id
             if job_path.exists():
-                job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                job = self._mock_job_from_disk(job_path, task_id, job_id)
             else:
                 # Job directory doesn't exist - create minimal MockJob
                 # Convert float timestamp to datetime if needed
@@ -768,7 +768,7 @@ class WorkspaceStateProvider(StateProvider):
                 )
 
                 # Check job state for experiment status and counting
-                job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                job = self._mock_job_from_disk(job_path, task_id, job_id)
                 if job.state.is_error():
                     status = ExperimentStatus.FAILED
                     failed_count += 1
@@ -826,7 +826,7 @@ class WorkspaceStateProvider(StateProvider):
                 job_id = job_link.name
 
                 # Create MockJob from filesystem state (done/failed files, etc.)
-                job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                job = self._mock_job_from_disk(job_path, task_id, job_id)
                 jobs.append(job)
 
         return jobs
@@ -1236,7 +1236,7 @@ class WorkspaceStateProvider(StateProvider):
                 # Check if this job is referenced by any experiment
                 if job_path not in referenced_jobs:
                     # This is an orphan job - create MockJob from filesystem state
-                    job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                    job = self._mock_job_from_disk(job_path, task_id, job_id)
                     orphan_jobs.append(job)
 
         return orphan_jobs
@@ -1290,7 +1290,7 @@ class WorkspaceStateProvider(StateProvider):
                     # Only include if the job is actually running
                     if actual_state == JobState.RUNNING:
                         # Create MockJob for the running job
-                        job = self._create_mock_job_from_path(job_path, task_id, job_id)
+                        job = self._mock_job_from_disk(job_path, task_id, job_id)
                         # Update state to verified running state
                         job.state = JobState.RUNNING
                         stray_jobs.append(job)
@@ -1440,44 +1440,21 @@ class WorkspaceStateProvider(StateProvider):
 
         return referenced
 
-    def _create_mock_job_from_path(
-        self, job_path: Path, task_id: str, job_id: str
-    ) -> MockJob:
-        """Create a MockJob from a job directory path (when no metadata exists)"""
-        from experimaestro.scheduler.interfaces import JobState as JobStateClass
-
-        # Try to determine state from marker files
-        scriptname = task_id.rsplit(".", 1)[-1]
-        state = JobStateClass.from_path(job_path, scriptname)
-
-        # If no done/failed marker, check if job is running via PID file
-        if state is None:
-            state = self._check_running_from_pid(job_path, scriptname)
-
-        if state is None:
-            state = JobState.UNSCHEDULED
-
-        # Get modification time for timestamps (convert to datetime)
-        try:
-            mtime = datetime.fromtimestamp(job_path.stat().st_mtime)
-        except OSError:
-            mtime = None
-
-        # Load carbon metrics from carbon storage
-        carbon_metrics = self._load_carbon_metrics_for_job(job_id)
-
-        return MockJob(
-            identifier=job_id,
+    def _mock_job_from_disk(self, job_path: Path, task_id: str, job_id: str) -> MockJob:
+        """Create a MockJob from disk and load carbon metrics from storage"""
+        job = MockJob.from_disk(
+            job_path=job_path,
             task_id=task_id,
-            path=job_path,
-            state=state.name,
-            submittime=mtime,
-            starttime=mtime,
-            endtime=mtime if state.finished() else None,
-            progress=[],
-            updated_at="",
-            carbon_metrics=carbon_metrics,
+            job_id=job_id,
+            workspace_path=self.workspace_path,
         )
+
+        # Load carbon metrics from carbon storage (may be more recent than status.json)
+        carbon_metrics = self._load_carbon_metrics_for_job(job_id)
+        if carbon_metrics is not None:
+            job.carbon_metrics = carbon_metrics
+
+        return job
 
     def _check_running_from_pid(
         self, job_path: Path, scriptname: str
