@@ -397,7 +397,7 @@ class BaseJob:
     identifier: str
     task_id: str
     path: Path
-    state: JobState
+    _state: JobState
     submittime: Optional[datetime]
     starttime: Optional[datetime]
     endtime: Optional[datetime]
@@ -415,8 +415,62 @@ class BaseJob:
 
     def __init__(self):
         super().__init__()
+        self._state = JobState.UNSCHEDULED
+        self.submittime: datetime | None = None
+        self.starttime: datetime | None = None
+        self.endtime: datetime | None = None
         self._process = None
         self._process_dict = None
+
+    @property
+    def state(self) -> JobState:
+        """Access to job state"""
+        return self._state
+
+    @state.setter
+    def state(self, new_state: JobState):
+        """Set state via set_state() to ensure proper handling"""
+        self.set_state(new_state)
+
+    def set_state(
+        self,
+        new_state: JobState,
+        *,
+        loading: bool = False,
+    ):
+        """Set job state and update timestamps
+
+        Args:
+            new_state: The new job state
+            loading: If True, timestamps are not modified (loading from disk)
+
+        Timestamp rules (when loading=False):
+        - WAITING: sets submittime, clears starttime and endtime
+        - RUNNING: sets starttime
+        - DONE/ERROR: sets endtime
+        """
+        old_state = self._state
+        if old_state == new_state:
+            return
+
+        if not loading:
+            ts = datetime.now()
+
+            # Transitioning to WAITING clears later timestamps (for restarts)
+            if new_state == JobState.WAITING:
+                self.submittime = ts
+                self.starttime = None
+                self.endtime = None
+
+            # Set starttime when entering RUNNING
+            elif new_state == JobState.RUNNING:
+                self.starttime = ts
+
+            # Set endtime when finishing (DONE or ERROR)
+            elif new_state.finished():
+                self.endtime = ts
+
+        self._state = new_state
 
     @property
     def locator(self) -> str:
@@ -583,7 +637,20 @@ class BaseJob:
 
         # Marker files (.done/.failed) overrides stored state
         if marker_state := JobState.from_path(self.path, self.scriptname):
-            self.state = marker_state
+            # Use marker file's mtime as endtime
+            marker_file = (
+                self.donefile if marker_state == JobState.DONE else self.failedfile
+            )
+            try:
+                self.endtime = datetime.fromtimestamp(marker_file.stat().st_mtime)
+            except OSError:
+                pass
+
+            # Load starttime from params.json if not already set
+            if self.starttime is None:
+                self._load_starttime_from_params()
+
+            self.set_state(marker_state, loading=True)
             self._process_dict = None
             return
 
@@ -600,38 +667,63 @@ class BaseJob:
 
                         proc = psutil.Process(pid)
                         if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
-                            self.state = JobState.RUNNING
+                            self.set_state(JobState.RUNNING, loading=True)
                     except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
             except (json.JSONDecodeError, OSError, ValueError, TypeError):
                 pass
 
     def _load_from_status_dict(self, status_dict: Dict[str, Any]) -> None:
-        """Load fields from status.json dictionary"""
-        if status_dict.get("submitted_time"):
-            self.submittime = deserialize_to_datetime(status_dict["submitted_time"])
-        if status_dict.get("started_time"):
-            self.starttime = deserialize_to_datetime(status_dict["started_time"])
-        if status_dict.get("ended_time"):
-            self.endtime = deserialize_to_datetime(status_dict["ended_time"])
+        """Load fields from status.json dictionary
+
+        Timestamps are loaded and preserved when calling set_state() with the
+        appropriate timestamp parameter based on the target state.
+        """
+        # Load timestamps first
+        submitted_time = (
+            deserialize_to_datetime(status_dict["submitted_time"])
+            if status_dict.get("submitted_time")
+            else None
+        )
+        started_time = (
+            deserialize_to_datetime(status_dict["started_time"])
+            if status_dict.get("started_time")
+            else None
+        )
+        ended_time = (
+            deserialize_to_datetime(status_dict["ended_time"])
+            if status_dict.get("ended_time")
+            else None
+        )
+
         if status_dict.get("exit_code") is not None:
             self.exit_code = status_dict["exit_code"]
         if status_dict.get("retry_count") is not None:
             self.retry_count = status_dict["retry_count"]
 
-        # Get state
+        # Set timestamps directly
+        self.submittime = submitted_time
+        self.starttime = started_time
+        self.endtime = ended_time
+
+        # Determine state from status dict
         state_str = status_dict.get("state", "").lower()
-        self.state = STATE_NAME_TO_JOBSTATE.get(state_str)
+        new_state = STATE_NAME_TO_JOBSTATE.get(state_str)
+
         # Handle error state with failure reason
         if state_str in ("error", "failed"):
             failure_reason = status_dict.get("failure_reason")
             if failure_reason:
                 try:
-                    self.state = JobStateError(JobFailureStatus[failure_reason])
+                    new_state = JobStateError(JobFailureStatus[failure_reason])
                 except (KeyError, ValueError):
-                    self.state = JobStateError(JobFailureStatus.FAILED)
+                    new_state = JobStateError(JobFailureStatus.FAILED)
             else:
-                self.state = JobStateError(JobFailureStatus.FAILED)
+                new_state = JobStateError(JobFailureStatus.FAILED)
+
+        # Set state without modifying timestamps (loading from disk)
+        if new_state is not None:
+            self.set_state(new_state, loading=True)
 
         # Load process information
         self._process_dict = status_dict.get("process", None)
@@ -670,6 +762,15 @@ class BaseJob:
                 and self.endtime is None
             ):
                 self.endtime = mtime
+        except OSError:
+            pass
+
+    def _load_starttime_from_params(self) -> None:
+        """Load starttime from params.json mtime as fallback"""
+        params_path = self.path / "params.json"
+        try:
+            if params_path.exists():
+                self.starttime = datetime.fromtimestamp(params_path.stat().st_mtime)
         except OSError:
             pass
 

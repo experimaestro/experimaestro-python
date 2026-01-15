@@ -42,12 +42,16 @@ async def _aio_wait_kqueue(pid: int) -> int:
     loop = asyncio.get_event_loop()
     kq = select.kqueue()
 
+    # NOTE_EXITSTATUS is required to get the exit status in the data field
+    # Python's select module doesn't expose this constant, so define it here
+    NOTE_EXITSTATUS = 0x04000000
+
     try:
         event = select.kevent(
             pid,
             filter=select.KQ_FILTER_PROC,
             flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
-            fflags=select.KQ_NOTE_EXIT,
+            fflags=select.KQ_NOTE_EXIT | NOTE_EXITSTATUS,
         )
         kq.control([event], 0)
 
@@ -61,7 +65,16 @@ async def _aio_wait_kqueue(pid: int) -> int:
 
         events = kq.control([], 1, 0)
         if events:
-            return events[0].data
+            # With NOTE_EXITSTATUS, data contains the raw wait status
+            raw_status = events[0].data
+            exit_code = os.waitstatus_to_exitcode(raw_status)
+            logger.debug(
+                "kqueue exit: pid=%s raw_status=%s exit_code=%s",
+                pid,
+                raw_status,
+                exit_code,
+            )
+            return exit_code
         return -1
     finally:
         kq.close()

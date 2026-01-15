@@ -141,6 +141,9 @@ class Job(BaseJob, Resource):
     # Set by the scheduler
     _future: Optional["concurrent.futures.Future"]
 
+    # Future that resolves when done handler completes
+    _final_state: Optional["asyncio.Future[JobState]"]
+
     def __init__(
         self,
         config: Config,
@@ -170,7 +173,7 @@ class Job(BaseJob, Resource):
         self.scheduler: Optional["Scheduler"] = None
         self.experiments: List["experiment"] = []  # Experiments this job belongs to
         self.config = config
-        self.state: JobState = JobState.UNSCHEDULED
+        self._state: JobState = JobState.UNSCHEDULED
 
         # Dependencies
         self.dependencies: Set[Dependency] = set()  # as target
@@ -211,6 +214,22 @@ class Job(BaseJob, Resource):
 
         # Carbon metrics (updated via events)
         self.carbon_metrics = None
+
+        # Future that resolves when done handler completes
+        self._final_state: Optional[asyncio.Future[JobState]] = None
+
+    def get_final_state_future(self, loop: asyncio.AbstractEventLoop) -> asyncio.Future:
+        """Get or create the final_state future.
+
+        Args:
+            loop: The event loop to create the future on
+
+        Returns:
+            A future that resolves to the job's final state
+        """
+        if self._final_state is None:
+            self._final_state = loop.create_future()
+        return self._final_state
 
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
@@ -253,21 +272,34 @@ class Job(BaseJob, Resource):
         assert self._future, "Cannot wait a not submitted job"
         return self._future.result()
 
-    def set_state(self, new_state: JobState):
-        """Set the job state and update experiment statistics
+    def set_state(
+        self,
+        new_state: JobState,
+        *,
+        loading: bool = False,
+    ):
+        """Set the job state, update timestamps, experiment statistics, and notify
 
         This method should be called instead of direct state assignment
         to ensure experiment statistics (unfinishedJobs, failedJobs) are
         properly updated.
 
         :param new_state: The new job state
+        :param loading: If True, timestamps are not modified (loading from disk)
         """
-        old_state = self.state
-        self.state = new_state
+        old_state = self._state
 
         # Nothing changed
         if old_state == new_state:
             return
+
+        # Call base implementation for state and timestamps
+        super().set_state(new_state, loading=loading)
+
+        # Reset _final_state when transitioning to WAITING (for restarts/resubmits)
+        # This ensures a new future is created instead of reusing the old one
+        if new_state == JobState.WAITING:
+            self._final_state = None
 
         # Helper to determine if a state should be "counted" in unfinishedJobs
         # A job is counted when it's been submitted and hasn't finished yet

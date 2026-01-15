@@ -218,12 +218,15 @@ class ControllableResumableTask(ResumableTask):
     control_file: Meta[Path] = field(default_factory=PathGenerator("control"))
 
     def execute(self):
-        # Wait for control file
-        while not self.control_file.is_file():
+        # Wait for control file with non-empty content
+        # This avoids race conditions where the file exists but is empty
+        while True:
+            if self.control_file.is_file():
+                action = self.control_file.read_text().strip()
+                if action:  # Only proceed if file has content
+                    break
             time.sleep(0.1)
 
-        # Read control: "fail" to exit with error, "complete" to succeed
-        action = self.control_file.read_text().strip()
         self.control_file.unlink()
 
         if action == "fail":
@@ -231,10 +234,10 @@ class ControllableResumableTask(ResumableTask):
 
 
 def test_resumable_task_resubmit():
-    """Test resubmitting a failed ResumableTask within the same experiment"""
+    """Test that resubmitting a failed ResumableTask stays failed unless max_retries increased"""
     with TemporaryExperiment("resumable_resubmit", timeout_multiplier=12):
         task1 = ControllableResumableTask.C()
-        task1.submit()
+        task1.submit(max_retries=1)
 
         # Tell task to fail
         task1.control_file.parent.mkdir(parents=True, exist_ok=True)
@@ -244,19 +247,29 @@ def test_resumable_task_resubmit():
         job = task1.__xpm__.job
         assert job.wait() == JobState.ERROR, "Job should have failed"
 
-        # Resubmit by creating a new instance with same parameters
+        # Resubmit with same max_retries - should stay failed
         task2 = ControllableResumableTask.C()
-        task2.submit()
+        task2.submit(max_retries=1)
 
-        # Tell task to complete
+        # Even though we tell it to complete, it should not run
         task2.control_file.write_text("complete")
 
-        # Wait for the resubmitted job to complete
-        assert task2.__xpm__.job.wait() == JobState.DONE
+        # Job should still be in error state (not restarted)
+        assert task2.__xpm__.job.wait() == JobState.ERROR
+
+        # Resubmit with higher max_retries - should run and complete
+        task3 = ControllableResumableTask.C()
+        task3.submit(max_retries=2)
+
+        # Tell task to complete
+        task3.control_file.write_text("complete")
+
+        # Now it should complete
+        assert task3.__xpm__.job.wait() == JobState.DONE
 
 
 def test_resumable_task_resubmit_across_experiments():
-    """Test resubmitting a failed ResumableTask across two experiment instances"""
+    """Test resubmitting a failed ResumableTask across experiments requires higher max_retries"""
     with TemporaryDirectory(prefix="xpm", suffix="resubmit_across") as workdir:
         # First experiment: task fails
         try:
@@ -264,7 +277,7 @@ def test_resumable_task_resubmit_across_experiments():
                 "resubmit_across", timeout_multiplier=6, workdir=workdir
             ):
                 task1 = ControllableResumableTask.C()
-                task1.submit()
+                task1.submit(max_retries=1)
 
                 # Tell task to fail
                 task1.control_file.parent.mkdir(parents=True, exist_ok=True)
@@ -272,18 +285,30 @@ def test_resumable_task_resubmit_across_experiments():
         except Exception as e:
             logging.info("First experiment ended (expected): %s", e)
 
-        # Second experiment: task completes
+        # Second experiment: resubmit with same max_retries - should stay failed
+        with TemporaryExperiment(
+            "resubmit_across", timeout_multiplier=6, workdir=workdir
+        ):
+            task2 = ControllableResumableTask.C()
+            task2.submit(max_retries=1)
+
+            task2.control_file.write_text("complete")
+
+            # Should still be error (retry_count exhausted)
+            assert task2.__xpm__.job.wait() == JobState.ERROR
+
+        # Third experiment: resubmit with higher max_retries - should complete
         with TemporaryExperiment(
             "resubmit_across", timeout_multiplier=12, workdir=workdir
         ):
-            task2 = ControllableResumableTask.C()
-            task2.submit()
+            task3 = ControllableResumableTask.C()
+            task3.submit(max_retries=2)
 
             # Tell task to complete
-            task2.control_file.write_text("complete")
+            task3.control_file.write_text("complete")
 
-            # Wait for the resubmitted job to complete
-            assert task2.__xpm__.job.wait() == JobState.DONE
+            # Now it should complete
+            assert task3.__xpm__.job.wait() == JobState.DONE
 
 
 def test_task_resubmit_across_experiments():

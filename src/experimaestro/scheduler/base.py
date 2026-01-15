@@ -13,7 +13,14 @@ from typing import (
 import asyncio
 
 from experimaestro.scheduler import experiment
-from experimaestro.scheduler.jobs import Job, JobState, JobError, JobDependency
+from experimaestro.scheduler.jobs import (
+    Job,
+    JobState,
+    JobError,
+    JobDependency,
+    JobStateError,
+    JobFailureStatus,
+)
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.interfaces import (
     BaseJob,
@@ -35,13 +42,13 @@ from experimaestro.scheduler.state_provider import CarbonMetricsData
 
 
 from experimaestro.utils import logger
-from experimaestro.utils.asyncio import asyncThreadcheck
 import concurrent.futures
 
 if TYPE_CHECKING:
     from experimaestro.webui import WebUIServer
     from experimaestro.settings import ServerSettings
     from experimaestro.scheduler.workspace import Workspace
+    from experimaestro.connectors import Process
 
 
 class Listener:
@@ -234,6 +241,11 @@ class Scheduler(StateProvider, threading.Thread):
         self.loop.call_soon_threadsafe(init_loop_vars)
         init_done.wait()
 
+        # Set up DoneHandlerWorker with the event loop
+        from experimaestro.scheduler.done_handler import DoneHandlerWorker
+
+        DoneHandlerWorker.instance().set_loop(self.loop)
+
         self._ready.set()
         logger.debug("Scheduler initialized with EventLoopThread's loop")
 
@@ -305,8 +317,16 @@ class Scheduler(StateProvider, threading.Thread):
         async def submit():
             try:
                 state = await self.aio_submit(job)
-                if isinstance(job.state, (JobStateUnscheduled, JobStateWaiting)):
+                # UNSCHEDULED is valid for transient jobs that weren't needed
+                if isinstance(job.state, JobStateWaiting):
                     logger.error("Job ended with unexpected state: %s", state)
+                elif isinstance(job.state, JobStateUnscheduled):
+                    if job.transient.is_transient:
+                        logger.debug(
+                            "Transient job ended unscheduled (not needed): %s", state
+                        )
+                    else:
+                        logger.error("Job ended with unexpected state: %s", state)
                 else:
                     logger.debug("Job ended: %s", state)
                 return state
@@ -355,11 +375,25 @@ class Scheduler(StateProvider, threading.Thread):
             # This ensures new callbacks are registered even for resubmitted jobs
             other.watched_outputs.extend(job.watched_outputs)
 
+            # Update max_retries if the new job has a higher value
+            # This allows restarting failed jobs by increasing max_retries
+            if job.max_retries > other.max_retries:
+                other.max_retries = job.max_retries
+
             # Check if job needs to be re-started
             need_restart = False
             if other.state.is_error():
-                logger.info("Re-submitting job (was in error state)")
-                need_restart = True
+                # Only restart if we have retries remaining
+                if other.retry_count < other.max_retries:
+                    logger.info("Re-submitting job (was in error state)")
+                    need_restart = True
+                else:
+                    logger.info(
+                        "Job %s in error state but retry_count=%d >= max_retries=%d",
+                        other.identifier[:8],
+                        other.retry_count,
+                        other.max_retries,
+                    )
             elif (
                 was_transient
                 and not other.transient.is_transient
@@ -550,6 +584,31 @@ class Scheduler(StateProvider, threading.Thread):
             except OSError as e:
                 logger.warning("Failed to remove job event file %s: %s", event_file, e)
 
+    def _cleanup_job_marker_files(self, job: Job) -> None:
+        """Clean up old marker files (.done/.failed) from previous runs
+
+        Called when a job is about to start to ensure clean state.
+        This is necessary when resubmitting a failed job.
+
+        Args:
+            job: The job being started
+        """
+        logger.info("Cleaning up marker files for job %s", job.identifier[:8])
+        for marker_file in [job.donepath, job.failedpath]:
+            logger.info(
+                "  Checking marker file: %s (exists=%s)",
+                marker_file,
+                marker_file.exists(),
+            )
+            if marker_file.exists():
+                try:
+                    marker_file.unlink()
+                    logger.info("  Removed old marker file: %s", marker_file)
+                except OSError as e:
+                    logger.warning(
+                        "Failed to remove marker file %s: %s", marker_file, e
+                    )
+
     def _notify_listeners(self, notification_func, job: Job):
         """Execute notification in thread pool with error isolation.
 
@@ -671,8 +730,6 @@ class Scheduler(StateProvider, threading.Thread):
         """Main scheduler function: submit a job, run it (if needed), and returns
         the status code
         """
-        from experimaestro.scheduler.jobs import JobStateError, JobFailureStatus
-
         logger.info("Submitting job %s", job)
         job.scheduler = self
         self.waitingjobs.add(job)
@@ -682,12 +739,6 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Note: Job metadata will be written after directory is created in aio_start
 
-        # Check that we don't have a completed job in
-        # alternate directories
-        for jobspath in experiment.current().alt_jobspaths:
-            # Future enhancement: check if done
-            pass
-
         # Creates a link into the experiment folder
         path = experiment.current().jobspath / job.relpath
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -695,18 +746,25 @@ class Scheduler(StateProvider, threading.Thread):
             path.unlink()
         path.symlink_to(job.path)
 
-        # Load existing job status if available (from previous run)
-        old_state = job.state
-        job.load_from_disk()
-        new_state = job.state
-        if old_state != job.state:
-            job.state = old_state
-            job.set_state(new_state)
-
+        # Now, notify that the job has been submitted
         self.notify_job_submitted(job)
+
+        # Load existing job status if available (from previous run)
+        # set_state(loading=True) properly handles experiment statistics
+        job.load_from_disk()
 
         was_done = job.state == JobState.DONE
         if was_done:
+            self.notify_job_state(job)
+        elif job.state.is_error() and job.retry_count >= job.max_retries:
+            # Failed job with exhausted retries - keep in error state
+            # User must increase max_retries to allow restart
+            logger.info(
+                "Job %s failed with retry_count=%d >= max_retries=%d, not restarting",
+                job.identifier[:8],
+                job.retry_count,
+                job.max_retries,
+            )
             self.notify_job_state(job)
         else:
             job._clear_transient_fields()
@@ -717,55 +775,10 @@ class Scheduler(StateProvider, threading.Thread):
             process = await job.aio_process()
 
             if process is not None:
-                logger.debug("Got a process for %s", job)
-                # Notify listeners that job is running
-                job.set_state(JobState.RUNNING)
-                self.notify_job_state(job)
-
-                # And now, we wait...
-                logger.info("Got a process for job %s - waiting to complete", job)
-                code = await process.aio_code()
-                logger.info("Job %s completed with code %s", job, code)
-
-                # Record exit code if available
-                if code is not None:
-                    job.exit_code = code
-
-                # Read state from .done/.failed files (contains detailed failure reason)
-                state = JobState.from_path(job.path, job.name)
-
-                # If state is a generic FAILED error, let the process determine
-                # the state (it may detect launcher-specific failures like SLURM timeout)
-                if (
-                    state is not None
-                    and isinstance(state, JobStateError)
-                    and state.failure_reason == JobFailureStatus.FAILED
-                    and code is not None
-                ):
-                    process_state = process.get_job_state(code)
-                    if (
-                        isinstance(process_state, JobStateError)
-                        and process_state.failure_reason != JobFailureStatus.FAILED
-                    ):
-                        # Process detected a more specific failure reason
-                        state = process_state
-
-                if state is None:
-                    if code is not None:
-                        # Fall back to process-specific state detection
-                        state = process.get_job_state(code)
-                    else:
-                        logger.error("No .done or .failed file found for job %s", job)
-                        state = JobState.ERROR
-                # Set endtime before set_state so database gets the timestamp
-                job.endtime = datetime.now()
-                job.set_state(state)
-                self.notify_job_state(job)  # Notify listeners of final state
+                await self._wait_for_job_process(job, process)
 
         # If not done or running, start the job
         if not job.state.finished():
-            job.submittime = datetime.now()
-
             # Check if this is a transient job that is not needed
             if job.transient.is_transient and not job._needed_transient:
                 logger.debug("Job is transient and not needed, discarding for now")
@@ -776,35 +789,88 @@ class Scheduler(StateProvider, threading.Thread):
             if job.state == JobState.WAITING:
                 try:
                     state = await self.aio_start(job)
-                    logger.debug("aio_start returned %s", state)
+                    logger.info(
+                        "aio_start returned %s for job %s", state, job.identifier[:8]
+                    )
                     if state is not None:
-                        job.endtime = datetime.now()
                         job.set_state(state)
+                        logger.info(
+                            "Job %s state after set_state: %s",
+                            job.identifier[:8],
+                            job.state,
+                        )
                 except Exception:
                     logger.exception("Got an exception while starting the job")
                     raise
 
-        # Job is finished - experiment statistics already updated by set_state
+        logger.info("Current job state is %s", job.state)
 
-        # Write final metadata with end time and final state
-        # Only for jobs that actually ran this time (not loaded from disk)
-        if not was_done and job.starttime is not None:
-            job.status_path.write_text(json.dumps(job.state_dict()))
+        # Submit to done handler for background processing
+        # This handles: task outputs, final status write, and cleanup
+        from experimaestro.scheduler.done_handler import DoneHandlerWorker
 
-        if job in self.waitingjobs:
-            self.waitingjobs.remove(job)
+        # Create the final state future before submitting to handler
+        final_future = job.get_final_state_future(self.loop)
 
-        # Process all remaining task outputs BEFORE notifying exit condition
-        # This ensures taskOutputQueueSize is updated before wait() can check it,
-        # preventing a race where wait() sees both unfinishedJobs==0 and
-        # taskOutputQueueSize==0 before callbacks have been queued.
-        await asyncThreadcheck("End of job processing", job.done_handler)
+        # Submit job completion to background handler
+        # For jobs loaded from disk as DONE, we still need to process any
+        # pending task outputs and write status
+        DoneHandlerWorker.instance().submit(job, self.loop)
 
-        # Now notify - wait() will see the correct taskOutputQueueSize
-        async with self.exitCondition:
-            self.exitCondition.notify_all()
+        # Wait for done handler to complete and notify exit condition
+        logger.info("Final future is %s", final_future)
+        return await final_future
 
-        return job.state
+    async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
+        """Wait for a running job process to complete and update state.
+
+        Args:
+            job: The job with a running process
+            process: The process to wait for
+        """
+        logger.debug("Got a process for %s", job)
+        # Notify listeners that job is running
+        job.set_state(JobState.RUNNING)
+        self.notify_job_state(job)
+
+        # And now, we wait...
+        logger.info("Got a process for job %s - waiting to complete", job)
+        code = await process.aio_code()
+        logger.info("Job %s completed with code %s", job, code)
+
+        # Record exit code if available
+        if code is not None:
+            job.exit_code = code
+
+        # Read state from .done/.failed files (contains detailed failure reason)
+        state = JobState.from_path(job.path, job.name)
+
+        # If state is a generic FAILED error, let the process determine
+        # the state (it may detect launcher-specific failures like SLURM timeout)
+        if (
+            state is not None
+            and isinstance(state, JobStateError)
+            and state.failure_reason == JobFailureStatus.FAILED
+            and code is not None
+        ):
+            process_state = process.get_job_state(code)
+            if (
+                isinstance(process_state, JobStateError)
+                and process_state.failure_reason != JobFailureStatus.FAILED
+            ):
+                # Process detected a more specific failure reason
+                state = process_state
+
+        if state is None:
+            if code is not None:
+                # Fall back to process-specific state detection
+                state = process.get_job_state(code)
+            else:
+                logger.error("No .done or .failed file found for job %s", job)
+                state = JobState.ERROR
+
+        job.set_state(state)
+        self.notify_job_state(job)  # Notify listeners of final state
 
     async def aio_start(self, job: Job) -> Optional[JobState]:  # noqa: C901
         """Start a job with full job starting logic
@@ -820,9 +886,7 @@ class Scheduler(StateProvider, threading.Thread):
         :raises Exception: Various exceptions during job execution, dependency locking,
             or process creation
         """
-        from experimaestro.scheduler.jobs import JobStateError
         from experimaestro.locking import DynamicDependencyLocks, LockError
-        from experimaestro.scheduler.jobs import JobFailureStatus
 
         # Assert preconditions
         assert job.launcher is not None
@@ -929,6 +993,9 @@ class Scheduler(StateProvider, threading.Thread):
                         # Clean up old job event files from previous runs
                         self._cleanup_job_event_files(job)
 
+                        # Clean up old marker files (.done/.failed) from previous runs
+                        self._cleanup_job_marker_files(job)
+
                         # Write metadata with submit and start time (after directory creation)
                         job.status_path.parent.mkdir(parents=True, exist_ok=True)
                         job.status_path.write_text(json.dumps(job.state_dict()))
@@ -987,6 +1054,14 @@ class Scheduler(StateProvider, threading.Thread):
 
                     # Read state from .done/.failed files (contains detailed failure reason)
                     state = JobState.from_path(job.path, job.name)
+                    logger.info(
+                        "State from marker files for job %s: %s (code=%s, donepath=%s, failedpath=%s)",
+                        job.identifier[:8],
+                        state,
+                        code,
+                        job.donepath.exists(),
+                        job.failedpath.exists(),
+                    )
 
                     # If state is a generic FAILED error, let the process determine
                     # the state (it may detect launcher-specific failures like SLURM timeout)
@@ -1029,38 +1104,32 @@ class Scheduler(StateProvider, threading.Thread):
 
             # Locks are released here after job completes
 
-            # Check if we should restart a resumable task that timed out
-            from experimaestro.scheduler.jobs import JobStateError
+            # Increment retry_count for any failure of a resumable task
+            if isinstance(state, JobStateError) and job.resumable:
+                job.retry_count += 1
 
+            # Check if we should restart a resumable task that timed out
             if (
                 isinstance(state, JobStateError)
                 and state.failure_reason == JobFailureStatus.TIMEOUT
                 and job.resumable
+                and job.retry_count <= job.max_retries
             ):
-                job.retry_count += 1
-                if job.retry_count <= job.max_retries:
-                    logger.info(
-                        "Resumable task %s timed out - restarting (attempt %d/%d)",
-                        job,
-                        job.retry_count,
-                        job.max_retries,
-                    )
-                    # Rotate log files to preserve previous run's logs
-                    job.rotate_logs()
-                    # Clear cached process so aio_run() will create a new one
-                    job._process = None
-                    # Delete PID file so the job will be resubmitted
-                    if job.pidpath.exists():
-                        job.pidpath.unlink()
-                    # Continue the loop to restart
-                    continue
-                else:
-                    logger.warning(
-                        "Resumable task %s exceeded max retries (%d), marking as failed",
-                        job,
-                        job.max_retries,
-                    )
-                    # Fall through to return the error state
+                logger.info(
+                    "Resumable task %s timed out - restarting (attempt %d/%d)",
+                    job,
+                    job.retry_count,
+                    job.max_retries,
+                )
+                # Rotate log files to preserve previous run's logs
+                job.rotate_logs()
+                # Clear cached process so aio_run() will create a new one
+                job._process = None
+                # Delete PID file so the job will be resubmitted
+                if job.pidpath.exists():
+                    job.pidpath.unlink()
+                # Continue the loop to restart
+                continue
 
             # Job finished (success or non-recoverable error)
             # Notify scheduler listeners of job state after job completes

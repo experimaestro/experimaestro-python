@@ -100,7 +100,9 @@ class StateListener:
         progress = []
         if hasattr(job, "_progress") and job._progress:
             progress = [
-                {"level": p.level, "progress": p.progress, "desc": p.desc}
+                p
+                if isinstance(p, dict)
+                else {"level": p.level, "progress": p.progress, "desc": p.desc}
                 for p in job._progress
             ]
 
