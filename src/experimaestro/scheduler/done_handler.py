@@ -58,7 +58,11 @@ class DoneHandlerWorker:
         """Shutdown the thread pool executor."""
         self._executor.shutdown(wait=False)
 
-    def submit(self, job: "Job", loop: asyncio.AbstractEventLoop | None = None) -> None:
+    def submit(
+        self,
+        job: "Job",
+        loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
         """Submit a job for done handler processing.
 
         Args:
@@ -90,16 +94,20 @@ class DoneHandlerWorker:
                 # Call job's done_handler (processes task outputs)
                 job.done_handler()
 
-                # Write final status
-                try:
-                    job.status_path.parent.mkdir(parents=True, exist_ok=True)
-                    job.status_path.write_text(json.dumps(job.state_dict()))
-                except Exception as e:
-                    logger.warning(
-                        "Failed to write final status for job %s: %s",
-                        job.identifier[:8],
-                        e,
-                    )
+                # Write final status while holding job lock
+                from filelock import FileLock
+
+                lock_path = job.lockpath
+                with FileLock(lock_path):
+                    try:
+                        job.status_path.parent.mkdir(parents=True, exist_ok=True)
+                        job.status_path.write_text(json.dumps(job.state_dict()))
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to write final status for job %s: %s",
+                            job.identifier[:8],
+                            e,
+                        )
 
             # Remove from scheduler waitingjobs
             if job.scheduler:
