@@ -58,6 +58,8 @@ class RPCMethod(str, Enum):
     GET_DEPENDENCIES_MAP = "get_dependencies_map"
     KILL_JOB = "kill_job"
     CLEAN_JOB = "clean_job"
+    DELETE_JOB_SAFELY = "delete_job_safely"
+    DELETE_EXPERIMENT = "delete_experiment"
     GET_SYNC_INFO = "get_sync_info"
     GET_PROCESS_INFO = "get_process_info"
 

@@ -456,7 +456,7 @@ class JobsTable(Vertical):
 
     BINDINGS = [
         Binding("ctrl+d", "delete_job", "Delete", show=False),
-        Binding("k", "kill_job", "Kill", show=False),
+        Binding("ctrl+k", "kill_job", "Kill", show=False),
         Binding("l", "view_logs", "Logs", key_display="l"),
         Binding("f", "copy_path", "Copy Path", show=False),
         Binding("/", "toggle_search", "Search"),

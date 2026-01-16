@@ -702,6 +702,35 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.CLEAN_JOB, params)
         return result.get("success", False)
 
+    def delete_job_safely(self, job: BaseJob, perform: bool = True) -> tuple[bool, str]:
+        """Safely delete a job and its data via remote server"""
+        if not perform:
+            # Dry run - check if job can be deleted (not running)
+            if job.state and job.state.running():
+                return False, f"Cannot delete running job {job.identifier}"
+            return True, f"Job {job.identifier} can be deleted"
+
+        params = {
+            "job_id": job.identifier,
+            "experiment_id": getattr(job, "experiment_id", ""),
+            "run_id": getattr(job, "run_id", ""),
+            "perform": True,
+        }
+        result = self._call_sync(RPCMethod.DELETE_JOB_SAFELY, params)
+        return result.get("success", False), result.get("message", "")
+
+    def delete_experiment(
+        self, experiment_id: str, delete_jobs: bool = False, perform: bool = True
+    ) -> tuple[bool, str]:
+        """Delete an experiment and optionally its job data via remote server"""
+        params = {
+            "experiment_id": experiment_id,
+            "delete_jobs": delete_jobs,
+            "perform": perform,
+        }
+        result = self._call_sync(RPCMethod.DELETE_EXPERIMENT, params)
+        return result.get("success", False), result.get("message", "")
+
     def get_process_info(self, job: BaseJob):
         """Get process information for a job
 

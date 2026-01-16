@@ -27,7 +27,7 @@ class ExperimentsList(Widget):
     BINDINGS = [
         Binding("d", "show_runs", "Runs"),
         Binding("ctrl+d", "delete_experiment", "Delete", show=False),
-        Binding("k", "kill_experiment", "Kill", show=False),
+        Binding("ctrl+k", "kill_experiment", "Kill", show=False),
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("D", "sort_by_date", "Sort Date", show=False),
     ]

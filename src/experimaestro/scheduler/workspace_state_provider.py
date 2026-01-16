@@ -1187,6 +1187,21 @@ class WorkspaceStateProvider(StateProvider):
 
             if job.path.exists():
                 shutil.rmtree(job.path)
+
+            # Clear job from cache
+            with self._job_cache_lock:
+                self._job_cache.pop(job.identifier, None)
+
+            # Emit state change event (unscheduled = job removed)
+            from experimaestro.scheduler.state_status import JobStateChangedEvent
+
+            self._notify_state_listeners(
+                JobStateChangedEvent(
+                    job_id=job.identifier,
+                    state="unscheduled",
+                )
+            )
+
             return True
         except Exception as e:
             logger.warning("Failed to clean job %s: %s", job.identifier, e)
@@ -1546,6 +1561,88 @@ class WorkspaceStateProvider(StateProvider):
             return result
         except (json.JSONDecodeError, OSError):
             return None
+
+    # =========================================================================
+    # Experiment deletion
+    # =========================================================================
+
+    def delete_experiment(
+        self, experiment_id: str, delete_jobs: bool = False, perform: bool = True
+    ) -> tuple[bool, str]:
+        """Delete an experiment and optionally its job data
+
+        Args:
+            experiment_id: Experiment identifier to delete
+            delete_jobs: If True, also delete job directories (default: False)
+            perform: If True, actually perform deletion; if False, just check
+
+        Returns:
+            Tuple of (success, message)
+        """
+        import shutil
+
+        # Check for running jobs first
+        jobs = self.get_jobs(experiment_id=experiment_id)
+        running_jobs = [j for j in jobs if j.state and j.state.running()]
+        if running_jobs:
+            return False, f"Cannot delete: {len(running_jobs)} jobs are still running"
+
+        # Find experiment directories (v2 layout)
+        exp_dir = self.workspace_path / "experiments" / experiment_id
+        events_dir = self._experiments_dir / experiment_id
+
+        # Check for v1 layout
+        v1_exp_dir = self.workspace_path / "xp" / experiment_id
+
+        if not exp_dir.exists() and not v1_exp_dir.exists():
+            return False, f"Experiment {experiment_id} not found"
+
+        if not perform:
+            return True, f"Experiment {experiment_id} can be deleted"
+
+        errors = []
+
+        # Delete job directories if requested
+        if delete_jobs:
+            for job in jobs:
+                if job.path and job.path.exists():
+                    try:
+                        shutil.rmtree(job.path)
+                    except OSError as e:
+                        errors.append(f"Failed to delete job {job.identifier}: {e}")
+
+        # Delete v2 experiment directory
+        if exp_dir.exists():
+            try:
+                shutil.rmtree(exp_dir)
+            except OSError as e:
+                errors.append(f"Failed to delete experiment dir: {e}")
+
+        # Delete events directory
+        if events_dir.exists():
+            try:
+                shutil.rmtree(events_dir)
+            except OSError as e:
+                errors.append(f"Failed to delete events dir: {e}")
+
+        # Delete v1 experiment directory
+        if v1_exp_dir.exists():
+            try:
+                shutil.rmtree(v1_exp_dir)
+            except OSError as e:
+                errors.append(f"Failed to delete v1 experiment dir: {e}")
+
+        # Clear caches
+        self._clear_experiment_cache(experiment_id)
+        with self._job_cache_lock:
+            job_ids_to_remove = [j.identifier for j in jobs]
+            for job_id in job_ids_to_remove:
+                self._job_cache.pop(job_id, None)
+
+        if errors:
+            return False, f"Partial deletion: {'; '.join(errors)}"
+
+        return True, f"Deleted experiment {experiment_id}"
 
     # =========================================================================
     # Lifecycle

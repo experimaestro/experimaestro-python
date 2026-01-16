@@ -82,6 +82,8 @@ class SSHStateProviderServer:
             RPCMethod.GET_DEPENDENCIES_MAP.value: self._handle_get_dependencies_map,
             RPCMethod.KILL_JOB.value: self._handle_kill_job,
             RPCMethod.CLEAN_JOB.value: self._handle_clean_job,
+            RPCMethod.DELETE_JOB_SAFELY.value: self._handle_delete_job_safely,
+            RPCMethod.DELETE_EXPERIMENT.value: self._handle_delete_experiment,
             RPCMethod.GET_SYNC_INFO.value: self._handle_get_sync_info,
             RPCMethod.GET_PROCESS_INFO.value: self._handle_get_process_info,
         }
@@ -445,3 +447,45 @@ class SSHStateProviderServer:
             "type": pinfo.type,
             "running": pinfo.running,
         }
+
+    def _handle_delete_job_safely(self, params: Dict) -> Dict:
+        """Handle delete_job_safely request"""
+        job_id = params.get("job_id")
+        experiment_id = params.get("experiment_id")
+        run_id = params.get("run_id")
+        perform = params.get("perform", True)
+
+        if not job_id or not experiment_id:
+            raise TypeError("job_id and experiment_id are required")
+
+        # Get the job first
+        job = self._state_provider.get_job(job_id, experiment_id, run_id)
+        if job is None:
+            return {"success": False, "message": "Job not found"}
+
+        # Delete the job safely
+        try:
+            success, message = self._state_provider.delete_job_safely(
+                job, perform=perform
+            )
+            return {"success": success, "message": message}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def _handle_delete_experiment(self, params: Dict) -> Dict:
+        """Handle delete_experiment request"""
+        experiment_id = params.get("experiment_id")
+        delete_jobs = params.get("delete_jobs", False)
+        perform = params.get("perform", True)
+
+        if not experiment_id:
+            raise TypeError("experiment_id is required")
+
+        # Delete the experiment
+        try:
+            success, message = self._state_provider.delete_experiment(
+                experiment_id, delete_jobs=delete_jobs, perform=perform
+            )
+            return {"success": success, "message": message}
+        except Exception as e:
+            return {"success": False, "message": str(e)}

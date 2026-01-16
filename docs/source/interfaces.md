@@ -97,7 +97,7 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 | `Enter` | Select experiment |
 | `d` | Show experiment runs |
 | `Ctrl+d` | Delete experiment |
-| `k` | Kill all running jobs |
+| `Ctrl+k` | Kill all running jobs |
 | `S` | Sort by status |
 | `D` | Sort by date |
 
@@ -107,7 +107,7 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 |-----|--------|
 | `l` | View job logs |
 | `Ctrl+d` | Delete job |
-| `k` | Kill running job |
+| `Ctrl+k` | Kill running job |
 | `/` | Open search filter |
 | `c` | Clear search filter |
 | `S` | Sort by status |

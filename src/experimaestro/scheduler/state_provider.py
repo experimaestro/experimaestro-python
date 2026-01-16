@@ -312,13 +312,44 @@ class StateProvider(ABC):
         return [j for j in self.get_orphan_jobs() if j.state and j.state.running()]
 
     def delete_job_safely(self, job: BaseJob, perform: bool = True) -> Tuple[bool, str]:
-        """Safely delete a job and its data"""
-        return False, "Not implemented"
+        """Safely delete a job and its data
+
+        Only deletes jobs that are finished (not running). Uses clean_job
+        for the actual deletion.
+
+        Args:
+            job: The job to delete
+            perform: If True, actually perform deletion; if False, just check
+
+        Returns:
+            Tuple of (success, message)
+        """
+        # Check if job is running - cannot delete running jobs
+        if job.state and job.state.running():
+            return False, f"Cannot delete running job {job.identifier}"
+
+        # Use clean_job for the actual deletion
+        if self.clean_job(job, perform=perform):
+            if perform:
+                return True, f"Deleted job {job.identifier}"
+            else:
+                return True, f"Job {job.identifier} can be deleted"
+        else:
+            return False, f"Failed to delete job {job.identifier}"
 
     def delete_experiment(
-        self, experiment_id: str, perform: bool = True
+        self, experiment_id: str, delete_jobs: bool = False, perform: bool = True
     ) -> Tuple[bool, str]:
-        """Delete an experiment and all its data"""
+        """Delete an experiment and optionally its job data
+
+        Args:
+            experiment_id: Experiment identifier to delete
+            delete_jobs: If True, also delete job directories (default: False)
+            perform: If True, actually perform deletion; if False, just check
+
+        Returns:
+            Tuple of (success, message)
+        """
         return False, "Not implemented"
 
     def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
