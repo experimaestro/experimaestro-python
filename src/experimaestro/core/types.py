@@ -565,6 +565,8 @@ class ObjectType(Type):
         For Config types, the child type should be a subtype of the parent type
         (covariant). For other types, we check for exact match.
         """
+        from .objects import Config
+
         child_type = child_arg.type
         parent_type = parent_arg.type
 
@@ -580,6 +582,16 @@ class ObjectType(Type):
                     f"is not a subtype of parent type {parent_pytype.__qualname__}. "
                     f"Override types must be subtypes of the parent type."
                 )
+        elif isinstance(child_type, GenericType) and isinstance(
+            parent_type, GenericType
+        ):
+            # Check generic type compatibility using utility function
+            try:
+                typingutils.is_generic_subtype(
+                    child_type.type, parent_type.type, config_base=Config
+                )
+            except TypeError as e:
+                raise TypeError(f"Parameter '{child_arg.name}': {e}") from None
         elif type(child_type) is not type(parent_type):
             # For non-Config types, check for exact type match
             # Different type classes (e.g., IntType vs StrType) are incompatible

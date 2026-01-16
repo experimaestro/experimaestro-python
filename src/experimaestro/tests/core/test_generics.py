@@ -207,3 +207,166 @@ def test_core_generics_bound_typevar():
     assert isinstance(a.x, SimpleConfigChild)
     with pytest.raises(TypeError):
         a.x = SimpleConfig.C()
+
+
+# =============================================================================
+# Tests for Generic[T] where T is a Config type
+# =============================================================================
+
+
+class ConfigA(Config):
+    """Base config for generic type parameter tests"""
+
+    pass
+
+
+class ConfigB(ConfigA):
+    """Subclass of ConfigA for covariance tests"""
+
+    pass
+
+
+class GenericConfigHolder(Config, Generic[T]):
+    """A generic config that holds another config of type T"""
+
+    held: Param[T]
+
+
+def test_core_generics_config_type_param():
+    """Test basic generic with Config as type parameter"""
+    a = GenericConfigHolder.C(held=ConfigA.C())
+    assert isinstance(a.held, ConfigA)
+
+    # Can assign same type
+    a.held = ConfigA.C()
+
+    # Can assign subtype (covariance)
+    a.held = ConfigB.C()
+
+
+def test_core_generics_config_type_param_subtype_binding():
+    """Test that binding to a subtype allows supertype assignment"""
+    a = GenericConfigHolder.C(held=ConfigB.C())
+
+    # T is bound to ConfigB, but we allow generalization to ConfigA
+    a.held = ConfigA.C()
+
+
+def test_core_generics_config_type_param_type_mismatch():
+    """Test that incompatible config types are rejected"""
+    a = GenericConfigHolder.C(held=ConfigA.C())
+
+    # Cannot assign unrelated type
+    with pytest.raises(TypeError):
+        a.held = "not a config"
+
+    with pytest.raises(TypeError):
+        a.held = 123
+
+
+class WrapperConfig(Config, Generic[T]):
+    """Wrapper that holds a GenericConfigHolder[T]"""
+
+    inner: Param[GenericConfigHolder[T]]
+
+
+def test_core_generics_nested_config_type_param():
+    """Test nested generics with Config type parameter"""
+    inner = GenericConfigHolder.C(held=ConfigA.C())
+    wrapper = WrapperConfig.C(inner=inner)
+
+    assert isinstance(wrapper.inner.held, ConfigA)
+
+    # Nested assignment respects type binding
+    wrapper.inner.held = ConfigB.C()
+
+
+def test_core_generics_nested_config_type_param_mismatch():
+    """Test that nested generics enforce type consistency"""
+    # Create with ConfigA
+    inner_a = GenericConfigHolder.C(held=ConfigA.C())
+    wrapper = WrapperConfig.C(inner=inner_a)
+
+    # Cannot assign string to nested held
+    with pytest.raises(TypeError):
+        wrapper.inner.held = "invalid"
+
+
+class ParentWithGeneric(Config):
+    """Parent class with a generic parameter"""
+
+    holder: Param[GenericConfigHolder[ConfigA]]
+
+
+class ChildWithGeneric(ParentWithGeneric):
+    """Child class that overrides with more specific generic"""
+
+    holder: Param[GenericConfigHolder[ConfigB]]
+
+
+def test_core_generics_inheritance_override():
+    """Test that child can override with more specific generic type"""
+    # Child requires GenericConfigHolder[ConfigB]
+    child = ChildWithGeneric.C(holder=GenericConfigHolder.C(held=ConfigB.C()))
+    assert isinstance(child.holder.held, ConfigB)
+
+
+def test_core_generics_override_subtype_config():
+    """Test that overriding Generic[ConfigA] with Generic[ConfigB] is allowed
+    when ConfigB is a subtype of ConfigA"""
+
+    class Parent(Config):
+        holder: Param[GenericConfigHolder[ConfigA]]
+
+    # Should succeed - ConfigB is subtype of ConfigA
+    class Child(Parent):
+        holder: Param[GenericConfigHolder[ConfigB]] = field(overrides=True)
+
+    Child.__getxpmtype__().arguments
+
+
+def test_core_generics_override_incompatible_config():
+    """Test that overriding Generic[ConfigA] with Generic[ConfigC] raises error
+    when ConfigC is not a subtype of ConfigA"""
+
+    class ConfigC(Config):
+        """Unrelated config type"""
+
+        pass
+
+    class Parent(Config):
+        holder: Param[GenericConfigHolder[ConfigA]]
+
+    # Should fail - ConfigC is not a subtype of ConfigA
+    with pytest.raises(TypeError, match="is not a subtype"):
+
+        class Child(Parent):
+            holder: Param[GenericConfigHolder[ConfigC]] = field(overrides=True)
+
+        Child.__getxpmtype__().arguments
+
+
+def test_core_generics_override_same_generic_type():
+    """Test that overriding with the same generic type is allowed"""
+
+    class Parent(Config):
+        holder: Param[GenericConfigHolder[ConfigA]]
+
+    # Should succeed - same type
+    class Child(Parent):
+        holder: Param[GenericConfigHolder[ConfigA]] = field(overrides=True)
+
+    Child.__getxpmtype__().arguments
+
+
+def test_core_generics_override_nested_subtype():
+    """Test that nested generics can be overridden with subtypes"""
+
+    class Parent(Config):
+        wrapper: Param[WrapperConfig[ConfigA]]
+
+    # Should succeed - ConfigB is subtype of ConfigA
+    class Child(Parent):
+        wrapper: Param[WrapperConfig[ConfigB]] = field(overrides=True)
+
+    Child.__getxpmtype__().arguments

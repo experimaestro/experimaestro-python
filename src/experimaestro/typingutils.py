@@ -117,3 +117,69 @@ def generic_mro(tp):
     _generic_mro(result, tp)
     cls = origin if origin is not None else tp
     return tuple(result.get(sub_cls, sub_cls) for sub_cls in cls.__mro__)
+
+
+def is_generic_subtype(child_type, parent_type, *, config_base: type | None = None):
+    """Check if child_type is a valid subtype of parent_type for generic types.
+
+    For generic types like Generic[T], checks that:
+    1. The origin types match (e.g., both are List, Dict, etc.)
+    2. Type arguments are compatible (subtypes for config_base types)
+
+    Args:
+        child_type: The child generic type to check
+        parent_type: The parent generic type to check against
+        config_base: Base class for Config types. If provided, type arguments
+            that are subclasses of this will be checked for subtype compatibility.
+            If None, type arguments must match exactly.
+
+    Returns:
+        True if child_type is a valid subtype of parent_type
+
+    Raises:
+        TypeError: If the types are incompatible, with a descriptive message
+    """
+    child_origin = get_origin(child_type)
+    parent_origin = get_origin(parent_type)
+
+    # Check that origin types match
+    if child_origin is not parent_origin:
+        raise TypeError(
+            f"Generic origin {child_origin} is not compatible with "
+            f"parent origin {parent_origin}. "
+            f"Override types must have the same generic origin."
+        )
+
+    # Check type arguments compatibility
+    child_args = get_args(child_type)
+    parent_args = get_args(parent_type)
+
+    if len(child_args) != len(parent_args):
+        raise TypeError(
+            f"Generic type has {len(child_args)} type arguments "
+            f"but parent has {len(parent_args)}."
+        )
+
+    for child_arg, parent_arg in zip(child_args, parent_args):
+        # Check if both are types that should be checked for subtype compatibility
+        if (
+            config_base is not None
+            and isinstance(child_arg, type)
+            and isinstance(parent_arg, type)
+            and issubclass(parent_arg, config_base)
+        ):
+            # For Config types, child must be a subtype of parent
+            if not issubclass(child_arg, parent_arg):
+                raise TypeError(
+                    f"Type argument {child_arg.__qualname__} "
+                    f"is not a subtype of parent type argument {parent_arg.__qualname__}. "
+                    f"Override generic type arguments must be subtypes."
+                )
+        elif child_arg != parent_arg:
+            # For non-Config types, require exact match
+            raise TypeError(
+                f"Type argument {child_arg} does not match "
+                f"parent type argument {parent_arg}."
+            )
+
+    return True
