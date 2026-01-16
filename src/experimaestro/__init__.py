@@ -84,6 +84,8 @@ def set_launcher(launcher: Launcher):
     Workspace.CURRENT.launcher = launcher
 
 
-# Get version
-__version__ = "0.0.0"
-__version_tuple__ = (0, 0, 0)
+# Get version - import from generated version.py if available, fallback to placeholder
+try:
+    from .version import __version__
+except ImportError:
+    __version__ = "0.0.0"
