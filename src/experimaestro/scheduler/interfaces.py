@@ -19,12 +19,13 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from experimaestro.connectors import Process
     from experimaestro.scheduler.transient import TransientMode
     from experimaestro.scheduler.state_provider import CarbonMetricsData
+    from experimaestro.scheduler.state_status import EventBase
     from experimaestro.carbon.base import CarbonImpactData
 
 logger = logging.getLogger("xpm.interfaces")
@@ -406,6 +407,7 @@ class BaseJob:
     retry_count: int
     transient: "TransientMode"
     carbon_metrics: Optional["CarbonMetricsData"]
+    event_count: Optional[int]  # None = all events processed
 
     #: The process
     _process: Optional["Process"]
@@ -421,6 +423,7 @@ class BaseJob:
         self.endtime: datetime | None = None
         self._process = None
         self._process_dict = None
+        self.event_count: int | None = None
 
     @property
     def state(self) -> JobState:
@@ -599,11 +602,213 @@ class BaseJob:
                 "region": carbon_metrics.region,
                 "is_final": carbon_metrics.is_final,
             }
+        # Include event_count only if not None (None = all events processed)
+        if self.event_count is not None:
+            result["event_count"] = self.event_count
         return result
 
     def process_state_dict(self) -> dict | None:
         """Get process state as dictionary. Override in subclasses."""
         return None
+
+    def write_status(self) -> None:
+        """Write job state to status.json file.
+
+        This is a sync method for writing the canonical state_dict() to disk.
+        Call this while holding the job lock to ensure atomic status updates.
+        """
+        import json
+
+        self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        self.status_path.write_text(json.dumps(self.state_dict()))
+
+    def apply_event(self, event: "EventBase") -> None:
+        """Apply a job event to update this job's state.
+
+        Handles CarbonMetricsEvent, JobStateChangedEvent, and JobProgressEvent.
+        """
+        from experimaestro.scheduler.state_status import (
+            JobStateChangedEvent,
+            JobProgressEvent,
+            CarbonMetricsEvent,
+        )
+        from experimaestro.scheduler.state_provider import CarbonMetricsData
+        from experimaestro.notifications import LevelInformation
+
+        if isinstance(event, CarbonMetricsEvent):
+            self.carbon_metrics = CarbonMetricsData(
+                co2_kg=event.co2_kg,
+                energy_kwh=event.energy_kwh,
+                cpu_power_w=event.cpu_power_w,
+                gpu_power_w=event.gpu_power_w,
+                ram_power_w=event.ram_power_w,
+                duration_s=event.duration_s,
+                region=event.region,
+                is_final=event.is_final,
+            )
+            logger.debug(
+                "Applied carbon metrics to job %s: %.4f kg CO2",
+                self.identifier,
+                event.co2_kg,
+            )
+
+        elif isinstance(event, JobStateChangedEvent):
+            new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
+            if new_state is not None:
+                self.set_state(new_state, loading=True)
+            if event.failure_reason:
+                try:
+                    # Set failure reason on the state if it's an error state
+                    if hasattr(self._state, "failure_reason"):
+                        self._state.failure_reason = JobFailureStatus[
+                            event.failure_reason
+                        ]
+                except KeyError:
+                    pass
+            # Convert ISO string timestamps to datetime
+            if event.submitted_time is not None:
+                self.submittime = deserialize_to_datetime(event.submitted_time)
+            if event.started_time is not None:
+                self.starttime = deserialize_to_datetime(event.started_time)
+            if event.ended_time is not None:
+                self.endtime = deserialize_to_datetime(event.ended_time)
+            if event.exit_code is not None:
+                self.exit_code = event.exit_code
+            if event.retry_count:
+                self.retry_count = event.retry_count
+            logger.debug(
+                "Applied state change to job %s: %s", self.identifier, self.state
+            )
+
+        elif isinstance(event, JobProgressEvent):
+            level = event.level
+            # Truncate to level + 1 entries
+            self.progress = self.progress[: (level + 1)]
+            # Extend if needed
+            while len(self.progress) <= level:
+                self.progress.append(LevelInformation(len(self.progress), None, 0.0))
+            # Update the level's progress and description
+            if event.desc:
+                self.progress[-1].desc = event.desc
+            self.progress[-1].progress = event.progress
+            logger.debug(
+                "Applied progress to job %s level %d: %.2f",
+                self.identifier,
+                level,
+                event.progress,
+            )
+
+    def _cleanup_event_files(self) -> None:
+        """Clean up job event files, applying pending events first.
+
+        1. If event_count is set, reads and applies events from that count onwards
+        2. Removes event files at .events/jobs/{task_id}/event-{job_id}-*.jsonl
+        3. Sets event_count to None (all events processed)
+
+        Called when a job is about to restart to ensure clean state while
+        preserving carbon metrics and other event-based data.
+        """
+        from experimaestro.scheduler.state_status import EventReader, WatchedDirectory
+
+        # Get paths for event files
+        # job.path is workspace/jobs/task_id/job_id
+        workspace_path = self.path.parent.parent.parent
+        events_dir = workspace_path / ".events" / "jobs" / self.task_id
+
+        # Apply pending events if event_count is set
+        if self.event_count is not None and events_dir.exists():
+            try:
+                reader = EventReader([WatchedDirectory(path=events_dir)])
+                events = reader.read_events_since_count(
+                    self.identifier, self.event_count
+                )
+                for event in events:
+                    self.apply_event(event)
+                    logger.debug(
+                        "Applied event %s to job %s",
+                        type(event).__name__,
+                        self.identifier,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to apply pending events for job %s: %s",
+                    self.identifier,
+                    e,
+                )
+
+        # Mark all events as processed
+        self.event_count = None
+
+        # Find and delete old event files for this job
+        if events_dir.exists():
+            pattern = f"event-{self.identifier}-*.jsonl"
+            for event_file in events_dir.glob(pattern):
+                try:
+                    event_file.unlink()
+                    logger.debug("Removed old job event file: %s", event_file)
+                except OSError as e:
+                    logger.warning(
+                        "Failed to remove job event file %s: %s", event_file, e
+                    )
+
+    async def finalize_status(
+        self,
+        callback: "Callable[[BaseJob], None] | None" = None,
+        cleanup_events: bool = False,
+    ) -> bool:
+        """Finalize job status: load from disk, apply callback, cleanup, and write.
+
+        This method:
+        1. Acquires the job lock
+        2. Loads state from disk (to get carbon info, etc.)
+        3. Calls the callback to modify job state (e.g., set state, increment retry_count)
+        4. Optionally cleans up event files (for non-done jobs being restarted)
+        5. Writes status if different from disk
+
+        Args:
+            callback: Optional function to modify job state after loading from disk.
+                      Called with the job as argument.
+            cleanup_events: If True, cleanup event files (for job restart scenarios).
+
+        Returns:
+            True if the status was written, False if unchanged.
+        """
+        import json
+        from filelock import AsyncFileLock
+
+        async with AsyncFileLock(self.lockpath):
+            # Load state from disk (gets carbon info, timestamps, etc.)
+            self.load_from_disk()
+            logger.debug(
+                "finalization: reading dict for %s: %s", self, self.state_dict()
+            )
+
+            # Apply callback to modify job state
+            if callback is not None:
+                callback(self)
+
+            # Cleanup event files if requested (for restart scenarios)
+            if cleanup_events:
+                self._cleanup_event_files()
+
+            # Read current state from disk for comparison
+            current_dict = None
+            if self.status_path.exists():
+                try:
+                    current_dict = json.loads(self.status_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Get new state
+            new_dict = self.state_dict()
+
+            # Compare and write only if different
+            if current_dict != new_dict:
+                self.status_path.parent.mkdir(parents=True, exist_ok=True)
+                self.status_path.write_text(json.dumps(new_dict))
+                return True
+
+            return False
 
     def load_from_disk(self):
         """Load job state from disk, prioritizing marker files over status.json
@@ -652,10 +857,9 @@ class BaseJob:
 
             self.set_state(marker_state, loading=True)
             self._process_dict = None
-            return
 
         # Check PID file for running state
-        if self.pidfile.exists():
+        elif self.pidfile.exists():
             try:
                 self._process_dict = json.loads(self.pidfile.read_text())
                 pid = self._process_dict.get("pid")
@@ -679,32 +883,27 @@ class BaseJob:
         Timestamps are loaded and preserved when calling set_state() with the
         appropriate timestamp parameter based on the target state.
         """
-        # Load timestamps first
-        submitted_time = (
+        # Load timestamps
+        self.submittime = (
             deserialize_to_datetime(status_dict["submitted_time"])
             if status_dict.get("submitted_time")
             else None
         )
-        started_time = (
+        self.starttime = (
             deserialize_to_datetime(status_dict["started_time"])
             if status_dict.get("started_time")
             else None
         )
-        ended_time = (
+        self.endtime = (
             deserialize_to_datetime(status_dict["ended_time"])
             if status_dict.get("ended_time")
             else None
         )
 
-        if status_dict.get("exit_code") is not None:
-            self.exit_code = status_dict["exit_code"]
-        if status_dict.get("retry_count") is not None:
-            self.retry_count = status_dict["retry_count"]
-
-        # Set timestamps directly
-        self.submittime = submitted_time
-        self.starttime = started_time
-        self.endtime = ended_time
+        # Always override fields from status_dict (None if not existent)
+        self.exit_code = status_dict.get("exit_code")
+        self.retry_count = status_dict.get("retry_count", 0)
+        self.event_count = status_dict.get("event_count")  # None = all events processed
 
         # Determine state from status dict
         state_str = status_dict.get("state", "").lower()
@@ -734,7 +933,9 @@ class BaseJob:
 
         # Load carbon metrics
         carbon_dict = status_dict.get("carbon_metrics")
-        if carbon_dict is not None:
+        if carbon_dict is None:
+            self.carbon_metrics = None
+        else:
             from experimaestro.scheduler.state_provider import CarbonMetricsData
 
             self.carbon_metrics = CarbonMetricsData(

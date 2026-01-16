@@ -7,7 +7,7 @@ import signal
 import sys
 import json
 import threading
-from typing import List
+from typing import List, TYPE_CHECKING
 import filelock
 from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
@@ -18,6 +18,9 @@ from experimaestro.utils import logger
 from experimaestro.core.objects import ConfigInformation
 import experimaestro.taskglobals as taskglobals
 import atexit
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_provider import MockJob
 
 
 def parse_commandline(argv=None):
@@ -219,6 +222,7 @@ def _stop_carbon_tracking(
     job_id: str,
     task_id: str,
     start_time: datetime,
+    mock_job: "MockJob",
 ):
     """Stop carbon tracking and record final metrics.
 
@@ -231,6 +235,7 @@ def _stop_carbon_tracking(
         job_id: Job identifier.
         task_id: Task type identifier.
         start_time: Job start time.
+        mock_job: MockJob to apply the carbon event to.
     """
     if tracker is None:
         return
@@ -274,6 +279,9 @@ def _stop_carbon_tracking(
                 is_final=True,
             )
             event_writer.write_event(event)
+
+            # Apply event to MockJob so it's included in status.json
+            mock_job.apply_event(event)
         finally:
             event_writer.close()
 
@@ -335,11 +343,37 @@ class TaskRunner:
         self._carbon_stop_event = None
         self._job_start_time: datetime | None = None
 
+        # MockJob for tracking state (loaded from status.json)
+        self._mock_job: "MockJob | None" = None
+
+    def _load_mock_job(self) -> "MockJob":
+        """Load MockJob from disk for state tracking."""
+        from experimaestro.scheduler.state_provider import MockJob
+
+        workdir = self.scriptpath.parent
+        job_id = workdir.name
+        task_id = workdir.parent.name
+
+        return MockJob.from_disk(workdir, task_id, job_id)
+
+    def _write_status(self) -> None:
+        """Write status.json from MockJob state (while still holding locks)."""
+        if self._mock_job is None:
+            return
+
+        try:
+            self._mock_job.write_status()
+        except Exception as e:
+            logger.warning("Failed to write status.json: %s", e)
+
     def cleanup(self):
         if not self.cleaned:
             self.cleaned = True
             logger.info("Cleaning up")
             rmfile(self.pidfile)
+
+            # Load MockJob for state tracking
+            self._mock_job = self._load_mock_job()
 
             # Stop carbon tracking and record metrics
             if self._carbon_tracker is not None:
@@ -369,8 +403,12 @@ class TaskRunner:
                         job_id,
                         task_id,
                         self._job_start_time,
+                        self._mock_job,
                     )
                 self._carbon_tracker = None
+
+            # Write status.json while still holding locks
+            self._write_status()
 
             # Release IPC locks
             for lock in self.locks:

@@ -43,11 +43,13 @@ class DynamicResource(ABC):
         ...
 
     @abstractmethod
-    async def refresh_state(self) -> None:
+    async def refresh_state(self) -> bool:
         """Refresh resource state from underlying storage.
 
-        Called by ResourcePoller. Should update internal state and
-        notify waiters as appropriate.
+        Called by ResourcePoller. Should update internal state.
+
+        Returns:
+            True if state changed, False if unchanged
         """
         ...
 
@@ -112,6 +114,7 @@ class ResourcePoller:
 
         # Schedule the polling coroutine on EventLoopThread's loop
         def start_polling():
+            logger.info("Starting dynamic resource polling")
             self._wake_event = asyncio.Event()
             self._poll_task = asyncio.create_task(self._poll_loop())
 
@@ -222,8 +225,10 @@ class ResourcePoller:
             # Poll each resource
             for resource in resources:
                 try:
-                    await resource.refresh_state()
-                    self._notify_waiters(resource)
+                    changed = await resource.refresh_state()
+                    # Only notify waiters if state actually changed
+                    if changed:
+                        self._notify_waiters(resource)
                 except Exception:
                     logger.exception("Error polling resource %s", resource)
 
@@ -237,11 +242,11 @@ class ResourcePoller:
 
             # Sleep with ability to wake up on new registration
             if self._wake_event:
+                timeout = max(0.01, sleep_time)
+                logger.debug("Sleep for %s", sleep_time)
                 self._wake_event.clear()
                 try:
-                    await asyncio.wait_for(
-                        self._wake_event.wait(), timeout=max(0.01, sleep_time)
-                    )
+                    await asyncio.wait_for(self._wake_event.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
                     pass
 

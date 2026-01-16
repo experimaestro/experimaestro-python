@@ -277,7 +277,7 @@ class CommandLineJob(Job):
         scriptPath = self.prepare()
 
         # OK, now starts the process
-        logger.info("Starting job %s", self.jobpath)
+        logger.debug("Starting job %s", self.jobpath)
         processbuilder = self.launcher.processbuilder()
         processbuilder.environ = self.environ
         processbuilder.command.append(self.launcher.connector.resolve(scriptPath))

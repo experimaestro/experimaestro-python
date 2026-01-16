@@ -270,10 +270,10 @@ def test_resumable_task_fails_after_max_retries():
     # Verify job failed correctly
     assert isinstance(state, JobStateError)
     assert state.failure_reason == JobFailureStatus.TIMEOUT
-    # retry_count should be max_retries + 1 (initial attempt + 3 retries = 4 total)
-    assert job.retry_count == 4
-    # Checkpoint should show 4 executions
-    assert int(checkpoint_file.read_text()) == 4
+    # retry_count equals max_retries when exhausted (initial + max_retries-1 retries)
+    assert job.retry_count == 3
+    # Checkpoint should show 3 executions (initial + 2 retries before giving up)
+    assert int(checkpoint_file.read_text()) == 3
 
 
 # =============================================================================

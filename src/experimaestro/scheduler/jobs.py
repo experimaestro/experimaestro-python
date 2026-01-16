@@ -248,7 +248,7 @@ class Job(BaseJob, Resource):
             await xp.taskOutputsWorker.aio_process_job_outputs(self)
 
     def __str__(self):
-        return "Job[{}]".format(self.identifier)
+        return "Job[{}/{}]".format(self.task_id, self.identifier[:8])
 
     def wait(self) -> JobState:
         assert self._future, "Cannot wait a not submitted job"
@@ -486,38 +486,6 @@ class Job(BaseJob, Resource):
         if self._process is not None:
             return self._process.tospec()
         return None
-
-    async def write_status_with_lock(self) -> bool:
-        """Write status.json if it differs from the current state on disk.
-
-        This method acquires the job lock, reads the current status from disk,
-        compares it with the in-memory state, and only writes if there's a difference.
-
-        Returns:
-            True if the status was written, False if it was unchanged.
-        """
-        import json
-        from filelock import AsyncFileLock
-
-        async with AsyncFileLock(self.lockpath):
-            # Read current state from disk
-            current_dict = None
-            if self.status_path.exists():
-                try:
-                    current_dict = json.loads(self.status_path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-            # Get new state
-            new_dict = self.state_dict()
-
-            # Compare and write only if different
-            if current_dict != new_dict:
-                self.status_path.parent.mkdir(parents=True, exist_ok=True)
-                self.status_path.write_text(json.dumps(new_dict))
-                return True
-
-            return False
 
     @property
     def basepath(self) -> Path:

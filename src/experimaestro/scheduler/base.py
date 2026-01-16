@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -43,7 +44,6 @@ from experimaestro.scheduler.state_status import (
 from experimaestro.scheduler.state_provider import CarbonMetricsData
 
 
-from experimaestro.utils import logger
 import concurrent.futures
 
 if TYPE_CHECKING:
@@ -51,6 +51,9 @@ if TYPE_CHECKING:
     from experimaestro.settings import ServerSettings
     from experimaestro.scheduler.workspace import Workspace
     from experimaestro.connectors import Process
+
+
+logger = logging.getLogger("xpm.scheduler")
 
 
 class Listener:
@@ -540,34 +543,6 @@ class Scheduler(StateProvider, threading.Thread):
             # Notify StateProvider-style listeners (TUI/WebUI)
             self._notify_state_listeners_async(event)
 
-    def _cleanup_job_event_files(self, job: Job) -> None:
-        """Clean up old job event files from previous runs
-
-        Removes event files at .events/jobs/{task_id}/event-{job_id}-*.jsonl
-        Called when a job is about to start to ensure clean state.
-
-        Args:
-            job: The job being started
-        """
-        # Get the workspace path from the job's path
-        # job.path is workspace/jobs/task_id/job_id
-        workspace_path = job.path.parent.parent.parent
-        task_id = str(job.type.identifier)
-        job_id = job.identifier
-
-        events_dir = workspace_path / ".events" / "jobs" / task_id
-        if not events_dir.exists():
-            return
-
-        # Find and delete old event files for this job
-        pattern = f"event-{job_id}-*.jsonl"
-        for event_file in events_dir.glob(pattern):
-            try:
-                event_file.unlink()
-                logger.debug("Removed old job event file: %s", event_file)
-            except OSError as e:
-                logger.warning("Failed to remove job event file %s: %s", event_file, e)
-
     def _cleanup_job_marker_files(self, job: Job) -> None:
         """Clean up old marker files (.done/.failed) from previous runs
 
@@ -577,7 +552,7 @@ class Scheduler(StateProvider, threading.Thread):
         Args:
             job: The job being started
         """
-        logger.info("Cleaning up marker files for job %s", job.identifier[:8])
+        logger.debug("Cleaning up marker files for job %s", job.identifier[:8])
         for marker_file in [job.donepath, job.failedpath]:
             logger.debug(
                 "  Checking marker file: %s (exists=%s)",
@@ -747,7 +722,7 @@ class Scheduler(StateProvider, threading.Thread):
                 )
                 pass
 
-        logger.info("Current job state is %s", job.state)
+        logger.debug("Current job state is %s", job.state)
 
         # Process job completion: task outputs, final status write, cleanup
         return await self.aio_final_state(job)
@@ -811,17 +786,20 @@ class Scheduler(StateProvider, threading.Thread):
             while job.state == JobState.WAITING:
                 try:
                     state = await self.aio_start(job)
-                    logger.info(
+                    logger.debug(
                         "aio_start returned %s for job %s", state, job.identifier[:8]
                     )
                     if state is not None:
                         job.set_state(state)
-                        logger.info(
+                        logger.debug(
                             "Job %s state after set_state: %s",
                             job.identifier[:8],
                             job.state,
                         )
                     break  # Exit loop on success
+                except GracefulTimeout:
+                    # Just re-raise
+                    raise
                 except Exception:
                     logger.exception("Got an exception while starting the job")
                     raise
@@ -851,9 +829,8 @@ class Scheduler(StateProvider, threading.Thread):
             )
 
         else:
-            # Write final status (only if different from disk)
-            # Status may have already been written by aio_start
-            await job.write_status_with_lock()
+            # Finalize status: load from disk (carbon info), write if different
+            await job.finalize_status()
 
             # Process task outputs (queues remaining events for processing)
             await job.aio_done_handler()
@@ -938,16 +915,17 @@ class Scheduler(StateProvider, threading.Thread):
         """
         from experimaestro.locking import DynamicDependencyLocks, LockError
 
-        # Restart loop for resumable tasks that timeout
-        logger.debug(
-            "Starting job %s with %d dependencies",
-            job,
-            len(job.dependencies),
-        )
-
         # Separate static and dynamic dependencies
         static_deps = [d for d in job.dependencies if not d.is_dynamic()]
         dynamic_deps = [d for d in job.dependencies if d.is_dynamic()]
+
+        logger.debug(
+            "Starting job %s with %d dependencies (%d static, %d dynamic)",
+            job,
+            len(job.dependencies),
+            len(static_deps),
+            len(dynamic_deps),
+        )
 
         # First, wait for all static dependencies (jobs) to complete
         # These don't need the dependency lock as they can't change state
@@ -1010,9 +988,6 @@ class Scheduler(StateProvider, threading.Thread):
                                     # All locks acquired successfully
                                     break
 
-                    # Dependencies have been locked, we can start the job
-                    job.starttime = datetime.now()
-
                     # Creates the main directory
                     directory = job.path
                     logger.debug("Making directories job %s...", directory)
@@ -1037,7 +1012,7 @@ class Scheduler(StateProvider, threading.Thread):
                         directory.mkdir(parents=True, exist_ok=True)
 
                     # Clean up old job event files from previous runs
-                    self._cleanup_job_event_files(job)
+                    job._cleanup_event_files()
 
                     # Clean up old marker files (.done/.failed) from previous runs
                     self._cleanup_job_marker_files(job)
@@ -1054,6 +1029,10 @@ class Scheduler(StateProvider, threading.Thread):
                     return JobState.WAITING
 
                 try:
+                    # Rotate logs if this is a retry of a resumable task
+                    if job.resumable and job.retry_count > 0:
+                        job.rotate_logs()
+
                     # Runs the job
                     process = await job.aio_run()
 
@@ -1100,7 +1079,7 @@ class Scheduler(StateProvider, threading.Thread):
 
                 # Read state from .done/.failed files (contains detailed failure reason)
                 state = JobState.from_path(job.path, job.name)
-                logger.info(
+                logger.debug(
                     "State from marker files for job %s: %s (code=%s, donepath=%s, failedpath=%s)",
                     job.identifier[:8],
                     state,
@@ -1148,12 +1127,15 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Locks are released here after job completes
 
-        # Increment retry_count for any failure of a resumable task
-        if isinstance(state, JobStateError) and job.resumable:
-            job.retry_count += 1
+        # Finalize status: load from disk (carbon info), set state, increment retry_count
+        def finalize_callback(j: Job):
+            j.set_state(state)
+            # Increment retry_count for any failure of a resumable task
+            if isinstance(state, JobStateError) and j.resumable:
+                j.retry_count += 1
 
-        # Write status to disk (only if changed) - this persists retry_count
-        await job.write_status_with_lock()
+        logger.debug("[job ended] Finalizing")
+        await job.finalize_status(callback=finalize_callback)
 
         # Check if we should restart a resumable task that timed out
         if (
@@ -1168,13 +1150,10 @@ class Scheduler(StateProvider, threading.Thread):
                 job.retry_count,
                 job.max_retries,
             )
-            # Rotate log files to preserve previous run's logs
-            job.rotate_logs()
+
             # Clear cached process so aio_run() will create a new one
             job._process = None
-            # Delete PID file so the job will be resubmitted
-            if job.pidpath.exists():
-                job.pidpath.unlink()
+
             # Continue the loop to restart
             raise GracefulTimeout()
 

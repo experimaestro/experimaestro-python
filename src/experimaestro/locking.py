@@ -881,10 +881,19 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         self.timestamp = os.path.getmtime(self.lock_folder)
 
+        # Track jobs_folder modification time for refresh_state optimization
+        self._last_jobs_folder_mtime: float = 0.0
+
         # Initial state update (reads existing lock files)
         # Use sync FileLock since we're in __init__
         with filelock.FileLock(self.ipc_lock_path):
             self._ipc_update()
+            # Update mtime after initial sync
+            if self.jobs_folder.exists():
+                try:
+                    self._last_jobs_folder_mtime = os.path.getmtime(self.jobs_folder)
+                except OSError:
+                    pass
 
         # Set up async file system watching
         from .ipc import ipcom
@@ -955,6 +964,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
             event: Watchdog FileSystemEvent
         """
         path = Path(event.src_path)
+
         logger.debug(
             "Created/Modified path notification (async) %s [watched %s]",
             event.src_path,
@@ -1072,6 +1082,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
                 return
 
             self._handle_information_change()
+            self.timestamp = timestamp
             self._notify_async_waiters()
 
     def _notify_async_waiters(self) -> None:
@@ -1083,14 +1094,54 @@ class TrackedDynamicResource(DynamicResource, ABC):
         # Reset for next wait - waiters that were waiting will have been notified
         self._available_event.clear()
 
-    async def refresh_state(self) -> None:
+    async def refresh_state(self) -> bool:
         """Refresh state from disk.
 
         This is a fallback for when file system notifications are missed.
         Called by ResourcePoller periodically from the LockManagerThread loop.
+
+        Optimization: only does a full update if the jobs_folder has been modified
+        since the last update.
+
+        Note: This method runs exclusively in EventLoopThread, so we only need
+        the IPC lock (not _async_lock) since there's no concurrent async access
+        within the same loop.
+
+        Returns:
+            True if state changed, False if unchanged
         """
-        async with self._async_lock, self.ipc_lock:
+        import os
+
+        # Check if jobs_folder mtime changed
+        try:
+            current_mtime = os.path.getmtime(self.jobs_folder)
+        except OSError:
+            current_mtime = 0.0
+
+        if current_mtime <= self._last_jobs_folder_mtime:
+            # No change to jobs folder, skip full update
+            return False
+
+        # Only IPC lock needed - this runs in EventLoopThread exclusively
+        async with self.ipc_lock:
+            old_cache_keys = set(self.cache.keys())
+            old_valid_states = {k: lf.valid_state for k, lf in self.cache.items()}
+
             self._ipc_update()
+            self._last_jobs_folder_mtime = current_mtime
+
+            # Check if state changed
+            new_cache_keys = set(self.cache.keys())
+            if old_cache_keys != new_cache_keys:
+                return True
+
+            # Check if any lock file's valid_state changed
+            for key, lf in self.cache.items():
+                if key in old_valid_states:
+                    if old_valid_states[key] != lf.valid_state:
+                        return True
+
+            return False
 
     async def async_wait(self, timeout: float = 0) -> bool:
         """Wait asynchronously until the resource state may have changed.

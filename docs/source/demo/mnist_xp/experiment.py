@@ -42,9 +42,7 @@ def run(helper: ExperimentHelper, cfg: Configuration):
     logging.info(f"Will Launch Tasks using launcher: {gpulauncher}")
 
     evaluations = []
-    logging.info(
-        "Experimaestro will launch tasks for " "each combination of parameters"
-    )
+    logging.info("Experimaestro will launch tasks for each combination of parameters")
 
     # This downloads the dataset if needed
     ds_mnist = prepare_dataset(mnist)
