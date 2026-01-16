@@ -233,10 +233,13 @@ class Job(BaseJob, Resource):
             xp.watch_output(watched)
 
     async def aio_done_handler(self):
-        """The task has been completed (async version with completion signaling).
+        """Process remaining task outputs after job completion.
 
-        Ensures all remaining task output events are processed by explicitly
-        reading the task outputs file and waits for all callbacks to complete.
+        Called by: Scheduler.aio_final_state()
+
+        Ensures all remaining task output events are queued for processing
+        by explicitly reading the task outputs file. The callbacks will
+        complete asynchronously and decrement task_output_count when done.
         """
         if not self.watched_outputs:
             return

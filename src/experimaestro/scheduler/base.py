@@ -855,7 +855,7 @@ class Scheduler(StateProvider, threading.Thread):
             # Status may have already been written by aio_start
             await job.write_status_with_lock()
 
-            # Process task outputs
+            # Process task outputs (queues remaining events for processing)
             await job.aio_done_handler()
 
         # Remove from waiting jobs
