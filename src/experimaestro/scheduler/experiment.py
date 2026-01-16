@@ -1098,7 +1098,7 @@ class experiment(BaseExperiment):
         if exc_type is GracefulExperimentExit:
             return True
 
-    async def update_task_output_count(self, delta: int):
+    async def update_task_output_count(self, delta: int) -> int:
         """Change in the number of task outputs to process"""
         async with self.scheduler.exitCondition:
             self.taskOutputQueueSize += delta
@@ -1107,6 +1107,7 @@ class experiment(BaseExperiment):
             )
             if self.taskOutputQueueSize == 0:
                 self.scheduler.exitCondition.notify_all()
+            return self.taskOutputQueueSize
 
     def watch_output(self, watched: "WatchedOutput"):
         """Watch an output

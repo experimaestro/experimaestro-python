@@ -236,6 +236,7 @@ class ControllableResumableTask(ResumableTask):
 def test_resumable_task_resubmit():
     """Test that resubmitting a failed ResumableTask stays failed unless max_retries increased"""
     with TemporaryExperiment("resumable_resubmit", timeout_multiplier=12):
+        logging.info("# Submission 1/3")
         task1 = ControllableResumableTask.C()
         task1.submit(max_retries=1)
 
@@ -249,6 +250,7 @@ def test_resumable_task_resubmit():
 
         # Resubmit with same max_retries - should stay failed
         task2 = ControllableResumableTask.C()
+        logging.info("# Submission 2/3")
         task2.submit(max_retries=1)
 
         # Even though we tell it to complete, it should not run
@@ -259,6 +261,7 @@ def test_resumable_task_resubmit():
 
         # Resubmit with higher max_retries - should run and complete
         task3 = ControllableResumableTask.C()
+        logging.info("# Submission 3/3")
         task3.submit(max_retries=2)
 
         # Tell task to complete
@@ -286,16 +289,20 @@ def test_resumable_task_resubmit_across_experiments():
             logging.info("First experiment ended (expected): %s", e)
 
         # Second experiment: resubmit with same max_retries - should stay failed
-        with TemporaryExperiment(
-            "resubmit_across", timeout_multiplier=6, workdir=workdir
-        ):
-            task2 = ControllableResumableTask.C()
-            task2.submit(max_retries=1)
+        try:
+            with TemporaryExperiment(
+                "resubmit_across", timeout_multiplier=6, workdir=workdir
+            ):
+                task2 = ControllableResumableTask.C()
+                task2.submit(max_retries=1)
 
-            task2.control_file.write_text("complete")
+                task2.control_file.write_text("complete")
 
-            # Should still be error (retry_count exhausted)
-            assert task2.__xpm__.job.wait() == JobState.ERROR
+                # Should still be error (retry_count exhausted)
+                assert task2.__xpm__.job.wait() == JobState.ERROR
+        except FailedExperiment:
+            # Expected - experiment raises because job is in error state
+            pass
 
         # Third experiment: resubmit with higher max_retries - should complete
         with TemporaryExperiment(

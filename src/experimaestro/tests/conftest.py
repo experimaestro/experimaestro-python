@@ -82,11 +82,6 @@ def reset_scheduler():
     # Reset ResourcePoller singleton
     ResourcePoller.reset()
 
-    # Reset DoneHandlerWorker singleton
-    from experimaestro.scheduler.done_handler import DoneHandlerWorker
-
-    DoneHandlerWorker.reset()
-
     # Get the singleton instance if it exists
     if Scheduler._instance is not None:
         scheduler = Scheduler._instance
@@ -166,9 +161,6 @@ def reset_scheduler():
 
     # Reset ResourcePoller singleton after test
     ResourcePoller.reset()
-
-    # Reset DoneHandlerWorker singleton after test
-    DoneHandlerWorker.reset()
 
 
 def pytest_configure(config):

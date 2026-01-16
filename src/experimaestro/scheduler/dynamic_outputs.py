@@ -12,17 +12,77 @@ import asyncio
 import json
 import queue
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Set, TYPE_CHECKING
 
+import concurrent
 from watchdog.events import FileSystemEventHandler
 
 from experimaestro.ipc import ipcom
 from experimaestro.utils import logger
 
 if TYPE_CHECKING:
+    from experimaestro.scheduler.jobs import Job
     from experimaestro.core.objects import WatchedOutput
     from experimaestro.scheduler.experiment import experiment
+
+
+@dataclass
+class CallbackItem:
+    """A callback to be executed on the worker thread"""
+
+    callback: Callable
+    event: object
+    update_count: bool
+
+    def run(self, worker: "TaskOutputsWorker") -> None:
+        """Execute the callback"""
+        try:
+            logger.debug("Calling callback %s with event %s", self.callback, self.event)
+            self.callback(self.event)
+        except Exception:
+            logger.exception("Error in task output callback")
+        finally:
+            if self.update_count:
+                asyncio.run_coroutine_threadsafe(
+                    worker.xp.update_task_output_count(-1),
+                    worker.xp.scheduler.loop,
+                ).result()
+
+
+@dataclass
+class RawEventItem:
+    """A raw event that needs method processing on the worker thread
+
+    This moves the potentially slow method call to the worker thread
+    instead of blocking the file watcher thread.
+    """
+
+    watcher: "TaskOutputWatcher"
+    raw_event: dict
+
+    def run(self, worker: "TaskOutputsWorker") -> None:
+        """Execute the event: call method and dispatch to callbacks"""
+        try:
+            self.watcher.execute_event(self.raw_event)
+        except Exception:
+            logger.exception("Error processing raw event")
+
+
+@dataclass
+class CompletionSignal:
+    """Signal that job output processing is complete"""
+
+    completion_event: threading.Event
+
+    def run(self, worker: "TaskOutputsWorker") -> None:
+        """Signal completion"""
+        self.completion_event.set()
+
+
+# Queue item type
+QueueItem = CallbackItem | RawEventItem | CompletionSignal | None
 
 
 class TaskOutputWatcher:
@@ -39,6 +99,7 @@ class TaskOutputWatcher:
         self.worker = worker
         self.callbacks: Set[Callable] = set()
         self.processed_events: List[dict] = []
+        self.update_xp_futures: list[concurrent.futures.Future] = []
 
     def add_callback(self, callback: Callable):
         """Add a callback and replay any existing events"""
@@ -48,8 +109,32 @@ class TaskOutputWatcher:
         self.callbacks.add(callback)
 
     def process_event(self, raw_event: dict):
-        """Process a raw event from the task output file"""
-        # Call the method to convert the raw event to a configuration
+        """Queue a raw event for processing on the worker thread
+
+        This queues the event to be processed by the worker thread, which
+        will call the method and dispatch to callbacks. This avoids blocking
+        the file watcher thread with potentially slow method calls.
+        """
+        logger.info("Adding raw event %s", raw_event)
+        # Update task output count for this event
+        self.update_xp_futures.append(
+            asyncio.run_coroutine_threadsafe(
+                self.worker.xp.update_task_output_count(1),
+                self.worker.xp.scheduler.loop,
+            )
+        )
+
+        # Queue the raw event for processing on worker thread
+        self.worker.queue.put(RawEventItem(watcher=self, raw_event=raw_event))
+
+    def execute_event(self, raw_event: dict):
+        """Execute a raw event on the worker thread
+
+        This is called by the worker thread to process the event:
+        1. Call the method to convert raw event to configuration
+        2. Store in processed_events for replay
+        3. Dispatch to all callbacks
+        """
         try:
             # The method signature is: method(dep, *args, **kwargs) -> Config
             # We need to provide a marker function that marks the output
@@ -60,9 +145,9 @@ class TaskOutputWatcher:
             result = self.method(mark_output, *raw_event["args"], **raw_event["kwargs"])
             self.processed_events.append(result)
 
-            # Dispatch to all callbacks
+            # Dispatch to all callbacks (don't update count, already counted above)
             for callback in self.callbacks:
-                self.worker.add(callback, result)
+                self.worker.add(callback, result, update_count=False)
         except Exception:
             logger.exception("Error processing task output event")
 
@@ -192,6 +277,7 @@ class TaskOutputs(FileSystemEventHandler):
                 event = json.loads(line)
                 key = event.get("key")
                 if key and key in self.watchers:
+                    logger.info("Adding one event %s", event)
                     self.watchers[key].process_event(event)
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON in task output: %s", line)
@@ -211,7 +297,7 @@ class TaskOutputs(FileSystemEventHandler):
 
 
 class TaskOutputsWorker(threading.Thread):
-    """Worker thread that processes task output callbacks"""
+    """Worker thread that processes task output callbacks for one experiment"""
 
     def __init__(self, xp: "experiment"):
         super().__init__(name="task-outputs-worker", daemon=True)
@@ -251,36 +337,40 @@ class TaskOutputsWorker(threading.Thread):
         :param event: The event data
         :param update_count: Whether to update the task output count (False for replays)
         """
+
+        async def add_one():
+            total = await self.xp.update_task_output_count(1)
+            logger.info(
+                "Added one task output to be processed to experiment (total %d)", total
+            )
+
         if update_count:
             asyncio.run_coroutine_threadsafe(
-                self.xp.update_task_output_count(1),
+                add_one(),
                 self.xp.scheduler.loop,
             ).result()
 
-        self.queue.put((callback, event, update_count))
+        self.queue.put(
+            CallbackItem(callback=callback, event=event, update_count=update_count)
+        )
 
     def run(self):
         """Main worker loop"""
         logger.debug("Starting task outputs worker")
         while True:
-            element = self.queue.get()
-            if element is None:
+            item = self.queue.get()
+
+            if item is None:
                 # Shutdown signal
                 break
 
-            callback, event, update_count = element
+            logger.info("Processing event %s", item)
             try:
-                logger.debug("Calling callback %s with event %s", callback, event)
-                callback(event)
+                item.run(self)
             except Exception:
-                logger.exception("Error in task output callback")
-            finally:
-                self.queue.task_done()
-                if update_count:
-                    asyncio.run_coroutine_threadsafe(
-                        self.xp.update_task_output_count(-1),
-                        self.xp.scheduler.loop,
-                    ).result()
+                logger.exception("Got an error while processing event %s", item)
+            self.queue.task_done()
+            logger.info("Processed event %s", item)
 
         logger.debug("Task outputs worker stopped")
 
@@ -300,6 +390,39 @@ class TaskOutputsWorker(threading.Thread):
         if monitor is not None:
             with monitor._lock:
                 monitor._process_file()
+
+    async def aio_process_job_outputs(self, job: "Job"):
+        """Process job outputs and return a future that resolves when complete.
+
+        This method:
+        1. Processes the task outputs file to queue any remaining events
+        3. Returns a future that resolves when the completion signal is processed
+
+        The returned future can be awaited to ensure all callbacks have completed.
+
+        :param job: The job that has finished
+        :return: Future that resolves when processing is complete, or None if no monitor
+        """
+        path = job.task_outputs_path
+        with self._lock:
+            monitor = self._monitors.get(path)
+
+        if monitor is None:
+            return None
+
+        # Process file to queue any remaining events
+        with monitor._lock:
+            monitor._process_file()
+
+        for key, watcher in monitor.watchers.items():
+            futures = watcher.update_xp_futures
+            logger.info(
+                "Waiting for completion of %d task outputs workers for %s",
+                len(futures),
+                key,
+            )
+            await asyncio.gather(*[asyncio.wrap_future(f) for f in futures])
+            logger.info("Task outputs processed for %s", self)
 
     def shutdown(self):
         """Stop the worker and all monitors"""

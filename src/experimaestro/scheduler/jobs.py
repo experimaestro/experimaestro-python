@@ -141,9 +141,6 @@ class Job(BaseJob, Resource):
     # Set by the scheduler
     _future: Optional["concurrent.futures.Future"]
 
-    # Future that resolves when done handler completes
-    _final_state: Optional["asyncio.Future[JobState]"]
-
     def __init__(
         self,
         config: Config,
@@ -215,22 +212,6 @@ class Job(BaseJob, Resource):
         # Carbon metrics (updated via events)
         self.carbon_metrics = None
 
-        # Future that resolves when done handler completes
-        self._final_state: Optional[asyncio.Future[JobState]] = None
-
-    def get_final_state_future(self, loop: asyncio.AbstractEventLoop) -> asyncio.Future:
-        """Get or create the final_state future.
-
-        Args:
-            loop: The event loop to create the future on
-
-        Returns:
-            A future that resolves to the job's final state
-        """
-        if self._final_state is None:
-            self._final_state = loop.create_future()
-        return self._final_state
-
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
 
@@ -251,19 +232,17 @@ class Job(BaseJob, Resource):
             watched.job = self
             xp.watch_output(watched)
 
-    def done_handler(self):
-        """The task has been completed.
+    async def aio_done_handler(self):
+        """The task has been completed (async version with completion signaling).
 
         Ensures all remaining task output events are processed by explicitly
-        reading the task outputs file. This is necessary because file system
-        watchers may have latency, and we need to process all outputs before
-        the experiment can exit.
+        reading the task outputs file and waits for all callbacks to complete.
         """
         if not self.watched_outputs:
             return
 
         for xp in self.experiments:
-            xp.taskOutputsWorker.process_job_outputs(self)
+            await xp.taskOutputsWorker.aio_process_job_outputs(self)
 
     def __str__(self):
         return "Job[{}]".format(self.identifier)
@@ -295,11 +274,6 @@ class Job(BaseJob, Resource):
 
         # Call base implementation for state and timestamps
         super().set_state(new_state, loading=loading)
-
-        # Reset _final_state when transitioning to WAITING (for restarts/resubmits)
-        # This ensures a new future is created instead of reusing the old one
-        if new_state == JobState.WAITING:
-            self._final_state = None
 
         # Helper to determine if a state should be "counted" in unfinishedJobs
         # A job is counted when it's been submitted and hasn't finished yet
@@ -509,6 +483,38 @@ class Job(BaseJob, Resource):
         if self._process is not None:
             return self._process.tospec()
         return None
+
+    async def write_status_with_lock(self) -> bool:
+        """Write status.json if it differs from the current state on disk.
+
+        This method acquires the job lock, reads the current status from disk,
+        compares it with the in-memory state, and only writes if there's a difference.
+
+        Returns:
+            True if the status was written, False if it was unchanged.
+        """
+        import json
+        from filelock import AsyncFileLock
+
+        async with AsyncFileLock(self.lockpath):
+            # Read current state from disk
+            current_dict = None
+            if self.status_path.exists():
+                try:
+                    current_dict = json.loads(self.status_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Get new state
+            new_dict = self.state_dict()
+
+            # Compare and write only if different
+            if current_dict != new_dict:
+                self.status_path.parent.mkdir(parents=True, exist_ok=True)
+                self.status_path.write_text(json.dumps(new_dict))
+                return True
+
+            return False
 
     @property
     def basepath(self) -> Path:

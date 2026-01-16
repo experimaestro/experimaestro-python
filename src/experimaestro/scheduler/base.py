@@ -12,6 +12,8 @@ from typing import (
 )
 import asyncio
 
+
+from experimaestro.exceptions import GracefulTimeout
 from experimaestro.scheduler import experiment
 from experimaestro.scheduler.jobs import (
     Job,
@@ -241,11 +243,6 @@ class Scheduler(StateProvider, threading.Thread):
         self.loop.call_soon_threadsafe(init_loop_vars)
         init_done.wait()
 
-        # Set up DoneHandlerWorker with the event loop
-        from experimaestro.scheduler.done_handler import DoneHandlerWorker
-
-        DoneHandlerWorker.instance().set_loop(self.loop)
-
         self._ready.set()
         logger.debug("Scheduler initialized with EventLoopThread's loop")
 
@@ -383,17 +380,7 @@ class Scheduler(StateProvider, threading.Thread):
             # Check if job needs to be re-started
             need_restart = False
             if other.state.is_error():
-                # Only restart if we have retries remaining
-                if other.retry_count < other.max_retries:
-                    logger.info("Re-submitting job (was in error state)")
-                    need_restart = True
-                else:
-                    logger.info(
-                        "Job %s in error state but retry_count=%d >= max_retries=%d",
-                        other.identifier[:8],
-                        other.retry_count,
-                        other.max_retries,
-                    )
+                need_restart = True
             elif (
                 was_transient
                 and not other.transient.is_transient
@@ -421,9 +408,6 @@ class Scheduler(StateProvider, threading.Thread):
         # Register this job
         xp = experiment.current()
         self.jobs[job.identifier] = job
-        # Set submittime now so that add_job can record it in the database
-        # (aio_submit may update this later for re-submitted jobs)
-        job.submittime = datetime.now()
         xp.add_job(job)
 
         # Update tags map for this experiment/run
@@ -595,7 +579,7 @@ class Scheduler(StateProvider, threading.Thread):
         """
         logger.info("Cleaning up marker files for job %s", job.identifier[:8])
         for marker_file in [job.donepath, job.failedpath]:
-            logger.info(
+            logger.debug(
                 "  Checking marker file: %s (exists=%s)",
                 marker_file,
                 marker_file.exists(),
@@ -603,7 +587,7 @@ class Scheduler(StateProvider, threading.Thread):
             if marker_file.exists():
                 try:
                     marker_file.unlink()
-                    logger.info("  Removed old marker file: %s", marker_file)
+                    logger.debug("  Removed old marker file: %s", marker_file)
                 except OSError as e:
                     logger.warning(
                         "Failed to remove marker file %s: %s", marker_file, e
@@ -749,26 +733,63 @@ class Scheduler(StateProvider, threading.Thread):
         # Now, notify that the job has been submitted
         self.notify_job_submitted(job)
 
+        # Run the job and handle retries
+        while True:
+            try:
+                await self.aio_submit_inner(job)
+                break
+            except GracefulTimeout:
+                # If timeout we just start again the loop to start the job again
+                # if needed
+                logger.info(
+                    "GracefulTimeout caught for job %s, restarting",
+                    job.identifier[:8],
+                )
+                pass
+
+        logger.info("Current job state is %s", job.state)
+
+        # Process job completion: task outputs, final status write, cleanup
+        return await self.aio_final_state(job)
+
+    async def aio_submit_inner(self, job: Job) -> None:
+        """Inner job submission logic: load state, check for running process, start if needed.
+
+        This method handles:
+        1. Loading existing job state from disk
+        2. Checking for already-done or exhausted-retries jobs
+        3. Checking for running processes
+        4. Starting the job with retry loop for GracefulTimeout
+
+        Args:
+            job: The job to submit
+        """
         # Load existing job status if available (from previous run)
         # set_state(loading=True) properly handles experiment statistics
         job.load_from_disk()
+        logger.debug("Job state after load_from_disk: %s", job.state_dict())
 
-        was_done = job.state == JobState.DONE
-        if was_done:
-            self.notify_job_state(job)
-        elif job.state.is_error() and job.retry_count >= job.max_retries:
-            # Failed job with exhausted retries - keep in error state
-            # User must increase max_retries to allow restart
+        # Check if job is already done
+        if job.state == JobState.DONE:
+            return
+
+        # Check if job failed with exhausted retries
+        if (
+            job.state.is_error()
+            and job.resumable
+            and job.retry_count >= job.max_retries
+        ):
             logger.info(
-                "Job %s failed with retry_count=%d >= max_retries=%d, not restarting",
+                "Job %s failed with retry_count=%d/max_retries=%d - not restarting",
                 job.identifier[:8],
                 job.retry_count,
                 job.max_retries,
             )
-            self.notify_job_state(job)
-        else:
-            job._clear_transient_fields()
-            job.set_state(JobState.WAITING)
+            return
+
+        # Job needs to run - clear transient fields and set to WAITING
+        job._clear_transient_fields()
+        job.set_state(JobState.WAITING)
 
         # Check if we have a running process
         if not job.state.finished():
@@ -785,8 +806,9 @@ class Scheduler(StateProvider, threading.Thread):
                 job.set_state(JobState.UNSCHEDULED)
 
             # Start the job if not skipped (state is still WAITING)
+            # Loop to handle GracefulTimeout for resumable tasks
             logger.debug("No process for job %s (state %s), starting", job, job.state)
-            if job.state == JobState.WAITING:
+            while job.state == JobState.WAITING:
                 try:
                     state = await self.aio_start(job)
                     logger.info(
@@ -799,27 +821,55 @@ class Scheduler(StateProvider, threading.Thread):
                             job.identifier[:8],
                             job.state,
                         )
+                    break  # Exit loop on success
                 except Exception:
                     logger.exception("Got an exception while starting the job")
                     raise
 
-        logger.info("Current job state is %s", job.state)
+    async def aio_final_state(self, job: Job) -> JobState:
+        """Process job completion and return final state.
 
-        # Submit to done handler for background processing
-        # This handles: task outputs, final status write, and cleanup
-        from experimaestro.scheduler.done_handler import DoneHandlerWorker
+        This method handles:
+        1. Skip processing for UNSCHEDULED jobs (transient jobs not needed)
+        2. Write final status file (if different from disk)
+        3. Process task outputs (with completion signaling)
+        4. Remove job from waiting jobs
+        5. Notify exit condition
 
-        # Create the final state future before submitting to handler
-        final_future = job.get_final_state_future(self.loop)
+        Args:
+            job: The job that has completed
 
-        # Submit job completion to background handler
-        # For jobs loaded from disk as DONE, we still need to process any
-        # pending task outputs and write status
-        DoneHandlerWorker.instance().submit(job, self.loop)
+        Returns:
+            The final job state
+        """
+        logger.debug("Processing final state for job %s", job.identifier[:8])
+
+        # Skip processing for UNSCHEDULED jobs (transient jobs that weren't needed)
+        if job.state == JobState.UNSCHEDULED:
+            logger.debug(
+                "Skipping final state for unscheduled job %s", job.identifier[:8]
+            )
+
+        else:
+            # Write final status (only if different from disk)
+            # Status may have already been written by aio_start
+            await job.write_status_with_lock()
+
+            # Process task outputs
+            await job.aio_done_handler()
+
+        # Remove from waiting jobs
+        self.waitingjobs.discard(job)
+
+        # Notify with final state
+        self.notify_job_state(job)
+
+        # Notify the experiments
+        async with self.exitCondition:
+            self.exitCondition.notify_all()
 
         # Wait for done handler to complete and notify exit condition
-        logger.info("Final future is %s", final_future)
-        return await final_future
+        return job.state
 
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.
@@ -888,253 +938,250 @@ class Scheduler(StateProvider, threading.Thread):
         """
         from experimaestro.locking import DynamicDependencyLocks, LockError
 
-        # Assert preconditions
-        assert job.launcher is not None
-
         # Restart loop for resumable tasks that timeout
-        while True:
-            logger.debug(
-                "Starting job %s with %d dependencies",
-                job,
-                len(job.dependencies),
-            )
+        logger.debug(
+            "Starting job %s with %d dependencies",
+            job,
+            len(job.dependencies),
+        )
 
-            # Separate static and dynamic dependencies
-            static_deps = [d for d in job.dependencies if not d.is_dynamic()]
-            dynamic_deps = [d for d in job.dependencies if d.is_dynamic()]
+        # Separate static and dynamic dependencies
+        static_deps = [d for d in job.dependencies if not d.is_dynamic()]
+        dynamic_deps = [d for d in job.dependencies if d.is_dynamic()]
 
-            # First, wait for all static dependencies (jobs) to complete
-            # These don't need the dependency lock as they can't change state
-            # Static dependency locks don't need to be added to locks list
-            logger.debug("Waiting for %d static dependencies", len(static_deps))
-            for dependency in static_deps:
-                logger.debug("Waiting for static dependency %s", dependency)
+        # First, wait for all static dependencies (jobs) to complete
+        # These don't need the dependency lock as they can't change state
+        # Static dependency locks don't need to be added to locks list
+        logger.debug("Waiting for %d static dependencies", len(static_deps))
+        for dependency in static_deps:
+            logger.debug("Waiting for static dependency %s", dependency)
+            try:
+                await dependency.aio_lock()
+            except RuntimeError as e:
+                # Dependency failed - mark job as failed due to dependency
+                logger.warning("Dependency failed: %s", e)
+                return JobStateError(JobFailureStatus.DEPENDENCY)
+
+        # We first lock the job before proceeding
+        async with DynamicDependencyLocks() as locks:
+            logger.debug("[starting] Locking job %s", job)
+            async with job.launcher.connector.async_lock(job.lockpath):
+                logger.debug("[starting] Locked job %s", job)
+
+                state = None
                 try:
-                    await dependency.aio_lock()
-                except RuntimeError as e:
-                    # Dependency failed - mark job as failed due to dependency
-                    logger.warning("Dependency failed: %s", e)
-                    return JobStateError(JobFailureStatus.DEPENDENCY)
-
-            # We first lock the job before proceeding
-            async with DynamicDependencyLocks() as locks:
-                logger.debug("[starting] Locking job %s", job)
-                async with job.launcher.connector.async_lock(job.lockpath):
-                    logger.debug("[starting] Locked job %s", job)
-
-                    state = None
-                    try:
-                        # Now handle dynamic dependencies (tokens) with retry logic
-                        # CRITICAL: Only one task at a time can acquire dynamic dependencies
-                        # to prevent deadlocks (e.g., Task A holds Token1 waiting for Token2,
-                        # Task B holds Token2 waiting for Token1)
-                        if dynamic_deps:
-                            async with self.dependencyLock:
-                                logger.debug(
-                                    "Locking %d dynamic dependencies (tokens)",
-                                    len(dynamic_deps),
-                                )
-                                while True:
-                                    all_locked = True
-                                    for idx, dependency in enumerate(dynamic_deps):
-                                        try:
-                                            # Use timeout=0 for first dependency, 0.1s for subsequent
-                                            timeout = 0 if idx == 0 else 0.1
-                                            # Acquire the lock (this might block on IPC locks)
-                                            lock = await dependency.aio_lock(
-                                                timeout=timeout
-                                            )
-                                            locks.append(lock)
-                                        except LockError:
-                                            logger.info(
-                                                "Could not lock %s, retrying",
-                                                dependency,
-                                            )
-                                            # Release all locks and restart
-                                            for lock in locks.locks:
-                                                await lock.aio_release()
-                                            locks.locks.clear()
-                                            # Put failed dependency first
-                                            dynamic_deps.remove(dependency)
-                                            dynamic_deps.insert(0, dependency)
-                                            all_locked = False
-                                            break
-
-                                    if all_locked:
-                                        # All locks acquired successfully
+                    # Now handle dynamic dependencies (tokens) with retry logic
+                    # CRITICAL: Only one task at a time can acquire dynamic dependencies
+                    # to prevent deadlocks (e.g., Task A holds Token1 waiting for Token2,
+                    # Task B holds Token2 waiting for Token1)
+                    if dynamic_deps:
+                        async with self.dependencyLock:
+                            logger.debug(
+                                "Locking %d dynamic dependencies (tokens)",
+                                len(dynamic_deps),
+                            )
+                            while True:
+                                all_locked = True
+                                for idx, dependency in enumerate(dynamic_deps):
+                                    try:
+                                        # Use timeout=0 for first dependency, 0.1s for subsequent
+                                        timeout = 0 if idx == 0 else 0.1
+                                        # Acquire the lock (this might block on IPC locks)
+                                        lock = await dependency.aio_lock(
+                                            timeout=timeout
+                                        )
+                                        locks.append(lock)
+                                    except LockError:
+                                        logger.info(
+                                            "Could not lock %s, retrying",
+                                            dependency,
+                                        )
+                                        # Release all locks and restart
+                                        for lock in locks.locks:
+                                            await lock.aio_release()
+                                        locks.locks.clear()
+                                        # Put failed dependency first
+                                        dynamic_deps.remove(dependency)
+                                        dynamic_deps.insert(0, dependency)
+                                        all_locked = False
                                         break
 
-                        # Dependencies have been locked, we can start the job
-                        job.starttime = datetime.now()
+                                if all_locked:
+                                    # All locks acquired successfully
+                                    break
 
-                        # Creates the main directory
-                        directory = job.path
-                        logger.debug("Making directories job %s...", directory)
+                    # Dependencies have been locked, we can start the job
+                    job.starttime = datetime.now()
 
-                        # Warn about directory cleanup for non-resumable tasks
-                        # (only once per task type)
-                        xpmtype = job.config.__xpmtype__
-                        if (
-                            directory.is_dir()
-                            and not job.resumable
-                            and not xpmtype.warned_clean_not_resumable
-                        ):
-                            xpmtype.warned_clean_not_resumable = True
-                            logger.warning(
-                                "In a future version, directory will be cleaned up for "
-                                "non-resumable tasks (%s). Use ResumableTask if you want "
-                                "to preserve the directory contents.",
-                                xpmtype.identifier,
-                            )
+                    # Creates the main directory
+                    directory = job.path
+                    logger.debug("Making directories job %s...", directory)
 
-                        if not directory.is_dir():
-                            directory.mkdir(parents=True, exist_ok=True)
-
-                        # Clean up old job event files from previous runs
-                        self._cleanup_job_event_files(job)
-
-                        # Clean up old marker files (.done/.failed) from previous runs
-                        self._cleanup_job_marker_files(job)
-
-                        # Write metadata with submit and start time (after directory creation)
-                        job.status_path.parent.mkdir(parents=True, exist_ok=True)
-                        job.status_path.write_text(json.dumps(job.state_dict()))
-
-                        # Notify locks before job starts (e.g., create symlinks)
-                        await locks.aio_job_before_start(job)
-
-                    except Exception:
-                        logger.warning("Error while locking job", exc_info=True)
-                        return JobState.WAITING
-
-                    try:
-                        # Runs the job
-                        process = await job.aio_run()
-
-                        # Notify locks that job has started
-                        await locks.aio_job_started(job, process)
-
-                        # Write locks.json for job process (if there are dynamic locks)
-                        if locks.locks:
-                            import tempfile
-
-                            locks_path = job.path / "locks.json"
-                            locks_data = {"dynamic_locks": locks.to_json()}
-                            # Atomic write: write to temp file then rename
-                            with tempfile.NamedTemporaryFile(
-                                mode="w",
-                                dir=job.path,
-                                prefix=".locks.",
-                                suffix=".json",
-                                delete=False,
-                            ) as tmp:
-                                json.dump(locks_data, tmp)
-                                tmp_path = tmp.name
-                            # Rename is atomic on POSIX
-                            import os
-
-                            os.rename(tmp_path, locks_path)
-                    except Exception:
-                        logger.warning("Error while starting job", exc_info=True)
-                        return JobState.ERROR
-
-                # Wait for job to complete while holding locks
-                try:
-                    logger.debug("Waiting for job %s process to end", job)
-
-                    code = await process.aio_code()
-                    logger.debug("Got return code %s for %s", code, job)
-
-                    # Record exit code if available
-                    if code is not None:
-                        logger.info("Job %s ended with code %s", job, code)
-                        job.exit_code = code
-                    else:
-                        logger.info("Job %s ended, reading state from files", job)
-
-                    # Read state from .done/.failed files (contains detailed failure reason)
-                    state = JobState.from_path(job.path, job.name)
-                    logger.info(
-                        "State from marker files for job %s: %s (code=%s, donepath=%s, failedpath=%s)",
-                        job.identifier[:8],
-                        state,
-                        code,
-                        job.donepath.exists(),
-                        job.failedpath.exists(),
-                    )
-
-                    # If state is a generic FAILED error, let the process determine
-                    # the state (it may detect launcher-specific failures like SLURM timeout)
+                    # Warn about directory cleanup for non-resumable tasks
+                    # (only once per task type)
+                    xpmtype = job.config.__xpmtype__
                     if (
-                        state is not None
-                        and isinstance(state, JobStateError)
-                        and state.failure_reason == JobFailureStatus.FAILED
-                        and code is not None
+                        directory.is_dir()
+                        and not job.resumable
+                        and not xpmtype.warned_clean_not_resumable
                     ):
-                        process_state = process.get_job_state(code)
-                        if (
-                            isinstance(process_state, JobStateError)
-                            and process_state.failure_reason != JobFailureStatus.FAILED
-                        ):
-                            # Process detected a more specific failure reason
-                            state = process_state
+                        xpmtype.warned_clean_not_resumable = True
+                        logger.warning(
+                            "In a future version, directory will be cleaned up for "
+                            "non-resumable tasks (%s). Use ResumableTask if you want "
+                            "to preserve the directory contents.",
+                            xpmtype.identifier,
+                        )
 
-                    if state is None:
-                        if code is not None:
-                            # Fall back to process-specific state detection
-                            state = process.get_job_state(code)
-                        else:
-                            logger.error(
-                                "No .done or .failed file found for job %s", job
-                            )
-                            state = JobState.ERROR
+                    if not directory.is_dir():
+                        directory.mkdir(parents=True, exist_ok=True)
 
-                except JobError:
-                    logger.warning("Error while running job")
-                    state = JobState.ERROR
+                    # Clean up old job event files from previous runs
+                    self._cleanup_job_event_files(job)
+
+                    # Clean up old marker files (.done/.failed) from previous runs
+                    self._cleanup_job_marker_files(job)
+
+                    # Write metadata with submit and start time (after directory creation)
+                    job.status_path.parent.mkdir(parents=True, exist_ok=True)
+                    job.status_path.write_text(json.dumps(job.state_dict()))
+
+                    # Notify locks before job starts (e.g., create symlinks)
+                    await locks.aio_job_before_start(job)
 
                 except Exception:
-                    logger.warning(
-                        "Error while running job (in experimaestro)", exc_info=True
-                    )
-                    state = JobState.ERROR
+                    logger.warning("Error while locking job", exc_info=True)
+                    return JobState.WAITING
 
-                # Notify locks that job has finished (before releasing)
-                await locks.aio_job_finished(job)
+                try:
+                    # Runs the job
+                    process = await job.aio_run()
 
-            # Locks are released here after job completes
+                    # Notify locks that job has started
+                    await locks.aio_job_started(job, process)
 
-            # Increment retry_count for any failure of a resumable task
-            if isinstance(state, JobStateError) and job.resumable:
-                job.retry_count += 1
+                    # Write locks.json for job process (if there are dynamic locks)
+                    if locks.locks:
+                        import tempfile
 
-            # Check if we should restart a resumable task that timed out
-            if (
-                isinstance(state, JobStateError)
-                and state.failure_reason == JobFailureStatus.TIMEOUT
-                and job.resumable
-                and job.retry_count <= job.max_retries
-            ):
+                        locks_path = job.path / "locks.json"
+                        locks_data = {"dynamic_locks": locks.to_json()}
+                        # Atomic write: write to temp file then rename
+                        with tempfile.NamedTemporaryFile(
+                            mode="w",
+                            dir=job.path,
+                            prefix=".locks.",
+                            suffix=".json",
+                            delete=False,
+                        ) as tmp:
+                            json.dump(locks_data, tmp)
+                            tmp_path = tmp.name
+                        # Rename is atomic on POSIX
+                        import os
+
+                        os.rename(tmp_path, locks_path)
+                except Exception:
+                    logger.warning("Error while starting job", exc_info=True)
+                    return JobState.ERROR
+
+            # Wait for job to complete while holding locks
+            try:
+                logger.debug("Waiting for job %s process to end", job)
+
+                code = await process.aio_code()
+                logger.debug("Got return code %s for %s", code, job)
+
+                # Record exit code if available
+                if code is not None:
+                    logger.info("Job %s ended with code %s", job, code)
+                    job.exit_code = code
+                else:
+                    logger.info("Job %s ended, reading state from files", job)
+
+                # Read state from .done/.failed files (contains detailed failure reason)
+                state = JobState.from_path(job.path, job.name)
                 logger.info(
-                    "Resumable task %s timed out - restarting (attempt %d/%d)",
-                    job,
-                    job.retry_count,
-                    job.max_retries,
+                    "State from marker files for job %s: %s (code=%s, donepath=%s, failedpath=%s)",
+                    job.identifier[:8],
+                    state,
+                    code,
+                    job.donepath.exists(),
+                    job.failedpath.exists(),
                 )
-                # Rotate log files to preserve previous run's logs
-                job.rotate_logs()
-                # Clear cached process so aio_run() will create a new one
-                job._process = None
-                # Delete PID file so the job will be resubmitted
-                if job.pidpath.exists():
-                    job.pidpath.unlink()
-                # Continue the loop to restart
-                continue
 
-            # Job finished (success or non-recoverable error)
-            # Notify scheduler listeners of job state after job completes
-            self.notify_job_state(job)
-            return state
+                # If state is a generic FAILED error, let the process determine
+                # the state (it may detect launcher-specific failures like SLURM timeout)
+                if (
+                    state is not None
+                    and isinstance(state, JobStateError)
+                    and state.failure_reason == JobFailureStatus.FAILED
+                    and code is not None
+                ):
+                    process_state = process.get_job_state(code)
+                    if (
+                        isinstance(process_state, JobStateError)
+                        and process_state.failure_reason != JobFailureStatus.FAILED
+                    ):
+                        # Process detected a more specific failure reason
+                        state = process_state
+
+                if state is None:
+                    if code is not None:
+                        # Fall back to process-specific state detection
+                        state = process.get_job_state(code)
+                    else:
+                        logger.error("No .done or .failed file found for job %s", job)
+                        state = JobState.ERROR
+
+            except JobError:
+                logger.warning("Error while running job")
+                state = JobState.ERROR
+
+            except Exception:
+                logger.warning(
+                    "Error while running job (in experimaestro)", exc_info=True
+                )
+                state = JobState.ERROR
+
+            # Notify locks that job has finished (before releasing)
+            await locks.aio_job_finished(job)
+
+        # Locks are released here after job completes
+
+        # Increment retry_count for any failure of a resumable task
+        if isinstance(state, JobStateError) and job.resumable:
+            job.retry_count += 1
+
+        # Write status to disk (only if changed) - this persists retry_count
+        await job.write_status_with_lock()
+
+        # Check if we should restart a resumable task that timed out
+        if (
+            isinstance(state, JobStateError)
+            and state.failure_reason == JobFailureStatus.TIMEOUT
+            and job.resumable
+            and job.retry_count <= job.max_retries
+        ):
+            logger.info(
+                "Resumable task %s timed out - restarting (attempt %d/%d)",
+                job,
+                job.retry_count,
+                job.max_retries,
+            )
+            # Rotate log files to preserve previous run's logs
+            job.rotate_logs()
+            # Clear cached process so aio_run() will create a new one
+            job._process = None
+            # Delete PID file so the job will be resubmitted
+            if job.pidpath.exists():
+                job.pidpath.unlink()
+            # Continue the loop to restart
+            raise GracefulTimeout()
+
+        # Job finished (success or non-recoverable error)
+        # Notify scheduler listeners of job state after job completes
+        self.notify_job_state(job)
+        return state
 
     # =========================================================================
     # StateProvider abstract method implementations
