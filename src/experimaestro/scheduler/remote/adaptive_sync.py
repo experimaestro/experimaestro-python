@@ -33,12 +33,15 @@ class AdaptiveSynchronizer:
 
     def __init__(
         self,
-        sync_func: Callable[[str], Optional[Path]],
+        sync_func: Callable[..., Optional[Path]],
         remote_path: str,
         name: str = "",
         on_sync_start: Optional[Callable[[], None]] = None,
         on_sync_complete: Optional[Callable[[Path], None]] = None,
         on_sync_error: Optional[Callable[[str], None]] = None,
+        on_give_up: Optional[Callable[[str], None]] = None,
+        max_retries: int = 3,
+        include: list[str] | None = None,
     ):
         """Initialize the synchronizer
 
@@ -49,6 +52,9 @@ class AdaptiveSynchronizer:
             on_sync_start: Callback when sync starts
             on_sync_complete: Callback when sync completes with local path
             on_sync_error: Callback when sync fails with error message
+            on_give_up: Callback when max retries reached (sync stopped)
+            max_retries: Maximum consecutive failures before giving up (0 = never give up)
+            include: Optional list of filename patterns to include (e.g., ["*.out", "*.err"])
         """
         self.sync_func = sync_func
         self.remote_path = remote_path
@@ -56,7 +62,12 @@ class AdaptiveSynchronizer:
         self.on_sync_start = on_sync_start
         self.on_sync_complete = on_sync_complete
         self.on_sync_error = on_sync_error
+        self.on_give_up = on_give_up
+        self.max_retries = max_retries
+        self.include = include
         self._syncing = False
+        self._consecutive_failures = 0
+        self._gave_up = False
 
         self._interval = INITIAL_SYNC_INTERVAL
         self._running = False
@@ -81,6 +92,16 @@ class AdaptiveSynchronizer:
     def syncing(self) -> bool:
         """Whether a sync is currently in progress"""
         return self._syncing
+
+    @property
+    def gave_up(self) -> bool:
+        """Whether sync gave up after max retries"""
+        return self._gave_up
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Number of consecutive sync failures"""
+        return self._consecutive_failures
 
     def start(self) -> None:
         """Start background syncing"""
@@ -117,6 +138,16 @@ class AdaptiveSynchronizer:
         """
         return self._do_sync()
 
+    def retry(self) -> None:
+        """Retry syncing after giving up
+
+        Resets failure count and restarts the background sync loop.
+        """
+        self._consecutive_failures = 0
+        self._gave_up = False
+        self._interval = INITIAL_SYNC_INTERVAL
+        self.start()
+
     def _sync_loop(self) -> None:
         """Background sync loop"""
         # Do initial sync immediately
@@ -141,12 +172,13 @@ class AdaptiveSynchronizer:
 
             logger.info("[%s] Starting rsync for %s...", self.name, self.remote_path)
             start_time = time.time()
-            local_path = self.sync_func(self.remote_path)
+            local_path = self.sync_func(self.remote_path, include=self.include)
             logger.info("[%s] sync_func returned: %s", self.name, local_path)
             sync_duration = time.time() - start_time
 
             if local_path:
                 self._local_path = local_path
+                self._consecutive_failures = 0  # Reset on success
 
                 # Check for changes
                 has_changes = self._check_for_changes(local_path)
@@ -187,24 +219,48 @@ class AdaptiveSynchronizer:
                 return local_path
             else:
                 logger.warning("[%s] Rsync returned no path", self.name)
-                if self.on_sync_error:
-                    self.on_sync_error("Sync returned no path")
+                self._handle_failure("Sync returned no path")
                 return None
 
         except Exception as e:
             logger.warning("[%s] Rsync failed: %s", self.name, e)
-            # On error, slow down to avoid hammering
-            self._interval = min(MAX_SYNC_INTERVAL, self._interval * 2)
-            logger.info(
-                "[%s] Next sync in %.1fs (after error)", self.name, self._interval
-            )
-
-            if self.on_sync_error:
-                self.on_sync_error(str(e))
-
+            self._handle_failure(str(e))
             return None
         finally:
             self._syncing = False
+
+    def _handle_failure(self, error: str) -> None:
+        """Handle a sync failure, potentially giving up after max retries"""
+        self._consecutive_failures += 1
+
+        # On error, slow down to avoid hammering
+        self._interval = min(MAX_SYNC_INTERVAL, self._interval * 2)
+
+        if self.on_sync_error:
+            self.on_sync_error(error)
+
+        # Check if we should give up
+        if self.max_retries > 0 and self._consecutive_failures >= self.max_retries:
+            logger.warning(
+                "[%s] Giving up after %d consecutive failures",
+                self.name,
+                self._consecutive_failures,
+            )
+            self._gave_up = True
+            self._running = False
+            self._stop_event.set()
+            if self.on_give_up:
+                self.on_give_up(
+                    f"Sync failed {self._consecutive_failures} times: {error}"
+                )
+        else:
+            logger.info(
+                "[%s] Failure %d/%d, next sync in %.1fs",
+                self.name,
+                self._consecutive_failures,
+                self.max_retries if self.max_retries > 0 else "∞",
+                self._interval,
+            )
 
     def _check_for_changes(self, local_path: Path) -> bool:
         """Check if any files in the synced directory have changed
@@ -262,4 +318,8 @@ class AdaptiveSynchronizer:
         return self
 
     def __exit__(self, *args):
+        self.stop()
+
+    def __del__(self):
+        """Ensure sync is stopped when garbage collected to prevent stray threads"""
         self.stop()

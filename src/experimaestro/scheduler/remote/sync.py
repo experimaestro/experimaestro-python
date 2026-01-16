@@ -40,11 +40,13 @@ class RemoteFileSynchronizer:
         self.local_cache = local_cache
         self.ssh_options = ssh_options or []
 
-    def sync_path(self, remote_path: str) -> Path:
+    def sync_path(self, remote_path: str, include: list[str] | None = None) -> Path:
         """Sync a specific path from remote
 
         Args:
             remote_path: Absolute path on remote or path relative to workspace
+            include: Optional list of filename patterns to include (e.g., ["*.out", "*.err"]).
+                    If provided, only files matching these patterns will be synced.
 
         Returns:
             Local path where the files were synced to
@@ -66,16 +68,17 @@ class RemoteFileSynchronizer:
         local_path.mkdir(parents=True, exist_ok=True)
         dest = f"{local_path}/"
 
-        self._rsync(source, dest)
+        self._rsync(source, dest, include=include)
 
         return local_path
 
-    def _rsync(self, source: str, dest: str):
+    def _rsync(self, source: str, dest: str, include: list[str] | None = None):
         """Execute rsync command
 
         Args:
             source: Remote source path (host:path/)
             dest: Local destination path
+            include: Optional list of filename patterns to include
         """
         cmd = [
             "rsync",
@@ -86,6 +89,12 @@ class RemoteFileSynchronizer:
             "-z",  # Compress during transfer
             "-v",  # Verbose
         ]
+
+        # Include/exclude patterns (order matters: includes first, then exclude all)
+        if include:
+            for pattern in include:
+                cmd.extend(["--include", pattern])
+            cmd.extend(["--exclude", "*"])
 
         # SSH options
         if self.ssh_options:

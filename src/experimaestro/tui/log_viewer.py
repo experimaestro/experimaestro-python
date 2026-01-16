@@ -278,42 +278,26 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         except Exception:
             pass
 
-        if is_running:
-            # Build a name for logging
-            sync_name = f"job:{self.task_id}" if self.task_id else f"job:{self.job_id}"
-            self._synchronizer = AdaptiveSynchronizer(
-                sync_func=self.sync_func,
-                remote_path=self.remote_path,
-                name=sync_name,
-                on_sync_start=lambda: self.app.call_from_thread(self._on_sync_start),
-                on_sync_complete=lambda p: self.app.call_from_thread(
-                    self._on_sync_complete, p
-                ),
-                on_sync_error=lambda e: self.app.call_from_thread(
-                    self._on_sync_error, e
-                ),
-            )
-            self._synchronizer.start()
-        else:
-            # For completed jobs, just sync once
-            self._do_single_sync()
+        # Build a name for logging
+        sync_name = f"job:{self.task_id}" if self.task_id else f"job:{self.job_id}"
 
-    def _do_single_sync(self) -> None:
-        """Do a single sync for completed jobs"""
-        import threading
+        # Only sync log files, not the entire job directory
+        task_name = self.task_id.split(".")[-1] if self.task_id else "task"
+        include_patterns = [f"{task_name}.out", f"{task_name}.err"]
 
-        def sync_thread():
-            try:
-                local_path = self.sync_func(self.remote_path)
-                if local_path:
-                    self.app.call_from_thread(self._on_sync_complete, local_path)
-                else:
-                    self.app.call_from_thread(self._on_sync_error, "Sync failed")
-            except Exception as e:
-                self.app.call_from_thread(self._on_sync_error, str(e))
-
-        thread = threading.Thread(target=sync_thread, daemon=True)
-        thread.start()
+        self._synchronizer = AdaptiveSynchronizer(
+            sync_func=self.sync_func,
+            remote_path=self.remote_path,
+            name=sync_name,
+            on_sync_start=lambda: self.app.call_from_thread(self._on_sync_start),
+            on_sync_complete=lambda p: self.app.call_from_thread(
+                self._on_sync_complete, p
+            ),
+            on_sync_error=lambda e: self.app.call_from_thread(self._on_sync_error, e),
+            max_retries=0 if is_running else 3,  # Never give up for running jobs
+            include=include_patterns,
+        )
+        self._synchronizer.start()
 
     def _on_sync_start(self) -> None:
         """Handle sync start - update status"""
@@ -322,6 +306,13 @@ class LogViewerScreen(Screen, inherit_bindings=False):
             status.update("⟳ Syncing...")
         except Exception:
             pass
+        # Also update loading message if still loading
+        if self._loading:
+            try:
+                loading = self.query_one("#loading", Static)
+                loading.update("⟳ Syncing logs from remote...")
+            except Exception:
+                pass
 
     def _on_sync_complete(self, local_path) -> None:
         """Handle sync completion - update log widgets"""
@@ -332,8 +323,6 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         # Ensure local_path is a Path object
         if not isinstance(local_path, Path):
             local_path = Path(local_path)
-
-        logger.info(f"Sync complete: {local_path}, loading={self._loading}")
 
         # Update sync status
         try:
@@ -409,15 +398,26 @@ class LogViewerScreen(Screen, inherit_bindings=False):
             self.log_widgets.append(widget)
             self.mount(widget, before=self.query_one("#sync-status"))
         else:
-            tabbed = TabbedContent()
-            self.mount(tabbed, before=self.query_one("#sync-status"))
+            # Build panes first, then mount TabbedContent
+            panes = []
             for i, log_file in enumerate(self.log_files):
                 file_name = Path(log_file).name
-                pane = TabPane(file_name, id=f"tab-{i}")
                 widget = LogWidget(log_file, f"log-{i}")
                 self.log_widgets.append(widget)
-                pane.compose_add_child(widget)
-                tabbed.add_pane(pane)
+                panes.append((file_name, f"tab-{i}", widget))
+
+            # Create TabbedContent
+            tabbed = TabbedContent()
+            self.mount(tabbed, before=self.query_one("#sync-status"))
+
+            # Use call_later to add panes after TabbedContent is fully mounted
+            def add_panes():
+                for title, tab_id, widget in panes:
+                    pane = TabPane(title, id=tab_id)
+                    pane.compose_add_child(widget)
+                    tabbed.add_pane(pane)
+
+            self.call_later(add_panes)
 
     def _refresh_logs(self) -> None:
         """Refresh all log widgets"""
@@ -433,16 +433,12 @@ class LogViewerScreen(Screen, inherit_bindings=False):
 
         logger = logging.getLogger("xpm.tui.log_viewer")
 
-        # Warn if closing during first sync
-        if self._loading:
-            self.notify("Sync in progress, please wait...", severity="warning")
-            logger.info("User tried to close during first sync, ignoring")
-            return
-
-        # Stop adaptive sync if running
+        # Stop adaptive sync if running (non-blocking to avoid UI freeze)
         if self._synchronizer:
-            logger.info("Closing log viewer, stopping sync")
-            self._synchronizer.stop()
+            logger.info("Closing log viewer, signaling sync to stop")
+            # Signal stop without blocking - thread will clean up on its own
+            self._synchronizer._running = False
+            self._synchronizer._stop_event.set()
 
         self.dismiss()
 
@@ -474,5 +470,6 @@ class LogViewerScreen(Screen, inherit_bindings=False):
             self._synchronizer.sync_now()
             self.notify("Syncing...")
         elif self.sync_func and self.remote_path:
-            self._do_single_sync()
+            # Start sync if not already running
+            self._start_adaptive_sync()
             self.notify("Syncing...")

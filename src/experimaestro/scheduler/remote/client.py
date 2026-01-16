@@ -862,7 +862,7 @@ class SSHStateProviderClient(OfflineStateProvider):
     # File Synchronization
     # -------------------------------------------------------------------------
 
-    def sync_path(self, path: str) -> Optional[Path]:
+    def sync_path(self, path: str, include: list[str] | None = None) -> Optional[Path]:
         """Sync a specific path from remote on-demand
 
         Used by services (e.g., TensorboardService) that need access to
@@ -873,6 +873,8 @@ class SSHStateProviderClient(OfflineStateProvider):
                 - Remote absolute path (e.g., /remote/workspace/jobs/xxx)
                 - Local cache path (e.g., /tmp/xpm_remote_xxx/jobs/xxx)
                 - Relative path within workspace (e.g., jobs/xxx)
+            include: Optional list of filename patterns to include (e.g., ["*.out", "*.err"]).
+                    If provided, only files matching these patterns will be synced.
 
         Returns:
             Local path where the files were synced to, or None if sync failed
@@ -906,7 +908,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             )
 
         try:
-            return self._synchronizer.sync_path(remote_path)
+            return self._synchronizer.sync_path(remote_path, include=include)
         except Exception as e:
             logger.warning("Failed to sync path %s: %s", remote_path, e)
             return None
