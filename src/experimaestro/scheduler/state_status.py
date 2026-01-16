@@ -955,7 +955,11 @@ class EventReader:
                 path = Path(event.src_path)
                 if self._is_event_file(path):
                     logger.debug("Detected creation of event file: %s", path)
-                    reader._file_positions[path] = 0
+                    # Only set position to 0 if not already tracked
+                    # (the file may have been processed by ordering logic in
+                    # _process_file_change before this callback arrived)
+                    if path not in reader._file_positions:
+                        reader._file_positions[path] = 0
                     reader._process_file_change(path)
 
             def on_deleted(self, event):
