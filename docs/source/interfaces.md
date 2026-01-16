@@ -77,13 +77,72 @@ experimaestro experiments monitor --workdir /path/to/workspace --console
 
 ### Keyboard Shortcuts
 
+Press `?` in the TUI to show the help screen with all shortcuts.
+
+**Navigation:**
+
 | Key | Action |
 |-----|--------|
-| `q` | Quit the TUI |
-| `↑`/`↓` | Navigate job list |
-| `Enter` | View job details |
-| `l` | Toggle log panel |
-| `r` | Refresh job list |
+| `q` | Quit application |
+| `Esc` | Go back / Close dialog |
+| `r` | Refresh data |
+| `?` | Show help |
+| `j` | Switch to Jobs tab |
+| `s` | Switch to Services tab |
+
+**Experiments:**
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Select experiment |
+| `d` | Show experiment runs |
+| `Ctrl+d` | Delete experiment |
+| `k` | Kill all running jobs |
+| `S` | Sort by status |
+| `D` | Sort by date |
+
+**Jobs:**
+
+| Key | Action |
+|-----|--------|
+| `l` | View job logs |
+| `Ctrl+d` | Delete job |
+| `k` | Kill running job |
+| `/` | Open search filter |
+| `c` | Clear search filter |
+| `S` | Sort by status |
+| `T` | Sort by task |
+| `D` | Sort by date |
+| `f` | Copy folder path |
+
+**Log Viewer:**
+
+| Key | Action |
+|-----|--------|
+| `f` | Toggle follow mode |
+| `g` | Go to top |
+| `G` | Go to bottom |
+| `r` | Sync now (remote) |
+| `Esc`/`q` | Close viewer |
+
+**Services:**
+
+| Key | Action |
+|-----|--------|
+| `s` | Start service |
+| `x` | Stop service |
+| `u` | Copy URL |
+
+**Orphan Jobs:**
+
+| Key | Action |
+|-----|--------|
+| `r` | Refresh |
+| `T` | Sort by task |
+| `Z` | Sort by size |
+| `Ctrl+d` | Delete selected |
+| `Ctrl+D` | Delete all |
+| `f` | Copy folder path |
 
 ### Python API
 

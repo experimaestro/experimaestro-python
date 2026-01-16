@@ -128,12 +128,15 @@ class HelpScreen(ModalScreen[None]):
 
 [bold cyan]Experiments[/bold cyan]
   Enter     Select experiment
-  d         Delete experiment
+  d         Show experiment runs
+  Ctrl+d    Delete experiment
   k         Kill all running jobs
+  S         Sort by status
+  D         Sort by date
 
 [bold cyan]Jobs[/bold cyan]
   l         View job logs
-  d         Delete job
+  Ctrl+d    Delete job
   k         Kill running job
   /         Open search filter
   c         Clear search filter
@@ -142,21 +145,24 @@ class HelpScreen(ModalScreen[None]):
   D         Sort by date
   f         Copy folder path
 
+[bold cyan]Log Viewer[/bold cyan]
+  f         Toggle follow mode
+  g         Go to top
+  G         Go to bottom
+  r         Sync now (remote)
+  Esc/q     Close viewer
+
 [bold cyan]Services[/bold cyan]
   s         Start service
   x         Stop service
   u         Copy URL
 
-[bold cyan]Search Filter[/bold cyan]
-  Enter     Apply filter
-  Esc       Close and clear filter
-
 [bold cyan]Orphan Jobs[/bold cyan]
-  o         Show orphan jobs
+  r         Refresh
   T         Sort by task
   Z         Sort by size
-  d         Delete selected
-  D         Delete all
+  Ctrl+d    Delete selected
+  Ctrl+D    Delete all
   f         Copy folder path
 """
         with Vertical(id="help-dialog"):
