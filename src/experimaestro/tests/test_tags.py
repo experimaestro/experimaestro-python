@@ -1,6 +1,9 @@
 from typing import Dict
 from pathlib import Path
 import logging
+
+import pytest
+
 from experimaestro import (
     tag,
     LightweightTask,
@@ -10,6 +13,9 @@ from experimaestro import (
 )
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.xpmutils import DirectoryContext
+
+# Mark all tests in this module as config tests
+pytestmark = pytest.mark.config
 
 
 class Config1(Config):

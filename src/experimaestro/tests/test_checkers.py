@@ -1,7 +1,11 @@
+import pytest
+
 from experimaestro import Config
 from experimaestro.core.arguments import Annotated
 from experimaestro.checkers import Choices
-import pytest
+
+# Mark all tests in this module as config tests
+pytestmark = pytest.mark.config
 
 
 def test_choices():

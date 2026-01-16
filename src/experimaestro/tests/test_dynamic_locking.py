@@ -15,6 +15,9 @@ from experimaestro.locking import (
 from experimaestro.tokens import TokenLockFile
 from experimaestro.core.partial_lock import PartialLockFile
 
+# Mark all tests in this module as token tests (locking related)
+pytestmark = pytest.mark.tokens
+
 
 # --- Test implementations ---
 

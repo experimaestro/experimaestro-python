@@ -16,7 +16,8 @@ from experimaestro.tokens import CounterToken
 from experimaestro.locking import LockError
 from experimaestro.ipc import AsyncEventBridge
 
-pytestmark = pytest.mark.anyio
+# Mark all tests in this module as token tests
+pytestmark = [pytest.mark.anyio, pytest.mark.tokens]
 
 
 @pytest.fixture(autouse=True)

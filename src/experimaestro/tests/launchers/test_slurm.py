@@ -12,6 +12,9 @@ import shutil
 import pytest
 from .common import waitFromSpec, takeback
 
+# Mark all tests in this module as launcher tests
+pytestmark = pytest.mark.launchers
+
 BINPATH = Path(__file__).parent / "bin"
 
 

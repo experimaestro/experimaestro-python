@@ -12,6 +12,9 @@ from experimaestro.utils.psutils import (
     aio_wait_pid,
 )
 
+# Mark all tests in this module as connector tests (utilities)
+pytestmark = [pytest.mark.connectors]
+
 
 @pytest.mark.parametrize("exit_code", [0, 1, 2, 42, 127])
 def test_aio_wait_pid_exit_codes(exit_code: int):

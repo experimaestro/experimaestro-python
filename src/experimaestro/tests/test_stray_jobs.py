@@ -10,6 +10,8 @@ from pathlib import Path
 import tempfile
 import logging
 
+import pytest
+
 from experimaestro import (
     Task,
     Param,
@@ -22,6 +24,9 @@ from experimaestro import (
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.scheduler import JobState
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+
+# Mark all tests in this module as task tests
+pytestmark = pytest.mark.tasks
 
 logger = logging.getLogger(__name__)
 

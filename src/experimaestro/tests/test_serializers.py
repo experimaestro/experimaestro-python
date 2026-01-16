@@ -1,4 +1,7 @@
 from typing import Optional
+
+import pytest
+
 from experimaestro import (
     Config,
     Param,
@@ -8,6 +11,12 @@ from experimaestro import (
 )
 from experimaestro.core.context import SerializationContext
 from experimaestro.core.objects import ConfigMixin, ConfigInformation, TaskStub
+
+# Mark all tests in this module as serialization tests (depends on identifier)
+pytestmark = [
+    pytest.mark.serialization,
+    pytest.mark.dependency(depends=["mod_identifier"], scope="session"),
+]
 
 
 class Object1(Config):

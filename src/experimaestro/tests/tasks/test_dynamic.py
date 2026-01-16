@@ -7,6 +7,9 @@ import logging
 from pathlib import Path
 import sys
 import time
+
+import pytest
+
 from experimaestro import (
     Config,
     Param,
@@ -19,6 +22,12 @@ from experimaestro import (
 )
 from experimaestro.core.arguments import Meta
 from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
+
+# Mark all tests in this module as dynamic output tests (depends on tasks)
+pytestmark = [
+    pytest.mark.dynamic,
+    pytest.mark.dependency(depends=["mod_tasks"], scope="session"),
+]
 
 
 class Model(Config):

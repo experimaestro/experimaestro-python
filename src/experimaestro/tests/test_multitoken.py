@@ -13,11 +13,15 @@ from pathlib import Path
 from dataclasses import dataclass, field as dataclass_field
 from typing import List
 
+import pytest
+
 from experimaestro import Task, Param, field
 from experimaestro.tokens import CounterToken
 from experimaestro.scheduler import JobState
 from .utils import TemporaryExperiment
 
+# Mark all tests in this module as token tests
+pytestmark = pytest.mark.tokens
 
 logger = logging.getLogger(__name__)
 

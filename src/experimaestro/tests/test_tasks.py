@@ -35,6 +35,14 @@ from .tasks.all import (
 from . import restart
 from .definitions_types import IntegerTask, FloatTask
 
+# Mark all tests in this module as task tests (depends on identifier)
+pytestmark = [
+    pytest.mark.tasks,
+    pytest.mark.dependency(
+        name="mod_tasks", depends=["mod_identifier"], scope="session"
+    ),
+]
+
 
 def test_task_types():
     with TemporaryExperiment("simple"):

@@ -7,6 +7,12 @@ from typing import Union
 import pytest
 from experimaestro.core.objects import ConfigMixin
 
+# Mark all tests in this module as type system tests (foundation - no dependencies)
+pytestmark = [
+    pytest.mark.types,
+    pytest.mark.dependency(name="mod_types", scope="session"),
+]
+
 
 def test_multiple_inheritance():
     class A(Config):

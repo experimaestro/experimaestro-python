@@ -26,6 +26,12 @@ from experimaestro import (
 import experimaestro.core.types as types
 from experimaestro.xpmutils import DirectoryContext
 
+# Mark all tests in this module as config tests (depends on types)
+pytestmark = [
+    pytest.mark.config,
+    pytest.mark.dependency(name="mod_config", depends=["mod_types"], scope="session"),
+]
+
 # --- Test manual name for configuration
 
 

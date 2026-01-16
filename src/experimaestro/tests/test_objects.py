@@ -8,6 +8,9 @@ from experimaestro.generators import pathgenerator
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tests.utils import TemporaryExperiment
 
+# Mark all tests in this module as config tests
+pytestmark = pytest.mark.config
+
 
 @pytest.fixture()
 def xp():

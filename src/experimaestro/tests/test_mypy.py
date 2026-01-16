@@ -8,6 +8,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
+# Mark all tests in this module as type tests
+pytestmark = [pytest.mark.types]
+
 
 def run_mypy(code: str, use_plugin: bool = True) -> tuple[int, str, str]:
     """Run mypy on the given code and return (exit_code, stdout, stderr)."""

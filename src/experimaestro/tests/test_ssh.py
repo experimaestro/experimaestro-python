@@ -2,6 +2,9 @@ import sys
 import pytest
 from experimaestro.connectors.ssh import SshPath
 
+# Mark all tests in this module as connector tests
+pytestmark = [pytest.mark.connectors]
+
 # --- Test SSH path and SSH path manipulation
 
 

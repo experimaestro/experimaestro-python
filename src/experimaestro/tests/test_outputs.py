@@ -1,7 +1,12 @@
 """Test for task outputs"""
 
+import pytest
+
 from experimaestro import field, Config, Task, Param
 from experimaestro.scheduler.workspace import RunMode
+
+# Mark all tests in this module as task tests
+pytestmark = pytest.mark.tasks
 
 
 class B(Config):

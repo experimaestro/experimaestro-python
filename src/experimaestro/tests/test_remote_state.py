@@ -38,6 +38,9 @@ from experimaestro.scheduler.state_provider import (
 )
 from experimaestro.notifications import LevelInformation
 
+# Mark all tests in this module as state tests
+pytestmark = [pytest.mark.state]
+
 
 # =============================================================================
 # Protocol Tests

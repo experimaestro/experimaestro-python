@@ -1,7 +1,13 @@
 from typing import Optional
+
+import pytest
+
 from experimaestro import field, Param, Config
 from experimaestro.core.objects import ConfigMixin
 from experimaestro.core.serializers import SerializationLWTask
+
+# Mark all tests in this module as identifier tests
+pytestmark = pytest.mark.identifier
 
 
 class A(Config):

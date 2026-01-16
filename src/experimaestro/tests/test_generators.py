@@ -1,8 +1,12 @@
+import pytest
+
 from experimaestro import Config, Task, Param, Meta, Path, field, PathGenerator
 from experimaestro.scheduler.workspace import Workspace
 from experimaestro.settings import Settings, WorkspaceSettings
-import pytest
 from experimaestro.scheduler import RunMode
+
+# Mark all tests in this module as config tests
+pytestmark = pytest.mark.config
 
 
 class Validation(Config):

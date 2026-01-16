@@ -1,8 +1,14 @@
 """Tests for workspace trigger matching (issue #119)"""
 
 from pathlib import Path
+
+import pytest
+
 from experimaestro.settings import WorkspaceSettings, find_workspace, Settings
 from unittest.mock import patch
+
+# Mark all tests in this module as workspace tests
+pytestmark = [pytest.mark.workspace]
 
 
 def test_workspace_trigger_exact_match():

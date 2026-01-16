@@ -1,6 +1,9 @@
 """Integration tests for partial paths and cleanup"""
 
 from pathlib import Path
+
+import pytest
+
 from experimaestro import (
     Task,
     Param,
@@ -13,6 +16,9 @@ from experimaestro import (
 from experimaestro.scheduler import JobState
 
 from .utils import TemporaryExperiment, TemporaryDirectory
+
+# Mark all tests in this module as identifier tests
+pytestmark = pytest.mark.identifier
 
 
 # Define parameter groups

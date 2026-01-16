@@ -4,6 +4,9 @@ from experimaestro.launchers import Launcher
 from experimaestro.tests.utils import TemporaryExperiment
 from .common import waitFromSpec, takeback
 
+# Mark all tests in this module as launcher tests
+pytestmark = pytest.mark.launchers
+
 
 @pytest.mark.timeout(3)
 def test_local_process(tmp_path: Path):

@@ -10,6 +10,9 @@ from experimaestro.scheduler.workspace import RunMode
 from .utils import TemporaryExperiment
 from experimaestro.xpmutils import EmptyContext
 
+# Mark all tests in this module as config tests
+pytestmark = pytest.mark.config
+
 valns = Identifier("validation")
 
 

@@ -7,6 +7,9 @@ from experimaestro import field, Config, Param
 from experimaestro.core.arguments import Argument
 from experimaestro.core.types import TypeVarType
 
+# Mark all tests in this module as type system tests
+pytestmark = pytest.mark.types
+
 T = TypeVar("T")
 
 

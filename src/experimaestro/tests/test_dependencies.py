@@ -4,6 +4,12 @@ from experimaestro import Config, Param, Task, RunMode
 from experimaestro.scheduler.jobs import JobDependency
 from experimaestro.tests.utils import TemporaryExperiment
 
+# Mark all tests in this module as dependency tests (depends on tasks)
+pytestmark = [
+    pytest.mark.dependencies,
+    pytest.mark.dependency(depends=["mod_tasks"], scope="session"),
+]
+
 
 @pytest.fixture()
 def xp():

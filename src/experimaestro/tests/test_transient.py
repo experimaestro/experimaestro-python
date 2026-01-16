@@ -2,10 +2,16 @@
 
 from tempfile import TemporaryDirectory
 from typing import List, Optional
+
+import pytest
+
 from experimaestro import Config, Task, Param, TransientMode
 from experimaestro.scheduler import JobState
 from experimaestro.scheduler.base import Scheduler
 from .utils import TemporaryExperiment
+
+# Mark all tests in this module as transient tests
+pytestmark = pytest.mark.transient
 
 
 class TransientTask(Task):

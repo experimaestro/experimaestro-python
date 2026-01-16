@@ -4,12 +4,18 @@ from pathlib import Path
 import time
 import filelock
 from typing import List, Tuple, Union
+
+import pytest
+
 from experimaestro import Task, Annotated, pathgenerator, progress, tqdm
 from experimaestro.core.objects import logger
 from experimaestro.notifications import LevelInformation
 from experimaestro.scheduler import Job, Listener
 from queue import Queue
 from .utils import TemporaryExperiment
+
+# Mark all tests in this module as task tests
+pytestmark = pytest.mark.tasks
 
 
 class ProgressingTask(Task):

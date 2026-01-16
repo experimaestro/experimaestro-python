@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 
 from experimaestro.carbon.base import CarbonMetrics, NullCarbonTracker
 from experimaestro.carbon.utils import (
@@ -26,6 +27,9 @@ from experimaestro.carbon import create_tracker
 from experimaestro.scheduler.state_status import CarbonMetricsEvent
 from experimaestro.scheduler.state_provider import MockJob, CarbonMetricsData
 from experimaestro.settings import CarbonSettings
+
+# Mark all tests in this module as carbon tests
+pytestmark = [pytest.mark.carbon]
 
 
 class TestCarbonMetrics:

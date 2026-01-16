@@ -6,6 +6,9 @@ from click.testing import CliRunner
 
 from experimaestro.cli import cli
 
+# Mark all tests in this module as task tests
+pytestmark = pytest.mark.tasks
+
 
 # --- Test fixture files as separate modules ---
 

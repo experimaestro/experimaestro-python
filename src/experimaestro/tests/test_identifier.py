@@ -3,6 +3,9 @@
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
+
+import pytest
+
 from experimaestro import (
     Param,
     Config,
@@ -23,6 +26,14 @@ from experimaestro.core.objects import (
     setmeta,
 )
 from experimaestro.scheduler.workspace import RunMode
+
+# Mark all tests in this module as identifier tests (depends on types)
+pytestmark = [
+    pytest.mark.identifier,
+    pytest.mark.dependency(
+        name="mod_identifier", depends=["mod_types"], scope="session"
+    ),
+]
 
 
 class A(Config):

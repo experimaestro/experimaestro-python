@@ -10,6 +10,9 @@ import shlex
 import os
 import logging
 
+# Mark all tests in this module as slow (documentation snippets)
+pytestmark = [pytest.mark.slow]
+
 DIR = Path(__file__).parents[3]
 RE_SNIPPET_START = re.compile(
     r"<!-- SNIPPET: (?P<id>\S+)"

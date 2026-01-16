@@ -12,6 +12,9 @@ from experimaestro.utils.environment import (
     ExperimentEnvironment,
 )
 
+# Mark all tests in this module as workspace tests
+pytestmark = [pytest.mark.workspace]
+
 
 class TestGetGitInfo:
     """Tests for get_git_info function"""

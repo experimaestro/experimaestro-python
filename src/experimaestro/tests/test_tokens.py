@@ -20,6 +20,12 @@ from .utils import (
 from .task_tokens import TokenTask
 from . import restart
 
+# Mark all tests in this module as token tests (depends on tasks)
+pytestmark = [
+    pytest.mark.tokens,
+    pytest.mark.dependency(depends=["mod_tasks"], scope="session"),
+]
+
 
 def token_experiment(xp, token, ntasks=3):
     """Starts two tasks with a token

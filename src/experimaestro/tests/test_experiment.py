@@ -8,6 +8,9 @@ from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
 from experimaestro.scheduler.experiment import cleanup_experiment_history
 from experimaestro.settings import HistorySettings
 
+# Mark all tests in this module as task tests
+pytestmark = pytest.mark.tasks
+
 
 class TaskA(Task):
     def execute(self):

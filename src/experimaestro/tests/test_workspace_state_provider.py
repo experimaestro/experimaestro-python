@@ -20,6 +20,9 @@ from experimaestro.scheduler.state_status import (
     ExperimentUpdatedEvent,
 )
 
+# Mark all tests in this module as state tests
+pytestmark = [pytest.mark.state]
+
 
 # =============================================================================
 # Mock Workspace Helpers - Reusable for other tests

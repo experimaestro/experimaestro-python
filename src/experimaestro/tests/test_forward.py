@@ -1,6 +1,11 @@
+import pytest
+
 from experimaestro import field, Param, Config
 from experimaestro.click import forwardoption
 import click
+
+# Mark all tests in this module as config tests
+pytestmark = pytest.mark.config
 
 
 def test_main():

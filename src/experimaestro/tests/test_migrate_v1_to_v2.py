@@ -23,6 +23,9 @@ from experimaestro.tests.test_workspace_state_provider import (
     create_v2_experiment,
 )
 
+# Mark all tests in this module as state tests
+pytestmark = [pytest.mark.state]
+
 
 @pytest.fixture
 def workspace(tmp_path):

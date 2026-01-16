@@ -2,6 +2,9 @@
 
 import json
 from pathlib import Path
+
+import pytest
+
 from experimaestro import field, ResumableTask, Task, Param, GracefulTimeout
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.scheduler import JobState, JobFailureStatus
@@ -12,6 +15,12 @@ from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.direct import DirectLauncher
 from experimaestro.commandline import CommandLineJob
 from .utils import TemporaryExperiment
+
+# Mark all tests in this module as resumable task tests (depends on tasks)
+pytestmark = [
+    pytest.mark.resumable,
+    pytest.mark.dependency(depends=["mod_tasks"], scope="session"),
+]
 
 
 class MockTimeoutCommandLineJob(CommandLineJob):

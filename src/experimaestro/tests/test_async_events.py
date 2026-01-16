@@ -10,7 +10,8 @@ from pathlib import Path
 
 from experimaestro.ipc import AsyncEventBridge, AsyncFileSystemEventHandler
 
-pytestmark = pytest.mark.anyio
+# Mark all tests in this module as token tests (async/locking related)
+pytestmark = [pytest.mark.anyio, pytest.mark.tokens]
 
 
 @pytest.fixture

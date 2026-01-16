@@ -1,5 +1,7 @@
 """Tests for partial (partial identifier computation)"""
 
+import pytest
+
 from experimaestro import (
     Config,
     Task,
@@ -10,6 +12,9 @@ from experimaestro import (
     ParameterGroup,
     Partial,
 )
+
+# Mark all tests in this module as identifier tests
+pytestmark = pytest.mark.identifier
 
 
 # Define parameter groups at module level

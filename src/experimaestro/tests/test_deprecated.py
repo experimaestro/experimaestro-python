@@ -12,12 +12,17 @@ Tests cover:
 import logging
 from typing import List
 
+import pytest
+
 from experimaestro import field, Config, Param, Task, deprecate
 from experimaestro.core.identifier import IdentifierComputer
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.tools.jobs import fix_deprecated
 
 from .utils import TemporaryExperiment
+
+# Mark all tests in this module as deprecation tests
+pytestmark = pytest.mark.deprecation
 
 
 def assert_equal(a, b, message=""):

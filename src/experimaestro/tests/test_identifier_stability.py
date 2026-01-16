@@ -6,6 +6,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List
 
+import pytest
+
 from experimaestro import (
     Param,
     Config,
@@ -16,6 +18,9 @@ from experimaestro import (
     Option,
 )
 from experimaestro.scheduler.workspace import RunMode
+
+# Mark all tests in this module as identifier tests
+pytestmark = pytest.mark.identifier
 
 
 # --- Basic types ---

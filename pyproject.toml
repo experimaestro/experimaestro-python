@@ -58,6 +58,8 @@ dependencies = [
 dev = [
     "mypy>=1.0",
     "pytest>=8.4.1",
+    "pytest-dependency>=0.6.0",
+    "pytest-order>=1.0.0",
     "pytest-timeout>=2.4.0",
     "textual-dev>=1.8.0",
     "docutils>=0.18",
@@ -152,6 +154,32 @@ log_format = "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]:
 log_cli_format = "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]: %(message)s"
 log_date_format = "%H:%M:%S"
 log_cli_date_format = "%H:%M:%S"
+addopts = "--order-dependencies"
+markers = [
+    # Core foundation (no dependencies)
+    "types: Type system, type hierarchy, validation tests",
+    "config: Config object behavior, parameters, fields tests",
+    # Identifier system (depends on types/config)
+    "identifier: Identifier computation, hashing, stability tests",
+    "serialization: Config/task serialization, state dict handling tests",
+    # Task execution (depends on identifiers)
+    "tasks: Basic task execution, submission tests",
+    "dependencies: Dependency resolution, explicit/implicit deps tests",
+    "dynamic: Dynamic task outputs, callbacks, watch_output tests",
+    # Advanced execution (depends on tasks)
+    "resumable: ResumableTask, GracefulTimeout, checkpoints, retries tests",
+    "tokens: Token management, concurrency limiting, locks tests",
+    "transient: Transient (non-cached) execution tests",
+    # Infrastructure
+    "connectors: Local/SSH connectors tests",
+    "launchers: Direct/SLURM/OAR launchers tests",
+    "state: Workspace state, remote state providers tests",
+    # Utilities & misc
+    "workspace: Workspace triggers, settings tests",
+    "deprecation: DeprecatedAttribute, migration tests",
+    "carbon: Carbon tracking tests (optional feature)",
+    "slow: Long-running tests",
+]
 
 [dependency-groups]
 dev = [

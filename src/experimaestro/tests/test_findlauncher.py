@@ -1,3 +1,5 @@
+import pytest
+
 from experimaestro.launcherfinder.registry import LauncherRegistry
 from experimaestro.launcherfinder.specs import (
     CPUSpecification,
@@ -12,6 +14,9 @@ from humanfriendly import parse_size, parse_timespan
 
 from experimaestro.launchers.slurm import SlurmLauncher
 from experimaestro.utils.resources import ResourcePathWrapper
+
+# Mark all tests in this module as launcher tests
+pytestmark = [pytest.mark.launchers]
 
 
 def test_findlauncher_specs():
