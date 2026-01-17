@@ -492,6 +492,8 @@ class CarbonMetricsData:
     duration_s: float = 0.0
     region: str = ""
     is_final: bool = False
+    written: bool = False
+    """True if the carbon record was successfully written to CarbonStorage."""
 
 
 # Re-export aggregate data classes from carbon module
@@ -503,70 +505,9 @@ class MockJob(BaseJob):
 
     This class is used when loading job information from the database,
     as opposed to live Job instances which are created during experiment runs.
+
+    Note: apply_event is inherited from BaseJob - no override needed.
     """
-
-    def apply_event(self, event: "EventBase") -> None:
-        """Apply a job event to update this job's state"""
-        from experimaestro.scheduler.state_status import (
-            JobStateChangedEvent,
-            JobProgressEvent,
-            CarbonMetricsEvent,
-        )
-        from experimaestro.notifications import LevelInformation
-
-        if isinstance(event, CarbonMetricsEvent):
-            self.carbon_metrics = CarbonMetricsData(
-                co2_kg=event.co2_kg,
-                energy_kwh=event.energy_kwh,
-                cpu_power_w=event.cpu_power_w,
-                gpu_power_w=event.gpu_power_w,
-                ram_power_w=event.ram_power_w,
-                duration_s=event.duration_s,
-                region=event.region,
-                is_final=event.is_final,
-            )
-            logger.debug(
-                "Applied carbon metrics to job %s: %.4f kg CO2",
-                self.identifier,
-                event.co2_kg,
-            )
-
-        elif isinstance(event, JobStateChangedEvent):
-            self.state = STATE_NAME_TO_JOBSTATE.get(event.state, self.state)
-            if event.failure_reason:
-                try:
-                    self.failure_reason = JobFailureStatus[event.failure_reason]
-                except KeyError:
-                    pass
-            # Convert ISO string timestamps to datetime
-            if event.submitted_time is not None:
-                self.submittime = deserialize_to_datetime(event.submitted_time)
-            if event.started_time is not None:
-                self.starttime = deserialize_to_datetime(event.started_time)
-            if event.ended_time is not None:
-                self.endtime = deserialize_to_datetime(event.ended_time)
-            if event.exit_code is not None:
-                self.exit_code = event.exit_code
-            if event.retry_count:
-                self.retry_count = event.retry_count
-            logger.debug(
-                "Applied state change to job %s: %s", self.identifier, self.state
-            )
-
-        elif isinstance(event, JobProgressEvent):
-            level = event.level
-            # Truncate to level + 1 entries
-            self.progress = self.progress[: (level + 1)]
-            # Extend if needed
-            while len(self.progress) <= level:
-                self.progress.append(LevelInformation(len(self.progress), None, 0.0))
-            # Update the level's progress and description
-            if event.desc:
-                self.progress[-1].desc = event.desc
-            self.progress[-1].progress = event.progress
-            logger.debug(
-                "Applied progress to job %s: %s", self.identifier, self.progress
-            )
 
     def __init__(
         self,
@@ -592,6 +533,9 @@ class MockJob(BaseJob):
         self.path = path
         # Convert state name to JobState instance
         self.state = STATE_NAME_TO_JOBSTATE.get(state, JobState.UNSCHEDULED)
+        # Set failure_reason on the state object
+        if failure_reason is not None:
+            self._state.failure_reason = failure_reason
         self.submittime = submittime
         self.starttime = starttime
         self.endtime = endtime
@@ -599,7 +543,6 @@ class MockJob(BaseJob):
         self.updated_at = updated_at
         self.exit_code = exit_code
         self.retry_count = retry_count
-        self.failure_reason = failure_reason
         self.transient = transient
         self._process_dict = process
         self.carbon_metrics = carbon_metrics

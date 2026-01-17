@@ -4,43 +4,11 @@ import logging
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
 
 from experimaestro.carbon.base import BaseCarbonTracker, CarbonMetrics
+from experimaestro.carbon.utils import to_float
 
 logger = logging.getLogger(__name__)
-
-
-def _to_float(value: Any, attr: str | None = None) -> float:
-    """Convert a codecarbon value to float.
-
-    Handles Energy objects, dicts with kWh/value keys, and regular floats.
-
-    Args:
-        value: Value to convert (Energy object, dict, or float)
-        attr: Attribute name to extract from object (e.g., 'kWh')
-
-    Returns:
-        Float value, or 0.0 if conversion fails
-    """
-    if value is None:
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    # Handle Energy or similar objects with kWh attribute
-    if hasattr(value, "kWh"):
-        return float(value.kWh)
-    # Handle dict serialization
-    if isinstance(value, dict):
-        if "kWh" in value:
-            return float(value["kWh"])
-        if attr and attr in value:
-            return float(value[attr])
-    # Try to convert directly
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 class CodeCarbonTracker(BaseCarbonTracker):
@@ -188,15 +156,15 @@ class CodeCarbonTracker(BaseCarbonTracker):
                 energy_kwh = getattr(self._tracker, "final_emissions_data", {}).get(
                     "energy_consumed", 0.0
                 )
-            energy_kwh = _to_float(energy_kwh)
+            energy_kwh = to_float(energy_kwh)
         except Exception:
             energy_kwh = 0.0
 
         # Get power metrics - also may be Energy objects in newer versions
         try:
-            cpu_power = _to_float(getattr(self._tracker, "_total_cpu_power", None))
-            gpu_power = _to_float(getattr(self._tracker, "_total_gpu_power", None))
-            ram_power = _to_float(getattr(self._tracker, "_total_ram_power", None))
+            cpu_power = to_float(getattr(self._tracker, "_total_cpu_power", None))
+            gpu_power = to_float(getattr(self._tracker, "_total_gpu_power", None))
+            ram_power = to_float(getattr(self._tracker, "_total_ram_power", None))
         except Exception:
             cpu_power = 0.0
             gpu_power = 0.0
@@ -212,7 +180,7 @@ class CodeCarbonTracker(BaseCarbonTracker):
             region = self._country_iso_code or ""
 
         return CarbonMetrics(
-            co2_kg=_to_float(emissions_kg),
+            co2_kg=to_float(emissions_kg),
             energy_kwh=energy_kwh,
             cpu_power_w=cpu_power,
             gpu_power_w=gpu_power,

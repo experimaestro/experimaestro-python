@@ -145,6 +145,18 @@ class JobState:
 
     name: str  # Readable name
     value: int  # Numeric value for ordering comparisons
+    failure_reason: Optional["JobFailureStatus"] = (
+        None  # Failure reason (for error states)
+    )
+
+    # Singleton instances (assigned after subclass definitions)
+    UNSCHEDULED: "JobStateUnscheduled"
+    WAITING: "JobStateWaiting"
+    READY: "JobStateReady"
+    SCHEDULED: "JobStateScheduled"
+    RUNNING: "JobStateRunning"
+    DONE: "JobStateDone"
+    ERROR: "JobStateError"
 
     def notstarted(self):
         """Returns True if the job hasn't started yet"""
@@ -548,6 +560,11 @@ class BaseJob:
         """Path to the .failed file"""
         return BaseJob.get_failedfile(self.path, self.scriptname)
 
+    @property
+    def lockpath(self) -> Path:
+        """Path to the .lock file for job locking"""
+        return self.xpm_dir / f"{self.scriptname}.lock"
+
     # -------------------------------------------------------------------------
     # State I/O (unified state_dict pattern)
     # -------------------------------------------------------------------------
@@ -562,14 +579,8 @@ class BaseJob:
             Dictionary with all job state fields
         """
         failure_reason = None
-        if (
-            self.state
-            and self.state.is_error()
-            and hasattr(self.state, "failure_reason")
-        ):
-            fr = self.state.failure_reason
-            if fr is not None:
-                failure_reason = fr.name
+        if self.state and self.state.failure_reason is not None:
+            failure_reason = self.state.failure_reason.name
 
         result = {
             "job_id": self.identifier,
@@ -601,6 +612,7 @@ class BaseJob:
                 "duration_s": carbon_metrics.duration_s,
                 "region": carbon_metrics.region,
                 "is_final": carbon_metrics.is_final,
+                "written": carbon_metrics.written,
             }
         # Include event_count only if not None (None = all events processed)
         if self.event_count is not None:
@@ -645,6 +657,7 @@ class BaseJob:
                 duration_s=event.duration_s,
                 region=event.region,
                 is_final=event.is_final,
+                written=event.written,
             )
             logger.debug(
                 "Applied carbon metrics to job %s: %.4f kg CO2",
@@ -658,11 +671,7 @@ class BaseJob:
                 self.set_state(new_state, loading=True)
             if event.failure_reason:
                 try:
-                    # Set failure reason on the state if it's an error state
-                    if hasattr(self._state, "failure_reason"):
-                        self._state.failure_reason = JobFailureStatus[
-                            event.failure_reason
-                        ]
+                    self._state.failure_reason = JobFailureStatus[event.failure_reason]
                 except KeyError:
                     pass
             # Convert ISO string timestamps to datetime
@@ -790,6 +799,42 @@ class BaseJob:
             # Cleanup event files if requested (for restart scenarios)
             if cleanup_events:
                 self._cleanup_event_files()
+
+                # Write carbon record if we have metrics but not yet written
+                if self.carbon_metrics is not None and not self.carbon_metrics.written:
+                    try:
+                        from experimaestro.carbon.storage import (
+                            CarbonRecord,
+                            CarbonStorage,
+                        )
+
+                        workspace_path = self.path.parent.parent.parent
+                        record = CarbonRecord(
+                            job_id=self.identifier,
+                            task_id=self.task_id,
+                            started_at=serialize_timestamp(self.starttime) or "",
+                            ended_at=serialize_timestamp(self.endtime) or "",
+                            co2_kg=self.carbon_metrics.co2_kg,
+                            energy_kwh=self.carbon_metrics.energy_kwh,
+                            cpu_power_w=self.carbon_metrics.cpu_power_w,
+                            gpu_power_w=self.carbon_metrics.gpu_power_w,
+                            ram_power_w=self.carbon_metrics.ram_power_w,
+                            duration_s=self.carbon_metrics.duration_s,
+                            region=self.carbon_metrics.region,
+                        )
+                        storage = CarbonStorage(workspace_path)
+                        storage.write_record(record)
+                        self.carbon_metrics.written = True
+                        logger.debug(
+                            "Wrote carbon record for job %s from events",
+                            self.identifier,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to write carbon record for job %s: %s",
+                            self.identifier,
+                            e,
+                        )
 
             # Read current state from disk for comparison
             current_dict = None
@@ -936,17 +981,19 @@ class BaseJob:
         if carbon_dict is None:
             self.carbon_metrics = None
         else:
+            from experimaestro.carbon.utils import to_float
             from experimaestro.scheduler.state_provider import CarbonMetricsData
 
             self.carbon_metrics = CarbonMetricsData(
-                co2_kg=carbon_dict.get("co2_kg", 0.0),
-                energy_kwh=carbon_dict.get("energy_kwh", 0.0),
-                cpu_power_w=carbon_dict.get("cpu_power_w", 0.0),
-                gpu_power_w=carbon_dict.get("gpu_power_w", 0.0),
-                ram_power_w=carbon_dict.get("ram_power_w", 0.0),
-                duration_s=carbon_dict.get("duration_s", 0.0),
+                co2_kg=to_float(carbon_dict.get("co2_kg", 0.0)),
+                energy_kwh=to_float(carbon_dict.get("energy_kwh", 0.0)),
+                cpu_power_w=to_float(carbon_dict.get("cpu_power_w", 0.0)),
+                gpu_power_w=to_float(carbon_dict.get("gpu_power_w", 0.0)),
+                ram_power_w=to_float(carbon_dict.get("ram_power_w", 0.0)),
+                duration_s=to_float(carbon_dict.get("duration_s", 0.0)),
                 region=carbon_dict.get("region", ""),
                 is_final=carbon_dict.get("is_final", False),
+                written=carbon_dict.get("written", False),
             )
 
     def _load_fallback_timestamps(self) -> None:

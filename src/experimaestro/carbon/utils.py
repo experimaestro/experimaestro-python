@@ -1,5 +1,36 @@
 """Formatting utilities for carbon metrics display."""
 
+from typing import Any
+
+
+def to_float(value: Any) -> float:
+    """Convert a codecarbon value to float.
+
+    Handles Energy objects, dicts with kWh key, and regular floats.
+
+    Args:
+        value: Value to convert (Energy object, dict, or float)
+
+    Returns:
+        Float value, or 0.0 if conversion fails
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    # Handle Energy or similar objects with kWh attribute
+    if hasattr(value, "kWh"):
+        return float(value.kWh)
+    # Handle dict serialization
+    if isinstance(value, dict):
+        if "kWh" in value:
+            return float(value["kWh"])
+    # Try to convert directly
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def format_co2(grams: float) -> str:
     """Format CO2 with auto-scaling: g for <1000, kg otherwise.

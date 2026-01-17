@@ -309,6 +309,9 @@ class CarbonMetricsEvent(JobEventBase):
     is_final: bool = False
     """True if this is the final measurement (on job completion)."""
 
+    written: bool = False
+    """True if the carbon record was successfully written to CarbonStorage."""
+
 
 # -----------------------------------------------------------------------------
 # Experiment Events

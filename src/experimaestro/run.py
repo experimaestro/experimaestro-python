@@ -256,7 +256,34 @@ def _stop_carbon_tracking(
             metrics.duration_s,
         )
 
-        # Emit final carbon event
+        # Record to carbon storage first
+        from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
+
+        record = CarbonRecord(
+            job_id=job_id,
+            task_id=task_id,
+            started_at=start_time.isoformat(),
+            ended_at=datetime.now().isoformat(),
+            co2_kg=metrics.co2_kg,
+            energy_kwh=metrics.energy_kwh,
+            cpu_power_w=metrics.cpu_power_w,
+            gpu_power_w=metrics.gpu_power_w,
+            ram_power_w=metrics.ram_power_w,
+            duration_s=metrics.duration_s,
+            region=metrics.region,
+        )
+
+        written = False
+        try:
+            storage = CarbonStorage(workspace_path)
+            storage.write_record(record)
+            written = True
+        except Exception as storage_error:
+            logger.warning(
+                "Failed to write carbon record to storage: %s", storage_error
+            )
+
+        # Emit final carbon event with written status
         from experimaestro.scheduler.state_status import (
             CarbonMetricsEvent,
             JobEventWriter,
@@ -277,6 +304,7 @@ def _stop_carbon_tracking(
                 duration_s=metrics.duration_s,
                 region=metrics.region,
                 is_final=True,
+                written=written,
             )
             event_writer.write_event(event)
 
@@ -284,25 +312,6 @@ def _stop_carbon_tracking(
             mock_job.apply_event(event)
         finally:
             event_writer.close()
-
-        # Record to carbon storage
-        from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
-
-        storage = CarbonStorage(workspace_path)
-        record = CarbonRecord(
-            job_id=job_id,
-            task_id=task_id,
-            started_at=start_time.isoformat(),
-            ended_at=datetime.now().isoformat(),
-            co2_kg=metrics.co2_kg,
-            energy_kwh=metrics.energy_kwh,
-            cpu_power_w=metrics.cpu_power_w,
-            gpu_power_w=metrics.gpu_power_w,
-            ram_power_w=metrics.ram_power_w,
-            duration_s=metrics.duration_s,
-            region=metrics.region,
-        )
-        storage.write_record(record)
 
     except Exception as e:
         logger.warning("Failed to finalize carbon tracking: %s", e)

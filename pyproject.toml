@@ -154,7 +154,8 @@ log_format = "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]:
 log_cli_format = "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName)s]: %(message)s"
 log_date_format = "%H:%M:%S"
 log_cli_date_format = "%H:%M:%S"
-addopts = "--order-dependencies"
+addopts = "--order-dependencies --ignore-unknown-dependency"
+
 markers = [
     # Core foundation (no dependencies)
     "types: Type system, type hierarchy, validation tests",
