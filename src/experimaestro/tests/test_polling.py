@@ -22,33 +22,70 @@ class TestPolledFile:
 
         assert before + 1.0 <= polled.next_poll <= after + 1.0
 
-    def test_on_activity_resets_interval(self):
-        """Test that on_activity resets to minimum interval"""
+    def test_on_activity_decreases_reliability(self):
+        """Test that on_activity (poll detected change) decreases reliability"""
         polled = PolledFile(path=Path("/tmp/test.txt"))
-        polled.poll_interval = 10.0  # Slow polling
+        polled.watchdog_reliability = 0.8  # High reliability
 
         polled.on_activity()
 
-        assert polled.poll_interval == polled.MIN_INTERVAL
+        # Reliability should decrease (Polyak toward 0)
+        assert polled.watchdog_reliability < 0.8
         assert polled.next_poll > 0
 
-    def test_on_no_activity_increases_interval(self):
-        """Test that on_no_activity increases interval up to max"""
+    def test_on_no_activity_increases_change_interval(self):
+        """Test that on_no_activity increases estimated change interval"""
         polled = PolledFile(path=Path("/tmp/test.txt"))
-        polled.poll_interval = 1.0
+        initial_interval = polled.estimated_change_interval
 
         polled.on_no_activity()
 
-        assert polled.poll_interval == 1.0 * polled.INTERVAL_MULTIPLIER
+        assert polled.estimated_change_interval > initial_interval
 
     def test_on_no_activity_caps_at_max(self):
-        """Test that interval doesn't exceed max"""
+        """Test that change interval doesn't grow unbounded"""
         polled = PolledFile(path=Path("/tmp/test.txt"))
-        polled.poll_interval = 25.0  # Close to max
+        polled.estimated_change_interval = polled.MAX_INTERVAL * 2
 
         polled.on_no_activity()
 
-        assert polled.poll_interval == polled.MAX_INTERVAL
+        assert polled.estimated_change_interval == polled.MAX_INTERVAL * 2
+
+    def test_reliability_increases_on_watchdog_change(self):
+        """Test that watchdog-detected changes increase reliability"""
+        polled = PolledFile(path=Path("/tmp/test.txt"))
+        polled.watchdog_reliability = 0.3  # Low reliability
+
+        polled.on_watchdog_detected_change()
+
+        # Reliability should increase (Polyak toward 1)
+        assert polled.watchdog_reliability > 0.3
+
+    def test_reliability_decreases_on_poll_change(self):
+        """Test that poll-detected changes decrease reliability"""
+        polled = PolledFile(path=Path("/tmp/test.txt"))
+        polled.watchdog_reliability = 0.7  # Medium-high reliability
+
+        polled.on_poll_detected_change()
+
+        # Reliability should decrease (Polyak toward 0)
+        assert polled.watchdog_reliability < 0.7
+
+    def test_poll_interval_depends_on_reliability(self):
+        """Test that poll interval scales with watchdog reliability"""
+        polled_low = PolledFile(path=Path("/tmp/test.txt"))
+        polled_high = PolledFile(path=Path("/tmp/test.txt"))
+
+        polled_low.watchdog_reliability = 0.1
+        polled_high.watchdog_reliability = 0.9
+        polled_low.estimated_change_interval = 5.0
+        polled_high.estimated_change_interval = 5.0
+
+        polled_low._compute_poll_interval()
+        polled_high._compute_poll_interval()
+
+        # Higher reliability = longer poll interval
+        assert polled_high.poll_interval > polled_low.poll_interval
 
     def test_update_size_detects_change(self, tmp_path):
         """Test that update_size detects file size changes"""
@@ -112,20 +149,56 @@ class TestFileWatcher:
         assert txt_file in watcher._files
         assert json_file not in watcher._files
 
-    def test_notify_change_resets_interval(self, tmp_path):
-        """Test that notify_change resets the polling interval"""
+    def test_notify_change_increases_reliability(self, tmp_path):
+        """Test that notify_change increases watchdog reliability"""
         watcher = FileWatcher(on_change=lambda p: None)
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
         watcher.add_file(test_file)
-        # Simulate time passing - set interval high
-        watcher._files[test_file].poll_interval = 20.0
+        initial_reliability = watcher._files[test_file].watchdog_reliability
 
         watcher.notify_change(test_file)
 
-        assert watcher._files[test_file].poll_interval == 0.5  # MIN_INTERVAL
+        # Reliability should increase since watchdog detected the change
+        assert watcher._files[test_file].watchdog_reliability > initial_reliability
+
+    def test_poll_detected_change_decreases_reliability(self, tmp_path):
+        """Test that polling-detected change decreases watchdog reliability"""
+        changes: List[Path] = []
+        change_event = Event()
+
+        def on_change(path):
+            changes.append(path)
+            change_event.set()
+
+        watcher = FileWatcher(
+            on_change=on_change,
+            min_interval=0.1,
+            max_interval=1.0,
+        )
+
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("initial")
+
+        watcher.add_file(test_file)
+        # Set high reliability to test decrease
+        watcher._files[test_file].watchdog_reliability = 0.8
+        watcher._files[test_file].poll_interval = 0.5
+
+        watcher.start()
+
+        try:
+            time.sleep(0.2)
+            # Modify file - polling should detect it (not watchdog)
+            test_file.write_text("modified content")
+
+            assert change_event.wait(timeout=2.0), "Change was not detected"
+            # Watchdog reliability should have decreased
+            assert watcher._files[test_file].watchdog_reliability < 0.8
+        finally:
+            watcher.stop()
 
     def test_polling_detects_changes(self, tmp_path):
         """Test that polling detects file changes"""

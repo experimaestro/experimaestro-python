@@ -4,15 +4,22 @@ This module provides a hybrid file watching system that combines watchdog
 for immediate notifications with adaptive polling as a fallback.
 
 Key components:
-- PolledFile: State for a single watched file
+- PolledFile: State for a single watched file with adaptive reliability tracking
 - FileWatcher: Manages watchdog + adaptive polling for reliable change detection
 
-The system works as follows:
-1. Watchdog provides immediate notifications when available
-2. Polling runs in the background with adaptive intervals (0.5s to 30s)
-3. When watchdog fires, polling interval is reset to minimum
-4. When files are idle, polling interval gradually increases
-5. This ensures reliable change detection even when watchdog misses events
+The system uses Polyak averaging (exponential moving average) to track:
+1. watchdog_reliability: How reliably watchdog detects changes (0.0 to 1.0)
+2. estimated_change_interval: Expected time between file changes
+
+Adaptation behavior:
+- When watchdog detects changes, reliability increases → poll less often
+- When polling detects changes (watchdog missed), reliability decreases → poll more
+- Polling interval = base_interval + (max - base) * reliability
+- Base interval is half the estimated change interval
+
+This ensures efficient resource usage when watchdog works well, while
+providing reliable fallback when watchdog misses events (e.g., network
+filesystems, certain filesystem types, or high-load scenarios).
 """
 
 import logging
@@ -31,40 +38,119 @@ logger = logging.getLogger("xpm.polling")
 class PolledFile:
     """State for a file being watched with polling fallback
 
+    Uses adaptive polling with Polyak averaging to track:
+    - watchdog_reliability: How reliably watchdog detects changes (0.0-1.0)
+    - estimated_change_interval: Expected time between file changes
+
+    The polling interval adapts based on both metrics:
+    - When watchdog is reliable, poll less frequently
+    - When file changes rapidly, poll more frequently
+    - Uses exponential moving average (Polyak) for smooth adaptation
+
     Attributes:
         path: Path to the file
         last_size: Last known file size (for detecting changes)
-        last_activity: time.time() when last update was seen
+        last_change_time: time.time() when last change was detected
         poll_interval: Current polling interval (adapts based on activity)
         next_poll: time.time() when next poll should happen
+        watchdog_reliability: 0.0 (unreliable) to 1.0 (reliable)
+        estimated_change_interval: Polyak average of time between changes
     """
 
     path: Path
     last_size: int = 0
-    last_activity: float = field(default_factory=time.time)
+    last_change_time: float = field(default_factory=time.time)
     poll_interval: float = 0.5  # Start with fast polling
     next_poll: float = 0.0
+
+    # Adaptive tracking using Polyak averaging
+    watchdog_reliability: float = 0.5  # Start neutral
+    estimated_change_interval: float = 5.0  # Initial estimate
 
     # Polling interval bounds
     MIN_INTERVAL: float = field(default=0.5, repr=False)
     MAX_INTERVAL: float = field(default=30.0, repr=False)
-    INTERVAL_MULTIPLIER: float = field(default=1.5, repr=False)
+
+    # Polyak averaging parameters
+    POLYAK_ALPHA: float = field(default=0.3, repr=False)  # Weight for new observations
+    RELIABILITY_ALPHA: float = field(
+        default=0.2, repr=False
+    )  # Slower adaptation for reliability
 
     def schedule_next(self) -> None:
         """Schedule the next poll time"""
         self.next_poll = time.time() + self.poll_interval
 
-    def on_activity(self) -> None:
-        """Called when file has changed - reset to fast polling"""
-        self.last_activity = time.time()
-        self.poll_interval = self.MIN_INTERVAL
+    def _update_change_interval(self) -> None:
+        """Update estimated change interval using Polyak averaging"""
+        now = time.time()
+        observed_interval = now - self.last_change_time
+        # Clamp observed interval to reasonable bounds
+        observed_interval = max(0.1, min(observed_interval, self.MAX_INTERVAL * 2))
+        self.estimated_change_interval = (
+            self.POLYAK_ALPHA * observed_interval
+            + (1 - self.POLYAK_ALPHA) * self.estimated_change_interval
+        )
+        self.last_change_time = now
+
+    def _compute_poll_interval(self) -> None:
+        """Compute poll interval based on reliability and change frequency
+
+        The interval is computed as:
+        - Base: half the estimated change interval (catch changes promptly)
+        - Scaled up by watchdog reliability (trust watchdog more = poll less)
+        """
+        # Base interval: poll at roughly half the change rate to catch changes
+        base = max(self.MIN_INTERVAL, self.estimated_change_interval * 0.5)
+        # Scale up based on watchdog reliability
+        # reliability=0 -> poll_interval = base
+        # reliability=1 -> poll_interval = MAX_INTERVAL
+        self.poll_interval = min(
+            base + (self.MAX_INTERVAL - base) * self.watchdog_reliability,
+            self.MAX_INTERVAL,
+        )
+
+    def on_poll_detected_change(self) -> None:
+        """Called when POLLING detected a change (watchdog missed it)
+
+        Decreases watchdog reliability since it missed this change.
+        Updates change interval estimate.
+        """
+        self._update_change_interval()
+        # Decrease reliability (Polyak toward 0)
+        self.watchdog_reliability = (
+            self.RELIABILITY_ALPHA * 0.0
+            + (1 - self.RELIABILITY_ALPHA) * self.watchdog_reliability
+        )
+        self._compute_poll_interval()
+        self.schedule_next()
+
+    def on_watchdog_detected_change(self) -> None:
+        """Called when WATCHDOG detected a change
+
+        Increases watchdog reliability since it caught this change.
+        Updates change interval estimate.
+        """
+        self._update_change_interval()
+        # Increase reliability (Polyak toward 1)
+        self.watchdog_reliability = (
+            self.RELIABILITY_ALPHA * 1.0
+            + (1 - self.RELIABILITY_ALPHA) * self.watchdog_reliability
+        )
+        self._compute_poll_interval()
         self.schedule_next()
 
     def on_no_activity(self) -> None:
-        """Called when no changes - increase interval up to max"""
-        self.poll_interval = min(
-            self.poll_interval * self.INTERVAL_MULTIPLIER, self.MAX_INTERVAL
+        """Called when no changes detected during poll
+
+        When nothing changes, we can afford to poll less often.
+        Reliability stays the same (no new information about watchdog).
+        """
+        # Increase estimated change interval slowly (file is quiet)
+        self.estimated_change_interval = min(
+            self.estimated_change_interval * 1.2, self.MAX_INTERVAL * 2
         )
+        self._compute_poll_interval()
         self.schedule_next()
 
     def update_size(self) -> bool:
@@ -80,6 +166,11 @@ class PolledFile:
         except OSError:
             return False
 
+    # Keep old method name for compatibility
+    def on_activity(self) -> None:
+        """Deprecated: use on_poll_detected_change or on_watchdog_detected_change"""
+        self.on_poll_detected_change()
+
 
 # Callback types
 FileChangeCallback = Callable[[Path], None]
@@ -92,14 +183,16 @@ class FileWatcher:
 
     Provides reliable file change detection by using:
     1. Watchdog for immediate filesystem event notifications
-    2. Adaptive polling as a fallback (0.5s to 30s based on activity)
+    2. Adaptive polling as a fallback with Polyak-averaged reliability
 
-    When watchdog works correctly, polling serves as verification.
-    When watchdog misses events, polling catches the changes.
+    The system learns from experience:
+    - When watchdog catches changes: reliability increases, poll less often
+    - When polling catches changes: reliability decreases, poll more often
+    - When files are quiet: change interval estimate increases, poll less
 
-    The polling interval adapts:
-    - Resets to minimum (0.5s) when activity is detected
-    - Gradually increases to maximum (30s) when files are idle
+    Polling interval is computed from:
+    - Estimated change frequency (poll at half the change rate)
+    - Watchdog reliability (higher reliability = longer intervals)
     """
 
     def __init__(
@@ -177,8 +270,8 @@ class FileWatcher:
     def notify_change(self, path: Path) -> None:
         """Notify that a file was changed externally (e.g., from another watchdog)
 
-        This resets the polling interval to minimum for faster follow-up polls,
-        but does NOT call the callback (caller should handle that).
+        This signals that watchdog is working, so polling interval can increase.
+        Does NOT call the callback (caller should handle that).
 
         Args:
             path: Path that changed
@@ -187,7 +280,7 @@ class FileWatcher:
             if path in self._files:
                 polled = self._files[path]
                 polled.update_size()
-                polled.on_activity()
+                polled.on_watchdog_detected_change()
 
     def watch_directory(self, directory: Path, recursive: bool = True) -> None:
         """Start watching a directory with watchdog
@@ -255,8 +348,13 @@ class FileWatcher:
             if polled:
                 # Update size tracking
                 polled.update_size()
-                # Reset to fast polling since file is active
-                polled.on_activity()
+                # Adjust polling based on source
+                if from_watchdog:
+                    # Watchdog is working - can poll less frequently
+                    polled.on_watchdog_detected_change()
+                else:
+                    # Polling detected change - watchdog missed it
+                    polled.on_poll_detected_change()
 
         # Call the change callback
         try:
@@ -302,6 +400,10 @@ class FileWatcher:
             self._files.clear()
         logger.debug("Stopped file watcher")
 
+    def __del__(self) -> None:
+        """Ensure thread is stopped when object is garbage collected"""
+        self.stop()
+
     def _poll_loop(self) -> None:
         """Main polling loop - runs in background thread"""
         while not self._stop_event.is_set():
@@ -316,8 +418,8 @@ class FileWatcher:
                     # Time to poll this file
                     changed = polled.update_size()
                     if changed:
-                        polled.on_activity()
-                        # Call callback (file changed but watchdog missed it)
+                        # Polling detected change - watchdog missed it
+                        polled.on_poll_detected_change()
                         try:
                             self.on_change(polled.path)
                         except Exception:
