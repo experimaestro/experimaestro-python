@@ -295,11 +295,12 @@ def experiments_cli(  # noqa: C901
     for path in python_path:
         sys.path.append(str(path))
 
-    # --- Execute pre-experiment script if specified
+    # --- Execute pre-experiment script if specified (file path or module name)
     pre_experiment = configuration.get("pre_experiment", None)
     if pre_experiment:
         pre_exp_path = Path(pre_experiment)
         if pre_exp_path.exists():
+            # It's a file path
             logger.info("Executing pre-experiment script: %s", pre_exp_path)
             try:
                 spec = importlib.util.spec_from_file_location(
@@ -312,9 +313,18 @@ def experiments_cli(  # noqa: C901
                     f"Failed to execute pre-experiment script '{pre_exp_path}': {e}"
                 )
         else:
-            raise click.ClickException(
-                f"Pre-experiment script not found: {pre_exp_path}"
-            )
+            # Try to import as a module name
+            logger.info("Importing pre-experiment module: %s", pre_experiment)
+            try:
+                importlib.import_module(pre_experiment)
+            except ModuleNotFoundError as e:
+                raise click.ClickException(
+                    f"Pre-experiment '{pre_experiment}' not found as file or module: {e}"
+                )
+            except Exception as e:
+                raise click.ClickException(
+                    f"Failed to import pre-experiment module '{pre_experiment}': {e}"
+                )
 
     # --- Adds automatically the experiment module if not found
     if module_name and conf_loader.yaml_module_file:

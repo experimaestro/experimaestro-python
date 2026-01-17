@@ -87,7 +87,7 @@ The YAML configuration file supports the following options from {py:class}`~expe
 | `module` | string | `None` | Python module containing the `run` function (mutually exclusive with `file`) |
 | `pythonpath` | list | `None` | List of paths to add to Python path (relative to YAML file directory) |
 | `parent` | string | `None` | Relative path to a parent YAML file to inherit from |
-| `pre_experiment` | string | `None` | Relative path to a Python file to execute before importing the experiment |
+| `pre_experiment` | string | `None` | Python file path or module name to execute before importing the experiment |
 | `title` | string | `""` | Short description of the experiment |
 | `subtitle` | string | `""` | Additional details about the experiment |
 | `description` | string | `""` | Full description of the experiment |
@@ -150,7 +150,12 @@ experimaestro run-experiment --show -c learning_rate=1e-5 --pre-yaml base.yaml e
 
 ### Pre-experiment Setup
 
-The `pre_experiment` option allows you to run Python code **before** the experiment module is imported. This is useful for:
+The `pre_experiment` option allows you to run Python code **before** the experiment module is imported. It can be specified as:
+
+- **A file path**: Relative path to a Python file (e.g., `pre_setup.py`)
+- **A module name**: Python module to import (e.g., `mypackage.pre_experiment`)
+
+This is useful for:
 
 - Setting environment variables to control library behavior
 - Mocking heavy modules to speed up the experiment setup phase (the actual job execution will use real modules)
@@ -214,6 +219,62 @@ id: my-experiment
 pre_experiment: pre_env.py
 file: experiment
 ```
+
+#### Example: Mock heavy modules with FakeModuleFinder
+
+For experiments that import heavy libraries like PyTorch or transformers, you can use {py:class}`~experimaestro.experiments.FakeModuleFinder` to mock these modules during the experiment setup phase. This significantly speeds up configuration parsing while the actual job execution still uses the real modules.
+
+```python
+# pre_experiment.py
+import sys
+from experimaestro.experiments import FakeModuleFinder
+
+# Mock PyTorch and related modules
+sys.meta_path.insert(0, FakeModuleFinder(
+    # Modules to mock (submodules are automatically included)
+    ['torch', 'pytorch_lightning', 'transformers', 'huggingface_hub'],
+    # Decorators to make no-ops
+    decorators=[
+        'torch.compile',
+        'torch.jit.script',
+        'torch.jit.unused',
+        'torch.jit.export',
+        'torch.jit.ignore',
+        'torch.no_grad',
+        'torch.inference_mode',
+    ]
+))
+```
+
+```yaml
+id: my-experiment
+pre_experiment: pre_experiment.py
+file: experiment
+```
+
+The `FakeModuleFinder` provides:
+
+- **Module mocking**: Any import of the specified modules returns fake objects that silently accept attribute access, method calls, and instantiation
+- **Decorator handling**: Specified decorator paths (like `torch.compile`) work as no-op decorators that return the function unchanged
+- **Inheritance support**: Code that inherits from mocked classes (like `torch.nn.Module`) works correctly without metaclass conflicts
+- **Generic type support**: Subscript notation like `List[int]` or `Module[str, Tensor]` works correctly
+
+This is particularly useful for large codebases with many PyTorch modules where importing takes significant time during experiment configuration.
+
+#### Example: Using a module name
+
+If you have a package with a pre-experiment module, you can reference it by module name:
+
+```yaml
+id: my-experiment
+pre_experiment: mypackage.pre_experiment
+module: mypackage.experiment
+```
+
+This is useful when:
+- Your pre-experiment code is part of an installed package
+- You want to share pre-experiment setup across multiple experiments
+- You're using a library that provides pre-experiment utilities (like `experimaestro.experiments.FakeModuleFinder`)
 
 ### Dirty Git Check
 
