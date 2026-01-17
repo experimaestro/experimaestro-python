@@ -754,12 +754,12 @@ class ExperimaestroUI(App):
 
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
-                success = self.state_provider.kill_job(job, perform=True)
-                if success:
+                try:
+                    self.state_provider.kill_job(job, perform=True)
                     self.notify(f"Job {job.identifier} killed", severity="information")
                     self.action_refresh()
-                else:
-                    self.notify("Failed to kill job", severity="error")
+                except Exception as e:
+                    self.notify(f"Failed to kill job: {e}", severity="error")
 
         self.push_screen(
             KillConfirmScreen("job", job.identifier),
@@ -778,13 +778,23 @@ class ExperimaestroUI(App):
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
                 killed = 0
+                failed = 0
                 for job in running_jobs:
-                    if self.state_provider.kill_job(job, perform=True):
+                    try:
+                        self.state_provider.kill_job(job, perform=True)
                         killed += 1
-                self.notify(
-                    f"Killed {killed} of {len(running_jobs)} running jobs",
-                    severity="information",
-                )
+                    except Exception:
+                        failed += 1
+                if failed:
+                    self.notify(
+                        f"Killed {killed} of {len(running_jobs)} jobs ({failed} failed)",
+                        severity="warning",
+                    )
+                else:
+                    self.notify(
+                        f"Killed {killed} of {len(running_jobs)} running jobs",
+                        severity="information",
+                    )
                 self.action_refresh()
 
         self.push_screen(

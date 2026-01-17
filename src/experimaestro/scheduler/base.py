@@ -1336,31 +1336,36 @@ class Scheduler(StateProvider, threading.Thread):
         return self._dependencies_map.get(exp_run_key, {})
 
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
-        """Kill a running job
+        """Kill a running job.
 
         For the scheduler, this is a live operation.
+
+        Raises:
+            RuntimeError: If the job cannot be killed.
         """
         if not perform:
             # Just check if the job can be killed
             return job.state == JobState.RUNNING
 
         if job.state != JobState.RUNNING:
-            return False
+            raise RuntimeError("Job is not running")
 
         # Get the actual Job from our jobs dict
         actual_job = self.jobs.get(job.identifier)
         if actual_job is None:
-            return False
+            raise RuntimeError("Job not found in scheduler")
 
-        # Try to kill the process via the process attribute
-        process = getattr(actual_job, "process", None)
-        if process is not None:
-            try:
-                process.kill()
-                return True
-            except Exception:
-                logger.exception("Failed to kill job %s", job.identifier)
-        return False
+        # Try to kill the process via the _process attribute
+        process = actual_job._process
+        if process is None:
+            raise RuntimeError("No process found for job")
+
+        try:
+            process.kill()
+            return True
+        except Exception as e:
+            logger.exception("Failed to kill job %s", job.identifier)
+            raise RuntimeError(f"Failed to kill process: {e}") from e
 
     def clean_job(
         self,

@@ -675,7 +675,11 @@ class SSHStateProviderClient(OfflineStateProvider):
         return services
 
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
-        """Kill a running job"""
+        """Kill a running job.
+
+        Raises:
+            RuntimeError: If the job cannot be killed.
+        """
         if not perform:
             # Dry run - just check if job is running
             return job.state.running()
@@ -686,7 +690,10 @@ class SSHStateProviderClient(OfflineStateProvider):
             "run_id": getattr(job, "run_id", ""),
         }
         result = self._call_sync(RPCMethod.KILL_JOB, params)
-        return result.get("success", False)
+        if not result.get("success", False):
+            error = result.get("error", "Unknown error")
+            raise RuntimeError(f"Failed to kill job: {error}")
+        return True
 
     def clean_job(self, job: BaseJob, perform: bool = False) -> bool:
         """Clean a finished job"""

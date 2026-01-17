@@ -448,12 +448,12 @@ class OrphanJobsTab(Vertical):
 
         def handle_kill(confirmed: bool) -> None:
             if confirmed:
-                success = self.state_provider.kill_job(job, perform=True)
-                if success:
+                try:
+                    self.state_provider.kill_job(job, perform=True)
                     self.notify(f"Job {job.identifier} killed", severity="information")
                     self.refresh_orphan_jobs()
-                else:
-                    self.notify("Failed to kill job", severity="error")
+                except Exception as e:
+                    self.notify(f"Failed to kill job: {e}", severity="error")
 
         self.app.push_screen(
             KillConfirmScreen("orphan job", job.identifier),
@@ -471,14 +471,24 @@ class OrphanJobsTab(Vertical):
         def handle_kill_all(confirmed: bool) -> None:
             if confirmed:
                 killed = 0
+                failed = 0
                 for job in running_jobs:
-                    if self.state_provider.kill_job(job, perform=True):
+                    try:
+                        self.state_provider.kill_job(job, perform=True)
                         killed += 1
+                    except Exception:
+                        failed += 1
 
-                self.notify(
-                    f"Killed {killed} of {len(running_jobs)} running jobs",
-                    severity="information",
-                )
+                if failed:
+                    self.notify(
+                        f"Killed {killed} of {len(running_jobs)} jobs ({failed} failed)",
+                        severity="warning",
+                    )
+                else:
+                    self.notify(
+                        f"Killed {killed} of {len(running_jobs)} running jobs",
+                        severity="information",
+                    )
                 self.refresh_orphan_jobs()
 
         self.app.push_screen(

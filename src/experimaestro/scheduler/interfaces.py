@@ -1008,12 +1008,13 @@ class BaseJob:
             from experimaestro.connectors import Process
 
             pinfo = json.loads(self.pidpath.read_text())
-            p = Process.fromDefinition(self.launcher.connector, pinfo)
-            if p is None:
+            process = Process.fromDefinition(self.launcher.connector, pinfo)
+            if process is None:
                 return None
 
-            if await p.aio_isrunning():
-                return p
+            if await process.aio_isrunning():
+                self._process = process
+                return self._process
 
             return None
 

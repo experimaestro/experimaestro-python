@@ -402,6 +402,8 @@ class WebSocketHandler:
                 self.state_provider.kill_job(experiment_id, job_id)
             except NotImplementedError:
                 logger.warning("kill_job not supported for this state provider")
+            except Exception as e:
+                logger.warning("Failed to kill job %s: %s", job_id, e)
 
     async def _handle_quit(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle quit request from web interface"""

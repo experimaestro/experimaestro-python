@@ -1159,20 +1159,24 @@ class WorkspaceStateProvider(StateProvider):
     # =========================================================================
 
     def kill_job(self, job: MockJob, perform: bool = False) -> bool:
-        """Kill a running job"""
+        """Kill a running job.
+
+        Raises:
+            RuntimeError: If the job cannot be killed (no process or kill failed).
+        """
         if not perform:
             return job.state.running()
 
         process = job.getprocess()
         if process is None:
-            return False
+            raise RuntimeError("No process found for job")
 
         try:
             process.kill()
             return True
         except Exception as e:
             logger.warning("Failed to kill job %s: %s", job.identifier, e)
-            return False
+            raise RuntimeError(f"Failed to kill process: {e}") from e
 
     def clean_job(self, job: MockJob, perform: bool = False) -> bool:
         """Clean a finished job"""

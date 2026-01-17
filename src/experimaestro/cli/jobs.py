@@ -114,10 +114,11 @@ def process(
         elif job.state.running():
             if kill:
                 if perform:
-                    if provider.kill_job(job, perform=True):
+                    try:
+                        provider.kill_job(job, perform=True)
                         cprint(f"KILLED  {job_str}", "light_red")
-                    else:
-                        cprint(f"KILL FAILED {job_str}", "red")
+                    except Exception as e:
+                        cprint(f"KILL FAILED {job_str}: {e}", "red")
                 else:
                     cprint(f"KILLING {job_str} (dry run)", "yellow")
             else:
@@ -467,11 +468,12 @@ def stray(
         # Kill running jobs if requested
         if kill and job.state and job.state.running():
             if perform:
-                if provider.kill_job(job, perform=True):
+                try:
+                    provider.kill_job(job, perform=True)
                     cprint("  KILLED", "light_red")
                     killed_count += 1
-                else:
-                    cprint("  KILL FAILED", "red")
+                except Exception as e:
+                    cprint(f"  KILL FAILED: {e}", "red")
             else:
                 cprint("  Would kill (dry run)", "yellow")
 
