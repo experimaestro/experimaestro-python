@@ -53,15 +53,21 @@ def format_energy(wh: float) -> str:
     return f"{wh / 1000:.2f}kWh"
 
 
-def format_energy_kwh(kwh: float) -> str:
+def format_energy_kwh(kwh: float | dict) -> str:
     """Format energy from kWh value with auto-scaling.
 
     Args:
-        kwh: Energy in kilowatt-hours.
+        kwh: Energy in kilowatt-hours. May be a dict with 'kWh' key
+            from older codecarbon serialization.
 
     Returns:
         Formatted string like "45.2Wh" or "1.23kWh"
     """
+    # Handle Energy object or dict from codecarbon
+    if isinstance(kwh, dict):
+        kwh = kwh.get("kWh", 0.0)
+    elif hasattr(kwh, "kWh"):
+        kwh = kwh.kWh
     return format_energy(kwh * 1000)
 
 
