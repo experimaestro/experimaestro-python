@@ -37,15 +37,11 @@ class CallbackItem:
 
     callback: Callable
     event: object
-    update_count: bool
 
     def run(self, worker: "TaskOutputsWorker") -> None:
         """Execute the callback
 
         Called by: TaskOutputsWorker.run() (worker thread)
-
-        If update_count is True, decrements task_output_count after callback completes.
-        This balances the increment done in TaskOutputsWorker.add().
         """
         try:
             logger.debug("Calling callback %s with event %s", self.callback, self.event)
@@ -53,11 +49,11 @@ class CallbackItem:
         except Exception:
             logger.exception("Error in task output callback")
         finally:
-            if self.update_count:
-                asyncio.run_coroutine_threadsafe(
-                    worker.xp.update_task_output_count(-1),
-                    worker.xp.scheduler.loop,
-                ).result()
+            # Always decrease the value
+            asyncio.run_coroutine_threadsafe(
+                worker.xp.update_task_output_count(-1),
+                worker.xp.scheduler.loop,
+            ).result()
 
 
 @dataclass
@@ -82,11 +78,19 @@ class RawEventItem:
         Calls watcher.execute_event() which:
         1. Converts raw event to Config via the method
         2. Dispatches to all registered callbacks via worker.add()
+
+        Decrements task_output_count after processing (balances the increment
+        done in process_event()).
         """
         try:
             self.watcher.execute_event(self.raw_event)
         except Exception:
             logger.exception("Error processing raw event")
+        finally:
+            asyncio.run_coroutine_threadsafe(
+                worker.xp.update_task_output_count(-1),
+                worker.xp.scheduler.loop,
+            ).result()
 
 
 # Queue item type
@@ -104,6 +108,11 @@ class TaskOutputWatcher:
     3. process_event() queues RawEventItem to worker thread
     4. Worker thread calls execute_event() via RawEventItem.run()
     5. execute_event() converts raw event to Config and dispatches to callbacks
+
+    Thread safety:
+    - add_callback() is called from the main thread
+    - execute_event() is called from the worker thread
+    - Both access callbacks and processed_events, so _lock protects them
     """
 
     def __init__(
@@ -115,6 +124,9 @@ class TaskOutputWatcher:
         self.key = key
         self.method = method
         self.worker = worker
+        self._lock = threading.Lock()  # Protects callbacks and processed_events
+
+        #: The callbacks to call
         self.callbacks: Set[Callable] = set()
         self.processed_events: List[object] = []  # Processed Config objects for replay
 
@@ -123,12 +135,19 @@ class TaskOutputWatcher:
 
         Called by: TaskOutputs.add_watcher() (main thread)
 
-        Replays use update_count=False since those events were already counted.
+        Thread safety: Must hold _lock to ensure atomicity between checking
+        processed_events and adding to callbacks. This prevents a race where
+        execute_event() could dispatch to callbacks between these operations,
+        causing the callback to miss an event.
         """
-        # Replay processed events to new callback (don't update count for replays)
-        for event in self.processed_events:
-            self.worker.add(callback, event, update_count=False)
-        self.callbacks.add(callback)
+        with self._lock:
+            # Add callback first, then replay. This ensures that if execute_event
+            # runs concurrently, the callback will receive new events directly.
+            # Any events already in processed_events will be replayed below.
+            self.callbacks.add(callback)
+            # Replay processed events to new callback (with counting)
+            for event in self.processed_events:
+                self.worker.add(callback, event)
 
     def process_event(self, raw_event: dict):
         """Queue a raw event for processing on the worker thread
@@ -139,10 +158,15 @@ class TaskOutputWatcher:
         will call the method and dispatch to callbacks. This avoids blocking
         the file watcher thread with potentially slow method calls.
 
-        Count management: No increment here - count is incremented when
-        CallbackItems are created in execute_event() -> worker.add().
+        Count management: Increments task_output_count here. RawEventItem.run()
+        decrements it after processing. This ensures the experiment waits for
+        all queued events to be processed before exiting.
         """
         logger.info("Adding raw event %s", raw_event)
+
+        # Increment count before queuing to ensure experiment waits
+        self.worker.update_count(1)
+
         # Queue the raw event for processing on worker thread
         self.worker.queue.put(RawEventItem(watcher=self, raw_event=raw_event))
 
@@ -153,9 +177,10 @@ class TaskOutputWatcher:
 
         1. Call the method to convert raw event to configuration
         2. Store in processed_events for replay
-        3. Dispatch to all callbacks via worker.add(update_count=True)
-           - This increments task_output_count for each callback
-           - CallbackItem.run() decrements when callback completes
+        3. Dispatch to all callbacks via worker.add()
+
+        Thread safety: Must hold _lock when modifying processed_events and
+        reading callbacks to ensure atomicity with add_callback().
         """
         try:
             # The method signature is: method(dep, *args, **kwargs) -> Config
@@ -165,12 +190,17 @@ class TaskOutputWatcher:
                 return config
 
             result = self.method(mark_output, *raw_event["args"], **raw_event["kwargs"])
-            self.processed_events.append(result)
 
-            # Dispatch to all callbacks
-            # update_count=True: increment on add, decrement when callback completes
-            for callback in self.callbacks:
-                self.worker.add(callback, result, update_count=True)
+            # Hold lock while updating processed_events and reading callbacks
+            # to ensure atomicity with add_callback()
+            with self._lock:
+                self.processed_events.append(result)
+                # Take a snapshot of callbacks to dispatch to
+                callbacks_snapshot = list(self.callbacks)
+
+            # Dispatch to all callbacks (outside lock to avoid blocking add_callback)
+            for callback in callbacks_snapshot:
+                self.worker.add(callback, result)
         except Exception:
             logger.exception("Error processing task output event")
 
@@ -351,6 +381,29 @@ class TaskOutputsWorker(threading.Thread):
         self._monitors: Dict[Path, TaskOutputs] = {}
         self._lock = threading.Lock()
 
+    def update_count(self, delta: int):
+        """Update task_output_count safely from any thread.
+
+        Handles the case where we might be on the event loop thread
+        (which would deadlock if we used run_coroutine_threadsafe().result()).
+        """
+        loop = self.xp.scheduler.loop
+        try:
+            running_loop = asyncio.get_running_loop()
+            on_event_loop = running_loop is loop
+        except RuntimeError:
+            on_event_loop = False
+
+        if on_event_loop:
+            # We're on the event loop thread, create a task (don't block)
+            asyncio.create_task(self.xp.update_task_output_count(delta))
+        else:
+            # We're on another thread, use run_coroutine_threadsafe and wait
+            asyncio.run_coroutine_threadsafe(
+                self.xp.update_task_output_count(delta),
+                loop,
+            ).result()
+
     def watch_output(self, watched: "WatchedOutput"):
         """Register a watched output
 
@@ -375,36 +428,16 @@ class TaskOutputsWorker(threading.Thread):
 
         monitor.add_watcher(watched)
 
-    def add(self, callback: Callable, event, update_count: bool = True):
+    def add(self, callback: Callable, event):
         """Add a callback event to the processing queue
 
-        Called by: TaskOutputWatcher.execute_event() or add_callback() (worker thread)
+        Called by: TaskOutputWatcher.execute_event() or add_callback()
 
         :param callback: The callback to call with the event
         :param event: The processed Config object
-        :param update_count: If True, increment count now and decrement when done.
-                            False for replays (already processed events).
-
-        Count management:
-        - update_count=True: increment here, CallbackItem.run() decrements
-        - update_count=False: no count changes (used for replays)
         """
-
-        async def add_one():
-            total = await self.xp.update_task_output_count(1)
-            logger.info(
-                "Added one task output to be processed to experiment (total %d)", total
-            )
-
-        if update_count:
-            asyncio.run_coroutine_threadsafe(
-                add_one(),
-                self.xp.scheduler.loop,
-            ).result()
-
-        self.queue.put(
-            CallbackItem(callback=callback, event=event, update_count=update_count)
-        )
+        self.update_count(1)
+        self.queue.put(CallbackItem(callback=callback, event=event))
 
     def run(self):
         """Main worker loop - processes items from queue until shutdown

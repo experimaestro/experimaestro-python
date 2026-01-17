@@ -23,7 +23,6 @@ from experimaestro.scheduler.interfaces import (
 )
 from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
 from experimaestro.experiments.configuration import DirtyGitAction
-from experimaestro.utils import logger
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.interfaces import ExperimentStatus
@@ -31,6 +30,8 @@ if TYPE_CHECKING:
     from experimaestro.carbon.base import CarbonImpactData
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
+
+logger = logging.getLogger("xpm.experiment")
 
 
 class FailedExperiment(HandledException):
@@ -1102,8 +1103,11 @@ class experiment(BaseExperiment):
         """Change in the number of task outputs to process"""
         async with self.scheduler.exitCondition:
             self.taskOutputQueueSize += delta
-            logging.debug(
+            logger.debug(
                 "Updating queue size with %d => %d", delta, self.taskOutputQueueSize
+            )
+            assert self.taskOutputQueueSize >= 0, (
+                "Task output queue size should always be >= 0"
             )
             if self.taskOutputQueueSize == 0:
                 self.scheduler.exitCondition.notify_all()
