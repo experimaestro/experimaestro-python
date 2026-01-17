@@ -26,6 +26,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
+from experimaestro.scheduler.polling import FileWatcher
+
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.interfaces import BaseExperiment
@@ -810,6 +812,8 @@ class EventReader:
         self._deleted_buffer: list[str] = []
         # Cache for events_count from status.json (entity_dir -> count)
         self._events_count_cache: dict[Path, int] = {}
+        # Dynamic polling tracker (complements watchdog for reliability)
+        self._poll_tracker: FileWatcher | None = None
 
     def _extract_entity_id(self, path: Path) -> Optional[str]:
         """Extract entity ID from event file path"""
@@ -951,6 +955,9 @@ class EventReader:
                 if self._is_event_file(path):
                     logger.debug("Detected modification of event file: %s", path)
                     reader._process_file_change(path)
+                    # Notify poll tracker to reset interval (file is active)
+                    if reader._poll_tracker:
+                        reader._poll_tracker.notify_change(path)
 
             def on_created(self, event):
                 if event.is_directory:
@@ -964,6 +971,9 @@ class EventReader:
                     if path not in reader._file_positions:
                         reader._file_positions[path] = 0
                     reader._process_file_change(path)
+                    # Start polling this file for changes
+                    if reader._poll_tracker:
+                        reader._poll_tracker.add_file(path)
 
             def on_deleted(self, event):
                 if event.is_directory:
@@ -974,11 +984,18 @@ class EventReader:
                     entity_id = reader._extract_entity_id(path)
                     dir_config = reader._find_dir_config(path)
                     reader._file_positions.pop(path, None)
+                    # Stop polling this file
+                    if reader._poll_tracker:
+                        reader._poll_tracker.remove_file(path)
                     if entity_id:
                         reader._handle_deletion(entity_id, path, dir_config)
 
         self._handler = EventFileHandler()
         ipc = ipcom()
+
+        # Create and start poll tracker for adaptive file polling
+        self._poll_tracker = FileWatcher(on_change=self._process_file_change)
+        self._poll_tracker.start()
 
         # Register watches for each directory
         for dir_config in self.directories:
@@ -987,9 +1004,18 @@ class EventReader:
             self._watches.append(watch)
             logger.debug("Started watching %s", dir_config.path)
 
+        # Add existing event files to poll tracker
+        for path in self.get_all_event_files():
+            self._poll_tracker.add_file(path)
+
     def stop_watching(self) -> None:
         """Stop watching for file changes"""
         from experimaestro.ipc import ipcom
+
+        # Stop poll tracker first
+        if self._poll_tracker:
+            self._poll_tracker.stop()
+            self._poll_tracker = None
 
         ipc = ipcom()
         for watch in self._watches:
