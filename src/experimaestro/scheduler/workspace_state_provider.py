@@ -1544,23 +1544,48 @@ class WorkspaceStateProvider(StateProvider):
 
             result = ProcessInfo(pid=pid, type=proc_type, running=False)
 
-            # Try to get more info for running jobs
+            # Try to get more info for running jobs using the process abstraction
             if job.state and job.state.running():
                 try:
-                    import psutil
+                    from experimaestro.connectors import Process
+                    from experimaestro.connectors.local import LocalConnector
 
-                    proc = psutil.Process(pid)
-                    if proc.is_running():
+                    connector = LocalConnector.instance()
+                    proc = Process.fromDefinition(connector, pinfo)
+
+                    # Check if process is running (sync via async)
+                    import asyncio
+
+                    try:
+                        asyncio.get_running_loop()
+                        # We're in an async context, can't use asyncio.run
+                        # Just mark as running based on job state
                         result.running = True
-                        # Get CPU and memory usage
-                        result.cpu_percent = proc.cpu_percent(interval=0.1)
-                        mem_info = proc.memory_info()
-                        result.memory_mb = mem_info.rss / (1024 * 1024)
-                        result.num_threads = proc.num_threads()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-                except ImportError:
-                    pass  # psutil not available
+                    except RuntimeError:
+                        # No running loop, safe to use asyncio.run
+                        result.running = asyncio.run(proc.aio_isrunning())
+
+                    # For local processes, try to get CPU/memory info via psutil
+                    if proc_type == "local" and result.running:
+                        try:
+                            import psutil
+
+                            local_pid = int(pid)
+                            ps_proc = psutil.Process(local_pid)
+                            if ps_proc.is_running():
+                                result.cpu_percent = ps_proc.cpu_percent(interval=0.1)
+                                mem_info = ps_proc.memory_info()
+                                result.memory_mb = mem_info.rss / (1024 * 1024)
+                                result.num_threads = ps_proc.num_threads()
+                        except (
+                            psutil.NoSuchProcess,
+                            psutil.AccessDenied,
+                            ImportError,
+                            ValueError,
+                        ):
+                            pass
+                except Exception:
+                    pass  # Process abstraction not available or failed
 
             return result
         except (json.JSONDecodeError, OSError):
