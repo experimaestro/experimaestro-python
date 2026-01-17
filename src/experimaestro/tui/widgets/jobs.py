@@ -627,7 +627,7 @@ class JobsTable(Vertical):
 
     def action_copy_path(self) -> None:
         """Copy the job folder path to clipboard"""
-        import pyperclip
+        from experimaestro.tui.clipboard import copy
 
         table = self.query_one("#jobs-table", DataTable)
         if table.cursor_row is None or not self.current_experiment:
@@ -638,11 +638,10 @@ class JobsTable(Vertical):
             job_id = str(row_key.value)
             job = self.state_provider.get_job(job_id, self.current_experiment)
             if job.path:
-                try:
-                    pyperclip.copy(str(job.path))
+                if copy(str(job.path)):
                     self.notify(f"Path copied: {job.path}", severity="information")
-                except Exception as e:
-                    self.notify(f"Failed to copy: {e}", severity="error")
+                else:
+                    self.notify("Failed to copy path", severity="error")
             else:
                 self.notify("No path available for this job", severity="warning")
 

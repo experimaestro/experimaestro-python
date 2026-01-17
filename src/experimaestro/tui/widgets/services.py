@@ -303,12 +303,11 @@ class ServicesList(Vertical):
 
         url = getattr(service, "url", None)
         if url:
-            try:
-                import pyperclip
+            from experimaestro.tui.clipboard import copy
 
-                pyperclip.copy(url)
+            if copy(url):
                 self.notify(f"URL copied: {url}", severity="information")
-            except Exception as e:
-                self.notify(f"Failed to copy: {e}", severity="error")
+            else:
+                self.notify("Failed to copy URL", severity="error")
         else:
             self.notify("Start the service first to get URL", severity="warning")

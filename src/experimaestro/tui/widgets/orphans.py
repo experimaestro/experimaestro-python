@@ -269,7 +269,7 @@ class OrphanJobsScreen(Screen):
 
     def action_copy_path(self) -> None:
         """Copy the job folder path to clipboard"""
-        import pyperclip
+        from experimaestro.tui.clipboard import copy
 
         table = self.query_one("#orphan-table", DataTable)
         if table.cursor_row is None:
@@ -280,11 +280,10 @@ class OrphanJobsScreen(Screen):
             job_id = str(row_key.value)
             job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
             if job and job.path:
-                try:
-                    pyperclip.copy(str(job.path))
+                if copy(str(job.path)):
                     self.notify("Path copied", severity="information")
-                except Exception as e:
-                    self.notify(f"Failed to copy: {e}", severity="error")
+                else:
+                    self.notify("Failed to copy path", severity="error")
 
     def action_delete_selected(self) -> None:
         """Delete the selected orphan job"""

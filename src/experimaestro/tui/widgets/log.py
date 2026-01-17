@@ -123,12 +123,11 @@ class CaptureLog(RichLog):
             filepath.write_text(content)
             path_str = str(filepath.absolute())
             # Copy path to clipboard
-            try:
-                import pyperclip
+            from experimaestro.tui.clipboard import copy
 
-                pyperclip.copy(path_str)
+            if copy(path_str):
                 self.notify(f"Log saved and path copied: {path_str}")
-            except Exception:
+            else:
                 # Clipboard may not be available (headless systems)
                 self.notify(f"Log saved to {path_str}", timeout=60)
         except Exception as e:
@@ -141,14 +140,13 @@ class CaptureLog(RichLog):
             self.notify("No log content to copy", severity="warning")
             return
 
-        try:
-            import pyperclip
+        from experimaestro.tui.clipboard import copy
 
-            pyperclip.copy(content)
+        if copy(content):
             line_count = len(self.lines)
             self.notify(f"Copied {line_count} lines to clipboard")
-        except Exception as e:
-            self.notify(f"Failed to copy: {e}", severity="error")
+        else:
+            self.notify("Failed to copy log content", severity="error")
 
     def _get_log_content(self) -> str:
         """Get the full log content as plain text from RichLog's lines"""

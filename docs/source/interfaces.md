@@ -144,6 +144,36 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 | `Ctrl+D` | Delete all |
 | `f` | Copy folder path |
 
+### Clipboard Support
+
+The TUI supports clipboard operations (like `f` to copy path) that work both
+locally and in remote/tmux environments.
+
+**How it works:**
+
+1. First tries `pyperclip` for local clipboard access
+2. Falls back to [OSC 52](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands)
+   escape sequences when pyperclip fails (e.g., over SSH)
+
+**OSC 52 supported terminals:**
+
+- iTerm2 (macOS)
+- kitty
+- alacritty
+- Windows Terminal
+- Most modern terminal emulators
+
+**tmux configuration:**
+
+For clipboard to work inside tmux over SSH, add these lines to `~/.tmux.conf`:
+
+```bash
+set -g set-clipboard on
+set -g allow-passthrough on   # Required for tmux 3.2+
+```
+
+Then reload tmux configuration: `tmux source-file ~/.tmux.conf`
+
 ### Python API
 
 The TUI can also be launched programmatically:
