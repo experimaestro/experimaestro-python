@@ -13,6 +13,8 @@ A new interactive terminal interface built with [Textual](https://textual.textua
 - Real-time experiment and job monitoring
 - Push notifications via file watching
 - SQLite persistence for tracking multiple experiments
+- Orphan job detection and cleanup
+- Clipboard support via OSC 52 (works over SSH/tmux)
 - Thread-safe updates
 
 ![Experiment screen](img/tui-experiments.png)
@@ -178,6 +180,53 @@ workspaces:
       - "ir-experiment"
 ```
 
+#### Carbon Tracking
+
+Track the environmental impact of your experiments with optional carbon emissions monitoring:
+
+```yaml
+# Enable in ~/.config/experimaestro/settings.yaml
+carbon:
+  enabled: true
+  country_iso_code: FRA  # Optional: override detected country
+```
+
+When enabled, experimaestro tracks CO2 emissions, energy consumption, and power usage for each job using [CodeCarbon](https://codecarbon.io/). Metrics are stored per-job and can be aggregated across experiments.
+
+#### SSH Remote Monitoring
+
+Monitor experiments running on remote servers directly from your local machine:
+
+```bash
+experimaestro experiments ssh-monitor user@cluster /path/to/workspace --console
+```
+
+Features include JSON-RPC communication over SSH, on-demand file synchronization for logs, and support for both Web UI and TUI. See [Remote Monitoring via SSH](interfaces.md#remote-monitoring-via-ssh) for details.
+
+#### Transient Tasks
+
+Tasks that don't need persistent storage can be marked as transient at submission time:
+
+```python
+from experimaestro import TransientMode
+
+# Skip if no dependent tasks need it
+task.submit(transient=TransientMode.TRANSIENT)
+
+# Run but remove directory after dependents complete
+task.submit(transient=TransientMode.REMOVE)
+```
+
+Transient tasks are only executed if they have non-transient dependents, saving resources for intermediate computations.
+
+#### Experiment Run History
+
+Track multiple runs of the same experiment with automatic run numbering:
+
+- New layout: `experiments/{experiment-id}/{run-id}/`
+- View run history with `d` key in TUI
+- Each run maintains its own jobs and state
+
 #### Improved Stability
 
 The scheduler has been refactored to use asyncio instead of threads for job management,
@@ -192,6 +241,22 @@ resulting in more predictable behavior and reduced race conditions.
 - **[Explicit default behavior](experiments/config.md#parameters)**: `field(ignore_default=...)` and `field(default=...)`
 
 ### Breaking Changes
+
+#### Configuration Constructor Pattern (`Config.C()`)
+
+Configurations must now be created using the `.C()` constructor instead of direct instantiation:
+
+```python
+# v1.x (no longer works)
+model = MyModel(hidden_size=256)
+task = TrainTask(model=model, epochs=10)
+
+# v2.0 (required)
+model = MyModel.C(hidden_size=256)
+task = TrainTask.C(model=model, epochs=10)
+```
+
+The `.C()` constructor returns an `XPMConfig` wrapper that tracks configuration state, handles serialization, and manages dependencies. The actual instance is created when the task executes.
 
 #### Removed Deprecated Decorators
 
