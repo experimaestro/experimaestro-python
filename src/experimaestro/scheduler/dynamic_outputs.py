@@ -120,10 +120,12 @@ class TaskOutputWatcher:
         key: str,
         method: Callable,
         worker: "TaskOutputsWorker",
+        job: "Job",
     ):
         self.key = key
         self.method = method
         self.worker = worker
+        self.job = job  # The job that produces the dynamic outputs
         self._lock = threading.Lock()  # Protects callbacks and processed_events
 
         #: The callbacks to call
@@ -184,10 +186,16 @@ class TaskOutputWatcher:
         """
         try:
             # The method signature is: method(dep, *args, **kwargs) -> Config
-            # We need to provide a marker function that marks the output
+            # We need to provide a marker function that marks the output as
+            # a dynamic output of the producing task. This ensures:
+            # 1. The checkpoint identifier includes the task (different learning_rates
+            #    produce different checkpoints)
+            # 2. The dependency is non-blocking (Evaluate can run while Learn runs)
+            task_config = self.job.config
+
             def mark_output(config):
-                """Marker function that just returns the config"""
-                return config
+                """Marker function that marks config as dynamic output of the task"""
+                return task_config.__xpm__.mark_output(config, dynamic=True)
 
             result = self.method(mark_output, *raw_event["args"], **raw_event["kwargs"])
 
@@ -294,7 +302,9 @@ class TaskOutputs(FileSystemEventHandler):
         with self._lock:
             is_new = key not in self.watchers
             if is_new:
-                self.watchers[key] = TaskOutputWatcher(key, watched.method, self.worker)
+                self.watchers[key] = TaskOutputWatcher(
+                    key, watched.method, self.worker, watched.job
+                )
 
             # If this is a new watcher and the file already exists, replay events from file
             if is_new and self.path.exists():

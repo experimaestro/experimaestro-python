@@ -363,6 +363,9 @@ class Validation(Config):
 
     def checkpoint(self, dep: DependentMarker, *, step: int) -> Checkpoint:
         """Method that produces dynamic outputs"""
+        # dep ensures that the checkpoint depends on the learning task
+        # this is crucial when computing the identifier (i.e. different
+        # learning rates lead to different checkpoints)
         return dep(Checkpoint.C(model=self.model, step=step))
 
     def compute(self, step: int):
@@ -372,6 +375,7 @@ class Validation(Config):
 class Learn(ResumableTask):
     model: Param[Model]
     validation: Param[Validation]
+    learn: Param[float]
 
     def execute(self):
         for step in range(100):

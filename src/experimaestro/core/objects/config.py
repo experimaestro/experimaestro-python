@@ -215,6 +215,9 @@ class ConfigInformation:
         #: True when this configuration was loaded from disk
         self.loaded = False
 
+        #: True when the task dependency is dynamic (non-blocking)
+        self.is_dynamic_task = False
+
         # Explicitly added dependencies
         self.dependencies = []
 
@@ -587,12 +590,16 @@ class ConfigInformation:
 
         return identifier
 
-    def dependency(self):
-        """Returns a dependency"""
+    def dependency(self, *, soft: bool = False):
+        """Returns a dependency
+
+        :param soft: If True, creates a soft dependency that is tracked but
+            doesn't block execution. Used for dynamic task outputs.
+        """
         from experimaestro.scheduler import JobDependency
 
         assert self.job, f"{self.xpmtype} is a task but was not submitted"
-        return JobDependency(self.job)
+        return JobDependency(self.job, soft=soft)
 
     def updatedependencies(
         self,
@@ -610,7 +617,10 @@ class ConfigInformation:
         if self.task and not self.loaded:
             if id(self.task) not in taskids:
                 taskids.add(id(self.task))
-                dependencies.add(self.task.__xpm__.dependency())
+                # Dynamic task outputs create soft dependencies (tracked but non-blocking)
+                dependencies.add(
+                    self.task.__xpm__.dependency(soft=self.is_dynamic_task)
+                )
         else:
             # Look arguments
             for argument, value in self.xpmvalues():
@@ -822,13 +832,27 @@ class ConfigInformation:
 
         return self._taskoutput
 
-    def mark_output(self, config: "Config"):
-        """Sets a dependency on the job"""
+    def mark_output(self, config: "Config", *, dynamic: bool = False):
+        """Sets a dependency on the job
+
+        :param config: The configuration to mark as an output of this task
+        :param dynamic: If True, this is a dynamic output that won't create
+            a blocking dependency. This is used for outputs produced during
+            task execution (e.g., checkpoints) where dependent tasks should
+            be able to run concurrently with the producing task.
+        """
         assert not isinstance(config, Task), "Cannot set a dependency on a task"
         assert isinstance(config, ConfigMixin), (
             "Only configurations can be marked as dependent on a task"
         )
+
+        if config.__xpm__.task is self.pyobject:
+            return
+
+        assert config.__xpm__.task is None, "Configuration has already been marked"
         config.__xpm__.task = self.pyobject
+        if dynamic:
+            config.__xpm__.is_dynamic_task = True
         return config
 
     # --- Serialization

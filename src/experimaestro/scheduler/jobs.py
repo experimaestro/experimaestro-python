@@ -68,8 +68,9 @@ class JobLock(Lock):
 class JobDependency(Dependency):
     origin: "Job"
 
-    def __init__(self, job):
+    def __init__(self, job, *, soft: bool = False):
         super().__init__(job)
+        self.soft = soft  # Soft dependencies don't block execution
 
     async def ensure_started(self):
         """Ensure the dependency job is started.
@@ -110,6 +111,11 @@ class JobDependency(Dependency):
             ValueError: If timeout is not 0
             RuntimeError: If the job has not been submitted or if it failed
         """
+        # Soft dependencies don't block - return immediately
+        if self.soft:
+            # All good, return the lock as is
+            return JobLock(self.origin)
+
         if timeout != 0:
             raise ValueError(
                 "Job dependencies only support timeout=0 (wait indefinitely)"

@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import sys
 import time
+from typing import Optional
 
 import pytest
 
@@ -48,9 +49,14 @@ class CheckpointLoader(LightweightTask):
 
 class Evaluate(Task):
     model: Param[Model]
+    signal_file: Meta[Optional[Path]] = None
 
     def execute(self):
-        pass
+        # If a signal file is provided, touch it to indicate we're running
+        if self.signal_file is not None:
+            self.signal_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.signal_file.open("w") as f:
+                f.write("done")
 
 
 class Validation(Config):
@@ -201,7 +207,8 @@ def test_task_dynamic_replay():
                     validation.checkpoint, partial(evaluate, evaluations_run1)
                 )
 
-                learn.submit()
+                # Disable retries so the task fails on first crash (for this test)
+                learn.submit(max_retries=1)
 
                 # Allow task to produce step 15 checkpoint, then simulate crash
                 # Negative value means: produce up to |value| then exit with error
@@ -243,4 +250,126 @@ def test_task_dynamic_replay():
         # Total: 3 evaluations (but step 15 was replayed, not re-produced)
         assert len(evaluations_run2) == 3, (
             f"Run 2: Expected 3 evaluations, got {len(evaluations_run2)}"
+        )
+
+
+class LearnWithLR(ResumableTask):
+    """Learn task with learning_rate parameter for testing identifier uniqueness"""
+
+    model: Param[Model]
+    learning_rate: Param[float] = field(ignore_default=1e-3)
+    validation: Param[Validation]
+
+    # Control files for synchronization with tests
+    max_step_file: Meta[Path] = field(default_factory=PathGenerator("max_step"))
+    can_finish_file: Meta[Path] = field(default_factory=PathGenerator("can_finish"))
+
+    def execute(self):
+        # Wait for max_step_file to know how far to go
+        while not self.max_step_file.is_file():
+            time.sleep(0.1)
+
+        with self.max_step_file.open("r") as f:
+            max_step = int(f.read().strip())
+        self.max_step_file.unlink()
+
+        for step in [15, 30]:
+            if step > max_step:
+                break
+            self.validation.compute(step)
+
+        # Wait for can_finish signal - this verifies that Evaluate can run
+        # while Learn is still running (non-blocking soft dependency)
+        # Ensure directory exists so we can wait for the file
+        self.can_finish_file.parent.mkdir(parents=True, exist_ok=True)
+        logging.info("Learn waiting for can_finish signal at %s", self.can_finish_file)
+        while not self.can_finish_file.is_file():
+            time.sleep(0.1)
+        logging.info("Learn received can_finish signal, completing")
+
+
+def test_task_dynamic_dependency():
+    """Test that dynamic outputs have correct identifiers and non-blocking behavior.
+
+    This test verifies:
+    1. Different learning_rate values produce different checkpoint identifiers
+    2. Evaluate tasks can run while Learn is still running (non-blocking dependency)
+    """
+    with TemporaryDirectory() as workdir:
+        checkpoints_lr1 = []
+        checkpoints_lr2 = []
+        can_finish_files = [None, None]
+
+        def make_callback(checkpoints_list, index):
+            def callback(checkpoint: Checkpoint):
+                logging.info(
+                    "Callback %d: received checkpoint step %d", index, checkpoint.step
+                )
+                checkpoints_list.append(checkpoint)
+
+                # Submit Evaluate with signal_file to touch Learn's can_finish_file
+                # When Evaluate runs, it will signal Learn to finish
+                # This proves Evaluate ran while Learn was still waiting
+                task = Evaluate.C(
+                    model=checkpoint.model, signal_file=can_finish_files[index]
+                )
+                checkpoint_loader = CheckpointLoader.C(checkpoint=checkpoint)
+                task.submit(init_tasks=[checkpoint_loader])
+
+            return callback
+
+        with TemporaryExperiment(
+            "dynamic_dependency", timeout_multiplier=10, workdir=workdir
+        ):
+            model = Model.C()
+
+            # First Learn task with learning_rate=0.01
+            validation1 = Validation.C(model=model)
+            learn1 = LearnWithLR.C(
+                model=model, validation=validation1, learning_rate=0.01
+            )
+            learn1.watch_output(
+                validation1.checkpoint, make_callback(checkpoints_lr1, 0)
+            )
+            learn1.submit()
+            can_finish_files[0] = learn1.can_finish_file
+
+            learn1.max_step_file.parent.mkdir(parents=True, exist_ok=True)
+            with learn1.max_step_file.open("w") as f:
+                f.write("15")
+
+            # Second Learn task with learning_rate=0.001
+            validation2 = Validation.C(model=model)
+            learn2 = LearnWithLR.C(
+                model=model, validation=validation2, learning_rate=0.001
+            )
+            learn2.watch_output(
+                validation2.checkpoint, make_callback(checkpoints_lr2, 1)
+            )
+            learn2.submit()
+            can_finish_files[1] = learn2.can_finish_file
+
+            learn2.max_step_file.parent.mkdir(parents=True, exist_ok=True)
+            with learn2.max_step_file.open("w") as f:
+                f.write("15")
+
+        # If we get here, both Learn tasks completed successfully
+        # This means Evaluate ran and signaled them to finish (non-blocking dependency works)
+
+        # Verify both tasks produced checkpoints
+        assert len(checkpoints_lr1) == 1, (
+            f"Expected 1 checkpoint from learn1, got {len(checkpoints_lr1)}"
+        )
+        assert len(checkpoints_lr2) == 1, (
+            f"Expected 1 checkpoint from learn2, got {len(checkpoints_lr2)}"
+        )
+
+        # Verify the checkpoint identifiers are different
+        id1 = checkpoints_lr1[0].__xpm__.identifier.all.hex()
+        id2 = checkpoints_lr2[0].__xpm__.identifier.all.hex()
+        logging.info("Checkpoint from lr=0.01: %s", id1)
+        logging.info("Checkpoint from lr=0.001: %s", id2)
+        assert id1 != id2, (
+            f"Checkpoints from different learning rates should have different "
+            f"identifiers: {id1} vs {id2}"
         )

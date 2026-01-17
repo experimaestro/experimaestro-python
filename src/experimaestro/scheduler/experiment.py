@@ -1103,7 +1103,7 @@ class experiment(BaseExperiment):
         """Change in the number of task outputs to process"""
         async with self.scheduler.exitCondition:
             self.taskOutputQueueSize += delta
-            logger.debug(
+            logger.warning(
                 "Updating queue size with %d => %d", delta, self.taskOutputQueueSize
             )
             assert self.taskOutputQueueSize >= 0, (
