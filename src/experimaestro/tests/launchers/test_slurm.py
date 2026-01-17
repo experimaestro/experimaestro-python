@@ -1,11 +1,15 @@
 from pathlib import Path
 import sys
+import asyncio
+import threading
+import concurrent.futures
 from experimaestro.connectors import Redirect
 from experimaestro.tests.utils import TemporaryExperiment
 from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.slurm import (
     SlurmLauncher,
 )
+from experimaestro.launchers.slurm.base import SlurmProcessWatcher
 from experimaestro import field, ResumableTask, Param
 from experimaestro.scheduler import JobState
 import shutil
@@ -167,3 +171,132 @@ def test_slurm_resumable_task(tmp_path: Path, slurmlauncher: SlurmLauncher):
         # Verify output file was created on success
         assert output_file.exists(), "Output file was not created"
         assert "Completed after 3 attempts" in output_file.read_text()
+
+
+@pytest.mark.timeout(30)
+def test_slurm_watcher_race_condition(slurmlauncher: SlurmLauncher):
+    """Stress test for SlurmProcessWatcher race conditions.
+
+    This test verifies that concurrent access to the watcher doesn't cause:
+    - Premature watcher shutdown
+    - Deadlocks
+    - Lost notifications
+    """
+    num_threads = 20
+    iterations_per_thread = 10
+    errors: list[Exception] = []
+    barrier = threading.Barrier(num_threads)
+
+    def worker(thread_id: int):
+        """Worker that repeatedly gets/releases the watcher and submits jobs."""
+        try:
+            barrier.wait()  # Synchronize all threads to start at once
+            for i in range(iterations_per_thread):
+                # Rapidly get and release the watcher
+                with SlurmProcessWatcher.get(slurmlauncher) as watcher:
+                    # Do a quick job check to exercise the watcher
+                    _ = watcher.getjob(f"nonexistent-{thread_id}-{i}", timeout=0.01)
+        except Exception as e:
+            errors.append(e)
+
+    # Run workers concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(worker, i) for i in range(num_threads)]
+        concurrent.futures.wait(futures)
+
+    # Check for errors
+    assert not errors, f"Errors during stress test: {errors}"
+
+    # Verify watcher properly cleaned up (no leaked watchers)
+    # Give a moment for cleanup
+    import time
+
+    time.sleep(0.1)
+    assert slurmlauncher.key not in SlurmProcessWatcher.WATCHERS, (
+        "Watcher was not cleaned up after all users exited"
+    )
+
+
+@pytest.mark.timeout(30)
+def test_slurm_concurrent_processes(slurmlauncher: SlurmLauncher):
+    """Test that multiple processes can be created and waited on concurrently."""
+    num_processes = 5
+
+    # Submit multiple processes
+    processes = []
+    for _ in range(num_processes):
+        builder = slurmlauncher.processbuilder()
+        builder.command = [sys.executable, slurmlauncher.binpath / "test.py"]
+        processes.append(builder.start())
+
+    # Wait for all processes in parallel threads
+    results: list[int | None] = [None] * num_processes
+    errors: list[Exception] = []
+
+    def wait_for_process(idx: int):
+        try:
+            results[idx] = processes[idx].wait()
+        except Exception as e:
+            errors.append(e)
+
+    threads = [
+        threading.Thread(target=wait_for_process, args=(i,))
+        for i in range(num_processes)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Errors waiting for processes: {errors}"
+    assert all(r == 0 for r in results), f"Not all processes succeeded: {results}"
+
+
+@pytest.mark.timeout(30)
+def test_slurm_async_concurrent_wait(slurmlauncher: SlurmLauncher):
+    """Test that async waiting works correctly with multiple concurrent waiters."""
+
+    async def run_test():
+        num_processes = 5
+
+        # Submit multiple processes
+        processes = []
+        for _ in range(num_processes):
+            builder = slurmlauncher.processbuilder()
+            builder.command = [sys.executable, slurmlauncher.binpath / "test.py"]
+            processes.append(builder.start())
+
+        # Wait for all processes concurrently using asyncio
+        results = await asyncio.gather(*[p.aio_wait() for p in processes])
+
+        assert all(r == 0 for r in results), f"Not all processes succeeded: {results}"
+
+    asyncio.run(run_test())
+
+
+@pytest.mark.timeout(30)
+def test_slurm_watcher_reuse_after_cleanup(slurmlauncher: SlurmLauncher):
+    """Test that a new watcher is properly created after the previous one cleans up."""
+    # First, use and release a watcher
+    with SlurmProcessWatcher.get(slurmlauncher) as watcher1:
+        _ = watcher1.getjob("test-job", timeout=0.01)
+
+    # Wait for cleanup
+    import time
+
+    time.sleep(0.2)
+
+    # Verify cleanup happened
+    assert slurmlauncher.key not in SlurmProcessWatcher.WATCHERS
+
+    # Now get a new watcher - should work without issues
+    with SlurmProcessWatcher.get(slurmlauncher) as watcher2:
+        # Watcher should be running and functional
+        assert watcher2.is_alive()
+        _ = watcher2.getjob("test-job-2", timeout=0.01)
+
+    # Submit and wait for a real process to confirm everything works
+    builder = slurmlauncher.processbuilder()
+    builder.command = [sys.executable, slurmlauncher.binpath / "test.py"]
+    p = builder.start()
+    assert p.wait() == 0

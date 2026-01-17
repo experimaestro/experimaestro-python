@@ -303,7 +303,9 @@ class Scheduler(StateProvider, threading.Thread):
             self.aio_registerJob(job), self.loop
         )
         other = otherFuture.result()
-        logger.debug("Job already submitted" if other else "First submission")
+        logger.debug(
+            "Job %s already submitted" if other else "First submission of job %s", job
+        )
 
         # Only returns if job was already submitted and doesn't need reprocessing
         if other is not None:
@@ -771,6 +773,9 @@ class Scheduler(StateProvider, threading.Thread):
             process = await job.aio_process()
 
             if process is not None:
+                logger.info(
+                    "Got process %s for job %s - waiting to complete", process, job
+                )
                 await self._wait_for_job_process(job, process)
 
         # If not done or running, start the job
@@ -855,13 +860,11 @@ class Scheduler(StateProvider, threading.Thread):
             job: The job with a running process
             process: The process to wait for
         """
-        logger.debug("Got a process for %s", job)
         # Notify listeners that job is running
         job.set_state(JobState.RUNNING)
         self.notify_job_state(job)
 
         # And now, we wait...
-        logger.info("Got a process for job %s - waiting to complete", job)
         code = await process.aio_code()
         logger.info("Job %s completed with code %s", job, code)
 

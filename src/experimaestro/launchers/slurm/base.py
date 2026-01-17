@@ -21,7 +21,6 @@ from experimaestro.launcherfinder.registry import (
 )
 from experimaestro.utils import ThreadingCondition
 from experimaestro.tests.connectors.utils import OutputCaptureHandler
-from experimaestro.utils.asyncio import asyncThreadcheck
 from functools import cached_property
 from experimaestro.launchers import Launcher
 from experimaestro.scriptbuilder import PythonScriptBuilder
@@ -210,51 +209,126 @@ class SlurmProcessWatcher(threading.Thread):
     """Process that calls sacct at regular interval to check job status"""
 
     WATCHERS: Dict[Tuple[Tuple[str, Any]], "SlurmProcessWatcher"] = {}
+    WATCHERS_LOCK = threading.Lock()
 
     def __init__(self, launcher: "SlurmLauncher"):
         super().__init__(daemon=True)
         self.launcher = launcher
-        self.count = 1
+        self.count = 0  # Will be incremented to 1 by first get() call
         self.jobs: Dict[str, SlurmJobState] = {}
 
         self.cv = ThreadingCondition()
         self.fetched_event = threading.Event()
         self.updating_jobs = threading.Lock()
 
-        # Async waiters: jobid -> list of (asyncio.Event, event_loop)
+        # Async waiters: jobid -> list of (asyncio.Future, event_loop)
         self.async_waiters: Dict[
-            str, List[Tuple[asyncio.Event, asyncio.AbstractEventLoop]]
+            str, List[Tuple[asyncio.Future, asyncio.AbstractEventLoop]]
         ] = {}
         self.async_waiters_lock = threading.Lock()
 
-        self.start()
+        # Async waiters for first fetch: list of (asyncio.Future, event_loop)
+        self.async_fetched_waiters: List[
+            Tuple[asyncio.Future, asyncio.AbstractEventLoop]
+        ] = []
+        # Note: start() is called by get() after incrementing count
+
+    @staticmethod
+    def acquire(launcher: "SlurmLauncher") -> "SlurmProcessWatcher":
+        """Acquire a reference to the watcher, creating it if needed.
+
+        The caller must call release() when done to allow the watcher to stop.
+        """
+        with SlurmProcessWatcher.WATCHERS_LOCK:
+            watcher = SlurmProcessWatcher.WATCHERS.get(launcher.key, None)
+            is_new = watcher is None
+            if is_new:
+                watcher = SlurmProcessWatcher(launcher)
+                SlurmProcessWatcher.WATCHERS[launcher.key] = watcher
+            with watcher.cv:
+                watcher.count += 1
+            # Start thread after incrementing count (for new watchers only)
+            if is_new:
+                watcher.start()
+        return watcher
+
+    @staticmethod
+    def release(watcher: "SlurmProcessWatcher"):
+        """Release a reference to the watcher."""
+        with watcher.cv:
+            watcher.count -= 1
+            watcher.cv.notify()
 
     @staticmethod
     @contextmanager
     def get(launcher: "SlurmLauncher"):
-        watcher = SlurmProcessWatcher.WATCHERS.get(launcher.key, None)
-        if watcher is None:
-            watcher = SlurmProcessWatcher(launcher)
-            SlurmProcessWatcher.WATCHERS[launcher.key] = watcher
-        else:
-            with watcher.cv:
-                watcher.count += 1
-        yield watcher
-        watcher.count -= 1
-        with watcher.cv:
-            watcher.cv.notify()
+        watcher = SlurmProcessWatcher.acquire(launcher)
+        try:
+            yield watcher
+        finally:
+            SlurmProcessWatcher.release(watcher)
 
-    def getjob(self, jobid, timeout=None):
-        """Allows to share the calls to sacct"""
+    def getjob(self, jobid, timeout=None, *, wait_for_update: bool = True):
+        """Get job state from the watcher (blocking).
 
+        Args:
+            jobid: The SLURM job ID to look up
+            timeout: Timeout for waiting for an update (only if wait_for_update=True)
+            wait_for_update: If True (default), wait for the next poll cycle.
+                If False, return current cached data immediately after first fetch.
+        """
         # Ensures that we have fetched at least once
         self.fetched_event.wait()
 
-        # Waits that jobs are refreshed (with a timeout)
-        with self.cv:
-            self.cv.wait(timeout=timeout)
+        if wait_for_update:
+            # Waits that jobs are refreshed (with a timeout)
+            with self.cv:
+                logger.debug(
+                    "Waiting for information about %s [timeout=%s]", jobid, timeout
+                )
+                self.cv.wait(timeout=timeout)
 
         # Ensures jobs are not updated right now
+        with self.updating_jobs:
+            return self.jobs.get(jobid)
+
+    async def aio_getjob(self, jobid) -> Optional[SlurmJobState]:
+        """Get job state from the watcher (async, non-blocking).
+
+        Waits asynchronously for the first fetch if needed, then returns
+        the current cached state without waiting for updates.
+
+        Args:
+            jobid: The SLURM job ID to look up
+
+        Returns:
+            SlurmJobState or None if job not found
+        """
+        # If already fetched, return immediately
+        if self.fetched_event.is_set():
+            with self.updating_jobs:
+                return self.jobs.get(jobid)
+
+        # Register for async notification of first fetch
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        with self.async_waiters_lock:
+            self.async_fetched_waiters.append((future, loop))
+
+        # Check again in case it was set while we were registering
+        if self.fetched_event.is_set():
+            # Cancel our waiter and return immediately
+            with self.async_waiters_lock:
+                self.async_fetched_waiters = [
+                    (f, lp) for f, lp in self.async_fetched_waiters if f is not future
+                ]
+            with self.updating_jobs:
+                return self.jobs.get(jobid)
+
+        # Wait for the first fetch
+        await future
+
+        # Return the job state
         with self.updating_jobs:
             return self.jobs.get(jobid)
 
@@ -286,6 +360,13 @@ class SlurmProcessWatcher(threading.Thread):
 
             for jobid in finished_jobs:
                 del self.async_waiters[jobid]
+
+    def _notify_async_fetched_waiters(self):
+        """Notify async waiters waiting for the first fetch"""
+        with self.async_waiters_lock:
+            for future, loop in self.async_fetched_waiters:
+                loop.call_soon_threadsafe(future.set_result, True)
+            self.async_fetched_waiters.clear()
 
     def run(self):
         while self.count > 0:
@@ -325,52 +406,89 @@ class SlurmProcessWatcher(threading.Thread):
                 self.fetched_event.set()
                 self.cv.notify_all()
 
+            # Notify async waiters for first fetch (outside cv lock)
+            self._notify_async_fetched_waiters()
+
+            with self.cv:
                 self.cv.wait_for(
                     lambda: self.count == 0, timeout=self.launcher.interval
                 )
-                if self.count == 0:
-                    logger.debug("Stopping SLURM watcher process")
-                    del SlurmProcessWatcher.WATCHERS[self.launcher.key]
-                    break
+
+            # Check if we should stop - must acquire WATCHERS_LOCK first,
+            # then re-check count under cv to avoid race with get()
+            if self.count == 0:
+                with SlurmProcessWatcher.WATCHERS_LOCK:
+                    with self.cv:
+                        if self.count == 0:
+                            logger.debug(
+                                "Stopping SLURM watcher process (%s)", self.launcher.key
+                            )
+                            del SlurmProcessWatcher.WATCHERS[self.launcher.key]
+                            break
 
 
 class BatchSlurmProcess(Process):
     """A batch slurm process"""
 
-    def __init__(self, launcher: "SlurmLauncher", jobid: str):
+    def __init__(
+        self, launcher: "SlurmLauncher", jobid: str, *, hold_watcher: bool = False
+    ):
         self.launcher = launcher
         self.jobid = jobid
         self._last_state: Optional[SlurmJobState] = None
+        self._watcher: Optional[SlurmProcessWatcher] = None
+
+        # Optionally acquire a watcher reference to keep it alive
+        if hold_watcher:
+            self._watcher = SlurmProcessWatcher.acquire(launcher)
+
+    def _release_watcher(self):
+        """Release the held watcher reference if any."""
+        if self._watcher is not None:
+            SlurmProcessWatcher.release(self._watcher)
+            self._watcher = None
+
+    def __del__(self):
+        # Ensure watcher is released if process is garbage collected
+        self._release_watcher()
 
     def wait(self):
-        with SlurmProcessWatcher.get(self.launcher) as watcher:
-            while True:
-                state = watcher.getjob(self.jobid)
-                if state and state.finished():
-                    self._last_state = state
-                    return 0 if state.slurm_state == "COMPLETED" else 1
+        try:
+            with SlurmProcessWatcher.get(self.launcher) as watcher:
+                while True:
+                    state = watcher.getjob(self.jobid)
+                    if state and state.finished():
+                        self._last_state = state
+                        return 0 if state.slurm_state == "COMPLETED" else 1
+        finally:
+            # Release held watcher when wait completes
+            self._release_watcher()
 
     async def aio_wait(self) -> int:
         """Asynchronously wait for SLURM job to finish (event-driven)"""
         logger.debug("Async waiting for SLURM job %s", self.jobid)
         loop = asyncio.get_running_loop()
 
-        with SlurmProcessWatcher.get(self.launcher) as watcher:
-            # Check if already finished
-            state = watcher.getjob(self.jobid)
-            if state and state.finished():
-                self._last_state = state
-                return 0 if state.slurm_state == "COMPLETED" else 1
+        try:
+            with SlurmProcessWatcher.get(self.launcher) as watcher:
+                # Check if already finished (async to avoid blocking on first fetch)
+                state = await watcher.aio_getjob(self.jobid)
+                if state and state.finished():
+                    self._last_state = state
+                    return 0 if state.slurm_state == "COMPLETED" else 1
 
-            # Register and wait for the job to finish
-            future = watcher.register_async_waiter(self.jobid, loop)
-            self._last_state = await future
+                # Register and wait for the job to finish
+                future = watcher.register_async_waiter(self.jobid, loop)
+                self._last_state = await future
 
-            code = 0 if self._last_state.slurm_state == "COMPLETED" else 1
-            logger.debug(
-                "Finished async wait for SLURM job %s: code %s", self.jobid, code
-            )
-            return code
+                code = 0 if self._last_state.slurm_state == "COMPLETED" else 1
+                logger.debug(
+                    "Finished async wait for SLURM job %s: code %s", self.jobid, code
+                )
+                return code
+        finally:
+            # Release held watcher when wait completes
+            self._release_watcher()
 
     def get_job_state(self, code: int) -> "JobState":
         """Convert SLURM exit code to JobState, detecting timeouts"""
@@ -391,12 +509,20 @@ class BatchSlurmProcess(Process):
         return JobState.ERROR
 
     async def aio_state(self, timeout: float | None = None) -> ProcessState:
-        def check():
-            with SlurmProcessWatcher.get(self.launcher) as watcher:
-                jobinfo = watcher.getjob(self.jobid, timeout=timeout)
-                return jobinfo.state if jobinfo else ProcessState.SCHEDULED
+        # Get watcher - either use held one or acquire temporarily
+        if self._watcher is not None:
+            watcher = self._watcher
+            release_after = False
+        else:
+            watcher = SlurmProcessWatcher.acquire(self.launcher)
+            release_after = True
 
-        return await asyncThreadcheck("slurm.aio_isrunning", check)
+        try:
+            jobinfo = await watcher.aio_getjob(self.jobid)
+            return jobinfo.state if jobinfo else ProcessState.SCHEDULED
+        finally:
+            if release_after:
+                SlurmProcessWatcher.release(watcher)
 
     def kill(self):
         logger.warning("Killing slurm job %s", self.jobid)
@@ -414,17 +540,21 @@ class BatchSlurmProcess(Process):
     def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
         options = {k: v for k, v in spec.get("options", ())}
         launcher = SlurmLauncher(connector=connector, **options)
-        process = BatchSlurmProcess(launcher, spec["pid"])
 
-        # Checks that the process is running
-        with SlurmProcessWatcher.get(launcher) as watcher:
-            logger.debug("Checking SLURM job %s", process.jobid)
-            jobinfo = watcher.getjob(process.jobid, timeout=0.1)
-            if jobinfo and jobinfo.state.running:
-                logger.debug(
-                    "SLURM job is running (%s), returning process", process.jobid
-                )
-                return process
+        # Create process with hold_watcher=True to keep watcher alive
+        # until wait/aio_wait completes
+        process = BatchSlurmProcess(launcher, spec["pid"], hold_watcher=True)
+
+        # Check that the process is running (watcher is already held by process)
+        # Use wait_for_update=False to get cached data immediately
+        logger.debug("Checking SLURM job %s", process.jobid)
+        jobinfo = process._watcher.getjob(process.jobid, wait_for_update=False)
+        if jobinfo and jobinfo.state.running:
+            logger.debug("SLURM job is running (%s), returning process", process.jobid)
+            return process
+
+        # Job not running, release the watcher and return None
+        process._release_watcher()
         return None
 
 
