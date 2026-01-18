@@ -187,10 +187,44 @@ class WorkspaceStateProvider(StateProvider):
         If events_count is absent from status.json, all events have been processed
         and we just need to cleanup the orphaned event files.
 
+        IMPORTANT: Only consolidate if we can acquire the experiment lock.
+        If the lock is held (experiment is running), skip consolidation.
+
         Args:
             experiment_id: The experiment identifier
             exp_events_dir: Path to .events/experiments/{experiment_id}/
         """
+        import filelock
+
+        # Try to acquire the experiment lock with a short timeout
+        # The experiment lock is at: workspace_path/experiments/{experiment_id}/lock
+        experiment_lock_path = (
+            self.workspace_path / "experiments" / experiment_id / "lock"
+        )
+
+        # Create lock object with short timeout
+        lock = filelock.FileLock(str(experiment_lock_path), timeout=0.1)
+
+        try:
+            lock.acquire()
+        except filelock.Timeout:
+            # Lock is held - experiment is still running, skip consolidation
+            logger.debug(
+                "Experiment %s is still running (lock held), skipping consolidation",
+                experiment_id,
+            )
+            return
+
+        # We have the lock - proceed with consolidation
+        try:
+            self._do_consolidate_experiment_events(experiment_id, exp_events_dir)
+        finally:
+            lock.release()
+
+    def _do_consolidate_experiment_events(
+        self, experiment_id: str, exp_events_dir: Path
+    ) -> None:
+        """Actual consolidation logic (called with lock held)"""
         # Find event files
         event_files = list(exp_events_dir.glob("events-*.jsonl"))
         if not event_files:
