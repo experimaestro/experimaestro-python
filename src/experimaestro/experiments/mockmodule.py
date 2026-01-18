@@ -13,18 +13,14 @@ Example usage in a pre_experiment.py file:
 
     from experimaestro.experiments import mock_modules
 
-    mock_modules(
-        ['torch', 'transformers', 'pytorch_lightning'],
-        decorators=[
-            'torch.compile',
-            'torch.jit.script',
-            'torch.no_grad',
-            'torch.inference_mode',
-        ]
-    )
+    mock_modules(['torch', 'transformers', 'pytorch_lightning'])
+
+    # All decorator patterns work automatically:
+    # @torch.compile, @torch.no_grad(), @torch.jit.script, etc.
 """
 
 import sys
+import warnings
 from importlib.abc import MetaPathFinder
 from importlib.machinery import ModuleSpec
 from types import ModuleType
@@ -46,12 +42,62 @@ def noop_decorator(fn=None, *args, **kwargs):
     return lambda f: f
 
 
+def _noop_callable(*args, **kwargs):
+    """A callable that works as a universal no-op, including as a decorator.
+
+    Handles both decorator patterns:
+        @decorator
+        def func(): ...
+
+        @decorator(arg=1)
+        def func(): ...
+    """
+    # Case 1: @decorator - called directly with a function
+    if len(args) == 1 and callable(args[0]) and not kwargs:
+        return args[0]
+    # Case 2: @decorator(...) - called with arguments, return a decorator
+    return _noop_callable
+
+
+class _NoopCallableDescriptor:
+    """Descriptor that provides a no-op callable for both class and instance access.
+
+    This allows attributes like `MyClass.apply(...)` and `instance.apply(...)`
+    to work without requiring a custom metaclass.
+    """
+
+    def __get__(self, obj, objtype=None):
+        return _noop_callable
+
+
+class _FakeBaseClass:
+    """Base class used when inheriting from fake classes.
+
+    When fake classes are used as base classes via __mro_entries__, this class
+    is returned instead of object. This provides common attributes like `apply`
+    that some libraries (e.g., torch.autograd.Function) expect on subclasses.
+
+    This class deliberately does NOT use a custom metaclass to avoid metaclass
+    conflicts when mixed with other classes that have custom metaclasses.
+    """
+
+    # Common class-level attributes that should be callable.
+    # These are defined as descriptors so they work for both class and instance access.
+    apply = _NoopCallableDescriptor()
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+
 class _FakeClass:
     """Fake class that can be inherited from without metaclass conflicts.
 
     This class allows code that inherits from mocked classes (like torch.nn.Module)
-    to be parsed without errors. When used as a base class, it resolves to `object`
-    to avoid metaclass conflicts.
+    to be parsed without errors. When used as a base class, it resolves to
+    `_FakeBaseClass` to provide dynamic attribute access on subclasses.
     """
 
     _finder: "FakeModuleFinder | None" = None
@@ -61,9 +107,11 @@ class _FakeClass:
         pass
 
     def __call__(self, *args, **kwargs):
+        # If called with a single callable (decorator pattern), return it unchanged
         if len(args) == 1 and callable(args[0]) and not kwargs:
             return args[0]
-        return _FakeClass()
+        # Otherwise return self to allow chaining: @decorator(arg=1) works
+        return self
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -81,11 +129,23 @@ class _FakeClass:
         return cls
 
     def __mro_entries__(self, bases):
-        """Tell Python to use object instead of this class when used as a base.
+        """Tell Python to use _FakeBaseClass when this class is used as a base.
 
-        This avoids metaclass conflicts when inheriting from real classes.
+        This provides common attributes like `apply` on subclasses.
+
+        Returns an empty tuple if _FakeBaseClass is already in another base's MRO
+        to avoid "duplicate base class" errors.
         """
-        return (object,)
+        for base in bases:
+            if base is self:
+                continue
+            # Check if base already has _FakeBaseClass in its MRO
+            if hasattr(base, "__mro__") and _FakeBaseClass in base.__mro__:
+                return ()
+            # Check if base is another fake class/proxy (without recursing)
+            if isinstance(base, (_FakeClass, _FakeClassProxy)):
+                return ()
+        return (_FakeBaseClass,)
 
 
 class _FakeClassProxy:
@@ -113,11 +173,32 @@ class _FakeClassProxy:
             return noop_decorator
 
     def __call__(self, *args, **kwargs):
-        return _FakeClassProxy(_FakeClass())
+        # If called with a single callable (decorator pattern), return it unchanged
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+        # Otherwise return self to allow chaining: @decorator(arg=1) works
+        return self
+
+    def __getitem__(self, item):
+        """Support for subscript notation like Tensor[int] or Module[str]."""
+        return self
 
     def __mro_entries__(self, bases):
-        """When used as a base, return the actual fake class."""
-        return (object.__getattribute__(self, "_fake_class"),)
+        """When used as a base, return _FakeBaseClass for common attributes.
+
+        Returns an empty tuple if _FakeBaseClass is already in another base's MRO
+        to avoid "duplicate base class" errors.
+        """
+        for base in bases:
+            if base is self:
+                continue
+            # Check if base already has _FakeBaseClass in its MRO
+            if hasattr(base, "__mro__") and _FakeBaseClass in base.__mro__:
+                return ()
+            # Check if base is another fake class/proxy (without recursing)
+            if isinstance(base, (_FakeClass, _FakeClassProxy)):
+                return ()
+        return (_FakeBaseClass,)
 
 
 class FakeModule(ModuleType):
@@ -219,26 +300,40 @@ def mock_modules(
     in sys.meta_path. Use this in pre_experiment.py files to speed up experiment
     configuration parsing.
 
+    All mocked objects automatically work as decorators, supporting both patterns:
+        @decorator
+        def func(): ...
+
+        @decorator(arg=1)
+        def func(): ...
+
     Args:
         modules: List of module names to mock (e.g., ['torch', 'transformers']).
             Submodules are automatically included (e.g., 'torch' includes 'torch.nn').
-        decorators: List of full paths to treat as decorators (e.g., ['torch.compile']).
-            These will return noop_decorator when accessed.
+        decorators: Deprecated. No longer needed as all mocked objects now
+            automatically work as decorators.
 
     Returns:
         The FakeModuleFinder instance that was registered.
 
     Example:
         >>> from experimaestro.experiments import mock_modules
-        >>> mock_modules(
-        ...     ['torch', 'transformers'],
-        ...     decorators=['torch.compile', 'torch.no_grad']
-        ... )
+        >>> mock_modules(['torch', 'transformers'])
         >>> import torch  # Now returns a fake module
         >>> @torch.no_grad()  # Works as a no-op decorator
         ... def my_func():
         ...     pass
+        >>> @torch.compile
+        ... def my_other_func():
+        ...     pass
     """
+    if decorators is not None:
+        warnings.warn(
+            "The 'decorators' parameter is deprecated and will be removed in a future "
+            "version. All mocked objects now automatically work as decorators.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     finder = FakeModuleFinder(modules, decorators)
     sys.meta_path.insert(0, finder)
     return finder
