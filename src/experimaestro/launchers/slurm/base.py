@@ -221,8 +221,12 @@ class SlurmProcessWatcher(threading.Thread):
         self.fetched_event = threading.Event()
         self.updating_jobs = threading.Lock()
 
-        # Async waiters: jobid -> list of (asyncio.Future, event_loop)
+        # Async waiters for job completion: jobid -> list of (asyncio.Future, event_loop)
         self.async_waiters: Dict[
+            str, List[Tuple[asyncio.Future, asyncio.AbstractEventLoop]]
+        ] = {}
+        # Async waiters for state change: jobid -> list of (asyncio.Future, event_loop)
+        self.async_state_waiters: Dict[
             str, List[Tuple[asyncio.Future, asyncio.AbstractEventLoop]]
         ] = {}
         self.async_waiters_lock = threading.Lock()
@@ -346,9 +350,24 @@ class SlurmProcessWatcher(threading.Thread):
             self.async_waiters[jobid].append((event, loop))
         return event
 
-    def _notify_async_waiters(self):
-        """Notify async waiters for finished jobs"""
+    def register_async_state_waiter(
+        self, jobid: str, loop: asyncio.AbstractEventLoop
+    ) -> asyncio.Future:
+        """Register an async waiter for job state change.
+
+        Returns an asyncio.Future that will be set on next state update.
+        """
+        future = loop.create_future()
         with self.async_waiters_lock:
+            if jobid not in self.async_state_waiters:
+                self.async_state_waiters[jobid] = []
+            self.async_state_waiters[jobid].append((future, loop))
+        return future
+
+    def _notify_async_waiters(self):
+        """Notify async waiters for finished jobs and state changes"""
+        with self.async_waiters_lock:
+            # Notify completion waiters
             finished_jobs = []
             for jobid, waiters in self.async_waiters.items():
                 state = self.jobs.get(jobid)
@@ -360,6 +379,13 @@ class SlurmProcessWatcher(threading.Thread):
 
             for jobid in finished_jobs:
                 del self.async_waiters[jobid]
+
+            # Notify state change waiters (always notify with current state)
+            for jobid, waiters in list(self.async_state_waiters.items()):
+                state = self.jobs.get(jobid)
+                for future, loop in waiters:
+                    loop.call_soon_threadsafe(future.set_result, state)
+            self.async_state_waiters.clear()
 
     def _notify_async_fetched_waiters(self):
         """Notify async waiters waiting for the first fetch"""
@@ -523,6 +549,29 @@ class BatchSlurmProcess(Process):
         finally:
             if release_after:
                 SlurmProcessWatcher.release(watcher)
+
+    async def aio_wait_until_running(self) -> ProcessState:
+        """Wait until the job transitions from SCHEDULED to RUNNING (or finishes).
+
+        Uses the SLURM watcher's event-driven notification instead of polling.
+        Returns the new ProcessState (RUNNING or a finished state).
+        """
+        loop = asyncio.get_running_loop()
+
+        with SlurmProcessWatcher.get(self.launcher) as watcher:
+            while True:
+                # Check current state
+                jobinfo = await watcher.aio_getjob(self.jobid)
+                if jobinfo:
+                    if jobinfo.state != ProcessState.SCHEDULED:
+                        return jobinfo.state
+                else:
+                    # Job not found yet, wait for next update
+                    pass
+
+                # Register for state change notification and wait
+                future = watcher.register_async_state_waiter(self.jobid, loop)
+                await future
 
     def kill(self):
         logger.warning("Killing slurm job %s", self.jobid)

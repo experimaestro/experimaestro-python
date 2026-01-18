@@ -138,6 +138,28 @@ class Process:
         """True is the process is truly running (I/O)"""
         return (await self.aio_state()).running
 
+    async def aio_wait_until_running(
+        self, poll_interval: float = 5.0
+    ) -> "ProcessState":
+        """Wait until the process transitions from SCHEDULED to RUNNING (or finishes).
+
+        Subclasses (e.g., SLURM) may override with event-driven implementation.
+        Default implementation polls aio_state() at regular intervals.
+
+        Args:
+            poll_interval: How often to poll for state changes (seconds)
+
+        Returns:
+            The new ProcessState (RUNNING or a finished state)
+        """
+        import asyncio
+
+        while True:
+            state = await self.aio_state()
+            if state != ProcessState.SCHEDULED:
+                return state
+            await asyncio.sleep(poll_interval)
+
     async def aio_code(self) -> Optional[int]:
         """Returns a future containing the returned code
 

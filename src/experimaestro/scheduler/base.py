@@ -853,6 +853,36 @@ class Scheduler(StateProvider, threading.Thread):
         # Wait for done handler to complete and notify exit condition
         return job.state
 
+    async def _set_job_state_from_process(self, job: Job, process: "Process") -> None:
+        """Set job state based on process state and wait until running.
+
+        Checks the process state and sets job to SCHEDULED or RUNNING accordingly.
+        If SCHEDULED, waits until the process starts running (or finishes).
+
+        Args:
+            job: The job to update
+            process: The process to check state on
+        """
+        from experimaestro.connectors import ProcessState
+
+        # Check initial process state
+        state = await process.aio_state()
+        if state == ProcessState.SCHEDULED:
+            job.set_state(JobState.SCHEDULED)
+            self.notify_job_state(job)
+
+            # Wait until running or finished (uses event-driven for SLURM)
+            state = await process.aio_wait_until_running()
+            if state == ProcessState.RUNNING:
+                job.set_state(JobState.RUNNING)
+                self.notify_job_state(job)
+                logger.info("Job %s started running", job.identifier[:8])
+            # If finished, state will be set later from marker files
+        else:
+            # Process is already running (or finished)
+            job.set_state(JobState.RUNNING)
+            self.notify_job_state(job)
+
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.
 
@@ -860,9 +890,8 @@ class Scheduler(StateProvider, threading.Thread):
             job: The job with a running process
             process: The process to wait for
         """
-        # Notify listeners that job is running
-        job.set_state(JobState.RUNNING)
-        self.notify_job_state(job)
+        # Set initial state (SCHEDULED or RUNNING) and wait until running
+        await self._set_job_state_from_process(job, process)
 
         # And now, we wait...
         code = await process.aio_code()
@@ -1065,6 +1094,9 @@ class Scheduler(StateProvider, threading.Thread):
                 except Exception:
                     logger.warning("Error while starting job", exc_info=True)
                     return JobState.ERROR
+
+            # Set initial state (SCHEDULED or RUNNING) and wait until running
+            await self._set_job_state_from_process(job, process)
 
             # Wait for job to complete while holding locks
             try:

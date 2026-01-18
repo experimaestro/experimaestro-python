@@ -44,6 +44,8 @@ def get_status_icon(status: str, failure_reason=None, transient=None):
         return "❌"
     elif status == "running":
         return "▶"
+    elif status == "scheduled":
+        return "🕐"  # Scheduled (e.g., in SLURM queue)
     elif status == "waiting":
         return "⌛"  # Waiting for dependencies
     elif status == "unscheduled" and transient is not None and transient.is_transient:

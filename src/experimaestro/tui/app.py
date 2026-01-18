@@ -621,6 +621,16 @@ class ExperimaestroUI(App):
         For remote monitoring, switches to log viewer immediately with loading state,
         then starts adaptive sync in background.
         """
+        from experimaestro.scheduler.interfaces import JobState
+
+        # Check if job is scheduled (not yet running) - no logs available
+        if message.job_state == JobState.SCHEDULED:
+            self.notify(
+                "Job is scheduled but not yet running - logs not available",
+                severity="information",
+            )
+            return
+
         job_path = Path(message.job_path)
         job_id = job_path.name
 
