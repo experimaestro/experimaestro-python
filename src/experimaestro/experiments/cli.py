@@ -82,9 +82,13 @@ class ConfigurationLoader:
                 _data["file"] = str((yaml_file.parent / path).resolve())
 
         if "pre_experiment" in _data:
-            path = Path(_data["pre_experiment"])
-            if not path.is_absolute():
-                _data["pre_experiment"] = str((yaml_file.parent / path).resolve())
+            pre_exp = _data["pre_experiment"]
+            # Only treat as file path if it contains path separators or ends with .py
+            # Otherwise treat as a module name (e.g., "mypackage.pre_experiment")
+            if "/" in pre_exp or "\\" in pre_exp or pre_exp.endswith(".py"):
+                path = Path(pre_exp)
+                if not path.is_absolute():
+                    _data["pre_experiment"] = str((yaml_file.parent / path).resolve())
 
         if "module" in _data:
             # Keeps track of the YAML file where the module was defined

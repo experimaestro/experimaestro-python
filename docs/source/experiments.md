@@ -220,17 +220,16 @@ pre_experiment: pre_env.py
 file: experiment
 ```
 
-#### Example: Mock heavy modules with FakeModuleFinder
+#### Example: Mock heavy modules with mock_modules
 
-For experiments that import heavy libraries like PyTorch or transformers, you can use {py:class}`~experimaestro.experiments.FakeModuleFinder` to mock these modules during the experiment setup phase. This significantly speeds up configuration parsing while the actual job execution still uses the real modules.
+For experiments that import heavy libraries like PyTorch or transformers, you can use {py:func}`~experimaestro.experiments.mock_modules` to mock these modules during the experiment setup phase. This significantly speeds up configuration parsing while the actual job execution still uses the real modules.
 
 ```python
 # pre_experiment.py
-import sys
-from experimaestro.experiments import FakeModuleFinder
+from experimaestro.experiments import mock_modules
 
 # Mock PyTorch and related modules
-sys.meta_path.insert(0, FakeModuleFinder(
+mock_modules(
     # Modules to mock (submodules are automatically included)
     ['torch', 'pytorch_lightning', 'transformers', 'huggingface_hub'],
     # Decorators to make no-ops
@@ -243,7 +242,7 @@ sys.meta_path.insert(0, FakeModuleFinder(
         'torch.no_grad',
         'torch.inference_mode',
     ]
-))
+)
 ```
 
 ```yaml
@@ -252,7 +251,7 @@ pre_experiment: pre_experiment.py
 file: experiment
 ```
 
-The `FakeModuleFinder` provides:
+The `mock_modules` function provides:
 
 - **Module mocking**: Any import of the specified modules returns fake objects that silently accept attribute access, method calls, and instantiation
 - **Decorator handling**: Specified decorator paths (like `torch.compile`) work as no-op decorators that return the function unchanged

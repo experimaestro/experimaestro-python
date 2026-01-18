@@ -220,3 +220,49 @@ def test_pre_experiment_mocking_modules(experiment_dir):
         f"Module mocking failed. Output: {result.output}"
     )
     assert result.exit_code == 0, f"CLI failed with: {result.output}"
+
+
+def test_pre_experiment_module_name(experiment_dir):
+    """Test that pre_experiment can be specified as a module name"""
+    exp_dir, workdir = experiment_dir
+
+    import shutil
+    import sys
+
+    # Create a package with a pre_experiment module
+    pkg_dir = exp_dir / "mypackage"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "pre_setup.py").write_text(
+        '"""Pre-experiment module"""\nimport os\nos.environ["XPM_TEST_PRE_EXPERIMENT"] = "executed"\n'
+    )
+
+    shutil.copy(EXP_CHECK_ENV, exp_dir / "experiment.py")
+
+    # Create YAML with module name (not file path)
+    yaml_file = exp_dir / "config.yaml"
+    yaml_file.write_text(
+        "id: test-pre-experiment-module\nfile: experiment\npre_experiment: mypackage.pre_setup\n"
+    )
+
+    # Add experiment dir to path so module can be imported
+    original_path = sys.path.copy()
+    sys.path.insert(0, str(exp_dir))
+
+    try:
+        runner = CliRunner(env={"XPM_TEST_PRE_EXPERIMENT": ""})
+        result = runner.invoke(
+            cli,
+            [
+                "run-experiment",
+                "--workdir",
+                str(workdir),
+                "--run-mode",
+                "DRY_RUN",
+                str(yaml_file),
+            ],
+        )
+
+        assert result.exit_code == 0, f"CLI failed with: {result.output}"
+    finally:
+        sys.path[:] = original_path

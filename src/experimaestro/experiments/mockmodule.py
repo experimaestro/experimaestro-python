@@ -11,10 +11,9 @@ This is particularly useful for:
 
 Example usage in a pre_experiment.py file:
 
-    from experimaestro.experiments.mockmodule import FakeModuleFinder
-    import sys
+    from experimaestro.experiments import mock_modules
 
-    sys.meta_path.insert(0, FakeModuleFinder(
+    mock_modules(
         ['torch', 'transformers', 'pytorch_lightning'],
         decorators=[
             'torch.compile',
@@ -22,7 +21,7 @@ Example usage in a pre_experiment.py file:
             'torch.no_grad',
             'torch.inference_mode',
         ]
-    ))
+    )
 """
 
 import sys
@@ -103,7 +102,14 @@ class _FakeClassProxy:
         try:
             return getattr(fake_class, name)
         except AttributeError:
-            # Return noop_decorator for missing attributes
+            # Create a nested fake class for attribute access (e.g., torch.autograd.Function)
+            finder = getattr(fake_class, "_finder", None)
+            path = getattr(fake_class, "_path", "")
+            full_path = f"{path}.{name}" if path else name
+            if finder and full_path in finder.decorators:
+                return noop_decorator
+            if finder:
+                return finder._make_class(full_path, name)
             return noop_decorator
 
     def __call__(self, *args, **kwargs):
@@ -202,3 +208,37 @@ class FakeModuleFinder(MetaPathFinder):
 
     def __repr__(self):
         return f"FakeModuleFinder({self.modules})"
+
+
+def mock_modules(
+    modules: list[str], decorators: list[str] | None = None
+) -> FakeModuleFinder:
+    """Mock specified modules so they can be imported without the actual dependencies.
+
+    This is a convenience function that creates a FakeModuleFinder and registers it
+    in sys.meta_path. Use this in pre_experiment.py files to speed up experiment
+    configuration parsing.
+
+    Args:
+        modules: List of module names to mock (e.g., ['torch', 'transformers']).
+            Submodules are automatically included (e.g., 'torch' includes 'torch.nn').
+        decorators: List of full paths to treat as decorators (e.g., ['torch.compile']).
+            These will return noop_decorator when accessed.
+
+    Returns:
+        The FakeModuleFinder instance that was registered.
+
+    Example:
+        >>> from experimaestro.experiments import mock_modules
+        >>> mock_modules(
+        ...     ['torch', 'transformers'],
+        ...     decorators=['torch.compile', 'torch.no_grad']
+        ... )
+        >>> import torch  # Now returns a fake module
+        >>> @torch.no_grad()  # Works as a no-op decorator
+        ... def my_func():
+        ...     pass
+    """
+    finder = FakeModuleFinder(modules, decorators)
+    sys.meta_path.insert(0, finder)
+    return finder
