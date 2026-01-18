@@ -152,7 +152,7 @@ experimaestro run-experiment --show -c learning_rate=1e-5 --pre-yaml base.yaml e
 
 The `pre_experiment` option allows you to run Python code **before** the experiment module is imported. It can be specified as:
 
-- **A file path**: Relative path to a Python file (e.g., `pre_setup.py`)
+- **A file path**: Relative path to a Python file (e.g., `pre_experiment.py`)
 - **A module name**: Python module to import (e.g., `mypackage.pre_experiment`)
 
 This is useful for:
@@ -161,88 +161,20 @@ This is useful for:
 - Mocking heavy modules to speed up the experiment setup phase (the actual job execution will use real modules)
 - Configuring logging or other global state
 
-#### Example: Speed up PyTorch imports
-
-PyTorch's `torch.compile` and module initialization can significantly slow down experiment startup. You can use `pre_experiment` to mock these components:
-
-Create a `pre_setup.py` file:
-```python
-import os
-import sys
-from unittest.mock import MagicMock
-
-# Reduce torch compile threads
-os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
-
-# Make torch.compile a no-op decorator
-class MockCompile:
-    def __call__(self, fn=None, **kwargs):
-        if fn is not None:
-            return fn
-        def decorator(func):
-            return func
-        return decorator
-
-# Mock torch module with no-op compile
-class TorchMock(MagicMock):
-    compile = MockCompile()
-
-sys.modules['torch'] = TorchMock()
-sys.modules['torch.nn'] = MagicMock()
-sys.modules['torch.nn.functional'] = MagicMock()
-sys.modules['torch.optim'] = MagicMock()
-```
-
-Then reference it in your YAML:
-```yaml
-id: my-experiment
-pre_experiment: pre_setup.py
-file: experiment
-```
-
-#### Example: Set environment variables
-
-For simpler use cases like setting environment variables:
-
-```python
-# pre_env.py
-import os
-
-# Control threading behavior
-os.environ["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "4"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-```
-
-```yaml
-id: my-experiment
-pre_experiment: pre_env.py
-file: experiment
-```
-
 #### Example: Mock heavy modules with mock_modules
 
 For experiments that import heavy libraries like PyTorch or transformers, you can use {py:func}`~experimaestro.experiments.mock_modules` to mock these modules during the experiment setup phase. This significantly speeds up configuration parsing while the actual job execution still uses the real modules.
 
 ```python
 # pre_experiment.py
+import os
 from experimaestro.experiments import mock_modules
 
-# Mock PyTorch and related modules
-mock_modules(
-    # Modules to mock (submodules are automatically included)
-    ['torch', 'pytorch_lightning', 'transformers', 'huggingface_hub'],
-    # Decorators to make no-ops
-    decorators=[
-        'torch.compile',
-        'torch.jit.script',
-        'torch.jit.unused',
-        'torch.jit.export',
-        'torch.jit.ignore',
-        'torch.no_grad',
-        'torch.inference_mode',
-    ]
-)
+# Set environment variables
+os.environ["OMP_NUM_THREADS"] = "4"
+
+# Mock PyTorch and related modules (submodules are automatically included)
+mock_modules(['torch', 'pytorch_lightning', 'transformers', 'huggingface_hub'])
 ```
 
 ```yaml
@@ -254,9 +186,9 @@ file: experiment
 The `mock_modules` function provides:
 
 - **Module mocking**: Any import of the specified modules returns fake objects that silently accept attribute access, method calls, and instantiation
-- **Decorator handling**: Specified decorator paths (like `torch.compile`) work as no-op decorators that return the function unchanged
-- **Inheritance support**: Code that inherits from mocked classes (like `torch.nn.Module`) works correctly without metaclass conflicts
-- **Generic type support**: Subscript notation like `List[int]` or `Module[str, Tensor]` works correctly
+- **Automatic decorator support**: All mocked objects work as decorators, supporting both `@decorator` and `@decorator(args)` patterns (e.g., `@torch.compile`, `@torch.no_grad()`, `@torch.jit.script`)
+- **Inheritance support**: Code that inherits from mocked classes (like `torch.nn.Module` or `torch.autograd.Function`) works correctly without metaclass conflicts
+- **Generic type support**: Subscript notation like `Tensor[int]` or `Module[str, Tensor]` works correctly
 
 This is particularly useful for large codebases with many PyTorch modules where importing takes significant time during experiment configuration.
 
@@ -273,7 +205,6 @@ module: mypackage.experiment
 This is useful when:
 - Your pre-experiment code is part of an installed package
 - You want to share pre-experiment setup across multiple experiments
-- You're using a library that provides pre-experiment utilities (like `experimaestro.experiments.FakeModuleFinder`)
 
 ### Dirty Git Check
 
