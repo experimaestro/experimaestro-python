@@ -164,6 +164,22 @@ class ConfigurationLoader:
     help="Launch Textual console UI for monitoring with logs",
 )
 @click.option(
+    "--events-viewer",
+    is_flag=True,
+    help="Stream events to console (for log aggregation)",
+)
+@click.option(
+    "--events-format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Event output format (default: text, use json for tooling)",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Hide progress events in events viewer (reduces noise)",
+)
+@click.option(
     "--no-db",
     "no_db",
     is_flag=True,
@@ -207,6 +223,9 @@ def experiments_cli(  # noqa: C901
     port: int,
     web: bool,
     console: bool,
+    events_viewer: bool,
+    events_format: str,
+    no_progress: bool,
     no_db: bool,
     xpm_config_dir: Path,
     workdir: Optional[Path],
@@ -470,6 +489,21 @@ def experiments_cli(  # noqa: C901
                         settings.server.port or 12345,
                     )
 
+                # Start events viewer if requested
+                event_viewer_instance = None
+                if events_viewer and run_mode == RunMode.NORMAL:
+                    from experimaestro.scheduler.event_viewer import EventStreamViewer
+
+                    event_viewer_instance = EventStreamViewer(
+                        format=events_format,
+                        show_progress=not no_progress,
+                    )
+                    xp.scheduler.add_listener(event_viewer_instance)
+                    logger.info(
+                        "Events viewer started (%s format)",
+                        events_format,
+                    )
+
                 if xp_ready_event is not None:
                     xp_ready_event.set()  # Signal that xp is ready
 
@@ -501,6 +535,11 @@ def experiments_cli(  # noqa: C901
     use_console = console and run_mode == RunMode.NORMAL
     if console and not use_console:
         logger.warning("--console is ignored when run_mode is not NORMAL")
+
+    # Events viewer is incompatible with console mode
+    if events_viewer and use_console:
+        logger.warning("--events-viewer is ignored when --console is used")
+        events_viewer = False
 
     if use_console:
         # Start TUI first, then run experiment in background thread

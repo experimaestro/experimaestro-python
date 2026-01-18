@@ -461,9 +461,16 @@ def list_experiments(workdir: Path):
 
 
 def _run_monitor_ui(
-    state_provider, workdir: Path, console: bool, port: int, title: str = ""
+    state_provider,
+    workdir: Path,
+    console: bool,
+    port: int,
+    title: str = "",
+    events_viewer: bool = False,
+    events_format: str = "text",
+    events_show_progress: bool = True,
 ):
-    """Shared code for running monitor UI (TUI or web)
+    """Shared code for running monitor UI (TUI, web, or events viewer)
 
     Args:
         state_provider: StateProvider instance (local or remote)
@@ -471,9 +478,21 @@ def _run_monitor_ui(
         console: If True, use TUI; otherwise use web UI
         port: Port for web server
         title: Optional title for status messages
+        events_viewer: If True, stream events to console instead of UI
+        events_format: Event format ('json' or 'text')
+        events_show_progress: Whether to show progress events
     """
     try:
-        if console:
+        if events_viewer:
+            # Stream events to console
+            from experimaestro.scheduler.event_viewer import run_event_viewer
+
+            run_event_viewer(
+                state_provider,
+                format=events_format,
+                show_progress=events_show_progress,
+            )
+        elif console:
             # Use Textual TUI
             from experimaestro.tui import ExperimentTUI
 
@@ -517,6 +536,22 @@ def _run_monitor_ui(
 @experiments.command()
 @click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
 @click.option(
+    "--events-viewer",
+    is_flag=True,
+    help="Stream events to console (for log aggregation)",
+)
+@click.option(
+    "--events-format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Event output format (default: text, use json for tooling)",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Hide progress events in events viewer (reduces noise)",
+)
+@click.option(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
 )
 @click.option(
@@ -541,6 +576,9 @@ def _run_monitor_ui(
 def monitor(
     workdir: Path,
     console: bool,
+    events_viewer: bool,
+    events_format: str,
+    no_progress: bool,
     port: int,
     watcher: str,
     polling_interval: float,
@@ -567,13 +605,37 @@ def monitor(
 
     state_provider = WorkspaceStateProvider.get_instance(workdir)
 
-    _run_monitor_ui(state_provider, workdir, console, port)
+    _run_monitor_ui(
+        state_provider,
+        workdir,
+        console,
+        port,
+        events_viewer=events_viewer,
+        events_format=events_format,
+        events_show_progress=not no_progress,
+    )
 
 
 @experiments.command("ssh-monitor")
 @click.argument("host", type=str)
 @click.argument("remote_workdir", type=str)
 @click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
+@click.option(
+    "--events-viewer",
+    is_flag=True,
+    help="Stream events to console (for log aggregation)",
+)
+@click.option(
+    "--events-format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Event output format (default: text, use json for tooling)",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Hide progress events in events viewer (reduces noise)",
+)
 @click.option(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
 )
@@ -605,6 +667,9 @@ def ssh_monitor(
     host: str,
     remote_workdir: str,
     console: bool,
+    events_viewer: bool,
+    events_format: str,
+    no_progress: bool,
     port: int,
     watcher: str,
     polling_interval: float,
@@ -651,6 +716,9 @@ def ssh_monitor(
         console,
         port,
         title=host,
+        events_viewer=events_viewer,
+        events_format=events_format,
+        events_show_progress=not no_progress,
     )
 
 
