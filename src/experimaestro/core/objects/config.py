@@ -1023,15 +1023,22 @@ class ConfigInformation:
             out {io.TextIOBase} -- The output stream
             context {[type]} -- the command context
         """
-        json.dump(
-            {
-                "workspace": str(context.workspace.path.absolute()),
-                "version": 2,
-                "experimaestro": experimaestro.__version__,
-                "objects": self.__get_objects__([], context),
-            },
-            out,
-        )
+        import dataclasses
+
+        data = {
+            "workspace": str(context.workspace.path.absolute()),
+            "version": 2,
+            "experimaestro": experimaestro.__version__,
+            "objects": self.__get_objects__([], context),
+        }
+
+        # Include carbon settings so they're available during task execution
+        # without needing to load the settings file (which may have unresolved
+        # environment variable interpolations on compute nodes)
+        carbon_settings = context.workspace.settings.carbon
+        data["carbon"] = dataclasses.asdict(carbon_settings)
+
+        json.dump(data, out)
 
     def __json__(self) -> str:
         """Returns the JSON representation of the object itself"""

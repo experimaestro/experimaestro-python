@@ -70,7 +70,7 @@ def _init_carbon_tracking(
     workspace_path: Path,
     task_path: Path,
     job_id: str,
-    report_interval_s: float = 60.0,
+    carbon_settings: dict | None = None,
 ) -> tuple["CarbonTracker | None", "threading.Thread | None", "threading.Event | None"]:
     """Initialize carbon tracking for a job.
 
@@ -78,19 +78,22 @@ def _init_carbon_tracking(
         workspace_path: Path to the workspace.
         task_path: Path to the task directory.
         job_id: Job identifier.
-        report_interval_s: How often to emit periodic carbon events.
+        carbon_settings: Carbon settings dict from params.json (preferred), or None
+            to use default settings.
 
     Returns:
         Tuple of (tracker, reporter_thread, stop_event) or (None, None, None) if unavailable.
     """
     try:
         from experimaestro.carbon import create_tracker, is_available
-        from experimaestro.settings import get_settings
+        from experimaestro.settings import CarbonSettings
 
-        settings = get_settings()
-        carbon_settings = settings.carbon
+        # Use provided settings or defaults
+        if carbon_settings is None:
+            carbon_settings = {}
+        settings = CarbonSettings(**carbon_settings)
 
-        if not carbon_settings.enabled:
+        if not settings.enabled:
             logger.debug("Carbon tracking disabled in settings")
             return None, None, None
 
@@ -100,8 +103,8 @@ def _init_carbon_tracking(
 
         # Create tracker with settings
         tracker = create_tracker(
-            country_iso_code=carbon_settings.country_iso_code,
-            region=carbon_settings.region,
+            country_iso_code=settings.country_iso_code,
+            region=settings.region,
         )
 
         # Start tracking
@@ -121,7 +124,7 @@ def _init_carbon_tracking(
                 workspace_path,
                 task_path,
                 job_id,
-                report_interval_s,
+                settings.report_interval_s,
                 stop_event,
             ),
             daemon=True,
@@ -513,14 +516,16 @@ class TaskRunner:
                 self._job_start_time = datetime.now()
                 job_id = workdir.name
 
-                # Load workspace path from params
+                # Load workspace path and carbon settings from params
                 params_path = workdir / "params.json"
                 workspace_path = None
+                carbon_settings = None
                 if params_path.exists():
                     try:
                         with params_path.open() as f:
                             params_data = json.load(f)
                         workspace_path = Path(params_data.get("workspace", ""))
+                        carbon_settings = params_data.get("carbon")
                     except Exception as e:
                         logger.debug("Failed to load params for carbon tracking: %s", e)
 
@@ -533,6 +538,7 @@ class TaskRunner:
                         workspace_path,
                         workdir,
                         job_id,
+                        carbon_settings=carbon_settings,
                     )
 
                 # Acquire dynamic dependency locks while running the task
