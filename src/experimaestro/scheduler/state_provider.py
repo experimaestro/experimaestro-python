@@ -1,11 +1,12 @@
 """State provider interfaces for accessing experiment and job information
 
 This module provides the abstract StateProvider interface and related data classes.
-The concrete implementations are in db_state_provider.py (DbStateProvider) and
-remote/client.py (SSHStateProviderClient).
+The concrete implementations are in workspace_state_provider.py (WorkspaceStateProvider)
+and remote/client.py (SSHStateProviderClient).
 
 Key features:
 - StateProvider ABC: Abstract base class for all state providers
+- OfflineStateProvider: Base class for cached/persistent state providers
 - Mock classes: Concrete implementations for database-loaded state objects
 - StateListener: Type alias for listener callbacks
 
@@ -83,13 +84,13 @@ class StateProvider(ABC):
     """Abstract base class for state providers
 
     Defines the interface that all state providers must implement.
-    This enables both local (DbStateProvider), remote (SSHStateProviderClient),
+    This enables both local (WorkspaceStateProvider), remote (SSHStateProviderClient),
     and live (Scheduler) providers to be used interchangeably.
 
     Concrete implementations:
     - Scheduler: Live in-memory state from running experiments
-    - OfflineStateProvider: Base for cached/persistent state (in db_state_provider.py)
-      - DbStateProvider: SQLite database-backed state
+    - OfflineStateProvider: Base for cached/persistent state
+      - WorkspaceStateProvider: Filesystem-backed state
       - SSHStateProviderClient: Remote SSH-based state
 
     State listener management is provided by the base class with default implementations.
@@ -424,14 +425,24 @@ class OfflineStateProvider(StateProvider):
         Uses caching to preserve service instances (and their URLs) across calls.
         Subclasses can override _get_live_services() for live service support
         and must implement _fetch_services_from_storage() for persistent storage.
+
+        If experiment_id is None, returns services from all experiments.
         """
+        # Handle "get all services" case
+        if experiment_id is None:
+            all_services = []
+            for exp in self.get_experiments():
+                exp_services = self.get_services(exp.experiment_id)
+                all_services.extend(exp_services)
+            return all_services
+
         # Resolve run_id if needed
-        if experiment_id is not None and run_id is None:
+        if run_id is None:
             run_id = self.get_current_run(experiment_id)
             if run_id is None:
                 return []
 
-        cache_key = (experiment_id or "", run_id or "")
+        cache_key = (experiment_id, run_id)
 
         with self._service_cache_lock:
             # Try to get live services (scheduler, etc.) - may return None
@@ -903,6 +914,7 @@ class MockExperiment(BaseExperiment):
             JobSubmittedEvent,
             JobStateChangedEvent,
             ServiceAddedEvent,
+            ServiceStateChangedEvent,
             RunCompletedEvent,
         )
 
@@ -927,6 +939,11 @@ class MockExperiment(BaseExperiment):
                 run_id=self.run_id,
             )
 
+        elif isinstance(event, ServiceStateChangedEvent):
+            # Update service state when it changes
+            if event.service_id in self._services:
+                self._services[event.service_id]._state_name = event.state
+
         elif isinstance(event, JobStateChangedEvent):
             # Update finished/failed counters when jobs complete
             if event.state == "done":
@@ -946,11 +963,15 @@ class MockExperiment(BaseExperiment):
 
 
 class MockService(BaseService):
-    """Mock service object for remote monitoring
+    """Mock service object for offline/monitor mode.
 
     This class provides a service-like interface for services loaded from
-    the remote server. It mimics the Service class interface sufficiently
+    persistent storage. It mimics the Service class interface sufficiently
     for display in the TUI ServicesList widget.
+
+    Live service recreation happens lazily via to_service() when needed.
+    Subclasses (e.g., SSHMockService) can override to_service() for
+    specialized behavior like path translation and sync management.
     """
 
     def __init__(
@@ -962,19 +983,50 @@ class MockService(BaseService):
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
         url: Optional[str] = None,
+        state: Optional[str] = None,
     ):
         self.id = service_id
         self._description = description_text
-        self._state_name = "MOCK"  # MockService always has MOCK state
+        # Default to STOPPED state (services start stopped)
+        self._state_name = state or "STOPPED"
         self._state_dict_data = state_dict_data
         self._service_class = service_class
-        self.experiment_id = experiment_id
-        self.run_id = run_id
-        self.url = url
+        self._experiment_id = experiment_id or ""
+        self._run_id = run_id or ""
+        self._url = url
+        self._live_service: Optional["BaseService"] = None  # Cached live service
+        self._error: Optional[str] = None  # Error message if start failed
+
+    @property
+    def experiment_id(self) -> str:
+        """Return the experiment ID this service belongs to"""
+        return self._experiment_id
+
+    @property
+    def run_id(self) -> str:
+        """Return the run ID (timestamp format YYYYMMDD_HHMMSS)"""
+        return self._run_id
+
+    @property
+    def url(self) -> Optional[str]:
+        """Return service URL.
+
+        Delegates to live service if available (URL is set when service is started).
+        """
+        if self._live_service is not None:
+            return getattr(self._live_service, "url", None)
+        return self._url
 
     @property
     def state(self):
-        """Return state as a ServiceState-like object with a name attribute"""
+        """Return state as a ServiceState-like object with a name attribute
+
+        If a live service has been created via to_service(), delegates to its state.
+        """
+        # If we have a live service, return its state (keeps in sync when started)
+        if self._live_service is not None:
+            return self._live_service.state
+
         from experimaestro.scheduler.services import ServiceState
 
         # Convert state name to ServiceState enum
@@ -991,6 +1043,37 @@ class MockService(BaseService):
     def description(self) -> str:
         """Return service description"""
         return self._description
+
+    @property
+    def sync_status(self) -> Optional[str]:
+        """Return sync status for display.
+
+        Delegates to live service if available.
+        """
+        if self._live_service is not None:
+            return self._live_service.sync_status
+        return None
+
+    @property
+    def error(self) -> Optional[str]:
+        """Return error message if service failed to start.
+
+        Delegates to live service if available.
+        """
+        if self._live_service is not None:
+            return self._live_service.error
+        return self._error
+
+    def set_error(self, error: Optional[str]) -> None:
+        """Set error message and update state to ERROR."""
+        self._error = error
+        if error:
+            self._state_name = "ERROR"
+
+    def set_starting(self) -> None:
+        """Set state to STARTING and clear any previous error."""
+        self._state_name = "STARTING"
+        self._error = None
 
     def state_dict(self) -> dict:
         """Return service state for recreation"""
@@ -1038,13 +1121,30 @@ class MockService(BaseService):
         """Try to recreate a live Service instance from this mock.
 
         Attempts to recreate the service using the stored configuration.
-        If recreation fails, returns self.
+        The result is cached so subsequent calls return the same instance.
+        If recreation fails, sets error and returns self.
 
         Returns:
             A live Service instance or self if recreation is not possible
         """
-        # Just return self - service recreation from config not implemented
-        return self
+        # Return cached live service if available
+        if self._live_service is not None:
+            return self._live_service
+
+        from experimaestro.scheduler.services import Service
+
+        if not self._service_class:
+            self.set_error("No service class stored")
+            return self
+
+        try:
+            self._live_service = Service.from_state_dict(
+                self._service_class, self._state_dict_data
+            )
+            return self._live_service
+        except Exception as e:
+            self.set_error(str(e))
+            return self
 
 
 __all__ = [

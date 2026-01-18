@@ -1,6 +1,5 @@
 """Services list widget for the TUI"""
 
-from pathlib import Path
 from typing import Optional
 from textual import work
 from textual.app import ComposeResult
@@ -22,8 +21,8 @@ class ServicesList(Vertical):
     """
 
     BINDINGS = [
-        Binding("s", "start_service", "Start"),
-        Binding("x", "stop_service", "Stop"),
+        Binding("ctrl+s", "start_service", "Start"),
+        Binding("ctrl+k", "stop_service", "Stop"),
         Binding("u", "copy_url", "Copy URL", show=False),
     ]
 
@@ -33,6 +32,7 @@ class ServicesList(Vertical):
         "STARTING": "⏳",
         "RUNNING": "▶",
         "STOPPING": "⏳",
+        "ERROR": "⚠",
     }
 
     def __init__(self, state_provider: StateProvider) -> None:
@@ -42,6 +42,11 @@ class ServicesList(Vertical):
         self._services: dict = {}  # service_id -> Service object
 
     def compose(self) -> ComposeResult:
+        yield Static(
+            "Services",
+            id="services-header",
+            classes="section-title",
+        )
         yield Static("Loading services...", id="services-loading", classes="hidden")
         yield DataTable(id="services-table", cursor_type="row")
 
@@ -80,158 +85,71 @@ class ServicesList(Vertical):
         self.query_one("#services-loading", Static).add_class("hidden")
         self._refresh_services_with_data(services)
 
-    def _get_global_services(self):
-        """Get the global services sync widget"""
-        from experimaestro.tui.widgets.global_services import GlobalServiceSyncs
-
-        try:
-            return self.app.query_one(GlobalServiceSyncs)
-        except Exception:
-            return None
-
-    def _start_synchronizer_for_service(self, service) -> None:
-        """Register a service with the global sync manager"""
-        import logging
-
-        logger = logging.getLogger("xpm.tui.services")
-        service_id = service.id
-
-        if not self.state_provider.is_remote:
-            return
-
-        if not self.current_experiment:
-            return
-
-        # Check if service has paths in state_dict that need syncing
-        state_dict = getattr(service, "_state_dict_data", None)
-        if state_dict is None and hasattr(service, "state_dict"):
-            try:
-                state_dict = service.state_dict()
-            except Exception:
-                logger.debug(f"Service {service_id}: state_dict() failed")
-                return
-
-        if not state_dict:
-            logger.info(f"Service {service_id}: no state_dict")
-            return
-
-        # Find paths in state_dict
-        paths_to_sync = self._extract_paths(state_dict)
-        if not paths_to_sync:
-            logger.info(f"Service {service_id}: no paths in state_dict: {state_dict}")
-            return
-
-        logger.info(f"Service {service_id}: found paths to sync: {paths_to_sync}")
-
-        # Get service description and URL
-        description = (
-            service.description() if hasattr(service, "description") else service_id
-        )
-        url = getattr(service, "url", None)
-
-        # Register with global sync manager
-        global_services = self._get_global_services()
-        if global_services:
-            global_services.add_service_sync(
-                experiment_id=self.current_experiment,
-                service_id=service_id,
-                description=description,
-                remote_path=paths_to_sync[0],
-                url=url,
-            )
-
-    def _extract_paths(self, state_dict: dict) -> list[str]:
-        """Extract path strings from a service state_dict"""
-        from pathlib import PosixPath, WindowsPath
-
-        paths = []
-
-        def find_paths(d):
-            if isinstance(d, (Path, PosixPath, WindowsPath)):
-                # Direct Path object
-                paths.append(str(d))
-            elif isinstance(d, dict):
-                if "__path__" in d:
-                    # Serialized path format
-                    paths.append(d["__path__"])
-                else:
-                    for v in d.values():
-                        find_paths(v)
-            elif isinstance(d, (list, tuple)):
-                for item in d:
-                    find_paths(item)
-
-        find_paths(state_dict)
-        return paths
-
     def refresh_services(self) -> None:
-        """Refresh the services list from state provider
+        """Refresh the services display from current services
 
-        For remote providers, this runs in background. For local, it's synchronous.
+        Uses self._services which preserves the live service instances.
+        Initial load (in set_experiment) fetches from state provider.
         """
-        if not self.current_experiment:
+        if not self.current_experiment or not self._services:
             return
 
-        if self.state_provider.is_remote:
-            self._load_services(self.current_experiment)
-        else:
-            services = self.state_provider.get_services(self.current_experiment)
-            self._refresh_services_with_data(services)
+        # Refresh display from current services (preserves live service instances)
+        self._refresh_display()
 
     def _refresh_services_with_data(self, services: list) -> None:
-        """Refresh the services display with provided data"""
+        """Refresh the services display with provided data (initial load)
+
+        Stores services in self._services and refreshes display.
+        """
         import logging
 
         logger = logging.getLogger("xpm.tui.services")
 
-        table = self.query_one("#services-table", DataTable)
-        table.clear()
         self._services = {}
-
-        global_services = self._get_global_services()
+        for service in services:
+            self._services[service.id] = service
 
         logger.debug(
             f"refresh_services got {len(services)} services: "
             f"{[(s.id, getattr(s, 'url', None)) for s in services]}"
         )
 
-        for service in services:
-            service_id = service.id
-            self._services[service_id] = service
+        self._refresh_display()
 
+    def _refresh_display(self) -> None:
+        """Refresh the table display from current self._services
+
+        Called on initial load and when sync status changes.
+        """
+        table = self.query_one("#services-table", DataTable)
+        table.clear()
+
+        for service_id, service in self._services.items():
             state_name = service.state.name if hasattr(service, "state") else "UNKNOWN"
             state_icon = self.STATE_ICONS.get(state_name, "?")
-            url = getattr(service, "url", None) or "-"
             description = (
                 service.description() if hasattr(service, "description") else ""
             )
 
-            # Get sync status from global services
-            sync_status = "-"
-            if global_services and self.current_experiment:
-                status = global_services.get_sync_status(
-                    self.current_experiment, service_id
-                )
-                if status:
-                    sync_status = status
+            # Get sync status from service (SSHLocalService provides actual status)
+            sync_status = service.sync_status or "-"
+
+            # Show error in URL column if there's one, otherwise show URL
+            error = service.error
+            if error:
+                url_or_error = f"⚠ {error}"
+            else:
+                url_or_error = getattr(service, "url", None) or "-"
 
             table.add_row(
                 service_id,
                 description,
                 f"{state_icon} {state_name}",
                 sync_status,
-                url,
+                url_or_error,
                 key=service_id,
             )
-
-            # Start synchronizer for running services with paths (remote only)
-            if state_name == "RUNNING":
-                self._start_synchronizer_for_service(service)
-            elif (
-                state_name == "STOPPED" and global_services and self.current_experiment
-            ):
-                # Stop sync when service is explicitly stopped
-                global_services.stop_service_sync(self.current_experiment, service_id)
 
     def _get_selected_service(self):
         """Get the currently selected Service object"""
@@ -243,41 +161,85 @@ class ServicesList(Vertical):
                 return self._services.get(service_id)
         return None
 
+    def _refresh_all_services(self) -> None:
+        """Refresh both this widget and the global services widget"""
+        self.refresh_services()
+        # Also refresh global services to update tab title
+        try:
+            from experimaestro.tui.widgets.global_services import GlobalServiceSyncs
+
+            global_services = self.app.query_one(GlobalServiceSyncs)
+            global_services.refresh_services()
+        except Exception:
+            pass
+
     def action_start_service(self) -> None:
         """Start the selected service"""
-        import logging
-
-        logger = logging.getLogger("xpm.tui.services")
-
         service = self._get_selected_service()
         if not service:
             return
 
+        # Set STARTING state immediately and refresh UI
+        service.set_starting()
+        self.notify("Starting service...", severity="information")
+        self._refresh_all_services()
+
+        # Set up callback for sync status changes (for SSH remote services)
+        # The callback refreshes both widgets when sync status changes
+        if hasattr(service, "set_status_change_callback"):
+            service.set_status_change_callback(
+                lambda: self.app.call_from_thread(self._refresh_all_services)
+            )
+
+        # Start service in background thread so UI can update
+        self._start_service_worker(service)
+
+    @work(thread=True, exclusive=True, group="service_start")
+    def _start_service_worker(self, service) -> None:
+        """Start service in background thread"""
+        import logging
+
+        logger = logging.getLogger("xpm.tui.services")
+
+        # Convert MockService to live Service (on-demand, cached)
+        live_service = service.to_service()
+
         logger.info(
-            f"Starting service {service.id} (type={type(service).__name__}, "
-            f"has_get_url={hasattr(service, 'get_url')}, is_live={self.state_provider.is_live})"
+            f"Starting service {live_service.id} (type={type(live_service).__name__}, "
+            f"has_get_url={hasattr(live_service, 'get_url')}, is_live={self.state_provider.is_live})"
         )
 
         try:
-            if hasattr(service, "get_url"):
-                url = service.get_url()
-                logger.info(f"Service started, url={url}, service.url={service.url}")
-                self.notify(f"Service started: {url}", severity="information")
-            else:
-                # MockService - service state loaded from file but not the actual service
-                self.notify(
-                    "Service not available (loaded from saved state)",
-                    severity="warning",
+            if hasattr(live_service, "get_url"):
+                url = live_service.get_url()
+                logger.info(
+                    f"Service started, url={url}, service.url={live_service.url}"
                 )
-            self.refresh_services()
+                self.app.call_from_thread(
+                    self.notify, f"Service started: {url}", severity="information"
+                )
+            else:
+                # Service recreation failed - error was set by to_service()
+                error_msg = service.error or "Service cannot be started"
+                self.app.call_from_thread(self.notify, error_msg, severity="warning")
+            self.app.call_from_thread(self._refresh_all_services)
         except Exception as e:
-            self.notify(f"Failed to start service: {e}", severity="error")
+            # Set error on service so it shows in URL column
+            error_msg = str(e)
+            service.set_error(error_msg)
+            self.app.call_from_thread(self._refresh_all_services)
+            self.app.call_from_thread(
+                self.notify, f"Failed to start service: {e}", severity="error"
+            )
 
     def action_stop_service(self) -> None:
         """Stop the selected service"""
         service = self._get_selected_service()
         if not service:
             return
+
+        # Convert MockService to live Service (on-demand, cached)
+        service = service.to_service()
 
         from experimaestro.scheduler.services import ServiceState
 
@@ -291,7 +253,7 @@ class ServicesList(Vertical):
                 self.notify(f"Service stopped: {service.id}", severity="information")
             else:
                 self.notify("Service does not support stopping", severity="warning")
-            self.refresh_services()
+            self._refresh_all_services()
         except Exception as e:
             self.notify(f"Failed to stop service: {e}", severity="error")
 

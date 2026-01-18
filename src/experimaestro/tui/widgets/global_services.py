@@ -1,10 +1,9 @@
 """Global services widget - shows all running services across experiments"""
 
 import logging
-from pathlib import Path
-from typing import Optional
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.widgets import DataTable, Static
 
@@ -17,14 +16,19 @@ class GlobalServiceSyncs(Vertical):
     """Widget displaying all running services across all experiments
 
     Shows services from all experiments with their state and URL.
-    For remote monitoring, also tracks file synchronization status.
+    Sync status is provided by the service's sync_status property
+    (e.g., SSHLocalService provides actual sync state).
     """
+
+    BINDINGS = [
+        Binding("ctrl+k", "stop_service", "Stop Service"),
+    ]
 
     def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
-        # service_key -> {synchronizer, ...} for remote file syncs
-        self._syncs: dict[str, dict] = {}
+        # service_key -> Service object for quick access
+        self._services: dict[str, object] = {}
 
     def compose(self) -> ComposeResult:
         yield Static("Running Services", classes="section-title")
@@ -42,7 +46,12 @@ class GlobalServiceSyncs(Vertical):
         self.refresh_services()
 
     def refresh_services(self) -> None:
-        """Refresh the services list from state provider"""
+        """Refresh the services list from state provider
+
+        Sync status is provided by the service's sync_status property,
+        which SSHLocalService overrides to show actual sync state.
+        """
+        from experimaestro.scheduler.services import ServiceState
 
         try:
             table = self.query_one("#global-services-table", DataTable)
@@ -56,19 +65,44 @@ class GlobalServiceSyncs(Vertical):
         table.clear()
 
         try:
-            # Get all services from state provider
+            # Get all services from state provider and filter to running only
             all_services = self.state_provider.get_services()
+            running_services = [
+                s
+                for s in all_services
+                if hasattr(s, "state") and s.state == ServiceState.RUNNING
+            ]
             self.log.info(
-                f"GlobalServiceSyncs.refresh_services: got {len(all_services)} services"
+                f"GlobalServiceSyncs.refresh_services: got {len(running_services)} "
+                f"running services (out of {len(all_services)} total)"
             )
 
-            for service in all_services:
+            # Clear services dict before repopulating
+            self._services.clear()
+
+            for service in running_services:
                 service_id = service.id
                 state = service.state if hasattr(service, "state") else None
                 state_name = state.name if state else "UNKNOWN"
-                exp_id = getattr(service, "_experiment_id", None) or "-"
+
+                # Format experiment display: "exp_id (YYYY-MM-DD HH:MM)"
+                exp_id = service.experiment_id or "-"
+                run_id = service.run_id
+                if run_id and run_id != "dry-run" and len(run_id) >= 13:
+                    # Parse YYYYMMDD_HHMMSS format
+                    try:
+                        timestamp = (
+                            f"{run_id[0:4]}-{run_id[4:6]}-{run_id[6:8]} "
+                            f"{run_id[9:11]}:{run_id[11:13]}"
+                        )
+                        exp_display = f"{exp_id} ({timestamp})"
+                    except (IndexError, ValueError):
+                        exp_display = f"{exp_id} ({run_id})" if run_id else exp_id
+                else:
+                    exp_display = f"{exp_id} ({run_id})" if run_id else exp_id
+
                 self.log.info(
-                    f"  Service: {service_id}, state={state_name}, exp={exp_id}"
+                    f"  Service: {service_id}, state={state_name}, exp={exp_display}"
                 )
 
                 # Get description
@@ -79,20 +113,15 @@ class GlobalServiceSyncs(Vertical):
                     except Exception:
                         description = service_id
 
-                # Get URL
-                url = getattr(service, "url", None) or "-"
+                # Get sync status from service (SSHLocalService provides actual status)
+                sync_status = service.sync_status or "-"
 
-                # Get sync status for remote monitoring
-                sync_status = "-"
-                service_key = f"{exp_id}:{service_id}"
-                if service_key in self._syncs:
-                    sync_info = self._syncs[service_key]
-                    synchronizer = sync_info.get("synchronizer")
-                    if synchronizer:
-                        if synchronizer.syncing:
-                            sync_status = "⟳ Syncing"
-                        else:
-                            sync_status = f"✓ {synchronizer.interval:.0f}s"
+                # Show error in URL column if there's one, otherwise show URL
+                error = service.error
+                if error:
+                    url_or_error = f"⚠ {error}"
+                else:
+                    url_or_error = getattr(service, "url", None) or "-"
 
                 # State icon
                 state_icons = {
@@ -100,17 +129,22 @@ class GlobalServiceSyncs(Vertical):
                     "STOPPED": "⏹",
                     "STARTING": "⏳",
                     "STOPPING": "⏳",
+                    "ERROR": "⚠",
                 }
                 state_icon = state_icons.get(state_name, "?")
 
+                service_key = f"{exp_id}:{service_id}"
                 table.add_row(
-                    exp_id,
+                    exp_display,
                     description or service_id,
                     f"{state_icon} {state_name}",
                     sync_status,
-                    url,
+                    url_or_error,
                     key=service_key,
                 )
+
+                # Store service for quick access
+                self._services[service_key] = service
 
         except Exception as e:
             logger.warning(f"Failed to refresh global services: {e}")
@@ -118,109 +152,12 @@ class GlobalServiceSyncs(Vertical):
         # Update tab title
         self._update_tab_title()
 
-    def add_service_sync(
-        self,
-        experiment_id: str,
-        service_id: str,
-        description: str,
-        remote_path: str,
-        url: Optional[str] = None,
-    ) -> None:
-        """Add a new service sync (called from ServicesList for remote monitoring)"""
-        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
-
-        service_key = f"{experiment_id}:{service_id}"
-
-        # Don't restart if already syncing
-        if service_key in self._syncs:
-            return
-
-        if not self.state_provider.is_remote:
-            return
-
-        sync_name = f"service:{description}"
-
-        synchronizer = AdaptiveSynchronizer(
-            sync_func=self.state_provider.sync_path,
-            remote_path=remote_path,
-            name=sync_name,
-            on_sync_start=lambda sk=service_key: self.app.call_from_thread(
-                self._on_sync_start, sk
-            ),
-            on_sync_complete=lambda p, sk=service_key: self.app.call_from_thread(
-                self._on_sync_complete, sk, p
-            ),
-        )
-
-        self._syncs[service_key] = {
-            "synchronizer": synchronizer,
-            "experiment_id": experiment_id,
-            "service_id": service_id,
-            "description": description,
-            "remote_path": remote_path,
-            "url": url or "-",
-        }
-
-        synchronizer.start()
-        logger.info(f"Started global sync for {service_key}: {remote_path}")
-
-        # Refresh to show sync status
-        self.refresh_services()
-
-    def stop_service_sync(self, experiment_id: str, service_id: str) -> None:
-        """Stop a service sync (called when service is STOPPED)"""
-        service_key = f"{experiment_id}:{service_id}"
-
-        if service_key in self._syncs:
-            self._syncs[service_key]["synchronizer"].stop()
-            del self._syncs[service_key]
-            logger.info(f"Stopped global sync for {service_key}")
-            self.refresh_services()
-
     def _update_tab_title(self) -> None:
         """Update the Services tab title with count"""
         try:
             self.app.update_services_tab_title()
         except Exception:
             pass
-
-    def has_sync(self, experiment_id: str, service_id: str) -> bool:
-        """Check if a sync exists for this service"""
-        return f"{experiment_id}:{service_id}" in self._syncs
-
-    def get_sync_status(self, experiment_id: str, service_id: str) -> Optional[str]:
-        """Get sync status string for display"""
-        service_key = f"{experiment_id}:{service_id}"
-        if service_key not in self._syncs:
-            return None
-
-        sync_info = self._syncs[service_key]
-        synchronizer = sync_info["synchronizer"]
-
-        if synchronizer.syncing:
-            return "⟳"
-        else:
-            return f"✓ {synchronizer.interval:.0f}s"
-
-    def _on_sync_start(self, service_key: str) -> None:
-        """Handle sync start"""
-        self.refresh_services()
-
-    def _on_sync_complete(self, service_key: str, local_path: Path) -> None:
-        """Handle sync complete"""
-        self.refresh_services()
-
-    def on_unmount(self) -> None:
-        """Stop all syncs when app closes"""
-        for service_key, info in list(self._syncs.items()):
-            if "synchronizer" in info:
-                info["synchronizer"].stop()
-        self._syncs.clear()
-
-    @property
-    def sync_count(self) -> int:
-        """Number of active syncs (for backward compatibility)"""
-        return len(self._syncs)
 
     @property
     def running_service_count(self) -> int:
@@ -236,3 +173,39 @@ class GlobalServiceSyncs(Vertical):
             )
         except Exception:
             return 0
+
+    def _get_selected_service(self):
+        """Get the currently selected Service object"""
+        table = self.query_one("#global-services-table", DataTable)
+        if table.cursor_row is not None and table.row_count > 0:
+            row_key = list(table.rows.keys())[table.cursor_row]
+            if row_key:
+                service_key = str(row_key.value)
+                return self._services.get(service_key)
+        return None
+
+    def action_stop_service(self) -> None:
+        """Stop the selected service"""
+        from experimaestro.scheduler.services import ServiceState
+
+        service = self._get_selected_service()
+        if not service:
+            self.notify("No service selected", severity="warning")
+            return
+
+        # Convert MockService to live Service (on-demand, cached)
+        service = service.to_service()
+
+        if service.state != ServiceState.RUNNING:
+            self.notify("Service is not running", severity="warning")
+            return
+
+        try:
+            if hasattr(service, "stop"):
+                service.stop()
+                self.notify(f"Service stopped: {service.id}", severity="information")
+            else:
+                self.notify("Service does not support stopping", severity="warning")
+            self.refresh_services()
+        except Exception as e:
+            self.notify(f"Failed to stop service: {e}", severity="error")

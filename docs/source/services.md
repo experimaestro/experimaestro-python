@@ -130,3 +130,18 @@ When using the web interface (enabled by the `port` parameter), services
 are accessible through the services menu. For `WebService` subclasses like
 `TensorboardService`, the service URL is automatically proxied through the
 experimaestro web interface.
+
+## TUI Service Management
+
+When using the TUI monitor (`experimaestro experiments monitor`), services can
+be managed using the following keyboard shortcuts:
+
+| Shortcut | Action | Description |
+|----------|--------|-------------|
+| `ctrl+s` | Start | Start the selected service |
+| `ctrl+k` | Stop | Stop the selected service |
+
+These shortcuts work both in:
+
+- **Experiment Services tab**: Shows services for the selected experiment
+- **Main Services tab**: Shows all running services across all experiments

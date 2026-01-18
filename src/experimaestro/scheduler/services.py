@@ -21,16 +21,18 @@ class ServiceListener:
 
 
 class ServiceState(Enum):
-    """State of a service lifecycle.
+    r"""State of a service lifecycle.
 
     Services transition through these states:
     STOPPED -> STARTING -> RUNNING -> STOPPING -> STOPPED
+                      \-> ERROR (if start fails)
     """
 
     STOPPED = 0
     STARTING = 1
     RUNNING = 2
     STOPPING = 3
+    ERROR = 4
 
 
 class Service(BaseService):
@@ -46,6 +48,7 @@ class Service(BaseService):
 
     id: str
     _state: ServiceState = ServiceState.STOPPED
+    _experiment: Optional["Experiment"] = None
 
     def __init__(self):
         self._listeners: Set[ServiceListener] = set()
@@ -55,12 +58,26 @@ class Service(BaseService):
         """Called when the service is added to an experiment.
 
         Override this method to access the experiment context (e.g., workdir).
-        The default implementation does nothing.
+        The base implementation stores the experiment reference.
 
         Args:
             xp: The experiment this service is being added to.
         """
-        pass
+        self._experiment = xp
+
+    @property
+    def experiment_id(self) -> str:
+        """Return the experiment ID this service belongs to"""
+        if self._experiment is not None:
+            return self._experiment.name
+        return ""
+
+    @property
+    def run_id(self) -> str:
+        """Return the run ID (timestamp format YYYYMMDD_HHMMSS)"""
+        if self._experiment is not None:
+            return self._experiment.run_id or ""
+        return ""
 
     def state_dict(self) -> dict:
         """Return parameters needed to recreate this service.

@@ -51,6 +51,7 @@ OutputCallback = Optional["Callable[[str], None]"]
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.remote.sync import RemoteFileSynchronizer
+    from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
 
 
 logger = logging.getLogger("xpm.remote.client")
@@ -70,6 +71,254 @@ def _strip_dev_version(version: str) -> str:
     import re
 
     return re.sub(r"\.dev\d+$", "", version)
+
+
+class SSHLocalService(BaseService):
+    """Local service wrapper that manages sync lifecycle for SSH remote monitoring.
+
+    Wraps a live Service instance and manages file synchronization:
+    - get_url(): starts adaptive sync for service paths, then starts the inner service
+    - stop(): stops the inner service, then stops the sync
+
+    Supports an optional callback for sync status changes to enable dynamic UI updates.
+    """
+
+    def __init__(
+        self,
+        inner_service: "BaseService",
+        state_provider: "SSHStateProviderClient",
+        remote_paths: List[str],
+        on_status_change: Optional[Callable[[], None]] = None,
+    ):
+        """Initialize SSH local service wrapper.
+
+        Args:
+            inner_service: The actual live Service instance
+            state_provider: SSH state provider for sync operations
+            remote_paths: List of remote paths to sync for this service
+            on_status_change: Optional callback invoked when sync status changes
+        """
+        self._inner = inner_service
+        self._state_provider = state_provider
+        self._remote_paths = remote_paths
+        self._synchronizers: List["AdaptiveSynchronizer"] = []
+        self._on_status_change = on_status_change
+
+    @property
+    def id(self) -> str:
+        return self._inner.id
+
+    @property
+    def experiment_id(self) -> str:
+        return self._inner.experiment_id
+
+    @property
+    def run_id(self) -> str:
+        return self._inner.run_id
+
+    @property
+    def state(self):
+        return self._inner.state
+
+    @property
+    def url(self) -> Optional[str]:
+        return getattr(self._inner, "url", None)
+
+    def description(self) -> str:
+        return self._inner.description()
+
+    def state_dict(self) -> dict:
+        return self._inner.state_dict()
+
+    def _notify_status_change(self) -> None:
+        """Notify that sync status has changed."""
+        if self._on_status_change:
+            try:
+                self._on_status_change()
+            except Exception as e:
+                logger.debug(f"Error in status change callback: {e}")
+
+    def get_url(self) -> str:
+        """Start adaptive sync for service paths, then start the inner service."""
+        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
+
+        # Do initial sync and start adaptive synchronizers for each path
+        for remote_path in self._remote_paths:
+            # Initial sync
+            self._state_provider.sync_path(remote_path)
+
+            # Start adaptive sync for continuous updates
+            sync = AdaptiveSynchronizer(
+                sync_func=self._state_provider.sync_path,
+                remote_path=remote_path,
+                name=f"service:{self._inner.id}",
+                on_sync_start=lambda: self._notify_status_change(),
+                on_sync_complete=lambda _: self._notify_status_change(),
+            )
+            sync.start()
+            self._synchronizers.append(sync)
+
+        # Notify initial status
+        self._notify_status_change()
+
+        # Start the inner service
+        return self._inner.get_url()
+
+    @property
+    def sync_status(self) -> Optional[str]:
+        """Return sync status for display."""
+        if not self._synchronizers:
+            return None
+
+        # Check if any sync is actively syncing
+        syncing = any(s.syncing for s in self._synchronizers)
+        if syncing:
+            return "⟳ Syncing"
+
+        # Return interval of first synchronizer
+        if self._synchronizers:
+            interval = self._synchronizers[0].interval
+            return f"✓ in {interval:.0f}s"
+
+        return None
+
+    @property
+    def error(self) -> Optional[str]:
+        """Return error message if service failed to start."""
+        return self._inner.error
+
+    def stop(self) -> None:
+        """Stop the inner service and stop all syncs."""
+        # Stop the inner service first
+        if hasattr(self._inner, "stop"):
+            self._inner.stop()
+
+        # Stop all synchronizers
+        for sync in self._synchronizers:
+            sync.stop()
+        self._synchronizers.clear()
+
+
+class SSHMockService(MockService):
+    """MockService specialized for SSH remote monitoring.
+
+    Extends MockService to:
+    - Store reference to SSH state provider
+    - Create SSHLocalService via to_service() with sync management
+    - Handle path translation for remote paths
+    """
+
+    def __init__(
+        self,
+        service_id: str,
+        description_text: str,
+        state_dict_data: dict,
+        state_provider: "SSHStateProviderClient",
+        service_class: Optional[str] = None,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        url: Optional[str] = None,
+        state: Optional[str] = None,
+    ):
+        super().__init__(
+            service_id=service_id,
+            description_text=description_text,
+            state_dict_data=state_dict_data,
+            service_class=service_class,
+            experiment_id=experiment_id,
+            run_id=run_id,
+            url=url,
+            state=state,
+        )
+        self._state_provider = state_provider
+        self._on_status_change: Optional[Callable[[], None]] = None
+
+    def set_status_change_callback(
+        self, callback: Optional[Callable[[], None]]
+    ) -> None:
+        """Set callback to be invoked when sync status changes.
+
+        This should be called before to_service() to enable dynamic UI updates.
+        If to_service() was already called, updates the existing SSHLocalService.
+        """
+        self._on_status_change = callback
+        # Update existing live service if already created
+        if self._live_service is not None and hasattr(
+            self._live_service, "_on_status_change"
+        ):
+            self._live_service._on_status_change = callback
+
+    def _extract_paths(self) -> List[str]:
+        """Extract path strings from state_dict for syncing."""
+        paths = []
+
+        def find_paths(d):
+            if isinstance(d, dict):
+                if "__path__" in d:
+                    paths.append(d["__path__"])
+                else:
+                    for v in d.values():
+                        find_paths(v)
+            elif isinstance(d, (list, tuple)):
+                for item in d:
+                    find_paths(item)
+
+        find_paths(self._state_dict_data)
+        return paths
+
+    def to_service(self) -> "BaseService":
+        """Create an SSHLocalService that manages sync lifecycle.
+
+        Returns:
+            SSHLocalService wrapping the live service, or self if creation fails
+        """
+        # Return cached live service if available
+        if self._live_service is not None:
+            return self._live_service
+
+        from experimaestro.scheduler.services import Service
+
+        if not self._service_class:
+            return self
+
+        # Create path translator using state provider
+        def path_translator(remote_path: str) -> Path:
+            """Translate remote path to local, syncing if needed."""
+            local_path = self._state_provider.sync_path(remote_path)
+            if local_path:
+                return local_path
+            # Fallback: map to local cache without sync
+            remote_workspace = self._state_provider.remote_workspace
+            local_cache = self._state_provider.local_cache_dir
+            if remote_path.startswith(remote_workspace):
+                relative = remote_path[len(remote_workspace) :].lstrip("/")
+                return local_cache / relative
+            return Path(remote_path)
+
+        try:
+            # Create the actual service with path translation
+            inner_service = Service.from_state_dict(
+                self._service_class,
+                self._state_dict_data,
+                path_translator,
+            )
+            inner_service.id = self.id
+
+            # Extract remote paths for sync management
+            remote_paths = self._extract_paths()
+
+            # Wrap in SSHLocalService for sync lifecycle management
+            self._live_service = SSHLocalService(
+                inner_service=inner_service,
+                state_provider=self._state_provider,
+                remote_paths=remote_paths,
+                on_status_change=self._on_status_change,
+            )
+            return self._live_service
+        except Exception as e:
+            logger.warning("Failed to create live service for %s: %s", self.id, e)
+            self.set_error(str(e))
+            return self
 
 
 class SSHStateProviderClient(OfflineStateProvider):
@@ -798,82 +1047,35 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Note: timestamp conversion is handled by MockExperiment.from_state_dict
         return MockExperiment.from_state_dict(d, self.local_cache_dir)
 
-    def _dict_to_service(self, d: Dict) -> BaseService:
-        """Convert a dictionary to a Service or MockService
+    def _dict_to_service(self, d: Dict) -> SSHMockService:
+        """Convert a dictionary to an SSHMockService
 
-        Tries to recreate the actual Service from state_dict first.
-        Falls back to MockService with error message if module is missing.
+        Returns SSHMockService which handles:
+        - Path translation via state provider's sync_path
+        - Sync lifecycle management when service starts/stops
+        - Lazy live service creation via to_service()
         """
+        service_id = d.get("service_id", "")
         state_dict = d.get("state_dict", {})
         service_class = d.get("class", "")
-        service_id = d.get("service_id", "")
 
         # Check for unserializable marker
+        description = d.get("description", "")
         if state_dict.get("__unserializable__"):
             reason = state_dict.get("__reason__", "Service cannot be recreated")
-            return MockService(
-                service_id=service_id,
-                description_text=f"[{reason}]",
-                state_dict_data=state_dict,
-                service_class=service_class,
-                experiment_id=d.get("experiment_id"),
-                run_id=d.get("run_id"),
-                url=d.get("url"),
-            )
+            description = f"[{reason}]"
 
-        # Try to recreate actual Service from state_dict
-        if service_class:
-            try:
-                from experimaestro.scheduler.services import Service
-
-                # Create path translator that syncs and translates paths
-                def path_translator(remote_path: str) -> Path:
-                    """Translate remote path to local, syncing if needed"""
-                    local_path = self.sync_path(remote_path)
-                    if local_path:
-                        return local_path
-                    # Fallback: map to local cache without sync
-                    if remote_path.startswith(self.remote_workspace):
-                        relative = remote_path[len(self.remote_workspace) :].lstrip("/")
-                        return self.local_cache_dir / relative
-                    return Path(remote_path)
-
-                service = Service.from_state_dict(
-                    service_class, state_dict, path_translator
-                )
-                service.id = service_id
-                # Copy additional attributes
-                if d.get("experiment_id"):
-                    service.experiment_id = d["experiment_id"]
-                if d.get("run_id"):
-                    service.run_id = d["run_id"]
-                return service
-            except ModuleNotFoundError as e:
-                # Module not available locally - show error in description
-                missing_module = str(e).replace("No module named ", "").strip("'\"")
-                return MockService(
-                    service_id=service_id,
-                    description_text=f"[Missing module: {missing_module}]",
-                    state_dict_data=state_dict,
-                    service_class=service_class,
-                    experiment_id=d.get("experiment_id"),
-                    run_id=d.get("run_id"),
-                    url=d.get("url"),
-                )
-            except Exception as e:
-                # Other error - show in description
-                return MockService(
-                    service_id=service_id,
-                    description_text=f"[Error: {e}]",
-                    state_dict_data=state_dict,
-                    service_class=service_class,
-                    experiment_id=d.get("experiment_id"),
-                    run_id=d.get("run_id"),
-                    url=d.get("url"),
-                )
-
-        # No class - use MockService.from_full_state_dict
-        return MockService.from_full_state_dict(d)
+        return SSHMockService(
+            service_id=service_id,
+            description_text=description,
+            state_dict_data=state_dict,
+            state_provider=self,
+            service_class=service_class,
+            experiment_id=d.get("experiment_id"),
+            run_id=d.get("run_id"),
+            url=d.get("url"),
+            state=d.get("state"),
+        )
 
     def _parse_datetime_to_timestamp(self, value) -> Optional[float]:
         """Convert datetime value to Unix timestamp

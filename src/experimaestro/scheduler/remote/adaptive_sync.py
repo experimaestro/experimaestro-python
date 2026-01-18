@@ -15,8 +15,8 @@ from typing import Callable, Optional
 logger = logging.getLogger("xpm.remote.sync")
 
 # Sync interval limits (in seconds)
-MIN_SYNC_INTERVAL = 10.0
-MAX_SYNC_INTERVAL = 300.0  # 5 minutes
+MIN_SYNC_INTERVAL = 30.0
+MAX_SYNC_INTERVAL = 600.0  # 10 minutes
 INITIAL_SYNC_INTERVAL = 15.0
 
 # Interval adjustment factors
@@ -213,6 +213,8 @@ class AdaptiveSynchronizer:
                         self._interval,
                     )
 
+                # Set syncing to False BEFORE callback so status is correct
+                self._syncing = False
                 if self.on_sync_complete:
                     self.on_sync_complete(local_path)
 
@@ -227,6 +229,7 @@ class AdaptiveSynchronizer:
             self._handle_failure(str(e))
             return None
         finally:
+            # Ensure _syncing is False even if callback raises
             self._syncing = False
 
     def _handle_failure(self, error: str) -> None:

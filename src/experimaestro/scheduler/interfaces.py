@@ -16,6 +16,7 @@ to enable unified access in the TUI and other monitoring tools.
 import enum
 import json
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -1254,7 +1255,7 @@ class BaseExperiment:
             temp_path.replace(status_path)
 
 
-class BaseService:
+class BaseService(ABC):
     """Base interface for service information
 
     This class defines the interface for service data. Both live Service instances
@@ -1262,19 +1263,35 @@ class BaseService:
 
     Attributes:
         id: Unique identifier for the service
+        experiment_id: Experiment this service belongs to
+        run_id: Run ID (timestamp format YYYYMMDD_HHMMSS)
         state: Current service state (ServiceState enum or compatible)
     """
 
     id: str
 
     @property
+    @abstractmethod
+    def experiment_id(self) -> str:
+        """Experiment this service belongs to"""
+        ...
+
+    @property
+    @abstractmethod
+    def run_id(self) -> str:
+        """Run ID (timestamp format YYYYMMDD_HHMMSS)"""
+        ...
+
+    @property
+    @abstractmethod
     def state(self):
         """Current service state"""
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def description(self) -> str:
         """Human-readable description of the service"""
-        raise NotImplementedError
+        ...
 
     def state_dict(self) -> dict:
         """Return service state for serialization/recreation"""
@@ -1302,3 +1319,25 @@ class BaseService:
             A live Service instance, or self if conversion is not possible
         """
         return self  # Default: return self (for live services)
+
+    @property
+    def sync_status(self) -> Optional[str]:
+        """Return sync status for display.
+
+        Override in subclasses that manage file synchronization (e.g., SSHLocalService).
+
+        Returns:
+            Sync status string (e.g., "⟳ Syncing", "✓ 30s") or None if not applicable
+        """
+        return None
+
+    @property
+    def error(self) -> Optional[str]:
+        """Return error message if service failed to start.
+
+        Override in subclasses to provide error information.
+
+        Returns:
+            Error message string or None if no error
+        """
+        return None

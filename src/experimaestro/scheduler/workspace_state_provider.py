@@ -1,8 +1,7 @@
 """Filesystem-based state provider implementation
 
-This module provides the concrete implementation of StateProvider that
-uses the filesystem for persistent state storage, replacing the SQLite/peewee
-based DbStateProvider.
+This module provides the concrete implementation of OfflineStateProvider that
+uses the filesystem for persistent state storage.
 
 Classes:
 - WorkspaceStateProvider: Filesystem-backed state provider (read-only for monitoring)
@@ -11,7 +10,6 @@ Classes:
 import json
 import logging
 import os
-import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +22,7 @@ from experimaestro.scheduler.interfaces import (
     STATE_NAME_TO_JOBSTATE,
 )
 from experimaestro.scheduler.state_provider import (
-    StateProvider,
+    OfflineStateProvider,
     MockJob,
     MockExperiment,
     ProcessInfo,
@@ -48,7 +46,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("xpm.workspace_state")
 
 
-class WorkspaceStateProvider(StateProvider):
+class WorkspaceStateProvider(OfflineStateProvider):
     """Filesystem-based state provider for monitoring experiments
 
     This provider reads experiment state from status.json and events JSONL files.
@@ -106,9 +104,7 @@ class WorkspaceStateProvider(StateProvider):
         self._job_cache: Dict[str, MockJob] = {}
         self._job_cache_lock = threading.Lock()
 
-        # Service cache
-        self._service_cache: Dict[tuple[str, str], Dict[str, BaseService]] = {}
-        self._service_cache_lock = threading.Lock()
+        # Service cache is initialized by OfflineStateProvider.__init__()
 
         # Event reader (with built-in watching capability)
         self._event_reader: Optional[EventReader] = None
@@ -1077,52 +1073,14 @@ class WorkspaceStateProvider(StateProvider):
     # Services
     # =========================================================================
 
-    def get_services(
-        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
-    ) -> List[BaseService]:
-        """Get services for an experiment
-
-        Tries to recreate real Service objects from service_config, falls back to
-        MockService if recreation fails.
-
-        If experiment_id is None, returns services from all experiments.
-        """
-        if experiment_id is None:
-            # Return services from all experiments
-            all_services = []
-            for exp in self.get_experiments():
-                exp_services = self.get_services(exp.experiment_id)
-                all_services.extend(exp_services)
-            return all_services
-
-        if run_id is None:
-            run_id = self.get_current_run(experiment_id)
-            if run_id is None:
-                return []
-
-        cache_key = (experiment_id, run_id)
-
-        with self._service_cache_lock:
-            # Check cache
-            cached = self._service_cache.get(cache_key)
-            if cached is not None:
-                return list(cached.values())
-
-            # Fetch and try to recreate services
-            services = self._fetch_services_from_storage(experiment_id, run_id)
-            # Store experiment_id on services for global view
-            for s in services:
-                s._experiment_id = experiment_id
-                s._run_id = run_id
-            self._service_cache[cache_key] = {s.id: s for s in services}
-            return services
-
     def _fetch_services_from_storage(
         self, experiment_id: Optional[str], run_id: Optional[str]
     ) -> List[BaseService]:
-        """Fetch services from status.json and try to recreate real Service objects"""
-        from experimaestro.scheduler.services import Service
+        """Fetch services from status.json
 
+        Returns MockService objects directly from the cached experiment.
+        These are updated when ServiceStateChangedEvent is applied.
+        """
         if experiment_id is None or run_id is None:
             return []
 
@@ -1133,60 +1091,9 @@ class WorkspaceStateProvider(StateProvider):
         # Get experiment from cache or load from disk
         exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
 
-        services = []
-        for service_id, mock_service in exp.services.items():
-            # Try to recreate service from state_dict
-            service_class = mock_service.service_class
-            state_dict = mock_service.state_dict()
-            if service_class:
-                try:
-                    service = Service.from_state_dict(service_class, state_dict)
-                    # Store experiment info on the service
-                    service._experiment_id = experiment_id
-                    service._run_id = run_id
-                    # Register as listener to emit events when state changes
-                    service.add_listener(self)
-                    services.append(service)
-                    logger.debug("Recreated service %s from state_dict", service_id)
-                except Exception as e:
-                    # Failed to recreate - use MockService with error description
-                    from experimaestro.scheduler.state_provider import MockService
-
-                    service = MockService(
-                        service_id=service_id,
-                        description_text=f"error: {e}",
-                        state_dict_data={},
-                        experiment_id=experiment_id,
-                        run_id=run_id,
-                    )
-                    services.append(service)
-                    logger.warning(
-                        "Failed to recreate service %s from state_dict: %s",
-                        service_id,
-                        e,
-                    )
-                    if isinstance(e, ModuleNotFoundError):
-                        logger.warning(
-                            "Missing module for service recreation. Python Path: %s",
-                            sys.path,
-                        )
-            else:
-                # No service_class - use MockService with error
-                from experimaestro.scheduler.state_provider import MockService
-
-                service = MockService(
-                    service_id=service_id,
-                    description_text="error: no service_class",
-                    state_dict_data={},
-                    experiment_id=experiment_id,
-                    run_id=run_id,
-                )
-                services.append(service)
-                logger.debug(
-                    "Service %s has no service_class for recreation", service_id
-                )
-
-        return services
+        # Return MockService objects directly - they're updated by apply_event
+        # experiment_id and run_id are already set when MockService is created
+        return list(exp.services.values())
 
     # =========================================================================
     # Job operations
