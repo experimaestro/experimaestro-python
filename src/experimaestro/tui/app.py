@@ -562,7 +562,7 @@ class ExperimaestroUI(App):
 
         # Set the job to display
         job_detail_view = self.query_one(JobDetailView)
-        job_detail_view.set_job(message.job_id, message.experiment_id)
+        job_detail_view.set_job(message.job_id, message.task_id, message.experiment_id)
 
     def on_job_deselected(self, message: JobDeselected) -> None:
         """Handle job deselection - go back to jobs view"""
@@ -673,7 +673,7 @@ class ExperimaestroUI(App):
 
     def on_view_job_logs_request(self, message: ViewJobLogsRequest) -> None:
         """Handle log viewing request from jobs table"""
-        job = self.state_provider.get_job(message.job_id, message.experiment_id)
+        job = self.state_provider.get_job(message.task_id, message.job_id)
         if not job or not job.path or not job.task_id:
             self.notify("Cannot find job logs", severity="warning")
             return
@@ -681,7 +681,7 @@ class ExperimaestroUI(App):
 
     def on_delete_job_request(self, message: DeleteJobRequest) -> None:
         """Handle job deletion request"""
-        job = self.state_provider.get_job(message.job_id, message.experiment_id)
+        job = self.state_provider.get_job(message.task_id, message.job_id)
         if not job:
             self.notify("Job not found", severity="error")
             return
@@ -753,7 +753,7 @@ class ExperimaestroUI(App):
 
     def on_kill_job_request(self, message: KillJobRequest) -> None:
         """Handle job kill request"""
-        job = self.state_provider.get_job(message.job_id, message.experiment_id)
+        job = self.state_provider.get_job(message.task_id, message.job_id)
         if not job:
             self.notify("Job not found", severity="error")
             return

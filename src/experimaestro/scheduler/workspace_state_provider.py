@@ -470,7 +470,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Update experiment status cache for all experiment events
         # This includes JobStateChangedEvent which updates exp._job_states
         if isinstance(event, (ExperimentEventBase, JobEventBase)):
-            self._apply_event_to_cache(experiment_id, event)
+            self._handle_experiment_event(experiment_id, event)
 
         # Forward to listeners
         self._notify_state_listeners(event)
@@ -579,7 +579,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Status cache methods
     # =========================================================================
 
-    def _get_cached_experiment(
+    def _get_or_load_experiment(
         self, experiment_id: str, run_id: str, run_dir: Path
     ) -> MockExperiment:
         """Get experiment from cache or load from disk
@@ -597,23 +597,19 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Returns:
             MockExperiment with current state
         """
-        cache_key = (experiment_id, run_id)
+        return super()._get_or_load_experiment(experiment_id, run_id, run_dir=run_dir)
 
-        with self._experiment_cache_lock:
-            # For active experiments, cache is kept up to date by EventReader
-            if cache_key in self._experiment_cache:
-                return self._experiment_cache[cache_key]
-
-            # For non-active experiments, load from disk
-            # (no event files means no pending events to apply)
-            exp = MockExperiment.from_disk(run_dir, self.workspace_path)
-            if exp is None:
-                exp = MockExperiment(
-                    workdir=run_dir,
-                    run_id=run_id,
-                )
-
-            return exp
+    def _create_experiment(
+        self, experiment_id: str, run_id: str, *, run_dir: Path
+    ) -> MockExperiment:
+        """Create an experiment by loading from disk or creating minimal instance"""
+        exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+        if exp is None:
+            exp = MockExperiment(
+                workdir=run_dir,
+                run_id=run_id,
+            )
+        return exp
 
     def _has_event_files(self, experiment_id: str) -> bool:
         """Check if experiment has any event files (is active)"""
@@ -621,9 +617,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
         exp_events_dir = self._experiments_dir / experiment_id
         return exp_events_dir.is_dir() and any(exp_events_dir.glob("events-*.jsonl"))
 
-    def _apply_event_to_cache(self, experiment_id: str, event: EventBase) -> None:
-        """Apply an event to the cached experiment (called by EventFileWatcher)
+    def _handle_experiment_event(self, experiment_id: str, event: EventBase) -> None:
+        """Update cached experiment from an experiment event
 
+        Called by EventReader when experiment events are received.
         For JobStateChangedEvent with from_experiment=True, also applies to
         cached job to set _experiment_status.
         """
@@ -653,16 +650,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
                             job = self._job_cache.get(full_id)
                             if job is not None:
                                 job.apply_event(event)
-
-    def _clear_experiment_cache(self, experiment_id: str) -> None:
-        """Clear cached experiment for an experiment (called when experiment finishes)"""
-        with self._experiment_cache_lock:
-            # Remove all cache entries for this experiment
-            keys_to_remove = [
-                k for k in self._experiment_cache if k[0] == experiment_id
-            ]
-            for key in keys_to_remove:
-                del self._experiment_cache[key]
 
     def _load_carbon_metrics_for_job(self, job_id: str) -> CarbonMetricsData | None:
         """Load carbon metrics from carbon storage for a job.
@@ -710,41 +697,44 @@ class WorkspaceStateProvider(OfflineStateProvider):
             MockJob from cache or freshly loaded from disk
         """
         full_id = BaseJob.make_full_id(task_id, job_id)
-        with self._job_cache_lock:
-            if full_id in self._job_cache:
-                return self._job_cache[full_id]
+        return super()._get_or_load_job(
+            full_id, job_id=job_id, task_id=task_id, submit_time=submit_time
+        )
 
-            # Load from disk
-            job_path = self.workspace_path / "jobs" / task_id / job_id
-            if job_path.exists():
-                job = self._mock_job_from_disk(job_path, task_id, job_id)
+    def _create_job(
+        self,
+        full_id: str,
+        *,
+        job_id: str,
+        task_id: str,
+        submit_time: float | datetime | None,
+    ) -> MockJob:
+        """Create a job by loading from disk or creating minimal instance"""
+        job_path = self.workspace_path / "jobs" / task_id / job_id
+        if job_path.exists():
+            # _mock_job_from_disk handles carbon metrics loading
+            return self._mock_job_from_disk(job_path, task_id, job_id)
+
+        # Job directory doesn't exist - create minimal MockJob
+        submittime_dt = None
+        if submit_time is not None:
+            if isinstance(submit_time, datetime):
+                submittime_dt = submit_time
             else:
-                # Job directory doesn't exist - create minimal MockJob
-                # Convert float timestamp to datetime if needed
-                submittime_dt = None
-                if submit_time is not None:
-                    if isinstance(submit_time, datetime):
-                        submittime_dt = submit_time
-                    else:
-                        submittime_dt = datetime.fromtimestamp(submit_time)
-                job = MockJob(
-                    identifier=job_id,
-                    task_id=task_id,
-                    path=job_path,
-                    state="unscheduled",
-                    submittime=submittime_dt,
-                    starttime=None,
-                    endtime=None,
-                    progress=[],
-                    updated_at="",
-                )
+                submittime_dt = datetime.fromtimestamp(submit_time)
 
-            # Load carbon metrics from carbon storage if not already set
-            if job.carbon_metrics is None:
-                job.carbon_metrics = self._load_carbon_metrics_for_job(job_id)
-
-            self._job_cache[full_id] = job
-            return job
+        return MockJob(
+            identifier=job_id,
+            task_id=task_id,
+            path=job_path,
+            state="unscheduled",
+            submittime=submittime_dt,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+            carbon_metrics=self._load_carbon_metrics_for_job(job_id),
+        )
 
     # =========================================================================
     # Experiment methods
@@ -834,7 +824,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return None
 
         # Get experiment from cache or load from disk
-        return self._get_cached_experiment(experiment_id, current_run_id, run_dir)
+        return self._get_or_load_experiment(experiment_id, current_run_id, run_dir)
 
     def _load_v1_experiment(
         self, experiment_id: str, exp_dir: Path
@@ -1049,7 +1039,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return []
 
         # Get experiment from cache or load from disk
-        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
+        exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
 
         # Load jobs using job_infos
         jobs = []
@@ -1081,35 +1071,13 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return jobs
 
-    def get_job(
-        self, job_id: str, experiment_id: str, run_id: Optional[str] = None
-    ) -> Optional[MockJob]:
-        """Get a specific job"""
-        if run_id is None:
-            run_id = self.get_current_run(experiment_id)
-            if run_id is None:
-                return None
-
-        run_dir = self.workspace_path / "experiments" / experiment_id / run_id
-        if not run_dir.exists():
+    def get_job(self, task_id: str, job_id: str) -> Optional[MockJob]:
+        """Get a job directly by task_id and job_id"""
+        job_path = self.workspace_path / "jobs" / task_id / job_id
+        if not job_path.exists():
             return None
 
-        # Get experiment from cache or load from disk
-        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
-
-        # Get job_info and load full job data
-        job_info = exp.job_infos.get(job_id)
-        if job_info is None:
-            return None
-
-        job = self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
-
-        # Set experiment status from tracked job states
-        exp_state = exp.get_job_state(job_id)
-        if exp_state is not None:
-            job._experiment_status = exp_state
-
-        return job
+        return self._get_or_load_job(job_id, task_id, submit_time=None)
 
     def get_all_jobs(
         self,
@@ -1152,7 +1120,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return {}
 
         # Get experiment from cache or load from disk
-        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
+        exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
 
         return exp.tags
 
@@ -1170,7 +1138,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return {}
 
         # Get experiment from cache or load from disk
-        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
+        exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
 
         return exp.dependencies
 
@@ -1194,7 +1162,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return []
 
         # Get experiment from cache or load from disk
-        exp = self._get_cached_experiment(experiment_id, run_id, run_dir)
+        exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
 
         # Return MockService objects directly - they're updated by apply_event
         # experiment_id and run_id are already set when MockService is created
@@ -1389,7 +1357,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     continue
 
                 # Use cached experiment (EventReader keeps it up to date)
-                exp = self._get_cached_experiment(experiment_id, latest_run_id, run_dir)
+                exp = self._get_or_load_experiment(
+                    experiment_id, latest_run_id, run_dir
+                )
 
                 # Add all job paths from this run
                 for job_info in exp.job_infos.values():
@@ -1452,7 +1422,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     # Use cached experiment for current run (kept up to date by EventReader)
                     # For historical runs, load from disk (no pending events)
                     if run_id == current_run_id:
-                        exp = self._get_cached_experiment(
+                        exp = self._get_or_load_experiment(
                             experiment_id, run_id, run_dir
                         )
                     else:

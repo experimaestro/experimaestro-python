@@ -1282,9 +1282,8 @@ class Scheduler(StateProvider, threading.Thread):
 
     def get_job(
         self,
+        task_id: str,  # noqa: ARG002 - job_id is sufficient in live scheduler
         job_id: str,
-        experiment_id: str,  # noqa: ARG002 - job_id is sufficient in live scheduler
-        run_id: Optional[str] = None,  # noqa: ARG002 - job_id is sufficient in live scheduler
     ) -> Optional[BaseJob]:
         """Get a specific job"""
         return self.jobs.get(job_id)

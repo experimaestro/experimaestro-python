@@ -362,7 +362,6 @@ class WebSocketHandler:
     async def _handle_job_details(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle job details request"""
         job_id = payload.get("jobId")
-        experiment_id = payload.get("experimentId")
 
         if self._scheduler and job_id in self._scheduler.jobs:
             # Get from scheduler (live Job)
@@ -370,16 +369,18 @@ class WebSocketHandler:
             await websocket.send_json(
                 {"type": "job.update", "payload": serialize_live_job(job)}
             )
-        elif experiment_id:
+        else:
             # Get from state provider (MockJob)
-            job = self.state_provider.get_job(job_id, experiment_id)
-            if job:
-                await websocket.send_json(
-                    {
-                        "type": "job.update",
-                        "payload": job_db_to_frontend(job.db_state_dict()),
-                    }
-                )
+            task_id = payload.get("taskId")
+            if task_id:
+                job = self.state_provider.get_job(task_id, job_id)
+                if job:
+                    await websocket.send_json(
+                        {
+                            "type": "job.update",
+                            "payload": job_db_to_frontend(job.db_state_dict()),
+                        }
+                    )
 
     async def _handle_job_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle job kill request"""

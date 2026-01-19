@@ -421,9 +421,13 @@ class SSHStateProviderClient(OfflineStateProvider):
         cmd.append(self.host)
 
         # Build remote command (workdir is passed to experiments group)
+        # Use shlex.split to properly handle complex commands with arguments
+        import shlex
+
         if self.remote_xpm_path:
-            # Use specified path to experimaestro
-            remote_cmd = f"{self.remote_xpm_path} experiments --workdir {self.remote_workspace} monitor-server"
+            # Use specified path/command to experimaestro
+            # Parse the remote_xpm_path in case it contains arguments
+            remote_cmd_parts = shlex.split(self.remote_xpm_path)
         else:
             # Use uv tool run with version pinning
             try:
@@ -434,14 +438,25 @@ class SSHStateProviderClient(OfflineStateProvider):
                 xpm_version = None
 
             if xpm_version:
-                remote_cmd = f"uv tool run experimaestro=={xpm_version} experiments --workdir {self.remote_workspace} monitor-server"
+                remote_cmd_parts = [
+                    "uv",
+                    "tool",
+                    "run",
+                    f"experimaestro=={xpm_version}",
+                ]
             else:
-                remote_cmd = f"uv tool run experimaestro experiments --workdir {self.remote_workspace} monitor-server"
-        cmd.append(remote_cmd)
+                remote_cmd_parts = ["uv", "tool", "run", "experimaestro"]
+
+        # Add the subcommand arguments
+        remote_cmd_parts.extend(
+            ["experiments", "--workdir", self.remote_workspace, "monitor-server"]
+        )
+        cmd.extend(remote_cmd_parts)
 
         logger.info("Connecting to %s, workspace: %s", self.host, self.remote_workspace)
-        logger.debug("SSH command: %s", " ".join(cmd))
+        logger.debug("SSH command: %s", shlex.join(cmd))
 
+        # Start SSH process
         try:
             self._process = subprocess.Popen(
                 cmd,
@@ -816,7 +831,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Get list of all experiments"""
         params = {"since": serialize_datetime(since)}
         result = self._call_sync(RPCMethod.GET_EXPERIMENTS, params)
-        return [self._dict_to_experiment(d) for d in result]
+        return [self._get_or_load_experiment(d) for d in result]
 
     def get_experiment(self, experiment_id: str) -> Optional[BaseExperiment]:
         """Get a specific experiment by ID"""
@@ -824,7 +839,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_EXPERIMENT, params)
         if result is None:
             return None
-        return self._dict_to_experiment(result)
+        return self._get_or_load_experiment(result)
 
     def get_experiment_runs(self, experiment_id: str) -> List[Dict]:
         """Get all runs for an experiment"""
@@ -857,21 +872,18 @@ class SSHStateProviderClient(OfflineStateProvider):
             "since": serialize_datetime(since),
         }
         result = self._call_sync(RPCMethod.GET_JOBS, params)
-        return [self._dict_to_job(d) for d in result]
+        return [self._get_or_load_job(d) for d in result]
 
-    def get_job(
-        self, job_id: str, experiment_id: str, run_id: Optional[str] = None
-    ) -> Optional[BaseJob]:
+    def get_job(self, task_id: str, job_id: str) -> Optional[BaseJob]:
         """Get a specific job"""
         params = {
+            "task_id": task_id,
             "job_id": job_id,
-            "experiment_id": experiment_id,
-            "run_id": run_id,
         }
         result = self._call_sync(RPCMethod.GET_JOB, params)
         if result is None:
             return None
-        return self._dict_to_job(result)
+        return self._get_or_load_job(result)
 
     def get_all_jobs(
         self,
@@ -886,7 +898,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             "since": serialize_datetime(since),
         }
         result = self._call_sync(RPCMethod.GET_ALL_JOBS, params)
-        return [self._dict_to_job(d) for d in result]
+        return [self._get_or_load_job(d) for d in result]
 
     def get_tags_map(
         self,
@@ -1030,26 +1042,28 @@ class SSHStateProviderClient(OfflineStateProvider):
     # Data Conversion
     # -------------------------------------------------------------------------
 
-    def _dict_to_job(self, d: Dict) -> MockJob:
-        """Convert a dictionary to a MockJob using from_state_dict
-
-        Uses job cache to return the same MockJob instance for the same job,
-        allowing events to update the cached object and keep state in sync.
-        """
-        # Get job identifiers for cache lookup
+    def _get_or_load_job(self, d: Dict) -> MockJob:
+        """Get or load job from dict (uses base class caching)"""
         job_id = d.get("identifier", "")
         task_id = d.get("task_id", "")
-        full_id = BaseJob.make_full_id(task_id, job_id) if task_id and job_id else None
+        full_id = BaseJob.make_full_id(task_id, job_id) if task_id and job_id else ""
 
-        # Check cache first (using inherited method)
-        if full_id:
-            cached_job = self._get_cached_job(full_id)
-            if cached_job is not None:
-                # Update cached job with fresh data from server
-                # (server state is authoritative, but we keep the same object)
-                self._update_job_from_dict(cached_job, d)
-                return cached_job
+        if not full_id:
+            # Can't cache without identifiers, just create
+            return self._create_job_from_dict(d)
 
+        return super()._get_or_load_job(full_id, d=d)
+
+    def _create_job(self, full_id: str, *, d: Dict) -> MockJob:
+        """Create job from server dict"""
+        return self._create_job_from_dict(d)
+
+    def _on_cached_job_found(self, job: MockJob, *, d: Dict) -> None:
+        """Update cached job with fresh data from server"""
+        self._update_job_from_dict(job, d)
+
+    def _create_job_from_dict(self, d: Dict) -> MockJob:
+        """Internal: create MockJob from dict with path translation"""
         # Translate remote path to local cache path
         if d.get("path"):
             remote_path = d["path"]
@@ -1059,14 +1073,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             else:
                 d["path"] = Path(remote_path)
 
-        # Note: timestamp conversion is handled by MockJob.from_state_dict
-        job = MockJob.from_state_dict(d, self.local_cache_dir)
-
-        # Add to cache (using inherited method)
-        if full_id:
-            self._cache_job(full_id, job)
-
-        return job
+        return MockJob.from_state_dict(d, self.local_cache_dir)
 
     def _update_job_from_dict(self, job: MockJob, d: Dict) -> None:
         """Update a cached MockJob with fresh data from server
@@ -1101,23 +1108,29 @@ class SSHStateProviderClient(OfflineStateProvider):
                 get_progress_information_from_dict(p) for p in d["progress"]
             ]
 
-    def _dict_to_experiment(self, d: Dict) -> MockExperiment:
-        """Convert a dictionary to a MockExperiment using from_state_dict
-
-        Uses experiment cache to return the same MockExperiment instance,
-        allowing state to be tracked consistently.
-        """
+    def _get_or_load_experiment(self, d: Dict) -> MockExperiment:
+        """Get or load experiment from dict (uses base class caching)"""
         experiment_id = d.get("experiment_id", "")
         run_id = d.get("run_id", "")
 
-        # Check cache first (using inherited method)
-        if experiment_id and run_id:
-            cached_exp = self._get_cached_experiment(experiment_id, run_id)
-            if cached_exp is not None:
-                # Update cached experiment with fresh data from server
-                self._update_experiment_from_dict(cached_exp, d)
-                return cached_exp
+        if not experiment_id or not run_id:
+            # Can't cache without identifiers, just create
+            return self._create_experiment_from_dict(d)
 
+        return super()._get_or_load_experiment(experiment_id, run_id, d=d)
+
+    def _create_experiment(
+        self, experiment_id: str, run_id: str, *, d: Dict
+    ) -> MockExperiment:
+        """Create experiment from server dict"""
+        return self._create_experiment_from_dict(d)
+
+    def _on_cached_experiment_found(self, exp: MockExperiment, *, d: Dict) -> None:
+        """Update cached experiment with fresh data from server"""
+        self._update_experiment_from_dict(exp, d)
+
+    def _create_experiment_from_dict(self, d: Dict) -> MockExperiment:
+        """Internal: create MockExperiment from dict with path translation"""
         # Translate remote workdir to local cache path
         if d.get("workdir"):
             remote_path = d["workdir"]
@@ -1127,14 +1140,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             else:
                 d["workdir"] = Path(remote_path)
 
-        # Note: timestamp conversion is handled by MockExperiment.from_state_dict
-        exp = MockExperiment.from_state_dict(d, self.local_cache_dir)
-
-        # Add to cache (using inherited method)
-        if experiment_id and run_id:
-            self._cache_experiment(experiment_id, run_id, exp)
-
-        return exp
+        return MockExperiment.from_state_dict(d, self.local_cache_dir)
 
     def _update_experiment_from_dict(self, exp: MockExperiment, d: Dict) -> None:
         """Update a cached MockExperiment with fresh data from server"""

@@ -306,16 +306,12 @@ class SSHStateProviderServer:
 
     def _handle_get_job(self, params: Dict) -> Optional[Dict]:
         """Handle get_job request"""
+        task_id = params.get("task_id")
         job_id = params.get("job_id")
-        experiment_id = params.get("experiment_id")
-        if not job_id or not experiment_id:
-            raise TypeError("job_id and experiment_id are required")
+        if not task_id or not job_id:
+            raise TypeError("task_id and job_id are required")
 
-        job = self._state_provider.get_job(
-            job_id=job_id,
-            experiment_id=experiment_id,
-            run_id=params.get("run_id"),
-        )
+        job = self._state_provider.get_job(task_id=task_id, job_id=job_id)
         if job is None:
             return None
         return job.state_dict()
@@ -371,15 +367,14 @@ class SSHStateProviderServer:
 
     def _handle_kill_job(self, params: Dict) -> Dict:
         """Handle kill_job request"""
+        task_id = params.get("task_id")
         job_id = params.get("job_id")
-        experiment_id = params.get("experiment_id")
-        run_id = params.get("run_id")
 
-        if not job_id or not experiment_id or not run_id:
-            raise TypeError("job_id, experiment_id, and run_id are required")
+        if not task_id or not job_id:
+            raise TypeError("task_id and job_id are required")
 
         # Get the job first
-        job = self._state_provider.get_job(job_id, experiment_id, run_id)
+        job = self._state_provider.get_job(task_id, job_id)
         if job is None:
             return {"success": False, "error": "Job not found"}
 
@@ -392,15 +387,14 @@ class SSHStateProviderServer:
 
     def _handle_clean_job(self, params: Dict) -> Dict:
         """Handle clean_job request"""
+        task_id = params.get("task_id")
         job_id = params.get("job_id")
-        experiment_id = params.get("experiment_id")
-        run_id = params.get("run_id")
 
-        if not job_id or not experiment_id or not run_id:
-            raise TypeError("job_id, experiment_id, and run_id are required")
+        if not task_id or not job_id:
+            raise TypeError("task_id and job_id are required")
 
         # Get the job first
-        job = self._state_provider.get_job(job_id, experiment_id, run_id)
+        job = self._state_provider.get_job(task_id, job_id)
         if job is None:
             return {"success": False, "error": "Job not found"}
 
@@ -424,15 +418,14 @@ class SSHStateProviderServer:
 
     def _handle_get_process_info(self, params: Dict) -> Optional[Dict]:
         """Handle get_process_info request"""
+        task_id = params.get("task_id")
         job_id = params.get("job_id")
-        experiment_id = params.get("experiment_id")
-        run_id = params.get("run_id")
 
-        if not job_id or not experiment_id:
-            raise TypeError("job_id and experiment_id are required")
+        if not task_id or not job_id:
+            raise TypeError("task_id and job_id are required")
 
         # Get the job first
-        job = self._state_provider.get_job(job_id, experiment_id, run_id)
+        job = self._state_provider.get_job(task_id, job_id)
         if job is None:
             return None
 
@@ -450,16 +443,15 @@ class SSHStateProviderServer:
 
     def _handle_delete_job_safely(self, params: Dict) -> Dict:
         """Handle delete_job_safely request"""
+        task_id = params.get("task_id")
         job_id = params.get("job_id")
-        experiment_id = params.get("experiment_id")
-        run_id = params.get("run_id")
         perform = params.get("perform", True)
 
-        if not job_id or not experiment_id:
-            raise TypeError("job_id and experiment_id are required")
+        if not task_id or not job_id:
+            raise TypeError("task_id and job_id are required")
 
         # Get the job first
-        job = self._state_provider.get_job(job_id, experiment_id, run_id)
+        job = self._state_provider.get_job(task_id, job_id)
         if job is None:
             return {"success": False, "message": "Job not found"}
 

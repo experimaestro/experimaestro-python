@@ -109,7 +109,7 @@ class StateBridge:
         from experimaestro.webui.websocket import job_db_to_frontend
 
         # Fetch the full job data from state provider
-        job = self.state_provider.get_job(event.job_id, event.experiment_id)
+        job = self.state_provider.get_job(event.task_id, event.job_id)
         if job:
             # Get base dict from db_state_dict
             db_dict = job.db_state_dict()

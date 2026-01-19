@@ -206,10 +206,19 @@ class StateProvider(ABC):
         ...
 
     @abstractmethod
-    def get_job(
-        self, job_id: str, experiment_id: str, run_id: Optional[str] = None
-    ) -> Optional[BaseJob]:
-        """Get a specific job"""
+    def get_job(self, task_id: str, job_id: str) -> Optional[BaseJob]:
+        """Get a job directly by task_id and job_id
+
+        Jobs are stored independently in workspace/jobs/task_id/job_id/,
+        so they can be retrieved without knowing which experiment they belong to.
+
+        Args:
+            task_id: The task identifier
+            job_id: The job identifier (hash)
+
+        Returns:
+            The job if found, None otherwise
+        """
         ...
 
     @abstractmethod
@@ -435,6 +444,35 @@ class OfflineStateProvider(StateProvider):
         with self._job_cache_lock:
             self._job_cache[full_id] = job
 
+    def _get_or_load_job(self, full_id: str, *args, **kwargs) -> "MockJob":
+        """Get job from cache or load/create it
+
+        Checks cache first. If found, calls _on_cached_job_found (for updates).
+        If not found, calls _create_job to create it and caches the result.
+
+        Args:
+            full_id: Job full identifier (task_id:job_id)
+            *args, **kwargs: Passed to _create_job and _on_cached_job_found
+        """
+        with self._job_cache_lock:
+            cached = self._job_cache.get(full_id)
+            if cached is not None:
+                self._on_cached_job_found(cached, *args, **kwargs)
+                return cached
+
+            job = self._create_job(full_id, *args, **kwargs)
+            self._job_cache[full_id] = job
+            return job
+
+    def _on_cached_job_found(self, job: "MockJob", *args, **kwargs) -> None:
+        """Called when a cached job is found - override to update it"""
+        pass
+
+    @abstractmethod
+    def _create_job(self, full_id: str, *args, **kwargs) -> "MockJob":
+        """Create a job instance - subclasses implement this"""
+        ...
+
     # =========================================================================
     # Experiment caching methods
     # =========================================================================
@@ -450,6 +488,19 @@ class OfflineStateProvider(StateProvider):
         with self._experiment_cache_lock:
             self._experiment_cache.clear()
 
+    def _clear_experiment_cache(self, experiment_id: str) -> None:
+        """Clear cached experiments for a specific experiment ID
+
+        Removes all cache entries where the experiment_id matches,
+        regardless of run_id.
+        """
+        with self._experiment_cache_lock:
+            keys_to_remove = [
+                k for k in self._experiment_cache if k[0] == experiment_id
+            ]
+            for key in keys_to_remove:
+                del self._experiment_cache[key]
+
     def _get_cached_experiment(
         self, experiment_id: str, run_id: str
     ) -> Optional["MockExperiment"]:
@@ -463,6 +514,44 @@ class OfflineStateProvider(StateProvider):
         """Add an experiment to the cache"""
         with self._experiment_cache_lock:
             self._experiment_cache[(experiment_id, run_id)] = exp
+
+    def _get_or_load_experiment(
+        self, experiment_id: str, run_id: str, *args, **kwargs
+    ) -> "MockExperiment":
+        """Get experiment from cache or load/create it
+
+        Checks cache first. If found, calls _on_cached_experiment_found (for updates).
+        If not found, calls _create_experiment to create it and caches the result.
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier
+            *args, **kwargs: Passed to _create_experiment and _on_cached_experiment_found
+        """
+        cache_key = (experiment_id, run_id)
+
+        with self._experiment_cache_lock:
+            cached = self._experiment_cache.get(cache_key)
+            if cached is not None:
+                self._on_cached_experiment_found(cached, *args, **kwargs)
+                return cached
+
+            exp = self._create_experiment(experiment_id, run_id, *args, **kwargs)
+            self._experiment_cache[cache_key] = exp
+            return exp
+
+    def _on_cached_experiment_found(
+        self, exp: "MockExperiment", *args, **kwargs
+    ) -> None:
+        """Called when a cached experiment is found - override to update it"""
+        pass
+
+    @abstractmethod
+    def _create_experiment(
+        self, experiment_id: str, run_id: str, *args, **kwargs
+    ) -> "MockExperiment":
+        """Create an experiment instance - subclasses implement this"""
+        ...
 
     # =========================================================================
     # Event handling methods

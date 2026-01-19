@@ -25,9 +25,10 @@ class ExperimentDeselected(Message):
 class JobSelected(Message):
     """Message sent when a job is selected"""
 
-    def __init__(self, job_id: str, experiment_id: str) -> None:
+    def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
         super().__init__()
         self.job_id = job_id
+        self.task_id = task_id
         self.experiment_id = experiment_id
 
 
@@ -52,18 +53,20 @@ class ViewJobLogs(Message):
 class ViewJobLogsRequest(Message):
     """Message sent when user requests to view logs from jobs table"""
 
-    def __init__(self, job_id: str, experiment_id: str) -> None:
+    def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
         super().__init__()
         self.job_id = job_id
+        self.task_id = task_id
         self.experiment_id = experiment_id
 
 
 class DeleteJobRequest(Message):
     """Message sent when user requests to delete a job"""
 
-    def __init__(self, job_id: str, experiment_id: str) -> None:
+    def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
         super().__init__()
         self.job_id = job_id
+        self.task_id = task_id
         self.experiment_id = experiment_id
 
 
@@ -78,9 +81,10 @@ class DeleteExperimentRequest(Message):
 class KillJobRequest(Message):
     """Message sent when user requests to kill a running job"""
 
-    def __init__(self, job_id: str, experiment_id: str) -> None:
+    def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
         super().__init__()
         self.job_id = job_id
+        self.task_id = task_id
         self.experiment_id = experiment_id
 
 

@@ -391,12 +391,12 @@ class TestSSHRoundTrip:
         # Server-side: serialize using state_dict
         serialized = original.state_dict()
 
-        # Client-side: deserialize using _dict_to_job (which uses from_state_dict)
+        # Client-side: deserialize using _create_job_from_dict
         mock_client = MockSSHClient(
             remote_workspace=str(workspace_path),
             local_cache_dir=workspace_path,
         )
-        restored = SSHStateProviderClient._dict_to_job(mock_client, serialized)
+        restored = SSHStateProviderClient._create_job_from_dict(mock_client, serialized)
 
         # Verify equality by comparing state_dict outputs
         assert original.state_dict() == restored.state_dict()
@@ -424,12 +424,14 @@ class TestSSHRoundTrip:
         # Server-side: serialize using state_dict
         serialized = original.state_dict()
 
-        # Client-side: deserialize using _dict_to_experiment
+        # Client-side: deserialize using _create_experiment_from_dict
         mock_client = MockSSHClient(
             remote_workspace=str(workspace_path),
             local_cache_dir=workspace_path,
         )
-        restored = SSHStateProviderClient._dict_to_experiment(mock_client, serialized)
+        restored = SSHStateProviderClient._create_experiment_from_dict(
+            mock_client, serialized
+        )
 
         # Verify equality by comparing state_dict outputs
         assert original.state_dict() == restored.state_dict()
@@ -609,7 +611,7 @@ class TestServerRequestHandling:
         mock_state_provider.get_job.return_value = mock_job
 
         result = server_with_mock._handle_get_job(
-            {"job_id": "job1", "experiment_id": "exp1", "run_id": "run1"}
+            {"task_id": "task.Test", "job_id": "job1"}
         )
 
         assert result["job_id"] == "job1"
@@ -620,7 +622,7 @@ class TestServerRequestHandling:
         mock_state_provider.get_job.return_value = None
 
         result = server_with_mock._handle_get_job(
-            {"job_id": "nonexistent", "experiment_id": "exp1", "run_id": "run1"}
+            {"task_id": "task.Test", "job_id": "nonexistent"}
         )
 
         assert result is None
@@ -733,7 +735,7 @@ class TestServerRequestHandling:
         mock_state_provider.kill_job.return_value = True
 
         result = server_with_mock._handle_kill_job(
-            {"job_id": "job1", "experiment_id": "exp1", "run_id": "run1"}
+            {"task_id": "task.Test", "job_id": "job1"}
         )
 
         assert result["success"] is True
@@ -743,7 +745,7 @@ class TestServerRequestHandling:
         mock_state_provider.get_job.return_value = None
 
         result = server_with_mock._handle_kill_job(
-            {"job_id": "nonexistent", "experiment_id": "exp1", "run_id": "run1"}
+            {"task_id": "task.Test", "job_id": "nonexistent"}
         )
 
         assert result["success"] is False
@@ -766,7 +768,7 @@ class TestServerRequestHandling:
         mock_state_provider.clean_job.return_value = True
 
         result = server_with_mock._handle_clean_job(
-            {"job_id": "job1", "experiment_id": "exp1", "run_id": "run1"}
+            {"task_id": "task.Test", "job_id": "job1"}
         )
 
         assert result["success"] is True
@@ -776,7 +778,7 @@ class TestServerRequestHandling:
         mock_state_provider.get_job.return_value = None
 
         result = server_with_mock._handle_clean_job(
-            {"job_id": "nonexistent", "experiment_id": "exp1", "run_id": "run1"}
+            {"task_id": "task.Test", "job_id": "nonexistent"}
         )
 
         assert result["success"] is False
@@ -965,7 +967,7 @@ class TestClientDataConversion:
 
         return client
 
-    def test_dict_to_job(self, client, tmp_path):
+    def test_get_or_load_job(self, client, tmp_path):
         """Test converting dictionary to MockJob"""
         # Note: tags, experiment_id, run_id are not part of MockJob
         # as they are experiment-specific
@@ -980,14 +982,14 @@ class TestClientDataConversion:
             "progress": [],
         }
 
-        job = client._dict_to_job(job_dict)
+        job = client._get_or_load_job(job_dict)
 
         assert job.identifier == "job123"
         assert job.task_id == "task.MyTask"
         # Path should be mapped to local cache
         assert job.path == tmp_path / "jobs/job123"
 
-    def test_dict_to_experiment(self, client, tmp_path):
+    def test_get_or_load_experiment(self, client, tmp_path):
         """Test converting dictionary to MockExperiment"""
         # New layout: experiments/{experiment_id}/{run_id}
         exp_dict = {
@@ -998,7 +1000,7 @@ class TestClientDataConversion:
             "hostname": "server1",
         }
 
-        exp = client._dict_to_experiment(exp_dict)
+        exp = client._get_or_load_experiment(exp_dict)
 
         assert exp.experiment_id == "myexp"
         # Path should be mapped to local cache
@@ -1015,7 +1017,7 @@ class TestClientDataConversion:
             "progress": [],
         }
 
-        job = client._dict_to_job(job_dict)
+        job = client._get_or_load_job(job_dict)
 
         # Path outside workspace should be kept as-is
         assert job.path == Path("/other/path/job123")

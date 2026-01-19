@@ -177,9 +177,10 @@ class EventBase:
 
 @dataclass
 class JobEventBase(EventBase):
-    """Base class for job-related events (have job_id)"""
+    """Base class for job-related events (have job_id and task_id)"""
 
     job_id: str = ""
+    task_id: str = ""
 
 
 @dataclass
@@ -242,7 +243,6 @@ class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
     This is both a job event and an experiment event.
     """
 
-    task_id: str = ""
     run_id: str = ""
     transient: int = 0
     tags: list[JobTag] = field(default_factory=list)

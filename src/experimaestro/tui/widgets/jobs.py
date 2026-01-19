@@ -156,12 +156,15 @@ class JobDetailView(Widget):
         super().__init__()
         self.state_provider = state_provider
         self.current_job_id: Optional[str] = None
+        self.current_task_id: Optional[str] = None
         self.current_experiment_id: Optional[str] = None
         self.job_data: Optional[dict] = None
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
         self.dependencies_map: dict[
             str, list[str]
         ] = {}  # job_id -> [depends_on_job_ids]
+        # Mapping from job_id to task_id for dependencies lookup
+        self.job_task_id_map: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
@@ -262,9 +265,10 @@ class JobDetailView(Widget):
 
         return " | ".join(parts)
 
-    def set_job(self, job_id: str, experiment_id: str) -> None:
+    def set_job(self, job_id: str, task_id: str, experiment_id: str) -> None:
         """Set the job to display"""
         self.current_job_id = job_id
+        self.current_task_id = task_id
         self.current_experiment_id = experiment_id
 
         # Show loading for remote
@@ -272,23 +276,33 @@ class JobDetailView(Widget):
             self.query_one("#job-detail-loading", Static).remove_class("hidden")
 
         # Load in background
-        self._load_job_detail(job_id, experiment_id)
+        self._load_job_detail(job_id, task_id, experiment_id)
 
     @work(thread=True, exclusive=True, group="job_detail_load")
-    def _load_job_detail(self, job_id: str, experiment_id: str) -> None:
+    def _load_job_detail(self, job_id: str, task_id: str, experiment_id: str) -> None:
         """Load job details in background thread"""
         # Load tags and dependencies if needed
         tags_map = self.state_provider.get_tags_map(experiment_id)
         deps_map = self.state_provider.get_dependencies_map(experiment_id)
-        job = self.state_provider.get_job(job_id, experiment_id)
 
-        self.app.call_from_thread(self._on_job_loaded, job, tags_map, deps_map)
+        # Load all jobs for the experiment to build job_id -> task_id mapping
+        jobs = self.state_provider.get_jobs(experiment_id)
+        job_task_map = {j.identifier: j.task_id or "" for j in jobs}
 
-    def _on_job_loaded(self, job, tags_map: dict, deps_map: dict) -> None:
+        job = self.state_provider.get_job(task_id, job_id)
+
+        self.app.call_from_thread(
+            self._on_job_loaded, job, tags_map, deps_map, job_task_map
+        )
+
+    def _on_job_loaded(
+        self, job, tags_map: dict, deps_map: dict, job_task_map: dict
+    ) -> None:
         """Handle loaded job on main thread"""
         self.query_one("#job-detail-loading", Static).add_class("hidden")
         self.tags_map = tags_map
         self.dependencies_map = deps_map
+        self.job_task_id_map = job_task_map
 
         if not job:
             self.log(f"Job not found: {self.current_job_id}")
@@ -298,15 +312,17 @@ class JobDetailView(Widget):
 
     def refresh_job_detail(self) -> None:
         """Refresh job details from state provider"""
-        if not self.current_job_id or not self.current_experiment_id:
+        if not self.current_job_id or not self.current_task_id:
             return
 
         if self.state_provider.is_remote:
-            self._load_job_detail(self.current_job_id, self.current_experiment_id)
-        else:
-            job = self.state_provider.get_job(
-                self.current_job_id, self.current_experiment_id
+            self._load_job_detail(
+                self.current_job_id,
+                self.current_task_id,
+                self.current_experiment_id or "",
             )
+        else:
+            job = self.state_provider.get_job(self.current_task_id, self.current_job_id)
             if job:
                 self._update_job_display(job)
 
@@ -378,14 +394,12 @@ class JobDetailView(Widget):
         # Dependencies are stored in JobDependenciesModel, accessed via dependencies_map
         depends_on = self.dependencies_map.get(job.identifier, [])
         if depends_on:
-            # Try to get task IDs for the dependency jobs
+            # Try to get task IDs for the dependency jobs from our mapping
             dep_texts = []
             for dep_job_id in depends_on:
-                dep_job = self.state_provider.get_job(
-                    dep_job_id, self.current_experiment_id
-                )
-                if dep_job:
-                    dep_task_name = dep_job.task_id.split(".")[-1]
+                dep_task_id = self.job_task_id_map.get(dep_job_id, "")
+                if dep_task_id:
+                    dep_task_name = dep_task_id.split(".")[-1]
                     dep_texts.append(f"{dep_task_name} ({dep_job_id[:8]}...)")
                 else:
                     dep_texts.append(f"{dep_job_id[:8]}...")
@@ -484,6 +498,7 @@ class JobsTable(Vertical):
         self.dependencies_map: dict[
             str, list[str]
         ] = {}  # job_id -> [depends_on_job_ids]
+        self.task_id_map: dict[str, str] = {}  # job_id -> task_id
 
     def compose(self) -> ComposeResult:
         yield Static("", id="past-run-banner", classes="hidden")
@@ -601,7 +616,10 @@ class JobsTable(Vertical):
         row_key = list(table.rows.keys())[table.cursor_row]
         if row_key:
             job_id = str(row_key.value)
-            self.post_message(DeleteJobRequest(job_id, self.current_experiment))
+            task_id = self.task_id_map.get(job_id, "")
+            self.post_message(
+                DeleteJobRequest(job_id, task_id, self.current_experiment)
+            )
 
     def action_kill_job(self) -> None:
         """Request to kill the selected job"""
@@ -612,7 +630,8 @@ class JobsTable(Vertical):
         row_key = list(table.rows.keys())[table.cursor_row]
         if row_key:
             job_id = str(row_key.value)
-            self.post_message(KillJobRequest(job_id, self.current_experiment))
+            task_id = self.task_id_map.get(job_id, "")
+            self.post_message(KillJobRequest(job_id, task_id, self.current_experiment))
 
     def action_view_logs(self) -> None:
         """Request to view logs for the selected job"""
@@ -623,7 +642,10 @@ class JobsTable(Vertical):
         row_key = list(table.rows.keys())[table.cursor_row]
         if row_key:
             job_id = str(row_key.value)
-            self.post_message(ViewJobLogsRequest(job_id, self.current_experiment))
+            task_id = self.task_id_map.get(job_id, "")
+            self.post_message(
+                ViewJobLogsRequest(job_id, task_id, self.current_experiment)
+            )
 
     def action_copy_path(self) -> None:
         """Copy the job folder path to clipboard"""
@@ -636,14 +658,18 @@ class JobsTable(Vertical):
         row_key = list(table.rows.keys())[table.cursor_row]
         if row_key:
             job_id = str(row_key.value)
-            job = self.state_provider.get_job(job_id, self.current_experiment)
-            if job.path:
-                if copy(str(job.path)):
-                    self.notify(f"Path copied: {job.path}", severity="information")
+            task_id = self.task_id_map.get(job_id, "")
+            if task_id:
+                job = self.state_provider.get_job(task_id, job_id)
+                if job and job.path:
+                    if copy(str(job.path)):
+                        self.notify(f"Path copied: {job.path}", severity="information")
+                    else:
+                        self.notify("Failed to copy path", severity="error")
                 else:
-                    self.notify("Failed to copy path", severity="error")
+                    self.notify("No path available for this job", severity="warning")
             else:
-                self.notify("No path available for this job", severity="warning")
+                self.notify("Cannot find task ID for this job", severity="warning")
 
     # Status sort order (for sorting by status)
     STATUS_ORDER = {
@@ -898,11 +924,13 @@ class JobsTable(Vertical):
         needs_rebuild = self._needs_rebuild or jobs_changed or status_changed
         self._needs_rebuild = False
 
-        # Build row data for all jobs
+        # Build row data for all jobs and update task_id_map
         rows_data = {}
         for job in jobs:
             job_id = job.identifier
             task_id = job.task_id
+            # Track task_id for each job_id
+            self.task_id_map[job_id] = task_id or ""
             status = job.state.name if job.state else "unknown"
 
             # Format status with icon (and progress % if running)
@@ -1034,4 +1062,5 @@ class JobsTable(Vertical):
         """Handle job selection"""
         if event.row_key and self.current_experiment:
             job_id = str(event.row_key.value)
-            self.post_message(JobSelected(job_id, self.current_experiment))
+            task_id = self.task_id_map.get(job_id, "")
+            self.post_message(JobSelected(job_id, task_id, self.current_experiment))
