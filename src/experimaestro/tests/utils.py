@@ -145,10 +145,24 @@ class timeout:
         self.error_message = error_message
 
     def handle_timeout(self, signum, frame):
-        logging.error("Timeout - sending signal")
+        # Disable logging error reporting for cleanup (streams may close)
+        logging.raiseExceptions = False
+
+        # Use stderr directly to avoid logging errors on closed streams
+        import sys
+
+        try:
+            print("Timeout - sending signal", file=sys.stderr)  # noqa: T201
+        except Exception:
+            pass  # Ignore errors if stderr is closed
+
         import faulthandler
 
-        faulthandler.dump_traceback()
+        try:
+            faulthandler.dump_traceback()
+        except Exception:
+            pass  # Ignore errors if output streams are closed
+
         raise TimeoutError(self.error_message)
 
     def __enter__(self):
