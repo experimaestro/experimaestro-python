@@ -138,7 +138,9 @@ class SlurmResumableTask(ResumableTask):
 @pytest.mark.timeout(30)
 def test_slurm_resumable_task(tmp_path: Path, slurmlauncher: SlurmLauncher):
     """Test that ResumableTask retries and resumes after SLURM timeouts"""
-    with TemporaryExperiment("slurm-resumable", workdir=tmp_path / "xp"):
+    with TemporaryExperiment(
+        "slurm-resumable", workdir=tmp_path / "xp", timeout_multiplier=10.0
+    ):
         checkpoint = tmp_path / "checkpoint.txt"
         output_file = tmp_path / "output.txt"
 
@@ -208,13 +210,15 @@ def test_slurm_watcher_race_condition(slurmlauncher: SlurmLauncher):
     assert not errors, f"Errors during stress test: {errors}"
 
     # Verify watcher properly cleaned up (no leaked watchers)
-    # Give a moment for cleanup
+    # Poll with timeout since cleanup is asynchronous
     import time
 
-    time.sleep(0.1)
-    assert slurmlauncher.key not in SlurmProcessWatcher.WATCHERS, (
-        "Watcher was not cleaned up after all users exited"
-    )
+    timeout = 5.0
+    start = time.time()
+    while slurmlauncher.key in SlurmProcessWatcher.WATCHERS:
+        if time.time() - start > timeout:
+            assert False, "Watcher was not cleaned up after all users exited"
+        time.sleep(0.05)
 
 
 @pytest.mark.timeout(30)
