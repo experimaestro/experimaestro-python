@@ -200,6 +200,7 @@ class FileWatcher:
         on_change: FileChangeCallback,
         on_deleted: FileDeletedCallback | None = None,
         file_filter: FileFilter | None = None,
+        on_created: FileChangeCallback | None = None,
         min_interval: float = 0.5,
         max_interval: float = 30.0,
     ):
@@ -209,11 +210,13 @@ class FileWatcher:
             on_change: Callback for file modifications (watchdog or poll)
             on_deleted: Optional callback for file deletions
             file_filter: Optional filter to check if a path should be watched
+            on_created: Optional callback for file creations (called before on_change)
             min_interval: Minimum polling interval in seconds
             max_interval: Maximum polling interval in seconds
         """
         self.on_change = on_change
         self.on_deleted = on_deleted
+        self.on_created = on_created
         self.file_filter = file_filter or (lambda p: True)
         self.min_interval = min_interval
         self.max_interval = max_interval
@@ -318,6 +321,12 @@ class FileWatcher:
                     return
                 path = Path(event.src_path)
                 if watcher.file_filter(path):
+                    # Call on_created callback before processing
+                    if watcher.on_created:
+                        try:
+                            watcher.on_created(path)
+                        except Exception:
+                            logger.exception("Error in created callback for %s", path)
                     # Add to tracked files and process
                     watcher.add_file(path)
                     watcher._handle_file_change(path, from_watchdog=True)

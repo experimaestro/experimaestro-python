@@ -302,8 +302,15 @@ class MockSSHClient:
     """Minimal mock of SSHStateProviderClient for testing deserialization"""
 
     def __init__(self, remote_workspace: str, local_cache_dir: Path):
+        import threading as _threading
+
         self.remote_workspace = remote_workspace
         self.local_cache_dir = local_cache_dir
+        # Add cache attributes to match SSHStateProviderClient (from OfflineStateProvider)
+        self._job_cache: dict[str, MockJob] = {}
+        self._job_cache_lock = _threading.Lock()
+        self._experiment_cache: dict[tuple[str, str], MockExperiment] = {}
+        self._experiment_cache_lock = _threading.Lock()
 
     def _parse_datetime_to_timestamp(self, value) -> float | None:
         """Convert datetime value to Unix timestamp"""
@@ -320,6 +327,38 @@ class MockSSHClient:
         if isinstance(value, datetime):
             return value.timestamp()
         return None
+
+    def _get_cached_job(self, full_id: str) -> MockJob | None:
+        """Mock implementation of inherited method"""
+        with self._job_cache_lock:
+            return self._job_cache.get(full_id)
+
+    def _cache_job(self, full_id: str, job: MockJob) -> None:
+        """Mock implementation of inherited method"""
+        with self._job_cache_lock:
+            self._job_cache[full_id] = job
+
+    def _get_cached_experiment(
+        self, experiment_id: str, run_id: str
+    ) -> MockExperiment | None:
+        """Mock implementation of inherited method"""
+        with self._experiment_cache_lock:
+            return self._experiment_cache.get((experiment_id, run_id))
+
+    def _cache_experiment(
+        self, experiment_id: str, run_id: str, exp: MockExperiment
+    ) -> None:
+        """Mock implementation of inherited method"""
+        with self._experiment_cache_lock:
+            self._experiment_cache[(experiment_id, run_id)] = exp
+
+    def _update_job_from_dict(self, job: MockJob, d: dict) -> None:
+        """Mock implementation - does nothing for tests"""
+        pass
+
+    def _update_experiment_from_dict(self, exp: MockExperiment, d: dict) -> None:
+        """Mock implementation - does nothing for tests"""
+        pass
 
 
 class TestSSHRoundTrip:
@@ -1087,8 +1126,690 @@ class TestTempDirectory:
 
 
 # =============================================================================
+# Event Serialization Tests (SSH Pipeline)
+# =============================================================================
+
+
+class TestEventSerialization:
+    """Test event serialization/deserialization through SSH pipeline
+
+    These tests verify that all event types can be correctly serialized
+    on the server side and deserialized on the client side.
+    """
+
+    def test_job_state_changed_event_serialization(self):
+        """Test JobStateChangedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+        from dataclasses import asdict
+
+        # Create event with all fields
+        event = JobStateChangedEvent(
+            job_id="job123",
+            state="running",
+            failure_reason=None,
+            submitted_time="2024-01-01T10:00:00",
+            started_time="2024-01-01T10:01:00",
+            ended_time=None,
+            exit_code=None,
+            retry_count=2,
+            progress=[],
+            from_experiment=False,
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize using asdict (as server.py does)
+        event_dict = asdict(event)
+
+        # Verify from_experiment is in the serialized dict
+        assert "from_experiment" in event_dict
+        assert event_dict["from_experiment"] is False
+
+        # Client side: deserialize using EventBase.from_dict
+        from experimaestro.scheduler.state_status import EventBase
+
+        restored = EventBase.from_dict(
+            {"event_type": "JobStateChangedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, JobStateChangedEvent)
+        assert restored.job_id == "job123"
+        assert restored.state == "running"
+        assert restored.from_experiment is False
+        assert restored.retry_count == 2
+
+    def test_job_state_changed_event_from_experiment_true(self):
+        """Test that from_experiment=True is preserved through serialization"""
+        from experimaestro.scheduler.state_status import JobStateChangedEvent, EventBase
+        from dataclasses import asdict
+
+        # Create event with from_experiment=True (as experiment events set it)
+        event = JobStateChangedEvent(
+            job_id="job456",
+            state="done",
+            from_experiment=True,
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+        assert event_dict["from_experiment"] is True
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "JobStateChangedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, JobStateChangedEvent)
+        assert restored.from_experiment is True
+
+    def test_job_submitted_event_serialization(self):
+        """Test JobSubmittedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import (
+            JobSubmittedEvent,
+            EventBase,
+            JobTag,
+        )
+        from dataclasses import asdict
+
+        event = JobSubmittedEvent(
+            job_id="job789",
+            experiment_id="exp1",
+            task_id="my.Task",
+            run_id="run_001",
+            transient=0,
+            tags=[JobTag(key="model", value="bert")],
+            depends_on=["job123", "job456"],
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "JobSubmittedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, JobSubmittedEvent)
+        assert restored.job_id == "job789"
+        assert restored.experiment_id == "exp1"
+        assert restored.task_id == "my.Task"
+        assert restored.depends_on == ["job123", "job456"]
+
+    def test_job_progress_event_serialization(self):
+        """Test JobProgressEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import JobProgressEvent, EventBase
+        from dataclasses import asdict
+
+        event = JobProgressEvent(
+            job_id="job123",
+            level=0,
+            progress=0.75,
+            desc="Processing batch 75/100",
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict({"event_type": "JobProgressEvent", **event_dict})
+
+        assert isinstance(restored, JobProgressEvent)
+        assert restored.job_id == "job123"
+        assert restored.level == 0
+        assert restored.progress == 0.75
+        assert restored.desc == "Processing batch 75/100"
+
+    def test_experiment_updated_event_serialization(self):
+        """Test ExperimentUpdatedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import (
+            ExperimentUpdatedEvent,
+            EventBase,
+        )
+        from dataclasses import asdict
+
+        event = ExperimentUpdatedEvent(
+            experiment_id="myexp",
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "ExperimentUpdatedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, ExperimentUpdatedEvent)
+        assert restored.experiment_id == "myexp"
+
+    def test_run_updated_event_serialization(self):
+        """Test RunUpdatedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import RunUpdatedEvent, EventBase
+        from dataclasses import asdict
+
+        event = RunUpdatedEvent(
+            experiment_id="myexp",
+            run_id="run_001",
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict({"event_type": "RunUpdatedEvent", **event_dict})
+
+        assert isinstance(restored, RunUpdatedEvent)
+        assert restored.experiment_id == "myexp"
+        assert restored.run_id == "run_001"
+
+    def test_run_completed_event_serialization(self):
+        """Test RunCompletedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import RunCompletedEvent, EventBase
+        from dataclasses import asdict
+
+        event = RunCompletedEvent(
+            experiment_id="myexp",
+            run_id="run_001",
+            status="completed",
+            ended_at="2024-01-01T12:00:00",
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "RunCompletedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, RunCompletedEvent)
+        assert restored.experiment_id == "myexp"
+        assert restored.run_id == "run_001"
+        assert restored.status == "completed"
+
+    def test_service_added_event_serialization(self):
+        """Test ServiceAddedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import ServiceAddedEvent, EventBase
+        from dataclasses import asdict
+
+        event = ServiceAddedEvent(
+            experiment_id="myexp",
+            service_id="svc123",
+            run_id="run_001",
+            description="Tensorboard service",
+            service_class="experimaestro.services.TensorboardService",
+            state_dict={"log_dir": "/tmp/logs"},
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "ServiceAddedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, ServiceAddedEvent)
+        assert restored.experiment_id == "myexp"
+        assert restored.service_id == "svc123"
+        assert restored.description == "Tensorboard service"
+        assert restored.state_dict == {"log_dir": "/tmp/logs"}
+
+    def test_service_state_changed_event_serialization(self):
+        """Test ServiceStateChangedEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import (
+            ServiceStateChangedEvent,
+            EventBase,
+        )
+        from dataclasses import asdict
+
+        event = ServiceStateChangedEvent(
+            experiment_id="myexp",
+            service_id="svc123",
+            run_id="run_001",
+            state="RUNNING",
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "ServiceStateChangedEvent", **event_dict}
+        )
+
+        assert isinstance(restored, ServiceStateChangedEvent)
+        assert restored.service_id == "svc123"
+        assert restored.state == "RUNNING"
+
+    def test_carbon_metrics_event_serialization(self):
+        """Test CarbonMetricsEvent serialization through SSH pipeline"""
+        from experimaestro.scheduler.state_status import CarbonMetricsEvent, EventBase
+        from dataclasses import asdict
+
+        event = CarbonMetricsEvent(
+            job_id="job123",
+            co2_kg=0.05,
+            energy_kwh=0.1,
+            cpu_power_w=50.0,
+            gpu_power_w=150.0,
+            ram_power_w=10.0,
+            duration_s=3600.0,
+            region="FR",
+            is_final=True,
+            written=True,
+            timestamp=1704067260.0,
+        )
+
+        # Server side: serialize
+        event_dict = asdict(event)
+
+        # Client side: deserialize
+        restored = EventBase.from_dict(
+            {"event_type": "CarbonMetricsEvent", **event_dict}
+        )
+
+        assert isinstance(restored, CarbonMetricsEvent)
+        assert restored.job_id == "job123"
+        assert restored.co2_kg == 0.05
+        assert restored.is_final is True
+
+
+class TestServerEventNotification:
+    """Test server event notification mechanism"""
+
+    @pytest.fixture
+    def mock_state_provider(self):
+        """Create a mock state provider"""
+        provider = MagicMock()
+        provider.workspace_path = Path("/tmp/workspace")
+        return provider
+
+    def test_server_on_state_event_job_state_changed(
+        self, mock_state_provider, tmp_path
+    ):
+        """Test server converts JobStateChangedEvent to notification"""
+        from experimaestro.scheduler.remote.server import SSHStateProviderServer
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+        import io
+
+        # Create server with mock stdout
+        stdout = io.BytesIO()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".experimaestro").mkdir()
+
+        server = SSHStateProviderServer(workspace, stdout=stdout)
+        server._state_provider = mock_state_provider
+
+        # Create event
+        event = JobStateChangedEvent(
+            job_id="job123",
+            state="running",
+            from_experiment=True,
+            timestamp=1704067260.0,
+        )
+
+        # Call the event handler
+        server._on_state_event(event)
+
+        # Parse the notification
+        stdout.seek(0)
+        notification_json = stdout.read().decode("utf-8").strip()
+        notification_data = json.loads(notification_json)
+
+        assert notification_data["method"] == "notification.state_event"
+        assert notification_data["params"]["event_type"] == "JobStateChangedEvent"
+        assert notification_data["params"]["data"]["job_id"] == "job123"
+        assert notification_data["params"]["data"]["state"] == "running"
+        # The from_experiment field should be in the notification
+        assert notification_data["params"]["data"]["from_experiment"] is True
+
+    def test_server_on_state_event_job_progress(self, mock_state_provider, tmp_path):
+        """Test server converts JobProgressEvent to notification"""
+        from experimaestro.scheduler.remote.server import SSHStateProviderServer
+        from experimaestro.scheduler.state_status import JobProgressEvent
+        import io
+
+        stdout = io.BytesIO()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".experimaestro").mkdir()
+
+        server = SSHStateProviderServer(workspace, stdout=stdout)
+        server._state_provider = mock_state_provider
+
+        event = JobProgressEvent(
+            job_id="job123",
+            level=0,
+            progress=0.5,
+            desc="halfway",
+            timestamp=1704067260.0,
+        )
+
+        server._on_state_event(event)
+
+        stdout.seek(0)
+        notification_json = stdout.read().decode("utf-8").strip()
+        notification_data = json.loads(notification_json)
+
+        assert notification_data["params"]["event_type"] == "JobProgressEvent"
+        assert notification_data["params"]["data"]["progress"] == 0.5
+
+
+class TestClientEventHandling:
+    """Test client event handling and conversion"""
+
+    @pytest.fixture
+    def client(self, tmp_path):
+        """Create a client instance for testing"""
+        from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+        client = SSHStateProviderClient(
+            host="testhost",
+            remote_workspace="/remote/workspace",
+        )
+        # Manually set up temp directory for testing
+        client._temp_dir = str(tmp_path)
+        client.local_cache_dir = tmp_path
+        client.workspace_path = tmp_path
+        return client
+
+    def test_client_notification_to_event_job_state_changed(self, client):
+        """Test client converts notification to JobStateChangedEvent"""
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "JobStateChangedEvent",
+                "data": {
+                    "job_id": "job123",
+                    "state": "running",
+                    "from_experiment": True,
+                    "timestamp": 1704067260.0,
+                },
+            },
+        )
+
+        assert isinstance(event, JobStateChangedEvent)
+        assert event.job_id == "job123"
+        assert event.state == "running"
+        assert event.from_experiment is True
+
+    def test_client_notification_to_event_job_progress(self, client):
+        """Test client converts notification to JobProgressEvent"""
+        from experimaestro.scheduler.state_status import JobProgressEvent
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "JobProgressEvent",
+                "data": {
+                    "job_id": "job123",
+                    "level": 0,
+                    "progress": 0.75,
+                    "desc": "Processing",
+                    "timestamp": 1704067260.0,
+                },
+            },
+        )
+
+        assert isinstance(event, JobProgressEvent)
+        assert event.progress == 0.75
+
+    def test_client_notification_to_event_experiment_updated(self, client):
+        """Test client converts notification to ExperimentUpdatedEvent"""
+        from experimaestro.scheduler.state_status import ExperimentUpdatedEvent
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "ExperimentUpdatedEvent",
+                "data": {
+                    "experiment_id": "myexp",
+                    "timestamp": 1704067260.0,
+                },
+            },
+        )
+
+        assert isinstance(event, ExperimentUpdatedEvent)
+        assert event.experiment_id == "myexp"
+
+    def test_client_notification_to_event_service_added(self, client):
+        """Test client converts notification to ServiceAddedEvent"""
+        from experimaestro.scheduler.state_status import ServiceAddedEvent
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "ServiceAddedEvent",
+                "data": {
+                    "experiment_id": "myexp",
+                    "service_id": "svc123",
+                    "run_id": "run_001",
+                    "description": "Test service",
+                    "service_class": "mymodule.MyService",
+                    "state_dict": {"port": 8080},
+                    "timestamp": 1704067260.0,
+                },
+            },
+        )
+
+        assert isinstance(event, ServiceAddedEvent)
+        assert event.service_id == "svc123"
+        assert event.state_dict == {"port": 8080}
+
+    def test_client_notification_unknown_event_type(self, client):
+        """Test client handles unknown event type gracefully"""
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "UnknownEventType",
+                "data": {"foo": "bar"},
+            },
+        )
+
+        # Should return None for unknown event types
+        assert event is None
+
+    def test_client_notification_non_state_event(self, client):
+        """Test client handles non-state notifications"""
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        # SHUTDOWN notifications are handled separately
+        event = client._notification_to_event(
+            NotificationMethod.SHUTDOWN.value,
+            {"reason": "test"},
+        )
+
+        assert event is None
+
+
+# =============================================================================
 # Error Handling Tests
 # =============================================================================
+
+
+class TestWorkspaceToServerEventFlow:
+    """Integration tests for event flow from WorkspaceStateProvider to SSH Server
+
+    These tests verify the full event flow:
+    1. Event file is written by experiment/job
+    2. WorkspaceStateProvider detects the event
+    3. WorkspaceStateProvider notifies listeners (including SSH server)
+    4. SSH server serializes and sends notification to client
+    """
+
+    def test_listener_receives_job_state_changed_event(self, tmp_path):
+        """Test that listener receives JobStateChangedEvent when written to event file"""
+        import time
+        from experimaestro.scheduler.workspace_state_provider import (
+            WorkspaceStateProvider,
+        )
+        from experimaestro.scheduler.state_status import (
+            JobStateChangedEvent,
+            ExperimentEventWriter,
+        )
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
+        # Create workspace structure
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".events" / "experiments").mkdir(parents=True)
+        (workspace / "experiments" / "test_exp" / "run_001").mkdir(parents=True)
+
+        # Create a mock experiment
+        exp = MockExperiment(
+            workdir=workspace / "experiments" / "test_exp" / "run_001",
+            run_id="run_001",
+            status=ExperimentStatus.RUNNING,
+        )
+
+        # Write status.json
+        status_path = workspace / "experiments" / "test_exp" / "run_001" / "status.json"
+        status_path.write_text(json.dumps(exp.state_dict()))
+
+        # Create event writer for experiment
+        event_writer = ExperimentEventWriter(
+            experiment=exp,
+            workspace_path=workspace,
+        )
+
+        # Create symlink for "current" run
+        events_dir = workspace / ".events" / "experiments" / "test_exp"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        (events_dir / "current").symlink_to(
+            workspace / "experiments" / "test_exp" / "run_001"
+        )
+
+        # Create provider and register listener
+        received_events = []
+
+        def listener(event):
+            received_events.append(event)
+
+        # Use a new provider instance (not singleton) for testing
+        provider = WorkspaceStateProvider(workspace)
+        provider.add_listener(listener)
+
+        # Write an event
+        event = JobStateChangedEvent(
+            job_id="job123",
+            state="running",
+            timestamp=time.time(),
+        )
+        event_writer.write_event(event)
+        event_writer.flush()
+
+        # Give the watcher time to detect and process the event
+        time.sleep(0.5)
+
+        # Clean up
+        provider.close()
+        event_writer.close()
+
+        # Verify event was received
+        assert len(received_events) >= 1
+        # Find our event (there might be others)
+        job_events = [
+            e
+            for e in received_events
+            if isinstance(e, JobStateChangedEvent) and e.job_id == "job123"
+        ]
+        assert len(job_events) >= 1
+        assert job_events[0].state == "running"
+        # from_experiment should be True because it came from experiment events
+        assert job_events[0].from_experiment is True
+
+    def test_listener_receives_job_progress_event(self, tmp_path):
+        """Test that listener receives JobProgressEvent when written to event file"""
+        import time
+        from experimaestro.scheduler.workspace_state_provider import (
+            WorkspaceStateProvider,
+        )
+        from experimaestro.scheduler.state_status import (
+            JobProgressEvent,
+            ExperimentEventWriter,
+        )
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
+        # Create workspace structure
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".events" / "experiments").mkdir(parents=True)
+        (workspace / "experiments" / "test_exp" / "run_001").mkdir(parents=True)
+
+        # Create a mock experiment
+        exp = MockExperiment(
+            workdir=workspace / "experiments" / "test_exp" / "run_001",
+            run_id="run_001",
+            status=ExperimentStatus.RUNNING,
+        )
+
+        # Write status.json
+        status_path = workspace / "experiments" / "test_exp" / "run_001" / "status.json"
+        status_path.write_text(json.dumps(exp.state_dict()))
+
+        # Create event writer
+        event_writer = ExperimentEventWriter(
+            experiment=exp,
+            workspace_path=workspace,
+        )
+
+        # Create symlink for "current" run
+        events_dir = workspace / ".events" / "experiments" / "test_exp"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        (events_dir / "current").symlink_to(
+            workspace / "experiments" / "test_exp" / "run_001"
+        )
+
+        # Create provider and register listener
+        received_events = []
+
+        def listener(event):
+            received_events.append(event)
+
+        provider = WorkspaceStateProvider(workspace)
+        provider.add_listener(listener)
+
+        # Write a progress event
+        event = JobProgressEvent(
+            job_id="job456",
+            level=0,
+            progress=0.5,
+            desc="halfway",
+            timestamp=time.time(),
+        )
+        event_writer.write_event(event)
+        event_writer.flush()
+
+        # Give the watcher time to detect and process the event
+        time.sleep(0.5)
+
+        # Clean up
+        provider.close()
+        event_writer.close()
+
+        # Verify event was received
+        progress_events = [
+            e for e in received_events if isinstance(e, JobProgressEvent)
+        ]
+        assert len(progress_events) >= 1
+        assert any(e.job_id == "job456" and e.progress == 0.5 for e in progress_events)
 
 
 class TestErrorHandling:

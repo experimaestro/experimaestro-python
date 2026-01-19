@@ -462,17 +462,15 @@ class Scheduler(StateProvider, threading.Thread):
 
             # Create new reader for this workspace
             reader = EventReader(
-                [
-                    WatchedDirectory(
-                        path=jobs_dir,
-                        glob_pattern="*/event-*-*.jsonl",
-                        entity_id_extractor=job_entity_id_extractor,
-                    )
-                ]
+                WatchedDirectory(
+                    path=jobs_dir,
+                    glob_pattern="*/event-*-*.jsonl",
+                    entity_id_extractor=job_entity_id_extractor,
+                    on_created=self._on_job_created,
+                    on_event=self._on_job_event,
+                )
             )
-            reader.start_watching(
-                on_event=self._on_job_event,
-            )
+            reader.start_watching()
             self._job_event_readers[workspace_path] = reader
             logger.debug("Started job event reader for %s", jobs_dir)
 
@@ -496,16 +494,34 @@ class Scheduler(StateProvider, threading.Thread):
                     logger.debug("Stopped job event reader for %s", path)
                 self._job_event_readers.clear()
 
+    def _on_job_created(self, entity_id: str) -> bool:
+        """Handle new job discovery from EventReader.
+
+        Only follow jobs that this scheduler knows about (was submitted to it).
+
+        Args:
+            entity_id: Job entity ID in format "{task_id}:{job_id}"
+
+        Returns:
+            True if this scheduler should follow the job's events
+        """
+        # Parse entity_id (full_id) to get job_id
+        _task_id, job_id = BaseJob.parse_full_id(entity_id)
+        # Only follow jobs that this scheduler is managing
+        return job_id in self.jobs
+
     def _on_job_event(self, entity_id: str, event) -> None:
         """Handle job events from EventReader
 
         Updates job state from file-based events and notifies listeners.
 
         Args:
-            entity_id: The job ID
+            entity_id: Job entity ID in format "{task_id}:{job_id}" (same as full_id)
             event: The event (JobProgressEvent, JobStateChangedEvent, CarbonMetricsEvent)
         """
-        job = self.jobs.get(entity_id)
+        # Parse entity_id (full_id) to get job_id
+        _task_id, job_id = BaseJob.parse_full_id(entity_id)
+        job = self.jobs.get(job_id)
         if job is None:
             logger.debug(
                 "Job event for unknown job %s",

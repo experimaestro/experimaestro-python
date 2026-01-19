@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 from experimaestro.scheduler.interfaces import (
     BaseExperiment,
+    BaseJob,
     BaseService,
     JobState,
     STATE_NAME_TO_JOBSTATE,
@@ -90,21 +91,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Args:
             workspace_path: Path to workspace directory
         """
-        super().__init__()
+        super().__init__()  # Initializes job/experiment/service caches
         self.workspace_path = Path(workspace_path).resolve()
         self._experiments_dir = self.workspace_path / ".events" / "experiments"
-
-        # Experiment cache: (experiment_id, run_id) -> MockExperiment
-        # Only caches active experiments (those with event files)
-        self._experiment_cache: Dict[tuple[str, str], MockExperiment] = {}
-        self._experiment_cache_lock = threading.Lock()
-
-        # Job cache: job_id -> MockJob
-        # Shared cache for all jobs, updated directly by job events
-        self._job_cache: Dict[str, MockJob] = {}
-        self._job_cache_lock = threading.Lock()
-
-        # Service cache is initialized by OfflineStateProvider.__init__()
 
         # Event reader (with built-in watching capability)
         self._event_reader: Optional[EventReader] = None
@@ -119,24 +108,26 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """Start the event file watcher for experiments and jobs"""
         if self._event_reader is None:
             self._event_reader = EventReader(
-                [
-                    WatchedDirectory(path=self._experiments_dir),
-                    WatchedDirectory(
-                        path=self._jobs_dir,
-                        glob_pattern="*/event-*-*.jsonl",
-                        entity_id_extractor=job_entity_id_extractor,
-                    ),
-                ]
+                WatchedDirectory(
+                    path=self._experiments_dir,
+                    on_created=self._on_experiment_created,
+                    on_event=self._on_experiment_event,
+                    on_deleted=self._on_experiment_deleted,
+                ),
+                WatchedDirectory(
+                    path=self._jobs_dir,
+                    glob_pattern="*/event-*-*.jsonl",
+                    entity_id_extractor=job_entity_id_extractor,
+                    on_created=self._on_job_created,
+                    on_event=self._on_job_event,
+                    on_deleted=self._on_job_deleted,
+                ),
             )
             # Start buffering before watching to avoid race condition:
-            # events arriving before scan_existing_files completes should be
+            # events arriving before entity discovery completes should be
             # queued and processed after initial state is loaded
             self._event_reader.start_buffering()
-            self._event_reader.start_watching(
-                on_event=self._on_event,
-                on_deleted=self._on_deleted,
-            )
-            self._event_reader.scan_existing_files()
+            self._event_reader.start_watching()
             # Now flush any events that arrived during initialization
             self._event_reader.flush_buffer()
 
@@ -290,7 +281,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             )
 
         # Read and apply all events from events_count onwards
-        reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
+        reader = EventReader(WatchedDirectory(path=self._experiments_dir))
         events = reader.read_events_since_count(experiment_id, events_count)
 
         for event in events:
@@ -441,48 +432,138 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Clean up empty temp directory
         self._cleanup_event_files(temp_dir, [])
 
-    def _on_event(self, entity_id: str, event: EventBase) -> None:
-        """Unified callback for events from file watcher
+    # =========================================================================
+    # Experiment event callbacks
+    # =========================================================================
 
-        Uses event class hierarchy to determine how to handle events:
-        - ExperimentEventBase: update experiment status cache
-        - JobEventBase: update job cache directly
+    def _on_experiment_created(self, experiment_id: str) -> bool:
+        """Called when a new experiment is discovered. Pre-load into cache."""
+        logger.debug("Discovered experiment: %s", experiment_id)
+
+        # Get current run and pre-load experiment into cache
+        run_id = self.get_current_run(experiment_id)
+        if run_id is not None:
+            run_dir = self.workspace_path / "experiments" / experiment_id / run_id
+            if run_dir.exists():
+                exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+                if exp is not None:
+                    cache_key = (experiment_id, run_id)
+                    with self._experiment_cache_lock:
+                        self._experiment_cache[cache_key] = exp
+
+        return True  # Follow all experiments
+
+    def _on_experiment_event(self, experiment_id: str, event: EventBase) -> None:
+        """Handle experiment event
+
+        Experiment events include both ExperimentEventBase (experiment-level events)
+        and JobEventBase (job events written to experiment's event file).
         """
-        logger.debug("Received event for entity %s: %s", entity_id, event)
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
 
-        # Handle experiment events (update experiment status cache)
-        if isinstance(event, ExperimentEventBase):
-            experiment_id = entity_id
+        logger.debug("Received experiment event for %s: %s", experiment_id, event)
+
+        # Mark JobStateChangedEvent as coming from experiment events
+        if isinstance(event, JobStateChangedEvent):
+            event.from_experiment = True
+
+        # Update experiment status cache for all experiment events
+        # This includes JobStateChangedEvent which updates exp._job_states
+        if isinstance(event, (ExperimentEventBase, JobEventBase)):
             self._apply_event_to_cache(experiment_id, event)
 
-        # Handle job events (update job cache directly)
-        # Note: JobSubmittedEvent is both, but job is created when status loads
-        if isinstance(event, JobEventBase) and not isinstance(event, JobSubmittedEvent):
-            with self._job_cache_lock:
-                job = self._job_cache.get(event.job_id)
-                if job is not None:
-                    job.apply_event(event)
-
-        # Always forward to listeners
+        # Forward to listeners
         self._notify_state_listeners(event)
 
-    def _on_deleted(self, entity_id: str) -> None:
-        """Unified callback when event files are deleted"""
-        # Check if this is an experiment directory
-        if (self._experiments_dir / entity_id).exists() or self.get_current_run(
-            entity_id
-        ):
-            # Experiment event files deleted (experiment finalized)
-            experiment_id = entity_id
-            self._clear_experiment_cache(experiment_id)
-            run_id = self.get_current_run(experiment_id) or ""
-            self._notify_state_listeners(
-                ExperimentUpdatedEvent(experiment_id=experiment_id)
-            )
-            self._notify_state_listeners(
-                RunUpdatedEvent(experiment_id=experiment_id, run_id=run_id)
-            )
-        # Job deletion doesn't need special handling
+    def _on_experiment_deleted(self, experiment_id: str) -> None:
+        """Handle experiment event files deletion (experiment finalized)"""
+        self._clear_experiment_cache(experiment_id)
+        run_id = self.get_current_run(experiment_id) or ""
+        self._notify_state_listeners(
+            ExperimentUpdatedEvent(experiment_id=experiment_id)
+        )
+        self._notify_state_listeners(
+            RunUpdatedEvent(experiment_id=experiment_id, run_id=run_id)
+        )
+
+    # =========================================================================
+    # Job event callbacks
+    # =========================================================================
+
+    def _on_job_created(self, entity_id: str) -> bool:
+        """Called when a new job is discovered.
+
+        Args:
+            entity_id: Job entity ID in format "{task_id}:{job_id}" (same as full_id)
+        """
+        task_id, job_id = BaseJob.parse_full_id(entity_id)
+        logger.debug("Discovered job: %s (task: %s)", job_id, task_id)
+        return True  # Follow all jobs
+
+    def _on_job_event(self, entity_id: str, event: EventBase) -> None:
+        """Handle job event
+
+        Args:
+            entity_id: Job entity ID in format "{task_id}:{job_id}" (same as full_id)
+            event: The job event
+        """
+        task_id, job_id = BaseJob.parse_full_id(entity_id)
+        # entity_id is already in full_id format (task_id:job_id)
+        full_id = entity_id
+        logger.debug("Received job event for %s: %s", full_id, event)
+
+        if isinstance(event, JobEventBase):
+            with self._job_cache_lock:
+                job = self._job_cache.get(full_id)
+
+                if job is None:
+                    # Job not in cache - create/load it
+                    # This handles both JobSubmittedEvent and other events
+                    # (e.g., JobStateChangedEvent arriving without prior JobSubmittedEvent)
+                    job_path = self.workspace_path / "jobs" / task_id / job_id
+                    submit_time = None
+
+                    if isinstance(event, JobSubmittedEvent):
+                        # Use task_id from event if available (more reliable)
+                        if event.task_id:
+                            task_id = event.task_id
+                            full_id = BaseJob.make_full_id(task_id, job_id)
+                            job_path = self.workspace_path / "jobs" / task_id / job_id
+                        if event.timestamp:
+                            submit_time = datetime.fromtimestamp(event.timestamp)
+
+                    # Load from disk if exists, otherwise create minimal job
+                    if job_path.exists():
+                        job = self._mock_job_from_disk(job_path, task_id, job_id)
+                    else:
+                        job = MockJob(
+                            identifier=job_id,
+                            task_id=task_id,
+                            path=job_path,
+                            state="unscheduled",
+                            submittime=submit_time,
+                            starttime=None,
+                            endtime=None,
+                            progress=[],
+                            updated_at="",
+                        )
+                    self._job_cache[full_id] = job
+
+                # Apply the event to update job state
+                job.apply_event(event)
+
+        # Forward to listeners
+        self._notify_state_listeners(event)
+
+    def _on_job_deleted(self, entity_id: str) -> None:
+        """Handle job event files deletion
+
+        Args:
+            entity_id: Job entity ID in format "{task_id}:{job_id}"
+        """
+        # Job deletion doesn't need special handling - job remains in cache
+        # until explicitly removed or cache is cleared
+        pass
 
     @property
     def read_only(self) -> bool:
@@ -503,8 +584,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
     ) -> MockExperiment:
         """Get experiment from cache or load from disk
 
-        For active experiments (with event files), maintains an in-memory cache
-        that is updated when events arrive via the file watcher.
+        For active experiments (with event files), the cache is maintained by
+        the EventReader callbacks (on_created and on_event).
+
+        For non-active experiments (no event files), loads from disk directly.
 
         Args:
             experiment_id: Experiment identifier
@@ -512,35 +595,23 @@ class WorkspaceStateProvider(OfflineStateProvider):
             run_dir: Path to run directory
 
         Returns:
-            MockExperiment with all events applied
+            MockExperiment with current state
         """
         cache_key = (experiment_id, run_id)
 
         with self._experiment_cache_lock:
-            # Check cache first
+            # For active experiments, cache is kept up to date by EventReader
             if cache_key in self._experiment_cache:
                 return self._experiment_cache[cache_key]
 
-            # Load from disk using MockExperiment.from_disk
+            # For non-active experiments, load from disk
+            # (no event files means no pending events to apply)
             exp = MockExperiment.from_disk(run_dir, self.workspace_path)
             if exp is None:
-                # Create empty experiment if no status.json exists
                 exp = MockExperiment(
                     workdir=run_dir,
                     run_id=run_id,
                 )
-
-            # Apply pending events from event files
-            # Events are in experiments/{experiment_id}/events-{count}.jsonl
-            reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
-            events = reader.read_events_since_count(experiment_id, exp.events_count)
-            for event in events:
-                exp.apply_event(event)
-
-            # Only cache if experiment is active (has event files)
-            # This avoids caching finished experiments that won't change
-            if self._has_event_files(experiment_id):
-                self._experiment_cache[cache_key] = exp
 
             return exp
 
@@ -551,7 +622,13 @@ class WorkspaceStateProvider(OfflineStateProvider):
         return exp_events_dir.is_dir() and any(exp_events_dir.glob("events-*.jsonl"))
 
     def _apply_event_to_cache(self, experiment_id: str, event: EventBase) -> None:
-        """Apply an event to the cached experiment (called by EventFileWatcher)"""
+        """Apply an event to the cached experiment (called by EventFileWatcher)
+
+        For JobStateChangedEvent with from_experiment=True, also applies to
+        cached job to set _experiment_status.
+        """
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+
         run_id = self.get_current_run(experiment_id)
         if run_id is None:
             return
@@ -561,6 +638,21 @@ class WorkspaceStateProvider(OfflineStateProvider):
         with self._experiment_cache_lock:
             if cache_key in self._experiment_cache:
                 self._experiment_cache[cache_key].apply_event(event)
+
+        # Also apply JobStateChangedEvent to job cache to update _experiment_status
+        if isinstance(event, JobStateChangedEvent) and event.from_experiment:
+            job_id = event.job_id
+            # Find the job's task_id from the experiment's job_infos
+            with self._experiment_cache_lock:
+                exp = self._experiment_cache.get(cache_key)
+                if exp is not None:
+                    job_info = exp.job_infos.get(job_id)
+                    if job_info is not None:
+                        full_id = BaseJob.make_full_id(job_info.task_id, job_id)
+                        with self._job_cache_lock:
+                            job = self._job_cache.get(full_id)
+                            if job is not None:
+                                job.apply_event(event)
 
     def _clear_experiment_cache(self, experiment_id: str) -> None:
         """Clear cached experiment for an experiment (called when experiment finishes)"""
@@ -617,9 +709,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Returns:
             MockJob from cache or freshly loaded from disk
         """
+        full_id = BaseJob.make_full_id(task_id, job_id)
         with self._job_cache_lock:
-            if job_id in self._job_cache:
-                return self._job_cache[job_id]
+            if full_id in self._job_cache:
+                return self._job_cache[full_id]
 
             # Load from disk
             job_path = self.workspace_path / "jobs" / task_id / job_id
@@ -650,7 +743,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             if job.carbon_metrics is None:
                 job.carbon_metrics = self._load_carbon_metrics_for_job(job_id)
 
-            self._job_cache[job_id] = job
+            self._job_cache[full_id] = job
             return job
 
     # =========================================================================
@@ -973,6 +1066,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
             # Get job from cache or load from disk
             job = self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
 
+            # Set experiment status from tracked job states
+            exp_state = exp.get_job_state(job_id)
+            if exp_state is not None:
+                job._experiment_status = exp_state
+
             # Apply state filter on loaded job
             if state:
                 state_enum = STATE_NAME_TO_JOBSTATE.get(state)
@@ -1004,7 +1102,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if job_info is None:
             return None
 
-        return self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
+        job = self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
+
+        # Set experiment status from tracked job states
+        exp_state = exp.get_job_state(job_id)
+        if exp_state is not None:
+            job._experiment_status = exp_state
+
+        return job
 
     def get_all_jobs(
         self,
@@ -1135,7 +1240,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
             # Clear job from cache
             with self._job_cache_lock:
-                self._job_cache.pop(job.identifier, None)
+                self._job_cache.pop(job.full_id, None)
 
             # Emit state change event (unscheduled = job removed)
             from experimaestro.scheduler.state_status import JobStateChangedEvent
@@ -1283,17 +1388,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 if not run_dir.is_dir():
                     continue
 
-                # Load experiment from disk (with locking)
-                exp = MockExperiment.from_disk(run_dir, self.workspace_path)
-                if exp is None:
-                    continue
-
-                # Also apply pending events
-                # Events are in experiments/{experiment_id}/events-{count}.jsonl
-                reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
-                events = reader.read_events_since_count(experiment_id, exp.events_count)
-                for event in events:
-                    exp.apply_event(event)
+                # Use cached experiment (EventReader keeps it up to date)
+                exp = self._get_cached_experiment(experiment_id, latest_run_id, run_dir)
 
                 # Add all job paths from this run
                 for job_info in exp.job_infos.values():
@@ -1345,24 +1441,24 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     continue
 
                 experiment_id = exp_dir.name
+                current_run_id = self.get_current_run(experiment_id)
 
                 for run_dir in exp_dir.iterdir():
                     if not run_dir.is_dir() or run_dir.name.startswith("."):
                         continue
 
-                    # Load experiment from disk (with locking)
-                    exp = MockExperiment.from_disk(run_dir, self.workspace_path)
-                    if exp is None:
-                        continue
+                    run_id = run_dir.name
 
-                    # Also apply pending events
-                    # Events are in experiments/{experiment_id}/events-{count}.jsonl
-                    reader = EventReader([WatchedDirectory(path=self._experiments_dir)])
-                    events = reader.read_events_since_count(
-                        experiment_id, exp.events_count
-                    )
-                    for event in events:
-                        exp.apply_event(event)
+                    # Use cached experiment for current run (kept up to date by EventReader)
+                    # For historical runs, load from disk (no pending events)
+                    if run_id == current_run_id:
+                        exp = self._get_cached_experiment(
+                            experiment_id, run_id, run_dir
+                        )
+                    else:
+                        exp = MockExperiment.from_disk(run_dir, self.workspace_path)
+                        if exp is None:
+                            continue
 
                     # Add all job paths from this run
                     for job_info in exp.job_infos.values():
@@ -1605,9 +1701,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Clear caches
         self._clear_experiment_cache(experiment_id)
         with self._job_cache_lock:
-            job_ids_to_remove = [j.identifier for j in jobs]
-            for job_id in job_ids_to_remove:
-                self._job_cache.pop(job_id, None)
+            for job in jobs:
+                self._job_cache.pop(job.full_id, None)
 
         if errors:
             return False, f"Partial deletion: {'; '.join(errors)}"
@@ -1621,6 +1716,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
     def close(self) -> None:
         """Close the state provider and release resources"""
         self._stop_watcher()
+
+        # Clear caches (inherited from OfflineStateProvider)
+        self._clear_job_cache()
+        self._clear_experiment_cache_all()
+        self._clear_service_cache()
 
         with self._lock:
             if self.workspace_path in self._instances:

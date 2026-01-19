@@ -671,6 +671,137 @@ class TestEventWatcher:
 
 
 # =============================================================================
+# Tests: Job State from Job Events
+# =============================================================================
+
+
+class TestJobStateFromJobEvents:
+    """Tests for job state being updated from job event files.
+
+    This tests the scenario where:
+    1. status.json shows job as "waiting" (events_count=0)
+    2. Job event files contain JobStateChangedEvent with "running"
+    3. WorkspaceStateProvider should show the job as "running"
+    """
+
+    def test_job_state_updated_from_job_events(self, tmp_path):
+        """Job state should be updated from job event files, not just status.json
+
+        This test reproduces the bug where:
+        - status.json shows state="waiting", events_count=0
+        - .events/jobs/{task_id}/event-{job_id}-0.jsonl has JobStateChangedEvent(state="running")
+        - But WorkspaceStateProvider incorrectly shows the job as "waiting"
+        """
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        experiment_id = "test-exp"
+        run_id = "20260118_100000"
+        task_id = "my.test.Task"
+        job_id = "abc123def456"
+
+        # Create experiment with job info
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create status.json for experiment
+        exp_status = {
+            "version": 1,
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "events_count": 0,
+            "hostname": "test-host",
+            "started_at": "2026-01-18T10:00:00",
+            "ended_at": None,
+            "status": "running",
+            "finished_jobs": 0,
+            "failed_jobs": 0,
+            "dependencies": {},
+            "services": {},
+        }
+        (exp_dir / "status.json").write_text(json.dumps(exp_status))
+
+        # Create jobs.jsonl with job info
+        job_info = {
+            "job_id": job_id,
+            "task_id": task_id,
+            "tags": {},
+            "timestamp": 1768752000.0,
+        }
+        (exp_dir / "jobs.jsonl").write_text(json.dumps(job_info) + "\n")
+
+        # Create symlink for current run
+        symlinks_dir = workspace / ".events" / "experiments" / experiment_id
+        symlinks_dir.mkdir(parents=True, exist_ok=True)
+        symlink = symlinks_dir / "current"
+        target = Path("../../..") / "experiments" / experiment_id / run_id
+        symlink.symlink_to(target)
+
+        # Create job directory with status.json showing "waiting"
+        job_dir = workspace / "jobs" / task_id / job_id
+        xpm_dir = job_dir / ".experimaestro"
+        xpm_dir.mkdir(parents=True, exist_ok=True)
+
+        job_status = {
+            "job_id": job_id,
+            "task_id": task_id,
+            "path": str(job_dir),
+            "state": "waiting",
+            "failure_reason": None,
+            "submitted_time": "2026-01-18T10:00:00",
+            "events_count": 0,
+            "started_time": None,
+            "ended_time": None,
+            "exit_code": None,
+            "retry_count": 0,
+            "progress": [],
+            "process": {"type": "slurm", "pid": "12345"},
+        }
+        (xpm_dir / "status.json").write_text(json.dumps(job_status))
+
+        # Create job event file with "running" state
+        job_events_dir = workspace / ".events" / "jobs" / task_id
+        job_events_dir.mkdir(parents=True, exist_ok=True)
+
+        running_event = {
+            "timestamp": 1768752100.0,
+            "job_id": job_id,
+            "state": "running",
+            "failure_reason": None,
+            "submitted_time": None,
+            "started_time": "2026-01-18T10:01:40",
+            "ended_time": None,
+            "exit_code": None,
+            "retry_count": 0,
+            "progress": [],
+            "event_type": "JobStateChangedEvent",
+        }
+        event_file = job_events_dir / f"event-{job_id}-0.jsonl"
+        event_file.write_text(json.dumps(running_event) + "\n")
+
+        # Initialize provider - should discover job events and update state
+        provider = WorkspaceStateProvider(workspace)
+
+        try:
+            # Give EventReader time to process
+            time.sleep(0.5)
+
+            # Get jobs - should show "running" state from events
+            jobs = provider.get_jobs(experiment_id=experiment_id)
+
+            assert len(jobs) == 1, f"Expected 1 job, got {len(jobs)}"
+            job = jobs[0]
+
+            # This is the critical assertion - job should be "running", not "waiting"
+            assert job.state.name.lower() == "running", (
+                f"Expected job state 'running' from event file, "
+                f"but got '{job.state.name.lower()}' (probably from status.json)"
+            )
+        finally:
+            provider.close()
+
+
+# =============================================================================
 # Tests: Tags and Dependencies
 # =============================================================================
 
@@ -873,106 +1004,114 @@ class TestOrphanJobDetection:
 
 
 # =============================================================================
-# Tests: EventWriter Rotation
+# Tests: JobEventWriter Integration
 # =============================================================================
 
 
-class TestEventWriterRotation:
-    """Tests for EventWriter automatic file rotation"""
+class TestJobEventWriterIntegration:
+    """Integration tests for JobEventWriter with status.json
 
-    def test_event_writer_rotates_at_max_events(self, tmp_path):
-        """EventWriter should rotate to a new file after MAX_EVENTS_PER_FILE events"""
+    Note: Generic EventWriter tests are in test_events.py.
+    These tests specifically verify JobEventWriter behavior with job status files.
+    """
+
+    def test_job_event_writer_updates_status_on_first_event_and_rotation(
+        self, tmp_path
+    ):
+        """JobEventWriter should update status.json with events_count on first write and rotation
+
+        Flow:
+        1. Status file exists without events_count (job just started)
+        2. First event written -> status updated with events_count=0, event-{job_id}-0.jsonl created
+        3. Rotation happens -> status updated with events_count=1, event-{job_id}-1.jsonl created
+
+        When reading back, the reader uses events_count to know which event file to start from.
+        """
         from experimaestro.scheduler.state_status import (
-            EventWriter,
-            JobStateChangedEvent,
+            JobEventWriter,
+            JobProgressEvent,
         )
 
-        # Create a test EventWriter subclass with low rotation threshold
-        class TestEventWriter(EventWriter):
-            MAX_EVENTS_PER_FILE = 5  # Very low for testing
+        # Set up job directory structure
+        workspace_path = tmp_path
+        task_id = "my.task.TestTask"
+        job_id = "abc123"
+        job_path = workspace_path / "jobs" / task_id / job_id
 
-            def __init__(self, events_dir: Path):
-                super().__init__(initial_count=1)
-                self._events_dir = events_dir
-                self.rotation_counts = []
+        # Create initial status.json WITHOUT events_count (simulating job startup)
+        status_path = job_path / ".experimaestro" / "status.json"
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        initial_status = {
+            "job_id": job_id,
+            "task_id": task_id,
+            "state": "running",
+            # No events_count yet - will be added when first event is written
+        }
+        status_path.write_text(json.dumps(initial_status))
 
-            @property
-            def events_dir(self) -> Path:
-                return self._events_dir
-
-            def _on_rotate(self, new_count: int) -> None:
-                self.rotation_counts.append(new_count)
-
-        events_dir = tmp_path / ".events" / "test"
-        writer = TestEventWriter(events_dir)
-
-        try:
-            # Write 12 events (should trigger 2 rotations: at 5 and at 10)
-            for i in range(12):
-                event = JobStateChangedEvent(job_id=f"job-{i}", state="running")
-                writer.write_event(event)
-
-            # Should have rotated twice (5->6, 10->11)
-            assert len(writer.rotation_counts) == 2
-            assert writer.rotation_counts[0] == 2  # First rotation from count 1 to 2
-            assert writer.rotation_counts[1] == 3  # Second rotation from count 2 to 3
-
-            # Final count should be 3
-            assert writer._count == 3
-            assert writer._events_in_current_file == 2  # 12 - 5 - 5 = 2
-
-            # Verify files were created
-            assert (events_dir / "events-1.jsonl").exists()
-            assert (events_dir / "events-2.jsonl").exists()
-            assert (events_dir / "events-3.jsonl").exists()
-
-            # Verify event counts per file
-            with open(events_dir / "events-1.jsonl") as f:
-                assert len(f.readlines()) == 5
-            with open(events_dir / "events-2.jsonl") as f:
-                assert len(f.readlines()) == 5
-            with open(events_dir / "events-3.jsonl") as f:
-                assert len(f.readlines()) == 2
-        finally:
-            writer.close()
-
-    def test_event_writer_rotation_count_persisted(self, tmp_path):
-        """EventWriter rotation count should be accessible after each rotation"""
-        from experimaestro.scheduler.state_status import (
-            EventWriter,
-            JobStateChangedEvent,
-        )
-
-        class TestEventWriter(EventWriter):
-            MAX_EVENTS_PER_FILE = 3
-
-            def __init__(self, events_dir: Path):
-                super().__init__(initial_count=1)
-                self._events_dir = events_dir
-                self.counts_at_rotation = []
-
-            @property
-            def events_dir(self) -> Path:
-                return self._events_dir
-
-            def _on_rotate(self, new_count: int) -> None:
-                self.counts_at_rotation.append((self._count, new_count))
-
-        events_dir = tmp_path / ".events" / "test"
-        writer = TestEventWriter(events_dir)
+        # Create JobEventWriter with low rotation threshold for testing
+        original_max = JobEventWriter.MAX_EVENTS_PER_FILE
+        JobEventWriter.MAX_EVENTS_PER_FILE = 5  # Rotate after 5 events
 
         try:
-            # Write events to trigger rotation
-            for i in range(7):
-                event = JobStateChangedEvent(job_id=f"job-{i}", state="running")
+            writer = JobEventWriter(
+                workspace_path=workspace_path,
+                task_id=task_id,
+                job_id=job_id,
+                initial_count=0,
+                job_path=job_path,
+            )
+
+            # Verify no event files exist yet
+            events_dir = workspace_path / ".events" / "jobs" / task_id
+            assert not events_dir.exists() or not list(events_dir.glob("event-*.jsonl"))
+
+            # Write first event - should create event file and update status
+            event = JobProgressEvent(job_id=job_id, level=0, progress=0.1)
+            writer.write_event(event)
+
+            # Verify events_count=0 was written to status after first event
+            status_data = json.loads(status_path.read_text())
+            assert "events_count" in status_data, (
+                "events_count should be added to status.json after first event"
+            )
+            assert status_data["events_count"] == 0, (
+                f"events_count should be 0 after first event, got {status_data['events_count']}"
+            )
+
+            # Verify first event file was created
+            first_event_file = events_dir / f"event-{job_id}-0.jsonl"
+            assert first_event_file.exists(), "First event file should be created"
+
+            # Write 5 more events (total 6, triggers rotation after 5th)
+            for i in range(5):
+                event = JobProgressEvent(
+                    job_id=job_id, level=0, progress=(i + 2) / 10.0
+                )
                 writer.write_event(event)
 
-            # Check rotation history
-            assert len(writer.counts_at_rotation) == 2
-            assert writer.counts_at_rotation[0] == (1, 2)  # Before first rotate
-            assert writer.counts_at_rotation[1] == (2, 3)  # Before second rotate
-        finally:
+            # Verify rotation happened - events_count should be 1
+            status_data = json.loads(status_path.read_text())
+            assert status_data["events_count"] == 1, (
+                f"events_count should be 1 after rotation, got {status_data['events_count']}"
+            )
+
+            # Verify second event file was created
+            second_event_file = events_dir / f"event-{job_id}-1.jsonl"
+            assert second_event_file.exists(), (
+                "Second event file should be created after rotation"
+            )
+
+            # Verify event distribution: 5 in first file, 1 in second
+            with first_event_file.open() as f:
+                assert len(f.readlines()) == 5, "First file should have 5 events"
+            with second_event_file.open() as f:
+                assert len(f.readlines()) == 1, "Second file should have 1 event"
+
             writer.close()
+
+        finally:
+            JobEventWriter.MAX_EVENTS_PER_FILE = original_max
 
 
 class TestEventFileOrderingWithStartCount:

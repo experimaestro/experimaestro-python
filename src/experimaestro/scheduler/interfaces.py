@@ -420,7 +420,7 @@ class BaseJob:
     retry_count: int
     transient: "TransientMode"
     carbon_metrics: Optional["CarbonMetricsData"]
-    event_count: Optional[int]  # None = all events processed
+    events_count: Optional[int]  # None = all events processed
 
     #: The process
     _process: Optional["Process"]
@@ -436,7 +436,7 @@ class BaseJob:
         self.endtime: datetime | None = None
         self._process = None
         self._process_dict = None
-        self.event_count: int | None = None
+        self.events_count: int | None = None
 
     @property
     def state(self) -> JobState:
@@ -492,6 +492,46 @@ class BaseJob:
     def locator(self) -> str:
         """Full task locator (identifier): {task_id}/{identifier}"""
         return f"{self.task_id}/{self.identifier}"
+
+    @property
+    def full_id(self) -> str:
+        """Full job identifier: {task_id}:{identifier}
+
+        This is used as a unique key for jobs across the entire workspace,
+        combining the task identifier and job hash.
+        """
+        return f"{self.task_id}:{self.identifier}"
+
+    @staticmethod
+    def make_full_id(task_id: str, job_id: str) -> str:
+        """Create full job identifier from components.
+
+        This is a static helper for computing full_id when you don't have
+        a job instance yet (e.g., for cache lookups).
+
+        Args:
+            task_id: Task identifier
+            job_id: Job identifier (hash)
+
+        Returns:
+            Full job identifier in format "{task_id}:{job_id}"
+        """
+        return f"{task_id}:{job_id}"
+
+    @staticmethod
+    def parse_full_id(full_id: str) -> tuple[str, str]:
+        """Parse full job identifier into components.
+
+        Args:
+            full_id: Full job identifier in format "{task_id}:{job_id}"
+
+        Returns:
+            Tuple of (task_id, job_id)
+        """
+        parts = full_id.split(":", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        return "", full_id
 
     # -------------------------------------------------------------------------
     # Static path computation (for use without a job instance)
@@ -615,9 +655,9 @@ class BaseJob:
                 "is_final": carbon_metrics.is_final,
                 "written": carbon_metrics.written,
             }
-        # Include event_count only if not None (None = all events processed)
-        if self.event_count is not None:
-            result["event_count"] = self.event_count
+        # Include events_count only if not None (None = all events processed)
+        if self.events_count is not None:
+            result["events_count"] = self.events_count
         return result
 
     def process_state_dict(self) -> dict | None:
@@ -711,9 +751,9 @@ class BaseJob:
     def _cleanup_event_files(self) -> None:
         """Clean up job event files, applying pending events first.
 
-        1. If event_count is set, reads and applies events from that count onwards
+        1. If events_count is set, reads and applies events from that count onwards
         2. Removes event files at .events/jobs/{task_id}/event-{job_id}-*.jsonl
-        3. Sets event_count to None (all events processed)
+        3. Sets events_count to None (all events processed)
 
         Called when a job is about to restart to ensure clean state while
         preserving carbon metrics and other event-based data.
@@ -725,12 +765,12 @@ class BaseJob:
         workspace_path = self.path.parent.parent.parent
         events_dir = workspace_path / ".events" / "jobs" / self.task_id
 
-        # Apply pending events if event_count is set
-        if self.event_count is not None and events_dir.exists():
+        # Apply pending events if events_count is set
+        if self.events_count is not None and events_dir.exists():
             try:
-                reader = EventReader([WatchedDirectory(path=events_dir)])
+                reader = EventReader(WatchedDirectory(path=events_dir))
                 events = reader.read_events_since_count(
-                    self.identifier, self.event_count
+                    self.identifier, self.events_count
                 )
                 for event in events:
                     self.apply_event(event)
@@ -747,7 +787,7 @@ class BaseJob:
                 )
 
         # Mark all events as processed
-        self.event_count = None
+        self.events_count = None
 
         # Find and delete old event files for this job
         if events_dir.exists():
@@ -949,7 +989,9 @@ class BaseJob:
         # Always override fields from status_dict (None if not existent)
         self.exit_code = status_dict.get("exit_code")
         self.retry_count = status_dict.get("retry_count", 0)
-        self.event_count = status_dict.get("event_count")  # None = all events processed
+        self.events_count = status_dict.get(
+            "events_count"
+        )  # None = all events processed
 
         # Determine state from status dict
         state_str = status_dict.get("state", "").lower()
@@ -1216,7 +1258,6 @@ class BaseExperiment:
             "experiment_id": self.experiment_id,
             "run_id": self.run_id,
             "status": status_value,
-            "events_count": self.events_count,
             "hostname": self.hostname,
             "started_at": serialize_timestamp(self.started_at),
             "ended_at": serialize_timestamp(self.ended_at),

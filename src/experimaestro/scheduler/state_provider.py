@@ -391,17 +391,159 @@ class StateProvider(ABC):
 class OfflineStateProvider(StateProvider):
     """State provider for offline/cached state access
 
-    Provides state listener management and service caching shared by
+    Provides state listener management, job/experiment/service caching shared by
     WorkspaceStateProvider and SSHStateProviderClient.
 
     This is an intermediate class between StateProvider (the ABC) and concrete
-    implementations that need state listener support and service caching.
+    implementations that need state listener support and caching.
+
+    Caching strategy:
+    - Jobs and experiments are cached by their identifiers
+    - Events update cached objects in-place to maintain consistency
+    - get_jobs/get_experiments return cached objects when available
     """
 
     def __init__(self):
-        """Initialize offline state provider with service cache and listener management"""
+        """Initialize offline state provider with caches and listener management"""
         super().__init__()  # Initialize state listener management
         self._init_service_cache()
+        self._init_job_cache()
+        self._init_experiment_cache()
+
+    # =========================================================================
+    # Job caching methods
+    # =========================================================================
+
+    def _init_job_cache(self) -> None:
+        """Initialize job cache - call from subclass __init__"""
+        # Job cache: full_id (task_id:job_id) -> MockJob
+        self._job_cache: Dict[str, "MockJob"] = {}
+        self._job_cache_lock = threading.Lock()
+
+    def _clear_job_cache(self) -> None:
+        """Clear the job cache"""
+        with self._job_cache_lock:
+            self._job_cache.clear()
+
+    def _get_cached_job(self, full_id: str) -> Optional["MockJob"]:
+        """Get a job from cache by full_id"""
+        with self._job_cache_lock:
+            return self._job_cache.get(full_id)
+
+    def _cache_job(self, full_id: str, job: "MockJob") -> None:
+        """Add a job to the cache"""
+        with self._job_cache_lock:
+            self._job_cache[full_id] = job
+
+    # =========================================================================
+    # Experiment caching methods
+    # =========================================================================
+
+    def _init_experiment_cache(self) -> None:
+        """Initialize experiment cache - call from subclass __init__"""
+        # Experiment cache: (experiment_id, run_id) -> MockExperiment
+        self._experiment_cache: Dict[tuple[str, str], "MockExperiment"] = {}
+        self._experiment_cache_lock = threading.Lock()
+
+    def _clear_experiment_cache_all(self) -> None:
+        """Clear the entire experiment cache"""
+        with self._experiment_cache_lock:
+            self._experiment_cache.clear()
+
+    def _get_cached_experiment(
+        self, experiment_id: str, run_id: str
+    ) -> Optional["MockExperiment"]:
+        """Get an experiment from cache"""
+        with self._experiment_cache_lock:
+            return self._experiment_cache.get((experiment_id, run_id))
+
+    def _cache_experiment(
+        self, experiment_id: str, run_id: str, exp: "MockExperiment"
+    ) -> None:
+        """Add an experiment to the cache"""
+        with self._experiment_cache_lock:
+            self._experiment_cache[(experiment_id, run_id)] = exp
+
+    # =========================================================================
+    # Event handling methods
+    # =========================================================================
+
+    def apply_event(self, event: "EventBase") -> None:
+        """Apply an event to cached jobs and experiments
+
+        This method is called when events are received (from event files
+        or via notifications). It updates the cached objects in-place
+        to maintain state consistency.
+
+        Handles:
+        - JobStateChangedEvent: Updates job state in cache
+        - JobProgressEvent: Updates job progress in cache
+        - JobSubmittedEvent: Adds new job to cache
+        - ExperimentUpdatedEvent: Invalidates experiment cache
+
+        Subclasses may override this for additional logic (e.g., setting
+        from_experiment flag in WorkspaceStateProvider).
+        """
+        from experimaestro.scheduler.state_status import (
+            JobStateChangedEvent,
+            JobProgressEvent,
+            JobSubmittedEvent,
+            ExperimentUpdatedEvent,
+        )
+        from experimaestro.scheduler.interfaces import BaseJob
+
+        # Handle job state/progress events
+        if isinstance(event, (JobStateChangedEvent, JobProgressEvent)):
+            job_id = event.job_id
+            with self._job_cache_lock:
+                # Find job in cache by job_id
+                for full_id, job in self._job_cache.items():
+                    if job.identifier == job_id:
+                        job.apply_event(event)
+                        logger.debug(
+                            "Applied %s to cached job %s",
+                            type(event).__name__,
+                            full_id,
+                        )
+                        break
+
+        # Handle job submitted event - add to cache if we have task_id
+        elif isinstance(event, JobSubmittedEvent):
+            if event.task_id:
+                full_id = BaseJob.make_full_id(event.task_id, event.job_id)
+                with self._job_cache_lock:
+                    if full_id not in self._job_cache:
+                        # Create a minimal MockJob for tracking
+                        job = MockJob(
+                            identifier=event.job_id,
+                            task_id=event.task_id,
+                            path=None,
+                            state="scheduled",
+                            submittime=None,
+                            starttime=None,
+                            endtime=None,
+                            progress=[],
+                            updated_at="",
+                        )
+                        self._job_cache[full_id] = job
+                        logger.debug("Added job %s to cache from event", full_id)
+
+        # Handle experiment events - invalidate cache to force refresh
+        elif isinstance(event, ExperimentUpdatedEvent):
+            with self._experiment_cache_lock:
+                keys_to_remove = [
+                    k for k in self._experiment_cache if k[0] == event.experiment_id
+                ]
+                for key in keys_to_remove:
+                    del self._experiment_cache[key]
+
+    def _apply_event_to_cache(self, event: "EventBase") -> None:
+        """Apply an event to cached jobs/experiments
+
+        Convenience method that delegates to apply_event.
+        Used by subclasses when handling notifications.
+        """
+        self.apply_event(event)
 
     # =========================================================================
     # Service caching methods
@@ -517,7 +659,10 @@ class MockJob(BaseJob):
     This class is used when loading job information from the database,
     as opposed to live Job instances which are created during experiment runs.
 
-    Note: apply_event is inherited from BaseJob - no override needed.
+    State resolution:
+    - If _has_event_state is True, return _state (from job events)
+    - Else if _experiment_status is set, return _experiment_status (from experiment)
+    - Else return UNSCHEDULED
     """
 
     def __init__(
@@ -542,8 +687,18 @@ class MockJob(BaseJob):
         self.identifier = identifier
         self.task_id = task_id
         self.path = path
+
+        # Experiment-provided status (fallback when no job events)
+        self._experiment_status: JobState | None = None
+        # Track if state was set from job events (takes priority)
+        self._has_event_state: bool = False
+
         # Convert state name to JobState instance
-        self.state = STATE_NAME_TO_JOBSTATE.get(state, JobState.UNSCHEDULED)
+        initial_state = STATE_NAME_TO_JOBSTATE.get(state, JobState.UNSCHEDULED)
+        if initial_state != JobState.UNSCHEDULED:
+            # State was explicitly provided (from disk), mark as having state
+            self._state = initial_state
+            self._has_event_state = True
         # Set failure_reason on the state object
         if failure_reason is not None:
             self._state.failure_reason = failure_reason
@@ -557,6 +712,67 @@ class MockJob(BaseJob):
         self.transient = transient
         self._process_dict = process
         self.carbon_metrics = carbon_metrics
+
+    @property
+    def state(self) -> JobState:
+        """Get job state with fallback chain.
+
+        Priority:
+        1. _state if set from job events (_has_event_state=True)
+        2. _experiment_status if set by experiment
+        3. UNSCHEDULED as default
+        """
+        if self._has_event_state:
+            return self._state
+        if self._experiment_status is not None:
+            return self._experiment_status
+        return JobState.UNSCHEDULED
+
+    @state.setter
+    def state(self, new_state: JobState):
+        """Set state and mark as having event state."""
+        self._has_event_state = True
+        self.set_state(new_state)
+
+    def set_state(
+        self,
+        new_state: JobState,
+        *,
+        loading: bool = False,
+    ):
+        """Override to track when state is set from disk loading.
+
+        Any non-UNSCHEDULED state indicates a real state that should be used.
+        """
+        if new_state != JobState.UNSCHEDULED:
+            self._has_event_state = True
+        super().set_state(new_state, loading=loading)
+
+    def apply_event(self, event: "EventBase") -> None:
+        """Apply a job event to update this job's state.
+
+        Overrides BaseJob.apply_event to handle from_experiment flag:
+        - from_experiment=False (job events): high priority, sets _has_event_state
+        - from_experiment=True (experiment events): low priority, only sets _experiment_status
+        """
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+
+        if isinstance(event, JobStateChangedEvent):
+            if event.from_experiment:
+                # Event from experiment events - only update _experiment_status
+                # This is lower priority than job events
+                job_state = STATE_NAME_TO_JOBSTATE.get(
+                    event.state, JobState.UNSCHEDULED
+                )
+                self._experiment_status = job_state
+                # Don't call parent - we only want to update _experiment_status
+                return
+            else:
+                # Event from job events - high priority
+                self._has_event_state = True
+
+        # Call parent implementation for non-experiment events
+        super().apply_event(event)
 
     def process_state_dict(self) -> dict | None:
         """Get process state as dictionary."""
@@ -681,6 +897,11 @@ class MockExperiment(BaseExperiment):
 
     It stores all experiment state including jobs, services, tags,
     dependencies, and event tracking (replaces StatusData).
+
+    Job state tracking:
+    - _job_states: Dict[str, JobState] tracks the latest known state of each job
+      from experiment events (JobStateChangedEvent). This is used to provide
+      _experiment_status to MockJob instances when they are loaded.
     """
 
     def __init__(
@@ -701,6 +922,7 @@ class MockExperiment(BaseExperiment):
         failed_jobs: int = 0,
         run_tags: Optional[set[str]] = None,
         carbon_impact: Optional["CarbonImpactData"] = None,
+        job_states: Optional[Dict[str, JobState]] = None,
     ):
         self.workdir = workdir
         self.run_id = run_id
@@ -717,6 +939,8 @@ class MockExperiment(BaseExperiment):
         self._failed_jobs = failed_jobs
         self._run_tags = run_tags or set()
         self._carbon_impact = carbon_impact
+        # Track job states from experiment events
+        self._job_states: Dict[str, JobState] = job_states or {}
 
     @property
     def experiment_id(self) -> str:
@@ -785,6 +1009,17 @@ class MockExperiment(BaseExperiment):
     @property
     def failed_jobs(self) -> int:
         return self._failed_jobs
+
+    def get_job_state(self, job_id: str) -> JobState | None:
+        """Get the tracked state of a job from experiment events.
+
+        Args:
+            job_id: The job identifier
+
+        Returns:
+            JobState if tracked, None otherwise
+        """
+        return self._job_states.get(job_id)
 
     # state_dict() is inherited from BaseExperiment
 
@@ -945,6 +1180,10 @@ class MockExperiment(BaseExperiment):
                 self._services[event.service_id]._state_name = event.state
 
         elif isinstance(event, JobStateChangedEvent):
+            # Track individual job states
+            job_state = STATE_NAME_TO_JOBSTATE.get(event.state, JobState.UNSCHEDULED)
+            self._job_states[event.job_id] = job_state
+
             # Update finished/failed counters when jobs complete
             if event.state == "done":
                 self._finished_jobs += 1

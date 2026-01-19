@@ -332,6 +332,7 @@ class SSHStateProviderClient(OfflineStateProvider):
     - Async request/response handling with futures
     - Server push notifications converted to EventBases
     - On-demand rsync for specific paths (used by services like TensorboardService)
+    - Job caching with event-driven updates (similar to WorkspaceStateProvider)
     """
 
     def __init__(
@@ -392,6 +393,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._pending_events: List[EventBase] = []
         self._pending_events_lock = threading.Lock()
         self._notify_interval = 2.0  # Seconds between notification batches
+
+        # Job and experiment caches are inherited from OfflineStateProvider
 
     def connect(self, timeout: float = 30.0):
         """Establish SSH connection and start remote server
@@ -527,6 +530,10 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Clear service cache (using base class method)
         self._clear_service_cache()
 
+        # Clear job and experiment caches (using inherited methods)
+        self._clear_job_cache()
+        self._clear_experiment_cache_all()
+
         # Clean up temporary cache directory
         self._cleanup_temp_dir()
 
@@ -643,6 +650,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Handle a notification from the server
 
         Queues events for throttled delivery to avoid flooding the UI.
+        Also applies events to cached jobs/experiments for state consistency.
         """
         method = notification.method
         params = notification.params
@@ -652,6 +660,9 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Convert notification to EventBase and queue for throttled delivery
         event = self._notification_to_event(method, params)
         if event:
+            # Apply event to cached objects (like WorkspaceStateProvider does)
+            self._apply_event_to_cache(event)
+
             with self._pending_events_lock:
                 self._pending_events.append(event)
 
@@ -1020,7 +1031,25 @@ class SSHStateProviderClient(OfflineStateProvider):
     # -------------------------------------------------------------------------
 
     def _dict_to_job(self, d: Dict) -> MockJob:
-        """Convert a dictionary to a MockJob using from_state_dict"""
+        """Convert a dictionary to a MockJob using from_state_dict
+
+        Uses job cache to return the same MockJob instance for the same job,
+        allowing events to update the cached object and keep state in sync.
+        """
+        # Get job identifiers for cache lookup
+        job_id = d.get("identifier", "")
+        task_id = d.get("task_id", "")
+        full_id = BaseJob.make_full_id(task_id, job_id) if task_id and job_id else None
+
+        # Check cache first (using inherited method)
+        if full_id:
+            cached_job = self._get_cached_job(full_id)
+            if cached_job is not None:
+                # Update cached job with fresh data from server
+                # (server state is authoritative, but we keep the same object)
+                self._update_job_from_dict(cached_job, d)
+                return cached_job
+
         # Translate remote path to local cache path
         if d.get("path"):
             remote_path = d["path"]
@@ -1031,10 +1060,64 @@ class SSHStateProviderClient(OfflineStateProvider):
                 d["path"] = Path(remote_path)
 
         # Note: timestamp conversion is handled by MockJob.from_state_dict
-        return MockJob.from_state_dict(d, self.local_cache_dir)
+        job = MockJob.from_state_dict(d, self.local_cache_dir)
+
+        # Add to cache (using inherited method)
+        if full_id:
+            self._cache_job(full_id, job)
+
+        return job
+
+    def _update_job_from_dict(self, job: MockJob, d: Dict) -> None:
+        """Update a cached MockJob with fresh data from server
+
+        This updates the job's state from server data while preserving
+        any event-driven state updates that may have arrived since.
+        """
+        from experimaestro.scheduler.interfaces import (
+            STATE_NAME_TO_JOBSTATE,
+            deserialize_to_datetime,
+        )
+
+        # Only update state from server if we don't have event-driven state
+        # (event state takes priority over server snapshot)
+        if not job._has_event_state:
+            state_str = d.get("state", "unscheduled")
+            job._state = STATE_NAME_TO_JOBSTATE.get(state_str, job._state)
+
+        # Update timestamps (these don't conflict with events)
+        if d.get("submittime"):
+            job.submittime = deserialize_to_datetime(d["submittime"])
+        if d.get("starttime"):
+            job.starttime = deserialize_to_datetime(d["starttime"])
+        if d.get("endtime"):
+            job.endtime = deserialize_to_datetime(d["endtime"])
+
+        # Update progress if provided
+        if d.get("progress"):
+            from experimaestro.notifications import get_progress_information_from_dict
+
+            job.progress = [
+                get_progress_information_from_dict(p) for p in d["progress"]
+            ]
 
     def _dict_to_experiment(self, d: Dict) -> MockExperiment:
-        """Convert a dictionary to a MockExperiment using from_state_dict"""
+        """Convert a dictionary to a MockExperiment using from_state_dict
+
+        Uses experiment cache to return the same MockExperiment instance,
+        allowing state to be tracked consistently.
+        """
+        experiment_id = d.get("experiment_id", "")
+        run_id = d.get("run_id", "")
+
+        # Check cache first (using inherited method)
+        if experiment_id and run_id:
+            cached_exp = self._get_cached_experiment(experiment_id, run_id)
+            if cached_exp is not None:
+                # Update cached experiment with fresh data from server
+                self._update_experiment_from_dict(cached_exp, d)
+                return cached_exp
+
         # Translate remote workdir to local cache path
         if d.get("workdir"):
             remote_path = d["workdir"]
@@ -1045,7 +1128,54 @@ class SSHStateProviderClient(OfflineStateProvider):
                 d["workdir"] = Path(remote_path)
 
         # Note: timestamp conversion is handled by MockExperiment.from_state_dict
-        return MockExperiment.from_state_dict(d, self.local_cache_dir)
+        exp = MockExperiment.from_state_dict(d, self.local_cache_dir)
+
+        # Add to cache (using inherited method)
+        if experiment_id and run_id:
+            self._cache_experiment(experiment_id, run_id, exp)
+
+        return exp
+
+    def _update_experiment_from_dict(self, exp: MockExperiment, d: Dict) -> None:
+        """Update a cached MockExperiment with fresh data from server"""
+        from experimaestro.scheduler.interfaces import (
+            ExperimentStatus,
+            deserialize_to_datetime,
+        )
+
+        # Update status
+        if d.get("status"):
+            try:
+                exp._status = ExperimentStatus(d["status"])
+            except ValueError:
+                pass
+
+        # Update counts
+        if "total_jobs" in d:
+            exp._total_jobs = d["total_jobs"]
+        if "finished_jobs" in d:
+            exp._finished_jobs = d["finished_jobs"]
+        if "failed_jobs" in d:
+            exp._failed_jobs = d["failed_jobs"]
+
+        # Update timestamps
+        if d.get("started_at"):
+            exp._started_at = deserialize_to_datetime(d["started_at"])
+        if d.get("ended_at"):
+            exp._ended_at = deserialize_to_datetime(d["ended_at"])
+
+        # Update job_infos (for tracking job states)
+        if d.get("job_infos"):
+            from experimaestro.scheduler.interfaces import ExperimentJobInformation
+
+            for job_id, info_dict in d["job_infos"].items():
+                if job_id not in exp.job_infos:
+                    exp.job_infos[job_id] = ExperimentJobInformation(
+                        job_id=job_id,
+                        task_id=info_dict.get("task_id", ""),
+                        tags=info_dict.get("tags", {}),
+                        timestamp=info_dict.get("timestamp"),
+                    )
 
     def _dict_to_service(self, d: Dict) -> SSHMockService:
         """Convert a dictionary to an SSHMockService

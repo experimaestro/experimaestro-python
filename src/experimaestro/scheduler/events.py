@@ -1,41 +1,35 @@
-"""Filesystem-based state tracking for experiments
+"""Event I/O for experiment state tracking
 
-This module provides event and status file handling for tracking experiment state
-without using a database. It replaces the SQLite/peewee-based state tracking.
+This module provides classes for reading and writing events to JSONL files.
+It is used for tracking experiment and job state without using a database.
 
 Key components:
-- Event dataclasses: Serializable events for JSONL event files
 - EventWriter/EventReader: Base classes for event I/O
 - JobEventWriter: Job-specific event handling
-- ExperimentEventWriter/ExperimentEventReader: Experiment-specific event handling
+- ExperimentEventWriter: Experiment-specific event handling
+- WatchedDirectory: Configuration for watching event directories
 
 File structure:
 - workspace/.events/experiments/{experiment-id}/events-{count}.jsonl
 - workspace/.events/jobs/{task-id}/event-{job-id}-{count}.jsonl
-- workspace/experiments/{experiment-id}/{run-id}/status.json
-- workspace/jobs/{task-id}/{job-id}/.experimaestro/information.json
 """
 
 import json
 import logging
 import os
 import shutil
-import time
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from experimaestro.scheduler.polling import FileWatcher
 
-
 if TYPE_CHECKING:
     from experimaestro.scheduler.interfaces import BaseExperiment
+    from experimaestro.scheduler.state_status import EventBase, JobProgressEvent
 
-logger = logging.getLogger("xpm.state_status")
-
-# Status file version
-STATUS_VERSION = 1
+logger = logging.getLogger("xpm.events")
 
 
 # =============================================================================
@@ -114,262 +108,6 @@ def safe_link_or_copy(src: Path, dst: Path, use_hardlinks: bool = True) -> bool:
     # Fall back to copy
     shutil.copy2(src, dst)
     return False
-
-
-# =============================================================================
-# Event System
-# =============================================================================
-
-# Registry for event deserialization (auto-populated by __init_subclass__)
-EVENT_TYPES: dict[str, type["EventBase"]] = {}
-
-
-@dataclass
-class EventBase:
-    """Base class for all events
-
-    Events are lightweight - they carry only IDs, not object references.
-    Use StateProvider to fetch actual objects (BaseJob, BaseExperiment, etc.)
-    when needed.
-
-    Subclasses are automatically registered in EVENT_TYPES by their class name.
-    JSON serialization/deserialization is handled transparently via event_type field.
-    """
-
-    timestamp: float = field(default_factory=time.time)
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        # Register by class name
-        EVENT_TYPES[cls.__name__] = cls
-
-    @property
-    def event_type(self) -> str:
-        """Event type derived from class name"""
-        return self.__class__.__name__
-
-    def to_json(self) -> str:
-        """Serialize event to JSON string"""
-        d = asdict(self)
-        d["event_type"] = self.event_type
-        return json.dumps(d, separators=(",", ":"))
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "EventBase":
-        """Deserialize event from dictionary"""
-        event_type = d.get("event_type")
-        event_class = EVENT_TYPES.get(event_type, EventBase)
-        # Filter to only known fields for the event class
-        valid_fields = {f for f in event_class.__dataclass_fields__}
-        filtered = {k: v for k, v in d.items() if k in valid_fields}
-        return event_class(**filtered)
-
-    @classmethod
-    def get_class(cls, name: str) -> "type[EventBase] | None":
-        """Get an EventBase subclass by class name"""
-        return EVENT_TYPES.get(name)
-
-
-# -----------------------------------------------------------------------------
-# Event Base Classes (for filtering)
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class JobEventBase(EventBase):
-    """Base class for job-related events (have job_id)"""
-
-    job_id: str = ""
-
-
-@dataclass
-class ExperimentEventBase(EventBase):
-    """Base class for experiment-related events (have experiment_id)"""
-
-    experiment_id: str = ""
-
-
-@dataclass
-class ServiceEventBase(ExperimentEventBase):
-    """Base class for service-related events (have service_id)"""
-
-    service_id: str = ""
-
-
-# -----------------------------------------------------------------------------
-# Supporting Dataclasses
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class ProgressLevel:
-    """Progress information for a single level"""
-
-    level: int = 0
-    progress: float = 0.0
-    desc: Optional[str] = None
-
-    def to_dict(self) -> dict:
-        return {"level": self.level, "progress": self.progress, "desc": self.desc}
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ProgressLevel":
-        return cls(
-            level=d.get("level", 0),
-            progress=d.get("progress", 0.0),
-            desc=d.get("desc"),
-        )
-
-
-@dataclass
-class JobTag:
-    """A job tag (key-value pair)"""
-
-    key: str
-    value: str
-
-
-# -----------------------------------------------------------------------------
-# Job Events
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
-    """Event: Job was submitted to the scheduler
-
-    Fired when a job is added to an experiment run.
-    This is both a job event and an experiment event.
-    """
-
-    task_id: str = ""
-    run_id: str = ""
-    transient: int = 0
-    tags: list[JobTag] = field(default_factory=list)
-    depends_on: list[str] = field(default_factory=list)
-
-
-@dataclass
-class JobStateChangedEvent(JobEventBase):
-    """Event: Job state changed
-
-    Fired when a job's state changes (scheduled, running, done, error, etc.)
-    Timestamps are stored as ISO format strings for JSON serialization.
-
-    The from_experiment field distinguishes the source of the event:
-    - True: event came from experiment events (.events/experiments/)
-    - False: event came from job events (.events/jobs/)
-    This allows the state provider to prioritize job events over experiment events.
-    """
-
-    state: str = ""
-    failure_reason: Optional[str] = None
-    submitted_time: Optional[str] = None  # ISO format timestamp
-    started_time: Optional[str] = None  # ISO format timestamp
-    ended_time: Optional[str] = None  # ISO format timestamp
-    exit_code: Optional[int] = None
-    retry_count: int = 0
-    progress: list[ProgressLevel] = field(default_factory=list)
-    from_experiment: bool = False  # True if event came from experiment events
-
-
-@dataclass
-class JobProgressEvent(JobEventBase):
-    """Event: Job progress update
-
-    Written by the running job process to report progress.
-    """
-
-    level: int = 0
-    progress: float = 0.0
-    desc: Optional[str] = None
-
-
-@dataclass
-class CarbonMetricsEvent(JobEventBase):
-    """Event: Carbon metrics update during job execution.
-
-    Written periodically by the running job process to report environmental
-    impact metrics (CO2 emissions, energy consumption).
-    """
-
-    co2_kg: float = 0.0
-    """Cumulative CO2 equivalent emissions in kilograms."""
-
-    energy_kwh: float = 0.0
-    """Cumulative energy consumed in kilowatt-hours."""
-
-    cpu_power_w: float = 0.0
-    """Average CPU power consumption in watts."""
-
-    gpu_power_w: float = 0.0
-    """Average GPU power consumption in watts."""
-
-    ram_power_w: float = 0.0
-    """Average RAM power consumption in watts."""
-
-    duration_s: float = 0.0
-    """Duration of tracking in seconds."""
-
-    region: str = ""
-    """Region/country code used for carbon intensity."""
-
-    is_final: bool = False
-    """True if this is the final measurement (on job completion)."""
-
-    written: bool = False
-    """True if the carbon record was successfully written to CarbonStorage."""
-
-
-# -----------------------------------------------------------------------------
-# Experiment Events
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class ExperimentUpdatedEvent(ExperimentEventBase):
-    """Event: Experiment was created or updated"""
-
-    pass
-
-
-@dataclass
-class RunUpdatedEvent(ExperimentEventBase):
-    """Event: Experiment run was created or updated"""
-
-    run_id: str = ""
-
-
-@dataclass
-class RunCompletedEvent(ExperimentEventBase):
-    """Event: Experiment run completed"""
-
-    run_id: str = ""
-    status: str = "completed"
-    ended_at: str = ""
-
-
-# -----------------------------------------------------------------------------
-# Service Events
-# -----------------------------------------------------------------------------
-
-
-@dataclass
-class ServiceAddedEvent(ServiceEventBase):
-    """Event: Service was added to the experiment"""
-
-    run_id: str = ""
-    description: str = ""
-    service_class: str = ""
-    state_dict: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ServiceStateChangedEvent(ServiceEventBase):
-    """Event: Service state changed (STOPPED, STARTING, RUNNING, STOPPING)"""
-
-    run_id: str = ""
-    state: str = ""
 
 
 # =============================================================================
@@ -470,7 +208,7 @@ class EventWriter(ABC):
             raise ValueError("No permanent directory configured")
         return self._permanent_dir / f"event-{self._count}.jsonl"
 
-    def write_event(self, event: EventBase) -> None:
+    def write_event(self, event: "EventBase") -> None:
         """Write an event to the current event file
 
         If permanent storage is configured and hardlinks are supported,
@@ -756,12 +494,12 @@ class ExperimentEventWriter(EventWriter):
 
 
 # =============================================================================
-# Event Reader Class
+# Event Reader Classes
 # =============================================================================
 
 # Callback types for event watching
 # (entity_id, event) - entity_id is job_id or experiment_id
-EntityEventCallback = Callable[[str, EventBase], None]
+EntityEventCallback = Callable[[str, "EventBase"], None]
 # (entity_id,) - called when event files are deleted
 EntityDeletedCallback = Callable[[str], None]
 # Extracts entity_id from path
@@ -818,10 +556,6 @@ class WatchedDirectory:
         glob_pattern: Pattern for matching event files
         permanent_storage_resolver: Optional function that returns permanent storage
             path for an entity. Used for hardlink archiving and deletion recovery.
-        on_created: Callback when a new entity is discovered. Returns True to follow
-            this entity's events, False to ignore. If None, all entities are followed.
-        on_event: Callback for each event (entity_id, event).
-        on_deleted: Callback when entity's event files are deleted.
     """
 
     path: Path
@@ -831,10 +565,6 @@ class WatchedDirectory:
     glob_pattern: str = "*/events-*.jsonl"
     # For archiving and deletion handling:
     permanent_storage_resolver: PermanentStorageResolver | None = None
-    # Callbacks for entity lifecycle
-    on_created: Callable[[str], bool] | None = None
-    on_event: Callable[[str, EventBase], None] | None = None
-    on_deleted: Callable[[str], None] | None = None
 
 
 class EventReader:
@@ -847,26 +577,25 @@ class EventReader:
     - Incremental reading: read_new_events() - tracks file positions
     - File watching: start_watching(), stop_watching() - uses watchdog
     - Buffered mode: buffer events during initialization, flush after
-    - Entity tracking: on_created callback determines which entities to follow
     """
 
-    def __init__(self, *directories: WatchedDirectory):
+    def __init__(self, directories: list[WatchedDirectory]):
         """Initialize event reader
 
         Args:
-            directories: Directories to watch with their configurations
+            directories: List of directories to watch with their configurations
         """
-        self.directories = list(directories)
+        self.directories = directories
         # For incremental reading (live monitoring)
         self._file_positions: dict[Path, int] = {}
         # File watcher (watchdog + adaptive polling)
         self._file_watcher: FileWatcher | None = None
-        # Set of entity IDs being followed (entity_id -> dir_config)
-        self._followed_entities: dict[str, WatchedDirectory] = {}
+        self._event_callbacks: list[EntityEventCallback] = []
+        self._deleted_callbacks: list[EntityDeletedCallback] = []
         # Buffering mode: queue events instead of forwarding immediately
         self._buffering = False
-        self._event_buffer: list[tuple[str, WatchedDirectory, EventBase]] = []
-        self._deleted_buffer: list[tuple[str, WatchedDirectory]] = []
+        self._event_buffer: list[tuple[str, "EventBase"]] = []
+        self._deleted_buffer: list[str] = []
         # Cache for events_count from status.json (entity_dir -> count)
         self._events_count_cache: dict[Path, int] = {}
 
@@ -933,12 +662,14 @@ class EventReader:
             except OSError:
                 pass
 
-    def read_new_events(self) -> list[tuple[str, EventBase]]:
+    def read_new_events(self) -> list[tuple[str, "EventBase"]]:
         """Read new events since last call (incremental reading)
 
         Returns:
             List of (entity_id, event) tuples
         """
+        from experimaestro.scheduler.state_status import EventBase
+
         results = []
         for event_file in self.get_all_event_files():
             entity_id = self._extract_entity_id(event_file)
@@ -992,72 +723,24 @@ class EventReader:
         if path not in self._file_positions:
             self._file_positions[path] = 0
 
-    def _discover_entities(self) -> dict[str, tuple[WatchedDirectory, list[Path]]]:
-        """Discover all entities from existing event files.
-
-        Returns:
-            Dict mapping entity_id to (dir_config, list of event files)
-        """
-        entities: dict[str, tuple[WatchedDirectory, list[Path]]] = {}
-
-        for dir_config in self.directories:
-            if not dir_config.path.exists():
-                continue
-
-            for event_file in dir_config.path.glob(dir_config.glob_pattern):
-                entity_id = dir_config.entity_id_extractor(event_file)
-                if entity_id:
-                    if entity_id not in entities:
-                        entities[entity_id] = (dir_config, [])
-                    entities[entity_id][1].append(event_file)
-
-        # Sort event files by name (which includes the count)
-        for entity_id, (dir_config, files) in entities.items():
-            files.sort(key=lambda p: p.name)
-
-        return entities
-
-    def _register_entity(self, entity_id: str, dir_config: WatchedDirectory) -> bool:
-        """Register an entity to be followed.
-
-        Calls on_created callback if present. Returns True if entity should be followed.
+    def start_watching(
+        self,
+        on_event: Optional[EntityEventCallback] = None,
+        on_deleted: Optional[EntityDeletedCallback] = None,
+    ) -> None:
+        """Start watching for file changes using FileWatcher
 
         Args:
-            entity_id: Entity identifier
-            dir_config: Directory configuration for this entity
-
-        Returns:
-            True if entity is now being followed, False if rejected
+            on_event: Callback called with (entity_id, event) for each new event
+            on_deleted: Callback called with (entity_id,) when event files are deleted
         """
-        if entity_id in self._followed_entities:
-            return True  # Already following
+        if on_event:
+            self._event_callbacks.append(on_event)
+        if on_deleted:
+            self._deleted_callbacks.append(on_deleted)
 
-        # Call on_created callback if present
-        if dir_config.on_created is not None:
-            if not dir_config.on_created(entity_id):
-                return False  # Callback rejected this entity
-
-        self._followed_entities[entity_id] = dir_config
-        return True
-
-    def start_watching(self) -> None:
-        """Start watching for file changes using FileWatcher.
-
-        Discovers existing entities, calls on_created for each, and replays
-        events for entities that should be followed.
-        """
         if self._file_watcher is not None:
             return  # Already watching
-
-        # Discover existing entities
-        entities = self._discover_entities()
-
-        # Register entities and replay events for followed ones
-        for entity_id, (dir_config, event_files) in entities.items():
-            if self._register_entity(entity_id, dir_config):
-                # Replay events from files
-                for event_file in event_files:
-                    self._replay_events_from_file(event_file, entity_id, dir_config)
 
         # Create FileWatcher with event file filter
         self._file_watcher = FileWatcher(
@@ -1084,76 +767,6 @@ class EventReader:
             self._file_watcher.stop()
             self._file_watcher = None
         logger.debug("Stopped watching all directories")
-
-    def follow(self, entity_id: str, dir_config: WatchedDirectory) -> bool:
-        """Start following an entity (e.g., when scheduler submits a new job).
-
-        If the entity already has event files, replays all events.
-        If the entity is already being followed, returns True immediately.
-
-        Note: This bypasses the on_created callback - use this for explicit
-        registration (e.g., scheduler submitting a job) rather than discovery.
-
-        Args:
-            entity_id: Entity identifier to follow
-            dir_config: Directory configuration for this entity
-
-        Returns:
-            True (always succeeds)
-        """
-        if entity_id in self._followed_entities:
-            return True  # Already following
-
-        # Register directly without calling on_created (explicit follow)
-        self._followed_entities[entity_id] = dir_config
-
-        # Replay any existing events for this entity
-        if dir_config.path.exists():
-            event_files = sorted(
-                dir_config.path.glob(dir_config.glob_pattern),
-                key=lambda p: p.name,
-            )
-            for event_file in event_files:
-                file_entity_id = dir_config.entity_id_extractor(event_file)
-                if file_entity_id == entity_id:
-                    self._replay_events_from_file(event_file, entity_id, dir_config)
-                    # Track file for future changes
-                    if self._file_watcher:
-                        self._file_watcher.add_file(event_file)
-
-        return True
-
-    def _replay_events_from_file(
-        self, path: Path, entity_id: str, dir_config: WatchedDirectory
-    ) -> None:
-        """Replay all events from a file, calling on_event for each.
-
-        Updates file position tracking so subsequent calls don't re-read.
-        """
-        try:
-            with path.open("r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event_dict = json.loads(line)
-                        event = EventBase.from_dict(event_dict)
-                        if self._buffering:
-                            self._event_buffer.append((entity_id, dir_config, event))
-                        elif dir_config.on_event:
-                            try:
-                                dir_config.on_event(entity_id, event)
-                            except Exception:
-                                logger.exception("Error in on_event callback")
-                    except json.JSONDecodeError:
-                        pass
-                # Mark file as fully read
-                self._file_positions[path] = f.tell()
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger.warning("Failed to replay events from %s: %s", path, e)
 
     def _extract_file_number(self, path: Path) -> int | None:
         """Extract the file number from event file name.
@@ -1185,16 +798,6 @@ class EventReader:
         if not entity_id:
             return
 
-        dir_config = self._find_dir_config(path)
-        if not dir_config:
-            return
-
-        # Check if this entity is being followed
-        if entity_id not in self._followed_entities:
-            # New entity - try to register it
-            if not self._register_entity(entity_id, dir_config):
-                return  # Entity rejected by on_created
-
         entity_dir = path.parent
         file_number = self._extract_file_number(path)
 
@@ -1216,14 +819,14 @@ class EventReader:
             for earlier_num in range(min_count, file_number):
                 earlier_path = entity_dir / f"events-{earlier_num}.jsonl"
                 if earlier_path.exists():
-                    self._process_single_file(earlier_path, entity_id, dir_config)
+                    self._process_single_file(earlier_path, entity_id)
 
-        self._process_single_file(path, entity_id, dir_config)
+        self._process_single_file(path, entity_id)
 
-    def _process_single_file(
-        self, path: Path, entity_id: str, dir_config: WatchedDirectory
-    ) -> None:
+    def _process_single_file(self, path: Path, entity_id: str) -> None:
         """Process a single event file and notify callbacks (or buffer)"""
+        from experimaestro.scheduler.state_status import EventBase
+
         last_pos = self._file_positions.get(path, 0)
         try:
             with path.open("r") as f:
@@ -1248,13 +851,14 @@ class EventReader:
                         event = EventBase.from_dict(event_dict)
                         if self._buffering:
                             # Queue event for later
-                            self._event_buffer.append((entity_id, dir_config, event))
-                        elif dir_config.on_event:
+                            self._event_buffer.append((entity_id, event))
+                        else:
                             # Forward immediately
-                            try:
-                                dir_config.on_event(entity_id, event)
-                            except Exception:
-                                logger.exception("Error in on_event callback")
+                            for callback in self._event_callbacks:
+                                try:
+                                    callback(entity_id, event)
+                                except Exception:
+                                    logger.exception("Error in event callback")
                     except json.JSONDecodeError:
                         pass
 
@@ -1284,13 +888,6 @@ class EventReader:
             deleted_path: The path of the deleted file (optional)
             dir_config: The WatchedDirectory config for this path (optional)
         """
-        # Only process if entity was being followed
-        if entity_id not in self._followed_entities:
-            return
-
-        # Use stored dir_config if not provided
-        if dir_config is None:
-            dir_config = self._followed_entities.get(entity_id)
 
         # Try to read remaining events from permanent storage
         if dir_config and dir_config.permanent_storage_resolver:
@@ -1300,29 +897,27 @@ class EventReader:
             events = self._read_events_from_permanent(permanent_dir, entity_id)
             for event in events:
                 if self._buffering:
-                    self._event_buffer.append((entity_id, dir_config, event))
-                elif dir_config.on_event:
-                    try:
-                        dir_config.on_event(entity_id, event)
-                    except Exception:
-                        logger.exception("Error in on_event callback")
+                    self._event_buffer.append((entity_id, event))
+                else:
+                    for callback in self._event_callbacks:
+                        try:
+                            callback(entity_id, event)
+                        except Exception:
+                            logger.exception("Error in event callback")
 
-        # Notify deletion callback
-        if dir_config:
-            if self._buffering:
-                self._deleted_buffer.append((entity_id, dir_config))
-            elif dir_config.on_deleted:
+        # Notify deletion callbacks
+        if self._buffering:
+            self._deleted_buffer.append(entity_id)
+        else:
+            for callback in self._deleted_callbacks:
                 try:
-                    dir_config.on_deleted(entity_id)
+                    callback(entity_id)
                 except Exception:
-                    logger.exception("Error in on_deleted callback")
-
-        # Remove from followed entities
-        self._followed_entities.pop(entity_id, None)
+                    logger.exception("Error in deleted callback")
 
     def _read_events_from_permanent(
         self, permanent_dir: Path, entity_id: str
-    ) -> list[EventBase]:
+    ) -> list["EventBase"]:
         """Read events from permanent storage directory
 
         Args:
@@ -1332,6 +927,8 @@ class EventReader:
         Returns:
             List of events read from permanent storage
         """
+        from experimaestro.scheduler.state_status import EventBase
+
         events = []
         if not permanent_dir.exists():
             return events
@@ -1364,45 +961,50 @@ class EventReader:
             )
         return events
 
+    def clear_callbacks(self) -> None:
+        """Clear all registered callbacks"""
+        self._event_callbacks.clear()
+        self._deleted_callbacks.clear()
+
     def start_buffering(self) -> None:
         """Start buffering events instead of forwarding to callbacks
 
-        Call this before start_watching() to ensure events arriving
-        during initialization are queued and not lost.
+        Use this during initialization to avoid race conditions.
+        Events will be queued and can be flushed with flush_buffer().
         """
         self._buffering = True
         self._event_buffer.clear()
         self._deleted_buffer.clear()
 
     def flush_buffer(self) -> None:
-        """Stop buffering and forward all buffered events to callbacks
+        """Flush buffered events to callbacks and stop buffering
 
-        Call this after initial state loading is complete.
+        Processes all queued events and deletions in order.
         """
         self._buffering = False
 
-        # Forward buffered events
-        for entity_id, dir_config, event in self._event_buffer:
-            if dir_config.on_event:
+        # Process buffered events
+        for entity_id, event in self._event_buffer:
+            for callback in self._event_callbacks:
                 try:
-                    dir_config.on_event(entity_id, event)
+                    callback(entity_id, event)
                 except Exception:
-                    logger.exception("Error in on_event callback")
+                    logger.exception("Error in event callback during flush")
 
-        # Forward buffered deletions
-        for entity_id, dir_config in self._deleted_buffer:
-            if dir_config.on_deleted:
+        # Process buffered deletions
+        for entity_id in self._deleted_buffer:
+            for callback in self._deleted_callbacks:
                 try:
-                    dir_config.on_deleted(entity_id)
+                    callback(entity_id)
                 except Exception:
-                    logger.exception("Error in on_deleted callback")
+                    logger.exception("Error in deleted callback during flush")
 
         self._event_buffer.clear()
         self._deleted_buffer.clear()
 
     def read_events_since_count(
         self, entity_id: str, start_count: int, base_dir: Optional[Path] = None
-    ) -> list[EventBase]:
+    ) -> list["EventBase"]:
         """Read events for an entity starting from a specific file count
 
         Args:
@@ -1413,6 +1015,8 @@ class EventReader:
         Returns:
             List of events from files starting at start_count
         """
+        from experimaestro.scheduler.state_status import EventBase
+
         events = []
 
         # Determine which directory to search
@@ -1442,15 +1046,76 @@ class EventReader:
                                 pass
             except OSError:
                 pass
+
             count += 1
+
+        return events
+
+    def read_job_events_since_count(
+        self, task_id: str, job_id: str, start_count: int
+    ) -> list["EventBase"]:
+        """Read events for a job starting from a specific file count
+
+        Job events use a different file naming convention than experiments:
+        - Job events: .events/jobs/{task_id}/event-{job_id}-{count}.jsonl
+
+        Args:
+            task_id: Task identifier
+            job_id: Job identifier
+            start_count: File count to start reading from
+
+        Returns:
+            List of events from files starting at start_count
+        """
+        from experimaestro.scheduler.state_status import EventBase
+
+        events = []
+
+        # Find the jobs directory in configured directories
+        jobs_dir = None
+        for dir_config in self.directories:
+            if "jobs" in str(dir_config.path):
+                jobs_dir = dir_config.path
+                break
+
+        if jobs_dir is None:
+            return events
+
+        # Job events are in: {jobs_dir}/{task_id}/event-{job_id}-{count}.jsonl
+        task_dir = jobs_dir / task_id
+        if not task_dir.exists():
+            return events
+
+        count = start_count
+        while True:
+            event_path = task_dir / f"event-{job_id}-{count}.jsonl"
+            if not event_path.exists():
+                break
+
+            try:
+                with event_path.open("r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                event_dict = json.loads(line)
+                                event = EventBase.from_dict(event_dict)
+                                events.append(event)
+                            except json.JSONDecodeError:
+                                pass
+            except OSError:
+                pass
+
+            count += 1
+
         return events
 
 
 class JobProgressReader:
-    """Convenience reader for job progress events
+    """Reads progress events from job event files
 
-    Reads progress events from a job's event files.
-    Used for monitoring job progress via CLI and scheduler.
+    This is a specialized reader for getting job progress information
+    from the workspace event files.
     """
 
     def __init__(self, job_path: Path):
@@ -1474,12 +1139,14 @@ class JobProgressReader:
             return []
         return sorted(self._events_dir.glob("events-*.jsonl"))
 
-    def read_progress_events(self) -> list[JobProgressEvent]:
+    def read_progress_events(self) -> list["JobProgressEvent"]:
         """Read all progress events from event files
 
         Returns:
             List of JobProgressEvent objects in chronological order
         """
+        from experimaestro.scheduler.state_status import JobProgressEvent
+
         events = []
         for event_file in self.get_event_files():
             try:
@@ -1506,12 +1173,14 @@ class JobProgressReader:
                 pass
         return events
 
-    def get_current_progress(self) -> dict[int, JobProgressEvent]:
+    def get_current_progress(self) -> dict[int, "JobProgressEvent"]:
         """Get current progress state per level
 
         Returns:
             Dict mapping level to the latest JobProgressEvent for that level
         """
+        from experimaestro.scheduler.state_status import JobProgressEvent
+
         progress: dict[int, JobProgressEvent] = {}
         for event in self.read_progress_events():
             progress[event.level] = event
@@ -1554,26 +1223,20 @@ __all__ = [
     # Hardlink utilities
     "supports_hardlinks",
     "safe_link_or_copy",
-    # Event classes
-    "EventBase",
-    "JobSubmittedEvent",
-    "JobStateChangedEvent",
-    "JobProgressEvent",
-    "ServiceAddedEvent",
-    "ServiceStateChangedEvent",
-    "RunCompletedEvent",
-    "EVENT_TYPES",
     # Event writer classes
     "EventWriter",
     "JobEventWriter",
     "ExperimentEventWriter",
-    # Event reader class
+    # Event reader classes
     "EventReader",
     "WatchedDirectory",
-    "PermanentStorageResolver",
-    "job_entity_id_extractor",
     "JobProgressReader",
-    # Callback types
+    # Callback and extractor types
     "EntityEventCallback",
     "EntityDeletedCallback",
+    "EntityIdExtractor",
+    "PermanentStorageResolver",
+    # Entity ID extractors
+    "default_entity_id_extractor",
+    "job_entity_id_extractor",
 ]
