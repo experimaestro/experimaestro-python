@@ -59,7 +59,7 @@ Tags allow to monitor specific experimental parameters.
 
 ### Tagging a value
 
-Tagging a value can be done easily by using the `tag` function from `experimaestro`:
+Tagging a value can be done easily by using the {py:func}`~experimaestro.tag` function from `experimaestro`:
 
 `tag(value: Union[str, int, float, bool])`
 
@@ -79,12 +79,12 @@ Adding a tag can be also be done by using a configuration instance method:
 
 ### Retrieving tags
 
-To retrieve tags, use the `tags` method().
+To retrieve tags, use the {py:meth}`~experimaestro.Config.tags` method.
 In the above example, `model.tags()` will return `{ "epochs": 100 }`
 
 ### Paths based on tags
 
-Use `tagspath(config: Config)` to create a unique path where
+Use {py:func}`~experimaestro.tagspath` to create a unique path where
 all the tags associated with configuration will be associated with
 their values. The keys are ordered to ensure the uniqueness of the path.
 
@@ -127,7 +127,7 @@ with experiment("...main experimental folder path...", "experiment ID", port=123
 
 Callbacks can be registered to accomplish some actions e.g. on task completion.
 
-- `task.on_completed(callback: Callable[[], None])` register a callback that is
+- {py:meth}`~experimaestro.Task.on_completed` registers a callback that is
   called when the task terminates successfully
 
 
@@ -136,7 +136,7 @@ Callbacks can be registered to accomplish some actions e.g. on task completion.
 ### Command Line Arguments
 
 You can easily define command line arguments with [click](https://click.palletsprojects.com)
-by using the `forwardoption` command
+by using the {py:func}`~experimaestro.click.forwardoption` decorator
 
 ```python
 from experimaestro import Config, Param

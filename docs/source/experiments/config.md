@@ -1,6 +1,6 @@
 # Configurations
 
-In Experimaestro, a configuration object is a fundamental concept used to specify parameters and settings for tasks and experiments:
+In Experimaestro, a configuration object ({py:class}`~experimaestro.Config`) is a fundamental concept used to specify parameters and settings for tasks and experiments:
 
 1. **Parameter Definition**: The configuration object defines the parameters
    needed for a task or experiment. These parameters can include data file
@@ -42,7 +42,7 @@ detailed description:
 
 ## Defining a configuration
 
-A configuration is defined whenever an object derives from `Config`.
+A configuration is defined whenever an object derives from {py:class}`~experimaestro.Config`.
 
 When an identifier is not given, it is computed as `__module__.__qualname__`. In that case,
 it is possible to shorten the definition using the `Config` class as a base class.
@@ -58,6 +58,8 @@ class MyModel(Config):
 
     gamma: Param[float]
 ```
+
+Here, {py:data}`~experimaestro.Param` is used to declare a parameter.
 :::
 
 defines a configuration with name `my.model` and one argument `gamma` that has the type `float`.
@@ -67,8 +69,8 @@ When `__xpmid__` is missing, the qualified name is used.
 
 ## Object hierarchy
 
-When deriving `B` from `Config`, experimaestro creates a **configuration
-object** `A.XPMConfig` from `ConfigMixin` and `A`. When calling the
+When deriving `B` from {py:class}`~experimaestro.Config`, experimaestro creates a **configuration
+object** `A.XPMConfig` from {py:class}`~experimaestro.core.objects.ConfigMixin` and `A`. When calling the
 configuration constructor `A.C(...)` or (`B.C(...)`), the returned object is of
 type `A.XPMConfig` or `B.XPMConfig`, which extends the original object with a
 configuration specific behavior.
@@ -103,7 +105,7 @@ outer2 = Outer.C() @ Inner.C(x=42)
 
 The operator finds the unique parameter in the outer configuration that can
 accept the inner configuration's type. If there are multiple matching
-parameters or none, a `ValueError` is raised.
+parameters or none, a {py:exc}`ValueError` is raised.
 
 ### Chaining compositions
 
@@ -147,7 +149,7 @@ result = Outer.C() @ (Middle.C() @ Inner.C(x=1))
 
 ### Ambiguity and errors
 
-The composition operator raises `ValueError` in two cases:
+The composition operator raises {py:exc}`ValueError` in two cases:
 
 1. **No matching parameter**: The outer configuration has no parameter that
    accepts the inner type
@@ -172,13 +174,13 @@ Ambiguous.C() @ Inner.C(x=1)
 ## Deprecating a configuration or attributes
 
 When a configuration is moved (or equivalently its `__xpmid__` changed), its signature
-changes, and thus the same tasks can be run twice. To avoid this, use the `@deprecate`
-annotation.
+changes, and thus the same tasks can be run twice. To avoid this, use the {py:func}`~experimaestro.deprecate`
+decorator.
 
 ### Simple deprecation (legacy pattern)
 
 For simple cases where the old and new configurations have the same parameters, use
-`@deprecate` with inheritance:
+{py:func}`~experimaestro.deprecate` with inheritance:
 
 :::{admonition} Example
 :class: example
@@ -338,7 +340,7 @@ these steps:
 - Pre-tasks are ran (if any, see below)
 
 Sometimes, it is necessary to postpone a part of the initialization of a configuration
-object because it depends on an external processing. In this case, the `initializer` decorator can
+object because it depends on an external processing. In this case, the {py:func}`~experimaestro.initializer` decorator can
 be used:
 
 ```python
@@ -395,7 +397,7 @@ class MyConfig(Config):
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument (more details below)
-- Default values can be specified using `field()`:
+- Default values can be specified using {py:class}`~experimaestro.field`:
     - `field(ignore_default=value)`: The default is `value`, and if the actual value equals the default, it won't be included in the signature computation. This allows adding new parameters without changing past experiment signatures.
     - `field(default=value)`: The default is `value`, but it's always included in the signature computation.
 
@@ -550,14 +552,14 @@ class Parent(Config):
 class Child(Parent):
     model: Param[AdvancedModel] = field(overrides=True)
 
-# ERROR - str is not compatible with int
+# ERROR - str is not compatible with int (raises TypeError)
 class BadChild(Parent):
-    value: Param[str] = field(overrides=True)  # TypeError
+    value: Param[str] = field(overrides=True)
 ```
 
 ### Constants
 
-Constants are special parameters that cannot be modified. They are useful to note that the
+Constants ({py:data}`~experimaestro.Constant`) are special parameters that cannot be modified. They are useful to note that the
 behavior of a configuration/task has changed, and thus that the signature should not be the
 same (as the result of the processing will differ).
 
@@ -573,7 +575,7 @@ class MyConfig(Config):
 
 Metadata are parameters which are ignored during the signature computation. For
 instance, the human readable name of a model would be a metadata. They are
-declared as parameters, but using the `Meta` type hint.
+declared as parameters, but using the {py:data}`~experimaestro.Meta` type hint.
 
 Example
 
@@ -588,7 +590,7 @@ class MyConfig(Config):
     count: Meta[type]
 ```
 
-It is also possible to dynamically change the type of an argument using the `setmeta` method:
+It is also possible to dynamically change the type of an argument using the {py:func}`~experimaestro.setmeta` function:
 
 ```python
 from experimaestro import setmeta
@@ -604,7 +606,7 @@ a = setmeta(A(), False)
 ### Path option
 
 It is possible to define special options that will be set
-to paths relative to the task directory. For instance,
+to paths relative to the task directory using {py:class}`~experimaestro.PathGenerator`. For instance,
 
 ```python
 from experimaestro import Config, Meta, PathGenerator, field
@@ -628,7 +630,7 @@ differ only in certain parameters. For example, when training a model with
 different numbers of iterations but the same learning rate, you might want
 all runs to share the same checkpoint directory.
 
-**Partial identifiers** allow you to define parameter subsets that compute partial
+**Partial identifiers** (using {py:func}`~experimaestro.partial` and {py:func}`~experimaestro.param_group`) allow you to define parameter subsets that compute partial
 identifiers by excluding certain parameter groups. This enables:
 
 - Sharing checkpoint directories across training runs with different iteration counts
@@ -871,13 +873,13 @@ class LeafImpl(Leaf, BaseImpl):
 (instance-based-configurations)=
 ## Instance-based configurations
 
-By default, two `Config` instances with identical parameters will have the same identifier. This is the desired behavior in most cases, as it ensures task deduplication and caching. However, in some scenarios, you need to distinguish between different instances even when their parameters are identical.
+By default, two {py:class}`~experimaestro.Config` instances with identical parameters will have the same identifier. This is the desired behavior in most cases, as it ensures task deduplication and caching. However, in some scenarios, you need to distinguish between different instances even when their parameters are identical.
 
-This is where `InstanceConfig` comes in. When a class derives from `InstanceConfig` instead of `Config`, each instance will have a unique identifier based on the order it appears during identifier computation.
+This is where {py:class}`~experimaestro.InstanceConfig` comes in. When a class derives from {py:class}`~experimaestro.InstanceConfig` instead of {py:class}`~experimaestro.Config`, each instance will have a unique identifier based on the order it appears during identifier computation.
 
 ### When to use InstanceConfig
 
-Use `InstanceConfig` when:
+Use {py:class}`~experimaestro.InstanceConfig` when:
 
 - **Shared vs. Separate Resources**: You need to distinguish between shared and separate instances of the same configuration (e.g., shared model weights vs. separate model instances)
 - **Multiple Identical Configurations**: The same configuration appears multiple times in a workflow, and each occurrence should be treated as distinct
@@ -921,12 +923,12 @@ assert shared_ensemble.__identifier__() != separate_ensemble.__identifier__()
 
 ### Backwards compatibility
 
-`InstanceConfig` is designed to be backwards compatible with existing experiments. The first occurrence of an `InstanceConfig` instance (with a given set of parameters) will have the same identifier as a regular `Config` would have. Only when a second instance with identical parameters is encountered does the instance order marker get added to the identifier.
+{py:class}`~experimaestro.InstanceConfig` is designed to be backwards compatible with existing experiments. The first occurrence of an {py:class}`~experimaestro.InstanceConfig` instance (with a given set of parameters) will have the same identifier as a regular {py:class}`~experimaestro.Config` would have. Only when a second instance with identical parameters is encountered does the instance order marker get added to the identifier.
 
-This means you can migrate existing configurations to `InstanceConfig` without invalidating previous experiments, as long as you were only using a single instance of each configuration.
+This means you can migrate existing configurations to {py:class}`~experimaestro.InstanceConfig` without invalidating previous experiments, as long as you were only using a single instance of each configuration.
 
 :::{warning}
-Be careful when migrating to `InstanceConfig` if your workflow previously created multiple instances with the same parameters. The identifiers will change for the second and subsequent instances.
+Be careful when migrating to {py:class}`~experimaestro.InstanceConfig` if your workflow previously created multiple instances with the same parameters. The identifiers will change for the second and subsequent instances.
 :::
 
 ### How it works

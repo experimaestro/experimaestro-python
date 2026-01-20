@@ -1,15 +1,17 @@
 import signal
-from typing import Set
-from experimaestro.scheduler import experiment
+from typing import Set, TYPE_CHECKING
 from experimaestro.utils import logger
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.experiment import experiment as Experiment
 
 
 class SignalHandler:
     def __init__(self):
-        self.experiments: Set["experiment"] = set()
+        self.experiments: Set["Experiment"] = set()
         self.original_sigint_handler = None
 
-    def add(self, xp: "experiment"):
+    def add(self, xp: "Experiment"):
         if not self.experiments:
             self.original_sigint_handler = signal.getsignal(signal.SIGINT)
 

@@ -104,7 +104,7 @@ def state_dict(self):
 ## Adding a service to an experiment
 
 Services are added to an experiment using the
-{meth}`~experimaestro.experiment.add_service` method. The method returns
+{py:meth}`~experimaestro.experiment.add_service` method. The method returns
 the same service instance, allowing you to use it immediately.
 
 ```python

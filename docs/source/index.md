@@ -65,7 +65,8 @@ faq
 maxdepth: 1
 caption: "Development"
 ---
-development/scheduler
+development/experiment
+development/api
 ```
 
 Experimaestro is a versatile tool for designing and managing complex workflows.

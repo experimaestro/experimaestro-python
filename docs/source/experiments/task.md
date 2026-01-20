@@ -1,9 +1,9 @@
 # Tasks
 
-A task is a special [configuration](./config.md) that can be:
+A task ({py:class}`~experimaestro.Task`) is a special [configuration](./config.md) that can be:
 
-1. Submitted to the task scheduler using `submit` (preparation of the experiment)
-1. Executed with the method `execute` (running a specific task within the experiment)
+1. Submitted to the task scheduler using {py:meth}`~experimaestro.Task.submit` (preparation of the experiment)
+1. Executed with the method {py:meth}`~experimaestro.Task.execute` (running a specific task within the experiment)
 
 :::{admonition} Defining a task
 :class: example
@@ -36,8 +36,8 @@ and some special variables are defined:
 
 Task outputs can be re-used by other tasks. It is thus important
 to properly define what is a task dependency (i.e. the task
-should be run before) or not. To do so, the `task_outputs` method
-of a `Task` takes one argument, `dep`, which can be used to mark a dependency
+should be run before) or not. To do so, the {py:meth}`~experimaestro.Task.task_outputs` method
+of a {py:class}`~experimaestro.Task` takes one argument, `dep`, which can be used to mark a dependency
 to the task.
 
 By default, the task configuration is marked as a dependency as follows:
@@ -122,7 +122,7 @@ class TaskB(Task):
 
 The second solution is particularly suited when wanting to restore an object
 state from disk, and we want to separate the loading mechanism from the
-configuration logic; in that case, `LightweightTask` (a `Config` which must be
+configuration logic; in that case, {py:class}`~experimaestro.LightweightTask` (a {py:class}`~experimaestro.Config` which must be
 subclassed) can be used.
 
 
@@ -167,7 +167,7 @@ Evaluate.C(model=model).submit(init_tasks=[model_loader])
 
 ## Submit hooks
 
-When a task is submitted, it is possible to modify the job/launcher environnement
+When a task is submitted, it is possible to modify the job/launcher environment using {py:class}`~experimaestro.core.types.SubmitHook`.
 
 ```python
 from experimaestro import Config
@@ -197,7 +197,7 @@ class IndexCollection(Config):
 (resumable-tasks)=
 ## Resumable Tasks
 
-For long-running tasks that may be interrupted by scheduler timeouts (e.g., SLURM job time limits), you can use `ResumableTask` instead of `Task`. Resumable tasks can automatically retry when they fail due to timeouts, allowing them to resume from checkpoints.
+For long-running tasks that may be interrupted by scheduler timeouts (e.g., SLURM job time limits), you can use {py:class}`~experimaestro.ResumableTask` instead of {py:class}`~experimaestro.Task`. Resumable tasks can automatically retry when they fail due to timeouts, allowing them to resume from checkpoints.
 
 :::{admonition} Defining a resumable task
 :class: example
@@ -249,7 +249,7 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
 
 ### Querying Remaining Time
 
-Resumable tasks can query the remaining time before a job timeout using the `remaining_time()` method. This is useful for deciding whether to start another iteration or checkpoint before the scheduler kills the job.
+Resumable tasks can query the remaining time before a job timeout using the {py:meth}`~experimaestro.ResumableTask.remaining_time` method. This is useful for deciding whether to start another iteration or checkpoint before the scheduler kills the job.
 
 :::{admonition} Using remaining_time()
 :class: example
@@ -279,7 +279,7 @@ class LongTraining(ResumableTask):
 ```
 :::
 
-The `remaining_time()` method returns:
+The {py:meth}`~experimaestro.ResumableTask.remaining_time` method returns:
 
 - **Remaining seconds** (as `float`): When running on a launcher with time limits (e.g., SLURM)
 - **`None`**: When there is no time limit, or the launcher doesn't support querying remaining time
@@ -295,7 +295,7 @@ The remaining time is cached internally, so repeated calls are efficient.
 
 ### Graceful Timeout
 
-Sometimes a task knows it won't have enough time to complete another processing step before the scheduler kills it (e.g., SLURM walltime). In this case, the task can raise `GracefulTimeout` to stop cleanly and trigger a retry.
+Sometimes a task knows it won't have enough time to complete another processing step before the scheduler kills it (e.g., SLURM walltime). In this case, the task can raise {py:class}`~experimaestro.GracefulTimeout` to stop cleanly and trigger a retry.
 
 :::{admonition} Using GracefulTimeout with remaining_time()
 :class: example
@@ -340,13 +340,13 @@ This is useful when:
 
 Callbacks can be registered to accomplish some actions e.g. on task completion.
 
-- `task.on_completed(callback: Callable[[], None])` register a callback that is
+- {py:meth}`~experimaestro.Task.on_completed` registers a callback that is
   called when the task terminates successfully
 
 (dynamic-task-outputs)=
 ## Dynamic Task Outputs
 
-For tasks that produce outputs during execution (e.g., checkpoints during training), you can use `watch_output` to register callbacks that are triggered when outputs are produced. This is particularly useful for triggering evaluation jobs on intermediate checkpoints.
+For tasks that produce outputs during execution (e.g., checkpoints during training), you can use {py:meth}`~experimaestro.Task.watch_output` to register callbacks that are triggered when outputs are produced. This is particularly useful for triggering evaluation jobs on intermediate checkpoints. The output methods use {py:data}`~experimaestro.DependentMarker` to mark dependencies.
 
 :::{admonition} Defining dynamic outputs
 :class: example
@@ -401,7 +401,7 @@ learn.submit()
 
 ### Key Features
 
-- **ResumableTask only**: Only `ResumableTask` can use `register_task_output` (checked at runtime)
+- **ResumableTask only**: Only {py:class}`~experimaestro.ResumableTask` can use {py:meth}`~experimaestro.core.objects.ConfigMixin.register_task_output` (checked at runtime)
 - **Automatic replay**: When a task is restarted, callbacks are replayed for previously produced outputs (events stored in `.experimaestro/task-outputs.jsonl`)
 - **Multiple callbacks**: Multiple callbacks can watch the same output method
 - **Separate thread**: Callbacks run in a dedicated worker thread
@@ -415,7 +415,7 @@ learn.submit()
 
 ## Lightweights tasks using `@cache`
 
-Sometimes, a configuration might need to compute some output that might be interesting to cache, but without relying on a fully-fledged task (because it can be done on the fly). In those cases, the annotation `@cache` can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
+Sometimes, a configuration might need to compute some output that might be interesting to cache, but without relying on a fully-fledged task (because it can be done on the fly). In those cases, the {py:func}`~experimaestro.cache` decorator can be used. Behind the curtain, a config cache is created (using the configuration unique identifier) and the `path` is locked (avoiding problems if the same configuration is used in two running tasks):
 
 ```python
 from pathlib import Path

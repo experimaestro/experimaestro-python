@@ -21,11 +21,12 @@ class ServiceListener:
 
 
 class ServiceState(Enum):
-    r"""State of a service lifecycle.
+    """State of a service lifecycle.
 
-    Services transition through these states:
-    STOPPED -> STARTING -> RUNNING -> STOPPING -> STOPPED
-                      \-> ERROR (if start fails)
+    Services transition through these states::
+
+        STOPPED -> STARTING -> RUNNING -> STOPPING -> STOPPED
+                           |-> ERROR (if start fails)
     """
 
     STOPPED = 0

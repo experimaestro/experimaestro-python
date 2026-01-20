@@ -216,7 +216,7 @@ The `dirty_git` option controls the behavior:
 |-------|-------------|
 | `ignore` | Don't check or warn about uncommitted changes |
 | `warn` | Log a warning if there are uncommitted changes (default) |
-| `error` | Raise a `DirtyGitError` exception and abort the experiment |
+| `error` | Raise a {py:class}`~experimaestro.DirtyGitError` exception and abort the experiment |
 
 #### YAML configuration
 

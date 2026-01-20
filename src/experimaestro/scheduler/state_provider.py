@@ -88,10 +88,10 @@ class StateProvider(ABC):
     and live (Scheduler) providers to be used interchangeably.
 
     Concrete implementations:
+
     - Scheduler: Live in-memory state from running experiments
-    - OfflineStateProvider: Base for cached/persistent state
-      - WorkspaceStateProvider: Filesystem-backed state
-      - SSHStateProviderClient: Remote SSH-based state
+    - OfflineStateProvider: Base for cached/persistent state (WorkspaceStateProvider,
+      SSHStateProviderClient)
 
     State listener management is provided by the base class with default implementations.
     """

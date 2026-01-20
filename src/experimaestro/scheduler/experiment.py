@@ -74,12 +74,12 @@ class StateListener:
     def __init__(
         self,
         event_writer: "ExperimentEventWriter",
-        experiment: "experiment",
+        xp: "experiment",
         experiment_id: str,
         run_id: str,
     ):
         self.event_writer = event_writer
-        self.experiment = experiment
+        self.xp = xp
         self.experiment_id = experiment_id
         self.run_id = run_id
 

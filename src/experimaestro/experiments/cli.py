@@ -21,7 +21,7 @@ from experimaestro.settings import find_workspace
 from experimaestro.utils.logging import setup_logging
 
 if TYPE_CHECKING:
-    from experimaestro.scheduler.experiment import experiment
+    from experimaestro.scheduler.experiment import experiment as Experiment
 
 logger = logging.getLogger("xpm.experiments.cli")
 
@@ -29,7 +29,7 @@ logger = logging.getLogger("xpm.experiments.cli")
 class ExperimentHelper:
     """Helper for experiments"""
 
-    xp: "experiment"
+    xp: "Experiment"
     """The experiment object"""
 
     #: Run function

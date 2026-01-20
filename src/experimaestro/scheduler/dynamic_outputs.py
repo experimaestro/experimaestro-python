@@ -24,7 +24,7 @@ from experimaestro.utils import logger
 if TYPE_CHECKING:
     from experimaestro.scheduler.jobs import Job
     from experimaestro.core.objects import WatchedOutput
-    from experimaestro.scheduler.experiment import experiment
+    from experimaestro.scheduler.experiment import experiment as Experiment
 
 
 @dataclass
@@ -384,7 +384,7 @@ class TaskOutputsWorker(threading.Thread):
     - Count updates are synchronized with the scheduler's event loop
     """
 
-    def __init__(self, xp: "experiment"):
+    def __init__(self, xp: "Experiment"):
         super().__init__(name="task-outputs-worker", daemon=True)
         self.queue: queue.Queue = queue.Queue()
         self.xp = xp

@@ -219,7 +219,7 @@ This reduces memory usage and allows for efficient streaming of job information.
 
 Lightweight job information is stored in a separate JSONL file (one JSON object per line):
 
-```jsonl
+```json
 {"job_id": "abc123", "task_id": "my.task.Train", "tags": {"experiment": "v1"}, "timestamp": 1736343025.0}
 {"job_id": "def456", "task_id": "my.task.Evaluate", "tags": {}, "timestamp": 1736343030.5}
 ```
@@ -235,10 +235,10 @@ Each record contains:
 While an experiment is running, events are streamed to a JSONL file at
 `.events/experiments/events-{count}@{experiment-id}.jsonl`:
 
-```jsonl
-{"type": "job_submitted", "job_id": "...", "task_id": "...", "timestamp": ...}
-{"type": "job_state_changed", "job_id": "...", "state": "running", "timestamp": ...}
-{"type": "service_added", "service_id": "...", "description": "...", "timestamp": ...}
+```json
+{"type": "job_submitted", "job_id": "abc123", "task_id": "my.task", "timestamp": 1736343025.0}
+{"type": "job_state_changed", "job_id": "abc123", "state": "running", "timestamp": 1736343030.5}
+{"type": "service_added", "service_id": "tensorboard", "description": "TensorBoard", "timestamp": 1736343035.0}
 ```
 
 When the experiment completes, events are consolidated into `status.json` and

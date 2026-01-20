@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from ..identifier import Identifier
     from ..partial import Partial
     from experimaestro.scheduler.base import Job
-    from experimaestro.scheduler.workspace import RunMode
     from experimaestro.scheduler.transient import TransientMode
     from experimaestro.launchers import Launcher
     from experimaestro.scheduler import Workspace
@@ -1775,7 +1774,7 @@ class ConfigMixin:
         *,
         workspace=None,
         launcher=None,
-        run_mode: "RunMode" = None,
+        run_mode: "experimaestro.scheduler.workspace.RunMode" = None,
         init_tasks: List["LightweightTask"] = [],
         max_retries: Optional[int] = None,
         transient: "TransientMode" = None,

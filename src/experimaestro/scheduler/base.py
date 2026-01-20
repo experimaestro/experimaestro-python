@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from experimaestro.settings import ServerSettings
     from experimaestro.scheduler.workspace import Workspace
     from experimaestro.connectors import Process
+    from experimaestro.scheduler.experiment import experiment as Experiment
 
 
 logger = logging.getLogger("xpm.scheduler")
@@ -154,7 +155,7 @@ class Scheduler(StateProvider, threading.Thread):
         return instance
 
     @staticmethod
-    def create(xp: "experiment" = None, name: str = "Global"):
+    def create(xp: "Experiment" = None, name: str = "Global"):
         """Create or get the scheduler instance
 
         Args:
@@ -166,7 +167,7 @@ class Scheduler(StateProvider, threading.Thread):
         """
         return Scheduler.instance()
 
-    def register_experiment(self, xp: "experiment"):
+    def register_experiment(self, xp: "Experiment"):
         """Register an experiment with the scheduler"""
         # Use experiment name as key (not workdir.name which is now run_id)
         key = xp.name
@@ -177,7 +178,7 @@ class Scheduler(StateProvider, threading.Thread):
 
         logger.debug("Registered experiment %s with scheduler", key)
 
-    def unregister_experiment(self, xp: "experiment"):
+    def unregister_experiment(self, xp: "Experiment"):
         """Unregister an experiment from the scheduler"""
         key = xp.name
         if key in self.experiments:
