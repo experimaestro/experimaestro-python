@@ -1442,19 +1442,21 @@ class Scheduler(StateProvider, threading.Thread):
         return self._dependencies_map.get(exp_run_key, {})
 
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
-        """Kill a running job.
+        """Kill a running or scheduled job.
 
-        For the scheduler, this is a live operation.
+        For the scheduler, this is a live operation. Works for both:
+        - RUNNING jobs: actively executing
+        - SCHEDULED jobs: submitted to launcher (e.g., SLURM pending queue)
 
         Raises:
             RuntimeError: If the job cannot be killed.
         """
         if not perform:
             # Just check if the job can be killed
-            return job.state == JobState.RUNNING
+            return job.state.running()
 
-        if job.state != JobState.RUNNING:
-            raise RuntimeError("Job is not running")
+        if not job.state.running():
+            raise RuntimeError("Job is not running or scheduled")
 
         # Get the actual Job from our jobs dict
         actual_job = self.jobs.get(job.identifier)
