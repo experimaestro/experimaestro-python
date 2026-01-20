@@ -186,6 +186,21 @@ markers = [
 dev = [
     "ruff>=0.8",
     "mkdocs>=1.6.1",
+    "vulture>=2.14",
+]
+
+[tool.vulture]
+paths = ["src/experimaestro", "vulture_whitelist.py"]
+exclude = ["*/tests/*", "*/version.py"]
+min_confidence = 80
+sort_by_size = true
+# Ignore Click CLI decorators and Textual framework decorators
+ignore_decorators = [
+    "@click.command",
+    "@click.group",
+    "@click.option",
+    "@*.command",
+    "@*.group",
 ]
 
 [tool.ruff]

@@ -30,7 +30,7 @@ class DefaultValueFinder(ast.NodeVisitor):
         self.generic_visit(node)
         self.current_class = old_class
 
-    def _check_annotation(self, node: ast.AnnAssign, class_node: ast.ClassDef):
+    def _check_annotation(self, node: ast.AnnAssign, _class_node: ast.ClassDef):
         """Check if an annotated assignment uses Param/Meta/Option with bare default"""
         if not isinstance(node.target, ast.Name):
             return

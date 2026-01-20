@@ -742,37 +742,6 @@ def monitor_server(workdir: Path):
         server.stop()
 
 
-@experiments.command()
-@click.option(
-    "--dry-run",
-    is_flag=True,
-    help="[DEPRECATED] No longer needed with filesystem-based state tracking",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    help="[DEPRECATED] No longer needed with filesystem-based state tracking",
-)
-@click.option(
-    "--no-wait",
-    is_flag=True,
-    help="[DEPRECATED] No longer needed with filesystem-based state tracking",
-)
-@pass_cfg
-def sync(workdir: Path, dry_run: bool, force: bool, no_wait: bool):
-    """[DEPRECATED] Synchronize workspace database from disk state
-
-    This command is deprecated. With the new filesystem-based state tracking,
-    state is read directly from status.json and events files. No synchronization
-    is needed.
-    """
-    cprint(
-        "Warning: 'sync' command is deprecated. "
-        "State is now tracked via filesystem (status.json) - no sync needed.",
-        "yellow",
-    )
-
-
 # === History and tagging commands ===
 
 

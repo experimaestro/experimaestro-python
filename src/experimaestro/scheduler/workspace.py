@@ -130,3 +130,14 @@ class Workspace:
     def configcachepath(self):
         """Folder for jobs"""
         return self.path / "config"
+
+    @classmethod
+    def set_launcher(cls, launcher) -> None:
+        """Set the launcher for the current workspace
+
+        Args:
+            launcher: The launcher to use for task execution
+        """
+        if cls.CURRENT is None:
+            raise RuntimeError("No active workspace - use within an experiment context")
+        cls.CURRENT.launcher = launcher

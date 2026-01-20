@@ -1,7 +1,3 @@
-# flake8: noqa: F401
-
-from pathlib import Path
-
 # Annotations
 from .annotations import (
     cache,
@@ -14,7 +10,6 @@ from .annotations import (
     STDERR,
     deprecate,
     initializer,
-    # Method
     config_only,
 )
 from .core.types import Identifier
@@ -28,7 +23,6 @@ from .core.serialization import (
     deserialize,
 )
 from .core.arguments import (
-    # Types
     Param,
     Option,
     Meta,
@@ -36,7 +30,6 @@ from .core.arguments import (
     Annotated,
     Constant,
     field,
-    # Annotations helpers
     help,
 )
 from .generators import pathgenerator, PathGenerator
@@ -79,13 +72,91 @@ from .scheduler.base import Job
 from .launcherfinder.registry import LauncherRegistry
 from .experiments.configuration import DirtyGitAction
 
+# Re-export set_launcher for backwards compatibility
+set_launcher = Workspace.set_launcher
 
-def set_launcher(launcher: Launcher):
-    Workspace.CURRENT.launcher = launcher
-
-
-# Get version - import from generated version.py if available, fallback to placeholder
+# Get version
 try:
     from .version import __version__
 except ImportError:
     __version__ = "0.0.0"
+
+__all__ = [
+    # Version
+    "__version__",
+    # Annotations
+    "cache",
+    "Array",
+    "TagDict",
+    "tag",
+    "tags",
+    "tagspath",
+    "STDOUT",
+    "STDERR",
+    "deprecate",
+    "initializer",
+    "config_only",
+    # Types
+    "Identifier",
+    "Param",
+    "Option",
+    "Meta",
+    "DataPath",
+    "Annotated",
+    "Constant",
+    "field",
+    "help",
+    "Any",
+    "SubmitHook",
+    # Serialization
+    "load",
+    "save",
+    "state_dict",
+    "from_state_dict",
+    "from_task_dir",
+    "serialize",
+    "deserialize",
+    "SerializationContext",
+    "SerializationLWTask",
+    "PathSerializationLWTask",
+    # Generators
+    "pathgenerator",
+    "PathGenerator",
+    # Partial
+    "partial",
+    "param_group",
+    "ParameterGroup",
+    "Partial",
+    # Config/Task
+    "Config",
+    "InstanceConfig",
+    "copyconfig",
+    "setmeta",
+    "DependentMarker",
+    "Task",
+    "ResumableTask",
+    "LightweightTask",
+    "ObjectStore",
+    # Scheduler
+    "Scheduler",
+    "experiment",
+    "FailedExperiment",
+    "DirtyGitError",
+    "GracefulExperimentExit",
+    "GracefulTimeout",
+    "Workspace",
+    "RunMode",
+    "TransientMode",
+    "Job",
+    "set_launcher",
+    # Launchers
+    "Launcher",
+    "LauncherRegistry",
+    # Utilities
+    "progress",
+    "tqdm",
+    "Choices",
+    "DirectoryContext",
+    "documentation",
+    "DirtyGitAction",
+]

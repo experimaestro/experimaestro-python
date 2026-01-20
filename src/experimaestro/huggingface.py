@@ -85,3 +85,6 @@ class ExperimaestroHFHub(ModelHubMixin):
         return ConfigInformation.deserialize(
             data_loader, as_instance=as_instance, partial_loading=True
         )
+
+
+__all__ = ["ExperimaestroHFHub"]

@@ -51,6 +51,8 @@ if TYPE_CHECKING:
     from experimaestro.settings import ServerSettings
     from experimaestro.scheduler.workspace import Workspace
     from experimaestro.connectors import Process
+
+    # vulture: ignore
     from experimaestro.scheduler.experiment import experiment as Experiment
 
 
