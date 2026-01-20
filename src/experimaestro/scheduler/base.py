@@ -60,15 +60,32 @@ logger = logging.getLogger("xpm.scheduler")
 
 
 class Listener:
+    def on_job_submitted(self, job):
+        """Called when job is submitted (new preferred method)"""
+        pass
+
     def job_submitted(self, job):
+        """Deprecated: use on_job_submitted instead"""
+        # Backward compatibility: delegate to new method
+        self.on_job_submitted(job)
+
+    def on_job_state_changed(self, job):
+        """Called when job state changes (new preferred method)"""
         pass
 
     def job_state(self, job):
+        """Deprecated: use on_job_state_changed instead"""
+        # Backward compatibility: delegate to new method
+        self.on_job_state_changed(job)
+
+    def on_service_added(self, service: Service):
+        """Called when a new service is added (new preferred method)"""
         pass
 
     def service_add(self, service: Service):
-        """Notify when a new service is added"""
-        pass
+        """Deprecated: use on_service_added instead"""
+        # Backward compatibility: delegate to new method
+        self.on_service_added(service)
 
 
 class Scheduler(StateProvider, threading.Thread):
@@ -631,7 +648,7 @@ class Scheduler(StateProvider, threading.Thread):
 
     def notify_job_submitted(self, job: Job):
         """Notify the listeners that a job has been submitted"""
-        self._notify_listeners(lambda lst, j: lst.job_submitted(j), job)
+        self._notify_listeners(lambda lst, j: lst.on_job_submitted(j), job)
 
         # Also notify StateProvider-style listeners (for TUI etc.)
         from experimaestro.scheduler.state_status import JobSubmittedEvent, JobTag
@@ -665,8 +682,8 @@ class Scheduler(StateProvider, threading.Thread):
         by the job process itself. The scheduler only forwards notifications
         to listeners.
         """
-        # Legacy listener notification (per-experiment)
-        self._notify_listeners(lambda lst, j: lst.job_state(j), job)
+        # Listener notification (per-experiment)
+        self._notify_listeners(lambda lst, j: lst.on_job_state_changed(j), job)
 
         # Notify StateProvider-style listeners with experiment-independent event
         from experimaestro.scheduler.state_status import JobStateChangedEvent
@@ -681,7 +698,7 @@ class Scheduler(StateProvider, threading.Thread):
         self, service: Service, experiment_id: str = "", run_id: str = ""
     ):
         """Notify the listeners that a service has been added"""
-        self._notify_listeners(lambda lst, s: lst.service_add(s), service)
+        self._notify_listeners(lambda lst, s: lst.on_service_added(s), service)
 
         # Store experiment info on the service for later retrieval
         if experiment_id:

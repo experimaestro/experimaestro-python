@@ -83,46 +83,19 @@ class StateListener:
         self.experiment_id = experiment_id
         self.run_id = run_id
 
-    def job_submitted(self, job):
+    def on_job_submitted(self, job):
+        """Called when job is submitted"""
         # Already handled in experiment.add_job()
         pass
 
-    def job_state(self, job):
+    def on_job_state_changed(self, job):
         """Write job state change event to experiment event file"""
-        from .state_status import JobStateChangedEvent
-        from experimaestro.scheduler.interfaces import serialize_timestamp
-
-        # Get failure reason if error state
-        failure_reason = None
-        if hasattr(job.state, "failure_reason") and job.state.failure_reason:
-            failure_reason = job.state.failure_reason.name
-
-        # Get progress as list of dicts
-        progress = []
-        if hasattr(job, "_progress") and job._progress:
-            progress = [
-                p
-                if isinstance(p, dict)
-                else {"level": p.level, "progress": p.progress, "desc": p.desc}
-                for p in job._progress
-            ]
-
-        # Serialize datetime objects to ISO strings for event storage
-        event = JobStateChangedEvent(
-            job_id=job.identifier,
-            state=job.state.name,
-            failure_reason=failure_reason,
-            submitted_time=serialize_timestamp(job.submittime),
-            started_time=serialize_timestamp(job.starttime),
-            ended_time=serialize_timestamp(job.endtime),
-            exit_code=getattr(job, "exit_code", None),
-            retry_count=getattr(job, "retry_count", 0),
-            progress=progress,
-        )
+        # Use the centralized state_changed_event() method from BaseJob
+        event = job.state_changed_event()
         # Write to experiment event file
         self.event_writer.write_event(event)
 
-    def service_add(self, service):
+    def on_service_added(self, service):
         """Write service added event to filesystem"""
         from experimaestro.scheduler.services import Service
         from .state_status import ServiceAddedEvent

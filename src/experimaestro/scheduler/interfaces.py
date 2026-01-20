@@ -26,7 +26,8 @@ if TYPE_CHECKING:
     from experimaestro.connectors import Process
     from experimaestro.scheduler.transient import TransientMode
     from experimaestro.scheduler.state_provider import CarbonMetricsData
-    from experimaestro.scheduler.state_status import EventBase
+    from experimaestro.scheduler.state_status import EventBase, JobStateChangedEvent
+    from experimaestro.scheduler.experiment import experiment
     from experimaestro.carbon.base import CarbonImpactData
 
 logger = logging.getLogger("xpm.interfaces")
@@ -421,6 +422,7 @@ class BaseJob:
     transient: "TransientMode"
     carbon_metrics: Optional["CarbonMetricsData"]
     events_count: Optional[int]  # None = all events processed
+    experiments: List["experiment"]  # Experiments this job belongs to
 
     #: The process
     _process: Optional["Process"]
@@ -437,6 +439,7 @@ class BaseJob:
         self._process = None
         self._process_dict = None
         self.events_count: int | None = None
+        self.experiments: List = []
 
     @property
     def state(self) -> JobState:
@@ -664,6 +667,34 @@ class BaseJob:
         """Get process state as dictionary. Override in subclasses."""
         return None
 
+    def state_changed_event(self) -> "JobStateChangedEvent":
+        """Create a JobStateChangedEvent from the current job state.
+
+        This centralizes event creation logic by using state_dict() to avoid
+        duplication across the codebase (e.g., in StateListener, finalize_status).
+
+        Returns:
+            JobStateChangedEvent with current job state and metadata
+        """
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+
+        state_data = self.state_dict()
+
+        # Extract progress from state_dict
+        progress = state_data.get("progress", [])
+
+        return JobStateChangedEvent(
+            job_id=state_data["job_id"],
+            state=state_data["state"],
+            failure_reason=state_data.get("failure_reason"),
+            submitted_time=state_data.get("submitted_time"),
+            started_time=state_data.get("started_time"),
+            ended_time=state_data.get("ended_time"),
+            exit_code=state_data.get("exit_code"),
+            retry_count=state_data.get("retry_count", 0),
+            progress=progress,
+        )
+
     def write_status(self) -> None:
         """Write job state to status.json file.
 
@@ -885,16 +916,38 @@ class BaseJob:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-            # Get new state
+            # Get new state and create event
             new_dict = self.state_dict()
+            event = self.state_changed_event()
 
             # Compare and write only if different
+            status_written = False
             if current_dict != new_dict:
                 self.status_path.parent.mkdir(parents=True, exist_ok=True)
                 self.status_path.write_text(json.dumps(new_dict))
-                return True
+                status_written = True
 
-            return False
+            # After consolidating status.json, write job state event to all experiments
+            # This ensures experiment events are immediately available when processing
+            # (solves: "job is over but experiment events not yet available")
+            if self.experiments:
+                for xp in self.experiments:
+                    if xp._event_writer is not None:
+                        try:
+                            xp._event_writer.write_event(event)
+                            logger.debug(
+                                "Wrote job state event for %s to experiment %s",
+                                self.identifier[:8],
+                                xp.name,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to write job state event to experiment %s: %s",
+                                xp.name,
+                                e,
+                            )
+
+            return status_written
 
     def load_from_disk(self):
         """Load job state from disk, prioritizing marker files over status.json

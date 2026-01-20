@@ -57,7 +57,7 @@ class ProgressListener(Listener):
         self.current = []
         self.progresses: Queue[List[LevelInformation]] = Queue()
 
-    def job_state(self, job: Job):
+    def on_job_state_changed(self, job: Job):
         if (len(self.current) != len(job.progress)) or any(
             l1 != l2 for l1, l2 in zip(self.current, job.progress)
         ):

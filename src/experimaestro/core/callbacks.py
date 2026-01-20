@@ -30,7 +30,7 @@ class TaskEventListener(Listener):
 
         return TaskEventListener.INSTANCE
 
-    def job_state(self, job: Job):
+    def on_job_state_changed(self, job: Job):
         if job.state == JobState.DONE:
             with self.lock:
                 for callback in self._on_completed.get(id(job.config.__xpm__), []):

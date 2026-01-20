@@ -11,7 +11,7 @@ def jobmonitor(*outputs: Config):
     cv = Condition()
 
     class LocalListener(Listener):
-        def job_state(self, job):
+        def on_job_state_changed(self, job):
             with cv:
                 # Just notify when something happens
                 cv.notify()
