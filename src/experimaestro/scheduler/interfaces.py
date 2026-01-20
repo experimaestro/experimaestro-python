@@ -789,7 +789,8 @@ class BaseJob:
         Called when a job is about to restart to ensure clean state while
         preserving carbon metrics and other event-based data.
         """
-        from experimaestro.scheduler.state_status import EventReader, WatchedDirectory
+        import json
+        from experimaestro.scheduler.state_status import EventBase
 
         # Get paths for event files
         # job.path is workspace/jobs/task_id/job_id
@@ -799,17 +800,35 @@ class BaseJob:
         # Apply pending events if events_count is set
         if self.events_count is not None and events_dir.exists():
             try:
-                reader = EventReader(WatchedDirectory(path=events_dir))
-                events = reader.read_events_since_count(
-                    self.identifier, self.events_count
-                )
-                for event in events:
-                    self.apply_event(event)
-                    logger.debug(
-                        "Applied event %s to job %s",
-                        type(event).__name__,
-                        self.identifier,
-                    )
+                # Job events are stored as event-{job_id}-{count}.jsonl
+                # Read events from events_count onwards
+                count = self.events_count
+                while True:
+                    event_file = events_dir / f"event-{self.identifier}-{count}.jsonl"
+                    if not event_file.exists():
+                        break
+
+                    # Read events from this file
+                    with event_file.open("r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    event_dict = json.loads(line)
+                                    event = EventBase.from_dict(event_dict)
+                                    self.apply_event(event)
+                                    logger.debug(
+                                        "Applied event %s to job %s",
+                                        type(event).__name__,
+                                        self.identifier,
+                                    )
+                                except (json.JSONDecodeError, KeyError) as e:
+                                    logger.warning(
+                                        "Failed to parse event from %s: %s",
+                                        event_file,
+                                        e,
+                                    )
+                    count += 1
             except Exception as e:
                 logger.warning(
                     "Failed to apply pending events for job %s: %s",
@@ -1347,6 +1366,262 @@ class BaseExperiment:
             with temp_path.open("w") as f:
                 json.dump(data, f, indent=2)
             temp_path.replace(status_path)
+
+    def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:
+        """Apply an event to update experiment state.
+
+        This is a stub method - concrete implementations (MockExperiment)
+        should override this to handle specific event types.
+
+        Args:
+            event: Event to apply
+            merge_mode: If True, don't overwrite fields that are already set
+                       (except for timestamps which should use the latest value)
+        """
+        # Default implementation does nothing
+        # MockExperiment overrides this with actual event handling
+        pass
+
+    def _raise_orphaned_events_warning(
+        self, events_dir: Path, event_files: list[Path]
+    ) -> None:
+        """Raise OrphanedEventsError for user confirmation.
+
+        Args:
+            events_dir: Directory containing orphaned events
+            event_files: List of event file paths
+
+        Raises:
+            OrphanedEventsError: Always raises to request user confirmation
+        """
+        from experimaestro.scheduler.state_status import EventReader, WatchedDirectory
+        from experimaestro.locking import OrphanedEventsError
+
+        # Count total events
+        event_count = 0
+        for event_file in event_files:
+            with open(event_file) as f:
+                event_count += sum(1 for _ in f)
+
+        description = (
+            f"Found {event_count} orphaned events for experiment '{self.experiment_id}' (run: {self.run_id}).\n\n"
+            f"The experiment status file exists but doesn't track which events have been processed.\n"
+            f"This can happen if:\n"
+            f"  • The experiment finished before event tracking was implemented\n"
+            f"  • Files were manually modified or copied\n\n"
+            f"Action options:\n"
+            f"  • Merge Events: Replay all {event_count} events in merge mode (won't overwrite existing fields)\n"
+            f"  • Skip & Archive: Archive events without replaying (safe, preserves current state)\n"
+            f"  • Cancel: Leave events as-is for manual review"
+        )
+
+        # Create callbacks
+        def merge_events():
+            """Replay all events in merge mode"""
+            reader = EventReader(WatchedDirectory(path=events_dir))
+            events = reader.read_events_since_count(self.experiment_id, 0)
+            for event in events:
+                self.apply_event(event, merge_mode=True)
+            logger.info(
+                "Merged %d orphaned events into experiment %s",
+                event_count,
+                self.experiment_id,
+            )
+
+        def skip_events():
+            """Just mark as processed without applying"""
+            logger.info(
+                "Skipping %d orphaned events for experiment %s",
+                event_count,
+                self.experiment_id,
+            )
+            # Do nothing - events will be archived below
+
+        warning_key = f"orphaned_events_{self.experiment_id}_{self.run_id}"
+        context = {
+            "title": "Orphaned Events Detected",
+            "experiment_id": self.experiment_id,
+            "run_id": self.run_id,
+            "event_count": event_count,
+            "event_files": [str(f) for f in event_files],
+            "events_dir": str(events_dir),
+        }
+
+        actions = {
+            "merge": "Merge Events",
+            "skip": "Skip & Archive",
+            "cancel": "Cancel",
+        }
+
+        callbacks = {
+            "merge": merge_events,
+            "skip": skip_events,
+            "cancel": lambda: None,  # Raising the exception will stop processing
+        }
+
+        raise OrphanedEventsError(
+            warning_key=warning_key,
+            description=description,
+            actions=actions,
+            context=context,
+            callbacks=callbacks,
+        )
+
+    def _cleanup_experiment_event_files(self) -> None:
+        """Clean up experiment event files, applying pending events first.
+
+        1. If events_count is set, reads and applies events from that count onwards
+        2. If events_count is None but events exist, raises OrphanedEventsError for user confirmation
+        3. Archives event files from .events/experiments/{exp_id}/ to permanent storage
+        4. Sets events_count to None (all events processed)
+
+        Called when consolidating experiment state after completion or when cleaning up
+        orphaned events.
+
+        Raises:
+            OrphanedEventsError: When status.json has no events_count but orphaned events exist
+        """
+        from experimaestro.scheduler.state_status import EventReader, WatchedDirectory
+
+        # Get workspace path
+        # workdir is {workspace}/experiments/{exp-id}/{run-id}, so parent.parent.parent is workspace
+        workspace_path = self.workdir.parent.parent.parent
+        events_dir = workspace_path / ".events" / "experiments" / self.experiment_id
+
+        # Apply pending events if events_count is set
+        try:
+            current_events_count = self.events_count
+        except NotImplementedError:
+            current_events_count = None
+
+        # Check for orphaned events (events exist but no events_count)
+        if current_events_count is None and events_dir.exists():
+            event_files = list(events_dir.glob("events-*.jsonl"))
+            if event_files:
+                # Edge case: status.json exists without events_count, but events remain
+                # Ask user for confirmation before merging
+                self._raise_orphaned_events_warning(events_dir, event_files)
+
+        if current_events_count is not None and events_dir.exists():
+            try:
+                reader = EventReader(WatchedDirectory(path=events_dir))
+                # Event files are at events_dir/events-{count}.jsonl (no subdirectory)
+                # so we pass "." as entity_id to read directly from base_dir
+                events = reader.read_events_since_count(".", current_events_count)
+                for event in events:
+                    self.apply_event(event)
+                    logger.debug(
+                        "Applied event %s to experiment %s",
+                        type(event).__name__,
+                        self.experiment_id,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to apply pending events for experiment %s: %s",
+                    self.experiment_id,
+                    e,
+                )
+
+        # Mark all events as processed (set events_count to None)
+        # For MockExperiment, this sets _events_count
+        if hasattr(self, "_events_count"):
+            self._events_count = None
+
+        # Archive event files to permanent storage
+        if events_dir.exists():
+            event_files = list(events_dir.glob("events-*.jsonl"))
+            if event_files:
+                perm_events_dir = self.run_dir / "events"
+                perm_events_dir.mkdir(parents=True, exist_ok=True)
+
+                for event_file in event_files:
+                    try:
+                        # Rename from "events-N.jsonl" to "event-N.jsonl" (singular)
+                        perm_filename = event_file.name.replace("events-", "event-", 1)
+                        perm_file = perm_events_dir / perm_filename
+                        # Try hardlink first, copy if that fails
+                        try:
+                            perm_file.hardlink_to(event_file)
+                        except (OSError, NotImplementedError):
+                            import shutil
+
+                            shutil.copy2(event_file, perm_file)
+
+                        # Delete temp event file
+                        event_file.unlink()
+                        logger.debug("Archived experiment event file: %s", event_file)
+                    except OSError as e:
+                        logger.warning(
+                            "Failed to archive experiment event file %s: %s",
+                            event_file,
+                            e,
+                        )
+
+    async def finalize_status(
+        self,
+        callback: "Callable[[BaseExperiment], None] | None" = None,
+        cleanup_events: bool = False,
+    ) -> bool:
+        """Finalize experiment status: load from disk, apply callback, cleanup, and write.
+
+        This method:
+        1. Acquires the experiment lock
+        2. Loads state from disk (to get latest event-based updates)
+        3. Calls the callback to modify experiment state (e.g., set status, mark completed)
+        4. Optionally cleans up event files (consolidates orphaned events)
+        5. Writes status if different from disk
+
+        Args:
+            callback: Optional function to modify experiment state after loading from disk.
+                      Called with the experiment as argument.
+            cleanup_events: If True, cleanup event files (consolidates orphaned events).
+
+        Returns:
+            True if the status was written, False if unchanged.
+        """
+        import json
+        from filelock import AsyncFileLock
+
+        # Get experiment lock path (experiments/{exp-id}/lock)
+        experiment_base = self.workdir.parent
+        lock_path = experiment_base / "lock"
+
+        async with AsyncFileLock(lock_path):
+            # Get status path
+            status_path = self.run_dir / "status.json"
+
+            # Load current state from disk for comparison
+            current_dict = None
+            if status_path.exists():
+                try:
+                    current_dict = json.loads(status_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+            # Apply callback to modify experiment state
+            if callback is not None:
+                callback(self)
+
+            # Cleanup event files if requested
+            if cleanup_events:
+                self._cleanup_experiment_event_files()
+
+            # Get new state
+            new_dict = self.state_dict()
+
+            # Compare and write only if different
+            status_written = False
+            if current_dict != new_dict:
+                status_path.parent.mkdir(parents=True, exist_ok=True)
+                # Write without events_count field when cleanup_events=True
+                if cleanup_events and "events_count" in new_dict:
+                    new_dict = {
+                        k: v for k, v in new_dict.items() if k != "events_count"
+                    }
+                status_path.write_text(json.dumps(new_dict, indent=2))
+                status_written = True
+
+            return status_written
 
 
 class BaseService(ABC):

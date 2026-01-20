@@ -372,6 +372,36 @@ class ServiceStateChangedEvent(ServiceEventBase):
     state: str = ""
 
 
+@dataclass
+class WarningEvent(ExperimentEventBase):
+    """Event: Generic warning with user actions
+
+    This event is emitted when something needs user attention/action.
+    The TUI can display a dialog with the description and action buttons.
+    When user clicks an action, it calls state_provider.execute_warning_action(key, action_key).
+    """
+
+    run_id: str = ""
+    warning_key: str = ""  # Unique key for this warning (e.g., "stale_locks_gpu_token")
+    description: str = ""  # Human-readable description for the UI
+    actions: dict[str, str] = field(default_factory=dict)  # action_key -> button_label
+    context: dict[str, Any] = field(default_factory=dict)  # Additional data for UI
+    severity: str = "warning"  # "info", "warning", "error"
+
+
+@dataclass
+class ErrorEvent(ExperimentEventBase):
+    """Event: Error occurred during warning action execution
+
+    This event is emitted when execute_warning_action() fails.
+    """
+
+    run_id: str = ""
+    warning_key: str = ""  # Key of the warning that caused the error
+    action_key: str = ""  # Action that failed
+    error_message: str = ""  # Error description
+
+
 # =============================================================================
 # Event Writer Classes
 # =============================================================================

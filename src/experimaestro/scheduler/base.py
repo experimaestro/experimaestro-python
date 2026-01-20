@@ -1051,6 +1051,45 @@ class Scheduler(StateProvider, threading.Thread):
                                         dynamic_deps.insert(0, dependency)
                                         all_locked = False
                                         break
+                                    except Exception as e:
+                                        # Check if this is a StaleLockError
+                                        from experimaestro.locking import StaleLockError
+
+                                        if isinstance(e, StaleLockError):
+                                            logger.warning(
+                                                "Stale locks detected for %s: %s",
+                                                dependency,
+                                                e.description[:100],
+                                            )
+                                            # Create warning event to listeners
+                                            from experimaestro.scheduler.state_status import (
+                                                WarningEvent,
+                                            )
+
+                                            warning_event = WarningEvent(
+                                                experiment_id=job.experiment_id,
+                                                run_id=job.experiment.run_id,
+                                                warning_key=e.warning_key,
+                                                description=e.description,
+                                                actions=e.actions,
+                                                context=e.context,
+                                            )
+
+                                            # Register action callbacks and metadata
+                                            self.register_warning_actions(
+                                                e.warning_key,
+                                                e.callbacks,
+                                                warning_event,
+                                            )
+
+                                            # Emit warning event to listeners
+                                            self._notify_state_listeners(warning_event)
+                                            logger.info(
+                                                "Emitted WarningEvent for stale locks: %s",
+                                                e.warning_key,
+                                            )
+                                        # Re-raise to trigger retry logic
+                                        raise LockError(f"Failed to acquire lock: {e}")
 
                                 if all_locked:
                                     # All locks acquired successfully

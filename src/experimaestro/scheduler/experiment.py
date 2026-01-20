@@ -26,7 +26,7 @@ from experimaestro.experiments.configuration import DirtyGitAction
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.interfaces import ExperimentStatus
-    from experimaestro.scheduler.state_status import ExperimentEventWriter
+    from experimaestro.scheduler.state_status import ExperimentEventWriter, EventBase
     from experimaestro.carbon.base import CarbonImpactData
 
 ServiceClass = TypeVar("ServiceClass", bound=Service)
@@ -501,6 +501,23 @@ class experiment(BaseExperiment):
                 duration_s=total_duration,
                 job_count=job_count,
             )
+        )
+
+    def apply_event(self, event: "EventBase") -> None:
+        """Apply an event to update experiment state.
+
+        Live experiments generate events, they don't apply them.
+        This method should never be called on a live experiment instance.
+
+        Args:
+            event: Event to apply
+
+        Raises:
+            RuntimeError: Always raised since live experiments don't apply events
+        """
+        raise RuntimeError(
+            "apply_event should not be called on live experiment instances. "
+            "Live experiments generate events, they don't apply them."
         )
 
     @property

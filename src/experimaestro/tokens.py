@@ -336,6 +336,64 @@ class CounterToken(Token, TrackedDynamicResource):
         """Create a token dependency"""
         return CounterTokenDependency(self, count)
 
+    def get_stale_lock_files(
+        self, min_age_seconds: float = 3600
+    ) -> list[DynamicLockFile]:
+        """Get a list of stale lock files for this token.
+
+        A lock file is stale when:
+        1. It has a valid state (job_uri is set)
+        2. It has process information
+        3. The process is not running anymore
+        4. The file is older than min_age_seconds
+
+        Args:
+            min_age_seconds: Minimum age in seconds for a file to be considered stale.
+                           Default is 3600 seconds (1 hour).
+
+        Returns:
+            List of stale DynamicLockFile instances
+        """
+        stale_locks = []
+        for lock_file in self.cache.values():
+            if lock_file.is_stale(min_age_seconds=min_age_seconds):
+                stale_locks.append(lock_file)
+        return stale_locks
+
+    def cleanup_stale_locks(self, min_age_seconds: float = 3600) -> int:
+        """Remove stale lock files for this token.
+
+        Args:
+            min_age_seconds: Minimum age in seconds for a file to be considered stale.
+                           Default is 3600 seconds (1 hour).
+
+        Returns:
+            Number of stale lock files removed
+        """
+
+        stale_locks = self.get_stale_lock_files(min_age_seconds=min_age_seconds)
+        removed_count = 0
+
+        for lock_file in stale_locks:
+            try:
+                logger.info(
+                    "Removing stale lock file: %s (process %s not running)",
+                    lock_file.path,
+                    getattr(lock_file.process, "pid", "unknown"),
+                )
+                lock_file.path.unlink()
+                # Remove from cache
+                cache_key = str(lock_file.path.relative_to(self.jobs_folder))
+                if cache_key in self.cache:
+                    del self.cache[cache_key]
+                removed_count += 1
+            except OSError as e:
+                logger.warning(
+                    "Failed to remove stale lock file %s: %s", lock_file.path, e
+                )
+
+        return removed_count
+
     def __call__(self, count, task: Config):
         """Create a token dependency and add it to the task"""
         return task.add_dependencies(self.dependency(count))

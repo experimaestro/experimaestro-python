@@ -155,13 +155,140 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Logic:
         - If status.json has NO 'events_count' field → already consolidated, just cleanup
         - If status.json HAS 'events_count' field → events need to be processed
+
+        Note: If OrphanedEventsError is raised (events without events_count), it's caught
+        and handled by emitting a WarningEvent that the TUI/user can respond to.
         """
+        from experimaestro.locking import OrphanedEventsError
+        from experimaestro.scheduler.state_status import WarningEvent
+
         # Consolidate experiment events
         if self._experiments_dir.exists():
             for exp_events_dir in self._experiments_dir.iterdir():
                 if exp_events_dir.is_dir():
                     experiment_id = exp_events_dir.name
-                    self._consolidate_experiment_events(experiment_id, exp_events_dir)
+                    try:
+                        self._consolidate_experiment_events(
+                            experiment_id, exp_events_dir
+                        )
+                    except OrphanedEventsError as e:
+                        # Create warning event for TUI/listeners to handle
+                        warning_event = WarningEvent(
+                            experiment_id=e.context.get("experiment_id", ""),
+                            run_id=e.context.get("run_id", ""),
+                            warning_key=e.warning_key,
+                            description=e.description,
+                            actions=e.actions,
+                            context=e.context,
+                        )
+
+                        # Register callbacks and metadata with state provider
+                        self.register_warning_actions(
+                            e.warning_key, e.callbacks, warning_event
+                        )
+
+                        # Emit warning event for TUI/listeners to handle
+                        self._notify_state_listeners(warning_event)
+                        logger.info(
+                            "Orphaned events detected for experiment %s, awaiting user action",
+                            experiment_id,
+                        )
+
+        # Consolidate job events
+        # Note: We do this inline without using finalize_status() to avoid
+        # async/lock complications during initialization
+        if self._jobs_dir.exists():
+            for task_dir in self._jobs_dir.iterdir():
+                if task_dir.is_dir():
+                    task_id = task_dir.name
+                    # Group event files by job_id
+                    job_event_files = list(task_dir.glob("event-*-*.jsonl"))
+
+                    # Group files by job_id
+                    job_files_map: dict[str, list[Path]] = {}
+                    for event_file in job_event_files:
+                        # Extract job_id from filename: event-{job_id}-{count}.jsonl
+                        filename = event_file.name
+                        parts = filename.split("-")
+                        if len(parts) >= 3:
+                            job_id = parts[1]
+                            if job_id not in job_files_map:
+                                job_files_map[job_id] = []
+                            job_files_map[job_id].append(event_file)
+
+                    # Consolidate events for each job
+                    for job_id, files in job_files_map.items():
+                        try:
+                            self._consolidate_job_events(task_id, job_id, files)
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to consolidate events for job {task_id}/{job_id}: {e}"
+                            )
+
+    def _consolidate_job_events(
+        self, task_id: str, job_id: str, event_files: list[Path]
+    ) -> None:
+        """Consolidate orphaned job event files
+
+        Uses the job's own _cleanup_event_files() method to apply events and cleanup.
+
+        Args:
+            task_id: Task identifier
+            job_id: Job identifier
+            event_files: List of event file paths for this job
+        """
+        import json
+
+        job_path = self.workspace_path / "jobs" / task_id / job_id
+        if not job_path.exists():
+            # Job directory doesn't exist, just delete orphaned event files
+            for event_file in event_files:
+                try:
+                    event_file.unlink()
+                    logger.debug(f"Deleted orphaned event file: {event_file}")
+                except OSError:
+                    pass
+            return
+
+        # Load job from disk
+        from experimaestro.scheduler.state_provider import MockJob
+
+        job = MockJob.from_disk(
+            job_path=job_path,
+            task_id=task_id,
+            job_id=job_id,
+            workspace_path=self.workspace_path,
+        )
+
+        # Check if job has events_count (needs consolidation)
+        if job.events_count is None:
+            # Already consolidated, just delete event files
+            for event_file in event_files:
+                try:
+                    event_file.unlink()
+                    logger.debug(
+                        f"Deleted already-consolidated event file: {event_file}"
+                    )
+                except OSError:
+                    pass
+            return
+
+        # Use the job's own cleanup method to apply events and delete files
+        # This ensures we use the same logic as normal job consolidation
+        job._cleanup_event_files()
+
+        # Write updated status.json without events_count
+        status_dict = job.state_dict()
+        status_dict.pop("events_count", None)
+
+        status_path = job_path / ".experimaestro" / "status.json"
+        try:
+            status_path.write_text(json.dumps(status_dict, indent=2))
+            logger.debug(
+                f"Consolidated and updated status.json for job {task_id}/{job_id}"
+            )
+        except OSError as e:
+            logger.warning(f"Failed to write status.json for {task_id}/{job_id}: {e}")
 
     def _consolidate_experiment_events(
         self, experiment_id: str, exp_events_dir: Path
@@ -177,41 +304,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
         IMPORTANT: Only consolidate if we can acquire the experiment lock.
         If the lock is held (experiment is running), skip consolidation.
 
+        This method now uses BaseExperiment.finalize_status() for consolidation.
+
         Args:
             experiment_id: The experiment identifier
             exp_events_dir: Path to .events/experiments/{experiment_id}/
         """
         import filelock
 
-        # Try to acquire the experiment lock with a short timeout
-        # The experiment lock is at: workspace_path/experiments/{experiment_id}/lock
-        experiment_lock_path = (
-            self.workspace_path / "experiments" / experiment_id / "lock"
-        )
-
-        # Create lock object with short timeout
-        lock = filelock.FileLock(str(experiment_lock_path), timeout=0.1)
-
-        try:
-            lock.acquire()
-        except filelock.Timeout:
-            # Lock is held - experiment is still running, skip consolidation
-            logger.debug(
-                "Experiment %s is still running (lock held), skipping consolidation",
-                experiment_id,
-            )
-            return
-
-        # We have the lock - proceed with consolidation
-        try:
-            self._do_consolidate_experiment_events(experiment_id, exp_events_dir)
-        finally:
-            lock.release()
-
-    def _do_consolidate_experiment_events(
-        self, experiment_id: str, exp_events_dir: Path
-    ) -> None:
-        """Actual consolidation logic (called with lock held)"""
         # Find event files
         event_files = list(exp_events_dir.glob("events-*.jsonl"))
         if not event_files:
@@ -251,22 +351,28 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     "Failed to read status.json for %s: %s", experiment_id, e
                 )
 
-        # If events_count is None (absent), events are already consolidated
-        # Just cleanup orphaned event files
+        # If events_count is None (absent), this might be:
+        # 1. Already consolidated - just cleanup
+        # 2. Orphaned events that need user confirmation
+        # We'll let finalize_status() decide by checking if files exist
         if events_count is None:
             logger.debug(
-                "Experiment %s already consolidated (no events_count), cleaning up",
+                "Experiment %s has no events_count, will check for orphaned events",
                 experiment_id,
             )
-            self._cleanup_event_files(exp_events_dir, event_files)
-            return
 
-        # We have unprocessed events - need to consolidate
-        logger.info(
-            "Consolidating orphaned events for experiment %s (events_count=%d)",
-            experiment_id,
-            events_count,
-        )
+        # Log what we're doing
+        if events_count is not None:
+            logger.info(
+                "Consolidating orphaned events for experiment %s (events_count=%d)",
+                experiment_id,
+                events_count,
+            )
+        else:
+            logger.info(
+                "Checking experiment %s for orphaned events",
+                experiment_id,
+            )
 
         # Load or create experiment
         from experimaestro.scheduler.interfaces import ExperimentStatus
@@ -280,54 +386,81 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 status=ExperimentStatus.RUNNING,
             )
 
-        # Read and apply all events from events_count onwards
-        reader = EventReader(WatchedDirectory(path=self._experiments_dir))
-        events = reader.read_events_since_count(experiment_id, events_count)
+        # Try to acquire experiment lock with timeout
+        # If locked (experiment is running), skip consolidation
+        experiment_base = run_dir.parent
+        lock_path = experiment_base / "lock"
 
-        for event in events:
-            exp.apply_event(event)
+        try:
+            lock = filelock.FileLock(lock_path, timeout=0.1)
+            lock.acquire()
+        except filelock.Timeout:
+            # Experiment is locked (running), skip consolidation
             logger.debug(
-                "Applied event %s to experiment %s", type(event).__name__, experiment_id
+                "Experiment %s is locked (running), skipping consolidation",
+                experiment_id,
             )
+            return
 
-        # Check for RunCompletedEvent to determine final status
-        from experimaestro.scheduler.state_status import RunCompletedEvent
+        try:
+            # If events_count is None, events are already consolidated
+            # Just clean up orphaned event files without applying them
+            if events_count is None:
+                # Events already processed, just delete the orphaned files
+                for event_file in event_files:
+                    try:
+                        event_file.unlink()
+                        logger.debug(
+                            "Deleted already-consolidated event file: %s", event_file
+                        )
+                    except OSError as e:
+                        logger.warning(
+                            "Failed to delete event file %s: %s", event_file, e
+                        )
+                logger.debug(
+                    "Cleaned up %d already-consolidated event files for experiment %s",
+                    len(event_files),
+                    experiment_id,
+                )
+                return  # Done, no need to apply events or update status.json
 
-        final_event = None
-        for event in reversed(events):
-            if isinstance(event, RunCompletedEvent):
-                final_event = event
-                break
+            # Use the experiment's own cleanup method to apply events and archive files
+            # This ensures we use the same logic as normal experiment consolidation
+            try:
+                exp._cleanup_experiment_event_files()
+            except Exception as e:
+                # Let OrphanedEventsError bubble up
+                from experimaestro.locking import OrphanedEventsError
 
-        if final_event:
-            # Experiment completed - write final status.json
-            if final_event.status in ("completed", "done"):
-                exp._status = ExperimentStatus.DONE
-            elif final_event.status == "failed":
-                exp._status = ExperimentStatus.FAILED
-            if final_event.ended_at:
-                from experimaestro.scheduler.interfaces import deserialize_to_datetime
+                if isinstance(e, OrphanedEventsError):
+                    raise
+                logger.warning(
+                    "Failed to cleanup experiment event files for %s: %s",
+                    experiment_id,
+                    e,
+                )
+                return
 
-                exp._ended_at = deserialize_to_datetime(final_event.ended_at)
+            # Write status.json without events_count field
+            status_dict = exp.state_dict()
+            status_dict.pop("events_count", None)
 
-        # Remove events_count from state_dict to mark as consolidated
-        # (MockExperiment.state_dict() includes events_count, so we set it to 0
-        # and then remove the key after getting state_dict)
-        exp._events_count = 0
-
-        # Write consolidated status.json (without events_count)
-        self._write_experiment_status(exp, status_path, remove_events_count=True)
-
-        # Archive event files to permanent storage
-        perm_events_dir = run_dir / "events"
-        self._archive_event_files(exp_events_dir, perm_events_dir, event_files)
-
-        logger.info(
-            "Consolidated experiment %s: %d events applied, status=%s",
-            experiment_id,
-            len(events),
-            exp.status.value,
-        )
+            try:
+                status_path.write_text(json.dumps(status_dict, indent=2))
+                logger.info(
+                    "Consolidated experiment %s, status=%s",
+                    experiment_id,
+                    exp.status.value,
+                )
+            except OSError as e:
+                logger.warning(
+                    "Failed to write status.json for experiment %s: %s",
+                    experiment_id,
+                    e,
+                )
+        finally:
+            # Release the lock
+            lock.release()
 
     def _write_experiment_status(
         self, exp: MockExperiment, status_path: Path, remove_events_count: bool = False

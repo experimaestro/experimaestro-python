@@ -62,6 +62,8 @@ class RPCMethod(str, Enum):
     DELETE_EXPERIMENT = "delete_experiment"
     GET_SYNC_INFO = "get_sync_info"
     GET_PROCESS_INFO = "get_process_info"
+    EXECUTE_WARNING_ACTION = "execute_warning_action"
+    GET_UNRESOLVED_WARNINGS = "get_unresolved_warnings"
 
 
 @dataclass

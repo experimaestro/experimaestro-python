@@ -52,6 +52,7 @@ OutputCallback = Optional["Callable[[str], None]"]
 if TYPE_CHECKING:
     from experimaestro.scheduler.remote.sync import RemoteFileSynchronizer
     from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
+    from experimaestro.scheduler.state_status import WarningEvent
 
 
 logger = logging.getLogger("xpm.remote.client")
@@ -1037,6 +1038,56 @@ class SSHStateProviderClient(OfflineStateProvider):
             type=result["type"],
             running=result.get("running", False),
         )
+
+    def execute_warning_action(
+        self,
+        warning_key: str,
+        action_key: str,
+        experiment_id: str = "",
+        run_id: str = "",
+    ) -> None:
+        """Execute a warning action on the remote server
+
+        Args:
+            warning_key: The warning identifier
+            action_key: The action to execute
+            experiment_id: Experiment ID for error events
+            run_id: Run ID for error events
+
+        Raises:
+            RuntimeError: If the action execution fails on remote server
+        """
+        params = {
+            "warning_key": warning_key,
+            "action_key": action_key,
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+        }
+        self._call_sync(RPCMethod.EXECUTE_WARNING_ACTION, params)
+
+    def get_unresolved_warnings(self) -> List["WarningEvent"]:
+        """Get all unresolved warnings from the remote server
+
+        Returns:
+            List of WarningEvent objects with metadata for all pending warnings
+        """
+        from experimaestro.scheduler.state_status import WarningEvent
+
+        result = self._call_sync(RPCMethod.GET_UNRESOLVED_WARNINGS, {})
+        warnings = []
+        for w in result.get("warnings", []):
+            warnings.append(
+                WarningEvent(
+                    experiment_id=w.get("experiment_id", ""),
+                    run_id=w.get("run_id", ""),
+                    warning_key=w.get("warning_key", ""),
+                    description=w.get("description", ""),
+                    actions=w.get("actions", {}),
+                    context=w.get("context", {}),
+                    severity=w.get("severity", "warning"),
+                )
+            )
+        return warnings
 
     # -------------------------------------------------------------------------
     # Data Conversion

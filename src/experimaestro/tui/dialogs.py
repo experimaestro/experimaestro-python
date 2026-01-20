@@ -176,3 +176,94 @@ class HelpScreen(ModalScreen[None]):
 
     def action_close(self) -> None:
         self.dismiss()
+
+
+class WarningDialog(ModalScreen[str | None]):
+    """Generic modal dialog for displaying warnings with action buttons
+
+    Returns:
+        - action_key: User selected an action
+        - None: User dismissed the dialog
+    """
+
+    def __init__(
+        self,
+        warning_key: str,
+        title: str,
+        description: str,
+        actions: dict[str, str],
+        severity: str = "warning",
+    ) -> None:
+        """Initialize the warning dialog.
+
+        Args:
+            warning_key: Unique identifier for this warning
+            title: Dialog title
+            description: Message to display
+            actions: Dict mapping action_key to button label
+            severity: "info", "warning", or "error"
+        """
+        super().__init__()
+        self.warning_key = warning_key
+        self.title_text = title
+        self.description = description
+        self.actions = actions
+        self.severity = severity
+
+    def compose(self) -> ComposeResult:
+        # Choose icon based on severity
+        icon = {
+            "info": "ℹ️",
+            "warning": "⚠️",
+            "error": "❌",
+        }.get(self.severity, "⚠️")
+
+        with Vertical(id="warning-dialog"):
+            yield Static(f"{icon}  {self.title_text}", id="warning-title")
+            yield Static(self.description, id="warning-message")
+
+            # Create action buttons
+            with Horizontal(id="warning-buttons"):
+                for action_key, button_label in self.actions.items():
+                    # Determine button variant based on action key
+                    if action_key in ("clean", "remove", "delete"):
+                        variant = "warning"
+                    elif action_key in ("dismiss", "cancel", "close"):
+                        variant = "default"
+                    else:
+                        variant = "primary"
+
+                    yield Button(
+                        button_label, variant=variant, id=f"warning-action-{action_key}"
+                    )
+
+                # Always add dismiss button if not already present
+                if "dismiss" not in self.actions:
+                    yield Button(
+                        "Dismiss", variant="default", id="warning-action-dismiss"
+                    )
+
+    def on_mount(self) -> None:
+        """Focus dismiss button by default"""
+        # Try to focus dismiss button, or first button if no dismiss
+        try:
+            self.query_one("#warning-action-dismiss", Button).focus()
+        except Exception:
+            buttons = self.query(Button)
+            if buttons:
+                buttons[0].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        # Extract action key from button ID
+        if event.button.id and event.button.id.startswith("warning-action-"):
+            action_key = event.button.id[len("warning-action-") :]
+            if action_key == "dismiss":
+                self.dismiss(None)
+            else:
+                self.dismiss(action_key)
+        else:
+            self.dismiss(None)
+
+
+# Legacy alias for backwards compatibility
+StaleTokenAlertScreen = WarningDialog

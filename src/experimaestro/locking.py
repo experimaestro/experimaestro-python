@@ -7,7 +7,7 @@ import logging
 import os.path
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional, Any
 import weakref
 
 import filelock
@@ -15,6 +15,67 @@ import filelock
 from experimaestro.dynamic import DynamicResource
 
 logger = logging.getLogger("xpm.locking")
+
+
+class StaleLockError(Exception):
+    """Exception raised when stale locks are detected during token acquisition.
+
+    This exception contains all information needed to create a WarningEvent
+    and register action callbacks in the scheduler.
+
+    Attributes:
+        warning_key: Unique identifier for this warning
+        description: Human-readable description for UI
+        actions: Dict mapping action_key to button label (e.g., {"clean": "Remove Locks"})
+        context: Additional data for UI and callbacks (lock file paths, etc.)
+        callbacks: Dict mapping action_key to callable that executes the action
+    """
+
+    def __init__(
+        self,
+        warning_key: str,
+        description: str,
+        actions: dict[str, str],
+        context: dict[str, Any],
+        callbacks: dict[str, Callable[[], None]],
+    ):
+        self.warning_key = warning_key
+        self.description = description
+        self.actions = actions
+        self.context = context
+        self.callbacks = callbacks
+        super().__init__(description)
+
+
+class OrphanedEventsError(Exception):
+    """Exception raised when orphaned events are found without events_count.
+
+    This exception is raised when status.json exists without an events_count field,
+    but event files exist in .events/. This requires user confirmation to merge.
+
+    Attributes:
+        warning_key: Unique identifier for this warning
+        description: Human-readable description for UI
+        actions: Dict mapping action_key to button label
+        context: Additional data (event count, file paths, etc.)
+        callbacks: Dict mapping action_key to callable that executes the action
+    """
+
+    def __init__(
+        self,
+        warning_key: str,
+        description: str,
+        actions: dict[str, str],
+        context: dict[str, Any],
+        callbacks: dict[str, Callable[[], None]],
+    ):
+        self.warning_key = warning_key
+        self.description = description
+        self.actions = actions
+        self.context = context
+        self.callbacks = callbacks
+        super().__init__(description)
+
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.jobs import Job
@@ -578,6 +639,65 @@ class DynamicLockFile(ABC):
         A lock file is valid when job_uri is set.
         """
         return self.job_uri is not None
+
+    def is_stale(self, min_age_seconds: float = 3600) -> bool:
+        """Check if this lock file is stale (process not running, file is old).
+
+        A lock file is considered stale when:
+        1. It has a valid state (job_uri is set)
+        2. It has process information
+        3. The process is not running anymore
+        4. The file is older than min_age_seconds
+
+        Args:
+            min_age_seconds: Minimum age in seconds for a file to be considered stale.
+                           Default is 3600 seconds (1 hour).
+
+        Returns:
+            True if the lock file is stale, False otherwise
+        """
+        import time
+
+        # Not valid state - not stale (just invalid)
+        if not self.valid_state:
+            return False
+
+        # No process info - can't determine if stale
+        if self.process is None:
+            return False
+
+        # Check if file is old enough
+        if time.time() - self.timestamp < min_age_seconds:
+            return False
+
+        # Check if process is still running
+        try:
+            # Use the Process.isrunning() method (synchronous version)
+            if hasattr(self.process, "isrunning"):
+                is_running = self.process.isrunning()
+            else:
+                # Fallback: try to check PID using psutil
+                try:
+                    import psutil
+
+                    pid = getattr(self.process, "pid", None)
+                    if pid is None:
+                        return False
+                    process = psutil.Process(pid)
+                    is_running = process.is_running()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                    is_running = False
+
+            # Stale if process is not running
+            return not is_running
+
+        except Exception as e:
+            logger.debug(
+                "Error checking if process is running for lock file %s: %s",
+                self.path,
+                e,
+            )
+            return False
 
     @classmethod
     def create(
@@ -1343,6 +1463,102 @@ class TrackedDynamicResource(DynamicResource, ABC):
         job = dependency.target
         return self.jobs_folder / get_job_lock_relpath(job.task_id, job.identifier)
 
+    def _check_stale_locks(self, dependency: "DynamicDependency") -> None:
+        """Check for stale locks and raise StaleLockError if found.
+
+        Args:
+            dependency: The dependency requesting the resource
+
+        Raises:
+            StaleLockError: If stale locks are detected
+        """
+        stale_locks = []
+        for lock_file in self.cache.values():
+            if lock_file.is_stale(min_age_seconds=3600):
+                # Gather lock file info for the warning event
+                lock_info = {
+                    "path": str(lock_file.path),
+                    "timestamp": lock_file.timestamp,
+                    "pid": getattr(lock_file.process, "pid", None)
+                    if lock_file.process
+                    else None,
+                }
+                stale_locks.append((lock_file, lock_info))
+
+        if stale_locks:
+            # Build description for UI
+            count = len(stale_locks)
+            if count == 1:
+                description = f"Found 1 stale lock for token '{self.name}'.\n\n"
+            else:
+                description = f"Found {count} stale locks for token '{self.name}'.\n\n"
+
+            # Show first few locks in description
+            import time
+
+            for lock_file, lock_info in stale_locks[:5]:
+                pid = lock_info["pid"] or "unknown"
+                age_minutes = int((time.time() - lock_info["timestamp"]) / 60)
+                description += f"  • {lock_file.path.name}\n"
+                description += f"    PID {pid}, idle for {age_minutes} min\n"
+
+            if count > 5:
+                description += f"\n  ... and {count - 5} more\n"
+
+            description += (
+                "\n\nStale locks occur when a process crashes or is killed.\n"
+                "They prevent other jobs from acquiring the token."
+            )
+
+            # Create callbacks for actions
+            def cleanup_stale_locks():
+                """Remove all stale lock files"""
+                removed = 0
+                for lock_file, _ in stale_locks:
+                    try:
+                        lock_file.path.unlink()
+                        # Remove from cache
+                        lock_key = str(lock_file.path.relative_to(self.jobs_folder))
+                        if lock_key in self.cache:
+                            del self.cache[lock_key]
+                        removed += 1
+                        logger.info(f"Removed stale lock: {lock_file.path}")
+                    except OSError as e:
+                        logger.warning(f"Failed to remove {lock_file.path}: {e}")
+                logger.info(f"Cleaned up {removed}/{count} stale locks")
+
+            # Build warning key using resource name and job info
+            job = dependency.target
+            warning_key = f"stale_locks_{self.name}_{job.task_id}_{job.identifier}"
+
+            # Build context with lock file details
+            context = {
+                "title": "Stale Token Locks Detected",
+                "token_name": self.name,
+                "token_path": str(self.lock_folder),
+                "stale_lock_count": count,
+                "stale_locks": [info for _, info in stale_locks],
+            }
+
+            # Define actions
+            actions = {
+                "clean": "Remove Locks",
+                "dismiss": "Continue Anyway",
+            }
+
+            callbacks = {
+                "clean": cleanup_stale_locks,
+                "dismiss": lambda: None,  # No-op
+            }
+
+            raise StaleLockError(
+                warning_key=warning_key,
+                description=description,
+                actions=actions,
+                context=context,
+                callbacks=callbacks,
+            )
+
     async def aio_acquire(self, dependency: "DynamicDependency") -> None:
         """Acquire the resource for a dependency.
 
@@ -1351,9 +1567,14 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         Raises:
             LockError: If resource is not available
+            StaleLockError: If stale locks are detected
         """
         async with self._async_lock, self.ipc_lock:
             self._ipc_update()
+
+            # Check for stale locks before checking availability
+            self._check_stale_locks(dependency)
+
             if not self.is_available(dependency):
                 raise LockError(f"Resource {self.name} not available")
 

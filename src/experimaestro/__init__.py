@@ -1,4 +1,5 @@
 # Annotations
+from pathlib import Path
 from .annotations import (
     cache,
     Array,
@@ -159,4 +160,6 @@ __all__ = [
     "DirectoryContext",
     "documentation",
     "DirtyGitAction",
+    # Avoid breaking old code by re-exporting pathlib
+    "Path",
 ]

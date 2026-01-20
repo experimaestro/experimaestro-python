@@ -8,6 +8,7 @@ from experimaestro.tui.widgets.orphans import OrphanJobsScreen
 from experimaestro.tui.widgets.runs import RunsList
 from experimaestro.tui.widgets.global_services import GlobalServiceSyncs
 from experimaestro.tui.widgets.stray_jobs import OrphanJobsTab
+from experimaestro.tui.widgets.warnings import WarningsTab
 
 __all__ = [
     "CaptureLog",
@@ -20,4 +21,5 @@ __all__ = [
     "OrphanJobsTab",
     "RunsList",
     "GlobalServiceSyncs",
+    "WarningsTab",
 ]

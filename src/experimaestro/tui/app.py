@@ -25,6 +25,8 @@ from experimaestro.scheduler.state_status import (
     ServiceAddedEvent,
     ServiceStateChangedEvent,
     CarbonMetricsEvent,
+    WarningEvent,
+    ErrorEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
 from experimaestro.tui.utils import format_duration, get_status_icon  # noqa: F401
@@ -50,6 +52,7 @@ from experimaestro.tui.dialogs import (
     DeleteConfirmScreen,
     KillConfirmScreen,
     HelpScreen,
+    WarningDialog,
 )
 from experimaestro.tui.widgets import (
     CaptureLog,
@@ -59,6 +62,7 @@ from experimaestro.tui.widgets import (
     JobDetailView,
     RunsList,
     GlobalServiceSyncs,
+    WarningsTab,
 )
 from experimaestro.tui.widgets.stray_jobs import OrphanJobsTab
 
@@ -148,6 +152,8 @@ class ExperimaestroUI(App):
                     yield GlobalServiceSyncs(self.state_provider)
                 with TabPane("Orphans (0)", id="orphan-tab"):
                     yield OrphanJobsTab(self.state_provider)
+                with TabPane("Warnings (0)", id="warnings-tab"):
+                    yield WarningsTab(self.state_provider)
                 with TabPane("Logs", id="logs-tab"):
                     yield CaptureLog(id="logs", auto_scroll=True, wrap=True)
             self._monitor_mounted = True
@@ -160,6 +166,8 @@ class ExperimaestroUI(App):
                     yield GlobalServiceSyncs(self.state_provider)
                 with TabPane("Orphans (0)", id="orphan-tab"):
                     yield OrphanJobsTab(self.state_provider)
+                with TabPane("Warnings (0)", id="warnings-tab"):
+                    yield WarningsTab(self.state_provider)
             self._monitor_mounted = True
 
         yield Footer()
@@ -263,6 +271,11 @@ class ExperimaestroUI(App):
             orphan_pane.compose_add_child(OrphanJobsTab(self.state_provider))
             tabs.add_pane(orphan_pane, before="logs-tab")
 
+        # Create and mount warnings tab
+        warnings_pane = TabPane("Warnings (0)", id="warnings-tab")
+        warnings_pane.compose_add_child(WarningsTab(self.state_provider))
+        tabs.add_pane(warnings_pane, before="logs-tab")
+
         self._monitor_mounted = True
 
         # Refresh experiments list
@@ -306,6 +319,19 @@ class ExperimaestroUI(App):
         except Exception:
             pass
 
+    def update_warnings_tab_title(self) -> None:
+        """Update the Warnings tab title with unresolved warning count"""
+        try:
+            warnings_tab = self.query_one(WarningsTab)
+            count = warnings_tab.warning_count
+            # Find and update the tab pane title
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            tab = tabs.get_tab("warnings-tab")
+            if tab:
+                tab.label = f"Warnings ({count})"
+        except Exception:
+            pass
+
     def update_logs_tab_title(self) -> None:
         """Update the Logs tab title to show unread indicator (bold when unread)"""
         if not self.show_logs:
@@ -340,6 +366,13 @@ class ExperimaestroUI(App):
             try:
                 global_services = self.query_one(GlobalServiceSyncs)
                 global_services.refresh_services()
+            except Exception:
+                pass
+        elif event.pane.id == "warnings-tab":
+            # Refresh warnings when switching to Warnings tab
+            try:
+                warnings_tab = self.query_one(WarningsTab)
+                warnings_tab.refresh_warnings()
             except Exception:
                 pass
 
@@ -506,17 +539,6 @@ class ExperimaestroUI(App):
                 for job_detail_view in self.query(JobDetailView):
                     if job_detail_view.current_job_id == event.job_id:
                         job_detail_view.refresh_job_detail()
-
-    STATE_EVENT_HANDLERS = {
-        ExperimentUpdatedEvent: _handle_experiment_updated,
-        JobStateChangedEvent: _handle_job_state_changed,
-        JobProgressEvent: _handle_job_progress,
-        CarbonMetricsEvent: _handle_carbon_metrics,
-        RunUpdatedEvent: _handle_run_updated,
-        ServiceAddedEvent: _handle_service_added,
-        ServiceStateChangedEvent: _handle_service_state_changed,
-        JobSubmittedEvent: _handle_job_submitted,
-    }
 
     def on_experiment_selected(self, message: ExperimentSelected) -> None:
         """Handle experiment selection - show jobs/services tabs"""
@@ -883,6 +905,77 @@ class ExperimaestroUI(App):
                     self.query_one("#jobs-table", DataTable).focus()
             else:
                 experiments_table.focus()
+
+    def _handle_warning_event(self, event: "WarningEvent") -> None:
+        """Handle generic warning event from scheduler"""
+        self.log(f"Warning: {event.description[:100]}")
+
+        # Refresh warnings tab to show the new warning
+        try:
+            warnings_tab = self.query_one(WarningsTab)
+            warnings_tab.refresh_warnings()
+        except Exception:
+            pass
+
+        # Extract title from context or use default
+        title = event.context.get("title", "Warning")
+
+        def handle_warning_response(action_key: str | None) -> None:
+            if action_key is None:
+                # User dismissed the warning
+                return
+
+            # Execute the action via state provider
+            try:
+                self.state_provider.execute_warning_action(
+                    warning_key=event.warning_key,
+                    action_key=action_key,
+                    experiment_id=event.experiment_id,
+                    run_id=event.run_id,
+                )
+                self.notify(
+                    f"Action '{action_key}' completed successfully",
+                    severity="information",
+                    timeout=5,
+                )
+            except Exception as e:
+                self.log(f"Failed to execute action '{action_key}': {e}")
+                # Error event will be emitted by state provider
+
+        # Show generic warning dialog
+        self.push_screen(
+            WarningDialog(
+                warning_key=event.warning_key,
+                title=title,
+                description=event.description,
+                actions=event.actions,
+                severity=event.severity,
+            ),
+            handle_warning_response,
+        )
+
+    def _handle_error_event(self, event: "ErrorEvent") -> None:
+        """Handle error event from warning action execution"""
+        self.log(f"Error: {event.error_message}")
+        self.notify(
+            event.error_message,
+            severity="error",
+            timeout=10,
+        )
+
+    # Handler dispatch table - defined after all handler methods
+    STATE_EVENT_HANDLERS = {
+        ExperimentUpdatedEvent: _handle_experiment_updated,
+        JobStateChangedEvent: _handle_job_state_changed,
+        JobProgressEvent: _handle_job_progress,
+        CarbonMetricsEvent: _handle_carbon_metrics,
+        RunUpdatedEvent: _handle_run_updated,
+        ServiceAddedEvent: _handle_service_added,
+        ServiceStateChangedEvent: _handle_service_state_changed,
+        JobSubmittedEvent: _handle_job_submitted,
+        WarningEvent: _handle_warning_event,
+        ErrorEvent: _handle_error_event,
+    }
 
     def action_quit(self) -> None:
         """Show quit confirmation dialog"""

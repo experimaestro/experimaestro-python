@@ -86,6 +86,8 @@ class SSHStateProviderServer:
             RPCMethod.DELETE_EXPERIMENT.value: self._handle_delete_experiment,
             RPCMethod.GET_SYNC_INFO.value: self._handle_get_sync_info,
             RPCMethod.GET_PROCESS_INFO.value: self._handle_get_process_info,
+            RPCMethod.EXECUTE_WARNING_ACTION.value: self._handle_execute_warning_action,
+            RPCMethod.GET_UNRESOLVED_WARNINGS.value: self._handle_get_unresolved_warnings,
         }
 
     def start(self):
@@ -440,6 +442,46 @@ class SSHStateProviderServer:
             "type": pinfo.type,
             "running": pinfo.running,
         }
+
+    def _handle_execute_warning_action(self, params: Dict) -> None:
+        """Handle execute_warning_action request"""
+        warning_key = params.get("warning_key")
+        action_key = params.get("action_key")
+        experiment_id = params.get("experiment_id", "")
+        run_id = params.get("run_id", "")
+
+        if not warning_key or not action_key:
+            raise TypeError("warning_key and action_key are required")
+
+        # Execute the action on the state provider (scheduler)
+        self._state_provider.execute_warning_action(
+            warning_key=warning_key,
+            action_key=action_key,
+            experiment_id=experiment_id,
+            run_id=run_id,
+        )
+        # No return value - success is indicated by not raising
+
+    def _handle_get_unresolved_warnings(self, params: Dict) -> Dict:
+        """Handle get_unresolved_warnings request"""
+        warnings = self._state_provider.get_unresolved_warnings()
+
+        # Serialize warnings to dicts
+        warnings_data = []
+        for w in warnings:
+            warnings_data.append(
+                {
+                    "experiment_id": w.experiment_id,
+                    "run_id": w.run_id,
+                    "warning_key": w.warning_key,
+                    "description": w.description,
+                    "actions": w.actions,
+                    "context": w.context,
+                    "severity": w.severity,
+                }
+            )
+
+        return {"warnings": warnings_data}
 
     def _handle_delete_job_safely(self, params: Dict) -> Dict:
         """Handle delete_job_safely request"""

@@ -1,8 +1,11 @@
 # flake8: noqa: T201
 import sys
-from typing import Set, Optional
+from typing import Set, Optional, TYPE_CHECKING
 from shutil import rmtree
 import click
+
+if TYPE_CHECKING:
+    from experimaestro.locking import OrphanedEventsError
 import logging
 from functools import cached_property, update_wrapper
 from pathlib import Path
@@ -49,6 +52,65 @@ def pass_cfg(f):
         return ctx.invoke(f, ctx.obj, *args, **kwargs)
 
     return update_wrapper(new_func, f)
+
+
+def check_and_warn_stale_tokens(workdir: Path, min_age_seconds: int = 3600) -> None:
+    """Check for stale token locks and print a warning if found.
+
+    Args:
+        workdir: Workspace directory
+        min_age_seconds: Minimum age in seconds for a lock to be considered stale
+    """
+    try:
+        from experimaestro.tokens import CounterToken
+        import json
+
+        tokens_dir = workdir / "tokens"
+        if not tokens_dir.exists():
+            return
+
+        stale_count = 0
+
+        for token_dir in tokens_dir.iterdir():
+            if not token_dir.is_dir() or not token_dir.name.endswith(".counter"):
+                continue
+
+            token_name = token_dir.name[:-8]  # Remove .counter suffix
+
+            try:
+                # Read token total from informations.json
+                info_path = token_dir / "informations.json"
+                if not info_path.exists():
+                    continue
+
+                with info_path.open() as f:
+                    data = json.load(f)
+                    total = data.get("total", 1)
+
+                # Create token instance to check stale locks
+                token = CounterToken(token_name, token_dir, total, force=False)
+                stale_locks = token.get_stale_lock_files(
+                    min_age_seconds=min_age_seconds
+                )
+                stale_count += len(stale_locks)
+
+            except Exception:
+                # Silently ignore errors in stale token detection
+                continue
+
+        if stale_count > 0:
+            cprint("\n⚠️  Warning: Found stale token locks in workspace", "yellow")
+            print(
+                f"  {stale_count} stale lock(s) detected (processes no longer running)"
+            )
+            cprint(
+                "  Run 'experimaestro experiments cleanup' to remove them\n",
+                "yellow",
+            )
+
+    except Exception:
+        # Silently ignore errors - this is just a helpful warning
+        pass
 
 
 @click.group()
@@ -413,6 +475,10 @@ def experiments(ctx, workdir, workspace):
     ws = find_workspace(workdir=workdir, workspace=workspace)
     path = check_xp_path(None, None, ws.path)
     ctx.obj = path
+
+    # Check for stale tokens and warn (skip for cleanup command)
+    if ctx.invoked_subcommand != "cleanup":
+        check_and_warn_stale_tokens(path)
 
 
 @experiments.command("list")
@@ -1153,6 +1219,319 @@ def tags_list(workdir: Path, experiment_id: str, as_json: bool):
     cprint(f"Tags for experiment '{experiment_id}':", "cyan")
     for tag_name, run_id in sorted(tags_map.items()):
         print(f"  {tag_name:<20} -> {run_id}")
+
+
+def _handle_orphaned_events_in_cli(error: "OrphanedEventsError", force: bool) -> None:
+    """Handle OrphanedEventsError in CLI by prompting user for action.
+
+    Args:
+        error: The OrphanedEventsError exception
+        force: If True, automatically choose "skip" action
+    """
+    cprint("\n⚠️  Orphaned Events Detected", "yellow", attrs=["bold"])
+    print()
+    print(error.description)
+    print()
+
+    # If force mode, auto-select "skip" option
+    if force:
+        cprint("Force mode: automatically skipping orphaned events", "yellow")
+        action_key = "skip"
+    else:
+        # Prompt user for action
+        cprint("Available actions:", "cyan")
+        for key, label in error.actions.items():
+            print(f"  [{key}] {label}")
+        print()
+
+        # Get user choice
+        while True:
+            action_key = click.prompt(
+                "Select action",
+                type=click.Choice(list(error.actions.keys())),
+                default="skip",
+            )
+            break
+
+    # Execute the chosen callback
+    callback = error.callbacks.get(action_key)
+    if callback:
+        try:
+            callback()
+            cprint(f"✓ Action '{action_key}' completed successfully", "green")
+        except Exception as e:
+            cprint(f"✗ Action '{action_key}' failed: {e}", "red")
+            raise
+    else:
+        cprint(f"No callback for action '{action_key}'", "yellow")
+
+
+@experiments.command("cleanup")
+@click.option(
+    "--experiment-id", type=str, default=None, help="Specific experiment to cleanup"
+)
+@click.option(
+    "--perform",
+    is_flag=True,
+    help="Actually perform cleanup (default is to show what would be done)",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Use default strategies without asking (implies --perform)",
+)
+@click.option(
+    "--min-age",
+    type=int,
+    default=3600,
+    help="Minimum age in seconds for stale locks (default: 3600)",
+)
+@pass_cfg
+def cleanup(  # noqa: C901
+    workdir: Path, experiment_id: str | None, perform: bool, force: bool, min_age: int
+):
+    """Consolidate orphaned events and cleanup stale token locks
+
+    By default, this command only shows what would be cleaned (dry-run mode).
+    Use --perform to actually execute cleanup, or --force to execute with default strategies.
+
+    This command:
+    - Consolidates orphaned event files from crashed experiments
+    - Removes stale token lock files (process no longer running)
+    - Cleans up temporary event files after consolidation
+
+    Examples:
+        # Show what would be cleaned (default)
+        experimaestro experiments cleanup
+
+        # Actually perform cleanup with confirmation prompts
+        experimaestro experiments cleanup --perform
+
+        # Cleanup a specific experiment
+        experimaestro experiments cleanup --experiment-id my-exp --perform
+
+        # Force cleanup without questions (uses default strategies)
+        experimaestro experiments cleanup --force
+    """
+    import asyncio
+    import logging
+    import time
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+    from experimaestro.tokens import CounterToken
+
+    logger = logging.getLogger("xpm.cli.cleanup")
+
+    # Force implies perform
+    if force:
+        perform = True
+
+    # Default behavior is dry-run (show what would be done)
+    dry_run = not perform
+
+    cprint("=== Experimaestro Cleanup ===", "cyan", attrs=["bold"])
+    if dry_run:
+        cprint(
+            "DRY RUN MODE: Showing what would be cleaned (use --perform to execute)",
+            "yellow",
+            attrs=["bold"],
+        )
+    print()
+
+    # Initialize state provider (this triggers consolidation)
+    cprint("Scanning for orphaned experiment events...", "cyan")
+    state_provider = WorkspaceStateProvider.get_instance(workdir)
+
+    # Get experiments directory
+    experiments_dir = workdir / ".events" / "experiments"
+
+    if experiment_id:
+        # Cleanup specific experiment
+        exp_events_dir = experiments_dir / experiment_id
+        if exp_events_dir.exists():
+            cprint(f"Consolidating events for experiment '{experiment_id}'...", "cyan")
+            if not dry_run:
+                state_provider._consolidate_experiment_events(
+                    experiment_id, exp_events_dir
+                )
+            else:
+                cprint(f"  [DRY RUN] Would consolidate: {experiment_id}", "yellow")
+        else:
+            cprint(f"No orphaned events for experiment '{experiment_id}'", "yellow")
+    else:
+        # Cleanup all experiments
+        if experiments_dir.exists():
+            orphaned_count = sum(1 for d in experiments_dir.iterdir() if d.is_dir())
+            if orphaned_count > 0:
+                cprint(
+                    f"Found {orphaned_count} experiment(s) with orphaned events",
+                    "yellow",
+                )
+                if not dry_run and not force:
+                    if not click.confirm("Consolidate orphaned experiment events?"):
+                        cprint("Skipping experiment consolidation", "yellow")
+                        orphaned_count = 0
+
+                if dry_run or (orphaned_count > 0 and (force or not dry_run)):
+                    for exp_events_dir in experiments_dir.iterdir():
+                        if exp_events_dir.is_dir():
+                            exp_id = exp_events_dir.name
+                            if dry_run:
+                                cprint(
+                                    f"  [DRY RUN] Would consolidate: {exp_id}", "yellow"
+                                )
+                            else:
+                                try:
+                                    state_provider._consolidate_experiment_events(
+                                        exp_id, exp_events_dir
+                                    )
+                                except Exception as e:
+                                    from experimaestro.locking import (
+                                        OrphanedEventsError,
+                                    )
+
+                                    if isinstance(e, OrphanedEventsError):
+                                        _handle_orphaned_events_in_cli(e, force)
+                                    else:
+                                        raise
+            else:
+                cprint("No orphaned experiment events found", "green")
+        else:
+            cprint("No orphaned experiment events found", "green")
+
+    print()
+
+    # Cleanup orphaned job events
+    cprint("Scanning for orphaned job events...", "cyan")
+    jobs_events_dir = workdir / ".events" / "jobs"
+
+    if jobs_events_dir.exists():
+        orphaned_jobs_count = 0
+        for task_dir in jobs_events_dir.iterdir():
+            if task_dir.is_dir():
+                # Count job event files in this task directory
+                job_event_files = list(task_dir.glob("event-*-*.jsonl"))
+                if job_event_files:
+                    orphaned_jobs_count += len(job_event_files)
+                    if dry_run:
+                        cprint(
+                            f"  [DRY RUN] Would consolidate {len(job_event_files)} job event(s) in {task_dir.name}",
+                            "yellow",
+                        )
+
+        if orphaned_jobs_count > 0:
+            cprint(f"Found {orphaned_jobs_count} orphaned job event file(s)", "yellow")
+            if not dry_run:
+                if force or click.confirm("Consolidate orphaned job events?"):
+                    # Consolidate job events by calling finalize_status on each job
+                    consolidated = 0
+                    for task_dir in jobs_events_dir.iterdir():
+                        if task_dir.is_dir():
+                            job_event_files = list(task_dir.glob("event-*-*.jsonl"))
+                            for event_file in job_event_files:
+                                # Extract job_id from filename: event-{job_id}-{count}.jsonl
+                                filename = event_file.name
+                                parts = filename.split("-")
+                                if len(parts) >= 3:
+                                    job_id = parts[1]
+                                    task_id = task_dir.name
+
+                                    # Get the job and finalize it
+                                    job = state_provider.get_job(task_id, job_id)
+                                    if job:
+                                        try:
+                                            asyncio.run(
+                                                job.finalize_status(cleanup_events=True)
+                                            )
+                                            consolidated += 1
+                                            logger.debug(
+                                                f"Consolidated job {task_id}/{job_id}"
+                                            )
+                                        except Exception as e:
+                                            cprint(
+                                                f"  Failed to consolidate job {task_id}/{job_id}: {e}",
+                                                "red",
+                                            )
+                    cprint(f"Consolidated {consolidated} job(s)", "green")
+                else:
+                    cprint("Skipping job consolidation", "yellow")
+            else:
+                cprint("[DRY RUN] Would consolidate orphaned job events", "yellow")
+        else:
+            cprint("No orphaned job events found", "green")
+    else:
+        cprint("No job events directory found", "yellow")
+
+    print()
+
+    # Cleanup stale token locks
+    cprint("Scanning for stale token locks...", "cyan")
+    tokens_dir = workdir / "tokens"
+
+    if tokens_dir.exists():
+        stale_locks_found = []
+
+        for token_dir in tokens_dir.iterdir():
+            if not token_dir.is_dir() or not token_dir.name.endswith(".counter"):
+                continue
+
+            token_name = token_dir.name[:-8]  # Remove .counter suffix
+
+            # Load token to check for stale locks
+            try:
+                # Read token total from informations.json
+                info_path = token_dir / "informations.json"
+                if not info_path.exists():
+                    continue
+
+                import json
+
+                with info_path.open() as f:
+                    data = json.load(f)
+                    total = data.get("total", 1)
+
+                # Create token instance to check stale locks
+                token = CounterToken(token_name, token_dir, total, force=False)
+                stale_locks = token.get_stale_lock_files(min_age_seconds=min_age)
+
+                if stale_locks:
+                    stale_locks_found.extend(stale_locks)
+                    cprint(
+                        f"  Token '{token_name}': {len(stale_locks)} stale lock(s)",
+                        "yellow",
+                    )
+                    for lock_file in stale_locks:
+                        pid = getattr(lock_file.process, "pid", "unknown")
+                        print(
+                            f"    - {lock_file.path.name} (PID {pid}, age {int((time.time() - lock_file.timestamp) / 60)} min)"
+                        )
+
+            except Exception as e:
+                cprint(f"  Error checking token '{token_name}': {e}", "red")
+                continue
+
+        if stale_locks_found:
+            cprint(f"\nFound {len(stale_locks_found)} stale token lock(s)", "yellow")
+            if not dry_run:
+                if force or click.confirm("Remove stale token locks?"):
+                    removed = 0
+                    for lock_file in stale_locks_found:
+                        try:
+                            lock_file.path.unlink()
+                            removed += 1
+                        except OSError as e:
+                            cprint(f"  Failed to remove {lock_file.path}: {e}", "red")
+                    cprint(f"Removed {removed} stale lock file(s)", "green")
+                else:
+                    cprint("Skipping stale lock removal", "yellow")
+            else:
+                cprint("[DRY RUN] Would remove stale locks", "yellow")
+        else:
+            cprint("No stale token locks found", "green")
+    else:
+        cprint("No token directory found", "yellow")
+
+    print()
+    cprint("Cleanup complete!", "green", attrs=["bold"])
 
 
 # === Carbon tracking commands ===

@@ -20,7 +20,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_status import WarningEvent
 
 from experimaestro.scheduler.interfaces import (
     BaseJob,
@@ -100,9 +103,14 @@ class StateProvider(ABC):
     is_live: bool = False
 
     def __init__(self) -> None:
-        """Initialize state listener management"""
+        """Initialize state listener management and warning action cache"""
         self._state_listeners: Set[StateListener] = set()
         self._state_listener_lock = threading.Lock()
+        # Cache for warning action callbacks: warning_key -> {action_key -> callback}
+        self._warning_actions: Dict[str, Dict[str, Callable[[], None]]] = {}
+        # Cache for warning metadata: warning_key -> WarningEvent
+        self._warning_metadata: Dict[str, "WarningEvent"] = {}
+        self._warning_actions_lock = threading.Lock()
 
     def add_listener(self, listener: StateListener) -> None:
         """Register a listener for state change events
@@ -166,6 +174,116 @@ class StateProvider(ABC):
             state=state_name,
         )
         self._notify_state_listeners(event)
+
+    def register_warning_actions(
+        self,
+        warning_key: str,
+        actions: Dict[str, Callable[[], None]],
+        warning_event: Optional["WarningEvent"] = None,
+    ) -> None:
+        """Register action callbacks for a warning
+
+        Args:
+            warning_key: Unique identifier for the warning
+            actions: Dict mapping action_key to callback function
+            warning_event: Optional WarningEvent with full metadata for display
+        """
+        with self._warning_actions_lock:
+            self._warning_actions[warning_key] = actions
+            if warning_event is not None:
+                self._warning_metadata[warning_key] = warning_event
+            logger.debug(
+                "Registered %d actions for warning '%s'", len(actions), warning_key
+            )
+
+    def execute_warning_action(
+        self,
+        warning_key: str,
+        action_key: str,
+        experiment_id: str = "",
+        run_id: str = "",
+    ) -> None:
+        """Execute a warning action and emit error event if it fails
+
+        Args:
+            warning_key: The warning identifier
+            action_key: The action to execute
+            experiment_id: Experiment ID for error events
+            run_id: Run ID for error events
+
+        Raises:
+            KeyError: If warning_key or action_key not found
+        """
+        from experimaestro.scheduler.state_status import ErrorEvent
+
+        with self._warning_actions_lock:
+            if warning_key not in self._warning_actions:
+                error_msg = f"Warning '{warning_key}' not found"
+                logger.error(error_msg)
+                self._notify_state_listeners(
+                    ErrorEvent(
+                        experiment_id=experiment_id,
+                        run_id=run_id,
+                        warning_key=warning_key,
+                        action_key=action_key,
+                        error_message=error_msg,
+                    )
+                )
+                raise KeyError(error_msg)
+
+            actions = self._warning_actions[warning_key]
+            if action_key not in actions:
+                error_msg = (
+                    f"Action '{action_key}' not found for warning '{warning_key}'"
+                )
+                logger.error(error_msg)
+                self._notify_state_listeners(
+                    ErrorEvent(
+                        experiment_id=experiment_id,
+                        run_id=run_id,
+                        warning_key=warning_key,
+                        action_key=action_key,
+                        error_message=error_msg,
+                    )
+                )
+                raise KeyError(error_msg)
+
+            callback = actions[action_key]
+
+        # Execute callback outside the lock
+        try:
+            logger.info(
+                "Executing action '%s' for warning '%s'", action_key, warning_key
+            )
+            callback()
+            logger.info("Action '%s' completed successfully", action_key)
+
+            # Remove warning from metadata and actions (it's been resolved)
+            with self._warning_actions_lock:
+                self._warning_actions.pop(warning_key, None)
+                self._warning_metadata.pop(warning_key, None)
+        except Exception as e:
+            error_msg = f"Action '{action_key}' failed: {e}"
+            logger.error(error_msg, exc_info=True)
+            self._notify_state_listeners(
+                ErrorEvent(
+                    experiment_id=experiment_id,
+                    run_id=run_id,
+                    warning_key=warning_key,
+                    action_key=action_key,
+                    error_message=error_msg,
+                )
+            )
+            raise
+
+    def get_unresolved_warnings(self) -> List["WarningEvent"]:
+        """Get all unresolved warnings
+
+        Returns:
+            List of WarningEvent objects with metadata for all pending warnings
+        """
+        with self._warning_actions_lock:
+            return list(self._warning_metadata.values())
 
     @abstractmethod
     def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
@@ -1228,11 +1346,13 @@ class MockExperiment(BaseExperiment):
             carbon_impact=CarbonImpactData.from_dict(d.get("carbon_impact")),
         )
 
-    def apply_event(self, event: "EventBase") -> None:
+    def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:
         """Apply an event to update experiment state
 
         Args:
             event: Event to apply
+            merge_mode: If True, don't overwrite fields that are already set
+                       (except for timestamps which should use the latest value)
         """
         from experimaestro.scheduler.state_status import (
             JobSubmittedEvent,
@@ -1243,6 +1363,10 @@ class MockExperiment(BaseExperiment):
         )
 
         if isinstance(event, JobSubmittedEvent):
+            # In merge mode, only add if not already present
+            if merge_mode and event.job_id in self._job_infos:
+                return  # Already exists, skip
+
             # Add lightweight job info (tags are stored in ExperimentJobInformation)
             self._job_infos[event.job_id] = ExperimentJobInformation(
                 job_id=event.job_id,
@@ -1254,6 +1378,10 @@ class MockExperiment(BaseExperiment):
                 self._dependencies[event.job_id] = event.depends_on
 
         elif isinstance(event, ServiceAddedEvent):
+            # In merge mode, only add if not already present
+            if merge_mode and event.service_id in self._services:
+                return  # Already exists, skip
+
             self._services[event.service_id] = MockService(
                 service_id=event.service_id,
                 description_text=event.description,
@@ -1271,23 +1399,41 @@ class MockExperiment(BaseExperiment):
         elif isinstance(event, JobStateChangedEvent):
             # Track individual job states
             job_state = STATE_NAME_TO_JOBSTATE.get(event.state, JobState.UNSCHEDULED)
-            self._job_states[event.job_id] = job_state
 
-            # Update finished/failed counters when jobs complete
-            if event.state == "done":
-                self._finished_jobs += 1
-            elif event.state == "error":
-                self._failed_jobs += 1
+            # In merge mode, use existing state if already set
+            if not (merge_mode and event.job_id in self._job_states):
+                self._job_states[event.job_id] = job_state
+
+                # Update finished/failed counters when jobs complete
+                # In merge mode, counters were likely already incremented in status.json
+                if not merge_mode:
+                    if event.state == "done":
+                        self._finished_jobs += 1
+                    elif event.state == "error":
+                        self._failed_jobs += 1
 
         elif isinstance(event, RunCompletedEvent):
             # Map status string to ExperimentStatus
+            new_status = None
             if event.status in ("completed", "done"):
-                self._status = ExperimentStatus.DONE
+                new_status = ExperimentStatus.DONE
             elif event.status == "failed":
-                self._status = ExperimentStatus.FAILED
+                new_status = ExperimentStatus.FAILED
             else:
-                self._status = ExperimentStatus.RUNNING
-            self._ended_at = event.ended_at
+                new_status = ExperimentStatus.RUNNING
+
+            # In merge mode, only update if current status is less final
+            if merge_mode:
+                # Don't overwrite DONE or FAILED status with RUNNING
+                if self._status in (ExperimentStatus.DONE, ExperimentStatus.FAILED):
+                    if new_status == ExperimentStatus.RUNNING:
+                        return  # Keep the more final status
+
+            self._status = new_status
+
+            # For timestamps, always use the latest (even in merge mode)
+            if self._ended_at is None or event.ended_at > self._ended_at:
+                self._ended_at = event.ended_at
 
 
 class MockService(BaseService):
