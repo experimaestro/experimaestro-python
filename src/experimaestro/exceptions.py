@@ -26,3 +26,25 @@ class GracefulTimeout(Exception):
     def __init__(self, message: str = "Task stopped gracefully before timeout"):
         self.message = message
         super().__init__(message)
+
+
+class TaskCancelled(Exception):
+    """Exception raised when a task is cancelled by SIGTERM (e.g., from scancel).
+
+    This exception is raised automatically by the task runner when SIGTERM is
+    received. Tasks can catch this exception to perform cleanup before the job
+    is killed (typically ~30-60 seconds for SLURM's KillWait).
+
+    Attributes:
+        message: Description of the cancellation
+        remaining_time: Estimated time remaining before SIGKILL (if known), in seconds
+    """
+
+    def __init__(
+        self,
+        message: str = "Task cancelled by signal",
+        remaining_time: float | None = None,
+    ):
+        self.message = message
+        self.remaining_time = remaining_time
+        super().__init__(message)

@@ -1,10 +1,13 @@
 # --- Task and types definitions
 
+import json
+import signal
 import sys
 import time
 from pathlib import Path
 import pytest
 import logging
+import psutil
 from experimaestro import (
     Config,
     Task,
@@ -15,10 +18,12 @@ from experimaestro import (
     PathGenerator,
 )
 from experimaestro.scheduler.workspace import RunMode
-from experimaestro.scheduler import FailedExperiment, JobState
+from experimaestro.scheduler import FailedExperiment, JobState, JobFailureStatus
+from experimaestro.scheduler.jobs import JobStateError
+from experimaestro.scheduler.interfaces import JobState as JobStateClass
 from experimaestro import SubmitHook, Job, Launcher, LightweightTask
 
-from .utils import TemporaryDirectory, TemporaryExperiment
+from .utils import TemporaryDirectory, TemporaryExperiment, is_posix
 
 from .tasks.all import (
     Concat,
@@ -392,3 +397,165 @@ def test_resubmit_preserves_status():
                 f"status.json mtime changed: {original_mtime} -> {new_mtime}"
             )
             assert new_content == original_content, "status.json content changed"
+
+
+# --- Tests for JobState.from_path with cancelled reason ---
+
+
+def test_job_state_from_path_json_cancelled(tmp_path):
+    """Test JobState.from_path reads JSON format with cancelled reason"""
+    failed_file = tmp_path / "test.failed"
+    failed_file.write_text(
+        json.dumps(
+            {"code": 15, "reason": "cancelled", "message": "Job terminated by SIGTERM"}
+        )
+    )
+
+    state = JobStateClass.from_path(tmp_path, "test")
+    assert isinstance(state, JobStateError)
+    assert state.failure_reason == JobFailureStatus.CANCELLED
+
+
+# --- Tests for graceful termination with TaskCancelled ---
+
+
+class CancellableTask(Task):
+    """Task that catches TaskCancelled and does cleanup"""
+
+    started_file: Meta[Path] = field(default_factory=PathGenerator("started"))
+    cleanup_file: Meta[Path] = field(default_factory=PathGenerator("cleanup_done"))
+    reraise: Param[bool] = field(default=True)
+
+    def execute(self):
+        from experimaestro import TaskCancelled
+
+        # Signal that we started
+        self.started_file.write_text("started")
+
+        try:
+            # Wait forever until cancelled
+            while True:
+                time.sleep(0.1)
+        except TaskCancelled as e:
+            # Do cleanup
+            self.cleanup_file.write_text(
+                f"cleanup at remaining_time={e.remaining_time}"
+            )
+            if self.reraise:
+                raise  # Re-raise to let framework handle
+            # Otherwise task completes "normally" after catching the exception
+
+
+MAX_CANCELLATION_WAIT = 50  # 5 seconds max wait
+
+
+def _run_cancellation_test(task, experiment_name: str):
+    """Helper to run cancellation test logic.
+
+    Returns (job, process) for verification after experiment exits.
+    """
+    p = None
+    job = task.__xpm__.job
+
+    # Wait for task to start
+    counter = 0
+    while not task.started_file.is_file():
+        time.sleep(0.1)
+        counter += 1
+        if counter >= MAX_CANCELLATION_WAIT:
+            pytest.fail("Timeout waiting for task to start")
+
+    # Get the task process PID
+    jobinfo = json.loads(job.pidpath.read_text())
+    pid = int(jobinfo["pid"])
+    p = psutil.Process(pid)
+
+    logging.info("Task started with PID %d", pid)
+
+    # Send SIGTERM to the task process
+    p.send_signal(signal.SIGTERM)
+
+    # Wait for the cleanup file to appear
+    counter = 0
+    while not task.cleanup_file.is_file():
+        time.sleep(0.1)
+        counter += 1
+        if counter >= MAX_CANCELLATION_WAIT:
+            pytest.fail("Timeout waiting for cleanup file")
+
+    # Verify cleanup was done
+    cleanup_content = task.cleanup_file.read_text()
+    assert "cleanup at remaining_time=" in cleanup_content
+
+    # Wait for process to exit
+    try:
+        p.wait(timeout=5)
+    except psutil.TimeoutExpired:
+        p.kill()
+        pytest.fail("Task process did not exit after SIGTERM")
+
+    return job, p
+
+
+def _verify_cancelled_job(job):
+    """Verify that job was marked as cancelled."""
+    failed_path = job.path / f"{job.scriptname}.failed"
+    counter = 0
+    while not failed_path.is_file():
+        time.sleep(0.1)
+        counter += 1
+        if counter >= MAX_CANCELLATION_WAIT:
+            pytest.fail("Timeout waiting for .failed file")
+
+    failed_content = json.loads(failed_path.read_text())
+    assert failed_content["reason"] == "cancelled", (
+        f"Expected reason 'cancelled', got {failed_content}"
+    )
+
+    # Verify that .done file was NOT created
+    done_path = job.path / f"{job.scriptname}.done"
+    assert not done_path.is_file(), ".done should not exist for cancelled task"
+
+
+@pytest.mark.skipif(not is_posix(), reason="Signal handling only works on POSIX")
+def test_graceful_termination_with_cleanup():
+    """Test that task can catch TaskCancelled and do cleanup before termination"""
+    p = None
+    job = None
+    try:
+        with pytest.raises(FailedExperiment):
+            with TemporaryExperiment("graceful_termination", timeout_multiplier=9):
+                task = CancellableTask.C(reraise=True)
+                task.submit()
+                job, p = _run_cancellation_test(task, "graceful_termination")
+
+        assert job is not None
+        _verify_cancelled_job(job)
+
+    finally:
+        if p is not None and p.is_running():
+            logging.warning("Force killing task process %d", p.pid)
+            p.kill()
+
+
+@pytest.mark.skipif(not is_posix(), reason="Signal handling only works on POSIX")
+def test_graceful_termination_no_reraise():
+    """Test that task catching TaskCancelled without re-raising still marks job as cancelled"""
+    p = None
+    job = None
+    try:
+        with pytest.raises(FailedExperiment):
+            with TemporaryExperiment(
+                "graceful_termination_no_reraise", timeout_multiplier=9
+            ):
+                task = CancellableTask.C(reraise=False)
+                task.submit()
+                job, p = _run_cancellation_test(task, "graceful_termination_no_reraise")
+
+        assert job is not None
+        _verify_cancelled_job(job)
+
+    finally:
+        if p is not None and p.is_running():
+            logging.warning("Force killing task process %d", p.pid)
+            p.kill()

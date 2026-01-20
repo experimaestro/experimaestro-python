@@ -336,6 +336,45 @@ This is useful when:
 - You're monitoring remaining walltime via scheduler environment variables (e.g., `SLURM_JOB_END_TIME`)
 - You want to ensure checkpoints are saved cleanly before termination
 
+### Graceful Termination (SIGTERM/SIGINT)
+
+When a task receives SIGTERM (e.g., from `scancel`) or SIGINT (Ctrl+C), the framework provides a mechanism for graceful cleanup:
+
+1. A background thread starts the framework cleanup (writes `.failed` with `reason: "cancelled"`, releases locks)
+2. A {py:class}`~experimaestro.TaskCancelled` exception is raised in the main thread
+
+Tasks can catch this exception to perform custom cleanup before termination:
+
+:::{admonition} Handling TaskCancelled
+:class: example
+
+```python
+from experimaestro import Task, TaskCancelled
+
+class LongRunningTask(Task):
+    def execute(self):
+        try:
+            for step in range(1000):
+                do_work(step)
+        except TaskCancelled as e:
+            # Custom cleanup before termination
+            # e.remaining_time contains seconds until SIGKILL (if known)
+            save_partial_state()
+            close_connections()
+            raise  # Re-raise to let framework handle exit
+```
+:::
+
+:::{important}
+**Key points about graceful termination:**
+
+- Framework cleanup runs in a background thread regardless of whether the task catches the exception
+- If the task catches and suppresses `TaskCancelled` (doesn't re-raise), the job is still marked as cancelled (not done)
+- SLURM provides ~30-60 seconds (`KillWait` setting) between SIGTERM and SIGKILL
+- Use for quick cleanup only (saving state, closing connections)
+- The {py:attr}`~experimaestro.TaskCancelled.remaining_time` attribute contains the remaining time until SIGKILL (if known from the launcher)
+:::
+
 ## Handling task events
 
 Callbacks can be registered to accomplish some actions e.g. on task completion.

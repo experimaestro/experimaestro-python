@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from experimaestro.carbon.base import BaseCarbonTracker
+    from experimaestro.core.objects import Config
 
 
 class LauncherInformation:
@@ -42,6 +43,10 @@ class Env:
     # in slave mode:
     # - no progress report
     slave: bool = False
+
+    # The currently executing task (set during task.execute())
+    # Used by signal handlers for graceful termination
+    current_task: Optional["Config"] = None
 
     @cached_property
     def xpm_path(self):

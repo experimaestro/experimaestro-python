@@ -309,6 +309,9 @@ class JobFailureStatus(enum.Enum):
     #: Timeout (can retry for resumable tasks)
     TIMEOUT = 3
 
+    #: Job was cancelled (e.g., via scancel or SIGTERM)
+    CANCELLED = 4
+
 
 class ExperimentStatus(enum.Enum):
     """Status of an experiment run"""

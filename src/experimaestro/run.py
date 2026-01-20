@@ -11,7 +11,7 @@ from typing import List, TYPE_CHECKING
 import filelock
 from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
-from experimaestro.exceptions import GracefulTimeout
+from experimaestro.exceptions import GracefulTimeout, TaskCancelled
 from experimaestro.locking import JobDependencyLocks
 from .core.types import ObjectType
 from experimaestro.utils import logger
@@ -47,6 +47,9 @@ def run(parameters: Path):
 
         task = ConfigInformation.fromParameters(params["objects"])
         task.__taskdir__ = Path.cwd()
+
+        # Store task reference for signal handlers (graceful termination)
+        env.current_task = task
 
         # Notify that the task has started
         progress(0)
@@ -349,6 +352,10 @@ class TaskRunner:
 
         self.cleaned = False
 
+        # Set when SIGTERM/SIGINT received - prevents marking task as done
+        # if task catches and suppresses TaskCancelled
+        self._cancelled = False
+
         # Carbon tracking state
         self._carbon_tracker = None
         self._carbon_reporter_thread = None
@@ -458,10 +465,58 @@ class TaskRunner:
         delayed_shutdown(60, exit_code=code)
         sys.exit(1)
 
+    def _background_cleanup(self, reason: str, message: str = ""):
+        """Run framework cleanup in background thread."""
+        try:
+            logger.info("Background cleanup: reason=%s", reason)
+            failure_info = {"code": signal.SIGTERM, "reason": reason}
+            if message:
+                failure_info["message"] = message
+            self.failedpath.write_text(json.dumps(failure_info))
+            self.cleanup()
+            logger.info("Background cleanup finished")
+        except Exception:
+            logger.exception("Error during background cleanup")
+
+    def handle_sigterm(self, signum, frame):
+        """Handle SIGTERM signal for graceful termination.
+
+        This is called when the job is cancelled (e.g., via scancel).
+        Spawns a cleanup thread and raises TaskCancelled to allow the
+        task to do its own cleanup if needed.
+        """
+        logger.warning("SIGTERM received, initiating graceful termination")
+
+        # Mark as cancelled to prevent marking as done if task catches exception
+        self._cancelled = True
+
+        # Start framework cleanup in background thread
+        # This runs regardless of whether the task catches TaskCancelled
+        cleanup_thread = threading.Thread(
+            target=self._background_cleanup,
+            args=("cancelled", "Job terminated by SIGTERM"),
+            daemon=True,
+        )
+        cleanup_thread.start()
+
+        # Get remaining time from launcher if available
+        remaining_time = None
+        env = taskglobals.Env.instance()
+        if env.launcher_info is not None:
+            try:
+                remaining_time = env.launcher_info.remaining_time()
+            except Exception:
+                pass
+
+        # Raise exception to interrupt main thread
+        # Task can catch this to do its own cleanup
+        raise TaskCancelled("Job cancelled by SIGTERM", remaining_time=remaining_time)
+
     def run(self):
         atexit.register(self.cleanup)
-        sigterm_handler = signal.signal(signal.SIGTERM, self.handle_error)
-        sigint_handler = signal.signal(signal.SIGINT, self.handle_error)
+        # Both SIGTERM (scancel) and SIGINT (Ctrl+C) trigger graceful termination
+        sigterm_handler = signal.signal(signal.SIGTERM, self.handle_sigterm)
+        sigint_handler = signal.signal(signal.SIGINT, self.handle_sigterm)
 
         def remove_signal_handlers(remove_cleanup=True):
             """Removes cleanup in forked processes"""
@@ -548,6 +603,13 @@ class TaskRunner:
                 # ... remove the handlers
                 remove_signal_handlers(remove_cleanup=False)
 
+                # Check if cancellation occurred (task caught and suppressed TaskCancelled)
+                if self._cancelled:
+                    logger.info(
+                        "Task completed but was cancelled - not marking as done"
+                    )
+                    sys.exit(1)
+
                 # Everything went OK
                 logger.info("Task ended successfully")
                 self.cleanup()
@@ -555,6 +617,12 @@ class TaskRunner:
         except GracefulTimeout as e:
             logger.info("Task requested graceful timeout: %s", e.message)
             self.handle_error(1, None, reason="timeout", message=e.message)
+
+        except TaskCancelled as e:
+            # Cleanup is already running in background thread (started by signal handler)
+            # Just log and exit - the background thread handles everything
+            logger.info("Task cancelled: %s", e.message)
+            sys.exit(1)
 
         except Exception:
             logger.exception("Got exception while running")
@@ -566,6 +634,10 @@ class TaskRunner:
                 self.donepath.touch()
 
                 # ... and finish the exit process
+                raise
+            elif self._cancelled:
+                # Task was cancelled - .failed already written by background cleanup thread
+                # Just exit without overwriting
                 raise
             else:
                 self.handle_error(e.code, None)

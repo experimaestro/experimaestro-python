@@ -62,7 +62,7 @@ from .scheduler import (
     DirtyGitError,
     GracefulExperimentExit,
 )
-from .exceptions import GracefulTimeout
+from .exceptions import GracefulTimeout, TaskCancelled
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler.transient import TransientMode
 from .notifications import progress, tqdm
@@ -145,6 +145,7 @@ __all__ = [
     "DirtyGitError",
     "GracefulExperimentExit",
     "GracefulTimeout",
+    "TaskCancelled",
     "Workspace",
     "RunMode",
     "TransientMode",
