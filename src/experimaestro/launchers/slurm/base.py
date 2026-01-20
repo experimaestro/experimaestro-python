@@ -620,6 +620,9 @@ class SlurmProcessBuilder(ProcessBuilder):
     def __init__(self, launcher: "SlurmLauncher"):
         super().__init__()
         self.launcher = launcher
+        # SLURM should always use sbatch (detach=True) by default,
+        # even in test mode, since sbatch is the normal submission path
+        self.detach = True
 
     def start(self, task_mode: bool = False) -> BatchSlurmProcess:
         """Start the process"""

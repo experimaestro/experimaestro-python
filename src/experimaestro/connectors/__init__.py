@@ -200,11 +200,14 @@ class ProcessBuilder:
     """A process builder"""
 
     def __init__(self):
+        import sys
+
         self.workingDirectory = None  # type: Optional[Path]
         self.stdin = Redirect.inherit()
         self.stdout = Redirect.inherit()
         self.stderr = Redirect.inherit()
-        self.detach = True
+        # Disable detaching in test mode to prevent rogue processes
+        self.detach = not getattr(sys, "_called_from_test", False)
         self.environ: Mapping[str, str] = {}
         self.command = []
 

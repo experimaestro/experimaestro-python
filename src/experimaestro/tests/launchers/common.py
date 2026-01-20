@@ -25,7 +25,6 @@ def waitFromSpec(tmp_path: Path, launcher: Launcher):
         started,
         semaphore,
     ]
-    builder.detach = True
     builder.stdout = Redirect.file(tmp_path / "stdout")
     builder.stderr = Redirect.file(tmp_path / "stderr")
 
