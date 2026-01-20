@@ -1236,48 +1236,122 @@ class MockExperiment(BaseExperiment):
     ) -> Optional["MockExperiment"]:
         """Load MockExperiment from status.json and jobs.jsonl on disk
 
+        If status.json doesn't exist, attempts to recover experiment state from:
+        - Event files in .events/experiments/{experiment_id}/
+        - Jobs directory (jobs/ symlinks)
+        - Disk state (job status files)
+
         Args:
             run_dir: Path to the run directory containing status.json
             workspace_path: Workspace path for resolving relative paths
 
         Returns:
-            MockExperiment instance or None if status.json doesn't exist
+            MockExperiment instance or None if recovery fails
         """
         import filelock
 
         status_path = run_dir / "status.json"
-        if not status_path.exists():
-            return None
 
-        lock_path = status_path.parent / f".{status_path.name}.lock"
-        with filelock.FileLock(lock_path):
-            try:
-                with status_path.open("r") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to read %s: %s", status_path, e)
-                return None
+        # Try to load from status.json first
+        if status_path.exists():
+            lock_path = status_path.parent / f".{status_path.name}.lock"
+            with filelock.FileLock(lock_path):
+                try:
+                    with status_path.open("r") as f:
+                        data = json.load(f)
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning("Failed to read %s: %s", status_path, e)
+                    return None
 
-        # Create experiment from status.json
-        exp = cls.from_state_dict(data, workspace_path)
+            # Create experiment from status.json
+            exp = cls.from_state_dict(data, workspace_path)
 
-        # Load jobs from jobs.jsonl
-        jobs_jsonl_path = run_dir / "jobs.jsonl"
-        if jobs_jsonl_path.exists():
-            try:
-                with jobs_jsonl_path.open("r") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            record = json.loads(line)
-                            job_info = ExperimentJobInformation.from_dict(record)
-                            exp._job_infos[job_info.job_id] = job_info
-                        except (json.JSONDecodeError, KeyError):
-                            continue
-            except OSError as e:
-                logger.warning("Failed to read %s: %s", jobs_jsonl_path, e)
+            # Load jobs from jobs.jsonl
+            jobs_jsonl_path = run_dir / "jobs.jsonl"
+            if jobs_jsonl_path.exists():
+                try:
+                    with jobs_jsonl_path.open("r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                record = json.loads(line)
+                                job_info = ExperimentJobInformation.from_dict(record)
+                                exp._job_infos[job_info.job_id] = job_info
+                            except (json.JSONDecodeError, KeyError):
+                                continue
+                except OSError as e:
+                    logger.warning("Failed to read %s: %s", jobs_jsonl_path, e)
+
+            return exp
+
+        # status.json doesn't exist - try to recover from disk
+        logger.info(
+            "status.json not found at %s, attempting recovery from disk", status_path
+        )
+
+        # Get experiment_id and run_id from path
+        run_id = run_dir.name
+        experiment_id = run_dir.parent.name
+
+        # Create minimal experiment instance
+        exp = cls(
+            workdir=run_dir,
+            run_id=run_id,
+            status=ExperimentStatus.RUNNING,
+            started_at=None,
+            ended_at=None,
+            services={},
+            experiment_id_override=experiment_id,
+        )
+
+        # Try to recover jobs from jobs directory
+        jobs_dir = run_dir / "jobs"
+        if jobs_dir.exists():
+            logger.debug("Recovering jobs from %s", jobs_dir)
+            for task_dir in jobs_dir.iterdir():
+                if not task_dir.is_dir():
+                    continue
+                task_id = task_dir.name
+
+                for job_link in task_dir.iterdir():
+                    if not job_link.is_symlink():
+                        continue
+
+                    job_id = job_link.name
+                    try:
+                        # Resolve symlink to get actual job path
+                        job_path = job_link.resolve()
+
+                        # Load job from disk (validates it exists and is loadable)
+                        MockJob.from_disk(job_path, task_id, job_id, workspace_path)
+
+                        # Add job info to experiment
+                        job_info = ExperimentJobInformation(
+                            task_id=task_id,
+                            job_id=job_id,
+                            tags={},
+                            dependencies=[],
+                        )
+                        exp._job_infos[job_id] = job_info
+                        logger.debug("Recovered job %s/%s", task_id, job_id)
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to recover job %s/%s: %s", task_id, job_id, e
+                        )
+
+        # Assume experiment is done since we're recovering from a crash
+        # The events will update the status if needed
+        if exp._job_infos:
+            exp.status = ExperimentStatus.DONE
+
+        logger.info(
+            "Recovered experiment %s/%s with %d job(s)",
+            experiment_id,
+            run_id,
+            len(exp._job_infos),
+        )
 
         return exp
 

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from experimaestro.connectors import Process
+    from experimaestro.notifications import ProgressInformation
     from experimaestro.scheduler.transient import TransientMode
     from experimaestro.scheduler.state_provider import CarbonMetricsData
     from experimaestro.scheduler.state_status import EventBase, JobStateChangedEvent
@@ -416,7 +417,7 @@ class BaseJob:
     submittime: Optional[datetime]
     starttime: Optional[datetime]
     endtime: Optional[datetime]
-    progress: List[Dict]
+    progress: "ProgressInformation"
     exit_code: Optional[int]
     retry_count: int
     transient: "TransientMode"
@@ -1152,6 +1153,11 @@ class BaseJob:
 
     def _set_progress(self, progress_list: List) -> None:
         """Set progress from a list. Override in subclasses if needed."""
+        from experimaestro.notifications import get_progress_information_from_dict
+
+        # Convert dicts to LevelInformation objects
+        progress_list = get_progress_information_from_dict(progress_list)
+
         # Handle different attribute names (_progress vs progress)
         if hasattr(self, "_progress"):
             self._progress = progress_list

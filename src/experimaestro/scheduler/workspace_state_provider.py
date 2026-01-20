@@ -67,11 +67,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
     def get_instance(
         cls,
         workspace_path: Path,
+        no_cleanup: bool = False,
     ) -> "WorkspaceStateProvider":
         """Get or create singleton instance for workspace
 
         Args:
             workspace_path: Path to workspace directory
+            no_cleanup: If True, skip automatic cleanup during initialization.
+                       Useful when you want to control cleanup explicitly.
 
         Returns:
             WorkspaceStateProvider instance
@@ -81,15 +84,16 @@ class WorkspaceStateProvider(OfflineStateProvider):
         with cls._lock:
             instance = cls._instances.get(workspace_path)
             if instance is None:
-                instance = cls(workspace_path)
+                instance = cls(workspace_path, no_cleanup=no_cleanup)
                 cls._instances[workspace_path] = instance
             return instance
 
-    def __init__(self, workspace_path: Path):
+    def __init__(self, workspace_path: Path, no_cleanup: bool = False):
         """Initialize workspace state provider
 
         Args:
             workspace_path: Path to workspace directory
+            no_cleanup: If True, skip automatic cleanup during initialization
         """
         super().__init__()  # Initializes job/experiment/service caches
         self.workspace_path = Path(workspace_path).resolve()
@@ -99,8 +103,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
         self._event_reader: Optional[EventReader] = None
         self._jobs_dir = self.workspace_path / ".events" / "jobs"
 
-        # Perform crash recovery: consolidate orphaned events
-        self._consolidate_orphaned_events()
+        # Perform crash recovery: consolidate orphaned events (unless disabled)
+        if not no_cleanup:
+            self._consolidate_orphaned_events()
 
         self._start_watcher()
 
@@ -145,85 +150,85 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """Consolidate orphaned event files from crashed experiments/jobs
 
         This method is called during initialization to recover from crashes.
-        It scans the .events/ directory for orphaned event files and consolidates
-        them into status.json files.
+        It uses the unified cleanup function to detect and handle all cleanup scenarios.
 
-        Crash scenarios handled:
-        1. Experiment crashed after writing events but before finalizing status.json
-        2. Job crashed before writing final status
+        The unified cleanup function handles:
+        1. Orphaned experiment events
+        2. Orphaned job events
+        3. Stray jobs (running jobs not in latest run)
+        4. Orphan jobs (finished jobs not in any run)
+        5. Orphan partials
 
-        Logic:
-        - If status.json has NO 'events_count' field → already consolidated, just cleanup
-        - If status.json HAS 'events_count' field → events need to be processed
-
-        Note: If OrphanedEventsError is raised (events without events_count), it's caught
-        and handled by emitting a WarningEvent that the TUI/user can respond to.
+        Auto-fix is enabled, so safe issues (events with events_count) are consolidated
+        automatically. Issues requiring user confirmation generate WarningEvents.
         """
-        from experimaestro.locking import OrphanedEventsError
-        from experimaestro.scheduler.state_status import WarningEvent
+        from experimaestro.scheduler.cleanup import perform_workspace_cleanup
 
-        # Consolidate experiment events
-        if self._experiments_dir.exists():
-            for exp_events_dir in self._experiments_dir.iterdir():
-                if exp_events_dir.is_dir():
-                    experiment_id = exp_events_dir.name
-                    try:
-                        self._consolidate_experiment_events(
-                            experiment_id, exp_events_dir
-                        )
-                    except OrphanedEventsError as e:
-                        # Create warning event for TUI/listeners to handle
-                        warning_event = WarningEvent(
-                            experiment_id=e.context.get("experiment_id", ""),
-                            run_id=e.context.get("run_id", ""),
-                            warning_key=e.warning_key,
-                            description=e.description,
-                            actions=e.actions,
-                            context=e.context,
-                        )
+        # Use the unified cleanup function (no provider to avoid circular dep)
+        warnings, callbacks = perform_workspace_cleanup(
+            self.workspace_path, auto_fix=True, provider=None
+        )
 
-                        # Register callbacks and metadata with state provider
-                        self.register_warning_actions(
-                            e.warning_key, e.callbacks, warning_event
-                        )
+        # Register warnings and emit events for TUI/listeners to handle
+        for warning in warnings:
+            # Register callbacks and metadata with state provider
+            self.register_warning_actions(
+                warning.warning_key, callbacks.get(warning.warning_key, {}), warning
+            )
 
-                        # Emit warning event for TUI/listeners to handle
-                        self._notify_state_listeners(warning_event)
-                        logger.info(
-                            "Orphaned events detected for experiment %s, awaiting user action",
-                            experiment_id,
-                        )
+            # Emit warning event for TUI/listeners to handle
+            self._notify_state_listeners(warning)
+            logger.info(
+                "Cleanup warning detected: %s (key: %s)",
+                warning.context.get("title", "Unknown"),
+                warning.warning_key,
+            )
 
-        # Consolidate job events
-        # Note: We do this inline without using finalize_status() to avoid
-        # async/lock complications during initialization
-        if self._jobs_dir.exists():
-            for task_dir in self._jobs_dir.iterdir():
-                if task_dir.is_dir():
-                    task_id = task_dir.name
-                    # Group event files by job_id
-                    job_event_files = list(task_dir.glob("event-*-*.jsonl"))
+    def perform_cleanup(self, auto_fix: bool = True) -> int:
+        """Perform comprehensive workspace cleanup
 
-                    # Group files by job_id
-                    job_files_map: dict[str, list[Path]] = {}
-                    for event_file in job_event_files:
-                        # Extract job_id from filename: event-{job_id}-{count}.jsonl
-                        filename = event_file.name
-                        parts = filename.split("-")
-                        if len(parts) >= 3:
-                            job_id = parts[1]
-                            if job_id not in job_files_map:
-                                job_files_map[job_id] = []
-                            job_files_map[job_id].append(event_file)
+        This method scans for and fixes various cleanup issues:
+        - Orphaned experiment events
+        - Orphaned job events
+        - Stray jobs (running jobs not in latest run)
+        - Orphan jobs (finished jobs not in any run)
+        - Orphan partials
 
-                    # Consolidate events for each job
-                    for job_id, files in job_files_map.items():
-                        try:
-                            self._consolidate_job_events(task_id, job_id, files)
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to consolidate events for job {task_id}/{job_id}: {e}"
-                            )
+        Warnings are emitted as WarningEvent objects to state listeners (TUI).
+        Safe issues are auto-fixed if auto_fix=True.
+
+        Args:
+            auto_fix: If True, automatically fix safe issues (events with events_count)
+
+        Returns:
+            Number of warnings detected
+        """
+        from experimaestro.scheduler.cleanup import perform_workspace_cleanup
+
+        logger.info("Starting workspace cleanup (auto_fix=%s)", auto_fix)
+
+        # Use the unified cleanup function with this provider instance
+        warnings, callbacks = perform_workspace_cleanup(
+            self.workspace_path, auto_fix=auto_fix, provider=self
+        )
+
+        # Register warnings and emit events for TUI/listeners to handle
+        for warning in warnings:
+            # Register callbacks and metadata with state provider
+            self.register_warning_actions(
+                warning.warning_key, callbacks.get(warning.warning_key, {}), warning
+            )
+
+            # Emit warning event for TUI/listeners to handle
+            self._notify_state_listeners(warning)
+            logger.info(
+                "Cleanup warning: %s (key: %s)",
+                warning.context.get("title", "Unknown"),
+                warning.warning_key,
+            )
+
+        logger.info("Cleanup completed: %d warning(s) detected", len(warnings))
+        return len(warnings)
 
     def _consolidate_job_events(
         self, task_id: str, job_id: str, event_files: list[Path]

@@ -420,6 +420,6 @@ def ipcom():
 
     if IPCom.INSTANCE is None:
         IPCom.INSTANCE = IPCom()
-        logger.info("Started IPCom instance (%s)", id(IPCom.INSTANCE))
+        logger.debug("Started IPCom instance (%s)", id(IPCom.INSTANCE))
         # IPCom.INSTANCE.start()
     return IPCom.INSTANCE
