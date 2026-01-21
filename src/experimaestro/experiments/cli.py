@@ -525,10 +525,16 @@ def experiments_cli(  # noqa: C901
                 xp.wait()
 
         except HandledException as e:
+            from experimaestro.scheduler.experiment import FailedExperiment
+
             if in_thread:
                 # Re-raise to preserve exception info for the main thread
                 raise
-            cprint(f"Experiment failed: {e}", "red", file=sys.stderr)
+            if isinstance(e, FailedExperiment):
+                # For failed experiments, just print the message (already logged details)
+                cprint(str(e), "red", file=sys.stderr)
+            else:
+                cprint(f"Experiment failed: {e}", "red", file=sys.stderr)
             sys.exit(1)
 
     # Console mode is only available in NORMAL run mode
@@ -610,6 +616,7 @@ def experiments_cli(  # noqa: C901
 
                     # Run the experiment
                     helper.xp = xp
+
                     helper.run(list(args), xp_configuration)
 
                     # ... and wait
@@ -619,6 +626,12 @@ def experiments_cli(  # noqa: C901
 
             except BaseException as e:
                 # Use BaseException to also catch SystemExit from sys.exit()
+                from experimaestro.scheduler.experiment import FailedExperiment
+
+                if isinstance(e, FailedExperiment):
+                    # For failed experiments, log the message (details already logged)
+                    logger.error("%s", e)
+
                 exception_holder["exception"] = e
 
         # Start experiment in background thread
@@ -639,7 +652,15 @@ def experiments_cli(  # noqa: C901
 
         # Handle exceptions
         if exception_holder["exception"]:
-            raise exception_holder["exception"]
+            from experimaestro.scheduler.experiment import FailedExperiment
+
+            exc = exception_holder["exception"]
+            if isinstance(exc, FailedExperiment):
+                # For failed experiments, just print the message (already logged in TUI)
+                cprint(str(exc), "red", file=sys.stderr)
+                sys.exit(1)
+            else:
+                raise exc
 
     else:
         # Normal mode without TUI - run directly
