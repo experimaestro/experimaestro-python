@@ -357,6 +357,11 @@ class Job(BaseJob, Resource):
     def progress(self):
         return self._progress
 
+    @progress.setter
+    def progress(self, value: List):
+        """Setter for progress property (used by remote client and state loading)"""
+        self._progress = value
+
     def set_progress(self, level: int, value: float, desc: Optional[str]):
         if value < 0:
             logger.warning(f"Progress value out of bounds ({value})")
