@@ -44,6 +44,7 @@ from experimaestro.scheduler.remote.protocol import (
     parse_message,
     create_request,
     serialize_datetime,
+    PROTOCOL_VERSION,
 )
 
 # Type for SSH output callback
@@ -496,9 +497,26 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Wait for connection to be established by sending a test request
         try:
             sync_info = self._call_sync(RPCMethod.GET_SYNC_INFO, {}, timeout=timeout)
+
+            # Check protocol version compatibility
+            server_version = sync_info.get("protocol_version")
+            if server_version != PROTOCOL_VERSION:
+                self.disconnect()
+                error_msg = (
+                    f"Protocol version mismatch: client={PROTOCOL_VERSION}, "
+                    f"server={server_version}. Please ensure both client and server "
+                    f"are running the same version of experimaestro."
+                )
+                raise ConnectionError(error_msg)
+
             logger.info(
-                "Connected to remote workspace: %s", sync_info.get("workspace_path")
+                "Connected to remote workspace: %s (protocol v%s)",
+                sync_info.get("workspace_path"),
+                server_version,
             )
+        except ConnectionError:
+            # Re-raise ConnectionError (includes version mismatch)
+            raise
         except Exception as e:
             self.disconnect()
             raise ConnectionError(f"Failed to establish connection: {e}")

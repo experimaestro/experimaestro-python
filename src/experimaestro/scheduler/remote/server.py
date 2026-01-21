@@ -31,6 +31,7 @@ from experimaestro.scheduler.remote.protocol import (
     INVALID_PARAMS,
     INTERNAL_ERROR,
     WORKSPACE_NOT_FOUND,
+    PROTOCOL_VERSION,
 )
 
 logger = logging.getLogger("xpm.remote.server")
@@ -408,8 +409,9 @@ class SSHStateProviderServer:
             return {"success": False, "error": str(e)}
 
     def _handle_get_sync_info(self, params: Dict) -> Dict:
-        """Handle get_sync_info request"""
+        """Handle get_sync_info request - includes protocol version for compatibility check"""
         return {
+            "protocol_version": PROTOCOL_VERSION,
             "workspace_path": str(self.workspace_path),
             "last_sync_time": (
                 serialize_datetime(self._state_provider.get_last_sync_time())

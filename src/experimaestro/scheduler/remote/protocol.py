@@ -19,6 +19,11 @@ logger = logging.getLogger("xpm.remote.protocol")
 # JSON-RPC 2.0 version
 JSONRPC_VERSION = "2.0"
 
+# Remote monitoring protocol version
+# Increment this when making incompatible changes to the RPC protocol
+# Format: MAJOR.MINOR (e.g., "1.0", "1.1", "2.0")
+PROTOCOL_VERSION = "1.0"
+
 # Standard JSON-RPC error codes
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -31,6 +36,7 @@ CONNECTION_ERROR = -32001
 WORKSPACE_NOT_FOUND = -32002
 PERMISSION_DENIED = -32003
 TIMEOUT_ERROR = -32004
+VERSION_MISMATCH = -32005
 
 
 class NotificationMethod(str, Enum):
