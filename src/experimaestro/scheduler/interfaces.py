@@ -1143,16 +1143,11 @@ class BaseJob:
 
     def _clear_transient_fields(self) -> None:
         """Clear transient fields when job will run. Override in subclasses."""
-        # Handle different attribute names (_progress vs progress)
-        if hasattr(self, "_progress"):
-            self._progress = []
-        elif hasattr(self, "progress") and not isinstance(
-            getattr(type(self), "progress", None), property
-        ):
-            self.progress = []
-        # Clear carbon metrics
-        if hasattr(self, "carbon_metrics"):
-            self.carbon_metrics = None
+        self._progress = []
+        self.carbon_metrics = None
+        self.endtime = None
+        self.starttime = None
+        self.submittime = None
 
     def _set_progress(self, progress_list: List) -> None:
         """Set progress from a list. Override in subclasses if needed."""

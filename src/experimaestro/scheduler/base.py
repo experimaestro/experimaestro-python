@@ -807,10 +807,6 @@ class Scheduler(StateProvider, threading.Thread):
             )
             return
 
-        # Job needs to run - clear transient fields and set to WAITING
-        job._clear_transient_fields()
-        job.set_state(JobState.WAITING)
-
         # Check if we have a running process
         if not job.state.finished():
             process = await job.aio_process()
@@ -819,14 +815,24 @@ class Scheduler(StateProvider, threading.Thread):
                 logger.info(
                     "Got process %s for job %s - waiting to complete", process, job
                 )
-                await self._wait_for_job_process(job, process)
+
+                # Just wait for the process to finish since it is already
+                # running
+                return await self._wait_for_job_process(job, process)
 
         # If not done or running, start the job
-        if not job.state.finished():
+        if not job.state.finished() or job.state.is_error():
+            # OK, we can reset the job state to run afresh if needed (i.e.
+            # error state)
+            job._clear_transient_fields()
+
             # Check if this is a transient job that is not needed
             if job.transient.is_transient and not job._needed_transient:
                 logger.debug("Job is transient and not needed, discarding for now")
                 job.set_state(JobState.UNSCHEDULED)
+            else:
+                # Job needs to run, set in WAITING mode
+                job.set_state(JobState.WAITING)
 
             # Start the job if not skipped (state is still WAITING)
             # Loop to handle GracefulTimeout for resumable tasks
