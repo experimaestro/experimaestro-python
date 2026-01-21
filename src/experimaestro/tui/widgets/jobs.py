@@ -345,9 +345,9 @@ class JobDetailView(Widget):
 
         self.query_one("#job-status-label", Label).update(f"Status: {status_text}")
 
-        # Path (from locator)
-        locator = job.locator or "-"
-        self.query_one("#job-path-label", Label).update(f"Locator: {locator}")
+        # Path - show remote path for remote providers, local path otherwise
+        display_path = self.state_provider.get_display_path(job) if job.path else "-"
+        self.query_one("#job-path-label", Label).update(f"Path: {display_path}")
 
         # Times - format timestamps (now datetime objects)
         def format_time(ts):
@@ -662,8 +662,11 @@ class JobsTable(Vertical):
             if task_id:
                 job = self.state_provider.get_job(task_id, job_id)
                 if job and job.path:
-                    if copy(str(job.path)):
-                        self.notify(f"Path copied: {job.path}", severity="information")
+                    display_path = self.state_provider.get_display_path(job)
+                    if copy(display_path):
+                        self.notify(
+                            f"Path copied: {display_path}", severity="information"
+                        )
                     else:
                         self.notify("Failed to copy path", severity="error")
                 else:

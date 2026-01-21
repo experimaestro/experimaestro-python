@@ -1347,3 +1347,28 @@ class SSHStateProviderClient(OfflineStateProvider):
     def is_remote(self) -> bool:
         """This is a remote provider"""
         return True
+
+    def get_display_path(self, job: "BaseJob") -> str:
+        """Get the remote path to display/copy for a job
+
+        Translates the local cache path back to the remote path.
+
+        Args:
+            job: Job to get display path for
+
+        Returns:
+            Remote path string
+        """
+        if not job.path:
+            return ""
+
+        path_str = str(job.path)
+        local_cache_str = str(self.local_cache_dir)
+
+        # If path is in local cache, translate back to remote path
+        if path_str.startswith(local_cache_str):
+            relative = path_str[len(local_cache_str) :].lstrip("/")
+            return f"{self.remote_workspace}/{relative}"
+
+        # If it's already a remote path or we can't translate, return as-is
+        return path_str

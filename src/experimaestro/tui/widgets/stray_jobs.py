@@ -372,8 +372,9 @@ class OrphanJobsTab(Vertical):
                 state = job.state.name if job.state else "unknown"
                 is_running = job.state and job.state.running()
                 hint = "(ctrl+k to kill)" if is_running else "(ctrl+d to delete)"
+                display_path = self.state_provider.get_display_path(job)
                 info.update(
-                    f"Path: {job.path}  |  Size: {size}  |  State: {state} {hint}"
+                    f"Path: {display_path}  |  Size: {size}  |  State: {state} {hint}"
                 )
             else:
                 info.update("")

@@ -263,7 +263,8 @@ class OrphanJobsScreen(Screen):
             job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
             if job and job.path:
                 size = self._size_cache.get(job.identifier, "calculating...")
-                info.update(f"Path: {job.path}  |  Size: {size}")
+                display_path = self.state_provider.get_display_path(job)
+                info.update(f"Path: {display_path}  |  Size: {size}")
             else:
                 info.update("")
 
@@ -280,8 +281,9 @@ class OrphanJobsScreen(Screen):
             job_id = str(row_key.value)
             job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
             if job and job.path:
-                if copy(str(job.path)):
-                    self.notify("Path copied", severity="information")
+                display_path = self.state_provider.get_display_path(job)
+                if copy(display_path):
+                    self.notify(f"Path copied: {display_path}", severity="information")
                 else:
                     self.notify("Failed to copy path", severity="error")
 

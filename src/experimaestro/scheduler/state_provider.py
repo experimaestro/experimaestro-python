@@ -509,6 +509,20 @@ class StateProvider(ABC):
         """
         return False
 
+    def get_display_path(self, job: BaseJob) -> str:
+        """Get the path to display/copy for a job
+
+        For local providers, returns the local path.
+        For remote providers, returns the remote path.
+
+        Args:
+            job: Job to get display path for
+
+        Returns:
+            Path string suitable for display and copying
+        """
+        return str(job.path) if job.path else ""
+
 
 # =============================================================================
 # Offline State Provider (with service caching)
