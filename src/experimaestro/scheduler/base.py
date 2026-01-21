@@ -198,11 +198,18 @@ class Scheduler(StateProvider, threading.Thread):
         logger.debug("Registered experiment %s with scheduler", key)
 
     def unregister_experiment(self, xp: "Experiment"):
-        """Unregister an experiment from the scheduler"""
+        """Mark experiment as finished but keep it registered for TUI visibility
+
+        Previously this removed the experiment from the scheduler, but this caused
+        issues with the TUI where jobs would disappear when the experiment finished.
+        Now we keep the experiment registered so its jobs remain visible in the TUI.
+        The experiment's status (DONE/FAILED/DETACHED) reflects that it's finished.
+        """
         key = xp.name
         if key in self.experiments:
-            del self.experiments[key]
-            logger.debug("Unregistered experiment %s from scheduler", key)
+            # Don't remove - just log that the experiment has finished
+            # The experiment's _status property will be DONE/FAILED/DETACHED
+            logger.debug("Experiment %s finished (status: %s)", key, xp.status.name)
 
     def start_server(
         self,
