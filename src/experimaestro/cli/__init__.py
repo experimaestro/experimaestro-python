@@ -322,21 +322,27 @@ def find_launchers(config: Optional[Path], spec: str):
 
 
 class Launchers(click.Group):
-    """Dynamic command group for entry point discovery"""
+    """Dynamic command group for entry point discovery.
+
+    Loads subcommands from entry points in the `experimaestro.{name}` group.
+    Each entry point should have a `get_cli()` static method that returns
+    a click Command or Group.
+    """
 
     @cached_property
-    def commands(self):
-        map = {}
+    def _ep_commands(self):
+        """Load commands from entry points (cached)."""
+        cmds = {}
         for ep in entry_points(group=f"experimaestro.{self.name}"):
             if get_cli := getattr(ep.load(), "get_cli", None):
-                map[ep.name] = get_cli()
-        return map
+                cmds[ep.name] = get_cli()
+        return cmds
 
     def list_commands(self, ctx):
-        return self.commands.keys()
+        return list(self._ep_commands.keys())
 
     def get_command(self, ctx, name):
-        return self.commands[name]
+        return self._ep_commands.get(name)
 
 
 cli.add_command(Launchers("launchers", help="Launcher specific commands"))

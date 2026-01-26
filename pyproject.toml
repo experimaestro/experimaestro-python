@@ -35,6 +35,7 @@ dependencies = [
     "filelock >=3.16,<4",
     "httpx >=0.26,<1",
     "humanfriendly >=10",
+    "jinja2 >=3",
     "huggingface-hub >0.17",
     "marshmallow >=3.20,<4",
     "omegaconf >=2.3,<3",
@@ -102,6 +103,9 @@ ssh = "experimaestro.connectors.ssh:SshConnector"
 
 [project.entry-points."experimaestro.tokens"]
 unix = "experimaestro.tokens:CounterToken"
+
+[project.entry-points."experimaestro.launchers"]
+direct = "experimaestro.launchers.direct:DirectLauncher"
 
 [project.entry-points.mypy]
 experimaestro = "experimaestro.mypy:plugin"
