@@ -34,12 +34,20 @@ def multiplier():
     return "*", RegExMatch(r"\d+")
 
 
-def cuda_specs():
+def accelerator_specs():
     return ZeroOrMore(OrderedChoice([mem_spec]), sep=",")
 
 
 def cuda():
-    return "cuda", "(", cuda_specs, ")", Optional(multiplier)
+    return "cuda", "(", accelerator_specs, ")", Optional(multiplier)
+
+
+def mps():
+    return "mps", "(", accelerator_specs, ")", Optional(multiplier)
+
+
+def gpu():
+    return "gpu", "(", accelerator_specs, ")", Optional(multiplier)
 
 
 def cpu_specs():
@@ -60,7 +68,7 @@ def duration():
 
 
 def one_spec():
-    return OneOrMore(OrderedChoice([duration, cuda, cpu]), sep="&")
+    return OneOrMore(OrderedChoice([duration, cuda, mps, gpu, cpu]), sep="&")
 
 
 def grammar():
@@ -85,6 +93,16 @@ class Visitor(PTNodeVisitor):
             return specs.cuda_gpu(**children[0]) * int(children[1])
         return specs.cuda_gpu(**children[0])
 
+    def visit_mps(self, node, children):
+        if len(children) > 1:
+            return specs.mps_gpu(**children[0]) * int(children[1])
+        return specs.mps_gpu(**children[0])
+
+    def visit_gpu(self, node, children):
+        if len(children) > 1:
+            return specs.gpu(**children[0]) * int(children[1])
+        return specs.gpu(**children[0])
+
     def visit_cpu(self, node, children):
         return specs.cpu(**children[0])
 
@@ -94,7 +112,7 @@ class Visitor(PTNodeVisitor):
             a.update(c)
         return a
 
-    visit_cuda_specs = visit_specs
+    visit_accelerator_specs = visit_specs
     visit_cpu_specs = visit_specs
 
     def visit_mem_spec(self, node, children):
@@ -115,24 +133,37 @@ def parse(expr: str):
 
     - ``duration=<N><unit>``: Job duration (units: h/hours, d/days, m/mins)
     - ``cpu(mem=<size>, cores=<N>)``: CPU requirements
-    - ``cuda(mem=<size>) * <N>``: GPU requirements (memory and count)
+    - ``cuda(mem=<size>) * <N>``: NVIDIA CUDA GPU requirements (memory and count)
+    - ``mps(mem=<size>) * <N>``: Apple MPS GPU requirements (unified memory)
+    - ``gpu(mem=<size>) * <N>``: Generic GPU requirements (matches any accelerator)
     - Memory sizes: ``<N>G``, ``<N>GiB``, ``<N>M``, ``<N>MiB``
+
+    **Accelerator types:**
+
+    - ``cuda``: NVIDIA CUDA GPUs only (dedicated memory)
+    - ``mps``: Apple Silicon MPS only (unified memory with CPU)
+    - ``gpu``: Any accelerator type (cross-platform)
 
     :param expr: The requirement specification string
     :return: A :class:`~experimaestro.launcherfinder.specs.HostRequirement` object
 
-    **Example:**
+    **Examples:**
 
     .. code-block:: python
 
         from experimaestro.launcherfinder.parser import parse
 
-        # Request 2 GPUs with 32GB each, 700GB RAM, for 40 hours
-        # OR 4 GPUs with 32GB each for 50 hours
+        # Request 2 NVIDIA GPUs with 32GB each, 700GB RAM, for 40 hours
+        req = parse("duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 2")
+
+        # Cross-platform: CUDA on Linux/Windows OR MPS on macOS
         req = parse(
-            "duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 2"
-            " | duration=50h & cpu(mem=700GiB) & cuda(mem=32GiB) * 4"
+            "duration=4h & cuda(mem=8GiB)"
+            " | duration=4h & mps(mem=8GiB)"
         )
+
+        # Generic GPU requirement (matches any accelerator)
+        req = parse("duration=2h & gpu(mem=4GiB)")
     """
     parser = ParserPython(grammar, syntax_classes={"StrMatch": SuppressStrMatch})
     parse_tree = parser.parse(expr)

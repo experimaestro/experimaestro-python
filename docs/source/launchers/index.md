@@ -48,17 +48,50 @@ The `launchers.py` file dictates how a given *requirement* (e.g., 2 CPU with
 
 - {py:class}`~experimaestro.launcherfinder.specs.HostRequirement` - Abstract base representing a disjunction of host requirements (alternatives).
 - {py:class}`~experimaestro.launcherfinder.specs.HostSimpleRequirement` - A single host requirement specifying CPU, GPU, and duration constraints.
-- {py:class}`~experimaestro.launcherfinder.specs.CudaSpecification` - Specifies CUDA GPU requirements (memory, model).
+- {py:class}`~experimaestro.launcherfinder.specs.AcceleratorSpecification` - Generic accelerator (GPU) specification that matches any accelerator type.
+- {py:class}`~experimaestro.launcherfinder.specs.CudaSpecification` - Specifies NVIDIA CUDA GPU requirements (dedicated memory).
+- {py:class}`~experimaestro.launcherfinder.specs.MPSSpecification` - Specifies Apple Metal Performance Shaders requirements (unified memory).
 - {py:class}`~experimaestro.launcherfinder.specs.CPUSpecification` - Specifies CPU requirements (cores, memory).
+
+#### Accelerator Types
+
+The launcher finder supports multiple accelerator (GPU) types:
+
+- **CUDA** (`cuda()`): NVIDIA GPUs with dedicated memory. Use when you specifically need CUDA support.
+- **MPS** (`mps()`): Apple Silicon GPUs with unified memory (shared with CPU). Use for macOS Metal support.
+- **Generic** (`gpu()`): Matches any accelerator type. Use for cross-platform compatibility.
+
+```{note}
+MPS uses unified memory - the GPU shares RAM with the CPU. When matching MPS requirements,
+the combined CPU + GPU memory request must not exceed the total system memory.
+```
 
 #### Parsing requirements
 
 {py:func}`~experimaestro.launcherfinder.parser.parse` - Parses a requirement specification string into a {py:class}`~experimaestro.launcherfinder.specs.HostRequirement` object.
 
+**Syntax elements:**
+
+- `duration=<N><unit>`: Job duration (units: h/hours, d/days, m/mins)
+- `cpu(mem=<size>, cores=<N>)`: CPU requirements
+- `cuda(mem=<size>) * <N>`: NVIDIA CUDA GPU requirements (memory and count)
+- `mps(mem=<size>) * <N>`: Apple MPS GPU requirements (unified memory)
+- `gpu(mem=<size>) * <N>`: Generic GPU requirements (matches any accelerator)
+- Memory sizes: `<N>G`, `<N>GiB`, `<N>M`, `<N>MiB`
+
+**Examples:**
+
 ```python
 from experimaestro.launcherfinder.parser import parse
 
-req = parse("""duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 8 | duration=50h & cpu(mem=700GiB) & cuda(mem=32GiB) * 4""")
+# Request 8 NVIDIA GPUs with 32GB each
+req = parse("duration=40h & cpu(mem=700GiB) & cuda(mem=32GiB) * 8")
+
+# Cross-platform: CUDA on Linux/Windows OR MPS on macOS
+req = parse("duration=4h & cuda(mem=8GiB) | duration=4h & mps(mem=8GiB)")
+
+# Generic GPU requirement (matches any accelerator)
+req = parse("duration=2h & gpu(mem=4GiB)")
 ```
 
 Requirements can be manipulated:
@@ -79,7 +112,9 @@ from typing import Set
 from experimaestro.launcherfinder import (
     HostRequirement,
     HostSpecification,
+    AcceleratorSpecification,
     CudaSpecification,
+    MPSSpecification,
     CPUSpecification,
 )
 from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
@@ -90,25 +125,40 @@ from experimaestro.connectors.local import LocalConnector
 def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
     """Find a launcher"""
 
-    if match := requirements.match(HostSpecification(cuda=[])):
+    if match := requirements.match(HostSpecification(accelerators=[])):
         # No GPU: run directly
         return DirectLauncher(connector=LocalConnector.instance())
 
+    # CUDA cluster with SLURM
     if match := requirements.match(
         HostSpecification(
             max_duration=100 * 3600,
             cpu=CPUSpecification(cores=32, memory=129 * (1024**3)),
-            cuda=[CudaSpecification(memory=24 * (1024**3)) for _ in range(8)],
+            accelerators=[CudaSpecification(memory=24 * (1024**3)) for _ in range(8)],
         )
     ):
-        if len(match.requirement.cuda_gpus) > 0:
+        if len(match.requirement.accelerators) > 0:
             return SlurmLauncher(
                 connector=LocalConnector.instance(),
-                options=SlurmOptions(gpus_per_node=len(match.requirement.cuda_gpus)),
+                options=SlurmOptions(gpus_per_node=len(match.requirement.accelerators)),
             )
+
+    # Apple Silicon with MPS (unified memory)
+    if match := requirements.match(
+        HostSpecification(
+            cpu=CPUSpecification(cores=8, memory=32 * (1024**3)),
+            accelerators=[MPSSpecification(memory=32 * (1024**3))],
+        )
+    ):
+        return DirectLauncher(connector=LocalConnector.instance())
 
     # Could not find a host
     return None
+```
+
+```{note}
+The `cuda=` parameter is still supported for backwards compatibility but
+`accelerators=` is preferred for new code as it supports all accelerator types.
 ```
 
 ## Tags
