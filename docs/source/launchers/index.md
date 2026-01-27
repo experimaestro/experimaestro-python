@@ -4,6 +4,20 @@ Launchers, together with the [Connector](../connectors/index.md), specify how a 
 There exist two types of launchers at the moment, [direct launcher](#direct) (starting
 a new process) or through [slurm](#slurm)
 
+## Priority
+
+All launchers have a `priority` property (default: 0) that determines their preference
+when used with a {py:class}`~experimaestro.launchers.DynamicLauncher`. Higher priority
+values indicate more preferred launchers.
+
+```python
+from experimaestro.launchers.slurm import SlurmLauncher
+
+# Create launchers with different priorities
+fast_launcher = SlurmLauncher(options=SlurmOptions(partition="fast"), priority=10)
+slow_launcher = SlurmLauncher(options=SlurmOptions(partition="slow"), priority=1)
+```
+
 ## Types
 
 (direct)=
@@ -38,6 +52,70 @@ with experiment(launcher=launcher):
 {py:class}`~experimaestro.launchers.slurm.SlurmOptions` - Configuration options for SLURM jobs (nodes, time, partition, GPUs, etc.).
 
 {py:class}`~experimaestro.launchers.slurm.SlurmLauncher` - Launcher that submits tasks to the SLURM workload manager.
+
+(dynamic)=
+### Dynamic Launcher
+
+The {py:class}`~experimaestro.launchers.DynamicLauncher` allows dynamic selection
+from a list of launchers based on their priorities. This is useful when you have
+multiple execution options (e.g., different SLURM partitions or clusters) and want
+to select the best one at runtime.
+
+```python
+from experimaestro.launchers import DynamicLauncher
+from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
+
+# Create launchers with different priorities
+fast_partition = SlurmLauncher(
+    options=SlurmOptions(partition="fast", time="1:00:00"),
+    priority=10
+)
+slow_partition = SlurmLauncher(
+    options=SlurmOptions(partition="slow", time="24:00:00"),
+    priority=1
+)
+
+# By default, selects highest priority (fast_partition)
+# If priorities tie, samples uniformly among tied launchers
+dynamic = DynamicLauncher([fast_partition, slow_partition])
+
+# With sample=True, samples proportionally to priority
+# fast_partition has 10/(10+1) ≈ 91% chance of being selected
+dynamic_sampled = DynamicLauncher(
+    [fast_partition, slow_partition],
+    sample=True
+)
+
+with experiment(launcher=dynamic):
+    mytask().submit()
+```
+
+#### Selection Modes
+
+- **Default mode** (`sample=False`): Selects the launcher with the highest priority.
+  If multiple launchers share the highest priority, one is chosen uniformly at random.
+
+- **Sampling mode** (`sample=True`): Samples a launcher with probability proportional
+  to its priority. All priorities must be positive in this mode.
+
+#### Extending DynamicLauncher
+
+You can subclass `DynamicLauncher` and override the `update()` method to refresh
+the launcher list before each job submission. This is useful for checking cluster
+availability or queue status:
+
+```python
+class ClusterAwareLauncher(DynamicLauncher):
+    def update(self):
+        # Check cluster availability and update priorities
+        for launcher in self._launchers:
+            if is_cluster_available(launcher):
+                launcher.priority = 10
+            else:
+                launcher.priority = 0
+```
+
+{py:class}`~experimaestro.launchers.DynamicLauncher` - Launcher that dynamically selects from a list of launchers based on priority.
 
 ## Launcher file
 
