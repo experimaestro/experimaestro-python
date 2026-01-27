@@ -1885,6 +1885,33 @@ class ConfigMixin:
         other.__xpm__.set(param_name, self)
         return other
 
+    def __validate__(self):
+        """Validate the values"""
+        pass
+
+    def __json__(self):
+        """Returns a JSON version of the object (if possible)"""
+        return self.__xpm__.__json__()
+
+    def __identifier__(self) -> "Identifier":
+        return self.__xpm__.identifier
+
+    def register_task_output(self, method, *args, **kwargs):
+        # Determine the path for this...
+        path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = json.dumps(
+            {
+                "key": f"{self.__xpmidentifier__}/{method.__name__}",
+                "args": args,
+                "kwargs": kwargs,
+            }
+        )
+        with path.open("at") as fp:
+            fp.writelines([data, "\n"])
+            fp.flush()
+
 
 class Config:
     """Base type for all objects in python interface"""
@@ -1985,43 +2012,10 @@ class Config:
                 raise
         return xpmtype
 
-    def __validate__(self):
-        """Validate the values"""
-        pass
-
     def __post_init__(self):
         """Called after the object  __init__() and with properties set"""
         # Default implementation is to do nothing
         pass
-
-    def __json__(self):
-        """Returns a JSON version of the object (if possible)"""
-        return self.__xpm__.__json__()
-
-    def __identifier__(self) -> "Identifier":
-        return self.__xpm__.identifier
-
-    def copy_dependencies(self, other: "Config"):
-        """Add pre-tasks from the listed configurations"""
-        raise AssertionError(
-            "The 'copy_dependencies' method can only be used during configuration"
-        )
-
-    def register_task_output(self, method, *args, **kwargs):
-        # Determine the path for this...
-        path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        data = json.dumps(
-            {
-                "key": f"{self.__xpmidentifier__}/{method.__name__}",
-                "args": args,
-                "kwargs": kwargs,
-            }
-        )
-        with path.open("at") as fp:
-            fp.writelines([data, "\n"])
-            fp.flush()
 
 
 class InstanceConfig(Config):

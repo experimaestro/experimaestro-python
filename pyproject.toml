@@ -106,6 +106,7 @@ unix = "experimaestro.tokens:CounterToken"
 
 [project.entry-points."experimaestro.launchers"]
 direct = "experimaestro.launchers.direct:DirectLauncher"
+slurm = "experimaestro.launchers.slurm:SlurmLauncher"
 
 [project.entry-points.mypy]
 experimaestro = "experimaestro.mypy:plugin"
