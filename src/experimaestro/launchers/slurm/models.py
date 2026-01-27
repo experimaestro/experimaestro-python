@@ -351,6 +351,93 @@ class ClusterAccount:
     qos_list: list[str] = field(default_factory=list)
 
 
+class ConfiguredQoS:
+    """QoS configuration with user-defined tags.
+
+    Wraps ClusterQoS with user-configurable fields like tags.
+    """
+
+    def __init__(self, cluster: ClusterQoS):
+        self._cluster = cluster
+        self.tags: ListField[str] = ListField()
+
+    @property
+    def name(self) -> str:
+        return self._cluster.name
+
+    @property
+    def max_wall(self) -> str | None:
+        return self._cluster.max_wall
+
+    @property
+    def max_wall_seconds(self) -> int | None:
+        return self._cluster.max_wall_seconds
+
+    @property
+    def priority(self) -> int:
+        return self._cluster.priority
+
+    @property
+    def gres_limits(self) -> list[str]:
+        return self._cluster.gres_limits
+
+    @property
+    def gpu_types(self) -> list[str]:
+        return self._cluster.gpu_types
+
+    def to_save_dict(self) -> dict[str, Any] | None:
+        """Get data for saving (only overridden values)."""
+        data: dict[str, Any] = {}
+        if self.tags.is_overridden:
+            data["tags"] = self.tags.override_value
+        return data if data else None
+
+    def load_from_dict(self, data: dict[str, Any]) -> None:
+        """Load configuration from saved data."""
+        if tags_list := data.get("tags"):
+            self.tags.set(tags_list)
+
+
+class ConfiguredAccount:
+    """Account configuration with user-defined tags.
+
+    Wraps ClusterAccount with user-configurable fields like tags.
+    """
+
+    def __init__(self, cluster: ClusterAccount):
+        self._cluster = cluster
+        self.tags: ListField[str] = ListField()
+
+    @property
+    def account(self) -> str:
+        return self._cluster.account
+
+    @property
+    def partition(self) -> str | None:
+        return self._cluster.partition
+
+    @property
+    def qos_list(self) -> list[str]:
+        return self._cluster.qos_list
+
+    @property
+    def key(self) -> str:
+        """Unique key for this account association."""
+        return f"{self.account}:{self.partition or 'all'}"
+
+    def to_save_dict(self) -> dict[str, Any] | None:
+        """Get data for saving (only overridden values)."""
+        data: dict[str, Any] = {}
+        if self.tags.is_overridden:
+            data["tags"] = self.tags.override_value
+        return data if data else None
+
+    def load_from_dict(self, data: dict[str, Any]) -> None:
+        """Load configuration from saved data."""
+        if tags_list := data.get("tags"):
+            self.tags.set(tags_list)
+
+
 @dataclass
 class ClusterData:
     """Complete SLURM cluster data from commands.
@@ -396,6 +483,8 @@ class ConfiguredFeature:
         self.allowed_qos: ListField[str] = ListField()
         # Restrict to specific accounts
         self.allowed_accounts: ListField[str] = ListField()
+        # Tags for filtering
+        self.tags: ListField[str] = ListField()
 
     def has_any_config(self) -> bool:
         """Check if this feature has any overridden configuration."""
@@ -407,6 +496,7 @@ class ConfiguredFeature:
             or self.gpu_memory_gb.is_overridden
             or self.allowed_qos.is_overridden
             or self.allowed_accounts.is_overridden
+            or self.tags.is_overridden
         )
 
     def to_save_dict(self) -> dict[str, Any] | None:
@@ -426,6 +516,8 @@ class ConfiguredFeature:
             data["allowed_qos"] = self.allowed_qos.override_value
         if self.allowed_accounts.is_overridden:
             data["allowed_accounts"] = self.allowed_accounts.override_value
+        if self.tags.is_overridden:
+            data["tags"] = self.tags.override_value
         return data if data else None
 
     def load_from_dict(self, data: dict[str, Any] | str) -> None:
@@ -449,6 +541,8 @@ class ConfiguredFeature:
             self.allowed_qos.set(qos_list)
         if accounts_list := data.get("allowed_accounts"):
             self.allowed_accounts.set(accounts_list)
+        if tags_list := data.get("tags"):
+            self.tags.set(tags_list)
 
 
 class ConfiguredPartition:
@@ -795,6 +889,17 @@ class SlurmConfig:
         # Features (created on demand)
         self.features: dict[str, ConfiguredFeature] = {}
 
+        # QoS (created from cluster data)
+        self.qos: dict[str, ConfiguredQoS] = {}
+        for name, cq in cluster.qos.items():
+            self.qos[name] = ConfiguredQoS(cq)
+
+        # Accounts (created from cluster data)
+        self.accounts: dict[str, ConfiguredAccount] = {}
+        for ca in cluster.accounts:
+            acc = ConfiguredAccount(ca)
+            self.accounts[acc.key] = acc
+
         # Partitions (created from cluster data)
         self.partitions: dict[str, ConfiguredPartition] = {}
         for name, cp in cluster.partitions.items():
@@ -806,14 +911,9 @@ class SlurmConfig:
         return self._cluster
 
     @property
-    def qos(self) -> dict[str, ClusterQoS]:
-        """Get QoS information from cluster."""
-        return self._cluster.qos
-
-    @property
-    def accounts(self) -> list[ClusterAccount]:
-        """Get account associations from cluster."""
-        return self._cluster.accounts
+    def accounts_list(self) -> list[ConfiguredAccount]:
+        """Get account associations."""
+        return list(self.accounts.values())
 
     @property
     def all_features(self) -> set[str]:
@@ -936,7 +1036,7 @@ class SlurmConfig:
             config.load_from_yaml(config_path)
         return config
 
-    def load_from_yaml(self, path: Path) -> None:
+    def load_from_yaml(self, path: Path) -> None:  # noqa: C901
         """Load user configuration from YAML file."""
         if not path.exists():
             return
@@ -975,12 +1075,22 @@ class SlurmConfig:
                 feature = self.get_feature(name)
                 feature.gpu_type.set(gpu_type)
 
+        # Load QoS configurations
+        for name, qdata in data.get("qos", {}).items():
+            if name in self.qos:
+                self.qos[name].load_from_dict(qdata)
+
+        # Load account configurations
+        for key, adata in data.get("accounts", {}).items():
+            if key in self.accounts:
+                self.accounts[key].load_from_dict(adata)
+
         # Load partition configurations
         for name, pdata in data.get("partitions", {}).items():
             if name in self.partitions:
                 self.partitions[name].load_from_dict(pdata)
 
-    def save_to_yaml(self, path: Path) -> None:
+    def save_to_yaml(self, path: Path) -> None:  # noqa: C901
         """Save user configuration to YAML file (only overridden values)."""
         data: dict[str, Any] = {
             "cluster_name": self.cluster_name,
@@ -1014,6 +1124,24 @@ class SlurmConfig:
                 features_data[name] = fdata
         if features_data:
             data["features"] = features_data
+
+        # Save QoS configurations (only those with tags)
+        qos_data = {}
+        for name in sorted(self.qos.keys()):
+            qos = self.qos[name]
+            if qdata := qos.to_save_dict():
+                qos_data[name] = qdata
+        if qos_data:
+            data["qos"] = qos_data
+
+        # Save account configurations (only those with tags)
+        accounts_data = {}
+        for key in sorted(self.accounts.keys()):
+            acc = self.accounts[key]
+            if adata := acc.to_save_dict():
+                accounts_data[key] = adata
+        if accounts_data:
+            data["accounts"] = accounts_data
 
         # Save partition configurations (all partitions to track "seen" state)
         partitions_data = {}

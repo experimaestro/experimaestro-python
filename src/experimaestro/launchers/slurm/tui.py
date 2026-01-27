@@ -216,10 +216,16 @@ class PartitionsTab(TabPane):
         Binding("p", "edit_priority", "Priority"),
         Binding("o", "edit_qos", "QoS"),
         Binding("a", "edit_accounts", "Accounts"),
+        Binding("l", "edit_tags", "Tags"),
         Binding("e", "toggle_enabled", "Toggle"),
         Binding("delete", "reset_field", "Reset"),
         Binding("backspace", "reset_field", "Reset", show=False),
+        Binding("shift+up", "sort_asc", "Sort Asc"),
+        Binding("shift+down", "sort_desc", "Sort Desc"),
     ]
+
+    # Columns that cannot be sorted (list-based)
+    NON_SORTABLE_COLS = {"QoS", "Accounts", "Tags", "Features"}
 
     def __init__(
         self,
@@ -231,6 +237,7 @@ class PartitionsTab(TabPane):
         self.new_partitions = new_partitions or set()
         # Column keys - set in compose()
         self.col_keys: dict[str, any] = {}
+        self.col_names: list[str] = []  # For reverse lookup
 
     def compose(self) -> ComposeResult:
         help_text = (
@@ -261,10 +268,12 @@ class PartitionsTab(TabPane):
             col_names.append("QoS")
         if self.has_accounts:
             col_names.append("Accounts")
+        col_names.append("Tags")
         col_names.append("Enabled")
 
         keys = table.add_columns(*col_names)
         self.col_keys = dict(zip(col_names, keys))
+        self.col_names = col_names
 
         for name, partition in sorted(self.config.partitions.items()):
             if not partition._cluster.available:
@@ -332,6 +341,12 @@ class PartitionsTab(TabPane):
                         is_override=partition.allowed_accounts.is_overridden,
                     )
                 )
+            row_data.append(
+                list_field_widget(
+                    partition.tags.value,
+                    is_override=partition.tags.is_overridden,
+                )
+            )
             row_data.append("✓" if partition.enabled.value else "✗")
 
             table.add_row(*row_data, key=name)
@@ -431,6 +446,7 @@ class PartitionsTab(TabPane):
             editors[self.col_keys["QoS"]] = self.action_edit_qos
         if self.has_accounts:
             editors[self.col_keys["Accounts"]] = self.action_edit_accounts
+        editors[self.col_keys["Tags"]] = self.action_edit_tags
         if col_key in editors:
             editors[col_key]()
 
@@ -462,6 +478,10 @@ class PartitionsTab(TabPane):
                 ", ".join(partition.effective_accounts)
                 if partition.effective_accounts
                 else None
+            )
+        elif col_key == self.col_keys.get("Tags"):
+            full_value = (
+                ", ".join(partition.tags.value) if partition.tags.value else None
             )
 
         if full_value:
@@ -736,6 +756,52 @@ class PartitionsTab(TabPane):
             name, self.col_keys["Enabled"], "✓" if new_state else "✗"
         )
 
+    def action_edit_tags(self) -> None:
+        """Edit tags for selected partition."""
+        name, partition = self._get_selected_partition()
+        if not name:
+            return
+
+        table = self.table
+
+        def handle_result(result: tuple[str, str] | None) -> None:
+            if result is None:
+                return
+            callback_key, value = result
+            if callback_key != f"tags_{name}":
+                return
+
+            # Parse comma-separated tags
+            if value.strip():
+                tags = [t.strip() for t in value.split(",") if t.strip()]
+                partition.tags.set(tags)
+            else:
+                partition.tags.reset()
+            self.app.set_status(
+                f"{'Set' if value.strip() else 'Cleared'} tags for {name}"
+            )
+            self.app._auto_save()
+
+            table.update_cell(
+                name,
+                self.col_keys["Tags"],
+                list_field_widget(
+                    partition.tags.value,
+                    is_override=partition.tags.is_overridden,
+                ),
+            )
+
+        current_tags = ", ".join(partition.tags.value) if partition.tags.value else ""
+        self.app.push_screen(
+            InputScreen(
+                title=f"Tags for '{name}'",
+                label="Enter tags (comma-separated, e.g., gpu, large, priority):",
+                initial_value=current_tags,
+                callback_key=f"tags_{name}",
+            ),
+            handle_result,
+        )
+
     def action_reset_field(self) -> None:
         """Reset the current field to default."""
         table = self.table
@@ -807,6 +873,10 @@ class PartitionsTab(TabPane):
                 is_override=partition.allowed_accounts.is_overridden,
             )
             table.update_cell(name, col_key, display)
+        elif col_key == self.col_keys["Tags"]:
+            col_name = "Tags"
+            partition.tags.reset()
+            table.update_cell(name, col_key, Text("-", style="dim"))
         elif col_key == self.col_keys["Enabled"]:
             col_name = "Enabled"
             partition.enabled.reset()
@@ -816,6 +886,67 @@ class PartitionsTab(TabPane):
 
         self.app.set_status(f"Reset {col_name} for {name}")
         self.app._auto_save()
+
+    def _get_current_col_name(self) -> str | None:
+        """Get the name of the currently selected column."""
+        table = self.table
+        if table.cursor_column is None:
+            return None
+        cell_key = table.coordinate_to_cell_key((0, table.cursor_column))
+        col_key = cell_key.column_key
+        for name, key in self.col_keys.items():
+            if key == col_key:
+                return name
+        return None
+
+    def _extract_sort_value(self, cell_value: any) -> any:
+        """Extract a sortable value from a cell (handles Text objects)."""
+        if hasattr(cell_value, "plain"):
+            # It's a Text object, get plain string
+            text = cell_value.plain
+        else:
+            text = str(cell_value)
+
+        # Try to convert to number for numeric sorting
+        text = text.strip().rstrip(" GB").replace(",", "")
+        if text == "-" or text == "✓" or text == "✗":
+            return (0, text)
+        try:
+            return (1, float(text))
+        except ValueError:
+            return (0, text.lower())
+
+    def action_sort_asc(self) -> None:
+        """Sort table by current column ascending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        self.table.sort(
+            self.col_keys[col_name],
+            key=self._extract_sort_value,
+            reverse=False,
+        )
+        self.app.set_status(f"Sorted by {col_name} (ascending)")
+
+    def action_sort_desc(self) -> None:
+        """Sort table by current column descending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        self.table.sort(
+            self.col_keys[col_name],
+            key=self._extract_sort_value,
+            reverse=True,
+        )
+        self.app.set_status(f"Sorted by {col_name} (descending)")
 
 
 class FeatureMappingTab(TabPane):
@@ -829,9 +960,15 @@ class FeatureMappingTab(TabPane):
         Binding("v", "edit_gpu_mem", "GPU Mem"),
         Binding("o", "edit_qos", "QoS"),
         Binding("a", "edit_accounts", "Accounts"),
+        Binding("l", "edit_tags", "Tags"),
         Binding("delete", "reset_field", "Reset"),
         Binding("backspace", "reset_field", "Reset", show=False),
+        Binding("shift+up", "sort_asc", "Sort Asc"),
+        Binding("shift+down", "sort_desc", "Sort Desc"),
     ]
+
+    # Columns that cannot be sorted (list-based)
+    NON_SORTABLE_COLS = {"QoS", "Accounts", "Tags"}
 
     def __init__(self, config: SlurmConfig):
         super().__init__("Features", id="features-tab")
@@ -856,6 +993,7 @@ class FeatureMappingTab(TabPane):
             col_names.append("QoS")
         if self.has_accounts:
             col_names.append("Accounts")
+        col_names.append("Tags")
 
         keys = table.add_columns(*col_names)
         self.col_keys = dict(zip(col_names, keys))
@@ -925,6 +1063,12 @@ class FeatureMappingTab(TabPane):
                         else False,
                     )
                 )
+            row_data.append(
+                list_field_widget(
+                    feature.tags.value if feature else [],
+                    is_override=feature.tags.is_overridden if feature else False,
+                )
+            )
 
             table.add_row(*row_data, key=feature_name)
 
@@ -945,6 +1089,7 @@ class FeatureMappingTab(TabPane):
             editors[self.col_keys["QoS"]] = self.action_edit_qos
         if self.has_accounts:
             editors[self.col_keys["Accounts"]] = self.action_edit_accounts
+        editors[self.col_keys["Tags"]] = self.action_edit_tags
         if col_key in editors:
             editors[col_key]()
 
@@ -1368,6 +1513,59 @@ class FeatureMappingTab(TabPane):
             handle_result,
         )
 
+    def action_edit_tags(self) -> None:
+        """Edit tags for selected feature."""
+        feature_name = self._get_selected_feature()
+        if not feature_name:
+            return
+
+        feature = self.config.features.get(feature_name)
+        table = self.table
+
+        def handle_result(result: tuple[str, str] | None) -> None:
+            if result is None:
+                return
+            callback_key, value = result
+            if callback_key != f"tags_{feature_name}":
+                return
+
+            feature = self.config.get_feature(feature_name)
+            # Parse comma-separated tags
+            if value.strip():
+                tags = [t.strip() for t in value.split(",") if t.strip()]
+                feature.tags.set(tags)
+            else:
+                feature.tags.reset()
+            self.app.set_status(
+                f"{'Set' if value.strip() else 'Cleared'} tags for {feature_name}"
+            )
+
+            if not feature.has_any_config():
+                del self.config.features[feature_name]
+            self.app._auto_save()
+
+            table.update_cell(
+                feature_name,
+                self.col_keys["Tags"],
+                list_field_widget(
+                    feature.tags.value if feature_name in self.config.features else [],
+                    is_override=feature.tags.is_overridden
+                    if feature_name in self.config.features
+                    else False,
+                ),
+            )
+
+        current_tags = ", ".join(feature.tags.value) if feature else ""
+        self.app.push_screen(
+            InputScreen(
+                title=f"Tags for '{feature_name}'",
+                label="Enter tags (comma-separated, e.g., gpu, large, priority):",
+                initial_value=current_tags,
+                callback_key=f"tags_{feature_name}",
+            ),
+            handle_result,
+        )
+
     def action_reset_field(self) -> None:
         """Reset the current field to default."""
         table = self.table
@@ -1407,6 +1605,10 @@ class FeatureMappingTab(TabPane):
             col_name = "Accounts"
             feature.allowed_accounts.reset()
             table.update_cell(feature_name, col_key, Text("-", style="dim"))
+        elif col_key == self.col_keys["Tags"]:
+            col_name = "Tags"
+            feature.tags.reset()
+            table.update_cell(feature_name, col_key, Text("-", style="dim"))
         else:
             return
 
@@ -1416,19 +1618,100 @@ class FeatureMappingTab(TabPane):
             del self.config.features[feature_name]
         self.app._auto_save()
 
+    def _get_current_col_name(self) -> str | None:
+        """Get the name of the currently selected column."""
+        table = self.table
+        if table.cursor_column is None:
+            return None
+        cell_key = table.coordinate_to_cell_key((0, table.cursor_column))
+        col_key = cell_key.column_key
+        for name, key in self.col_keys.items():
+            if key == col_key:
+                return name
+        return None
+
+    def _extract_sort_value(self, cell_value: any) -> any:
+        """Extract a sortable value from a cell (handles Text objects)."""
+        if hasattr(cell_value, "plain"):
+            text = cell_value.plain
+        else:
+            text = str(cell_value)
+
+        text = text.strip().rstrip(" GB").replace(",", "")
+        if text == "-":
+            return (0, "")
+        try:
+            return (1, float(text))
+        except ValueError:
+            return (0, text.lower())
+
+    def action_sort_asc(self) -> None:
+        """Sort table by current column ascending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        self.table.sort(
+            self.col_keys[col_name],
+            key=self._extract_sort_value,
+            reverse=False,
+        )
+        self.app.set_status(f"Sorted by {col_name} (ascending)")
+
+    def action_sort_desc(self) -> None:
+        """Sort table by current column descending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        self.table.sort(
+            self.col_keys[col_name],
+            key=self._extract_sort_value,
+            reverse=True,
+        )
+        self.app.set_status(f"Sorted by {col_name} (descending)")
+
 
 class QoSTab(TabPane):
-    """Tab for viewing QoS information (read-only)."""
+    """Tab for viewing QoS information with editable tags."""
+
+    BINDINGS = [
+        Binding("l", "edit_tags", "Tags"),
+        Binding("delete", "reset_tags", "Reset"),
+        Binding("backspace", "reset_tags", "Reset", show=False),
+        Binding("shift+up", "sort_asc", "Sort Asc"),
+        Binding("shift+down", "sort_desc", "Sort Desc"),
+    ]
+
+    # Columns that cannot be sorted (list-based)
+    NON_SORTABLE_COLS = {"GRES Limits", "Tags"}
 
     def __init__(self, config: SlurmConfig):
         super().__init__("QoS", id="qos-tab")
         self.config = config
+        self.col_keys: dict[str, any] = {}
+
+    @property
+    def table(self) -> DataTable:
+        return self.query_one("#qos-table", DataTable)
 
     def compose(self) -> ComposeResult:
-        yield Static("QoS information from cluster (read-only).", classes="help-text")
+        yield Static(
+            "QoS information from cluster. [cyan]Tags are editable[/cyan]. "
+            "Press 'l' to edit tags.",
+            classes="help-text",
+        )
 
-        table = DataTable(id="qos-table")
-        table.add_columns("QoS", "Max Wall Time", "Priority", "GRES Limits")
+        table = DataTable(id="qos-table", cursor_type="cell")
+        col_names = ["QoS", "Max Wall Time", "Priority", "GRES Limits", "Tags"]
+        keys = table.add_columns(*col_names)
+        self.col_keys = dict(zip(col_names, keys))
 
         for name, q in sorted(self.config.qos.items()):
             gres_str = ", ".join(q.gres_limits[:2]) if q.gres_limits else "-"
@@ -1440,25 +1723,185 @@ class QoSTab(TabPane):
                 q.max_wall or "unlimited",
                 str(q.priority),
                 gres_str,
+                list_field_widget(q.tags.value, is_override=q.tags.is_overridden),
+                key=name,
             )
 
         yield table
 
+    def _get_selected_qos(self) -> str | None:
+        """Get the currently selected QoS name."""
+        table = self.table
+        if table.cursor_row is None or table.row_count == 0:
+            return None
+        cell_key = table.coordinate_to_cell_key((table.cursor_row, 0))
+        return cell_key.row_key.value
+
+    @on(DataTable.CellSelected)
+    def on_cell_selected(self, event: DataTable.CellSelected) -> None:
+        """Handle Enter key on cell."""
+        col_key = event.cell_key.column_key
+        if col_key == self.col_keys["Tags"]:
+            self.action_edit_tags()
+
+    def action_edit_tags(self) -> None:
+        """Edit tags for selected QoS."""
+        qos_name = self._get_selected_qos()
+        if not qos_name:
+            return
+
+        qos = self.config.qos.get(qos_name)
+        if not qos:
+            return
+
+        table = self.table
+
+        def handle_result(result: tuple[str, str] | None) -> None:
+            if result is None:
+                return
+            callback_key, value = result
+            if callback_key != f"qos_tags_{qos_name}":
+                return
+
+            # Parse comma-separated tags
+            if value.strip():
+                tags = [t.strip() for t in value.split(",") if t.strip()]
+                qos.tags.set(tags)
+            else:
+                qos.tags.reset()
+            self.app.set_status(
+                f"{'Set' if value.strip() else 'Cleared'} tags for QoS {qos_name}"
+            )
+            self.app._auto_save()
+
+            table.update_cell(
+                qos_name,
+                self.col_keys["Tags"],
+                list_field_widget(qos.tags.value, is_override=qos.tags.is_overridden),
+            )
+
+        current_tags = ", ".join(qos.tags.value) if qos.tags.value else ""
+        self.app.push_screen(
+            InputScreen(
+                title=f"Tags for QoS '{qos_name}'",
+                label="Enter tags (comma-separated, e.g., gpu, large, priority):",
+                initial_value=current_tags,
+                callback_key=f"qos_tags_{qos_name}",
+            ),
+            handle_result,
+        )
+
+    def action_reset_tags(self) -> None:
+        """Reset tags for selected QoS."""
+        qos_name = self._get_selected_qos()
+        if not qos_name:
+            return
+
+        qos = self.config.qos.get(qos_name)
+        if not qos:
+            return
+
+        qos.tags.reset()
+        self.table.update_cell(qos_name, self.col_keys["Tags"], Text("-", style="dim"))
+        self.app.set_status(f"Reset tags for QoS {qos_name}")
+        self.app._auto_save()
+
+    def _get_current_col_name(self) -> str | None:
+        """Get the name of the currently selected column."""
+        table = self.table
+        if table.cursor_column is None:
+            return None
+        cell_key = table.coordinate_to_cell_key((0, table.cursor_column))
+        col_key = cell_key.column_key
+        for name, key in self.col_keys.items():
+            if key == col_key:
+                return name
+        return None
+
+    def _extract_sort_value(self, cell_value: any) -> any:
+        """Extract a sortable value from a cell (handles Text objects)."""
+        if hasattr(cell_value, "plain"):
+            text = cell_value.plain
+        else:
+            text = str(cell_value)
+
+        text = text.strip()
+        if text == "-" or text == "unlimited":
+            return (0, "")
+        try:
+            return (1, float(text))
+        except ValueError:
+            return (0, text.lower())
+
+    def action_sort_asc(self) -> None:
+        """Sort table by current column ascending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        self.table.sort(
+            self.col_keys[col_name],
+            key=self._extract_sort_value,
+            reverse=False,
+        )
+        self.app.set_status(f"Sorted by {col_name} (ascending)")
+
+    def action_sort_desc(self) -> None:
+        """Sort table by current column descending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        self.table.sort(
+            self.col_keys[col_name],
+            key=self._extract_sort_value,
+            reverse=True,
+        )
+        self.app.set_status(f"Sorted by {col_name} (descending)")
+
 
 class AccountsTab(TabPane):
-    """Tab for viewing account associations (read-only)."""
+    """Tab for viewing account associations with editable tags."""
+
+    BINDINGS = [
+        Binding("l", "edit_tags", "Tags"),
+        Binding("delete", "reset_tags", "Reset"),
+        Binding("backspace", "reset_tags", "Reset", show=False),
+        Binding("shift+up", "sort_asc", "Sort Asc"),
+        Binding("shift+down", "sort_desc", "Sort Desc"),
+    ]
+
+    # Columns that cannot be sorted (list-based)
+    NON_SORTABLE_COLS = {"Available QoS", "Tags"}
 
     def __init__(self, config: SlurmConfig):
         super().__init__("Accounts", id="accounts-tab")
         self.config = config
+        self.col_keys: dict[str, any] = {}
+
+    @property
+    def table(self) -> DataTable:
+        return self.query_one("#accounts-table", DataTable)
 
     def compose(self) -> ComposeResult:
-        yield Static("Your account associations from cluster.", classes="help-text")
+        yield Static(
+            "Your account associations from cluster. [cyan]Tags are editable[/cyan]. "
+            "Press 'l' to edit tags.",
+            classes="help-text",
+        )
 
-        table = DataTable(id="accounts-table")
-        table.add_columns("Account", "Partition", "Available QoS")
+        table = DataTable(id="accounts-table", cursor_type="cell")
+        col_names = ["Account", "Partition", "Available QoS", "Tags"]
+        keys = table.add_columns(*col_names)
+        self.col_keys = dict(zip(col_names, keys))
 
-        for acc in self.config.accounts:
+        for acc in self.config.accounts_list:
             partition_str = acc.partition or "(all)"
             qos_str = ", ".join(acc.qos_list[:4]) if acc.qos_list else "(default)"
             if len(acc.qos_list) > 4:
@@ -1468,9 +1911,156 @@ class AccountsTab(TabPane):
                 acc.account,
                 partition_str,
                 qos_str,
+                list_field_widget(acc.tags.value, is_override=acc.tags.is_overridden),
+                key=acc.key,
             )
 
         yield table
+
+    def _get_selected_account(self) -> str | None:
+        """Get the currently selected account key."""
+        table = self.table
+        if table.cursor_row is None or table.row_count == 0:
+            return None
+        cell_key = table.coordinate_to_cell_key((table.cursor_row, 0))
+        return cell_key.row_key.value
+
+    @on(DataTable.CellSelected)
+    def on_cell_selected(self, event: DataTable.CellSelected) -> None:
+        """Handle Enter key on cell."""
+        col_key = event.cell_key.column_key
+        if col_key == self.col_keys["Tags"]:
+            self.action_edit_tags()
+
+    def action_edit_tags(self) -> None:
+        """Edit tags for selected account."""
+        acc_key = self._get_selected_account()
+        if not acc_key:
+            return
+
+        acc = self.config.accounts.get(acc_key)
+        if not acc:
+            return
+
+        table = self.table
+
+        def handle_result(result: tuple[str, str] | None) -> None:
+            if result is None:
+                return
+            callback_key, value = result
+            if callback_key != f"acc_tags_{acc_key}":
+                return
+
+            # Parse comma-separated tags
+            if value.strip():
+                tags = [t.strip() for t in value.split(",") if t.strip()]
+                acc.tags.set(tags)
+            else:
+                acc.tags.reset()
+            self.app.set_status(
+                f"{'Set' if value.strip() else 'Cleared'} tags for account {acc.account}"
+            )
+            self.app._auto_save()
+
+            table.update_cell(
+                acc_key,
+                self.col_keys["Tags"],
+                list_field_widget(acc.tags.value, is_override=acc.tags.is_overridden),
+            )
+
+        current_tags = ", ".join(acc.tags.value) if acc.tags.value else ""
+        self.app.push_screen(
+            InputScreen(
+                title=f"Tags for account '{acc.account}'",
+                label="Enter tags (comma-separated, e.g., gpu, large, priority):",
+                initial_value=current_tags,
+                callback_key=f"acc_tags_{acc_key}",
+            ),
+            handle_result,
+        )
+
+    def action_reset_tags(self) -> None:
+        """Reset tags for selected account."""
+        acc_key = self._get_selected_account()
+        if not acc_key:
+            return
+
+        acc = self.config.accounts.get(acc_key)
+        if not acc:
+            return
+
+        acc.tags.reset()
+        self.table.update_cell(acc_key, self.col_keys["Tags"], Text("-", style="dim"))
+        self.app.set_status(f"Reset tags for account {acc.account}")
+        self.app._auto_save()
+
+    def _get_current_col_name(self) -> str | None:
+        """Get the name of the currently selected column."""
+        table = self.table
+        if table.cursor_column is None:
+            return None
+        cell_key = table.coordinate_to_cell_key((0, table.cursor_column))
+        col_key = cell_key.column_key
+        for name, key in self.col_keys.items():
+            if key == col_key:
+                return name
+        return None
+
+    def _get_sort_value(self, acc_key: str, col_name: str) -> any:
+        """Get the sortable value for an account and column."""
+        acc = self.config.accounts.get(acc_key)
+        if not acc:
+            return ""
+        match col_name:
+            case "Account":
+                return acc.account.lower()
+            case "Partition":
+                return (acc.partition or "").lower()
+            case _:
+                return ""
+
+    def action_sort_asc(self) -> None:
+        """Sort table by current column ascending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        sorted_keys = sorted(
+            [str(key) for key in self.table.rows.keys()],
+            key=lambda k: self._get_sort_value(k, col_name),
+        )
+        self._reorder_rows(sorted_keys)
+        self.app.set_status(f"Sorted by {col_name} (ascending)")
+
+    def action_sort_desc(self) -> None:
+        """Sort table by current column descending."""
+        col_name = self._get_current_col_name()
+        if not col_name:
+            return
+        if col_name in self.NON_SORTABLE_COLS:
+            self.app.set_status(f"Cannot sort by {col_name}")
+            return
+
+        sorted_keys = sorted(
+            [str(key) for key in self.table.rows.keys()],
+            key=lambda k: self._get_sort_value(k, col_name),
+            reverse=True,
+        )
+        self._reorder_rows(sorted_keys)
+        self.app.set_status(f"Sorted by {col_name} (descending)")
+
+    def _reorder_rows(self, sorted_keys: list[str]) -> None:
+        """Reorder table rows according to sorted keys."""
+        table = self.table
+        row_data = {}
+        for key in sorted_keys:
+            row_data[key] = [table.get_cell(key, col) for col in self.col_keys.values()]
+        table.clear()
+        for key in sorted_keys:
+            table.add_row(*row_data[key], key=key)
 
 
 class SettingsTab(TabPane):
