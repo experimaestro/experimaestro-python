@@ -1,0 +1,102 @@
+/* SLURM Configuration TUI Styles */
+
+/* ============================================
+   InputScreen - Text input dialog
+   ============================================ */
+
+InputScreen {
+    align: center middle;
+}
+
+#input-dialog {
+    width: 60;
+    height: auto;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#input-dialog Label {
+    margin-bottom: 1;
+}
+
+#input-dialog Input {
+    margin-bottom: 1;
+}
+
+#input-dialog .button-row {
+    height: 3;
+    align: center middle;
+}
+
+/* ============================================
+   SelectionScreen - Multi-selection dialog
+   ============================================ */
+
+SelectionScreen {
+    align: center middle;
+}
+
+#selection-dialog {
+    width: 60;
+    height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#selection-dialog Label {
+    margin-bottom: 1;
+}
+
+#selection-table {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+#selection-dialog .button-row {
+    height: 3;
+    align: center middle;
+}
+
+/* ============================================
+   SlurmConfigApp - Main application
+   ============================================ */
+
+#app-title {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    padding: 0 1;
+}
+
+.help-text {
+    color: $text-muted;
+    padding: 0 1;
+    height: auto;
+}
+
+#status-bar {
+    height: 1;
+    background: $surface-darken-1;
+    color: $text;
+    padding: 0 1;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+}
+
+/* Tables */
+#partitions-table,
+#features-table,
+#qos-table,
+#accounts-table {
+    height: 1fr;
+}
