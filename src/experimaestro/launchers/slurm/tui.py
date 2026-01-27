@@ -19,6 +19,7 @@ from textual.widgets import (
     TabPane,
     Tree,
 )
+from textual_fspicker import FileOpen, FileSave, Filters
 
 from .cli import (
     SlurmCommandCache,
@@ -423,10 +424,13 @@ class PartitionsTab(TabPane):
             self.col_keys["GPU Type"]: self.action_edit_gpu_type,
             self.col_keys["GPU Mem"]: self.action_edit_gpu_mem,
             self.col_keys["Priority"]: self.action_edit_priority,
-            self.col_keys["QoS"]: self.action_edit_qos,
-            self.col_keys["Accounts"]: self.action_edit_accounts,
             self.col_keys["Enabled"]: self.action_toggle_enabled,
         }
+        # Add QoS/Accounts only if columns exist
+        if self.has_qos:
+            editors[self.col_keys["QoS"]] = self.action_edit_qos
+        if self.has_accounts:
+            editors[self.col_keys["Accounts"]] = self.action_edit_accounts
         if col_key in editors:
             editors[col_key]()
 
@@ -1569,6 +1573,8 @@ class SlurmConfigApp(App):
         Binding("g", "generate", "Generate"),
         Binding("s", "save", "Save Config"),
         Binding("r", "reload", "Reload"),
+        Binding("x", "export", "Export"),
+        Binding("i", "import_config", "Import"),
     ]
 
     def __init__(
@@ -1671,6 +1677,65 @@ class SlurmConfigApp(App):
             await self.recompose()
         except Exception as e:
             self.set_status(f"Reload error: {e}")
+
+    def action_export(self) -> None:
+        """Export configuration to a file for sharing."""
+        yaml_filter = Filters(("YAML files", lambda p: p.suffix in (".yaml", ".yml")))
+
+        def handle_result(export_path: Path | None) -> None:
+            if export_path is None:
+                self.set_status("Export cancelled")
+                return
+
+            try:
+                # Ensure .yaml extension
+                if export_path.suffix not in (".yaml", ".yml"):
+                    export_path = export_path.with_suffix(".yaml")
+                self.config.save_to_yaml(export_path)
+                self.set_status(f"Exported to: {export_path}")
+            except Exception as e:
+                self.set_status(f"Export error: {e}")
+
+        self.push_screen(
+            FileSave(
+                location=self.config_path.parent,
+                default_file=f"{self.config.cluster_name}_config.yaml",
+                filters=yaml_filter,
+                title="Export Configuration",
+            ),
+            handle_result,
+        )
+
+    def action_import_config(self) -> None:
+        """Import configuration from a file."""
+        yaml_filter = Filters(("YAML files", lambda p: p.suffix in (".yaml", ".yml")))
+
+        def handle_result(import_path: Path | None) -> None:
+            if import_path is None:
+                self.set_status("Import cancelled")
+                return
+
+            try:
+                self.config.load_from_yaml(import_path)
+                self._auto_save()
+                self.set_status(f"Imported from: {import_path}")
+                # Trigger recompose to refresh all tabs
+                self.call_later(self._refresh_after_import)
+            except Exception as e:
+                self.set_status(f"Import error: {e}")
+
+        self.push_screen(
+            FileOpen(
+                location=self.config_path.parent,
+                filters=yaml_filter,
+                title="Import Configuration",
+            ),
+            handle_result,
+        )
+
+    async def _refresh_after_import(self) -> None:
+        """Refresh the UI after importing configuration."""
+        await self.recompose()
 
 
 def run_tui(

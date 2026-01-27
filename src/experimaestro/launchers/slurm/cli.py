@@ -854,6 +854,8 @@ def configure(cache_file: Path | None, use_cache: bool, config_path: Path | None
     Existing configuration in slurm.yaml is preserved and merged with
     cluster information - new partitions are added but existing settings
     are not overwritten without confirmation.
+
+    Use 'x' to export and 'i' to import configuration within the TUI.
     """
     from .tui import run_tui
 

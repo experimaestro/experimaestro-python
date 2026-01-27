@@ -1015,12 +1015,12 @@ class SlurmConfig:
         if features_data:
             data["features"] = features_data
 
-        # Save partition configurations
+        # Save partition configurations (all partitions to track "seen" state)
         partitions_data = {}
         for name in sorted(self.partitions.keys()):
             partition = self.partitions[name]
-            if pdata := partition.to_save_dict():
-                partitions_data[name] = pdata
+            # Save overrides or empty dict to mark partition as "seen"
+            partitions_data[name] = partition.to_save_dict() or {}
         if partitions_data:
             data["partitions"] = partitions_data
 

@@ -49,6 +49,7 @@ dependencies = [
     "sortedcontainers >=2.4,<3",
     "termcolor >=2.3,<3",
     "textual >=6",
+    "textual-fspicker >=0.0.11",
     "tqdm >=4.66.1,<5",
     "typing-extensions >=4.2; python_version < \"3.12\"",
     "uvicorn[standard] >=0.27,<1",

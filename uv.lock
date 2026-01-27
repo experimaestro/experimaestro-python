@@ -718,6 +718,7 @@ dependencies = [
     { name = "sortedcontainers" },
     { name = "termcolor" },
     { name = "textual" },
+    { name = "textual-fspicker" },
     { name = "tqdm" },
     { name = "typing-extensions", marker = "python_full_version < '3.12'" },
     { name = "uvicorn", extra = ["standard"] },
@@ -799,6 +800,7 @@ requires-dist = [
     { name = "termcolor", specifier = ">=2.3,<3" },
     { name = "textual", specifier = ">=6" },
     { name = "textual-dev", marker = "extra == 'dev'", specifier = ">=1.8.0" },
+    { name = "textual-fspicker", specifier = ">=0.0.11" },
     { name = "tqdm", specifier = ">=4.66.1,<5" },
     { name = "typing-extensions", marker = "python_full_version < '3.12'", specifier = ">=4.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27,<1" },
@@ -3154,6 +3156,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/38/fd/fd5ad9527b536c306a5a860a33a45e13983a59804b48b91ea52b42ba030a/textual_dev-1.8.0.tar.gz", hash = "sha256:7e56867b0341405a95e938cac0647e6d2763d38d0df08710469ad6b6a8db76df", size = 25026, upload-time = "2025-10-11T09:47:01.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/c6/1dc08ceee6d0bdf219c500cb2fbd605b681b63507c4ff27a6477f12f8245/textual_dev-1.8.0-py3-none-any.whl", hash = "sha256:227b6d24a485fbbc77e302aa21f4fdf3083beb57eb45cd95bae082c81cbeddeb", size = 27541, upload-time = "2025-10-11T09:47:00.531Z" },
+]
+
+[[package]]
+name = "textual-fspicker"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "textual" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/15/2e/8c1ae6f0c26af2fe0c49d61d42c91d0077cbfd984df049d7e3d82a40d93d/textual_fspicker-0.6.0.tar.gz", hash = "sha256:0da0e3f35025f72c5b90557d12777c9f67c674470b3263cbe2c2de38f5b70c3c", size = 16157, upload-time = "2025-08-26T15:38:19.805Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/62/463994497050869e517dde4da7f628599f6aea05dcd6bbb14d2a945c2499/textual_fspicker-0.6.0-py3-none-any.whl", hash = "sha256:4d0ddbebdc5d7c93ad0d1f48627003a60690bc6d382267ee033cfeb2e6b4949c", size = 24715, upload-time = "2025-08-26T15:38:14.344Z" },
 ]
 
 [[package]]
