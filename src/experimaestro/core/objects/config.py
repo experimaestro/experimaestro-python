@@ -1896,22 +1896,6 @@ class ConfigMixin:
     def __identifier__(self) -> "Identifier":
         return self.__xpm__.identifier
 
-    def register_task_output(self, method, *args, **kwargs):
-        # Determine the path for this...
-        path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        data = json.dumps(
-            {
-                "key": f"{self.__xpmidentifier__}/{method.__name__}",
-                "args": args,
-                "kwargs": kwargs,
-            }
-        )
-        with path.open("at") as fp:
-            fp.writelines([data, "\n"])
-            fp.flush()
-
 
 class Config:
     """Base type for all objects in python interface"""
@@ -2016,6 +2000,26 @@ class Config:
         """Called after the object  __init__() and with properties set"""
         # Default implementation is to do nothing
         pass
+
+    def register_task_output(self, method, *args, **kwargs):
+        """Register a task output for dynamic callbacks.
+
+        This method is used to register outputs that can trigger callbacks
+        when produced during task execution.
+        """
+        path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = json.dumps(
+            {
+                "key": f"{self.__xpmidentifier__}/{method.__name__}",
+                "args": args,
+                "kwargs": kwargs,
+            }
+        )
+        with path.open("at") as fp:
+            fp.writelines([data, "\n"])
+            fp.flush()
 
 
 class InstanceConfig(Config):
