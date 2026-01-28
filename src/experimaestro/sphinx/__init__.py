@@ -9,7 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from docutils import nodes
 from sphinx.application import Sphinx
 from sphinx import addnodes
-from sphinx.ext.autodoc import ClassDocumenter, Documenter, restify
+from sphinx.ext.autodoc import ClassDocumenter, Documenter
+
+try:
+    # Sphinx 8.0+
+    from sphinx.util.typing import restify
+except ImportError:
+    # Sphinx < 8.0
+    from sphinx.ext.autodoc import restify
 from sphinx.locale import _
 from sphinx.util import inspect, logging
 from sphinx.domains.python import PyClasslike, PyAttribute, directives
@@ -127,7 +134,7 @@ class ConfigDocumenter(ClassDocumenter):
         xpminfo = getxpminfo(self.object)
 
         # Mostly copied from ClassDocumenter but adapted (no other choice)
-        # FIXME: would be better to be a plugin
+        # Note: would be better to be a plugin
 
         if self.doc_as_attr:
             self.directivetype = "attribute"
