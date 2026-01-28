@@ -56,6 +56,7 @@ class LongTraining(ResumableTask):
 - `GracefulTimeout` exception for clean timeout handling
 - Configurable `max_retries` (default: 3) for automatic retry on timeout
 - Log file rotation when resuming tasks
+- [Graceful termination](experiments/task.md#graceful-termination): Handle SIGTERM/SIGINT with `TaskCancelled` for custom cleanup
 
 #### [Dynamic Task Outputs](experiments/task.md#dynamic-task-outputs)
 
@@ -239,6 +240,14 @@ resulting in more predictable behavior and reduced race conditions.
 - **Override warnings**: Warns when overriding arguments without `overrides=True` flag
 - **[`value_class` decorator](experiments/config.md#value-classes)**: Register external types as experimaestro values
 - **[Explicit default behavior](experiments/config.md#parameters)**: `field(ignore_default=...)` and `field(default=...)`
+- **[DynamicLauncher](launchers/index.md#dynamic)**: Select launchers dynamically based on priority
+- **[AcceleratorSpecification](launchers/index.md#accelerator-types)**: Cross-platform GPU support (CUDA, MPS, generic)
+- **[Protocol version checking](interfaces.md#version-compatibility)**: Client-server compatibility for remote monitoring
+- **Colored logging**: ISO timestamps and colored output for CLI (`--logging` option)
+- **Events viewer**: Stream experiment events to console (`--events-viewer` option)
+- **Workspace version checking**: Prevents running v2 code against v1 workspaces
+- **Job dependencies display**: View job dependencies in TUI/Web UI
+- **SLURM TUI configuration**: Interactive terminal-based SLURM launcher configuration
 
 ### Breaking Changes
 

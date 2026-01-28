@@ -131,6 +131,7 @@ The `launchers.py` file dictates how a given *requirement* (e.g., 2 CPU with
 - {py:class}`~experimaestro.launcherfinder.specs.MPSSpecification` - Specifies Apple Metal Performance Shaders requirements (unified memory).
 - {py:class}`~experimaestro.launcherfinder.specs.CPUSpecification` - Specifies CPU requirements (cores, memory).
 
+(accelerator-types)=
 #### Accelerator Types
 
 The launcher finder supports multiple accelerator (GPU) types:

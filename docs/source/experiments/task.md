@@ -336,6 +336,7 @@ This is useful when:
 - You're monitoring remaining walltime via scheduler environment variables (e.g., `SLURM_JOB_END_TIME`)
 - You want to ensure checkpoints are saved cleanly before termination
 
+(graceful-termination)=
 ### Graceful Termination (SIGTERM/SIGINT)
 
 When a task receives SIGTERM (e.g., from `scancel`) or SIGINT (Ctrl+C), the framework provides a mechanism for graceful cleanup:

@@ -271,6 +271,7 @@ experimaestro experiments ssh-monitor host /workspace --remote-xpm /path/to/venv
 experimaestro experiments ssh-monitor host /workspace --remote-xpm experimaestro
 ```
 
+(version-compatibility)=
 ### Version Compatibility
 
 The local and remote experimaestro versions should be compatible. The protocol
