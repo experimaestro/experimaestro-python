@@ -768,6 +768,9 @@ class EnumType(Type):
     def __init__(self, type: typing.Type[Enum]):
         self.type = type
 
+    def name(self):
+        return self.type.__name__
+
     def validate(self, value):
         assert isinstance(value, self.type), f"{value} is not of type {self.type}"
         return value

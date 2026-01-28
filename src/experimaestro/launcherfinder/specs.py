@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 import logging
 import math
 from attr import Factory
@@ -11,9 +12,80 @@ from humanfriendly import parse_size, format_size, parse_timespan
 # --- Host specification part
 
 
+class AcceleratorType(Enum):
+    """Types of accelerators supported."""
+
+    CUDA = "cuda"  # NVIDIA CUDA GPUs (dedicated memory)
+    MPS = "mps"  # Apple Metal Performance Shaders (unified memory)
+    ROCM = "rocm"  # AMD ROCm GPUs (future)
+
+
 @dataclass
-class CudaSpecification:
-    memory: int
+class AcceleratorSpecification:
+    """Generic accelerator (GPU-like device) specification.
+
+    This can match any accelerator type (CUDA, MPS, ROCm, etc.) based on
+    memory requirements alone. Use this when you don't care about the
+    specific accelerator type.
+
+    For type-specific requirements, use CudaSpecification or MPSSpecification.
+    """
+
+    memory: int = 0
+    """Memory in bytes"""
+
+    model: str = ""
+    """Model name"""
+
+    min_memory: int = 0
+    """Minimum request memory (in bytes)"""
+
+    @property
+    def accelerator_type(self) -> AcceleratorType | None:
+        """Type of accelerator (None for generic)"""
+        return None
+
+    @property
+    def unified_memory(self) -> bool:
+        """If True, memory is shared with CPU (e.g., Apple Silicon)"""
+        return False
+
+    def match(self, spec: "AcceleratorSpecification") -> bool:
+        """Returns True if this host accelerator can satisfy the spec requirement.
+
+        Matching rules:
+        - If spec is generic (AcceleratorSpecification), any accelerator matches
+        - If spec is specific (CudaSpecification, MPSSpecification), types must match
+        """
+        # Check if the requested spec requires a specific type
+        spec_type = spec.accelerator_type
+        if spec_type is not None:
+            # Specific type requested - must match exactly
+            if self.accelerator_type != spec_type:
+                return False
+
+        # Check memory bounds
+        if self.memory < spec.memory:
+            return False
+        if self.min_memory > spec.memory:
+            return False
+
+        return True
+
+    def __repr__(self):
+        mem_str = format_size(self.memory, binary=True)
+        min_str = format_size(self.min_memory, binary=True)
+        return f"Accelerator({self.model} max={mem_str}/min={min_str})"
+
+
+@dataclass
+class CudaSpecification(AcceleratorSpecification):
+    """NVIDIA CUDA GPU specification (dedicated GPU memory).
+
+    Only matches CUDA GPUs - will not match MPS or other accelerator types.
+    """
+
+    memory: int = 0
     """Memory (in bytes)"""
 
     model: str = ""
@@ -22,12 +94,43 @@ class CudaSpecification:
     min_memory: int = 0
     """Minimum request memory (in bytes)"""
 
-    def match(self, spec: "CudaSpecification"):
-        """Returns True if the specification matches this host"""
-        return (self.memory >= spec.memory) and (self.min_memory <= spec.memory)
+    @property
+    def accelerator_type(self) -> AcceleratorType:
+        return AcceleratorType.CUDA
 
     def __repr__(self):
         return f"CUDA({self.model} max={format_size(self.memory, binary=True)}/min={format_size(self.min_memory, binary=True)})"
+
+
+@dataclass
+class MPSSpecification(AcceleratorSpecification):
+    """Apple Metal Performance Shaders (MPS) specification.
+
+    MPS uses unified memory - GPU memory is shared with CPU RAM.
+    When a task requests GPU memory on MPS, it consumes system RAM.
+
+    Only matches MPS - will not match CUDA or other accelerator types.
+    """
+
+    memory: int = 0
+    """Memory in bytes (shared with CPU)"""
+
+    model: str = ""
+    """Apple Silicon model (e.g., 'M1', 'M2 Pro')"""
+
+    min_memory: int = 0
+    """Minimum request memory (in bytes)"""
+
+    @property
+    def accelerator_type(self) -> AcceleratorType:
+        return AcceleratorType.MPS
+
+    @property
+    def unified_memory(self) -> bool:
+        return True
+
+    def __repr__(self):
+        return f"MPS({self.model} mem={format_size(self.memory, binary=True)} unified)"
 
 
 @dataclass
@@ -60,10 +163,24 @@ class CPUSpecification:
 
 @define(kw_only=True)
 class HostSpecification:
-    """Specifies how the host is set"""
+    """Specifies how the host is set.
+
+    Supports both CUDA GPUs and other accelerators (MPS, ROCm, etc.).
+    Use `accelerators` for the generic list, or `cuda` for backwards compatibility.
+
+    Examples:
+        # New style - generic accelerators
+        host = HostSpecification(accelerators=[CudaSpecification(memory=24*1024**3)])
+
+        # Backwards compatible - cuda shorthand
+        host = HostSpecification(cuda=[CudaSpecification(memory=24*1024**3)])
+    """
+
+    accelerators: List[AcceleratorSpecification] = Factory(list)
+    """All accelerators (GPUs) available on this host"""
 
     cuda: List[CudaSpecification] = Factory(list)
-    """CUDA GPUs"""
+    """CUDA GPUs (backwards compatibility, merged into accelerators)"""
 
     cpu: CPUSpecification = Factory(CPUSpecification)
     """CPU specification for this host"""
@@ -77,8 +194,14 @@ class HostSpecification:
     min_gpu: int = 0
     """Minimum number of allocated GPUs"""
 
-    def __post_init__(self):
-        self.cuda = sorted(self.cuda)
+    def __attrs_post_init__(self):
+        # Merge cuda into accelerators for backwards compatibility
+        if self.cuda:
+            self.accelerators = list(self.accelerators) + list(self.cuda)
+            # Clear cuda to avoid double-counting
+            object.__setattr__(self, "cuda", [])
+        # Sort by memory descending
+        self.accelerators = sorted(self.accelerators, key=lambda a: -a.memory)
 
 
 # --- Query part
@@ -156,8 +279,8 @@ class RequirementUnion(HostRequirement):
 class HostSimpleRequirement(HostRequirement):
     """Simple host requirement"""
 
-    cuda_gpus: List["CudaSpecification"]
-    """Specification for CUDA gpus"""
+    accelerators: List["AcceleratorSpecification"]
+    """Specification for accelerators (GPUs)"""
 
     cpu: "CPUSpecification"
     """Specification for CPU"""
@@ -166,7 +289,7 @@ class HostSimpleRequirement(HostRequirement):
     """Requested duration (in seconds)"""
 
     def __repr__(self):
-        return f"Req(cpu={self.cpu}, cuda={self.cuda_gpus}, duration={self.duration})"
+        return f"Req(cpu={self.cpu}, accelerators={self.accelerators}, duration={self.duration})"
 
     def multiply_duration(self, coefficient: float) -> "HostSimpleRequirement":
         r = HostSimpleRequirement(self)
@@ -174,7 +297,7 @@ class HostSimpleRequirement(HostRequirement):
         return r
 
     def __init__(self, *reqs: "HostSimpleRequirement"):
-        self.cuda_gpus = []
+        self.accelerators = []
         self.cpu = CPUSpecification(0, 0)
         self.duration = 0
         for req in reqs:
@@ -189,33 +312,67 @@ class HostSimpleRequirement(HostRequirement):
         self.cpu.memory = max(req.cpu.memory, self.cpu.memory)
         self.cpu.cores = max(req.cpu.cores, self.cpu.cores)
         self.duration = max(req.duration, self.duration)
-        self.cuda_gpus.extend(req.cuda_gpus)
-        self.cuda_gpus.sort(key=lambda cuda: -cuda.memory)
+        self.accelerators.extend(req.accelerators)
+        self.accelerators.sort(key=lambda a: -a.memory)
+
+    @property
+    def cuda_gpus(self) -> List["CudaSpecification"]:
+        """CUDA GPUs (backwards compatibility alias).
+
+        Returns only CUDA accelerators from the accelerators list.
+        """
+        return [a for a in self.accelerators if isinstance(a, CudaSpecification)]
 
     def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
-        if self.cuda_gpus:
-            if len(host.cuda) < len(self.cuda_gpus):
+        if self.accelerators:
+            if len(host.accelerators) < len(self.accelerators):
                 logging.debug(
-                    "Not enough CUDA gpus (%d < %d)",
-                    len(host.cuda),
-                    len(self.cuda_gpus),
+                    "Not enough accelerators (%d < %d)",
+                    len(host.accelerators),
+                    len(self.accelerators),
                 )
                 return None
 
-            for host_gpu, req_gpu in zip(host.cuda, self.cuda_gpus):
-                if not host_gpu.match(req_gpu):
+            # Match accelerators - each requested accelerator must find a match
+            # Sort both by memory descending for greedy matching
+            host_accels = sorted(host.accelerators, key=lambda a: -a.memory)
+            req_accels = sorted(self.accelerators, key=lambda a: -a.memory)
+
+            for host_accel, req_accel in zip(host_accels, req_accels):
+                if not host_accel.match(req_accel):
+                    logging.debug(
+                        "Accelerator mismatch: host %s cannot satisfy %s",
+                        host_accel,
+                        req_accel,
+                    )
                     return None
 
-        if len(self.cuda_gpus) < host.min_gpu:
+        if len(self.accelerators) < host.min_gpu:
             logging.debug(
-                "Not enough requested CUDA gpus (min=%d > %d)",
+                "Not enough requested accelerators (min=%d > %d)",
                 host.min_gpu,
-                len(self.cuda_gpus),
+                len(self.accelerators),
             )
             return None
 
         if not host.cpu.match(self.cpu):
             return None
+
+        # For unified memory systems (MPS), check that combined CPU + GPU memory
+        # doesn't exceed total system memory
+        unified_gpu_memory = sum(
+            a.memory for a in self.accelerators if a.unified_memory
+        )
+        if unified_gpu_memory > 0:
+            total_requested = self.cpu.memory + unified_gpu_memory
+            if total_requested > host.cpu.memory:
+                logging.debug(
+                    "Unified memory exceeded: requested %d (CPU) + %d (GPU) > %d available",
+                    self.cpu.memory,
+                    unified_gpu_memory,
+                    host.cpu.memory,
+                )
+                return None
 
         if host.max_duration > 0 and self.duration > host.max_duration:
             return None
@@ -228,8 +385,8 @@ class HostSimpleRequirement(HostRequirement):
 
         _self = deepcopy(self)
         for _ in range(count - 1):
-            _self.cuda_gpus.extend(self.cuda_gpus)
-        _self.cuda_gpus.sort(key=lambda cuda: -cuda.memory)
+            _self.accelerators.extend(self.accelerators)
+        _self.accelerators.sort(key=lambda a: -a.memory)
 
         return _self
 
@@ -242,10 +399,39 @@ def cpu(*, mem: Optional[str] = None, cores: int = 1):
 
 
 def cuda_gpu(*, mem: Optional[str] = None):
-    """CUDA GPU requirement"""
+    """CUDA GPU requirement (NVIDIA only).
+
+    Use this when you specifically need NVIDIA CUDA support.
+    Will not match MPS or other accelerator types.
+    """
     _mem = parse_size(mem) if mem else 0
     r = HostSimpleRequirement()
-    r.cuda_gpus.append(CudaSpecification(_mem))
+    r.accelerators.append(CudaSpecification(_mem))
+    return r
+
+
+def mps_gpu(*, mem: Optional[str] = None):
+    """Apple MPS GPU requirement (Apple Silicon only).
+
+    MPS uses unified memory - the GPU shares RAM with the CPU.
+    Use this when you specifically need Apple Metal support.
+    Will not match CUDA or other accelerator types.
+    """
+    _mem = parse_size(mem) if mem else 0
+    r = HostSimpleRequirement()
+    r.accelerators.append(MPSSpecification(_mem))
+    return r
+
+
+def gpu(*, mem: Optional[str] = None):
+    """Generic GPU/accelerator requirement.
+
+    Matches any accelerator type (CUDA, MPS, ROCm, etc.) that satisfies
+    the memory requirement. Use this for cross-platform compatibility.
+    """
+    _mem = parse_size(mem) if mem else 0
+    r = HostSimpleRequirement()
+    r.accelerators.append(AcceleratorSpecification(_mem))
     return r
 
 

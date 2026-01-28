@@ -35,6 +35,7 @@ dependencies = [
     "filelock >=3.16,<4",
     "httpx >=0.26,<1",
     "humanfriendly >=10",
+    "jinja2 >=3",
     "huggingface-hub >0.17",
     "marshmallow >=3.20,<4",
     "omegaconf >=2.3,<3",
@@ -48,6 +49,7 @@ dependencies = [
     "sortedcontainers >=2.4,<3",
     "termcolor >=2.3,<3",
     "textual >=6",
+    "textual-fspicker >=0.0.11",
     "tqdm >=4.66.1,<5",
     "typing-extensions >=4.2; python_version < \"3.12\"",
     "uvicorn[standard] >=0.27,<1",
@@ -102,6 +104,10 @@ ssh = "experimaestro.connectors.ssh:SshConnector"
 
 [project.entry-points."experimaestro.tokens"]
 unix = "experimaestro.tokens:CounterToken"
+
+[project.entry-points."experimaestro.launchers"]
+direct = "experimaestro.launchers.direct:DirectLauncher"
+slurm = "experimaestro.launchers.slurm:SlurmLauncher"
 
 [project.entry-points.mypy]
 experimaestro = "experimaestro.mypy:plugin"

@@ -267,15 +267,53 @@ class DocumentationAnalyzer:
             cprint(f"  [undocumented] {error}", "red")
 
     def assert_no_undocumented(self):
-        assert (
-            len(self.documentation_errors) == 0
-            and len(self.parsing_errors) == 0
-            and len(self.undocumented) == 0
-        )
+        """Asserts that all configurations are documented and no errors occurred.
+
+        Raises:
+            AssertionError: If there are documentation errors, parsing errors,
+                or undocumented configurations.
+        """
+        errors = []
+
+        if self.documentation_errors:
+            errors.append(
+                f"Documentation parsing errors ({len(self.documentation_errors)}):\n"
+                + "\n".join(f"  - {e}" for e in self.documentation_errors)
+            )
+
+        if self.parsing_errors:
+            errors.append(
+                f"Module import errors ({len(self.parsing_errors)}):\n"
+                + "\n".join(f"  - {e}" for e in self.parsing_errors)
+            )
+
+        if self.undocumented:
+            errors.append(
+                f"Undocumented configurations ({len(self.undocumented)}):\n"
+                + "\n".join(f"  - {u}" for u in sorted(self.undocumented))
+            )
+
+        if errors:
+            raise AssertionError("\n\n".join(errors))
 
     def assert_valid_documentation(self):
-        """Asserts that there are no falsy documented"""
+        """Asserts that documentation is complete and consistent.
+
+        This checks that:
+        - All configurations are documented (no undocumented configs)
+        - No documentation parsing errors occurred
+        - No module import errors occurred
+        - No "falsy documented" entries exist (documentation references
+          to configurations that don't exist in the code)
+
+        Raises:
+            AssertionError: If any of the above conditions are not met.
+        """
         self.assert_no_undocumented()
-        assert len(self.falsy_documented) == 0, (
-            f"{self.falsy_documented} falsy documented members"
-        )
+
+        if self.falsy_documented:
+            raise AssertionError(
+                f"Falsy documented configurations ({len(self.falsy_documented)}) - "
+                "these are documented but don't exist in code:\n"
+                + "\n".join(f"  - {f}" for f in sorted(self.falsy_documented))
+            )

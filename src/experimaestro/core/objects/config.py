@@ -1885,6 +1885,17 @@ class ConfigMixin:
         other.__xpm__.set(param_name, self)
         return other
 
+    def __validate__(self):
+        """Validate the values"""
+        pass
+
+    def __json__(self):
+        """Returns a JSON version of the object (if possible)"""
+        return self.__xpm__.__json__()
+
+    def __identifier__(self) -> "Identifier":
+        return self.__xpm__.identifier
+
 
 class Config:
     """Base type for all objects in python interface"""
@@ -1985,30 +1996,17 @@ class Config:
                 raise
         return xpmtype
 
-    def __validate__(self):
-        """Validate the values"""
-        pass
-
     def __post_init__(self):
         """Called after the object  __init__() and with properties set"""
         # Default implementation is to do nothing
         pass
 
-    def __json__(self):
-        """Returns a JSON version of the object (if possible)"""
-        return self.__xpm__.__json__()
-
-    def __identifier__(self) -> "Identifier":
-        return self.__xpm__.identifier
-
-    def copy_dependencies(self, other: "Config"):
-        """Add pre-tasks from the listed configurations"""
-        raise AssertionError(
-            "The 'copy_dependencies' method can only be used during configuration"
-        )
-
     def register_task_output(self, method, *args, **kwargs):
-        # Determine the path for this...
+        """Register a task output for dynamic callbacks.
+
+        This method is used to register outputs that can trigger callbacks
+        when produced during task execution.
+        """
         path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -359,10 +359,33 @@ Type annotations are used to declare parameters in configurations and tasks.
    :members:
 ```
 
+### AcceleratorSpecification
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.AcceleratorSpecification
+   :members:
+```
+
 ### CudaSpecification
 
 ```{eval-rst}
 .. autoclass:: experimaestro.launcherfinder.specs.CudaSpecification
+   :members:
+   :show-inheritance:
+```
+
+### MPSSpecification
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.MPSSpecification
+   :members:
+   :show-inheritance:
+```
+
+### AcceleratorType
+
+```{eval-rst}
+.. autoclass:: experimaestro.launcherfinder.specs.AcceleratorType
    :members:
 ```
 
