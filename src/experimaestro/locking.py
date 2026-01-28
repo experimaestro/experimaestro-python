@@ -1223,10 +1223,6 @@ class TrackedDynamicResource(DynamicResource, ABC):
         Optimization: only does a full update if the jobs_folder has been modified
         since the last update.
 
-        Note: This method runs exclusively in EventLoopThread, so we only need
-        the IPC lock (not _async_lock) since there's no concurrent async access
-        within the same loop.
-
         Returns:
             True if state changed, False if unchanged
         """
@@ -1242,8 +1238,12 @@ class TrackedDynamicResource(DynamicResource, ABC):
             # No change to jobs folder, skip full update
             return False
 
-        # Only IPC lock needed - this runs in EventLoopThread exclusively
-        async with self.ipc_lock:
+        # Use both _async_lock and ipc_lock to avoid race conditions with
+        # other coroutines (aio_acquire, aio_job_started, etc.) that also
+        # access ipc_lock. AsyncFileLock can have internal state corruption
+        # when accessed concurrently from multiple coroutines due to its
+        # run_in_executor implementation.
+        async with self._async_lock, self.ipc_lock:
             old_cache_keys = set(self.cache.keys())
             old_valid_states = {k: lf.valid_state for k, lf in self.cache.items()}
 
