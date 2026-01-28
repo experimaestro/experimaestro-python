@@ -133,6 +133,9 @@ class CounterTokenDependency(DynamicDependency):
     def token(self):
         return self._token
 
+    def __repr__(self):
+        return f"CounterTokenDep({self._token.name}, count={self.count})"
+
 
 class TokenLockFile(DynamicLockFile):
     """Lock file for counter tokens.
@@ -273,6 +276,12 @@ class CounterToken(Token, TrackedDynamicResource):
 
     def __str__(self):
         return "token[{}]".format(self.name)
+
+    def __repr__(self):
+        return (
+            f"CounterToken({self.name}, {self.available}/{self.total} available, "
+            f"{len(self.cache)} locks)"
+        )
 
     # --- TrackedDynamicResource abstract method implementations ---
 

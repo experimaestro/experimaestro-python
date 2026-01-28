@@ -226,19 +226,93 @@ class TemporaryExperiment:
         logging.info("Created new temporary experiment (%s)", workdir)
         return self.experiment
 
-    def __exit__(self, *args):
-        elapsed = time.time() - self._start_time
-        logging.info(
-            "Experiment '%s' completed in %.2fs (timeout: %ds)",
-            self.name,
-            elapsed,
-            self.timeout.seconds,
-        )
+    def _log_debug_info_on_timeout(self):
+        """Log debugging information when a timeout occurs."""
+        # Re-enable logging exceptions (disabled by signal handler)
+        logging.raiseExceptions = True
 
-        self.experiment.__exit__(*args)
-        self.timeout.__exit__(*args)
+        logger = logging.getLogger("xpm.test.timeout")
+
+        logger.error("=" * 60)
+        logger.error("TIMEOUT DEBUG INFO for experiment '%s'", self.name)
+        logger.error("=" * 60)
+
+        # Log job states
+        resources_seen = {}
+        try:
+            from experimaestro.dynamic import DynamicDependency
+
+            jobs = list(self.experiment.jobs.values())
+            if not jobs:
+                logger.error("Jobs: none")
+            else:
+                from collections import Counter
+
+                state_counts = Counter(job.state.name for job in jobs)
+                summary = ", ".join(
+                    f"{name}: {count}" for name, count in sorted(state_counts.items())
+                )
+                logger.error("Jobs (%d total): %s", len(jobs), summary)
+
+                for job in jobs:
+                    # Collect dynamic resources from all jobs
+                    for dep in job.dependencies:
+                        if isinstance(dep, DynamicDependency):
+                            resources_seen[id(dep.origin)] = dep.origin
+
+                    if job.state.name != "done":
+                        dyn_deps = [
+                            repr(dep)
+                            for dep in job.dependencies
+                            if isinstance(dep, DynamicDependency)
+                        ]
+                        dep_str = f" {dyn_deps}" if dyn_deps else ""
+                        logger.error(
+                            "  [%s] %s (%s)%s",
+                            job.state.name,
+                            job.name,
+                            job.identifier[:12],
+                            dep_str,
+                        )
+        except Exception as e:
+            logger.error("Error getting jobs: %s", e)
+
+        # Log dynamic resource states
+        try:
+            if not resources_seen:
+                logger.error("Dynamic resources: none found")
+            else:
+                for resource in resources_seen.values():
+                    logger.error("  %r", resource)
+        except Exception as e:
+            logger.error("Error getting resources: %s", e)
+
+        logger.error("=" * 60)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = time.time() - self._start_time
+
+        # Check if this is a timeout - print debug info before cleanup
+        if exc_type is TimeoutError:
+            logging.error(
+                "Experiment '%s' TIMED OUT after %.2fs (timeout: %ds)",
+                self.name,
+                elapsed,
+                self.timeout.seconds,
+            )
+            self._log_debug_info_on_timeout()
+        else:
+            logging.info(
+                "Experiment '%s' completed in %.2fs (timeout: %ds)",
+                self.name,
+                elapsed,
+                self.timeout.seconds,
+            )
+
+        self.experiment.__exit__(exc_type, exc_val, exc_tb)
+        self.timeout.__exit__(exc_type, exc_val, exc_tb)
         if self.clean_workdir:
-            self.workdir.__exit__(*args)
+            self.workdir.__exit__(exc_type, exc_val, exc_tb)
 
 
 def is_posix():
