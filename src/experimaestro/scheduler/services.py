@@ -51,10 +51,12 @@ class Service(BaseService):
     id: str
     _state: ServiceState = ServiceState.STOPPED
     _experiment: Optional["Experiment"] = None
+    _error: Optional[str] = None
 
     def __init__(self):
         self._listeners: Set[ServiceListener] = set()
         self._listeners_lock = threading.Lock()
+        self._error = None
 
     def set_experiment(self, xp: "Experiment") -> None:
         """Called when the service is added to an experiment.
@@ -310,6 +312,27 @@ class Service(BaseService):
                 listener.service_state_changed(self)
             except Exception:
                 logger.exception("Error notifying listener %s", listener)
+
+    @property
+    def error(self) -> Optional[str]:
+        """Return error message if service failed to start"""
+        return self._error
+
+    def set_error(self, error: Optional[str]) -> None:
+        """Set error message and update state to ERROR"""
+        self._error = error
+        if error:
+            self.state = ServiceState.ERROR
+
+    def set_starting(self) -> None:
+        """Set state to STARTING and clear any previous error.
+
+        This is a no-op for live services - they manage their own state
+        internally through get_url(). Only MockService uses this to manually
+        control state for UI feedback.
+        """
+        # No-op for live services - state is managed by get_url()
+        pass
 
 
 class WebService(Service):

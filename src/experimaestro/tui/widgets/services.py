@@ -89,14 +89,14 @@ class ServicesList(Vertical):
     def refresh_services(self) -> None:
         """Refresh the services display from current services
 
-        Uses self._services which preserves the live service instances.
-        Initial load (in set_experiment) fetches from state provider.
+        Reloads services from state provider to pick up newly added services.
+        This is called when ServiceAddedEvent is received.
         """
-        if not self.current_experiment or not self._services:
+        if not self.current_experiment:
             return
 
-        # Refresh display from current services (preserves live service instances)
-        self._refresh_display()
+        # Reload services from state provider to pick up new services
+        self._load_services(self.current_experiment)
 
     def _refresh_services_with_data(self, services: list) -> None:
         """Refresh the services display with provided data (initial load)

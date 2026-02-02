@@ -752,6 +752,13 @@ class Scheduler(StateProvider, threading.Thread):
             if key not in self.services:
                 self.services[key] = {}
             self.services[key][service.id] = service
+            logger.debug(
+                "Added service %s to scheduler (experiment=%s, run=%s). Total services: %d",
+                service.id,
+                experiment_id,
+                run_id,
+                len(self.services[key]),
+            )
 
         # Also notify StateProvider-style listeners (for TUI etc.)
         from experimaestro.scheduler.state_status import ServiceAddedEvent
