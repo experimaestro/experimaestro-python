@@ -23,6 +23,7 @@ class ServicesList(Vertical):
     BINDINGS = [
         Binding("ctrl+s", "start_service", "Start"),
         Binding("ctrl+k", "stop_service", "Stop"),
+        Binding("l", "view_logs", "View Logs", priority=True),
         Binding("u", "copy_url", "Copy URL", show=False),
     ]
 
@@ -273,3 +274,29 @@ class ServicesList(Vertical):
                 self.notify("Failed to copy URL", severity="error")
         else:
             self.notify("Start the service first to get URL", severity="warning")
+
+    def action_view_logs(self) -> None:
+        """View service logs"""
+        service = self._get_selected_service()
+        if not service:
+            return
+
+        # Convert to live service to get log paths
+        live_service = service.to_service()
+
+        if not live_service.stdout or not live_service.stderr:
+            self.notify("Service logs not available", severity="warning")
+            return
+
+        if not live_service.stdout.exists() and not live_service.stderr.exists():
+            self.notify("No log files found", severity="warning")
+            return
+
+        from experimaestro.tui.log_viewer import create_service_log_viewer
+
+        sync_func = None
+        if self.state_provider.is_remote:
+            sync_func = self.state_provider.sync_path
+
+        viewer = create_service_log_viewer(live_service, sync_func)
+        self.app.push_screen(viewer)

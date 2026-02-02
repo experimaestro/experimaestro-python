@@ -129,7 +129,8 @@ def cli(ctx, quiet, debug, log_levels: str | None, traceback):
     if quiet:
         logging.getLogger().setLevel(logging.WARN)
     elif debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+        # Set DEBUG level for all xpm.* loggers
+        logging.getLogger("xpm").setLevel(logging.DEBUG)
 
     # Parse and apply custom log levels (e.g., "xpm.workspace_state=DEBUG,xpm.webui=INFO")
     if log_levels:

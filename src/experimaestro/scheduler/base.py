@@ -150,6 +150,9 @@ class Scheduler(StateProvider, threading.Thread):
         self._job_event_readers: Dict[Path, EventReader] = {}
         self._job_event_readers_lock = threading.Lock()
 
+        # Track which workspaces have logging setup
+        self._workspace_logging_setup: set[Path] = set()
+
     @staticmethod
     def has_instance() -> bool:
         """Check if a scheduler instance exists without creating one"""
@@ -186,11 +189,42 @@ class Scheduler(StateProvider, threading.Thread):
         """
         return Scheduler.instance()
 
+    def setup_workspace_logging(self, workspace: "Workspace") -> None:
+        """Setup logging to workspace .scheduler/{run_id}/experimaestro.log"""
+        log_file = workspace.scheduler_run_path / "experimaestro.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Add file handler to experimaestro logger
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+
+        xpm_logger = logging.getLogger("xpm")
+        xpm_logger.addHandler(file_handler)
+
+        logger.info(f"Logging to {log_file}")
+
     def register_experiment(self, xp: "Experiment"):
         """Register an experiment with the scheduler"""
         # Use experiment name as key (not workdir.name which is now run_id)
         key = xp.name
         self.experiments[key] = xp
+
+        # Setup workspace logging on first experiment registration
+        workspace_path = xp.workspace.path
+        if workspace_path not in self._workspace_logging_setup:
+            self.setup_workspace_logging(xp.workspace)
+            self._workspace_logging_setup.add(workspace_path)
+
+            # Cleanup old run directories (runs at most once per day)
+            try:
+                deleted, errors = xp.workspace.cleanup_old_scheduler_runs()
+                if deleted > 0:
+                    logger.info(f"Cleaned up {deleted} old scheduler run directories")
+            except Exception as e:
+                logger.warning(f"Scheduler run cleanup failed: {e}")
 
         # Start watching job events for this workspace
         self._start_job_event_reader(xp.workspace.path)

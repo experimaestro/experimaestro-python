@@ -78,6 +78,7 @@ class ExperimaestroUI(App):
         Binding("?", "show_help", "Help"),
         Binding("escape", "go_back", "Back", show=False),
         Binding("l", "view_logs", "Logs", show=False),
+        Binding("w", "view_workspace_log", "Workspace Log", show=False),
         Binding("j", "focus_jobs", "Jobs", show=False),
         Binding("s", "focus_services", "Services", show=False),
     ]
@@ -636,6 +637,32 @@ class ExperimaestroUI(App):
         if not job_detail_container.has_class("hidden"):
             job_detail_view = self.query_one(JobDetailView)
             job_detail_view.action_view_logs()
+
+    def action_view_workspace_log(self) -> None:
+        """View workspace-level experimaestro log for current run"""
+        if not self.state_provider:
+            return
+
+        experiments = self.state_provider.get_experiments()
+        if not experiments:
+            self.notify("No experiments found", severity="warning")
+            return
+
+        workspace = experiments[0].workspace
+        log_file = workspace.scheduler_run_path / "experimaestro.log"
+
+        if not log_file.exists():
+            self.notify("Workspace log not found", severity="warning")
+            return
+
+        from experimaestro.tui.log_viewer import LogViewerScreen
+
+        viewer = LogViewerScreen(
+            log_files=[str(log_file)],
+            job_id="workspace",
+            sync_func=None,
+        )
+        self.push_screen(viewer)
 
     def on_view_job_logs(self, message: ViewJobLogs) -> None:
         """Handle request to view job logs - push LogViewerScreen

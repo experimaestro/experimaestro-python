@@ -473,3 +473,34 @@ class LogViewerScreen(Screen, inherit_bindings=False):
             # Start sync if not already running
             self._start_adaptive_sync()
             self.notify("Syncing...")
+
+
+def create_service_log_viewer(
+    service,
+    sync_func: Optional[Callable[[str], Optional[Path]]] = None,
+) -> LogViewerScreen:
+    """Create a log viewer for a service
+
+    Args:
+        service: Service object with stdout/stderr properties
+        sync_func: Optional sync function for remote monitoring
+
+    Returns:
+        LogViewerScreen configured for service logs
+    """
+    log_files = []
+    if service.stdout and service.stdout.exists():
+        log_files.append(str(service.stdout))
+    if service.stderr and service.stderr.exists():
+        log_files.append(str(service.stderr))
+
+    remote_path = str(service.log_directory) if sync_func else None
+
+    return LogViewerScreen(
+        log_files=log_files,
+        job_id=service.id,
+        sync_func=sync_func,
+        remote_path=remote_path,
+        task_id=f"service.{service.id}",
+        job_state=None,
+    )
