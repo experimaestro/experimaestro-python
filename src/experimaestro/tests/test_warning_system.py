@@ -11,7 +11,6 @@ This module tests:
 import json
 import pytest
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -317,48 +316,6 @@ class TestStaleLockError:
         assert error.context["token_name"] == "gpu"
         assert error.callbacks["clean"] == callback
         assert str(error) == "Found 2 stale locks"
-
-
-# =============================================================================
-# Tests: Stale Lock Detection
-# =============================================================================
-
-
-class TestStaleLockDetection:
-    """Tests for stale lock detection in token acquisition"""
-
-    async def test_is_stale_detects_dead_process(self):
-        """DynamicLockFile.is_stale() should return True for dead processes"""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a simple lock file
-            from experimaestro.locking import DynamicLockFile
-
-            lock_path = Path(tmpdir) / "test.lock"
-            lock_path.write_text(json.dumps({"job_uri": "/tmp/job1"}))
-
-            # Create a minimal mock resource
-            class MockResource:
-                def _account_lock_file(self, lf):
-                    pass
-
-                def _unaccount_lock_file(self, lf):
-                    pass
-
-            lock_file = DynamicLockFile(lock_path, MockResource())
-
-            # Verify it's not stale without a process
-            assert not lock_file.is_stale()
-
-            # Set a mock dead process
-            lock_file.process = MockProcess(99999, running=False)
-            lock_file.timestamp = time.time() - 7200  # 2 hours ago
-
-            # Should be stale now
-            assert lock_file.is_stale(min_age_seconds=3600)
-
-            # Should not be stale if recent
-            lock_file.timestamp = time.time() - 60  # 1 minute ago
-            assert not lock_file.is_stale(min_age_seconds=3600)
 
 
 # =============================================================================

@@ -22,14 +22,17 @@ pytestmark = [pytest.mark.anyio, pytest.mark.tokens]
 
 @pytest.fixture(autouse=True)
 def reset_async_bridge():
-    """Reset AsyncEventBridge singleton before and after each test.
+    """Reset AsyncEventBridge singleton and tokens before and after each test.
 
     This ensures tests don't interfere with each other's event handling.
     Note: EventLoopThread is not reset as it's the central event loop.
     """
     AsyncEventBridge.reset()
+    # Reset token registry to avoid event loop binding issues across tests
+    CounterToken.TOKENS.clear()
     yield
     AsyncEventBridge.reset()
+    CounterToken.TOKENS.clear()
 
 
 class MockIdentifier:
@@ -58,6 +61,7 @@ class MockConfig:
 
 def create_mock_job(name: str, tmpdir: str):
     """Create a mock job with all required attributes and PID file."""
+    import os
 
     class MockJob:
         task_id = "mock-task"
@@ -73,10 +77,11 @@ def create_mock_job(name: str, tmpdir: str):
 
     job = MockJob()
 
-    # Create PID file with MockProcess data so lock files are valid
+    # Create job directory and PID file with valid process data
+    job.basepath.mkdir(parents=True, exist_ok=True)
     pid_path = job.basepath.with_suffix(".pid")
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(json.dumps({"type": "mock"}))
+    # Use current process PID so it's valid and running
+    pid_path.write_text(json.dumps({"type": "local", "pid": os.getpid()}))
 
     return job
 
@@ -292,3 +297,136 @@ async def test_token_timeout_zero():
         lock2 = await asyncio.wait_for(task, timeout=5.0)
         assert lock2 is not None
         await lock2.aio_release()
+
+
+async def test_orphaned_lock_detection():
+    """Test detection of orphaned locks (no PID, scheduler crashed)"""
+    from experimaestro.tokens import TokenLockFile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        token = CounterToken("test-orphaned", Path(tmpdir) / "token", count=10)
+
+        job1 = create_mock_job("1", tmpdir)
+
+        # Create an orphaned lock file (no process info)
+        lock_path = token.jobs_folder / "orphaned.json"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write lock file without process info (simulating scheduler crash)
+        with lock_path.open("w") as f:
+            json.dump({"job_uri": str(job1.basepath), "information": {"count": 2}}, f)
+
+        # Make the file old (31 seconds ago)
+        old_time = time.time() - 31
+        import os
+
+        os.utime(lock_path, (old_time, old_time))
+
+        # Load the lock file
+        lock_file = TokenLockFile(lock_path, token)
+
+        # But should be detected as orphaned
+        is_orphaned = await lock_file.async_resolve_orphaned(min_age_seconds=30)
+        assert is_orphaned, "Lock file without PID should be detected as orphaned"
+
+
+async def test_orphaned_lock_too_recent():
+    """Test that recent locks without PID are not considered orphaned"""
+    from experimaestro.tokens import TokenLockFile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        token = CounterToken("test-recent", Path(tmpdir) / "token", count=10)
+
+        job1 = create_mock_job("1", tmpdir)
+
+        # Create a lock file without process info
+        lock_path = token.jobs_folder / "recent.json"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with lock_path.open("w") as f:
+            json.dump({"job_uri": str(job1.basepath), "information": {"count": 1}}, f)
+
+        # Make the file recent (10 seconds ago)
+        recent_time = time.time() - 10
+        import os
+
+        os.utime(lock_path, (recent_time, recent_time))
+
+        # Load the lock file
+        lock_file = TokenLockFile(lock_path, token)
+
+        # Should NOT be orphaned (too recent)
+        is_orphaned = await lock_file.async_resolve_orphaned(min_age_seconds=30)
+        assert not is_orphaned, (
+            "Recent lock file without PID should not be considered orphaned"
+        )
+
+
+async def test_orphaned_lock_crash_scenario():
+    """Test orphaned lock detection when scheduler crashes in aio_job_started.
+
+    Scenario:
+    1. Job acquires a token lock
+    2. Scheduler crashes in aio_job_started before writing process info
+    3. Another job tries to acquire the same token
+    4. Should detect orphaned lock and clean it up
+    """
+    from experimaestro.dynamic import ResourcePoller
+    import os
+
+    # Reset ResourcePoller to ensure clean state
+    ResourcePoller.reset()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        token = CounterToken("test-crash", Path(tmpdir) / "token", count=1)
+
+        job1 = create_mock_job("1", tmpdir)
+        job2 = create_mock_job("2", tmpdir)
+
+        # Manually create an orphaned lock file (simulating crash after acquire)
+        lock_path = token.jobs_folder / f"{job1.task_id}@{job1.identifier}.json"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write lock file without process info (simulates crash before aio_job_started)
+        lock_data = {"job_uri": str(job1.basepath), "information": {"count": 1}}
+        with lock_path.open("w") as f:
+            json.dump(lock_data, f)
+
+        # Make the lock file old enough to be considered orphaned
+        old_time = time.time() - 35  # 35 seconds old
+        os.utime(lock_path, (old_time, old_time))
+
+        # Force token to re-read state from disk
+        async with token.ipc_lock:
+            token._ipc_update()
+
+        # Verify the lock file is in cache and accounted for
+        assert len(token.cache) == 1, "Lock file should be in cache"
+        assert token.available == 0, "Token should not be available"
+
+        # Now try to acquire the token with a second job
+        dep2 = token.dependency(1)
+        dep2.target = job2
+
+        # This should detect the orphaned lock and clean it up
+        lock2 = await dep2.aio_lock(timeout=5.0)
+
+        assert lock2 is not None, "Should acquire lock after cleaning orphaned lock"
+
+        # Verify the orphaned lock was removed
+        assert not lock_path.exists(), "Orphaned lock file should be removed"
+
+        # Verify the new lock exists
+        lock_path2 = token.jobs_folder / f"{job2.task_id}@{job2.identifier}.json"
+        assert lock_path2.exists(), "New lock file should exist"
+
+        # Cleanup
+        await lock2.aio_release()
+
+
+# NOTE: Removed test_orphaned_lock_waits_for_ipc_lock
+# The test was trying to verify intra-process serialization with IPC locks,
+# but file locks (used for IPC) are per-process, not per-coroutine.
+# The orphaned lock detection is primarily for inter-process scenarios
+# (detecting crashes from other scheduler processes), which is tested
+# in test_orphaned_lock_crash_scenario.

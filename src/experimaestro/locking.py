@@ -640,64 +640,81 @@ class DynamicLockFile(ABC):
         """
         return self.job_uri is not None
 
-    def is_stale(self, min_age_seconds: float = 3600) -> bool:
-        """Check if this lock file is stale (process not running, file is old).
+    async def async_resolve_orphaned(self, min_age_seconds: float = 30) -> bool:
+        """Attempt to resolve an orphaned lock file (no process info).
 
-        A lock file is considered stale when:
-        1. It has a valid state (job_uri is set)
-        2. It has process information
-        3. The process is not running anymore
-        4. The file is older than min_age_seconds
+        When a lock file has no process info, it could be:
+        1. A scheduler is currently starting the job (will write PID soon)
+        2. The scheduler crashed before writing the PID (orphaned)
+
+        This method:
+        1. Acquires the IPC lock (waits if scheduler is running)
+        2. Locks the job directory
+        3. Looks for the job's PID file and reads process info
+        4. Updates the lock file with process info if found
+        5. Returns whether the lock is orphaned
 
         Args:
-            min_age_seconds: Minimum age in seconds for a file to be considered stale.
-                           Default is 3600 seconds (1 hour).
+            min_age_seconds: Minimum age in seconds for considering orphaned.
+                           Default is 30 seconds.
 
         Returns:
-            True if the lock file is stale, False otherwise
+            True if the lock is orphaned (should be removed), False otherwise
         """
         import time
+        from pathlib import Path
+        import filelock
 
-        # Not valid state - not stale (just invalid)
-        if not self.valid_state:
+        # Only check if we have valid state but no process
+        if not self.valid_state or self.process is not None:
             return False
 
-        # No process info - can't determine if stale
-        if self.process is None:
-            return False
-
-        # Check if file is old enough
+        # Check if file is old enough to investigate
         if time.time() - self.timestamp < min_age_seconds:
             return False
 
-        # Check if process is still running
-        try:
-            # Use the Process.isrunning() method (synchronous version)
-            if hasattr(self.process, "isrunning"):
-                is_running = self.process.isrunning()
-            else:
-                # Fallback: try to check PID using psutil
-                try:
-                    import psutil
+        # Acquire IPC lock - if a scheduler is running, this will wait
+        async with self.resource.ipc_lock:
+            # After acquiring IPC lock, try to find the job's PID file
+            if not self.job_uri:
+                return True  # No job URI - definitely orphaned
 
-                    pid = getattr(self.process, "pid", None)
-                    if pid is None:
-                        return False
-                    process = psutil.Process(pid)
-                    is_running = process.is_running()
-                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                    is_running = False
+            job_path = Path(self.job_uri)
+            if not job_path.exists():
+                return True  # Job directory doesn't exist - orphaned
 
-            # Stale if process is not running
-            return not is_running
+            # Extract task_id and job_id from lock file path
+            # Lock file format: jobs/{task_id}@{identifier}.json
+            lock_filename = self.path.stem  # Remove .json extension
+            parts = lock_filename.split("@")
+            if len(parts) != 2:
+                return True  # Invalid lock file name - orphaned
 
-        except Exception as e:
-            logger.debug(
-                "Error checking if process is running for lock file %s: %s",
-                self.path,
-                e,
-            )
-            return False
+            task_id = parts[0]
+            job_id = parts[1]
+
+            # Create MockJob to get proper paths
+            try:
+                from experimaestro.scheduler.state_provider import MockJob
+
+                job = MockJob.from_disk(job_path, task_id, job_id)
+
+                # Lock the job directory using lockpath
+                with filelock.FileLock(job.lockpath):
+                    # Get process from job (reads PID file and creates Process object)
+                    process = job.getprocess()
+                    if process is None:
+                        return True  # No process - orphaned
+
+                    # Update the lock file with process info
+                    self.write_process(process)
+
+                    # Not orphaned - process info was found
+                    return False
+            except Exception as e:
+                # If we can't load the job or get process, consider it orphaned
+                logger.debug("Error resolving orphaned lock for %s: %s", self.path, e)
+                return True
 
     @classmethod
     def create(
@@ -1463,102 +1480,6 @@ class TrackedDynamicResource(DynamicResource, ABC):
         job = dependency.target
         return self.jobs_folder / get_job_lock_relpath(job.task_id, job.identifier)
 
-    def _check_stale_locks(self, dependency: "DynamicDependency") -> None:
-        """Check for stale locks and raise StaleLockError if found.
-
-        Args:
-            dependency: The dependency requesting the resource
-
-        Raises:
-            StaleLockError: If stale locks are detected
-        """
-        stale_locks = []
-        for lock_file in self.cache.values():
-            if lock_file.is_stale(min_age_seconds=3600):
-                # Gather lock file info for the warning event
-                lock_info = {
-                    "path": str(lock_file.path),
-                    "timestamp": lock_file.timestamp,
-                    "pid": getattr(lock_file.process, "pid", None)
-                    if lock_file.process
-                    else None,
-                }
-                stale_locks.append((lock_file, lock_info))
-
-        if stale_locks:
-            # Build description for UI
-            count = len(stale_locks)
-            if count == 1:
-                description = f"Found 1 stale lock for token '{self.name}'.\n\n"
-            else:
-                description = f"Found {count} stale locks for token '{self.name}'.\n\n"
-
-            # Show first few locks in description
-            import time
-
-            for lock_file, lock_info in stale_locks[:5]:
-                pid = lock_info["pid"] or "unknown"
-                age_minutes = int((time.time() - lock_info["timestamp"]) / 60)
-                description += f"  • {lock_file.path.name}\n"
-                description += f"    PID {pid}, idle for {age_minutes} min\n"
-
-            if count > 5:
-                description += f"\n  ... and {count - 5} more\n"
-
-            description += (
-                "\n\nStale locks occur when a process crashes or is killed.\n"
-                "They prevent other jobs from acquiring the token."
-            )
-
-            # Create callbacks for actions
-            def cleanup_stale_locks():
-                """Remove all stale lock files"""
-                removed = 0
-                for lock_file, _ in stale_locks:
-                    try:
-                        lock_file.path.unlink()
-                        # Remove from cache
-                        lock_key = str(lock_file.path.relative_to(self.jobs_folder))
-                        if lock_key in self.cache:
-                            del self.cache[lock_key]
-                        removed += 1
-                        logger.info(f"Removed stale lock: {lock_file.path}")
-                    except OSError as e:
-                        logger.warning(f"Failed to remove {lock_file.path}: {e}")
-                logger.info(f"Cleaned up {removed}/{count} stale locks")
-
-            # Build warning key using resource name and job info
-            job = dependency.target
-            warning_key = f"stale_locks_{self.name}_{job.task_id}_{job.identifier}"
-
-            # Build context with lock file details
-            context = {
-                "title": "Stale Token Locks Detected",
-                "token_name": self.name,
-                "token_path": str(self.lock_folder),
-                "stale_lock_count": count,
-                "stale_locks": [info for _, info in stale_locks],
-            }
-
-            # Define actions
-            actions = {
-                "clean": "Remove Locks",
-                "dismiss": "Continue Anyway",
-            }
-
-            callbacks = {
-                "clean": cleanup_stale_locks,
-                "dismiss": lambda: None,  # No-op
-            }
-
-            raise StaleLockError(
-                warning_key=warning_key,
-                description=description,
-                actions=actions,
-                context=context,
-                callbacks=callbacks,
-            )
-
     async def aio_acquire(self, dependency: "DynamicDependency") -> None:
         """Acquire the resource for a dependency.
 
@@ -1567,13 +1488,24 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         Raises:
             LockError: If resource is not available
-            StaleLockError: If stale locks are detected
         """
         async with self._async_lock, self.ipc_lock:
             self._ipc_update()
 
-            # Check for stale locks before checking availability
-            self._check_stale_locks(dependency)
+            # Clean up orphaned locks before checking availability
+            orphaned_locks = []
+            for lock_file in list(self.cache.values()):
+                if await lock_file.async_resolve_orphaned(min_age_seconds=30):
+                    orphaned_locks.append(lock_file)
+
+            # Remove orphaned locks
+            for lock_file in orphaned_locks:
+                lock_key = self._lock_file_key(lock_file.path)
+                if lock_key in self.cache:
+                    logger.info(f"Removing orphaned lock: {lock_file.path}")
+                    del self.cache[lock_key]
+                    lock_file.unaccount()
+                    lock_file.delete()
 
             if not self.is_available(dependency):
                 raise LockError(f"Resource {self.name} not available")
