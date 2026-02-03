@@ -1096,13 +1096,11 @@ class TrackedDynamicResource(DynamicResource, ABC):
         # IPC lock for inter-process coordination (async only)
         self.ipc_lock = create_async_file_lock(self.ipc_lock_path)
 
-        # Create async primitives in the EventLoopThread's event loop
-        # This ensures they are bound to the correct loop for all operations
-        async def create_primitives():
-            return asyncio.Lock(), asyncio.Event()
-
-        future = elt.run_coroutine(create_primitives())
-        self.__async_lock, self.__available_event = future.result(timeout=5.0)
+        # Async primitives will be created lazily in the EventLoopThread's context
+        # Use a threading lock to protect lazy initialization
+        self.__primitives_lock = threading.Lock()
+        self.__async_lock: asyncio.Lock | None = None
+        self.__available_event: asyncio.Event | None = None
 
         self.timestamp = os.path.getmtime(self.lock_folder)
 
@@ -1137,14 +1135,35 @@ class TrackedDynamicResource(DynamicResource, ABC):
             ipcom().fsunwatch(self.watcher)
             self.watcher = None
 
+    def _ensure_primitives(self) -> None:
+        """Ensure asyncio primitives are created in the EventLoopThread's loop.
+
+        This must be called from within the EventLoopThread's event loop.
+        """
+        if self.__async_lock is None:
+            with self.__primitives_lock:
+                if self.__async_lock is None:
+                    # We're in the EventLoopThread's loop, so creating primitives here
+                    # ensures they're bound to the correct loop
+                    self.__async_lock = asyncio.Lock()
+                    self.__available_event = asyncio.Event()
+
     @property
     def _async_lock(self) -> asyncio.Lock:
-        """Return asyncio.Lock created in EventLoopThread's event loop."""
+        """Return asyncio.Lock, creating it if needed.
+
+        Must be called from within the EventLoopThread's event loop.
+        """
+        self._ensure_primitives()
         return self.__async_lock
 
     @property
     def _available_event(self) -> asyncio.Event:
-        """Return asyncio.Event created in EventLoopThread's event loop."""
+        """Return asyncio.Event, creating it if needed.
+
+        Must be called from within the EventLoopThread's event loop.
+        """
+        self._ensure_primitives()
         return self.__available_event
 
     # --- IPC-locked methods for reading state ---
