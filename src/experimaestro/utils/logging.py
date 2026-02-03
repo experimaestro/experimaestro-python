@@ -3,6 +3,7 @@
 import datetime
 import logging
 import sys
+import traceback
 
 from termcolor import colored
 
@@ -42,9 +43,16 @@ class ColoredFormatter(logging.Formatter):
             color = self.COLORS.get(record.levelno, "white")
             level_str = colored(f"{level_name:5}", color, attrs=["bold"])
             name_str = colored(record.name, "cyan")
-            return f"{timestamp} {level_str} {name_str}: {message}"
+            result = f"{timestamp} {level_str} {name_str}: {message}"
         else:
-            return f"{timestamp} {level_name:5} {record.name}: {message}"
+            result = f"{timestamp} {level_name:5} {record.name}: {message}"
+
+        # Append traceback if exc_info is present
+        if record.exc_info:
+            exc_text = "".join(traceback.format_exception(*record.exc_info))
+            result = f"{result}\n{exc_text.rstrip()}"
+
+        return result
 
 
 def setup_logging(debug: bool = False, force_color: bool = False):
