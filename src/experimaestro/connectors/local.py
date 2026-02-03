@@ -276,7 +276,24 @@ class LocalConnector(Connector):
             return str(path)
 
     def setExecutable(self, path: Path, flag: bool):
-        os.chmod(path, 0o744)
+        import stat
+
+        current_mode = path.stat().st_mode
+
+        if flag:
+            # Add execute bits, respecting umask
+            # Start with full execute permissions (0o111)
+            exec_bits = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            # Apply umask to the execute bits
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            exec_bits &= ~current_umask
+            new_mode = current_mode | exec_bits
+        else:
+            # Remove all execute bits
+            new_mode = current_mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+        os.chmod(path, new_mode)
 
     def __str__(self):
         return "LocalConnector"
