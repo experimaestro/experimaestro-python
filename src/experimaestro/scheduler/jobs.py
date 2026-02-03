@@ -132,7 +132,7 @@ class JobDependency(Dependency):
         # Check if the job succeeded
         if self.origin.state != JobState.DONE:
             raise RuntimeError(
-                f"Dependency job {self.origin.identifier} failed with state {self.origin.state} for {self.target.identifier}"
+                f"Dependency job {self.origin} failed with state {self.origin.state} for {self.target}"
             )
 
         # Job succeeded, acquire and return the lock

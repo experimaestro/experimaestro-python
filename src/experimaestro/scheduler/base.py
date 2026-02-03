@@ -925,7 +925,14 @@ class Scheduler(StateProvider, threading.Thread):
 
         else:
             # Finalize status: load from disk (carbon info), write if different
-            await job.finalize_status()
+            # Preserve current state since it was already set by aio_submit_inner
+            # (load_from_disk would otherwise overwrite it with stale disk state)
+            current_state = job.state
+
+            def preserve_state_callback(j: Job):
+                j.set_state(current_state)
+
+            await job.finalize_status(callback=preserve_state_callback)
 
             # Process task outputs (queues remaining events for processing)
             await job.aio_done_handler()
@@ -1059,7 +1066,7 @@ class Scheduler(StateProvider, threading.Thread):
                 await dependency.aio_lock()
             except RuntimeError as e:
                 # Dependency failed - mark job as failed due to dependency
-                logger.warning("Dependency failed: %s", e)
+                logger.warning("Job %s cannot start: dependency failed: %s", job, e)
                 return JobStateError(JobFailureStatus.DEPENDENCY)
 
         # We first lock the job before proceeding
@@ -1186,7 +1193,12 @@ class Scheduler(StateProvider, threading.Thread):
                     await locks.aio_job_before_start(job)
 
                 except Exception:
-                    logger.warning("Error while locking job", exc_info=True)
+                    logger.warning(
+                        "Error while locking job %s (path: %s), will retry",
+                        job,
+                        job.path,
+                        exc_info=True,
+                    )
                     return JobState.WAITING
 
                 try:
@@ -1221,7 +1233,12 @@ class Scheduler(StateProvider, threading.Thread):
 
                         os.rename(tmp_path, locks_path)
                 except Exception:
-                    logger.warning("Error while starting job", exc_info=True)
+                    logger.error(
+                        "Error while starting job %s (path: %s)",
+                        job,
+                        job.path,
+                        exc_info=True,
+                    )
                     return JobState.ERROR
 
             # Set initial state (SCHEDULED or RUNNING) and wait until running
@@ -1277,12 +1294,20 @@ class Scheduler(StateProvider, threading.Thread):
                         state = JobState.ERROR
 
             except JobError:
-                logger.warning("Error while running job")
+                logger.error(
+                    "Error while running job %s (path: %s)",
+                    job,
+                    job.path,
+                    exc_info=True,
+                )
                 state = JobState.ERROR
 
             except Exception:
-                logger.warning(
-                    "Error while running job (in experimaestro)", exc_info=True
+                logger.error(
+                    "Error while running job %s (in experimaestro, path: %s)",
+                    job,
+                    job.path,
+                    exc_info=True,
                 )
                 state = JobState.ERROR
 
