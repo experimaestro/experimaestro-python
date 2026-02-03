@@ -16,6 +16,64 @@ from experimaestro.dynamic import DynamicResource
 
 logger = logging.getLogger("xpm.locking")
 
+# Base mode for lock files before umask is applied.
+# The effective mode will be LOCK_FILE_BASE_MODE & ~umask.
+# With base mode 0o666 and umask 002, this results in 0o664 (group-writable).
+LOCK_FILE_BASE_MODE = 0o666
+
+
+def _get_effective_mode() -> int:
+    """Get the effective lock file mode after applying umask.
+
+    The filelock library's mode parameter uses os.chmod() which doesn't
+    respect umask, so we manually apply it here.
+
+    Returns:
+        The effective mode (LOCK_FILE_BASE_MODE & ~umask)
+    """
+    import os
+
+    # Get current umask without changing it
+    current_umask = os.umask(0)
+    os.umask(current_umask)
+    return LOCK_FILE_BASE_MODE & ~current_umask
+
+
+def create_file_lock(path: str | Path, timeout: float = -1) -> filelock.FileLock:
+    """Create a FileLock with proper permissions respecting umask.
+
+    The lock file mode is LOCK_FILE_BASE_MODE (0o666) with the current umask
+    applied. This ensures group-writable permissions when umask allows it.
+
+    Args:
+        path: Path to the lock file
+        timeout: Timeout for acquiring the lock (-1 for infinite)
+
+    Returns:
+        A FileLock instance with the correct mode
+    """
+    return filelock.FileLock(str(path), timeout=timeout, mode=_get_effective_mode())
+
+
+def create_async_file_lock(
+    path: str | Path, timeout: float = -1
+) -> filelock.AsyncFileLock:
+    """Create an AsyncFileLock with proper permissions respecting umask.
+
+    The lock file mode is LOCK_FILE_BASE_MODE (0o666) with the current umask
+    applied. This ensures group-writable permissions when umask allows it.
+
+    Args:
+        path: Path to the lock file
+        timeout: Timeout for acquiring the lock (-1 for infinite)
+
+    Returns:
+        An AsyncFileLock instance with the correct mode
+    """
+    return filelock.AsyncFileLock(
+        str(path), timeout=timeout, mode=_get_effective_mode()
+    )
+
 
 class StaleLockError(Exception):
     """Exception raised when stale locks are detected during token acquisition.
@@ -139,7 +197,7 @@ class SyncLock:
 
     def __init__(self, path, timeout: float = -1):
         self.path = str(path)
-        self._lock = filelock.FileLock(self.path, timeout=timeout)
+        self._lock = create_file_lock(self.path, timeout=timeout)
 
     @property
     def acquired(self) -> bool:
@@ -230,11 +288,37 @@ class DynamicDependencyLock(Lock, ABC):
 
     async def aio_acquire(self):
         """Acquire lock (runs in EventLoopThread)."""
-        return await super().aio_acquire()
+        elt = EventLoopThread.instance()
+
+        # Check if we're already in the EventLoopThread's event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop is elt.loop:
+                # Already in the correct loop, run directly
+                return await super().aio_acquire()
+        except RuntimeError:
+            pass  # No running loop
+
+        # Dispatch to EventLoopThread and wait for result
+        future = elt.run_coroutine(super().aio_acquire())
+        return await asyncio.wrap_future(future)
 
     async def aio_release(self):
         """Release lock (runs in EventLoopThread)."""
-        return await super().aio_release()
+        elt = EventLoopThread.instance()
+
+        # Check if we're already in the EventLoopThread's event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop is elt.loop:
+                # Already in the correct loop, run directly
+                return await super().aio_release()
+        except RuntimeError:
+            pass  # No running loop
+
+        # Dispatch to EventLoopThread and wait for result
+        future = elt.run_coroutine(super().aio_release())
+        return await asyncio.wrap_future(future)
 
     @property
     @abstractmethod
@@ -640,64 +724,80 @@ class DynamicLockFile(ABC):
         """
         return self.job_uri is not None
 
-    def is_stale(self, min_age_seconds: float = 3600) -> bool:
-        """Check if this lock file is stale (process not running, file is old).
+    async def async_resolve_orphaned(self, min_age_seconds: float = 30) -> bool:
+        """Attempt to resolve an orphaned lock file (no process info).
 
-        A lock file is considered stale when:
-        1. It has a valid state (job_uri is set)
-        2. It has process information
-        3. The process is not running anymore
-        4. The file is older than min_age_seconds
+        When a lock file has no process info, it could be:
+        1. A scheduler is currently starting the job (will write PID soon)
+        2. The scheduler crashed before writing the PID (orphaned)
+
+        This method:
+        1. Acquires the IPC lock (waits if scheduler is running)
+        2. Locks the job directory
+        3. Looks for the job's PID file and reads process info
+        4. Updates the lock file with process info if found
+        5. Returns whether the lock is orphaned
 
         Args:
-            min_age_seconds: Minimum age in seconds for a file to be considered stale.
-                           Default is 3600 seconds (1 hour).
+            min_age_seconds: Minimum age in seconds for considering orphaned.
+                           Default is 30 seconds.
 
         Returns:
-            True if the lock file is stale, False otherwise
+            True if the lock is orphaned (should be removed), False otherwise
         """
         import time
+        from pathlib import Path
 
-        # Not valid state - not stale (just invalid)
-        if not self.valid_state:
+        # Only check if we have valid state but no process
+        if not self.valid_state or self.process is not None:
             return False
 
-        # No process info - can't determine if stale
-        if self.process is None:
-            return False
-
-        # Check if file is old enough
+        # Check if file is old enough to investigate
         if time.time() - self.timestamp < min_age_seconds:
             return False
 
-        # Check if process is still running
-        try:
-            # Use the Process.isrunning() method (synchronous version)
-            if hasattr(self.process, "isrunning"):
-                is_running = self.process.isrunning()
-            else:
-                # Fallback: try to check PID using psutil
-                try:
-                    import psutil
+        # Acquire IPC lock - if a scheduler is running, this will wait
+        async with self.resource.ipc_lock:
+            # After acquiring IPC lock, try to find the job's PID file
+            if not self.job_uri:
+                return True  # No job URI - definitely orphaned
 
-                    pid = getattr(self.process, "pid", None)
-                    if pid is None:
-                        return False
-                    process = psutil.Process(pid)
-                    is_running = process.is_running()
-                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
-                    is_running = False
+            job_path = Path(self.job_uri)
+            if not job_path.exists():
+                return True  # Job directory doesn't exist - orphaned
 
-            # Stale if process is not running
-            return not is_running
+            # Extract task_id and job_id from lock file path
+            # Lock file format: jobs/{task_id}@{identifier}.json
+            lock_filename = self.path.stem  # Remove .json extension
+            parts = lock_filename.split("@")
+            if len(parts) != 2:
+                return True  # Invalid lock file name - orphaned
 
-        except Exception as e:
-            logger.debug(
-                "Error checking if process is running for lock file %s: %s",
-                self.path,
-                e,
-            )
-            return False
+            task_id = parts[0]
+            job_id = parts[1]
+
+            # Create MockJob to get proper paths
+            try:
+                from experimaestro.scheduler.state_provider import MockJob
+
+                job = MockJob.from_disk(job_path, task_id, job_id)
+
+                # Lock the job directory using lockpath
+                with create_file_lock(job.lockpath):
+                    # Get process from job (reads PID file and creates Process object)
+                    process = job.getprocess()
+                    if process is None:
+                        return True  # No process - orphaned
+
+                    # Update the lock file with process info
+                    self.write_process(process)
+
+                    # Not orphaned - process info was found
+                    return False
+            except Exception as e:
+                # If we can't load the job or get process, consider it orphaned
+                logger.debug("Error resolving orphaned lock for %s: %s", self.path, e)
+                return True
 
     @classmethod
     def create(
@@ -987,15 +1087,18 @@ class TrackedDynamicResource(DynamicResource, ABC):
         self.lock_folder.mkdir(exist_ok=True, parents=True)
 
         # Ensure event loop thread is running before setting up file watching
-        EventLoopThread.instance().wait_ready()
+        elt = EventLoopThread.instance()
+        elt.wait_ready()
 
         # Caches dynamic lock files objects
         self.cache: dict[str, DynamicLockFile] = {}
 
         # IPC lock for inter-process coordination (async only)
-        self.ipc_lock = filelock.AsyncFileLock(self.ipc_lock_path)
+        self.ipc_lock = create_async_file_lock(self.ipc_lock_path)
 
-        # Async primitives - lazily created when first used to bind to correct loop
+        # Async primitives will be created lazily in the EventLoopThread's context
+        # Use a threading lock to protect lazy initialization
+        self.__primitives_lock = threading.Lock()
         self.__async_lock: asyncio.Lock | None = None
         self.__available_event: asyncio.Event | None = None
 
@@ -1006,7 +1109,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         # Initial state update (reads existing lock files)
         # Use sync FileLock since we're in __init__
-        with filelock.FileLock(self.ipc_lock_path):
+        with create_file_lock(self.ipc_lock_path):
             self._ipc_update()
             # Update mtime after initial sync
             if self.jobs_folder.exists():
@@ -1032,18 +1135,35 @@ class TrackedDynamicResource(DynamicResource, ABC):
             ipcom().fsunwatch(self.watcher)
             self.watcher = None
 
+    def _ensure_primitives(self) -> None:
+        """Ensure asyncio primitives are created in the EventLoopThread's loop.
+
+        This must be called from within the EventLoopThread's event loop.
+        """
+        if self.__async_lock is None:
+            with self.__primitives_lock:
+                if self.__async_lock is None:
+                    # We're in the EventLoopThread's loop, so creating primitives here
+                    # ensures they're bound to the correct loop
+                    self.__async_lock = asyncio.Lock()
+                    self.__available_event = asyncio.Event()
+
     @property
     def _async_lock(self) -> asyncio.Lock:
-        """Lazily create asyncio.Lock bound to the current event loop."""
-        if self.__async_lock is None:
-            self.__async_lock = asyncio.Lock()
+        """Return asyncio.Lock, creating it if needed.
+
+        Must be called from within the EventLoopThread's event loop.
+        """
+        self._ensure_primitives()
         return self.__async_lock
 
     @property
     def _available_event(self) -> asyncio.Event:
-        """Lazily create asyncio.Event bound to the current event loop."""
-        if self.__available_event is None:
-            self.__available_event = asyncio.Event()
+        """Return asyncio.Event, creating it if needed.
+
+        Must be called from within the EventLoopThread's event loop.
+        """
+        self._ensure_primitives()
         return self.__available_event
 
     # --- IPC-locked methods for reading state ---
@@ -1463,102 +1583,6 @@ class TrackedDynamicResource(DynamicResource, ABC):
         job = dependency.target
         return self.jobs_folder / get_job_lock_relpath(job.task_id, job.identifier)
 
-    def _check_stale_locks(self, dependency: "DynamicDependency") -> None:
-        """Check for stale locks and raise StaleLockError if found.
-
-        Args:
-            dependency: The dependency requesting the resource
-
-        Raises:
-            StaleLockError: If stale locks are detected
-        """
-        stale_locks = []
-        for lock_file in self.cache.values():
-            if lock_file.is_stale(min_age_seconds=3600):
-                # Gather lock file info for the warning event
-                lock_info = {
-                    "path": str(lock_file.path),
-                    "timestamp": lock_file.timestamp,
-                    "pid": getattr(lock_file.process, "pid", None)
-                    if lock_file.process
-                    else None,
-                }
-                stale_locks.append((lock_file, lock_info))
-
-        if stale_locks:
-            # Build description for UI
-            count = len(stale_locks)
-            if count == 1:
-                description = f"Found 1 stale lock for token '{self.name}'.\n\n"
-            else:
-                description = f"Found {count} stale locks for token '{self.name}'.\n\n"
-
-            # Show first few locks in description
-            import time
-
-            for lock_file, lock_info in stale_locks[:5]:
-                pid = lock_info["pid"] or "unknown"
-                age_minutes = int((time.time() - lock_info["timestamp"]) / 60)
-                description += f"  • {lock_file.path.name}\n"
-                description += f"    PID {pid}, idle for {age_minutes} min\n"
-
-            if count > 5:
-                description += f"\n  ... and {count - 5} more\n"
-
-            description += (
-                "\n\nStale locks occur when a process crashes or is killed.\n"
-                "They prevent other jobs from acquiring the token."
-            )
-
-            # Create callbacks for actions
-            def cleanup_stale_locks():
-                """Remove all stale lock files"""
-                removed = 0
-                for lock_file, _ in stale_locks:
-                    try:
-                        lock_file.path.unlink()
-                        # Remove from cache
-                        lock_key = str(lock_file.path.relative_to(self.jobs_folder))
-                        if lock_key in self.cache:
-                            del self.cache[lock_key]
-                        removed += 1
-                        logger.info(f"Removed stale lock: {lock_file.path}")
-                    except OSError as e:
-                        logger.warning(f"Failed to remove {lock_file.path}: {e}")
-                logger.info(f"Cleaned up {removed}/{count} stale locks")
-
-            # Build warning key using resource name and job info
-            job = dependency.target
-            warning_key = f"stale_locks_{self.name}_{job.task_id}_{job.identifier}"
-
-            # Build context with lock file details
-            context = {
-                "title": "Stale Token Locks Detected",
-                "token_name": self.name,
-                "token_path": str(self.lock_folder),
-                "stale_lock_count": count,
-                "stale_locks": [info for _, info in stale_locks],
-            }
-
-            # Define actions
-            actions = {
-                "clean": "Remove Locks",
-                "dismiss": "Continue Anyway",
-            }
-
-            callbacks = {
-                "clean": cleanup_stale_locks,
-                "dismiss": lambda: None,  # No-op
-            }
-
-            raise StaleLockError(
-                warning_key=warning_key,
-                description=description,
-                actions=actions,
-                context=context,
-                callbacks=callbacks,
-            )
-
     async def aio_acquire(self, dependency: "DynamicDependency") -> None:
         """Acquire the resource for a dependency.
 
@@ -1567,13 +1591,24 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         Raises:
             LockError: If resource is not available
-            StaleLockError: If stale locks are detected
         """
         async with self._async_lock, self.ipc_lock:
             self._ipc_update()
 
-            # Check for stale locks before checking availability
-            self._check_stale_locks(dependency)
+            # Clean up orphaned locks before checking availability
+            orphaned_locks = []
+            for lock_file in list(self.cache.values()):
+                if await lock_file.async_resolve_orphaned(min_age_seconds=30):
+                    orphaned_locks.append(lock_file)
+
+            # Remove orphaned locks
+            for lock_file in orphaned_locks:
+                lock_key = self._lock_file_key(lock_file.path)
+                if lock_key in self.cache:
+                    logger.info(f"Removing orphaned lock: {lock_file.path}")
+                    del self.cache[lock_key]
+                    lock_file.unaccount()
+                    lock_file.delete()
 
             if not self.is_available(dependency):
                 raise LockError(f"Resource {self.name} not available")

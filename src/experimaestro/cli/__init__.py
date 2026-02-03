@@ -54,65 +54,6 @@ def pass_cfg(f):
     return update_wrapper(new_func, f)
 
 
-def check_and_warn_stale_tokens(workdir: Path, min_age_seconds: int = 3600) -> None:
-    """Check for stale token locks and print a warning if found.
-
-    Args:
-        workdir: Workspace directory
-        min_age_seconds: Minimum age in seconds for a lock to be considered stale
-    """
-    try:
-        from experimaestro.tokens import CounterToken
-        import json
-
-        tokens_dir = workdir / "tokens"
-        if not tokens_dir.exists():
-            return
-
-        stale_count = 0
-
-        for token_dir in tokens_dir.iterdir():
-            if not token_dir.is_dir() or not token_dir.name.endswith(".counter"):
-                continue
-
-            token_name = token_dir.name[:-8]  # Remove .counter suffix
-
-            try:
-                # Read token total from informations.json
-                info_path = token_dir / "informations.json"
-                if not info_path.exists():
-                    continue
-
-                with info_path.open() as f:
-                    data = json.load(f)
-                    total = data.get("total", 1)
-
-                # Create token instance to check stale locks
-                token = CounterToken(token_name, token_dir, total, force=False)
-                stale_locks = token.get_stale_lock_files(
-                    min_age_seconds=min_age_seconds
-                )
-                stale_count += len(stale_locks)
-
-            except Exception:
-                # Silently ignore errors in stale token detection
-                continue
-
-        if stale_count > 0:
-            cprint("\n⚠️  Warning: Found stale token locks in workspace", "yellow")
-            print(
-                f"  {stale_count} stale lock(s) detected (processes no longer running)"
-            )
-            cprint(
-                "  Run 'experimaestro experiments cleanup' to remove them\n",
-                "yellow",
-            )
-
-    except Exception:
-        # Silently ignore errors - this is just a helpful warning
-        pass
-
-
 @click.group()
 @click.option("--quiet", is_flag=True, help="Be quiet")
 @click.option("--debug", is_flag=True, help="Be even more verbose (implies traceback)")
@@ -129,7 +70,8 @@ def cli(ctx, quiet, debug, log_levels: str | None, traceback):
     if quiet:
         logging.getLogger().setLevel(logging.WARN)
     elif debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+        # Set DEBUG level for all xpm.* loggers
+        logging.getLogger("xpm").setLevel(logging.DEBUG)
 
     # Parse and apply custom log levels (e.g., "xpm.workspace_state=DEBUG,xpm.webui=INFO")
     if log_levels:
@@ -481,10 +423,6 @@ def experiments(ctx, workdir, workspace):
     ws = find_workspace(workdir=workdir, workspace=workspace)
     path = check_xp_path(None, None, ws.path)
     ctx.obj = path
-
-    # Check for stale tokens and warn (skip for cleanup command)
-    if ctx.invoked_subcommand != "cleanup":
-        check_and_warn_stale_tokens(path)
 
 
 @experiments.command("list")

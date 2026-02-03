@@ -8,11 +8,10 @@ import sys
 import json
 import threading
 from typing import List, TYPE_CHECKING
-import filelock
 from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
 from experimaestro.exceptions import GracefulTimeout, TaskCancelled
-from experimaestro.locking import JobDependencyLocks
+from experimaestro.locking import JobDependencyLocks, create_file_lock
 from .core.types import ObjectType
 from experimaestro.utils import logger
 from experimaestro.core.objects import ConfigInformation
@@ -536,7 +535,7 @@ class TaskRunner:
             for lockfile in self.lockfiles:
                 fullpath = str(Path(lockfile).resolve())
                 logger.info("Locking %s", fullpath)
-                lock = filelock.FileLock(fullpath)
+                lock = create_file_lock(fullpath)
                 # MAYBE: should have a clever way to lock
                 # Problem = slurm would have a job doing nothing...
                 # Fix = maybe with two files

@@ -3,9 +3,9 @@
 import json
 
 from attr import define
-import filelock
 
 from experimaestro import taskglobals
+from experimaestro.locking import create_file_lock
 
 from termcolor import cprint
 from pathlib import Path
@@ -2180,7 +2180,7 @@ def cache(fn, name: str):
             dir.mkdir(parents=True, exist_ok=True)
 
         path = dir / name
-        with filelock.FileLock(path.with_suffix(path.suffix + ".lock")):
+        with create_file_lock(path.with_suffix(path.suffix + ".lock")):
             r = fn(config, path, *args, **kwargs)
             return r
 

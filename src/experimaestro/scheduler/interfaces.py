@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from experimaestro.locking import create_file_lock
 
 if TYPE_CHECKING:
     from experimaestro.connectors import Process
@@ -878,9 +879,9 @@ class BaseJob:
             True if the status was written, False if unchanged.
         """
         import json
-        from filelock import AsyncFileLock
+        from experimaestro.locking import create_async_file_lock
 
-        async with AsyncFileLock(self.lockpath):
+        async with create_async_file_lock(self.lockpath):
             # Load state from disk (gets carbon info, timestamps, etc.)
             self.load_from_disk()
             logger.debug(
@@ -1352,7 +1353,6 @@ class BaseExperiment:
 
         Uses file locking to ensure atomic writes across processes.
         """
-        import filelock
 
         run_dir = self.run_dir
         if run_dir is None:
@@ -1365,7 +1365,7 @@ class BaseExperiment:
         data = self.state_dict()
         data["last_updated"] = datetime.now().isoformat()
 
-        with filelock.FileLock(lock_path):
+        with create_file_lock(lock_path):
             temp_path = status_path.with_suffix(".json.tmp")
             with temp_path.open("w") as f:
                 json.dump(data, f, indent=2)
@@ -1584,13 +1584,13 @@ class BaseExperiment:
             True if the status was written, False if unchanged.
         """
         import json
-        from filelock import AsyncFileLock
+        from experimaestro.locking import create_async_file_lock
 
         # Get experiment lock path (experiments/{exp-id}/lock)
         experiment_base = self.workdir.parent
         lock_path = experiment_base / "lock"
 
-        async with AsyncFileLock(lock_path):
+        async with create_async_file_lock(lock_path):
             # Get status path
             status_path = self.run_dir / "status.json"
 

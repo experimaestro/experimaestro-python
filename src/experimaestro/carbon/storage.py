@@ -10,13 +10,14 @@ Storage location: WORKSPACE/carbon/
 - index.json (metadata: current file, total records)
 """
 
-import filelock
 import json
 import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+from experimaestro.locking import create_file_lock
 from typing import Iterator
 
 logger = logging.getLogger(__name__)
@@ -201,7 +202,7 @@ class CarbonStorage:
         """
         self._ensure_dir()
 
-        with filelock.FileLock(self._lock_path):
+        with create_file_lock(self._lock_path):
             index = self._load_index()
 
             # Check if we need to rotate

@@ -1,6 +1,7 @@
 import abc
 from enum import Enum
 import logging
+import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, Optional, Set, TYPE_CHECKING
@@ -50,21 +51,27 @@ class Service(BaseService):
     id: str
     _state: ServiceState = ServiceState.STOPPED
     _experiment: Optional["Experiment"] = None
+    _error: Optional[str] = None
 
     def __init__(self):
         self._listeners: Set[ServiceListener] = set()
         self._listeners_lock = threading.Lock()
+        self._error = None
 
     def set_experiment(self, xp: "Experiment") -> None:
         """Called when the service is added to an experiment.
 
         Override this method to access the experiment context (e.g., workdir).
-        The base implementation stores the experiment reference.
+        The base implementation stores the experiment reference and creates log directories.
 
         Args:
             xp: The experiment this service is being added to.
         """
         self._experiment = xp
+
+        # Create log directory for this service
+        if self.log_directory:
+            self.log_directory.mkdir(parents=True, exist_ok=True)
 
     @property
     def experiment_id(self) -> str:
@@ -79,6 +86,27 @@ class Service(BaseService):
         if self._experiment is not None:
             return self._experiment.run_id or ""
         return ""
+
+    @property
+    def log_directory(self) -> Optional[Path]:
+        """Return the directory for service logs (None if not attached to experiment)"""
+        if self._experiment is None:
+            return None
+        return self._experiment.workspace.scheduler_services_path / self.id
+
+    @property
+    def stdout(self) -> Optional[Path]:
+        """Return path to stdout log file"""
+        if self.log_directory is None:
+            return None
+        return self.log_directory / "logs.out"
+
+    @property
+    def stderr(self) -> Optional[Path]:
+        """Return path to stderr log file"""
+        if self.log_directory is None:
+            return None
+        return self.log_directory / "logs.err"
 
     def state_dict(self) -> dict:
         """Return parameters needed to recreate this service.
@@ -222,6 +250,50 @@ class Service(BaseService):
     def description(self):
         return ""
 
+    def setup_logging(
+        self,
+    ) -> tuple[Optional[logging.FileHandler], Optional[logging.FileHandler]]:
+        """Setup logging handlers for service output
+
+        Returns tuple of (stdout_handler, stderr_handler) for cleanup.
+        Call this at the start of _serve() to redirect service logs.
+        """
+        if not self.stdout or not self.stderr:
+            return None, None
+
+        # Get logger for this service
+        service_logger = logging.getLogger(f"xpm.service.{self.id}")
+        service_logger.setLevel(logging.INFO)
+
+        # Create handlers for stdout (INFO+) and stderr (WARNING+)
+        stdout_handler = logging.FileHandler(self.stdout)
+        stdout_handler.setLevel(logging.INFO)
+        stdout_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+
+        stderr_handler = logging.FileHandler(self.stderr)
+        stderr_handler.setLevel(logging.WARNING)
+        stderr_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+
+        service_logger.addHandler(stdout_handler)
+        service_logger.addHandler(stderr_handler)
+
+        return stdout_handler, stderr_handler
+
+    def cleanup_logging(self, stdout_handler, stderr_handler):
+        """Clean up logging handlers - call at end of _serve()"""
+        if stdout_handler:
+            stdout_handler.close()
+            service_logger = logging.getLogger(f"xpm.service.{self.id}")
+            service_logger.removeHandler(stdout_handler)
+        if stderr_handler:
+            stderr_handler.close()
+            service_logger = logging.getLogger(f"xpm.service.{self.id}")
+            service_logger.removeHandler(stderr_handler)
+
     @property
     def state(self):
         return self._state
@@ -240,6 +312,27 @@ class Service(BaseService):
                 listener.service_state_changed(self)
             except Exception:
                 logger.exception("Error notifying listener %s", listener)
+
+    @property
+    def error(self) -> Optional[str]:
+        """Return error message if service failed to start"""
+        return self._error
+
+    def set_error(self, error: Optional[str]) -> None:
+        """Set error message and update state to ERROR"""
+        self._error = error
+        if error:
+            self.state = ServiceState.ERROR
+
+    def set_starting(self) -> None:
+        """Set state to STARTING and clear any previous error.
+
+        This is a no-op for live services - they manage their own state
+        internally through get_url(). Only MockService uses this to manually
+        control state for UI feedback.
+        """
+        # No-op for live services - state is managed by get_url()
+        pass
 
 
 class WebService(Service):
@@ -420,11 +513,18 @@ class WebService(Service):
         self.thread.start()
 
     def _serve_wrapper(self):
-        """Wrapper for _serve that handles state transitions."""
+        """Wrapper for _serve that handles state transitions and logging."""
         running_event = self._running_event
+        stdout_handler, stderr_handler = None, None
+
         try:
+            # Setup logging before starting service
+            stdout_handler, stderr_handler = self.setup_logging()
             self._serve(running_event)
         finally:
+            # Cleanup logging after service stops
+            self.cleanup_logging(stdout_handler, stderr_handler)
+
             # Ensure the event is set even if _serve fails
             if running_event and not running_event.is_set():
                 running_event.set()
@@ -444,3 +544,174 @@ class WebService(Service):
         :param running: Event to signal when ``self.url`` is set
         """
         ...
+
+
+class ProcessWebService(Service):
+    """Process-based web service for full isolation.
+
+    This service runs as a separate process (via subprocess) instead of a thread.
+    This provides better isolation and prevents service crashes from affecting
+    the scheduler.
+
+    To implement a process-based web service:
+
+    1. Subclass ``ProcessWebService``
+    2. Set a unique ``id`` class attribute
+    3. Implement :meth:`_build_command` to return the command to start the service
+    4. Implement :meth:`_wait_for_ready` to detect when the service is ready and extract its URL
+
+    Example::
+
+        class MyProcessService(ProcessWebService):
+            id = "myservice"
+
+            def _build_command(self) -> list[str]:
+                return ["python", "-m", "myservice", "--port", "0"]
+
+            def _wait_for_ready(self) -> str:
+                # Poll stderr for URL
+                while True:
+                    if self.stderr.exists():
+                        content = self.stderr.read_text()
+                        if "Started at" in content:
+                            return extract_url(content)
+                    time.sleep(0.1)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.url = None
+        self.process: Optional[subprocess.Popen] = None
+        self._start_lock = threading.Lock()
+        self._running_event: Optional[threading.Event] = None
+
+    def get_url(self):
+        """Get the URL of this web service, starting it if needed.
+
+        If the service is not running, this method will start the process and
+        block until the URL is available.
+
+        :return: The URL where this service can be accessed
+        :raises RuntimeError: If called while service is stopping
+        """
+        with self._start_lock:
+            if self.state == ServiceState.STOPPING:
+                raise RuntimeError("Cannot start service while stopping")
+
+            if self.state == ServiceState.RUNNING:
+                return self.url
+
+            if self.state == ServiceState.STOPPED:
+                logger.info(f"Starting service {self.id} as subprocess")
+                self.state = ServiceState.STARTING
+                self._running_event = threading.Event()
+                self._start_process()
+
+            running_event = self._running_event
+
+        # Wait for process to be ready
+        if running_event:
+            running_event.wait()
+            with self._start_lock:
+                if self.state == ServiceState.STARTING:
+                    self.state = ServiceState.RUNNING
+
+        return self.url
+
+    def _start_process(self):
+        """Start the service as a subprocess"""
+        # Build command to run service
+        cmd = self._build_command()
+
+        # Redirect stdout/stderr to log files
+        stdout_file = open(self.stdout, "w") if self.stdout else subprocess.DEVNULL
+        stderr_file = open(self.stderr, "w") if self.stderr else subprocess.DEVNULL
+
+        # Start process
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            cwd=str(self.log_directory) if self.log_directory else None,
+        )
+
+        # Monitor process in background thread
+        monitor_thread = threading.Thread(
+            target=self._monitor_process,
+            name=f"service-monitor[{self.id}]",
+            daemon=True,
+        )
+        monitor_thread.start()
+
+    def _monitor_process(self):
+        """Monitor process startup and signal readiness"""
+        running_event = self._running_event
+        try:
+            # Wait for service to write URL to file or become ready
+            self.url = self._wait_for_ready()
+            if running_event:
+                running_event.set()
+
+            # Wait for process to exit
+            self.process.wait()
+
+        except Exception as e:
+            logger.exception(f"Service {self.id} monitoring failed: {e}")
+            self.state = ServiceState.ERROR
+        finally:
+            if running_event and not running_event.is_set():
+                running_event.set()
+
+    @abc.abstractmethod
+    def _build_command(self) -> list[str]:
+        """Build command to start service process
+
+        Returns:
+            Command as list of strings (e.g., ["python", "-m", "tensorboard", ...])
+        """
+        ...
+
+    @abc.abstractmethod
+    def _wait_for_ready(self) -> str:
+        """Wait for service to be ready and return URL
+
+        This should monitor log files or a readiness file to determine when
+        the service is ready and extract the URL.
+
+        Returns:
+            Service URL
+        """
+        ...
+
+    def stop(self, timeout: float = 2.0):
+        """Stop the service process"""
+        with self._start_lock:
+            if self.state == ServiceState.STOPPED:
+                return
+
+            if self.state == ServiceState.STARTING:
+                running_event = self._running_event
+            else:
+                running_event = None
+
+            self.state = ServiceState.STOPPING
+
+        # Wait for startup to complete
+        if running_event:
+            running_event.wait()
+
+        # Terminate process
+        if self.process and self.process.poll() is None:
+            logger.info(f"Terminating service {self.id} (PID {self.process.pid})")
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Service {self.id} did not terminate, killing")
+                self.process.kill()
+                self.process.wait()
+
+        with self._start_lock:
+            self.url = None
+            self._running_event = None
+            self.state = ServiceState.STOPPED
