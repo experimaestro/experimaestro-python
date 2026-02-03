@@ -224,7 +224,7 @@ class Workspace:
         """
         import shutil
         import time
-        from filelock import FileLock
+        from experimaestro.locking import create_file_lock
 
         scheduler_base = self.schedulerpath
         if not scheduler_base.exists():
@@ -233,7 +233,7 @@ class Workspace:
         # Use lock file in the current run directory to prevent concurrent cleanup
         lock_file = self.scheduler_lock_path
         lock_file.parent.mkdir(parents=True, exist_ok=True)
-        lock = FileLock(str(lock_file), timeout=0)
+        lock = create_file_lock(lock_file, timeout=0)
 
         try:
             lock.acquire()

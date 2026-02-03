@@ -1,10 +1,11 @@
 import sys
 import json
-import filelock
 import pytest
 import logging
 import time
 from pathlib import Path
+
+from experimaestro.locking import create_file_lock
 
 import subprocess
 from experimaestro import Task, Param
@@ -115,7 +116,7 @@ def test_token_cleanup():
         # Just lock directly (with process)
         logging.info("Lock with process")
         job = dependency.target
-        with filelock.FileLock(job.lockpath):
+        with create_file_lock(job.lockpath):
             logging.info("Creating dependency %s", dependency)
             TokenLockFile.from_dependency(dependency)
             lockingpath = job.path / "testtoken.signal"

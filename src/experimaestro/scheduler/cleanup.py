@@ -106,7 +106,7 @@ def _check_orphaned_experiment_events(
     Returns:
         Tuple of (warnings, callbacks)
     """
-    from experimaestro.locking import OrphanedEventsError
+    from experimaestro.locking import OrphanedEventsError, create_file_lock
     from experimaestro.scheduler.state_status import WarningEvent
     import filelock
 
@@ -160,7 +160,7 @@ def _check_orphaned_experiment_events(
         lock_path = experiment_base / "lock"
 
         try:
-            lock = filelock.FileLock(lock_path, timeout=0.1)
+            lock = create_file_lock(lock_path, timeout=0.1)
             lock.acquire()
         except filelock.Timeout:
             # Experiment is locked (running), skip

@@ -9,7 +9,7 @@ from experimaestro.launcherfinder import LauncherRegistry
 import filelock
 import psutil
 
-from experimaestro.locking import Lock, SyncLock
+from experimaestro.locking import Lock, SyncLock, create_async_file_lock
 
 from . import (
     Connector,
@@ -183,7 +183,7 @@ class AsyncLock(Lock):
     def __init__(self, path, timeout: float = -1):
         Lock.__init__(self)
         self.path = str(path)
-        self._lock = filelock.AsyncFileLock(self.path, timeout=timeout)
+        self._lock = create_async_file_lock(self.path, timeout=timeout)
 
     @property
     def acquired(self) -> bool:

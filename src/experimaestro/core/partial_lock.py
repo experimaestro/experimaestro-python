@@ -17,6 +17,7 @@ from experimaestro.locking import (
     DynamicLockFile,
     JobDependencyLock,
     TrackedDynamicResource,
+    create_file_lock,
 )
 from experimaestro.dynamic import DynamicDependency
 from experimaestro.scheduler.dependencies import Resource
@@ -261,7 +262,7 @@ class PartialJobLock(JobDependencyLock):
         logger.info("Acquiring partial lock: %s", self.partial_path)
 
         # Acquire the IPC lock (blocking - waits for other jobs to finish)
-        self._lock = filelock.FileLock(str(self.ipc_lock_path))
+        self._lock = create_file_lock(self.ipc_lock_path)
         self._lock.acquire()
 
         logger.info("Acquired partial lock: %s", self.partial_path)

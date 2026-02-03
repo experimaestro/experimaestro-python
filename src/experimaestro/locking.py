@@ -16,6 +16,64 @@ from experimaestro.dynamic import DynamicResource
 
 logger = logging.getLogger("xpm.locking")
 
+# Base mode for lock files before umask is applied.
+# The effective mode will be LOCK_FILE_BASE_MODE & ~umask.
+# With base mode 0o666 and umask 002, this results in 0o664 (group-writable).
+LOCK_FILE_BASE_MODE = 0o666
+
+
+def _get_effective_mode() -> int:
+    """Get the effective lock file mode after applying umask.
+
+    The filelock library's mode parameter uses os.chmod() which doesn't
+    respect umask, so we manually apply it here.
+
+    Returns:
+        The effective mode (LOCK_FILE_BASE_MODE & ~umask)
+    """
+    import os
+
+    # Get current umask without changing it
+    current_umask = os.umask(0)
+    os.umask(current_umask)
+    return LOCK_FILE_BASE_MODE & ~current_umask
+
+
+def create_file_lock(path: str | Path, timeout: float = -1) -> filelock.FileLock:
+    """Create a FileLock with proper permissions respecting umask.
+
+    The lock file mode is LOCK_FILE_BASE_MODE (0o666) with the current umask
+    applied. This ensures group-writable permissions when umask allows it.
+
+    Args:
+        path: Path to the lock file
+        timeout: Timeout for acquiring the lock (-1 for infinite)
+
+    Returns:
+        A FileLock instance with the correct mode
+    """
+    return filelock.FileLock(str(path), timeout=timeout, mode=_get_effective_mode())
+
+
+def create_async_file_lock(
+    path: str | Path, timeout: float = -1
+) -> filelock.AsyncFileLock:
+    """Create an AsyncFileLock with proper permissions respecting umask.
+
+    The lock file mode is LOCK_FILE_BASE_MODE (0o666) with the current umask
+    applied. This ensures group-writable permissions when umask allows it.
+
+    Args:
+        path: Path to the lock file
+        timeout: Timeout for acquiring the lock (-1 for infinite)
+
+    Returns:
+        An AsyncFileLock instance with the correct mode
+    """
+    return filelock.AsyncFileLock(
+        str(path), timeout=timeout, mode=_get_effective_mode()
+    )
+
 
 class StaleLockError(Exception):
     """Exception raised when stale locks are detected during token acquisition.
@@ -139,7 +197,7 @@ class SyncLock:
 
     def __init__(self, path, timeout: float = -1):
         self.path = str(path)
-        self._lock = filelock.FileLock(self.path, timeout=timeout)
+        self._lock = create_file_lock(self.path, timeout=timeout)
 
     @property
     def acquired(self) -> bool:
@@ -663,7 +721,6 @@ class DynamicLockFile(ABC):
         """
         import time
         from pathlib import Path
-        import filelock
 
         # Only check if we have valid state but no process
         if not self.valid_state or self.process is not None:
@@ -700,7 +757,7 @@ class DynamicLockFile(ABC):
                 job = MockJob.from_disk(job_path, task_id, job_id)
 
                 # Lock the job directory using lockpath
-                with filelock.FileLock(job.lockpath):
+                with create_file_lock(job.lockpath):
                     # Get process from job (reads PID file and creates Process object)
                     process = job.getprocess()
                     if process is None:
@@ -1010,7 +1067,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
         self.cache: dict[str, DynamicLockFile] = {}
 
         # IPC lock for inter-process coordination (async only)
-        self.ipc_lock = filelock.AsyncFileLock(self.ipc_lock_path)
+        self.ipc_lock = create_async_file_lock(self.ipc_lock_path)
 
         # Async primitives - lazily created when first used to bind to correct loop
         self.__async_lock: asyncio.Lock | None = None
@@ -1023,7 +1080,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         # Initial state update (reads existing lock files)
         # Use sync FileLock since we're in __init__
-        with filelock.FileLock(self.ipc_lock_path):
+        with create_file_lock(self.ipc_lock_path):
             self._ipc_update()
             # Update mtime after initial sync
             if self.jobs_folder.exists():

@@ -317,6 +317,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """
         import filelock
 
+        from experimaestro.locking import create_file_lock
+
         # Find event files
         event_files = list(exp_events_dir.glob("events-*.jsonl"))
         if not event_files:
@@ -397,7 +399,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         lock_path = experiment_base / "lock"
 
         try:
-            lock = filelock.FileLock(lock_path, timeout=0.1)
+            lock = create_file_lock(lock_path, timeout=0.1)
             lock.acquire()
         except filelock.Timeout:
             # Experiment is locked (running), skip consolidation
@@ -478,8 +480,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
             remove_events_count: If True, remove events_count from the output
                 (indicates all events have been processed)
         """
-        import filelock
         import tempfile
+
+        from experimaestro.locking import create_file_lock
 
         status_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -490,7 +493,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if remove_events_count:
             state.pop("events_count", None)
 
-        with filelock.FileLock(lock_path):
+        with create_file_lock(lock_path):
             # Write to temp file first, then atomic rename
             fd, temp_path = tempfile.mkstemp(
                 dir=status_path.parent, suffix=".tmp", prefix="status"

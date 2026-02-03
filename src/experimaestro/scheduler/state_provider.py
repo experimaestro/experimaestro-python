@@ -1262,14 +1262,14 @@ class MockExperiment(BaseExperiment):
         Returns:
             MockExperiment instance or None if recovery fails
         """
-        import filelock
+        from experimaestro.locking import create_file_lock
 
         status_path = run_dir / "status.json"
 
         # Try to load from status.json first
         if status_path.exists():
             lock_path = status_path.parent / f".{status_path.name}.lock"
-            with filelock.FileLock(lock_path):
+            with create_file_lock(lock_path):
                 try:
                     with status_path.open("r") as f:
                         data = json.load(f)
