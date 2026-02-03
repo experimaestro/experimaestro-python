@@ -288,11 +288,37 @@ class DynamicDependencyLock(Lock, ABC):
 
     async def aio_acquire(self):
         """Acquire lock (runs in EventLoopThread)."""
-        return await super().aio_acquire()
+        elt = EventLoopThread.instance()
+
+        # Check if we're already in the EventLoopThread's event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop is elt.loop:
+                # Already in the correct loop, run directly
+                return await super().aio_acquire()
+        except RuntimeError:
+            pass  # No running loop
+
+        # Dispatch to EventLoopThread and wait for result
+        future = elt.run_coroutine(super().aio_acquire())
+        return await asyncio.wrap_future(future)
 
     async def aio_release(self):
         """Release lock (runs in EventLoopThread)."""
-        return await super().aio_release()
+        elt = EventLoopThread.instance()
+
+        # Check if we're already in the EventLoopThread's event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop is elt.loop:
+                # Already in the correct loop, run directly
+                return await super().aio_release()
+        except RuntimeError:
+            pass  # No running loop
+
+        # Dispatch to EventLoopThread and wait for result
+        future = elt.run_coroutine(super().aio_release())
+        return await asyncio.wrap_future(future)
 
     @property
     @abstractmethod
@@ -1061,7 +1087,8 @@ class TrackedDynamicResource(DynamicResource, ABC):
         self.lock_folder.mkdir(exist_ok=True, parents=True)
 
         # Ensure event loop thread is running before setting up file watching
-        EventLoopThread.instance().wait_ready()
+        elt = EventLoopThread.instance()
+        elt.wait_ready()
 
         # Caches dynamic lock files objects
         self.cache: dict[str, DynamicLockFile] = {}
@@ -1069,9 +1096,13 @@ class TrackedDynamicResource(DynamicResource, ABC):
         # IPC lock for inter-process coordination (async only)
         self.ipc_lock = create_async_file_lock(self.ipc_lock_path)
 
-        # Async primitives - lazily created when first used to bind to correct loop
-        self.__async_lock: asyncio.Lock | None = None
-        self.__available_event: asyncio.Event | None = None
+        # Create async primitives in the EventLoopThread's event loop
+        # This ensures they are bound to the correct loop for all operations
+        async def create_primitives():
+            return asyncio.Lock(), asyncio.Event()
+
+        future = elt.run_coroutine(create_primitives())
+        self.__async_lock, self.__available_event = future.result(timeout=5.0)
 
         self.timestamp = os.path.getmtime(self.lock_folder)
 
@@ -1108,16 +1139,12 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
     @property
     def _async_lock(self) -> asyncio.Lock:
-        """Lazily create asyncio.Lock bound to the current event loop."""
-        if self.__async_lock is None:
-            self.__async_lock = asyncio.Lock()
+        """Return asyncio.Lock created in EventLoopThread's event loop."""
         return self.__async_lock
 
     @property
     def _available_event(self) -> asyncio.Event:
-        """Lazily create asyncio.Event bound to the current event loop."""
-        if self.__available_event is None:
-            self.__available_event = asyncio.Event()
+        """Return asyncio.Event created in EventLoopThread's event loop."""
         return self.__available_event
 
     # --- IPC-locked methods for reading state ---

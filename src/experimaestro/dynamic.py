@@ -304,7 +304,22 @@ class DynamicDependency(ABC):
         Raises:
             LockError: If lock cannot be acquired within timeout
         """
-        return await self._aio_lock_impl(timeout)
+        from experimaestro.locking import EventLoopThread
+
+        elt = EventLoopThread.instance()
+
+        # Check if we're already in the EventLoopThread's event loop
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop is elt.loop:
+                # Already in the correct loop, run directly
+                return await self._aio_lock_impl(timeout)
+        except RuntimeError:
+            pass  # No running loop
+
+        # Dispatch to EventLoopThread and wait for result
+        future = elt.run_coroutine(self._aio_lock_impl(timeout))
+        return await asyncio.wrap_future(future)
 
     async def _aio_lock_impl(self, timeout: float) -> "Lock":
         """Implementation of aio_lock that runs in EventLoopThread."""
