@@ -243,46 +243,44 @@ def test_resumable_task_succeeds_after_timeouts():
 
 def test_resumable_task_fails_after_max_retries():
     """Test that a resumable task fails after exceeding max_retries"""
-    from experimaestro.scheduler import FailedExperiment
-    import pytest
+    with TemporaryExperiment("resumable_timeout_fail", timeout_multiplier=9) as xp:
+        checkpoint_file = xp.workspace.path / "checkpoint.txt"
+        launcher = DirectLauncher(LocalConnector())
 
-    with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("resumable_timeout_fail", timeout_multiplier=9) as xp:
-            checkpoint_file = xp.workspace.path / "checkpoint.txt"
-            launcher = DirectLauncher(LocalConnector())
+        # Create task config
+        task_config = CountingResumableTask.C(checkpoint=checkpoint_file)
 
-            # Create task config
-            task_config = CountingResumableTask.C(checkpoint=checkpoint_file)
+        # Create mock job directly
+        job = MockTimeoutCommandLineJob(
+            None,  # commandline not used
+            task_config,
+            workspace=xp.workspace,
+            launcher=launcher,
+            max_retries=3,
+            timeout_count=10,
+            checkpoint_file=checkpoint_file,
+        )
 
-            # Create mock job directly
-            job = MockTimeoutCommandLineJob(
-                None,  # commandline not used
-                task_config,
-                workspace=xp.workspace,
-                launcher=launcher,
-                max_retries=3,
-                timeout_count=10,
-                checkpoint_file=checkpoint_file,
-            )
+        # Set the job on the config
+        task_config.__xpm__.job = job
 
-            # Set the job on the config
-            task_config.__xpm__.job = job
+        # Submit to scheduler
+        from experimaestro.scheduler import experiment
 
-            # Submit to scheduler
-            from experimaestro.scheduler import experiment
+        experiment.CURRENT.submit(job)
 
-            experiment.CURRENT.submit(job)
+        # Wait for job to complete (will fail)
+        state = job.wait()
 
-            # Wait for job to complete (will fail)
-            state = job.wait()
+        # Verify job failed correctly (must be inside with block, workdir is cleaned up after)
+        assert isinstance(state, JobStateError)
+        assert state.failure_reason == JobFailureStatus.TIMEOUT
+        # retry_count equals max_retries when exhausted (initial + max_retries-1 retries)
+        assert job.retry_count == 3
+        # Checkpoint should show 3 executions (initial + 2 retries before giving up)
+        assert int(checkpoint_file.read_text()) == 3
 
-    # Verify job failed correctly
-    assert isinstance(state, JobStateError)
-    assert state.failure_reason == JobFailureStatus.TIMEOUT
-    # retry_count equals max_retries when exhausted (initial + max_retries-1 retries)
-    assert job.retry_count == 3
-    # Checkpoint should show 3 executions (initial + 2 retries before giving up)
-    assert int(checkpoint_file.read_text()) == 3
+    assert xp.failed
 
 
 # =============================================================================

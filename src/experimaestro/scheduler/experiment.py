@@ -521,6 +521,11 @@ class experiment(BaseExperiment):
         )
 
     @property
+    def failed(self) -> bool:
+        """Whether the experiment has any failed jobs"""
+        return bool(self.failedJobs)
+
+    @property
     def alt_jobspaths(self):
         """Return potential other directories"""
         for alt_workdir in self.workspace.alt_workdirs:

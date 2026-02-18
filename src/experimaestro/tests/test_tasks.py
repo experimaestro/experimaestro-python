@@ -18,7 +18,7 @@ from experimaestro import (
     PathGenerator,
 )
 from experimaestro.scheduler.workspace import RunMode
-from experimaestro.scheduler import FailedExperiment, JobState, JobFailureStatus
+from experimaestro.scheduler import JobState, JobFailureStatus
 from experimaestro.scheduler.jobs import JobStateError
 from experimaestro.scheduler.interfaces import JobState as JobStateClass
 from experimaestro import SubmitHook, Job, Launcher, LightweightTask
@@ -80,10 +80,12 @@ def test_not_submitted():
 
 def test_fail_simple():
     """Failing task... should fail"""
-    with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("failing", timeout_multiplier=9):
-            fail = Fail.C().submit()
-            fail.touch()
+    with TemporaryExperiment("failing", timeout_multiplier=9) as xp:
+        fail = Fail.C().submit()
+        fail.touch()
+
+    assert xp.failed
+    assert fail.__xpm__.job.state == JobState.ERROR
 
 
 def test_foreign_type():
@@ -101,12 +103,12 @@ def test_foreign_type():
 
 def test_fail_dep():
     """Failing task... should cancel dependent"""
-    with pytest.raises(FailedExperiment):
-        with TemporaryExperiment("failingdep"):
-            fail = Fail.C().submit()
-            dep = FailConsumer.C(fail=fail).submit()
-            fail.touch()
+    with TemporaryExperiment("failingdep") as xp:
+        fail = Fail.C().submit()
+        dep = FailConsumer.C(fail=fail).submit()
+        fail.touch()
 
+    assert xp.failed
     assert fail.__xpm__.job.state == JobState.ERROR
     assert dep.__xpm__.job.state == JobState.ERROR
 
@@ -302,20 +304,16 @@ def test_resumable_task_resubmit_across_experiments():
             logging.info("First experiment ended (expected): %s", e)
 
         # Second experiment: resubmit with same max_retries - should stay failed
-        try:
-            with TemporaryExperiment(
-                "resubmit_across", timeout_multiplier=6, workdir=workdir
-            ):
-                task2 = ControllableResumableTask.C()
-                task2.submit(max_retries=1)
+        with TemporaryExperiment(
+            "resubmit_across", timeout_multiplier=6, workdir=workdir
+        ):
+            task2 = ControllableResumableTask.C()
+            task2.submit(max_retries=1)
 
-                task2.control_file.write_text("complete")
+            task2.control_file.write_text("complete")
 
-                # Should still be error (retry_count exhausted)
-                assert task2.__xpm__.job.wait() == JobState.ERROR
-        except FailedExperiment:
-            # Expected - experiment raises because job is in error state
-            pass
+            # Should still be error (retry_count exhausted)
+            assert task2.__xpm__.job.wait() == JobState.ERROR
 
         # Third experiment: resubmit with higher max_retries - should complete
         with TemporaryExperiment(
@@ -523,14 +521,13 @@ def test_graceful_termination_with_cleanup():
     p = None
     job = None
     try:
-        with pytest.raises(FailedExperiment):
-            with TemporaryExperiment("graceful_termination", timeout_multiplier=9):
-                task = CancellableTask.C(reraise=True)
-                task.submit()
-                job, p = _run_cancellation_test(task, "graceful_termination")
+        with TemporaryExperiment("graceful_termination", timeout_multiplier=9) as xp:
+            task = CancellableTask.C(reraise=True)
+            task.submit()
+            job, p = _run_cancellation_test(task, "graceful_termination")
+            _verify_cancelled_job(job)
 
-        assert job is not None
-        _verify_cancelled_job(job)
+        assert xp.failed
 
     finally:
         if p is not None and p.is_running():
@@ -544,16 +541,15 @@ def test_graceful_termination_no_reraise():
     p = None
     job = None
     try:
-        with pytest.raises(FailedExperiment):
-            with TemporaryExperiment(
-                "graceful_termination_no_reraise", timeout_multiplier=9
-            ):
-                task = CancellableTask.C(reraise=False)
-                task.submit()
-                job, p = _run_cancellation_test(task, "graceful_termination_no_reraise")
+        with TemporaryExperiment(
+            "graceful_termination_no_reraise", timeout_multiplier=9
+        ) as xp:
+            task = CancellableTask.C(reraise=False)
+            task.submit()
+            job, p = _run_cancellation_test(task, "graceful_termination_no_reraise")
+            _verify_cancelled_job(job)
 
-        assert job is not None
-        _verify_cancelled_job(job)
+        assert xp.failed
 
     finally:
         if p is not None and p.is_running():
