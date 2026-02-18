@@ -859,7 +859,7 @@ class GenericType(Type):
 
         if matching is None:
             raise ValueError(
-                f"{type(value)} is not of type {target} ({type(value).__mro__})"
+                f"{type(value)} is not of type {target} (MRO:{type(value).__mro__})"
             )
 
         return value
