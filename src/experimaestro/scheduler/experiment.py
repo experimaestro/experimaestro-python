@@ -778,7 +778,7 @@ class experiment(BaseExperiment):
                                 job.relpath,
                                 job.stderr,
                             )
-                    raise FailedExperiment(f"{count} failed jobs")
+                    logger.error("Experiment Failed: %d failed jobs", count)
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         return future.result()
