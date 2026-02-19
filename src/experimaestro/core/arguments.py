@@ -133,7 +133,10 @@ class Argument:
         return "Param[{name}:{type}]".format(**self.__dict__)
 
     def validate(self, value):
-        value = self.type.validate(value)
+        try:
+            value = self.type.validate(value)
+        except TypeError as e:
+            raise TypeError(f"Value {value} is not valid for argument {self.name}: {e}")
         if self.checker:
             if not self.checker.check(value):
                 raise ValueError("Value %s is not valid", value)

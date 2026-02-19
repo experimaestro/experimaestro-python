@@ -1,4 +1,6 @@
-# Configuration
+# Experimaestro configuration
+
+This pages describes how experimaestro itself can be configured for your need.
 
 ## Settings file
 

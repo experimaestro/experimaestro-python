@@ -25,8 +25,10 @@ A new interactive terminal interface built with [Textual](https://textual.textua
 
 Launch with:
 ```bash
-experimaestro experiments monitor --console --workdir /path/to/workdir
+experimaestro experiments --workdir /path/to/workdir monitor --console 
 ```
+
+with workdir one of the directories defined in the [Settings](settings.md)
 
 #### [Resumable Tasks](experiments/task.md#resumable-tasks)
 
