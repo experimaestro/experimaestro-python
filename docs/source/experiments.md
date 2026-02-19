@@ -275,9 +275,11 @@ To view the hostname for experiments:
 
 ```bash
 # CLI - shows hostname in brackets
-experimaestro experiments list --workdir /path/to/workspace
+experimaestro experiments --workdir /path/to/workdir list
 # Output: my-experiment [hostname.local] (5/10 jobs)
 
 # TUI - hostname shown in "Host" column
-experimaestro experiments monitor --console --workdir /path/to/workspace
+experimaestro experiments --workdir /path/to/workdir monitor --console 
 ```
+
+with workdir one of the directories defined in the [Settings](settings.md)
