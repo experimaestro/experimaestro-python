@@ -555,7 +555,10 @@ class ObjectType(Type):
 
         # Check default value
         if argument.default is not None:
-            argument.type.validate(argument.default)
+            try:
+                argument.type.validate(argument.default)
+            except TypeError as e:
+                raise TypeError(f"Value {argument.default} is not valid for argument {argument.name}: {e}")
 
     def _check_override_type_compatibility(
         self, child_arg: Argument, parent_arg: Argument
