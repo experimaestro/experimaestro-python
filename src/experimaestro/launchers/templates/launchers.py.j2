@@ -137,10 +137,12 @@ def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
     launcher = DirectLauncher(connector=connector)
 {% if use_memory_tokens %}
     if memory_tokens > 0:
-        launcher.add_token(registry.getToken("memory"), memory_tokens)
+        memory_token = registry.getToken("memory")
+        launcher.addListener(lambda job: job.dependencies.add(memory_token.dependency(memory_tokens)))
 {% endif %}
 {%- if use_gpu_tokens and total_gpu_tokens > 0 %}
     if gpu_tokens > 0:
-        launcher.add_token(registry.getToken("gpu"), gpu_tokens)
+        gpu_token = registry.getToken("gpu")
+        launcher.addListener(lambda job: job.dependencies.add(gpu_token.dependency(gpu_tokens)))
 {% endif %}
     return launcher
