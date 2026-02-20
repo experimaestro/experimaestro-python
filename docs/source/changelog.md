@@ -25,10 +25,12 @@ A new interactive terminal interface built with [Textual](https://textual.textua
 
 Launch with:
 ```bash
-experimaestro experiments --workdir /path/to/workdir monitor --console 
+experimaestro experiments --workdir /path/to/workdir monitor --console
 ```
 
 with workdir one of the directories defined in the [Settings](settings.md)
+
+[Read more about the TUI...](interfaces.md#terminal-ui-tui)
 
 #### [Resumable Tasks](experiments/task.md#resumable-tasks)
 
@@ -60,11 +62,26 @@ class LongTraining(ResumableTask):
 - Log file rotation when resuming tasks
 - [Graceful termination](experiments/task.md#graceful-termination): Handle SIGTERM/SIGINT with `TaskCancelled` for custom cleanup
 
+[Read more about resumable tasks...](experiments/task.md#resumable-tasks)
+
 #### [Dynamic Task Outputs](experiments/task.md#dynamic-task-outputs)
 
-Tasks can now produce outputs during execution with callback support:
+Tasks can now produce outputs *during* execution with callback support, useful for triggering evaluation on intermediate checkpoints while training is still running:
 
 ```python
+from experimaestro import ResumableTask, Config, Param, DependentMarker
+
+class Validation(Config):
+    model: Param[Model]
+
+    def checkpoint(self, dep: DependentMarker, *, step: int) -> Checkpoint:
+        # dep() marks the output as depending on the producing task,
+        # so different learning rates produce different checkpoint identifiers
+        return dep(Checkpoint.C(model=self.model, step=step))
+
+    def compute(self, step: int):
+        self.register_task_output(self.checkpoint, step=step)
+
 class Learn(ResumableTask):
     validation: Param[Validation]
 
@@ -72,14 +89,23 @@ class Learn(ResumableTask):
         for step in range(100):
             train_step()
             if step % 10 == 0:
-                self.validation.compute(step)  # Triggers callbacks
+                self.validation.compute(step)  # Signals output, triggers callbacks
 
-# Watch for outputs
+# Register a callback and submit
+def on_checkpoint(checkpoint: Checkpoint):
+    Evaluate.C(checkpoint=checkpoint).submit()
+
+learn = Learn.C(model=model, validation=validation)
 learn.watch_output(validation.checkpoint, on_checkpoint)
 learn.submit()
 ```
 
-Callbacks are replayed when tasks restart, ensuring no outputs are missed.
+- Only available on `ResumableTask`
+- Callbacks are replayed when tasks restart, ensuring no outputs are missed
+- Multiple callbacks can watch the same output method
+- Callbacks run in a dedicated worker thread
+
+[Read more about dynamic task outputs...](experiments/task.md#dynamic-task-outputs)
 
 #### Mypy Plugin
 
@@ -149,6 +175,8 @@ class OldConfig(Config):
     ...
 ```
 
+[Read more about deprecation...](experiments/config.md#deprecating-a-configuration-or-attributes)
+
 #### [Instance-Based Identity](experiments/config.md#instance-based-configurations)
 
 Distinguish between *shared* and *separate* instances with identical parameters using `InstanceConfig`. Essential for workflows where components can be tied or independent:
@@ -169,6 +197,8 @@ separate = DualEncoderModel.C(query_encoder=enc, doc_encoder=Encoder.C(hidden_si
 
 Backwards-compatible: first instance keeps its original identifier.
 
+[Read more about instance-based configurations...](experiments/config.md#instance-based-configurations)
+
 #### [Workspace Auto-Selection](settings.md)
 
 Workspaces can be automatically selected based on experiment ID patterns:
@@ -182,6 +212,8 @@ workspaces:
       - "neuralir-*"
       - "ir-experiment"
 ```
+
+[Read more about workspace settings...](settings.md)
 
 #### Carbon Tracking
 
