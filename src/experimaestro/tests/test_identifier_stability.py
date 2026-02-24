@@ -211,11 +211,46 @@ class CycleB(Config):
 # --- InstanceConfig ---
 
 
+# --- Default value variants ---
+
+
+class ConfigFieldDefault(Config):
+    """Config with field(default=...) - always included in identifier"""
+
+    __xpmid__ = "test.stability.ConfigFieldDefault"
+    a: Param[int] = field(default=10)
+    b: Param[int]
+
+
+class ConfigFieldDefaultIgnore(Config):
+    """Config with field(default=..., ignore_default=True) - excluded when equal"""
+
+    __xpmid__ = "test.stability.ConfigFieldDefaultIgnore"
+    a: Param[int] = field(default=10, ignore_default=True)
+    b: Param[int]
+
+
+class ConfigFieldFactory(Config):
+    """Config with field(default_factory=...) - always included in identifier"""
+
+    __xpmid__ = "test.stability.ConfigFieldFactory"
+    a: Param[int] = field(default_factory=lambda: 10)
+    b: Param[int]
+
+
+class ConfigFieldFactoryIgnore(Config):
+    """Config with field(default_factory=..., ignore_default=True) - excluded when equal"""
+
+    __xpmid__ = "test.stability.ConfigFieldFactoryIgnore"
+    a: Param[int] = field(default_factory=lambda: 10, ignore_default=True)
+    b: Param[int]
+
+
 class SubModel(InstanceConfig):
     """InstanceConfig for testing instance identity"""
 
     __xpmid__ = "test.stability.SubModel"
-    value: Param[int] = field(ignore_default=100)
+    value: Param[int] = field(default=100, ignore_default=True)
 
 
 class ModelContainer(Config):
@@ -284,6 +319,26 @@ def get_configurations():
     configs["option_override"] = ConfigWithOption.C(required=5, optional=100)
     configs["default_with_default"] = ConfigWithDefault.C(y=20)
     configs["default_override"] = ConfigWithDefault.C(x=99, y=20)
+
+    # field(default=...) - always included in identifier
+    configs["field_default_at_default"] = ConfigFieldDefault.C(a=10, b=5)
+    configs["field_default_override"] = ConfigFieldDefault.C(a=20, b=5)
+    configs["field_default_implicit"] = ConfigFieldDefault.C(b=5)
+
+    # field(default=..., ignore_default=True) - excluded when equal
+    configs["field_default_ignore_at_default"] = ConfigFieldDefaultIgnore.C(a=10, b=5)
+    configs["field_default_ignore_override"] = ConfigFieldDefaultIgnore.C(a=20, b=5)
+    configs["field_default_ignore_implicit"] = ConfigFieldDefaultIgnore.C(b=5)
+
+    # field(default_factory=...) - always included in identifier
+    configs["field_factory_at_default"] = ConfigFieldFactory.C(a=10, b=5)
+    configs["field_factory_override"] = ConfigFieldFactory.C(a=20, b=5)
+    configs["field_factory_implicit"] = ConfigFieldFactory.C(b=5)
+
+    # field(default_factory=..., ignore_default=True) - excluded when equal
+    configs["field_factory_ignore_at_default"] = ConfigFieldFactoryIgnore.C(a=10, b=5)
+    configs["field_factory_ignore_override"] = ConfigFieldFactoryIgnore.C(a=20, b=5)
+    configs["field_factory_ignore_implicit"] = ConfigFieldFactoryIgnore.C(b=5)
 
     # Tasks (without submission)
     configs["task_simple"] = SimpleTask.C(x=10)

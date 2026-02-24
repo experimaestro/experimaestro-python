@@ -297,7 +297,10 @@ class IdentifierComputer:
                         continue
 
                 if argument.generator:
-                    continue
+                    from experimaestro.generators import Generator
+
+                    if isinstance(argument.generator, Generator):
+                        continue
 
                 # Argument value
                 # Skip if the argument is not a constant, and
@@ -314,6 +317,16 @@ class IdentifierComputer:
                         value.__xpm__._initinfo,
                     )
                     raise
+
+                # For default_factory params, use the default when value
+                # is not set yet (factory runs later during sealing)
+                if (
+                    argvalue is None
+                    and argument.generator
+                    and argument.default is not None
+                ):
+                    argvalue = argument.default
+
                 if not argument.constant and (
                     (
                         not argument.required

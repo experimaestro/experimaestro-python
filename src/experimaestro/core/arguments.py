@@ -110,16 +110,18 @@ class Argument:
                 if field_or_default.groups:
                     self.groups = field_or_default.groups
 
-                if field_or_default.ignore_default is not None:
-                    # ignore_default: value is default AND ignored in identifier
-                    self.default = field_or_default.ignore_default
-                    self.ignore_default_in_identifier = True
-                elif field_or_default.default is not None:
-                    # default: value is default but NOT ignored in identifier
+                if field_or_default.default is not None:
                     self.default = field_or_default.default
-                    self.ignore_default_in_identifier = False
+                    self.ignore_default_in_identifier = field_or_default.ignore_default
                 elif field_or_default.default_factory is not None:
                     self.generator = field_or_default.default_factory
+                    if not self.ignored:
+                        # For Param fields, eagerly compute default for
+                        # identifier comparison (fixes #191)
+                        self.default = field_or_default.default_factory()
+                        self.ignore_default_in_identifier = (
+                            field_or_default.ignore_default
+                        )
             else:
                 # Bare default: backwards compatible, ignore in identifier
                 self.default = field_or_default
@@ -198,7 +200,8 @@ class ArgumentOptions:
                     )
                     warnings.warn(
                         f"Deprecated: parameter `{name}` in {module}.{class_name} "
-                        f"has an ambiguous default value. Use `field(ignore_default=...)` "
+                        f"has an ambiguous default value. Use "
+                        f"`field(default=..., ignore_default=True)` "
                         f"to keep current behavior (default ignored in identifier) or "
                         f"`field(default=...)` to include default in identifier. "
                         f"Run `experimaestro refactor default-values` to fix automatically."
@@ -293,17 +296,48 @@ class field:
 
     Use ``field()`` to control default value behavior and parameter grouping.
 
+    **Default value options and identifier behavior:**
+
+    ``default``
+        The parameter has a default value that is **always included** in the
+        task identifier. Two configs with different values always get different
+        identifiers, even if one uses the default.
+
+    ``default_factory``
+        A callable (zero-argument) that produces the default value. Behaves
+        like ``default`` — the value is **always included** in the identifier.
+        On ``Meta`` fields, the callable is invoked at seal time (e.g.
+        ``PathGenerator``).
+
+    ``ignore_default`` (bool)
+        When ``True`` and combined with ``default`` or ``default_factory``,
+        the default value is **excluded** from the identifier when the actual
+        value equals the default. This is the backwards-compatible behavior
+        matching bare defaults (``x: Param[int] = 23``, which is deprecated).
+
     Example::
 
         class MyConfig(Config):
-            # Default included in identifier
+            # Default always included in identifier
             count: Param[int] = field(default=10)
 
-            # Default ignored in identifier (backwards compatible)
-            threshold: Param[float] = field(ignore_default=0.5)
+            # Factory default always included in identifier
+            fabric: Param[FabricConfig] = field(
+                default_factory=FabricConfig.C
+            )
 
-            # Generated path
-            output: Meta[Path] = field(default_factory=PathGenerator("out.txt"))
+            # Default ignored in identifier when value == default
+            threshold: Param[float] = field(default=0.5, ignore_default=True)
+
+            # Factory default ignored when value == default
+            fabric: Param[FabricConfig] = field(
+                default_factory=FabricConfig.C, ignore_default=True
+            )
+
+            # Generated path (Meta field, excluded from identifier)
+            output: Meta[Path] = field(
+                default_factory=PathGenerator("out.txt")
+            )
 
             # Parameter in a group (for partial identifiers)
             lr: Param[float] = field(groups=[training_group])
@@ -314,39 +348,66 @@ class field:
         *,
         default: Any = None,
         default_factory: Callable = None,
-        ignore_default: Any = None,
+        ignore_default: bool | Any = None,
         ignore_generated=False,
         overrides=False,
         groups: list["ParameterGroup"] = None,
     ):
         """Create a field specification.
 
-        :param default: Default value (included in identifier computation)
-        :param default_factory: Callable that generates the default value
-        :param ignore_default: Default value that is ignored in identifier computation
-            when the actual value equals this default. Use for backwards-compatible
-            behavior with bare default values.
-        :param ignore_generated: If True, the generated value is hidden from tasks.
-            Useful for adding a field that changes the identifier but won't be used.
-        :param overrides: If True, suppress warning when overriding parent parameter
+        :param default: Default value, always included in identifier
+            computation (unless ``ignore_default=True``).
+        :param default_factory: Callable that generates the default value.
+            On ``Param`` fields, the factory is called eagerly at class
+            definition time. The value is always included in the identifier
+            unless ``ignore_default=True``. On ``Meta`` fields, the callable
+            is invoked at seal time (use ``PathGenerator`` for
+            task-directory-relative paths).
+        :param ignore_default: When ``True``, the default value is excluded
+            from identifier computation when the actual value equals the
+            default. Must be used with ``default`` or ``default_factory``.
+            For backwards compatibility, passing a non-bool value (without
+            ``default`` or ``default_factory``) is treated as
+            ``field(default=value, ignore_default=True)`` but emits a
+            deprecation warning.
+        :param ignore_generated: If ``True``, the generated value is not
+            tracked as a "generated value", suppressing reproducibility
+            warnings. Controls whether context-dependent generator values
+            (e.g. ``PathGenerator`` with 2 params) are flagged.
+        :param overrides: If True, suppress warning when overriding a parent
+            parameter.
         :param groups: List of ParameterGroup objects for partial identifiers.
-            Used with partial to compute identifiers that exclude certain groups.
+            Used with partial to compute identifiers that exclude certain
+            groups.
         """
         assert not ((default is not None) and (default_factory is not None)), (
             "default and default_factory are mutually exclusive options"
         )
 
-        assert not ((default is not None) and (ignore_default is not None)), (
-            "default and ignore_default are mutually exclusive options"
-        )
+        has_default_source = (default is not None) or (default_factory is not None)
 
-        assert not ((ignore_default is not None) and (default_factory is not None)), (
-            "ignore_default and default_factory are mutually exclusive options"
-        )
+        if has_default_source:
+            # When default or default_factory is set, ignore_default must be bool or None
+            assert ignore_default is None or isinstance(ignore_default, bool), (
+                "ignore_default must be True, False, or None when used with "
+                "default or default_factory"
+            )
+        elif ignore_default is not None and not isinstance(ignore_default, bool):
+            # Legacy path: field(ignore_default=<value>) without default/default_factory
+            # Treat as field(default=<value>, ignore_default=True)
+            warnings.warn(
+                f"Deprecated: field(ignore_default={ignore_default!r}) should be "
+                f"field(default={ignore_default!r}, ignore_default=True). "
+                f"The old syntax still works but will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            default = ignore_default
+            ignore_default = True
 
         self.default_factory = default_factory
         self.default = default
-        self.ignore_default = ignore_default
+        self.ignore_default = bool(ignore_default) if ignore_default else False
         self.ignore_generated = ignore_generated
         self.overrides = overrides
         self.groups = set(groups) if groups else set()

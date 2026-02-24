@@ -381,11 +381,17 @@ class MyConfig(Config):
     """
     # Default value ignored in identifier computation (backwards-compatible behavior)
     # If value == 1, it won't be included in identifier
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
 
     # Default value always included in identifier computation
     # Even if value == 1, it will be included in identifier
     w: Param[int] = field(default=1)
+
+    # Factory default always included in identifier
+    v: Param[SomeConfig] = field(default_factory=SomeConfig.C)
+
+    # Factory default ignored when value == default
+    u: Param[SomeConfig] = field(default_factory=SomeConfig.C, ignore_default=True)
 
     # Without default value
     y: Param[type]
@@ -398,19 +404,27 @@ class MyConfig(Config):
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument (more details below)
 - Default values can be specified using {py:class}`~experimaestro.field`:
-    - `field(ignore_default=value)`: The default is `value`, and if the actual value equals the default, it won't be included in the signature computation. This allows adding new parameters without changing past experiment signatures.
-    - `field(default=value)`: The default is `value`, but it's always included in the signature computation.
+    - `field(default=value)`: The default is `value`, always included in the signature computation.
+    - `field(default=value, ignore_default=True)`: The default is `value`, and if the actual value equals the default, it won't be included in the signature computation. This allows adding new parameters without changing past experiment signatures.
+    - `field(default_factory=callable)`: A callable that produces the default value, always included in the signature computation (like `default`).
+    - `field(default_factory=callable, ignore_default=True)`: Factory default excluded from identifier when value equals the default.
 
 :::{warning} Bare default values are deprecated
 Using bare default values like `x: Param[int] = 23` is deprecated. This syntax is
 ambiguous because it's unclear whether the default should be ignored in identifier
 computation or not.
 
-Use `field(ignore_default=23)` to keep the backwards-compatible behavior (default
-ignored in identifier) or `field(default=23)` to always include the value in identifier.
+Use `field(default=23, ignore_default=True)` to keep the backwards-compatible behavior
+(default ignored in identifier) or `field(default=23)` to always include the value in
+identifier.
 
-Run `experimaestro refactor default-values` to automatically convert bare defaults
-to `field(ignore_default=...)` syntax.
+Run `experimaestro refactor default-values` to automatically convert bare defaults.
+:::
+
+:::{warning} `field(ignore_default=<value>)` syntax is deprecated
+The old syntax `field(ignore_default=23)` (passing a value directly) is deprecated.
+Use `field(default=23, ignore_default=True)` instead. The old syntax still works
+but will emit a `DeprecationWarning`.
 :::
 
 ### Default Values
@@ -420,7 +434,7 @@ When changing an `ignore_default` value, the identifier of configurations
 **might** change. The reason is explained below.
 :::
 
-Adding a new parameter to a `Config` with `field(ignore_default=...)` will not change the original `id`.
+Adding a new parameter to a `Config` with `field(default=..., ignore_default=True)` will not change the original `id`.
 
 **Why?** The motivation is that with this behavior, you can add experimental parameters
 that were previously hard-coded.
@@ -437,7 +451,7 @@ obj = MyConfig.C(a = 2)
 id_old = obj.__identifier__()
 ```
 
-Then when using `field(ignore_default=...)` for parameter b will yield an object with the
+Then when using `field(default=..., ignore_default=True)` for parameter b will yield an object with the
 same identifier when using the default value:
 
 ```python
@@ -445,7 +459,7 @@ from experimaestro import Config, Param, field
 
 class MyConfig(Config):
     a: Param[int]
-    b: Param[int] = field(ignore_default=4)
+    b: Param[int] = field(default=4, ignore_default=True)
 
 
 # When not setting `b`, the identifier is the same
@@ -461,31 +475,38 @@ assert new_id == old_id
 
 :::{warning}
 The identifier can be different if only the ignore_default value is changed. In particular,
-if the ignore_default value is 2 (and not 4)
+if the default value is 2 (and not 4)
 
 ```python
 from experimaestro import Config, Param, field
 
 class MyConfig(Config):
     a: Param[int]
-    b: Param[int] = field(ignore_default=2)
+    b: Param[int] = field(default=2, ignore_default=True)
 
-# Here, `b` is not the ignore_default value
+# Here, `b` is not the default value
 obj = MyConfig.C(a = 4, b = 4)
 new_id = obj.__identifier__()
 assert new_id != old_id
 ```
 :::
 
-### field(default=...) vs field(ignore_default=...)
+### field(default=...) vs field(default=..., ignore_default=True)
 
-The key difference between `field(default=...)` and `field(ignore_default=...)`:
+The key difference between `field(default=...)` and `field(default=..., ignore_default=True)`:
 
-| Feature | `field(default=X)` | `field(ignore_default=X)` |
-|---------|-------------------|--------------------------|
+| Feature | `field(default=X)` | `field(default=X, ignore_default=True)` |
+|---------|-------------------|----------------------------------------|
 | Default value | X | X |
 | Included in identifier when value==X | **Yes** | **No** |
 | Use case | When you want the default value to be part of the task signature | When adding new parameters to existing configs without breaking old identifiers |
+
+The same applies to `default_factory`:
+
+| Feature | `field(default_factory=F)` | `field(default_factory=F, ignore_default=True)` |
+|---------|--------------------------|------------------------------------------------|
+| Default value | F() | F() |
+| Included in identifier when value==F() | **Yes** | **No** |
 
 ```python
 from experimaestro import Config, Param, field
@@ -494,7 +515,7 @@ class ConfigA(Config):
     x: Param[int] = field(default=1)      # Always in identifier
 
 class ConfigB(Config):
-    x: Param[int] = field(ignore_default=1)  # Ignored if x==1
+    x: Param[int] = field(default=1, ignore_default=True)  # Ignored if x==1
 
 # These will have DIFFERENT identifiers
 a = ConfigA.C(x=1)
@@ -504,7 +525,7 @@ assert a.__identifier__() != b.__identifier__()
 # But these will have the SAME identifier
 a2 = ConfigA.C(x=2)
 b2 = ConfigB.C(x=2)
-# Both include x=2 in their identifiers (since 2 != ignore_default value)
+# Both include x=2 in their identifiers (since 2 != default value)
 ```
 
 
@@ -949,11 +970,11 @@ representation.
 
  Moreover:
 
-- **Ignored default values** are removed when the value matches the `ignore_default`
-  (e.g. `k1` when set to 0.9 with `field(ignore_default=0.9)`). This allows to handle
-  the situation where one adds a new experimental parameter (e.g. a new loss
-  component). In that case, using `field(ignore_default=...)` allows to add this
-  parameter without invalidating all the previously ran experiments.
+- **Ignored default values** are removed when the value matches the default
+  (e.g. `k1` when set to 0.9 with `field(default=0.9, ignore_default=True)`). This
+  allows to handle the situation where one adds a new experimental parameter (e.g. a
+  new loss component). In that case, using `field(default=..., ignore_default=True)`
+  allows to add this parameter without invalidating all the previously ran experiments.
 - **Regular default values** using `field(default=...)` are always included in
   the identifier computation, even when the value matches the default.
 - **Ignored values** are removed (e.g. the number of threads when

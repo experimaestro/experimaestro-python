@@ -129,7 +129,7 @@ def refactor_file(file_path: Path, perform: bool) -> int:
             original_value = line[value_start:value_end]
 
             # Create the replacement
-            new_value = f"field(ignore_default={original_value})"
+            new_value = f"field(default={original_value}, ignore_default=True)"
 
             # Replace in the line
             new_line = line[:value_start] + new_value + line[value_end:]
@@ -138,13 +138,13 @@ def refactor_file(file_path: Path, perform: bool) -> int:
             if perform:
                 cprint(
                     f"  {file_path}:{line_num}: {class_name}.{param_name} = {original_value} "
-                    f"-> field(ignore_default={original_value})",
+                    f"-> field(default={original_value}, ignore_default=True)",
                     "green",
                 )
             else:
                 cprint(
                     f"  {file_path}:{line_num}: {class_name}.{param_name} = {original_value} "
-                    f"-> field(ignore_default={original_value})",
+                    f"-> field(default={original_value}, ignore_default=True)",
                     "yellow",
                 )
 
@@ -216,7 +216,7 @@ def refactor():
 def default_values(path: Path, perform: bool):
     """Fix ambiguous default values in configuration files.
 
-    Converts `x: Param[int] = 23` to `x: Param[int] = field(ignore_default=23)`
+    Converts `x: Param[int] = 23` to `x: Param[int] = field(default=23, ignore_default=True)`
     to make the behavior explicit.
 
     By default runs in dry-run mode. Use --perform to apply changes.

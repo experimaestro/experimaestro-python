@@ -52,7 +52,17 @@ class C(Config):
 
 
 class CField(Config):
+    """default_factory without ignore_default: value always in identifier"""
+
     a: Param[int] = field(default_factory=lambda: 1)
+    b: Param[int]
+
+
+class CFieldIgnored(Config):
+    """default_factory with ignore_default=True: value excluded when equal to default"""
+
+    __xpmid__ = "test_identifier.CField"
+    a: Param[int] = field(default_factory=lambda: 1, ignore_default=True)
     b: Param[int]
 
 
@@ -98,7 +108,67 @@ def test_identifier_default():
 
 
 def test_identifier_default_field():
-    assert_equal(CField.C(a=1, b=2), CField.C(b=2))
+    """field(default_factory=F) always includes value in identifier"""
+    # a=1 is the default, but without ignore_default it's still included
+    assert_notequal(
+        CField.C(a=1, b=2),
+        CField.C(a=2, b=2),
+        "default_factory: different values should differ",
+    )
+
+
+def test_identifier_default_field_ignore():
+    """field(default_factory=F, ignore_default=True) ignores value when equal to default"""
+    assert_equal(
+        CFieldIgnored.C(a=1, b=2),
+        CFieldIgnored.C(b=2),
+        "default_factory with ignore_default=True: default value should be ignored",
+    )
+    assert_notequal(
+        CFieldIgnored.C(a=2, b=2),
+        CFieldIgnored.C(b=2),
+        "default_factory with ignore_default=True: non-default value should differ",
+    )
+
+
+class CFieldConfig(Config):
+    x: Param[int]
+
+
+class CFieldWithConfigFactory(Config):
+    a: Param[CFieldConfig] = field(default_factory=lambda: CFieldConfig.C(x=1))
+    b: Param[int]
+
+
+class CFieldWithConfigFactoryIgnored(Config):
+    __xpmid__ = "test_identifier.CFieldWithConfigFactory"
+    a: Param[CFieldConfig] = field(
+        default_factory=lambda: CFieldConfig.C(x=1), ignore_default=True
+    )
+    b: Param[int]
+
+
+def test_identifier_default_factory_config():
+    """default_factory with Config: value always in identifier"""
+    assert_notequal(
+        CFieldWithConfigFactory.C(a=CFieldConfig.C(x=1), b=2),
+        CFieldWithConfigFactory.C(a=CFieldConfig.C(x=99), b=2),
+        "default_factory: different Config values should differ",
+    )
+
+
+def test_identifier_default_factory_config_ignore():
+    """default_factory with Config + ignore_default=True: value excluded when equal"""
+    assert_equal(
+        CFieldWithConfigFactoryIgnored.C(a=CFieldConfig.C(x=1), b=2),
+        CFieldWithConfigFactoryIgnored.C(b=2),
+        "default_factory with ignore_default=True: default Config should be ignored",
+    )
+    assert_notequal(
+        CFieldWithConfigFactoryIgnored.C(a=CFieldConfig.C(x=1), b=2),
+        CFieldWithConfigFactoryIgnored.C(a=CFieldConfig.C(x=99), b=2),
+        "default_factory with ignore_default=True: non-default Config should differ",
+    )
 
 
 def test_identifier_inner_eq():
