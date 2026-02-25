@@ -920,25 +920,25 @@ class EventReader:
     def _get_entity_events_count(self, entity_dir: Path) -> int:
         """Get events_count from status.json in the entity directory
 
-        Returns the events_count from status.json, or 1 if not found.
+        Returns the events_count from status.json, or 0 if not found.
         Caches the result and updates when status.json is modified.
         """
         status_path = entity_dir / "status.json"
 
         # Check if status.json exists
         if not status_path.exists():
-            return 1
+            return 0
 
         # Read status.json for events_count
         try:
             with status_path.open("r") as f:
                 status = json.load(f)
-                events_count = status.get("events_count", 1)
+                events_count = status.get("events_count", 0)
                 self._events_count_cache[entity_dir] = events_count
                 return events_count
         except (OSError, json.JSONDecodeError):
             # Fall back to cached value or default
-            return self._events_count_cache.get(entity_dir, 1)
+            return self._events_count_cache.get(entity_dir, 0)
 
     def get_all_event_files(self) -> list[Path]:
         """Get all event files across all directories, sorted by modification time"""

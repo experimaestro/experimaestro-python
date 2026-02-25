@@ -19,6 +19,7 @@ from experimaestro.scheduler.interfaces import (
     BaseExperiment,
     BaseJob,
     BaseService,
+    ExperimentJobInformation,
     JobState,
     STATE_NAME_TO_JOBSTATE,
 )
@@ -751,6 +752,35 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 run_id=run_id,
             )
         return exp
+
+    def _on_cached_experiment_found(
+        self, exp: MockExperiment, *, run_dir: Path
+    ) -> None:
+        """Reload job_infos from disk if experiment has active events.
+
+        When an experiment is relaunched, the cache may have been populated
+        before all jobs were submitted. Reloading jobs.jsonl picks up new
+        submissions that weren't captured by event processing.
+        """
+        if self._has_event_files(exp.experiment_id):
+            jobs_jsonl_path = run_dir / "jobs.jsonl"
+            if jobs_jsonl_path.exists():
+                try:
+                    new_infos: dict[str, "ExperimentJobInformation"] = {}
+                    with jobs_jsonl_path.open("r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            record = json.loads(line)
+                            job_info = ExperimentJobInformation.from_dict(record)
+                            new_infos[job_info.job_id] = job_info
+                    # Merge: add new jobs, keep existing state
+                    for job_id, info in new_infos.items():
+                        if job_id not in exp._job_infos:
+                            exp._job_infos[job_id] = info
+                except (OSError, json.JSONDecodeError):
+                    pass
 
     def _has_event_files(self, experiment_id: str) -> bool:
         """Check if experiment has any event files (is active)"""
