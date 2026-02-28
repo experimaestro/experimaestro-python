@@ -261,6 +261,7 @@ class PartitionsTab(TabPane):
             "GPU Type",
             "GPU Mem",
             "Priority",
+            "Time Limit",
         ]
         self.has_qos = bool(self.config.qos)
         self.has_accounts = bool(self.config.accounts)
@@ -324,6 +325,7 @@ class PartitionsTab(TabPane):
                 field_widget(
                     str(partition.priority.value), partition.priority.is_overridden
                 ),
+                Text(partition._cluster.time_limit or "∞", style="dim"),
             ]
             if self.has_qos:
                 row_data.append(

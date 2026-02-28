@@ -273,6 +273,47 @@ def _parse_slurm_list_field(data: dict, *keys) -> list | None:
     return None
 
 
+def _parse_partition_time_limits() -> dict[str, tuple[str, int | None]]:
+    """Parse partition time limits from scontrol show partition (text format).
+
+    Returns dict mapping partition name to (time_limit_str, time_limit_seconds).
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["scontrol", "show", "partition"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return {}
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return {}
+
+    limits: dict[str, tuple[str, int | None]] = {}
+    current_partition = None
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # Parse key=value pairs on each line
+        for token in line.split():
+            if "=" not in token:
+                continue
+            key, _, value = token.partition("=")
+            if key == "PartitionName":
+                current_partition = value
+            elif key == "MaxTime" and current_partition:
+                seconds = parse_time_to_seconds(value)
+                limits[current_partition] = (value, seconds)
+
+    return limits
+
+
 def detect_cluster_info(cache: SlurmCommandCache | None = None) -> ClusterData:  # noqa: C901
     """Detect SLURM cluster configuration by running JSON commands.
 
@@ -583,6 +624,13 @@ def detect_cluster_info(cache: SlurmCommandCache | None = None) -> ClusterData: 
                 allow_accounts=None,
                 deny_accounts=[],
             )
+
+    # Enrich partitions with time limits from text output if missing
+    if any(not p.time_limit for p in partitions.values()):
+        text_limits = _parse_partition_time_limits()
+        for name, partition in partitions.items():
+            if not partition.time_limit and name in text_limits:
+                partition.time_limit, partition.time_limit_seconds = text_limits[name]
 
     # Get QoS info (JSON)
     qos_data = cache.run_json_command(CACHE_KEY_QOS, SLURM_COMMANDS[CACHE_KEY_QOS][0])
