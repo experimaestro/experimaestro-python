@@ -56,13 +56,15 @@ def analyze(
         files and the list of undocumented configurations
     """
 
-    def process(mod: ModuleType, configurations: Dict[str, Type[Config]]):
+    def process(parent_mod: ModuleType, configurations: Dict[str, Type[Config]]):
         errors = []
-        for info in pkgutil.iter_modules(mod.__path__, prefix=f"{mod.__name__}."):
+        for info in pkgutil.iter_modules(
+            parent_mod.__path__, prefix=f"{parent_mod.__name__}."
+        ):
             try:
                 logging.info("Processing %s...", info.name)
-                mod = importlib.import_module(info.name)
-                for x in mod.__dict__.values():
+                child_mod = importlib.import_module(info.name)
+                for x in child_mod.__dict__.values():
                     if inspect.isclass(x) and issubclass(x, Config):
                         configurations[f"{x.__module__}.{x.__qualname__}"] = x
 
@@ -70,9 +72,9 @@ def analyze(
                 logging.exception(f"Module {info.name} could not be loaded")
                 errors.append(f"Module {info.name} could not be loaded")
 
-            # Process sub-modules
+            # Process sub-packages
             if info.ispkg:
-                errors.extend(process(mod, configurations))
+                errors.extend(process(child_mod, configurations))
 
         return errors
 
