@@ -33,7 +33,9 @@ footer = ""
 conventional_commits = true
 filter_unconventional = false
 split_commits = false
-commit_preprocessors = []
+commit_preprocessors = [
+    { pattern = "#(\\d+)", replace = "[#$1](https://github.com/experimaestro/experimaestro-python/issues/$1)" },
+]
 commit_parsers = [
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Bug Fixes" },
@@ -57,9 +59,9 @@ commit_parsers = [
 protect_breaking_commits = false
 filter_commits = false
 tag_pattern = "v[0-9].*"
-# Skip pre-release tags (alpha, beta, rc) so stable releases show full changelog
-skip_tags = "v.*[0-9](a|b|rc)[0-9]+"
-ignore_tags = ""
+# Ignore pre-release tags (alpha, beta, rc) so their commits roll up into stable releases
+skip_tags = ""
+ignore_tags = "v.*[0-9](a|b|rc)[0-9]+"
 topo_order = false
 sort_commits = "oldest"
 # Skip versions with no commits (after filtering)
