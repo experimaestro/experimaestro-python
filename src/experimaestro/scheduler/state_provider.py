@@ -32,6 +32,7 @@ from experimaestro.scheduler.interfaces import (
     ExperimentJobInformation,
     ExperimentStatus,
     JobState,
+    JobStateError,
     JobFailureStatus,
     STATE_NAME_TO_JOBSTATE,
     deserialize_to_datetime,
@@ -916,13 +917,14 @@ class MockJob(BaseJob):
 
         # Convert state name to JobState instance
         initial_state = STATE_NAME_TO_JOBSTATE.get(state, JobState.UNSCHEDULED)
+        if failure_reason is not None:
+            # Create a new JobStateError with the specific failure reason
+            # (don't mutate the singleton)
+            initial_state = JobStateError(failure_reason)
         if initial_state != JobState.UNSCHEDULED:
             # State was explicitly provided (from disk), mark as having state
             self._state = initial_state
             self._has_event_state = True
-        # Set failure_reason on the state object
-        if failure_reason is not None:
-            self._state.failure_reason = failure_reason
         self.submittime = submittime
         self.starttime = starttime
         self.endtime = endtime

@@ -97,7 +97,7 @@ class OrphanJobsScreen(Screen):
         table.clear()
 
         for job in self._get_sorted_jobs():
-            failure_reason = getattr(job, "failure_reason", None)
+            failure_reason = job.state.failure_reason if job.state else None
             transient = getattr(job, "transient", None)
             status_icon = get_status_icon(
                 job.state.name if job.state else "unknown", failure_reason, transient

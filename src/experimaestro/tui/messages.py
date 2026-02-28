@@ -129,6 +129,15 @@ class ShowRunsRequest(Message):
         self.current_run_id = current_run_id
 
 
+class JobHighlighted(Message):
+    """Message sent when a job row is highlighted (cursor moved)"""
+
+    def __init__(self, job_id: str, status_text: str) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.status_text = status_text
+
+
 class RunSelected(Message):
     """Message sent when a run is selected from the runs screen"""
 

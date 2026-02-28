@@ -15,6 +15,7 @@ from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration, get_status_icon
 from experimaestro.tui.messages import (
     JobSelected,
+    JobHighlighted,
     ViewJobLogs,
     ViewJobLogsRequest,
     DeleteJobRequest,
@@ -336,7 +337,7 @@ class JobDetailView(Widget):
 
         # Format status with icon and name
         status_name = job.state.name if job.state else "unknown"
-        failure_reason = getattr(job, "failure_reason", None)
+        failure_reason = job.state.failure_reason if job.state else None
         transient = getattr(job, "transient", None)
         status_icon = get_status_icon(status_name, failure_reason, transient)
         status_text = f"{status_icon} {status_name}"
@@ -373,6 +374,14 @@ class JobDetailView(Widget):
                 )
 
         times_text = f"Submitted: {submitted} | Start: {start} | End: {end} | Duration: {duration}"
+
+        # Show last state check if available from the process
+        if job._process is not None:
+            last_check = job._process.last_state_check
+            if last_check is not None:
+                ago = int((datetime.now() - last_check).total_seconds())
+                times_text += f" | Last check: {ago}s ago"
+
         self.query_one("#job-times-label", Label).update(times_text)
 
         # Process information
@@ -689,8 +698,10 @@ class JobsTable(Vertical):
     FAILURE_ORDER = {
         "TIMEOUT": 0,  # Might just need retry
         "MEMORY": 1,  # Might need resource adjustment
-        "DEPENDENCY": 2,  # Need to fix upstream job first
-        "FAILED": 3,  # Generic failure
+        "REJECTED_TIMELIMIT": 2,  # Time limit exceeded partition max
+        "REJECTED_OTHER": 3,  # Other rejection reason
+        "DEPENDENCY": 4,  # Need to fix upstream job first
+        "FAILED": 5,  # Generic failure
     }
 
     @classmethod
@@ -704,7 +715,7 @@ class JobsTable(Vertical):
 
         # For error jobs, also sort by failure reason
         if state_name == "error":
-            failure_reason = getattr(job, "failure_reason", None)
+            failure_reason = job.state.failure_reason if job.state else None
             if failure_reason:
                 failure_order = cls.FAILURE_ORDER.get(failure_reason.name, 99)
             else:
@@ -947,7 +958,7 @@ class JobsTable(Vertical):
                 else:
                     status_text = "▶"
             else:
-                failure_reason = getattr(job, "failure_reason", None)
+                failure_reason = job.state.failure_reason if job.state else None
                 transient = getattr(job, "transient", None)
                 status_text = get_status_icon(status, failure_reason, transient)
 
@@ -1060,6 +1071,23 @@ class JobsTable(Vertical):
             days = seconds // 86400
             hours = (seconds % 86400) // 3600
             return f"{days}d {hours}h"
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """Handle job row highlight (cursor moved) - update status bar"""
+        if event.row_key and self.current_experiment:
+            job_id = str(event.row_key.value)
+            task_id = self.task_id_map.get(job_id, "")
+            if task_id:
+                job = self.state_provider.get_job(task_id, job_id)
+                if job:
+                    status_name = job.state.name if job.state else "unknown"
+                    failure_reason = job.state.failure_reason if job.state else None
+                    transient = getattr(job, "transient", None)
+                    icon = get_status_icon(status_name, failure_reason, transient)
+                    status_text = f"{icon} {status_name}"
+                    if failure_reason:
+                        status_text += f" ({failure_reason.name})"
+                    self.post_message(JobHighlighted(job_id, status_text))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle job selection"""

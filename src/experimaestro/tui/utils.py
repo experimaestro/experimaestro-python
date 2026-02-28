@@ -40,6 +40,10 @@ def get_status_icon(status: str, failure_reason=None, transient=None):
                 return "⏱"  # Timeout
             elif failure_reason == JobFailureStatus.MEMORY:
                 return "💾"  # Memory issue
+            elif failure_reason == JobFailureStatus.REJECTED_TIMELIMIT:
+                return "🚫"  # Rejected (time limit)
+            elif failure_reason == JobFailureStatus.REJECTED_OTHER:
+                return "🚫"  # Rejected (other reason)
             # FAILED or unknown - use default error icon
         return "❌"
     elif status == "running":

@@ -35,6 +35,7 @@ from experimaestro.tui.messages import (
     ExperimentDeselected,
     JobSelected,
     JobDeselected,
+    JobHighlighted,
     ViewJobLogs,
     ViewJobLogsRequest,
     DeleteJobRequest,
@@ -563,6 +564,10 @@ class ExperimaestroUI(App):
         jobs_table = self.query_one("#jobs-table", DataTable)
         jobs_table.focus()
 
+    def on_job_highlighted(self, message: JobHighlighted) -> None:
+        """Handle job highlight - show status info in subtitle"""
+        self.sub_title = message.status_text
+
     def on_experiment_deselected(self, message: ExperimentDeselected) -> None:
         """Handle experiment deselection - hide jobs/services tabs"""
         # Hide the tabbed content
@@ -571,6 +576,8 @@ class ExperimaestroUI(App):
         # Also hide job detail if visible
         job_detail_container = self.query_one("#job-detail-container")
         job_detail_container.add_class("hidden")
+        # Restore default subtitle
+        self._update_scheduler_status()
 
     def on_job_selected(self, message: JobSelected) -> None:
         """Handle job selection - show job detail view"""

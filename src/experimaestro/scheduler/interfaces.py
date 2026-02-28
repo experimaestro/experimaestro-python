@@ -313,6 +313,12 @@ class JobFailureStatus(enum.Enum):
     #: Job was cancelled (e.g., via scancel or SIGTERM)
     CANCELLED = 4
 
+    #: Job rejected due to time limit (e.g., requested time exceeds partition max)
+    REJECTED_TIMELIMIT = 5
+
+    #: Job rejected for other reasons (e.g., invalid partition, resource constraints)
+    REJECTED_OTHER = 6
+
 
 class ExperimentStatus(enum.Enum):
     """Status of an experiment run"""
@@ -745,12 +751,14 @@ class BaseJob:
         elif isinstance(event, JobStateChangedEvent):
             new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
             if new_state is not None:
+                if event.failure_reason:
+                    try:
+                        new_state = JobStateError(
+                            JobFailureStatus[event.failure_reason]
+                        )
+                    except KeyError:
+                        pass
                 self.set_state(new_state, loading=True)
-            if event.failure_reason:
-                try:
-                    self._state.failure_reason = JobFailureStatus[event.failure_reason]
-                except KeyError:
-                    pass
             # Convert ISO string timestamps to datetime
             if event.submitted_time is not None:
                 self.submittime = deserialize_to_datetime(event.submitted_time)

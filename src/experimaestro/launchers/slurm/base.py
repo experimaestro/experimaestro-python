@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import (
     Any,
@@ -177,14 +178,24 @@ class SlurmJobState:
         "NODE_FAIL": ProcessState.ERROR,
         "REVOKED": ProcessState.ERROR,
         "TIMEOUT": ProcessState.ERROR,
-        "PARTITION_TIME_LIMIT": ProcessState.ERROR,
         "CANCELLED": ProcessState.ERROR,
         "BOOT_FAIL": ProcessState.ERROR,
         "OUT_OF_MEMORY": ProcessState.ERROR,
     }
 
+    @staticmethod
+    def get_failure_status(reason: str):
+        """Get the JobFailureStatus for a fatal pending reason, or None"""
+        from experimaestro.scheduler.jobs import JobFailureStatus
+
+        _REASON_TO_STATUS = {
+            "PartitionTimeLimit": JobFailureStatus.REJECTED_TIMELIMIT,
+        }
+        return _REASON_TO_STATUS.get(reason)
+
     def __init__(self, status, start, end):
         self.slurm_state = status if status[-1] == "+" else status
+        self.reason = ""
         if self.slurm_state.startswith("CANCELLED"):
             self.state = ProcessState.ERROR
         else:
@@ -197,6 +208,16 @@ class SlurmJobState:
 
         self.start = start
         self.end = end
+
+    def set_pending_reason(self, reason: str):
+        """Update state based on pending reason from squeue"""
+        self.reason = reason
+        if (
+            self.slurm_state == "PENDING"
+            and self.get_failure_status(reason) is not None
+        ):
+            logging.error("SLURM job will never start (reason: %s)", reason)
+            self.state = ProcessState.ERROR
 
     def finished(self):
         """Returns true if the job has finished"""
@@ -221,6 +242,7 @@ class SlurmProcessWatcher(threading.Thread):
         self.cv = ThreadingCondition()
         self.fetched_event = threading.Event()
         self.updating_jobs = threading.Lock()
+        self.last_check_time: datetime | None = None
 
         # Async waiters for job completion: jobid -> list of (asyncio.Future, event_loop)
         self.async_waiters: Dict[
@@ -395,6 +417,57 @@ class SlurmProcessWatcher(threading.Thread):
                 loop.call_soon_threadsafe(future.set_result, True)
             self.async_fetched_waiters.clear()
 
+    def _check_pending_reasons(self, pending_ids: list[str]):
+        """Query squeue for pending job reasons and update states.
+
+        Jobs with fatal reasons (e.g. PartitionTimeLimit) are cancelled
+        and marked as errors.
+        """
+        builder = self.launcher.connector.processbuilder()
+        builder.command = [
+            f"{self.launcher.binpath}/squeue",
+            "--jobs=" + ",".join(pending_ids),
+            "--format=%i|%r",
+            "--noheader",
+        ]
+        handler = OutputCaptureHandler()
+        builder.detach = False
+        builder.stdout = Redirect.pipe(handler)
+        builder.environ = self.launcher.launcherenv
+        process = builder.start()
+        process.wait()
+        output = handler.output.decode("utf-8")
+
+        cancel_ids = []
+        for line in output.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                jobid, reason = line.split("|", 1)
+                jobid = jobid.strip()
+                reason = reason.strip()
+                if jobid in self.jobs:
+                    self.jobs[jobid].set_pending_reason(reason)
+                    if SlurmJobState.get_failure_status(reason) is not None:
+                        cancel_ids.append(jobid)
+            except ValueError:
+                logger.error("Could not parse squeue line: %s", line)
+
+        # Cancel jobs that will never start
+        if cancel_ids:
+            builder = self.launcher.connector.processbuilder()
+            builder.command = [
+                f"{self.launcher.binpath}/scancel",
+                *cancel_ids,
+            ]
+            builder.environ = self.launcher.launcherenv
+            builder.start()
+            logger.warning(
+                "Cancelled SLURM jobs with fatal pending reasons: %s",
+                ", ".join(cancel_ids),
+            )
+
     def run(self):
         while self.count > 0:
             builder = self.launcher.connector.processbuilder()
@@ -412,6 +485,7 @@ class SlurmProcessWatcher(threading.Thread):
             process = builder.start()
 
             with self.updating_jobs:
+                old_jobs = self.jobs
                 self.jobs = {}
                 output = handler.output.decode("utf-8")
                 for line in output.split("\n"):
@@ -419,11 +493,25 @@ class SlurmProcessWatcher(threading.Thread):
                     if line:
                         try:
                             jobid, state, start, end, *_ = line.split("|")
-                            self.jobs[jobid] = SlurmJobState(state, start, end)
+                            new_state = SlurmJobState(state, start, end)
+                            # Carry forward reason from previous poll
+                            old = old_jobs.get(jobid)
+                            if old and old.reason:
+                                new_state.reason = old.reason
+                            self.jobs[jobid] = new_state
                             logger.debug("Parsed line: %s", line)
                         except ValueError:
                             logger.error("Could not parse line %s", line)
             process.kill()
+
+            # Check pending jobs via squeue to get reasons
+            pending_ids = [
+                jid for jid, js in self.jobs.items() if js.slurm_state == "PENDING"
+            ]
+            if pending_ids:
+                self._check_pending_reasons(pending_ids)
+
+            self.last_check_time = datetime.now()
 
             # Notify async waiters for finished jobs
             self._notify_async_waiters()
@@ -533,6 +621,18 @@ class BatchSlurmProcess(Process):
             logger.info("SLURM job %s timed out", self.jobid)
             return JobStateError(JobFailureStatus.TIMEOUT)
 
+        # Check if job was rejected due to fatal pending reason
+        if self._last_state and (
+            failure_status := SlurmJobState.get_failure_status(self._last_state.reason)
+        ):
+            logger.info(
+                "SLURM job %s rejected (reason: %s, status: %s)",
+                self.jobid,
+                self._last_state.reason,
+                failure_status.name,
+            )
+            return JobStateError(failure_status)
+
         return JobState.ERROR
 
     async def aio_state(self, timeout: float | None = None) -> ProcessState:
@@ -579,6 +679,13 @@ class BatchSlurmProcess(Process):
         builder = self.launcher.connector.processbuilder()
         builder.command = [f"{self.launcher.binpath}/scancel", f"{self.jobid}"]
         builder.start()
+
+    @property
+    def last_state_check(self) -> datetime | None:
+        """Returns the time of the last SLURM state check"""
+        if self._watcher is not None:
+            return self._watcher.last_check_time
+        return None
 
     def __repr__(self):
         return f"slurm:{self.jobid}"

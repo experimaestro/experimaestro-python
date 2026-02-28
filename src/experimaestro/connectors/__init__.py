@@ -11,6 +11,7 @@ This module contains :
 import enum
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any, Dict, Mapping, Type, Union, Optional, TYPE_CHECKING
 from pathlib import Path
 from experimaestro.utils import logger
@@ -185,6 +186,11 @@ class Process:
         from experimaestro.scheduler.jobs import JobState
 
         return JobState.DONE if code == 0 else JobState.ERROR
+
+    @property
+    def last_state_check(self) -> datetime | None:
+        """Returns the time of the last state check, or None if unknown"""
+        return None
 
     def kill(self):
         raise NotImplementedError(f"Not implemented: {self.__class__}.kill")
