@@ -509,9 +509,15 @@ class SSHStateProviderClient(OfflineStateProvider):
                 )
                 raise ConnectionError(error_msg)
 
+            # Update remote_workspace with the resolved path from the server
+            # (handles ~/path expansion, symlinks, etc.)
+            resolved_workspace = sync_info.get("workspace_path")
+            if resolved_workspace:
+                self.remote_workspace = resolved_workspace
+
             logger.info(
                 "Connected to remote workspace: %s (protocol v%s)",
-                sync_info.get("workspace_path"),
+                self.remote_workspace,
                 server_version,
             )
         except ConnectionError:
