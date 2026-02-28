@@ -28,7 +28,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.tokens]
 @pytest.fixture(autouse=True)
 def reset_async_bridge():
     """Reset AsyncEventBridge singleton before and after each test."""
-    from experimaestro.ipc import AsyncEventBridge
+    from experimaestro.filewatcher import AsyncEventBridge
 
     AsyncEventBridge.reset()
     yield

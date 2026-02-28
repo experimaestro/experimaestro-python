@@ -249,13 +249,13 @@ def experiments_cli(  # noqa: C901
     setup_logging(debug=debug)
 
     # --- Configure filesystem watcher type
-    from experimaestro.ipc import IPCom, WatcherType
+    from experimaestro.filewatcher import FileWatcherService, WatcherType
 
     if watcher != "auto":
-        IPCom.set_watcher_type(WatcherType(watcher), polling_interval)
+        FileWatcherService.configure(WatcherType(watcher), polling_interval)
     elif polling_interval != 1.0:
         # If polling interval is specified but watcher is auto, use polling
-        IPCom.set_watcher_type(WatcherType.POLLING, polling_interval)
+        FileWatcherService.configure(WatcherType.POLLING, polling_interval)
 
     # --- Warn about deprecated options
     if host is not None:

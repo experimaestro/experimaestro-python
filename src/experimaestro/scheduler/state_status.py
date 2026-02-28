@@ -26,7 +26,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from experimaestro.scheduler.polling import FileWatcher
+from experimaestro.filewatcher import DirectoryWatch, FileWatcherService
 
 
 if TYPE_CHECKING:
@@ -880,17 +880,19 @@ class EventReader:
     - Entity tracking: on_created callback determines which entities to follow
     """
 
-    def __init__(self, *directories: WatchedDirectory):
+    def __init__(self, *directories: WatchedDirectory, max_open_files: int = 128):
         """Initialize event reader
 
         Args:
             directories: Directories to watch with their configurations
+            max_open_files: Maximum open FDs for file tailing
         """
         self.directories = list(directories)
-        # For incremental reading (live monitoring)
+        self._max_open_files = max_open_files
+        # Initial file positions (staging area, transferred to watches on start)
         self._file_positions: dict[Path, int] = {}
-        # File watcher (watchdog + adaptive polling)
-        self._file_watcher: FileWatcher | None = None
+        # File watchers (with tailing support)
+        self._file_watcher: DirectoryWatch | None = None
         # Set of entity IDs being followed (entity_id -> dir_config)
         self._followed_entities: dict[str, WatchedDirectory] = {}
         # Buffering mode: queue events instead of forwarding immediately
@@ -899,6 +901,8 @@ class EventReader:
         self._deleted_buffer: list[tuple[str, WatchedDirectory]] = []
         # Cache for events_count from status.json (entity_dir -> count)
         self._events_count_cache: dict[Path, int] = {}
+        # All watches (for finding the right one per path)
+        self._all_watchers: list[DirectoryWatch] = []
 
     def _extract_entity_id(self, path: Path) -> Optional[str]:
         """Extract entity ID from event file path"""
@@ -998,6 +1002,16 @@ class EventReader:
                 pass
         return results
 
+    def _find_watcher(self, path: Path) -> DirectoryWatch | None:
+        """Find the DirectoryWatch that covers the given path"""
+        for watch in self._all_watchers:
+            try:
+                path.relative_to(watch._path)
+                return watch
+            except ValueError:
+                continue
+        return None
+
     @staticmethod
     def _is_event_file(path: Path) -> bool:
         """Check if path is an event file (experiment or job)"""
@@ -1010,16 +1024,21 @@ class EventReader:
         logger.debug("Detected deletion of event file: %s", path)
         entity_id = self._extract_entity_id(path)
         dir_config = self._find_dir_config(path)
+        # Remove from tailed pool
+        watch = self._find_watcher(path)
+        if watch:
+            watch.remove_tail(path)
         self._file_positions.pop(path, None)
         if entity_id:
             self._handle_deletion(entity_id, path, dir_config)
 
     def _on_file_created(self, path: Path) -> None:
         """Handle file creation - ensure position is initialized before processing"""
-        # Only set position to 0 if not already tracked
-        # (the file may have been processed by ordering logic in
-        # _process_file_change before this callback arrived)
-        if path not in self._file_positions:
+        watch = self._find_watcher(path)
+        if watch and watch._tailed_pool is not None:
+            if watch.get_tail_position(path) == 0:
+                watch.set_tail_position(path, 0)
+        elif path not in self._file_positions:
             self._file_positions[path] = 0
 
     def _discover_entities(self) -> dict[str, tuple[WatchedDirectory, list[Path]]]:
@@ -1089,30 +1108,66 @@ class EventReader:
                 for event_file in event_files:
                     self._replay_events_from_file(event_file, entity_id, dir_config)
 
-        # Create FileWatcher with event file filter
-        self._file_watcher = FileWatcher(
+        # Create a DirectoryWatch for each directory (via FileWatcherService)
+        # We use the first directory's watch as our primary _file_watcher handle,
+        # but we set up watches for all directories
+        svc = FileWatcherService.instance()
+
+        # Use the first directory to create the primary watch
+        first_dir = self.directories[0]
+        first_dir.path.mkdir(parents=True, exist_ok=True)
+        self._file_watcher = svc.watch_directory(
+            first_dir.path,
+            recursive=True,
             on_change=self._process_file_change,
             on_deleted=self._on_file_deleted,
             file_filter=self._is_event_file,
             on_created=self._on_file_created,
+            enable_tailing=True,
+            max_open_files=self._max_open_files,
         )
-        self._file_watcher.start()
+        self._all_watchers = [self._file_watcher]
+        logger.debug("Started watching %s", first_dir.path)
 
-        # Register watches for each directory
-        for dir_config in self.directories:
+        # Watch additional directories
+        self._extra_watchers: list[DirectoryWatch] = []
+        for dir_config in self.directories[1:]:
             dir_config.path.mkdir(parents=True, exist_ok=True)
-            self._file_watcher.watch_directory(dir_config.path, recursive=True)
+            extra = svc.watch_directory(
+                dir_config.path,
+                recursive=True,
+                on_change=self._process_file_change,
+                on_deleted=self._on_file_deleted,
+                file_filter=self._is_event_file,
+                on_created=self._on_file_created,
+                enable_tailing=True,
+                max_open_files=self._max_open_files,
+            )
+            self._extra_watchers.append(extra)
+            self._all_watchers.append(extra)
             logger.debug("Started watching %s", dir_config.path)
+
+        # Transfer staged file positions to watch tail pools
+        for path, pos in self._file_positions.items():
+            watch = self._find_watcher(path)
+            if watch:
+                watch.set_tail_position(path, pos)
+        self._file_positions.clear()
 
         # Add existing event files to be tracked
         for path in self.get_all_event_files():
             self._file_watcher.add_file(path)
 
     def stop_watching(self) -> None:
-        """Stop watching for file changes"""
+        """Stop watching for file changes (closes tailed file pools)"""
         if self._file_watcher:
-            self._file_watcher.stop()
+            self._file_watcher.close()
             self._file_watcher = None
+        if hasattr(self, "_extra_watchers"):
+            for w in self._extra_watchers:
+                w.close()
+            self._extra_watchers.clear()
+        self._all_watchers.clear()
         logger.debug("Stopped watching all directories")
 
     def follow(self, entity_id: str, dir_config: WatchedDirectory) -> bool:
@@ -1179,7 +1234,12 @@ class EventReader:
                     except json.JSONDecodeError:
                         pass
                 # Mark file as fully read
-                self._file_positions[path] = f.tell()
+                end_pos = f.tell()
+                watch = self._find_watcher(path)
+                if watch and watch._tailed_pool is not None:
+                    watch.set_tail_position(path, end_pos)
+                else:
+                    self._file_positions[path] = end_pos
         except FileNotFoundError:
             pass
         except OSError as e:
@@ -1254,48 +1314,62 @@ class EventReader:
         self, path: Path, entity_id: str, dir_config: WatchedDirectory
     ) -> None:
         """Process a single event file and notify callbacks (or buffer)"""
-        last_pos = self._file_positions.get(path, 0)
-        try:
-            with path.open("r") as f:
-                f.seek(last_pos)
-                # Use readline() instead of iterator to allow tell()
-                while True:
-                    line = f.readline()
-                    if not line:
-                        break
-
-                    # Skip incomplete lines (writer may be mid-write)
-                    if not line.endswith("\n"):
-                        break
-
-                    line = line.strip()
-                    if not line:
-                        # Update position for empty lines
+        watch = self._find_watcher(path)
+        if watch and watch._tailed_pool is not None:
+            # Use tailed file pool for efficient reading
+            lines = watch.read_new_lines(path)
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event_dict = json.loads(line)
+                    event = EventBase.from_dict(event_dict)
+                    if self._buffering:
+                        self._event_buffer.append((entity_id, dir_config, event))
+                    elif dir_config.on_event:
+                        try:
+                            dir_config.on_event(entity_id, event)
+                        except Exception:
+                            logger.exception("Error in on_event callback")
+                except json.JSONDecodeError:
+                    pass
+        else:
+            # Fallback: open/seek/read/close (for standalone read_new_events)
+            last_pos = self._file_positions.get(path, 0)
+            try:
+                with path.open("r") as f:
+                    f.seek(last_pos)
+                    while True:
+                        line = f.readline()
+                        if not line:
+                            break
+                        if not line.endswith("\n"):
+                            break
+                        line = line.strip()
+                        if not line:
+                            last_pos = f.tell()
+                            continue
+                        try:
+                            event_dict = json.loads(line)
+                            event = EventBase.from_dict(event_dict)
+                            if self._buffering:
+                                self._event_buffer.append(
+                                    (entity_id, dir_config, event)
+                                )
+                            elif dir_config.on_event:
+                                try:
+                                    dir_config.on_event(entity_id, event)
+                                except Exception:
+                                    logger.exception("Error in on_event callback")
+                        except json.JSONDecodeError:
+                            pass
                         last_pos = f.tell()
-                        continue
-                    try:
-                        event_dict = json.loads(line)
-                        event = EventBase.from_dict(event_dict)
-                        if self._buffering:
-                            # Queue event for later
-                            self._event_buffer.append((entity_id, dir_config, event))
-                        elif dir_config.on_event:
-                            # Forward immediately
-                            try:
-                                dir_config.on_event(entity_id, event)
-                            except Exception:
-                                logger.exception("Error in on_event callback")
-                    except json.JSONDecodeError:
-                        pass
-
-                    # Update position after each complete line
-                    last_pos = f.tell()
-
-                self._file_positions[path] = last_pos
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger.warning("Failed to read event file %s: %s", path, e)
+                    self._file_positions[path] = last_pos
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning("Failed to read event file %s: %s", path, e)
 
     def _handle_deletion(
         self,

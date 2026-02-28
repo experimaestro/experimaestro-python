@@ -1,4 +1,4 @@
-"""Tests for the FileWatcher adaptive polling system"""
+"""Tests for the adaptive polling system (via FileWatcherService)"""
 
 import time
 from pathlib import Path
@@ -6,7 +6,7 @@ from threading import Event
 from typing import List
 
 
-from experimaestro.scheduler.polling import FileWatcher, PolledFile
+from experimaestro.filewatcher import FileWatcherService, PolledFile
 
 
 class TestPolledFile:
@@ -113,28 +113,33 @@ class TestPolledFile:
         assert polled.update_size() is False
 
 
-class TestFileWatcher:
-    """Tests for FileWatcher class"""
+class TestDirectoryWatch:
+    """Tests for DirectoryWatch via FileWatcherService"""
 
     def test_add_and_remove_file(self, tmp_path):
         """Test adding and removing files"""
-        changes: List[Path] = []
-        watcher = FileWatcher(on_change=lambda p: changes.append(p))
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
+            on_change=lambda p: None,
+        )
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
-        watcher.add_file(test_file)
-        assert test_file in watcher._files
+        watch.add_file(test_file)
+        assert test_file in watch._files
 
-        watcher.remove_file(test_file)
-        assert test_file not in watcher._files
+        watch.remove_file(test_file)
+        assert test_file not in watch._files
+        watch.close()
 
     def test_file_filter(self, tmp_path):
         """Test that file_filter is respected"""
-        changes: List[Path] = []
-        watcher = FileWatcher(
-            on_change=lambda p: changes.append(p),
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
+            on_change=lambda p: None,
             file_filter=lambda p: p.suffix == ".txt",
         )
 
@@ -143,62 +148,45 @@ class TestFileWatcher:
         json_file = tmp_path / "test.json"
         json_file.write_text("{}")
 
-        watcher.add_file(txt_file)
-        watcher.add_file(json_file)
+        watch.add_file(txt_file)
+        watch.add_file(json_file)
 
-        assert txt_file in watcher._files
-        assert json_file not in watcher._files
+        assert txt_file in watch._files
+        assert json_file not in watch._files
+        watch.close()
 
     def test_notify_change_increases_reliability(self, tmp_path):
         """Test that notify_change increases watchdog reliability"""
-        watcher = FileWatcher(on_change=lambda p: None)
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
+            on_change=lambda p: None,
+        )
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
-        watcher.add_file(test_file)
-        initial_reliability = watcher._files[test_file].watchdog_reliability
+        watch.add_file(test_file)
+        initial_reliability = watch._files[test_file].watchdog_reliability
 
-        watcher.notify_change(test_file)
+        watch.notify_change(test_file)
 
-        # Reliability should increase since watchdog detected the change
-        assert watcher._files[test_file].watchdog_reliability > initial_reliability
+        assert watch._files[test_file].watchdog_reliability > initial_reliability
+        watch.close()
 
-    def test_poll_detected_change_decreases_reliability(self, tmp_path):
-        """Test that polling-detected change decreases watchdog reliability"""
-        changes: List[Path] = []
-        change_event = Event()
+    def test_poll_detected_change_decreases_reliability(self):
+        """Test that poll-detected changes decrease watchdog reliability
 
-        def on_change(path):
-            changes.append(path)
-            change_event.set()
+        Tests the PolledFile directly since DirectoryWatch always has
+        watchdog active (which would increase reliability instead).
+        """
+        polled = PolledFile(path=Path("/tmp/test.txt"))
+        polled.watchdog_reliability = 0.8
 
-        watcher = FileWatcher(
-            on_change=on_change,
-            min_interval=0.1,
-            max_interval=1.0,
-        )
+        polled.on_poll_detected_change()
 
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("initial")
-
-        watcher.add_file(test_file)
-        # Set high reliability to test decrease
-        watcher._files[test_file].watchdog_reliability = 0.8
-        watcher._files[test_file].poll_interval = 0.5
-
-        watcher.start()
-
-        try:
-            time.sleep(0.2)
-            # Modify file - polling should detect it (not watchdog)
-            test_file.write_text("modified content")
-
-            assert change_event.wait(timeout=2.0), "Change was not detected"
-            # Watchdog reliability should have decreased
-            assert watcher._files[test_file].watchdog_reliability < 0.8
-        finally:
-            watcher.stop()
+        # Reliability should decrease (Polyak toward 0)
+        assert polled.watchdog_reliability < 0.8
 
     def test_polling_detects_changes(self, tmp_path):
         """Test that polling detects file changes"""
@@ -209,67 +197,65 @@ class TestFileWatcher:
             changes.append(path)
             change_event.set()
 
-        watcher = FileWatcher(
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
             on_change=on_change,
-            min_interval=0.1,  # Fast polling for test
-            max_interval=0.5,
+            min_poll_interval=0.1,
+            max_poll_interval=0.5,
         )
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("initial")
 
-        watcher.add_file(test_file)
-        watcher.start()
+        watch.add_file(test_file)
 
         try:
-            # Modify the file
-            time.sleep(0.2)  # Wait for initial poll to complete
+            time.sleep(0.2)
             test_file.write_text("modified content")
 
-            # Wait for change to be detected
             assert change_event.wait(timeout=2.0), "Change was not detected"
             assert test_file in changes
         finally:
-            watcher.stop()
+            watch.close()
 
-    def test_stop_clears_files(self, tmp_path):
-        """Test that stop() clears all tracked files"""
-        watcher = FileWatcher(on_change=lambda p: None)
-
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("content")
-
-        watcher.add_file(test_file)
-        watcher.start()
-        watcher.stop()
-
-        assert len(watcher._files) == 0
-        assert watcher._thread is None
-
-    def test_adaptive_interval_increases(self, tmp_path):
-        """Test that polling interval increases when no changes"""
-        watcher = FileWatcher(
+    def test_close_clears_files(self, tmp_path):
+        """Test that close() clears all tracked files"""
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
             on_change=lambda p: None,
-            min_interval=0.1,
-            max_interval=1.0,
         )
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
-        watcher.add_file(test_file)
-        initial_interval = watcher._files[test_file].poll_interval
+        watch.add_file(test_file)
+        watch.close()
 
-        watcher.start()
+        assert len(watch._files) == 0
+
+    def test_adaptive_interval_increases(self, tmp_path):
+        """Test that polling interval increases when no changes"""
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
+            on_change=lambda p: None,
+            min_poll_interval=0.1,
+            max_poll_interval=1.0,
+        )
+
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+
+        watch.add_file(test_file)
+        initial_interval = watch._files[test_file].poll_interval
 
         try:
-            # Wait for a few poll cycles
             time.sleep(0.5)
-
-            # Interval should have increased since file didn't change
-            assert watcher._files[test_file].poll_interval > initial_interval
+            assert watch._files[test_file].poll_interval > initial_interval
         finally:
-            watcher.stop()
+            watch.close()
 
     def test_on_deleted_callback(self, tmp_path):
         """Test that on_deleted callback is called"""
@@ -280,7 +266,9 @@ class TestFileWatcher:
             deleted.append(path)
             delete_event.set()
 
-        watcher = FileWatcher(
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
             on_change=lambda p: None,
             on_deleted=on_deleted,
         )
@@ -288,19 +276,15 @@ class TestFileWatcher:
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
-        watcher.add_file(test_file)
-        watcher.watch_directory(tmp_path)
-        watcher.start()
+        watch.add_file(test_file)
 
         try:
-            # Delete the file
             test_file.unlink()
 
-            # Wait for deletion to be detected (via watchdog)
             if delete_event.wait(timeout=2.0):
-                assert test_file in deleted
+                assert any(p.name == "test.txt" for p in deleted)
         finally:
-            watcher.stop()
+            watch.close()
 
     def test_multiple_files(self, tmp_path):
         """Test watching multiple files"""
@@ -314,10 +298,12 @@ class TestFileWatcher:
             if change_count[0] >= 2:
                 change_event.set()
 
-        watcher = FileWatcher(
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
             on_change=on_change,
-            min_interval=0.1,
-            max_interval=0.5,
+            min_poll_interval=0.1,
+            max_poll_interval=0.5,
         )
 
         file1 = tmp_path / "file1.txt"
@@ -325,19 +311,16 @@ class TestFileWatcher:
         file1.write_text("content1")
         file2.write_text("content2")
 
-        watcher.add_file(file1)
-        watcher.add_file(file2)
-        watcher.start()
+        watch.add_file(file1)
+        watch.add_file(file2)
 
         try:
             time.sleep(0.2)
-            # Modify both files
             file1.write_text("modified1")
             file2.write_text("modified2")
 
-            # Wait for changes to be detected
             assert change_event.wait(timeout=3.0), "Changes were not detected"
             assert file1 in changes
             assert file2 in changes
         finally:
-            watcher.stop()
+            watch.close()

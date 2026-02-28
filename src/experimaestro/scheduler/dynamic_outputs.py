@@ -18,7 +18,7 @@ from typing import Callable, Dict, List, Set, TYPE_CHECKING
 
 from watchdog.events import FileSystemEventHandler
 
-from experimaestro.ipc import ipcom
+from experimaestro.filewatcher import FileWatcherService
 from experimaestro.utils import logger
 
 if TYPE_CHECKING:
@@ -271,7 +271,9 @@ class TaskOutputs(FileSystemEventHandler):
             self.path.parent.mkdir(parents=True, exist_ok=True)
 
             # Start file system watching
-            self._watch_handle = ipcom().fswatch(self, self.path.parent, False)
+            self._watch_handle = FileWatcherService.instance().fswatch(
+                self, self.path.parent, False
+            )
             logger.debug("Started watching directory %s", self.path.parent)
 
             # Process any existing content
@@ -282,7 +284,7 @@ class TaskOutputs(FileSystemEventHandler):
         with self._lock:
             if self._watch_handle is not None:
                 try:
-                    ipcom().fsunwatch(self._watch_handle)
+                    FileWatcherService.instance().fsunwatch(self._watch_handle)
                 except KeyError:
                     pass  # Already unwatched
                 self._watch_handle = None

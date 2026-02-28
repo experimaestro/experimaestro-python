@@ -604,12 +604,12 @@ def monitor(
         )
 
     # Configure filesystem watcher type
-    from experimaestro.ipc import IPCom, WatcherType
+    from experimaestro.filewatcher import FileWatcherService, WatcherType
 
     if watcher != "auto":
-        IPCom.set_watcher_type(WatcherType(watcher), polling_interval)
+        FileWatcherService.configure(WatcherType(watcher), polling_interval)
     elif polling_interval != 1.0:
-        IPCom.set_watcher_type(WatcherType.POLLING, polling_interval)
+        FileWatcherService.configure(WatcherType.POLLING, polling_interval)
 
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
@@ -697,12 +697,12 @@ def ssh_monitor(
         experimaestro experiments ssh-monitor host /workspace --remote-xpm /opt/xpm/bin/experimaestro
     """
     # Configure filesystem watcher type
-    from experimaestro.ipc import IPCom, WatcherType
+    from experimaestro.filewatcher import FileWatcherService, WatcherType
 
     if watcher != "auto":
-        IPCom.set_watcher_type(WatcherType(watcher), polling_interval)
+        FileWatcherService.configure(WatcherType(watcher), polling_interval)
     elif polling_interval != 1.0:
-        IPCom.set_watcher_type(WatcherType.POLLING, polling_interval)
+        FileWatcherService.configure(WatcherType.POLLING, polling_interval)
 
     from experimaestro.scheduler.remote.client import SSHStateProviderClient
 

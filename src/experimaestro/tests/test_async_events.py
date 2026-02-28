@@ -8,7 +8,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from experimaestro.ipc import AsyncEventBridge, AsyncFileSystemEventHandler
+from experimaestro.filewatcher import AsyncEventBridge, AsyncFileSystemEventHandler
 
 # Mark all tests in this module as token tests (async/locking related)
 pytestmark = [pytest.mark.anyio, pytest.mark.tokens]

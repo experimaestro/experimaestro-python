@@ -14,7 +14,7 @@ import hashlib
 
 from experimaestro.tokens import CounterToken
 from experimaestro.locking import LockError
-from experimaestro.ipc import AsyncEventBridge
+from experimaestro.filewatcher import AsyncEventBridge
 
 # Mark all tests in this module as token tests
 pytestmark = [pytest.mark.anyio, pytest.mark.tokens]

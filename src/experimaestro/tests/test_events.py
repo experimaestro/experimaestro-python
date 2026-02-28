@@ -805,3 +805,135 @@ class TestEventWriterReaderIntegration:
 
         # Should have no events (file 3 doesn't exist, and files 0-2 are below events_count)
         assert len(received_events) == 0
+
+
+# =============================================================================
+# Tests: EventReader with TailedFilePool integration
+# =============================================================================
+
+
+class TestEventReaderTailedPool:
+    """Tests for EventReader using TailedFilePool via DirectoryWatch"""
+
+    def test_event_reader_uses_tailed_pool(self, events_dir):
+        """Verify EventReader creates watches with tailing enabled"""
+        received_events: list[str] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            if isinstance(event, JobStateChangedEvent):
+                received_events.append(event.job_id)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+            )
+        )
+
+        reader.start_watching()
+        try:
+            # Verify watches have tailing enabled
+            assert reader._file_watcher is not None
+            assert reader._file_watcher._tailed_pool is not None
+
+            # Write events and process them via the tailed pool
+            event_file = events_dir / "events-0.jsonl"
+            with event_file.open("w") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(job_id=f"job-{i}", state="running")
+                    f.write(event.to_json() + "\n")
+
+            # Register entity and process
+            reader._followed_entities["test"] = reader.directories[0]
+            reader._process_file_change(event_file)
+
+            assert len(received_events) == 3
+        finally:
+            reader.stop_watching()
+
+    def test_event_reader_fd_limit_low(self, events_dir):
+        """With max_open_files=2, many event files still work correctly"""
+        received_events: list[str] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            if isinstance(event, JobStateChangedEvent):
+                received_events.append(event.job_id)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+            ),
+            max_open_files=2,
+        )
+
+        # Create many event files
+        num_files = 5
+        for file_num in range(num_files):
+            event_file = events_dir / f"events-{file_num}.jsonl"
+            with event_file.open("w") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(
+                        job_id=f"f{file_num}-job-{i}", state="running"
+                    )
+                    f.write(event.to_json() + "\n")
+
+        # Create status.json
+        status_file = events_dir / "status.json"
+        status_file.write_text(json.dumps({"events_count": 0}))
+
+        reader.start_watching()
+        try:
+            reader._followed_entities["test"] = reader.directories[0]
+
+            # Process last file (triggers processing all earlier files)
+            reader._process_file_change(events_dir / f"events-{num_files - 1}.jsonl")
+
+            # All events should be received despite low FD limit
+            assert len(received_events) == num_files * 3
+
+            # FD count should be at most 2
+            assert reader._file_watcher._tailed_pool.open_count <= 2
+        finally:
+            reader.stop_watching()
+
+    def test_event_reader_incremental_with_tailing(self, events_dir):
+        """Incremental reads via tailed pool work correctly"""
+        received_events: list[str] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            if isinstance(event, JobStateChangedEvent):
+                received_events.append(event.job_id)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+            )
+        )
+
+        reader.start_watching()
+        try:
+            reader._followed_entities["test"] = reader.directories[0]
+
+            # Write first batch
+            event_file = events_dir / "events-0.jsonl"
+            with event_file.open("w") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(job_id=f"batch1-{i}", state="running")
+                    f.write(event.to_json() + "\n")
+
+            reader._process_file_change(event_file)
+            assert len(received_events) == 3
+
+            # Write second batch (append)
+            with event_file.open("a") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(job_id=f"batch2-{i}", state="done")
+                    f.write(event.to_json() + "\n")
+
+            reader._process_file_change(event_file)
+            assert len(received_events) == 6
+
+            # Verify only batch2 events in the second read
+            batch2 = [e for e in received_events if e.startswith("batch2-")]
+            assert len(batch2) == 3
+        finally:
+            reader.stop_watching()

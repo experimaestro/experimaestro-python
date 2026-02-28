@@ -953,7 +953,7 @@ class EventLoopThread(threading.Thread):
         asyncio.set_event_loop(self._loop)
 
         # Set loop on AsyncEventBridge so file system events are routed here
-        from experimaestro.ipc import AsyncEventBridge
+        from experimaestro.filewatcher import AsyncEventBridge
 
         AsyncEventBridge.instance().set_loop(self._loop)
 
@@ -1119,20 +1119,20 @@ class TrackedDynamicResource(DynamicResource, ABC):
                     pass
 
         # Set up async file system watching
-        from .ipc import ipcom
+        from .filewatcher import FileWatcherService
 
         self.watchedpath = str(self.lock_folder.absolute())
         # Use weak reference handler to avoid preventing __del__ from being called
         handler = _WeakAsyncFSHandler(self)
-        self.watcher = ipcom().async_fswatch(handler, self.lock_folder, recursive=True)
+        self.watcher = FileWatcherService.instance().async_watch(
+            handler, self.lock_folder, recursive=True
+        )
         logger.debug("Watching %s", self.watchedpath)
 
     def __del__(self):
         if self.watcher is not None:
             logging.debug("Removing watcher on %s", self.watchedpath)
-            from .ipc import ipcom
-
-            ipcom().fsunwatch(self.watcher)
+            self.watcher.close()
             self.watcher = None
 
     def _ensure_primitives(self) -> None:
