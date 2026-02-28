@@ -177,6 +177,7 @@ class SlurmJobState:
         "NODE_FAIL": ProcessState.ERROR,
         "REVOKED": ProcessState.ERROR,
         "TIMEOUT": ProcessState.ERROR,
+        "PARTITION_TIME_LIMIT": ProcessState.ERROR,
         "CANCELLED": ProcessState.ERROR,
         "BOOT_FAIL": ProcessState.ERROR,
         "OUT_OF_MEMORY": ProcessState.ERROR,
