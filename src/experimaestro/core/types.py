@@ -380,9 +380,9 @@ class ObjectType(Type):
         from .arguments import TypeAnnotation
 
         if hasattr(self._original_type, "__annotations__"):
-            typekeys = set(
-                self._original_type.__dict__.get("__annotations__", {}).keys()
-            )
+            # Use __annotations__ property (not __dict__) for Python 3.14+
+            # compatibility (PEP 649: deferred annotation evaluation)
+            typekeys = set(self._original_type.__annotations__.keys())
             hints = get_type_hints(self._original_type, include_extras=True)
             for key, typehint in hints.items():
                 # Filter out hints from parent classes
@@ -558,7 +558,9 @@ class ObjectType(Type):
             try:
                 argument.type.validate(argument.default)
             except TypeError as e:
-                raise TypeError(f"Value {argument.default} is not valid for argument {argument.name}: {e}")
+                raise TypeError(
+                    f"Value {argument.default} is not valid for argument {argument.name}: {e}"
+                )
 
     def _check_override_type_compatibility(
         self, child_arg: Argument, parent_arg: Argument

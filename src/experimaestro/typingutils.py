@@ -1,4 +1,5 @@
 import sys
+import types
 import typing
 from typing import Generic, Protocol
 
@@ -28,21 +29,31 @@ def isgenericalias(typehint):
     return isinstance(typehint, GenericAlias)
 
 
+def _is_union(typehint):
+    """Returns True if typehint is a Union type.
+
+    Handles both typing.Union and types.UnionType (PEP 604, X | Y syntax).
+    Compatible with Python 3.10+ including 3.14 where Union representation changed.
+    """
+    return get_origin(typehint) is typing.Union or isinstance(typehint, types.UnionType)
+
+
 def get_union(typehint):
     """Return the list of types of a union (or the type itself if it is not an union)"""
-    if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
-        return typehint.__args__
+    if _is_union(typehint):
+        return get_args(typehint)
     return None
 
 
 def get_optional(typehint):
-    if isgenericalias(typehint) and typehint.__origin__ == typing.Union:
-        if len(typehint.__args__) == 2:
+    if _is_union(typehint):
+        args = get_args(typehint)
+        if len(args) == 2:
             for ix in (0, 1):
-                argtype = typehint.__args__[ix]
+                argtype = args[ix]
                 origin = get_origin(argtype) or argtype
                 if issubclass(origin, type(None)):
-                    return typehint.__args__[1 - ix]
+                    return args[1 - ix]
     return None
 
 
