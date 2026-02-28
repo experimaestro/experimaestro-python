@@ -204,7 +204,6 @@ class ExperimentsList(Widget):
         table.add_column("Run", key="run")
         table.add_column("#", key="runs", width=3)
         table.add_column("Host", key="host")
-        table.add_column("Jobs", key="jobs")
         table.add_column("Status", key="status")
         table.add_column("Started", key="started")
         table.add_column("Duration", key="duration")
@@ -293,8 +292,6 @@ class ExperimentsList(Widget):
             else:
                 status = "Empty"
 
-            jobs_text = f"{finished}/{total}"
-
             # Format started time
             if exp.started_at:
                 started = exp.started_at.strftime("%Y-%m-%d %H:%M")
@@ -349,7 +346,6 @@ class ExperimentsList(Widget):
                 run_id,
                 runs_count,
                 hostname,
-                jobs_text,
                 status,
                 started,
                 duration,
@@ -386,7 +382,6 @@ class ExperimentsList(Widget):
                         run_id,
                         runs_count,
                         hostname,
-                        jobs_text,
                         status,
                         started,
                         duration,
@@ -396,7 +391,6 @@ class ExperimentsList(Widget):
                     table.update_cell(exp_id, "run", run_id, update_width=True)
                     table.update_cell(exp_id, "runs", runs_count, update_width=True)
                     table.update_cell(exp_id, "host", hostname, update_width=True)
-                    table.update_cell(exp_id, "jobs", jobs_text, update_width=True)
                     table.update_cell(exp_id, "status", status, update_width=True)
                     table.update_cell(exp_id, "started", started, update_width=True)
                     table.update_cell(exp_id, "duration", duration, update_width=True)

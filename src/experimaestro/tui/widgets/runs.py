@@ -40,10 +40,9 @@ class RunsList(Widget):
         """Initialize the runs table"""
         table = self.query_one("#runs-table", DataTable)
         table.add_column("Run ID", key="run_id")
-        table.add_column("Status", key="status", width=12)
+        table.add_column("Status", key="status", width=15)
         table.add_column("Tags", key="tags", width=15)
         table.add_column("Host", key="host")
-        table.add_column("Jobs", key="jobs", width=10)
         table.add_column("Started", key="started")
         table.add_column("Duration", key="duration", width=12)
 
@@ -79,9 +78,12 @@ class RunsList(Widget):
         self.runs = self.state_provider.get_experiment_runs(self.experiment_id)
 
         for run in self.runs:
-            # Format status with icon
+            # Format status with jobs info when running
             if run.status == "active":
-                status = "▶ Active"
+                jobs_parts = [f"{run.finished_jobs}/{run.total_jobs}"]
+                if run.failed_jobs > 0:
+                    jobs_parts.append(f"{run.failed_jobs}✗")
+                status = f"▶ {' '.join(jobs_parts)}"
             elif run.status == "completed":
                 status = "✓ Done"
             elif run.status == "failed":
@@ -93,11 +95,6 @@ class RunsList(Widget):
             run_id_display = run.run_id
             if run.run_id == self.current_run_id:
                 run_id_display = f"★ {run.run_id}"
-
-            # Format jobs
-            jobs_text = f"{run.finished_jobs}/{run.total_jobs}"
-            if run.failed_jobs > 0:
-                jobs_text += f" ({run.failed_jobs}✗)"
 
             # Format tags
             tags_text = ", ".join(run.run_tags) if run.run_tags else "-"
@@ -124,7 +121,6 @@ class RunsList(Widget):
                 status,
                 tags_text,
                 hostname,
-                jobs_text,
                 started,
                 duration,
                 key=run.run_id,

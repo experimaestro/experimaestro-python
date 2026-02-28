@@ -268,11 +268,22 @@ class SSHStateProviderServer:
     # Request Handlers
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _experiment_to_dict(exp) -> Dict:
+        """Serialize experiment with job_infos for RPC transmission"""
+        data = exp.state_dict()
+        # Include job_infos (stored in jobs.jsonl, not in state_dict)
+        if hasattr(exp, "job_infos"):
+            data["job_infos"] = {
+                job_id: info.to_dict() for job_id, info in exp.job_infos.items()
+            }
+        return data
+
     def _handle_get_experiments(self, params: Dict) -> list:
         """Handle get_experiments request"""
         since = deserialize_datetime(params.get("since"))
         experiments = self._state_provider.get_experiments(since=since)
-        return [exp.state_dict() for exp in experiments]
+        return [self._experiment_to_dict(exp) for exp in experiments]
 
     def _handle_get_experiment(self, params: Dict) -> Optional[Dict]:
         """Handle get_experiment request"""
@@ -283,7 +294,7 @@ class SSHStateProviderServer:
         experiment = self._state_provider.get_experiment(experiment_id)
         if experiment is None:
             return None
-        return experiment.state_dict()
+        return self._experiment_to_dict(experiment)
 
     def _handle_get_experiment_runs(self, params: Dict) -> list:
         """Handle get_experiment_runs request"""
@@ -292,7 +303,7 @@ class SSHStateProviderServer:
             raise TypeError("experiment_id is required")
 
         runs = self._state_provider.get_experiment_runs(experiment_id)
-        return [run.state_dict() for run in runs]
+        return [self._experiment_to_dict(run) for run in runs]
 
     def _handle_get_jobs(self, params: Dict) -> list:
         """Handle get_jobs request"""

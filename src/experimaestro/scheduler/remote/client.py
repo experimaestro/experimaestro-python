@@ -866,10 +866,11 @@ class SSHStateProviderClient(OfflineStateProvider):
             return None
         return self._get_or_load_experiment(result)
 
-    def get_experiment_runs(self, experiment_id: str) -> List[Dict]:
+    def get_experiment_runs(self, experiment_id: str) -> list[BaseExperiment]:
         """Get all runs for an experiment"""
         params = {"experiment_id": experiment_id}
-        return self._call_sync(RPCMethod.GET_EXPERIMENT_RUNS, params)
+        result = self._call_sync(RPCMethod.GET_EXPERIMENT_RUNS, params)
+        return [self._get_or_load_experiment(d) for d in result]
 
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current run ID for an experiment"""
@@ -1232,8 +1233,6 @@ class SSHStateProviderClient(OfflineStateProvider):
                 pass
 
         # Update counts
-        if "total_jobs" in d:
-            exp._total_jobs = d["total_jobs"]
         if "finished_jobs" in d:
             exp._finished_jobs = d["finished_jobs"]
         if "failed_jobs" in d:

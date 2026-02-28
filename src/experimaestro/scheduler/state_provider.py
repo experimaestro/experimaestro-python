@@ -1418,6 +1418,15 @@ class MockExperiment(BaseExperiment):
                 k: MockService.from_full_state_dict(v) for k, v in services_data.items()
             }
 
+        # Parse job_infos (included in RPC responses, not in status.json)
+        job_infos_data = d.get("job_infos", {})
+        job_infos = {
+            job_id: ExperimentJobInformation.from_dict(info)
+            if isinstance(info, dict)
+            else info
+            for job_id, info in job_infos_data.items()
+        } or None
+
         return cls(
             workdir=workdir,
             run_id=run_id,
@@ -1426,6 +1435,7 @@ class MockExperiment(BaseExperiment):
             hostname=d.get("hostname"),
             started_at=deserialize_to_datetime(d.get("started_at")),
             ended_at=deserialize_to_datetime(d.get("ended_at")),
+            job_infos=job_infos,
             services=services,
             dependencies=d.get("dependencies", {}),
             finished_jobs=d.get("finished_jobs", 0),
@@ -1490,11 +1500,12 @@ class MockExperiment(BaseExperiment):
 
             # In merge mode, use existing state if already set
             if not (merge_mode and event.job_id in self._job_states):
+                previous_state = self._job_states.get(event.job_id)
                 self._job_states[event.job_id] = job_state
 
-                # Update finished/failed counters when jobs complete
-                # In merge mode, counters were likely already incremented in status.json
-                if not merge_mode:
+                # Update counters only when state actually changes
+                # (duplicate events in events.jsonl must not double-count)
+                if not merge_mode and previous_state != job_state:
                     if event.state == "done":
                         self._finished_jobs += 1
                     elif event.state == "error":
