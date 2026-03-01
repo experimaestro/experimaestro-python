@@ -18,6 +18,7 @@ from experimaestro.scheduler.state_status import (
     JobStateChangedEvent,
     JobProgressEvent,
     ExperimentUpdatedEvent,
+    task_id_hash,
 )
 
 # Mark all tests in this module as state tests
@@ -467,12 +468,13 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            # Create job events file in .events/jobs/{task_id}/event-{job_id}-{count}.jsonl
+            # Create job events file in .events/jobs/{hash8}-{job_id}-{count}.jsonl
             task_id = "my.test.task"
             job_id = "test-job-123"
-            task_dir = mock_workspace / ".events" / "jobs" / task_id
-            task_dir.mkdir(parents=True, exist_ok=True)
-            events_file = task_dir / f"event-{job_id}-0.jsonl"
+            jobs_dir = mock_workspace / ".events" / "jobs"
+            jobs_dir.mkdir(parents=True, exist_ok=True)
+            h = task_id_hash(task_id)
+            events_file = jobs_dir / f"{h}-{job_id}-0.jsonl"
 
             # Write job state changed event (from job process)
             with open(events_file, "w") as f:
@@ -507,12 +509,13 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            # Create job events file in .events/jobs/{task_id}/event-{job_id}-{count}.jsonl
+            # Create job events file in .events/jobs/{hash8}-{job_id}-{count}.jsonl
             task_id = "my.progress.task"
             job_id = "test-job-progress"
-            task_dir = mock_workspace / ".events" / "jobs" / task_id
-            task_dir.mkdir(parents=True, exist_ok=True)
-            events_file = task_dir / f"event-{job_id}-0.jsonl"
+            jobs_dir = mock_workspace / ".events" / "jobs"
+            jobs_dir.mkdir(parents=True, exist_ok=True)
+            h = task_id_hash(task_id)
+            events_file = jobs_dir / f"{h}-{job_id}-0.jsonl"
 
             # Write job progress event
             with open(events_file, "w") as f:
@@ -760,8 +763,9 @@ class TestJobStateFromJobEvents:
         (xpm_dir / "status.json").write_text(json.dumps(job_status))
 
         # Create job event file with "running" state
-        job_events_dir = workspace / ".events" / "jobs" / task_id
+        job_events_dir = workspace / ".events" / "jobs"
         job_events_dir.mkdir(parents=True, exist_ok=True)
+        h = task_id_hash(task_id)
 
         running_event = {
             "timestamp": 1768752100.0,
@@ -776,7 +780,7 @@ class TestJobStateFromJobEvents:
             "progress": [],
             "event_type": "JobStateChangedEvent",
         }
-        event_file = job_events_dir / f"event-{job_id}-0.jsonl"
+        event_file = job_events_dir / f"{h}-{job_id}-0.jsonl"
         event_file.write_text(json.dumps(running_event) + "\n")
 
         # Initialize provider - should discover job events and update state
@@ -1063,8 +1067,11 @@ class TestJobEventWriterIntegration:
             )
 
             # Verify no event files exist yet
-            events_dir = workspace_path / ".events" / "jobs" / task_id
-            assert not events_dir.exists() or not list(events_dir.glob("event-*.jsonl"))
+            events_dir = workspace_path / ".events" / "jobs"
+            h = task_id_hash(task_id)
+            assert not events_dir.exists() or not list(
+                events_dir.glob(f"{h}-{job_id}-*.jsonl")
+            )
 
             # Write first event - should create event file and update status
             event = JobProgressEvent(job_id=job_id, level=0, progress=0.1)
@@ -1080,7 +1087,7 @@ class TestJobEventWriterIntegration:
             )
 
             # Verify first event file was created
-            first_event_file = events_dir / f"event-{job_id}-0.jsonl"
+            first_event_file = events_dir / f"{h}-{job_id}-0.jsonl"
             assert first_event_file.exists(), "First event file should be created"
 
             # Write 5 more events (total 6, triggers rotation after 5th)
@@ -1097,7 +1104,7 @@ class TestJobEventWriterIntegration:
             )
 
             # Verify second event file was created
-            second_event_file = events_dir / f"event-{job_id}-1.jsonl"
+            second_event_file = events_dir / f"{h}-{job_id}-1.jsonl"
             assert second_event_file.exists(), (
                 "Second event file should be created after rotation"
             )

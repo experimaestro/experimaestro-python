@@ -42,6 +42,7 @@ from experimaestro.scheduler.state_status import (
     JobStateChangedEvent,
     WatchedDirectory,
     job_entity_id_extractor,
+    task_id_hash,
 )
 from experimaestro.scheduler.state_provider import CarbonMetricsData
 
@@ -527,7 +528,7 @@ class Scheduler(StateProvider, threading.Thread):
             reader = EventReader(
                 WatchedDirectory(
                     path=jobs_dir,
-                    glob_pattern="*/event-*-*.jsonl",
+                    glob_pattern="*-*-*.jsonl",
                     entity_id_extractor=job_entity_id_extractor,
                     on_created=self._on_job_created,
                     on_event=self._on_job_event,
@@ -687,7 +688,7 @@ class Scheduler(StateProvider, threading.Thread):
         # file gets deleted (removing it from polling), but follow() returns
         # early since the entity is already registered.
         expected_file = (
-            dir_config.path / job.task_id / f"event-{job.identifier}-0.jsonl"
+            dir_config.path / f"{task_id_hash(job.task_id)}-{job.identifier}-0.jsonl"
         )
         reader.ensure_file_polled(expected_file)
 

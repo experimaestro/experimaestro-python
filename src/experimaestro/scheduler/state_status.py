@@ -11,14 +11,16 @@ Key components:
 
 File structure:
 - workspace/.events/experiments/{experiment-id}/events-{count}.jsonl
-- workspace/.events/jobs/{task-id}/event-{job-id}-{count}.jsonl
+- workspace/.events/jobs/{hash8}-{job-id}-{count}.jsonl  (flat, hash8 = SHA-256(task-id)[:8])
 - workspace/experiments/{experiment-id}/{run-id}/status.json
 - workspace/jobs/{task-id}/{job-id}/.experimaestro/information.json
 """
 
+import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -38,6 +40,14 @@ logger = logging.getLogger("xpm.state_status")
 
 # Status file version
 STATUS_VERSION = 1
+
+
+def task_id_hash(task_id: str) -> str:
+    """Return the first 8 characters of the SHA-256 hash of a task_id.
+
+    Used to create flat event file names: {hash8}-{job_id}-{count}.jsonl
+    """
+    return hashlib.sha256(task_id.encode()).hexdigest()[:8]
 
 
 # =============================================================================
@@ -641,7 +651,7 @@ class EventWriter(ABC):
 class JobEventWriter(EventWriter):
     """Writes events to job event files
 
-    Events are stored in: {workspace}/.events/jobs/{task_id}/event-{job_id}-{count}.jsonl
+    Events are stored in: {workspace}/.events/jobs/{hash8}-{job_id}-{count}.jsonl
     Permanent storage: {job_path}/.experimaestro/events/event-{count}.jsonl
 
     Use JobEventWriter.get() to obtain a cached instance — this ensures that
@@ -714,7 +724,7 @@ class JobEventWriter(EventWriter):
         self.task_id = task_id
         self.job_id = job_id
         self.job_path = job_path
-        self._events_dir = workspace_path / ".events" / "jobs" / task_id
+        self._events_dir = workspace_path / ".events" / "jobs"
 
         # Maintain a MockJob loaded from status.json so that on rotation
         # we can write back a fully up-to-date state (progress, carbon, etc.)
@@ -785,12 +795,14 @@ class JobEventWriter(EventWriter):
             logger.warning("Failed to write job state to status: %s", e)
 
     def _get_event_file_path(self) -> Path:
-        """Get the path for job event file with job_id in filename"""
-        return self.events_dir / f"event-{self.job_id}-{self._count}.jsonl"
+        """Get the path for job event file with hash8 prefix in filename"""
+        h = task_id_hash(self.task_id)
+        return self.events_dir / f"{h}-{self.job_id}-{self._count}.jsonl"
 
     def _get_temp_event_file_path(self, count: int) -> Path:
         """Get path for temporary event file at a specific count"""
-        return self.events_dir / f"event-{self.job_id}-{count}.jsonl"
+        h = task_id_hash(self.task_id)
+        return self.events_dir / f"{h}-{self.job_id}-{count}.jsonl"
 
 
 class ExperimentEventWriter(EventWriter):
@@ -919,31 +931,37 @@ def default_entity_id_extractor(path: Path) -> Optional[str]:
     return path.parent.name
 
 
-def job_entity_id_extractor(path: Path) -> Optional[str]:
-    """For jobs: entity_id is "{task_id}:{job_id}" extracted from path
+# Regex for new flat format: {hash8}-{job_id}-{count}.jsonl
+# hash8 = 8 hex chars, job_id = typically 64 hex chars, count = digits
+# Uses non-greedy match + last dash before digits to handle job_ids with dashes
+_JOB_EVENT_FLAT_RE = re.compile(r"([0-9a-f]{8})-(.+)-(\d+)\.jsonl$")
 
-    Path format: {base_dir}/{task_id}/event-{job_id}-{count}.jsonl
-    Returns: "{task_id}:{job_id}" to provide both pieces of info to callbacks
+# Regex for old nested format: event-{job_id}-{count}.jsonl
+_JOB_EVENT_OLD_RE = re.compile(r"event-(.+)-(\d+)\.jsonl$")
+
+
+def job_entity_id_extractor(path: Path) -> str | None:
+    """For jobs: entity_id is "{hash8}:{job_id}" extracted from path
+
+    New flat format: {base_dir}/{hash8}-{job_id}-{count}.jsonl
+    Old nested format: {base_dir}/{task_id}/event-{job_id}-{count}.jsonl
+
+    Returns: "{hash8}:{job_id}"
     """
-    # e.g., .events/jobs/my.task/event-abc123-0.jsonl -> "my.task:abc123"
     name = path.name
-    if not name.startswith("event-"):
-        return None
 
-    # Extract task_id from parent directory
-    task_id = path.parent.name
+    # Try new flat format first
+    m = _JOB_EVENT_FLAT_RE.match(name)
+    if m:
+        return f"{m.group(1)}:{m.group(2)}"
 
-    # Remove "event-" prefix and ".jsonl" suffix
-    # Format: event-{job_id}-{count}.jsonl
-    rest = name[6:]  # Remove "event-"
-    if rest.endswith(".jsonl"):
-        rest = rest[:-6]  # Remove ".jsonl"
+    # Backwards compat: old nested format
+    m = _JOB_EVENT_OLD_RE.match(name)
+    if m:
+        parent_task_id = path.parent.name
+        h = task_id_hash(parent_task_id)
+        return f"{h}:{m.group(1)}"
 
-    # Now rest is "{job_id}-{count}", split on last "-" to get job_id
-    parts = rest.rsplit("-", 1)
-    if len(parts) == 2:
-        job_id = parts[0]
-        return f"{task_id}:{job_id}"
     return None
 
 
@@ -1130,9 +1148,19 @@ class EventReader:
     @staticmethod
     def _is_event_file(path: Path) -> bool:
         """Check if path is an event file (experiment or job)"""
+        name = path.name
+        if not name.endswith(".jsonl") or name.startswith("."):
+            return False
         # Experiment events: events-{count}.jsonl
-        # Job events: event-{job_id}-{count}.jsonl
-        return path.suffix == ".jsonl" and path.name.startswith(("events-", "event-"))
+        if name.startswith("events-"):
+            return True
+        # New flat job events: {hash8}-{job_id}-{count}.jsonl
+        if _JOB_EVENT_FLAT_RE.match(name):
+            return True
+        # Old job events: event-{job_id}-{count}.jsonl
+        if name.startswith("event-"):
+            return True
+        return False
 
     def _on_file_deleted(self, path: Path) -> None:
         """Handle file deletion event from FileWatcher"""
@@ -1488,14 +1516,13 @@ class EventReader:
     def _extract_file_number(self, path: Path) -> int | None:
         """Extract the file number from event file name.
 
-        E.g., "events-2.jsonl" -> 2, "event-abc123-10.jsonl" -> 10
+        E.g., "events-2.jsonl" -> 2, "abcd1234-abc123...-10.jsonl" -> 10,
+        "event-abc123-10.jsonl" -> 10 (old format)
         Returns None if the file name doesn't match the expected pattern.
         """
-        import re
-
         name = path.name
-        # Match events-{number}.jsonl (experiment) or event-{id}-{number}.jsonl (job)
-        match = re.match(r"events?-(?:.+-)?(\d+)\.jsonl$", name)
+        # Match any format ending in -{number}.jsonl
+        match = re.match(r".*-(\d+)\.jsonl$", name)
         if match:
             return int(match.group(1))
         return None
@@ -1503,13 +1530,13 @@ class EventReader:
     def _extract_file_prefix(self, path: Path) -> str | None:
         """Extract the filename prefix before the count number.
 
-        E.g., "events-2.jsonl" -> "events-", "event-abc123-10.jsonl" -> "event-abc123-"
+        E.g., "events-2.jsonl" -> "events-",
+        "abcd1234-abc123...-10.jsonl" -> "abcd1234-abc123...-",
+        "event-abc123-10.jsonl" -> "event-abc123-" (old format)
         Returns None if the file name doesn't match.
         """
-        import re
-
         name = path.name
-        match = re.match(r"(events?-(?:.+-)?)\d+\.jsonl$", name)
+        match = re.match(r"(.*-)\d+\.jsonl$", name)
         if match:
             return match.group(1)
         return None
@@ -1835,16 +1862,15 @@ class JobProgressReader:
         # Extract task_id and job_id from path
         self.job_id = job_path.name
         self.task_id = job_path.parent.name
-        # Progress events are stored in workspace/.events/jobs/{task_id}/
-        self._events_dir = (
-            job_path.parent.parent.parent / ".events" / "jobs" / self.task_id
-        )
+        # Progress events are stored in workspace/.events/jobs/
+        self._events_dir = job_path.parent.parent.parent / ".events" / "jobs"
 
     def get_event_files(self) -> list[Path]:
         """Get all event files for this job"""
         if not self._events_dir.exists():
             return []
-        return sorted(self._events_dir.glob("events-*.jsonl"))
+        h = task_id_hash(self.task_id)
+        return sorted(self._events_dir.glob(f"{h}-{self.job_id}-*.jsonl"))
 
     def read_progress_events(self) -> list[JobProgressEvent]:
         """Read all progress events from event files
@@ -1944,6 +1970,8 @@ __all__ = [
     "WatchedDirectory",
     "PermanentStorageResolver",
     "job_entity_id_extractor",
+    "task_id_hash",
+    "_JOB_EVENT_FLAT_RE",
     "JobProgressReader",
     # Callback types
     "EntityEventCallback",

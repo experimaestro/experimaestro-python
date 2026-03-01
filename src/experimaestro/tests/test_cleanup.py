@@ -7,18 +7,20 @@ from pathlib import Path
 
 from experimaestro.locking import create_file_lock
 from experimaestro.scheduler.cleanup import _check_orphaned_job_events
+from experimaestro.scheduler.state_status import task_id_hash
 
 
 TASK_ID = "my.module.MyTask"
-JOB_ID = "abc123def456"
+JOB_ID = "abc123def456" + "0" * 52  # 64 hex chars
 SCRIPTNAME = "MyTask"
 
 
 def _create_event_file(workspace: Path, task_id: str, job_id: str) -> Path:
-    """Create a fake event file in .events/jobs/{task_id}/"""
-    events_dir = workspace / ".events" / "jobs" / task_id
+    """Create a fake event file in .events/jobs/ (flat format)"""
+    events_dir = workspace / ".events" / "jobs"
     events_dir.mkdir(parents=True, exist_ok=True)
-    event_file = events_dir / f"event-{job_id}-0.jsonl"
+    h = task_id_hash(task_id)
+    event_file = events_dir / f"{h}-{job_id}-0.jsonl"
     event_file.write_text(
         json.dumps({"type": "job_state_changed", "job_id": job_id, "state": "running"})
         + "\n"

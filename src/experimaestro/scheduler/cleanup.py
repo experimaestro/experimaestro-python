@@ -410,7 +410,7 @@ def _check_orphaned_job_events(
     """Check for orphaned job events
 
     Events are orphaned when:
-    - Event files exist in .events/jobs/{task_id}/event-{job_id}-*.jsonl
+    - Event files exist in .events/jobs/{hash8}-{job_id}-*.jsonl
     - status.json exists but has NO events_count field (or events_count is None)
 
     If auto_fix=True, events WITH events_count are consolidated automatically.
@@ -436,95 +436,125 @@ def _check_orphaned_job_events(
     if not jobs_dir.exists():
         return warnings, callbacks
 
+    from experimaestro.scheduler.state_status import (
+        _JOB_EVENT_FLAT_RE,
+        task_id_hash,
+    )
+
+    # Build hash8 → task_id mapping from the jobs directory
+    hash_to_task_id: dict[str, str] = {}
+    actual_jobs_dir = workspace_path / "jobs"
+    if actual_jobs_dir.exists():
+        for task_dir in actual_jobs_dir.iterdir():
+            if task_dir.is_dir():
+                h = task_id_hash(task_dir.name)
+                hash_to_task_id[h] = task_dir.name
+
+    # Collect event files: new flat format + old nested format
+    job_files_map: dict[tuple[str, str], list[Path]] = {}  # (task_id, job_id) -> files
+
+    # New flat format: {hash8}-{job_id}-{count}.jsonl directly in jobs_dir
+    for event_file in jobs_dir.glob("*-*-*.jsonl"):
+        m = _JOB_EVENT_FLAT_RE.match(event_file.name)
+        if m:
+            h, job_id = m.group(1), m.group(2)
+            task_id = hash_to_task_id.get(h)
+            if task_id:
+                key = (task_id, job_id)
+                job_files_map.setdefault(key, []).append(event_file)
+
+    # Backwards compat: old nested format {task_id}/event-{job_id}-{count}.jsonl
     for task_dir in jobs_dir.iterdir():
         if not task_dir.is_dir():
             continue
-
         task_id = task_dir.name
-        job_event_files = list(task_dir.glob("event-*-*.jsonl"))
-
-        # Group files by job_id
-        job_files_map: dict[str, list[Path]] = {}
-        for event_file in job_event_files:
-            # Extract job_id from filename: event-{job_id}-{count}.jsonl
+        for event_file in task_dir.glob("event-*-*.jsonl"):
             filename = event_file.name
             parts = filename.split("-")
             if len(parts) >= 3:
                 job_id = parts[1]
-                if job_id not in job_files_map:
-                    job_files_map[job_id] = []
-                job_files_map[job_id].append(event_file)
+                key = (task_id, job_id)
+                job_files_map.setdefault(key, []).append(event_file)
 
-        # Consolidate events for each job
-        for job_id, files in job_files_map.items():
-            job_path = workspace_path / "jobs" / task_id / job_id
+    # Consolidate events for each job
+    for (task_id, job_id), files in job_files_map.items():
+        job_path = workspace_path / "jobs" / task_id / job_id
 
-            if not job_path.exists():
-                # Job directory doesn't exist yet — the job may be in very
-                # early startup (before directory creation in aio_start).
-                # Skip cleanup; will be cleaned once the job finishes.
-                logger.debug(
-                    "Job directory %s does not exist, "
-                    "skipping event cleanup (job may be starting)",
-                    job_path,
-                )
-                continue
+        if not job_path.exists():
+            # Job directory doesn't exist yet — the job may be in very
+            # early startup (before directory creation in aio_start).
+            # Skip cleanup; will be cleaned once the job finishes.
+            logger.debug(
+                "Job directory %s does not exist, "
+                "skipping event cleanup (job may be starting)",
+                job_path,
+            )
+            continue
 
-            # Acquire the job lock before any cleanup. If the lock is held
-            # (job is in steps 1-4 or 5-6 of its lifecycle), skip this job.
-            scriptname = BaseJob.get_scriptname(task_id)
-            xpm_dir = BaseJob.get_xpm_dir(job_path)
-            lock_path = xpm_dir / f"{scriptname}.lock"
+        # Acquire the job lock before any cleanup. If the lock is held
+        # (job is in steps 1-4 or 5-6 of its lifecycle), skip this job.
+        scriptname = BaseJob.get_scriptname(task_id)
+        xpm_dir = BaseJob.get_xpm_dir(job_path)
+        lock_path = xpm_dir / f"{scriptname}.lock"
 
-            try:
-                lock = create_file_lock(lock_path, timeout=0)
-                with lock:
-                    # Lock acquired — but the job could still be in the gap
-                    # between scheduler releasing and process acquiring the lock
-                    if _is_job_active(job_path, task_id):
-                        logger.debug(
-                            "Job %s/%s is active (running/starting), "
-                            "skipping event cleanup",
-                            task_id,
-                            job_id,
-                        )
-                        continue
-
-                    # Job is truly finished — safe to clean up
-                    from experimaestro.scheduler.state_provider import MockJob
-
-                    job = MockJob.from_disk(
-                        job_path=job_path,
-                        task_id=task_id,
-                        job_id=job_id,
-                        workspace_path=workspace_path,
+        try:
+            lock = create_file_lock(lock_path, timeout=0)
+            with lock:
+                # Lock acquired — but the job could still be in the gap
+                # between scheduler releasing and process acquiring the lock
+                if _is_job_active(job_path, task_id):
+                    logger.debug(
+                        "Job %s/%s is active (running/starting), "
+                        "skipping event cleanup",
+                        task_id,
+                        job_id,
                     )
+                    continue
 
-                    if job.events_count is None:
-                        # Already consolidated, just delete event files
-                        if auto_fix:
-                            for event_file in files:
-                                try:
-                                    event_file.unlink()
-                                    logger.debug(
-                                        "Deleted already-consolidated event file: %s",
-                                        event_file,
-                                    )
-                                except OSError:
-                                    pass
-                    elif auto_fix:
-                        # Auto-consolidate events with events_count
-                        _consolidate_job_events(
-                            workspace_path, task_id, job_id, job, job_path
-                        )
-            except filelock.Timeout:
-                # Lock is held — job is actively running, skip cleanup
-                logger.debug(
-                    "Job %s/%s is locked (running), skipping event cleanup",
-                    task_id,
-                    job_id,
+                # Job is truly finished — safe to clean up
+                from experimaestro.scheduler.state_provider import MockJob
+
+                job = MockJob.from_disk(
+                    job_path=job_path,
+                    task_id=task_id,
+                    job_id=job_id,
+                    workspace_path=workspace_path,
                 )
-                continue
+
+                if job.events_count is None:
+                    # Already consolidated, just delete event files
+                    if auto_fix:
+                        for event_file in files:
+                            try:
+                                event_file.unlink()
+                                logger.debug(
+                                    "Deleted already-consolidated event file: %s",
+                                    event_file,
+                                )
+                            except OSError:
+                                pass
+                elif auto_fix:
+                    # Auto-consolidate events with events_count
+                    _consolidate_job_events(
+                        workspace_path, task_id, job_id, job, job_path
+                    )
+        except filelock.Timeout:
+            # Lock is held — job is actively running, skip cleanup
+            logger.debug(
+                "Job %s/%s is locked (running), skipping event cleanup",
+                task_id,
+                job_id,
+            )
+            continue
+
+    # Clean up empty old-format subdirectories
+    if auto_fix:
+        for task_dir in jobs_dir.iterdir():
+            if task_dir.is_dir():
+                try:
+                    task_dir.rmdir()  # Only succeeds if empty
+                except OSError:
+                    pass
 
     return warnings, callbacks
 

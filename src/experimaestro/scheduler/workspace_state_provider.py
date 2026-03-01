@@ -174,7 +174,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 ),
                 WatchedDirectory(
                     path=self._jobs_dir,
-                    glob_pattern="*/event-*-*.jsonl",
+                    glob_pattern="*-*-*.jsonl",
                     entity_id_extractor=job_entity_id_extractor,
                     events_count_resolver=self._resolve_job_events_count,
                     on_created=self._on_job_created,
@@ -1056,10 +1056,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
         number >= events_count contain events not yet consolidated and are
         applied to the job in order.
         """
-        from experimaestro.scheduler.state_status import EventBase
+        from experimaestro.scheduler.state_status import EventBase, task_id_hash
 
-        events_dir = self._jobs_dir / task_id
-        if not events_dir.exists():
+        if not self._jobs_dir.exists():
             return
 
         # Determine events_count from status.json
@@ -1078,19 +1077,34 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if events_count is None:
             return
 
-        # Find and sort pending event files
-        prefix = f"event-{job_id}-"
-        event_files = sorted(
-            (
-                f
-                for f in events_dir.iterdir()
-                if f.name.startswith(prefix) and f.name.endswith(".jsonl")
-            ),
-            key=lambda p: p.name,
+        # Find pending event files (new flat format + old nested format)
+        h = task_id_hash(task_id)
+        new_prefix = f"{h}-{job_id}-"
+        old_prefix = f"event-{job_id}-"
+
+        event_files: list[Path] = []
+
+        # New flat format
+        event_files.extend(
+            f
+            for f in self._jobs_dir.iterdir()
+            if f.name.startswith(new_prefix)
+            and f.name.endswith(".jsonl")
+            and f.is_file()
         )
 
+        # Old nested format
+        old_dir = self._jobs_dir / task_id
+        if old_dir.exists():
+            event_files.extend(
+                f
+                for f in old_dir.iterdir()
+                if f.name.startswith(old_prefix) and f.name.endswith(".jsonl")
+            )
+
+        event_files.sort(key=lambda p: p.name)
+
         for event_file in event_files:
-            # Extract file number from name like event-{job_id}-{N}.jsonl
             try:
                 num = int(event_file.stem.rsplit("-", 1)[1])
             except (ValueError, IndexError):

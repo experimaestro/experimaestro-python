@@ -819,28 +819,27 @@ class BaseJob:
         """Clean up job event files, applying pending events first.
 
         1. If events_count is set, reads and applies events from that count onwards
-        2. Removes event files at .events/jobs/{task_id}/event-{job_id}-*.jsonl
+        2. Removes event files at .events/jobs/{hash8}-{job_id}-*.jsonl
         3. Sets events_count to None (all events processed)
 
         Called when a job is about to restart to ensure clean state while
         preserving carbon metrics and other event-based data.
         """
         import json
-        from experimaestro.scheduler.state_status import EventBase
+        from experimaestro.scheduler.state_status import EventBase, task_id_hash
 
         # Get paths for event files
         # job.path is workspace/jobs/task_id/job_id
         workspace_path = self.path.parent.parent.parent
-        events_dir = workspace_path / ".events" / "jobs" / self.task_id
+        events_dir = workspace_path / ".events" / "jobs"
+        h = task_id_hash(self.task_id)
 
         # Apply pending events if events_count is set
         if self.events_count is not None and events_dir.exists():
             try:
-                # Job events are stored as event-{job_id}-{count}.jsonl
-                # Read events from events_count onwards
                 count = self.events_count
                 while True:
-                    event_file = events_dir / f"event-{self.identifier}-{count}.jsonl"
+                    event_file = events_dir / f"{h}-{self.identifier}-{count}.jsonl"
                     if not event_file.exists():
                         break
 
@@ -875,9 +874,9 @@ class BaseJob:
         # Mark all events as processed
         self.events_count = None
 
-        # Find and delete old workspace event files for this job
+        # Find and delete new-format event files for this job
         if events_dir.exists():
-            pattern = f"event-{self.identifier}-*.jsonl"
+            pattern = f"{h}-{self.identifier}-*.jsonl"
             for event_file in events_dir.glob(pattern):
                 try:
                     event_file.unlink()
@@ -886,6 +885,28 @@ class BaseJob:
                     logger.warning(
                         "Failed to remove job event file %s: %s", event_file, e
                     )
+
+            # Backwards compat: also clean up old nested format
+            old_events_dir = events_dir / self.task_id
+            if old_events_dir.exists():
+                old_pattern = f"event-{self.identifier}-*.jsonl"
+                for event_file in old_events_dir.glob(old_pattern):
+                    try:
+                        event_file.unlink()
+                        logger.debug(
+                            "Removed old nested job event file: %s", event_file
+                        )
+                    except OSError as e:
+                        logger.warning(
+                            "Failed to remove job event file %s: %s",
+                            event_file,
+                            e,
+                        )
+                # Remove empty subdirectory
+                try:
+                    old_events_dir.rmdir()
+                except OSError:
+                    pass
 
         # Also delete permanent event files so they can be re-created
         # (with hardlinks) by the new run
