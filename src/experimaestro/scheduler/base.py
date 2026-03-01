@@ -503,11 +503,6 @@ class Scheduler(StateProvider, threading.Thread):
             if dependency.origin is not None:
                 dependency.origin.dependents.add(dependency)
 
-        # Replay any existing event files for this job (e.g., from a previous
-        # scheduler run). This ensures progress/carbon/start_time are up to date
-        # when picking up an already-running job on restart.
-        self._follow_job_events(job)
-
         return None
 
     def _start_job_event_reader(self, workspace_path: Path) -> None:
@@ -910,7 +905,12 @@ class Scheduler(StateProvider, threading.Thread):
         # Load existing job status if available (from previous run)
         # set_state(loading=True) properly handles experiment statistics
         job.load_from_disk()
-        logger.debug("Job state after load_from_disk: %s", job.state_dict())
+
+        # Replay any existing event files for this job (e.g., from a previous
+        # scheduler run). Must be AFTER load_from_disk() since that resets
+        # progress/carbon from status.json which may be stale.
+        self._follow_job_events(job)
+        logger.debug("Job state after load_from_disk + events: %s", job.state_dict())
 
         # Check if job is already done
         if job.state == JobState.DONE:
