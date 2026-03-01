@@ -908,6 +908,8 @@ class MockJob(BaseJob):
         transient: TransientMode = TransientMode.NONE,
         process: dict | None = None,
         carbon_metrics: CarbonMetricsData | None = None,
+        run_group_id: str | None = None,
+        previous_carbon_metrics: CarbonMetricsData | None = None,
     ):
         super().__init__()
         self.identifier = identifier
@@ -939,6 +941,8 @@ class MockJob(BaseJob):
         self.transient = transient
         self._process_dict = process
         self.carbon_metrics = carbon_metrics
+        self.run_group_id = run_group_id
+        self._previous_carbon_metrics = previous_carbon_metrics
 
     @property
     def state(self) -> JobState:
@@ -1088,6 +1092,12 @@ class MockJob(BaseJob):
         if carbon_dict:
             carbon_metrics = CarbonMetricsData(**carbon_dict)
 
+        # Restore previous carbon metrics if present
+        previous_carbon_metrics = None
+        prev_carbon_dict = d.get("previous_carbon_metrics")
+        if prev_carbon_dict:
+            previous_carbon_metrics = CarbonMetricsData(**prev_carbon_dict)
+
         return cls(
             identifier=identifier,
             task_id=task_id,
@@ -1103,6 +1113,8 @@ class MockJob(BaseJob):
             failure_reason=failure_reason,
             process=d.get("process"),
             carbon_metrics=carbon_metrics,
+            run_group_id=d.get("run_group_id"),
+            previous_carbon_metrics=previous_carbon_metrics,
         )
 
     @classmethod

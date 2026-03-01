@@ -1267,6 +1267,12 @@ class Scheduler(StateProvider, threading.Thread):
                     # Clean up old marker files (.done/.failed) from previous runs
                     self._cleanup_job_marker_files(job)
 
+                    # Generate run_group_id on first run (preserved across retries)
+                    if job.run_group_id is None:
+                        job.run_group_id = datetime.now().strftime("%Y%m%d-%H%M%S.%f")[
+                            :18
+                        ]
+
                     # Write metadata with submit and start time (after directory creation)
                     job.status_path.parent.mkdir(parents=True, exist_ok=True)
                     job.status_path.write_text(json.dumps(job.state_dict()))

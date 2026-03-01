@@ -432,6 +432,8 @@ class BaseJob:
     retry_count: int
     transient: "TransientMode"
     carbon_metrics: Optional["CarbonMetricsData"]
+    run_group_id: Optional[str]
+    _previous_carbon_metrics: Optional["CarbonMetricsData"]
     events_count: Optional[int]  # None = all events processed
     experiments: List["experiment"]  # Experiments this job belongs to
 
@@ -450,6 +452,8 @@ class BaseJob:
         self._process = None
         self._process_dict = None
         self.events_count: int | None = None
+        self.run_group_id: str | None = None
+        self._previous_carbon_metrics: "CarbonMetricsData | None" = None
         self.experiments: List = []
 
     @property
@@ -669,6 +673,23 @@ class BaseJob:
                 "is_final": carbon_metrics.is_final,
                 "written": carbon_metrics.written,
             }
+        # Include previous_carbon_metrics if available (for retry accumulation)
+        prev_carbon = getattr(self, "_previous_carbon_metrics", None)
+        if prev_carbon is not None:
+            result["previous_carbon_metrics"] = {
+                "co2_kg": prev_carbon.co2_kg,
+                "energy_kwh": prev_carbon.energy_kwh,
+                "cpu_power_w": prev_carbon.cpu_power_w,
+                "gpu_power_w": prev_carbon.gpu_power_w,
+                "ram_power_w": prev_carbon.ram_power_w,
+                "duration_s": prev_carbon.duration_s,
+                "region": prev_carbon.region,
+                "is_final": prev_carbon.is_final,
+                "written": prev_carbon.written,
+            }
+        # Include run_group_id if set
+        if self.run_group_id is not None:
+            result["run_group_id"] = self.run_group_id
         # Include events_count only if not None (None = all events processed)
         if self.events_count is not None:
             result["events_count"] = self.events_count
@@ -742,6 +763,8 @@ class BaseJob:
                 is_final=event.is_final,
                 written=event.written,
             )
+            if event.run_group_id:
+                self.run_group_id = event.run_group_id
             logger.debug(
                 "Applied carbon metrics to job %s: %.4f kg CO2",
                 self.identifier,
@@ -1135,6 +1158,27 @@ class BaseJob:
                 written=carbon_dict.get("written", False),
             )
 
+        # Load previous carbon metrics (for retry accumulation)
+        prev_carbon_dict = status_dict.get("previous_carbon_metrics")
+        if prev_carbon_dict is not None:
+            from experimaestro.carbon.utils import to_float
+            from experimaestro.scheduler.state_provider import CarbonMetricsData
+
+            self._previous_carbon_metrics = CarbonMetricsData(
+                co2_kg=to_float(prev_carbon_dict.get("co2_kg", 0.0)),
+                energy_kwh=to_float(prev_carbon_dict.get("energy_kwh", 0.0)),
+                cpu_power_w=to_float(prev_carbon_dict.get("cpu_power_w", 0.0)),
+                gpu_power_w=to_float(prev_carbon_dict.get("gpu_power_w", 0.0)),
+                ram_power_w=to_float(prev_carbon_dict.get("ram_power_w", 0.0)),
+                duration_s=to_float(prev_carbon_dict.get("duration_s", 0.0)),
+                region=prev_carbon_dict.get("region", ""),
+                is_final=prev_carbon_dict.get("is_final", False),
+                written=prev_carbon_dict.get("written", False),
+            )
+
+        # Load run_group_id
+        self.run_group_id = status_dict.get("run_group_id")
+
     def _load_fallback_timestamps(self) -> None:
         """Load timestamps from directory mtime as fallback"""
         try:
@@ -1162,8 +1206,31 @@ class BaseJob:
             pass
 
     def _clear_transient_fields(self) -> None:
-        """Clear transient fields when job will run. Override in subclasses."""
+        """Clear transient fields when job will run. Override in subclasses.
+
+        Note: run_group_id is NOT cleared — it persists across retries.
+        """
         self._progress = []
+        # Preserve current carbon metrics for accumulation across retries
+        if self.carbon_metrics is not None:
+            prev = self._previous_carbon_metrics
+            if prev is not None:
+                # Accumulate: add current to existing previous
+                from experimaestro.scheduler.state_provider import CarbonMetricsData
+
+                self._previous_carbon_metrics = CarbonMetricsData(
+                    co2_kg=prev.co2_kg + self.carbon_metrics.co2_kg,
+                    energy_kwh=prev.energy_kwh + self.carbon_metrics.energy_kwh,
+                    cpu_power_w=self.carbon_metrics.cpu_power_w,
+                    gpu_power_w=self.carbon_metrics.gpu_power_w,
+                    ram_power_w=self.carbon_metrics.ram_power_w,
+                    duration_s=prev.duration_s + self.carbon_metrics.duration_s,
+                    region=self.carbon_metrics.region,
+                    is_final=False,
+                    written=False,
+                )
+            else:
+                self._previous_carbon_metrics = self.carbon_metrics
         self.carbon_metrics = None
         self.endtime = None
         self.starttime = None

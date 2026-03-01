@@ -66,6 +66,9 @@ class CarbonRecord:
     region: str
     """Region code used for carbon intensity."""
 
+    run_group_id: str = ""
+    """Run group ID linking records from the same retry sequence."""
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -80,6 +83,7 @@ class CarbonRecord:
             "ram_power_w": self.ram_power_w,
             "duration_s": self.duration_s,
             "region": self.region,
+            "run_group_id": self.run_group_id,
         }
 
     @classmethod
@@ -97,6 +101,7 @@ class CarbonRecord:
             ram_power_w=data.get("ram_power_w", 0.0),
             duration_s=data.get("duration_s", 0.0),
             region=data.get("region", ""),
+            run_group_id=data.get("run_group_id", ""),
         )
 
     def to_json_line(self) -> str:

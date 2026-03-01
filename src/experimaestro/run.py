@@ -19,7 +19,7 @@ import experimaestro.taskglobals as taskglobals
 import atexit
 
 if TYPE_CHECKING:
-    from experimaestro.scheduler.state_provider import MockJob
+    from experimaestro.scheduler.state_provider import CarbonMetricsData, MockJob
 
 
 def parse_commandline(argv=None):
@@ -73,6 +73,8 @@ def _init_carbon_tracking(
     task_path: Path,
     job_id: str,
     carbon_settings: dict | None = None,
+    previous_carbon: "CarbonMetricsData | None" = None,
+    run_group_id: str = "",
 ) -> tuple["CarbonTracker | None", "threading.Thread | None", "threading.Event | None"]:
     """Initialize carbon tracking for a job.
 
@@ -128,6 +130,8 @@ def _init_carbon_tracking(
                 job_id,
                 settings.report_interval_s,
                 stop_event,
+                previous_carbon,
+                run_group_id,
             ),
             daemon=True,
             name="carbon-reporter",
@@ -148,6 +152,8 @@ def _carbon_reporter_loop(
     job_id: str,
     interval_s: float,
     stop_event: threading.Event,
+    previous_carbon: "CarbonMetricsData | None" = None,
+    run_group_id: str = "",
 ):
     """Background thread that periodically emits carbon metrics events.
 
@@ -158,6 +164,8 @@ def _carbon_reporter_loop(
         job_id: Job identifier.
         interval_s: Reporting interval in seconds.
         stop_event: Event to signal thread termination.
+        previous_carbon: Carbon metrics from previous runs (for accumulation).
+        run_group_id: Run group ID linking retries together.
     """
     from experimaestro.scheduler.state_status import CarbonMetricsEvent, JobEventWriter
 
@@ -172,26 +180,32 @@ def _carbon_reporter_loop(
         logger.warning("Failed to create carbon event writer: %s", e)
         return
 
+    # Offsets from previous runs for accumulation
+    prev_co2 = previous_carbon.co2_kg if previous_carbon else 0.0
+    prev_energy = previous_carbon.energy_kwh if previous_carbon else 0.0
+    prev_duration = previous_carbon.duration_s if previous_carbon else 0.0
+
     try:
         while not stop_event.wait(timeout=interval_s):
             try:
                 metrics = tracker.get_current_metrics()
                 event = CarbonMetricsEvent(
                     job_id=job_id,
-                    co2_kg=metrics.co2_kg,
-                    energy_kwh=metrics.energy_kwh,
+                    co2_kg=metrics.co2_kg + prev_co2,
+                    energy_kwh=metrics.energy_kwh + prev_energy,
                     cpu_power_w=metrics.cpu_power_w,
                     gpu_power_w=metrics.gpu_power_w,
                     ram_power_w=metrics.ram_power_w,
-                    duration_s=metrics.duration_s,
+                    duration_s=metrics.duration_s + prev_duration,
                     region=metrics.region,
                     is_final=False,
+                    run_group_id=run_group_id,
                 )
                 event_writer.write_event(event)
                 logger.debug(
                     "Carbon metrics: %.4f kg CO2, %.4f kWh",
-                    metrics.co2_kg,
-                    metrics.energy_kwh,
+                    metrics.co2_kg + prev_co2,
+                    metrics.energy_kwh + prev_energy,
                 )
             except Exception as e:
                 logger.debug("Failed to emit carbon metrics: %s", e)
@@ -201,14 +215,15 @@ def _carbon_reporter_loop(
             metrics = tracker.get_current_metrics()
             event = CarbonMetricsEvent(
                 job_id=job_id,
-                co2_kg=metrics.co2_kg,
-                energy_kwh=metrics.energy_kwh,
+                co2_kg=metrics.co2_kg + prev_co2,
+                energy_kwh=metrics.energy_kwh + prev_energy,
                 cpu_power_w=metrics.cpu_power_w,
                 gpu_power_w=metrics.gpu_power_w,
                 ram_power_w=metrics.ram_power_w,
-                duration_s=metrics.duration_s,
+                duration_s=metrics.duration_s + prev_duration,
                 region=metrics.region,
                 is_final=False,
+                run_group_id=run_group_id,
             )
             event_writer.write_event(event)
             logger.debug("Final periodic carbon metrics written before shutdown")
@@ -230,6 +245,8 @@ def _stop_carbon_tracking(
     task_id: str,
     start_time: datetime,
     mock_job: "MockJob",
+    previous_carbon: "CarbonMetricsData | None" = None,
+    run_group_id: str = "",
 ):
     """Stop carbon tracking and record final metrics.
 
@@ -243,6 +260,8 @@ def _stop_carbon_tracking(
         task_id: Task type identifier.
         start_time: Job start time.
         mock_job: MockJob to apply the carbon event to.
+        previous_carbon: Carbon metrics from previous runs (for accumulation).
+        run_group_id: Run group ID linking retries together.
     """
     if tracker is None:
         return
@@ -263,7 +282,7 @@ def _stop_carbon_tracking(
             metrics.duration_s,
         )
 
-        # Record to carbon storage first
+        # Record to carbon storage first (per-run values, NOT accumulated)
         from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
 
         record = CarbonRecord(
@@ -278,6 +297,7 @@ def _stop_carbon_tracking(
             ram_power_w=metrics.ram_power_w,
             duration_s=metrics.duration_s,
             region=metrics.region,
+            run_group_id=run_group_id,
         )
 
         written = False
@@ -297,21 +317,27 @@ def _stop_carbon_tracking(
         )
 
         task_id_from_path = task_path.parent.name
+        # Compute accumulated values for the event (includes previous runs)
+        prev_co2 = previous_carbon.co2_kg if previous_carbon else 0.0
+        prev_energy = previous_carbon.energy_kwh if previous_carbon else 0.0
+        prev_duration = previous_carbon.duration_s if previous_carbon else 0.0
+
         event_writer = JobEventWriter.get(
             workspace_path, task_id_from_path, job_id, 0, job_path=task_path
         )
         try:
             event = CarbonMetricsEvent(
                 job_id=job_id,
-                co2_kg=metrics.co2_kg,
-                energy_kwh=metrics.energy_kwh,
+                co2_kg=metrics.co2_kg + prev_co2,
+                energy_kwh=metrics.energy_kwh + prev_energy,
                 cpu_power_w=metrics.cpu_power_w,
                 gpu_power_w=metrics.gpu_power_w,
                 ram_power_w=metrics.ram_power_w,
-                duration_s=metrics.duration_s,
+                duration_s=metrics.duration_s + prev_duration,
                 region=metrics.region,
                 is_final=True,
                 written=written,
+                run_group_id=run_group_id,
             )
             event_writer.write_event(event)
 
@@ -364,6 +390,8 @@ class TaskRunner:
         self._carbon_reporter_thread = None
         self._carbon_stop_event = None
         self._job_start_time: datetime | None = None
+        self._previous_carbon: "CarbonMetricsData | None" = None
+        self._run_group_id: str = ""
 
         # MockJob for tracking state (loaded from status.json)
         self._mock_job: "MockJob | None" = None
@@ -426,6 +454,8 @@ class TaskRunner:
                         task_id,
                         self._job_start_time,
                         self._mock_job,
+                        previous_carbon=self._previous_carbon,
+                        run_group_id=self._run_group_id,
                     )
                 self._carbon_tracker = None
 
@@ -588,6 +618,16 @@ class TaskRunner:
                         logger.debug("Failed to load params for carbon tracking: %s", e)
 
                 if workspace_path:
+                    # Load previous carbon metrics from status.json for accumulation
+                    try:
+                        init_mock = self._load_mock_job()
+                        self._previous_carbon = init_mock._previous_carbon_metrics
+                        self._run_group_id = init_mock.run_group_id or ""
+                    except Exception as e:
+                        logger.debug(
+                            "Failed to load previous carbon from status.json: %s", e
+                        )
+
                     (
                         self._carbon_tracker,
                         self._carbon_reporter_thread,
@@ -597,6 +637,8 @@ class TaskRunner:
                         workdir,
                         job_id,
                         carbon_settings=carbon_settings,
+                        previous_carbon=self._previous_carbon,
+                        run_group_id=self._run_group_id,
                     )
 
                 # Acquire dynamic dependency locks while running the task

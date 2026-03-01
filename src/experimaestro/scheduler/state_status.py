@@ -321,6 +321,9 @@ class CarbonMetricsEvent(JobEventBase):
     written: bool = False
     """True if the carbon record was successfully written to CarbonStorage."""
 
+    run_group_id: str = ""
+    """Run group ID linking metrics from the same retry sequence."""
+
 
 # -----------------------------------------------------------------------------
 # Experiment Events

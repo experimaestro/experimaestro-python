@@ -485,3 +485,259 @@ def test_remaining_time_none_with_mock_launcher():
         # Verify the task received None
         assert output_file.exists()
         assert output_file.read_text() == "None"
+
+
+# =============================================================================
+# Tests for run_group_id and carbon accumulation across retries
+# =============================================================================
+
+
+def test_run_group_id_in_state_dict():
+    """Unit test: run_group_id round-trips through state_dict / from_state_dict"""
+    from experimaestro.scheduler.state_provider import MockJob
+
+    job = MockJob(
+        identifier="test-job-id",
+        task_id="test.Task",
+        path=Path("/tmp/test"),
+        state="done",
+        submittime=None,
+        starttime=None,
+        endtime=None,
+        progress=[],
+        updated_at="",
+        run_group_id="20260301-143022.45",
+    )
+
+    d = job.state_dict()
+    assert d["run_group_id"] == "20260301-143022.45"
+
+    # Round-trip through from_state_dict
+    job2 = MockJob.from_state_dict(d, Path("/tmp"))
+    assert job2.run_group_id == "20260301-143022.45"
+
+
+def test_run_group_id_none_not_in_state_dict():
+    """Unit test: run_group_id=None is not included in state_dict"""
+    from experimaestro.scheduler.state_provider import MockJob
+
+    job = MockJob(
+        identifier="test-job-id",
+        task_id="test.Task",
+        path=Path("/tmp/test"),
+        state="done",
+        submittime=None,
+        starttime=None,
+        endtime=None,
+        progress=[],
+        updated_at="",
+    )
+
+    d = job.state_dict()
+    assert "run_group_id" not in d
+
+
+def test_previous_carbon_in_state_dict():
+    """Unit test: previous_carbon_metrics round-trips through state_dict / from_state_dict"""
+    from experimaestro.scheduler.state_provider import CarbonMetricsData, MockJob
+
+    prev_carbon = CarbonMetricsData(
+        co2_kg=0.5,
+        energy_kwh=1.0,
+        duration_s=3600.0,
+        region="US",
+    )
+
+    job = MockJob(
+        identifier="test-job-id",
+        task_id="test.Task",
+        path=Path("/tmp/test"),
+        state="done",
+        submittime=None,
+        starttime=None,
+        endtime=None,
+        progress=[],
+        updated_at="",
+        previous_carbon_metrics=prev_carbon,
+    )
+
+    d = job.state_dict()
+    assert "previous_carbon_metrics" in d
+    assert d["previous_carbon_metrics"]["co2_kg"] == 0.5
+    assert d["previous_carbon_metrics"]["energy_kwh"] == 1.0
+
+    # Round-trip through from_state_dict
+    job2 = MockJob.from_state_dict(d, Path("/tmp"))
+    assert job2._previous_carbon_metrics is not None
+    assert job2._previous_carbon_metrics.co2_kg == 0.5
+    assert job2._previous_carbon_metrics.energy_kwh == 1.0
+    assert job2._previous_carbon_metrics.duration_s == 3600.0
+
+
+def test_clear_transient_fields_preserves_run_group_id():
+    """Test that _clear_transient_fields preserves run_group_id"""
+    from experimaestro.scheduler.state_provider import CarbonMetricsData, MockJob
+
+    job = MockJob(
+        identifier="test-job-id",
+        task_id="test.Task",
+        path=Path("/tmp/test"),
+        state="running",
+        submittime=None,
+        starttime=None,
+        endtime=None,
+        progress=[],
+        updated_at="",
+        run_group_id="20260301-143022.45",
+        carbon_metrics=CarbonMetricsData(co2_kg=0.5, energy_kwh=1.0, duration_s=3600.0),
+    )
+
+    job._clear_transient_fields()
+
+    # run_group_id should be preserved
+    assert job.run_group_id == "20260301-143022.45"
+    # carbon_metrics should be cleared and moved to _previous
+    assert job.carbon_metrics is None
+    assert job._previous_carbon_metrics is not None
+    assert job._previous_carbon_metrics.co2_kg == 0.5
+
+
+def test_clear_transient_fields_accumulates_previous_carbon():
+    """Test that _clear_transient_fields accumulates carbon across multiple clears"""
+    from experimaestro.scheduler.state_provider import CarbonMetricsData, MockJob
+
+    job = MockJob(
+        identifier="test-job-id",
+        task_id="test.Task",
+        path=Path("/tmp/test"),
+        state="running",
+        submittime=None,
+        starttime=None,
+        endtime=None,
+        progress=[],
+        updated_at="",
+        previous_carbon_metrics=CarbonMetricsData(
+            co2_kg=0.3, energy_kwh=0.5, duration_s=1800.0
+        ),
+        carbon_metrics=CarbonMetricsData(co2_kg=0.2, energy_kwh=0.3, duration_s=1200.0),
+    )
+
+    job._clear_transient_fields()
+
+    # Previous should be accumulated (0.3 + 0.2 = 0.5)
+    assert job._previous_carbon_metrics is not None
+    assert abs(job._previous_carbon_metrics.co2_kg - 0.5) < 1e-9
+    assert abs(job._previous_carbon_metrics.energy_kwh - 0.8) < 1e-9
+    assert abs(job._previous_carbon_metrics.duration_s - 3000.0) < 1e-9
+
+
+def test_carbon_metrics_event_run_group_id():
+    """Test that CarbonMetricsEvent carries run_group_id"""
+    from experimaestro.scheduler.state_status import CarbonMetricsEvent
+
+    event = CarbonMetricsEvent(
+        job_id="test-job",
+        co2_kg=0.1,
+        energy_kwh=0.2,
+        run_group_id="20260301-143022.45",
+    )
+
+    assert event.run_group_id == "20260301-143022.45"
+
+    # Test JSON round-trip
+    json_str = event.to_json()
+    from experimaestro.scheduler.state_status import EventBase
+
+    event2 = EventBase.from_dict(json.loads(json_str))
+    assert isinstance(event2, CarbonMetricsEvent)
+    assert event2.run_group_id == "20260301-143022.45"
+
+
+def test_carbon_record_run_group_id():
+    """Test that CarbonRecord carries run_group_id"""
+    from experimaestro.carbon.storage import CarbonRecord
+
+    record = CarbonRecord(
+        job_id="test-job",
+        task_id="test.Task",
+        started_at="2026-03-01T14:30:00",
+        ended_at="2026-03-01T15:30:00",
+        co2_kg=0.1,
+        energy_kwh=0.2,
+        cpu_power_w=50.0,
+        gpu_power_w=100.0,
+        ram_power_w=10.0,
+        duration_s=3600.0,
+        region="US",
+        run_group_id="20260301-143022.45",
+    )
+
+    d = record.to_dict()
+    assert d["run_group_id"] == "20260301-143022.45"
+
+    record2 = CarbonRecord.from_dict(d)
+    assert record2.run_group_id == "20260301-143022.45"
+
+
+def test_apply_event_sets_run_group_id():
+    """Test that apply_event picks up run_group_id from CarbonMetricsEvent"""
+    from experimaestro.scheduler.state_provider import MockJob
+    from experimaestro.scheduler.state_status import CarbonMetricsEvent
+
+    job = MockJob(
+        identifier="test-job-id",
+        task_id="test.Task",
+        path=Path("/tmp/test"),
+        state="running",
+        submittime=None,
+        starttime=None,
+        endtime=None,
+        progress=[],
+        updated_at="",
+    )
+
+    event = CarbonMetricsEvent(
+        job_id="test-job-id",
+        co2_kg=0.1,
+        energy_kwh=0.2,
+        run_group_id="20260301-143022.45",
+    )
+
+    job.apply_event(event)
+
+    assert job.run_group_id == "20260301-143022.45"
+    assert job.carbon_metrics is not None
+    assert job.carbon_metrics.co2_kg == 0.1
+
+
+def test_resumable_task_gets_run_group_id():
+    """Integration test: resumable task that times out gets a run_group_id"""
+    with TemporaryExperiment("run_group_id_test", timeout_multiplier=9) as xp:
+        checkpoint_file = xp.workspace.path / "checkpoint.txt"
+        launcher = DirectLauncher(LocalConnector())
+
+        task_config = CountingResumableTask.C(checkpoint=checkpoint_file)
+
+        job = MockTimeoutCommandLineJob(
+            None,
+            task_config,
+            workspace=xp.workspace,
+            launcher=launcher,
+            max_retries=5,
+            timeout_count=1,
+            checkpoint_file=checkpoint_file,
+        )
+
+        task_config.__xpm__.job = job
+
+        from experimaestro.scheduler import experiment
+
+        experiment.CURRENT.submit(job)
+
+        state = job.wait()
+        assert state == JobState.DONE
+        assert job.retry_count == 1
+
+        # run_group_id should be set
+        assert job.run_group_id is not None
+        assert len(job.run_group_id) == 18  # YYYYMMDD-HHMMSS.MM
