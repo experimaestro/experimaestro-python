@@ -31,6 +31,7 @@ from experimaestro.scheduler.interfaces import (
     BaseService,
     JobStateUnscheduled,
     JobStateWaiting,
+    STATE_NAME_TO_JOBSTATE,
     deserialize_to_datetime,
 )
 from experimaestro.scheduler.state_provider import StateProvider
@@ -570,7 +571,14 @@ class Scheduler(StateProvider, threading.Thread):
         # Parse entity_id (full_id) to get job_id
         _task_id, job_id = BaseJob.parse_full_id(entity_id)
         # Only follow jobs that this scheduler is managing
-        return job_id in self.jobs
+        found = job_id in self.jobs
+        logger.debug(
+            "Job created event for %s (job_id=%s): %s",
+            entity_id,
+            job_id[:8] if job_id else "",
+            "accepted" if found else "rejected (not in scheduler)",
+        )
+        return found
 
     def _on_job_event(self, entity_id: str, event) -> None:
         """Handle job events from EventReader
@@ -608,7 +616,12 @@ class Scheduler(StateProvider, threading.Thread):
             )
 
         elif isinstance(event, JobStateChangedEvent):
-            # Update job timestamps from event (e.g., started_time from job process)
+            # Update job state from event (e.g., SCHEDULED→RUNNING from job process)
+            new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
+            if new_state is not None:
+                job.set_state(new_state)
+                self.notify_job_state(job)
+            # Update job timestamps from event
             if event.started_time and job.starttime is None:
                 job.starttime = deserialize_to_datetime(event.started_time)
             if event.ended_time and job.endtime is None:
@@ -659,12 +672,24 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Get the WatchedDirectory config from the reader and collect events
         # without triggering callbacks (replay=False)
-        for dir_config in reader.directories:
-            if dir_config.on_event == self._on_job_event:
-                events = reader.follow(entity_id, dir_config, replay=False)
+        dir_config = None
+        for dc in reader.directories:
+            if dc.on_event == self._on_job_event:
+                dir_config = dc
+                events = reader.follow(entity_id, dc, replay=False)
                 break
         else:
             return
+
+        # Always ensure the expected event file is polled. This is needed
+        # because: (1) on NFS/shared filesystems, watchdog doesn't detect
+        # remote file creation; (2) if the job is restarted, the old event
+        # file gets deleted (removing it from polling), but follow() returns
+        # early since the entity is already registered.
+        expected_file = (
+            dir_config.path / job.task_id / f"event-{job.identifier}-0.jsonl"
+        )
+        reader.ensure_file_polled(expected_file)
 
         if not events:
             return
@@ -1032,36 +1057,6 @@ class Scheduler(StateProvider, threading.Thread):
         # Wait for done handler to complete and notify exit condition
         return job.state
 
-    async def _set_job_state_from_process(self, job: Job, process: "Process") -> None:
-        """Set job state based on process state and wait until running.
-
-        Checks the process state and sets job to SCHEDULED or RUNNING accordingly.
-        If SCHEDULED, waits until the process starts running (or finishes).
-
-        Args:
-            job: The job to update
-            process: The process to check state on
-        """
-        from experimaestro.connectors import ProcessState
-
-        # Check initial process state
-        state = await process.aio_state()
-        if state == ProcessState.SCHEDULED:
-            job.set_state(JobState.SCHEDULED)
-            self.notify_job_state(job)
-
-            # Wait until running or finished (uses event-driven for SLURM)
-            state = await process.aio_wait_until_running()
-            if state == ProcessState.RUNNING:
-                job.set_state(JobState.RUNNING)
-                self.notify_job_state(job)
-                logger.info("Job %s started running", job.identifier[:8])
-            # If finished, state will be set later from marker files
-        else:
-            # Process is already running (or finished)
-            job.set_state(JobState.RUNNING)
-            self.notify_job_state(job)
-
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.
 
@@ -1069,8 +1064,6 @@ class Scheduler(StateProvider, threading.Thread):
             job: The job with a running process
             process: The process to wait for
         """
-        # Set initial state (SCHEDULED or RUNNING) and wait until running
-        await self._set_job_state_from_process(job, process)
 
         # And now, we wait...
         code = await process.aio_code()
@@ -1329,8 +1322,15 @@ class Scheduler(StateProvider, threading.Thread):
                     )
                     return JobState.ERROR
 
-            # Set initial state (SCHEDULED or RUNNING) and wait until running
-            await self._set_job_state_from_process(job, process)
+            # The job process will update this to RUNNING when it starts. We set
+            # it to SCHEDULED here to reflect that the job has been launched and
+            # is awaiting execution.
+            job.set_state(JobState.SCHEDULED)
+
+            # Pre-register the job entity with the event reader so that
+            # file watcher events are properly routed when the job process
+            # starts writing event files.
+            self._follow_job_events(job)
 
             # Wait for job to complete while holding locks
             try:

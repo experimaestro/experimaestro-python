@@ -81,16 +81,19 @@ class FileBasedProgressReporter:
             self.event_writer.write_event(event)
             self.event_writer.flush()
 
-    def eoj(self):
-        """End of job notification"""
+    def eoj(self, state: str = "done"):
+        """End of job notification
+
+        Args:
+            state: Final job state ("done" or "error")
+        """
         from experimaestro.scheduler.state_status import JobStateChangedEvent
         from datetime import datetime
 
         with self.lock:
-            # Write JobStateChangedEvent with state="done" to event file
             event = JobStateChangedEvent(
                 job_id=self.job_id,
-                state="done",
+                state=state,
                 ended_time=datetime.now().isoformat(),
             )
             self.event_writer.write_event(event)

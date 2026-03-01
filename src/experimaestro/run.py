@@ -406,6 +406,17 @@ class TaskRunner:
 
         return MockJob.from_disk(workdir, task_id, job_id)
 
+    def _update_status_running(self) -> None:
+        """Update status.json to 'running' state before writing event files."""
+        from experimaestro.scheduler.interfaces import JobState
+
+        try:
+            mock_job = self._load_mock_job()
+            mock_job.set_state(JobState.RUNNING)
+            mock_job.write_status()
+        except Exception as e:
+            logger.warning("Failed to update status.json to running: %s", e)
+
     def _write_status(self) -> None:
         """Write status.json from MockJob state (while still holding locks)."""
         if self._mock_job is None:
@@ -476,7 +487,9 @@ class TaskRunner:
             # in the run() method, not here
 
             if self.started:
-                report_eoj()
+                # Report final state: "error" if .failed exists, "done" otherwise
+                final_state = "error" if self.failedpath.exists() else "done"
+                report_eoj(final_state)
             logger.info("Finished cleanup")
 
     def handle_error(self, code, frame_type, reason: str = "failed", message: str = ""):
@@ -597,7 +610,10 @@ class TaskRunner:
                 rmfile(self.failedpath)
                 self.started = True
 
-                # Notify that the job has started
+                # Update status.json to "running" before writing events
+                self._update_status_running()
+
+                # Notify that the job has started (writes event file)
                 start_of_job()
 
                 # Initialize carbon tracking

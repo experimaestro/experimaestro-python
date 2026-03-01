@@ -611,6 +611,7 @@ class _DirectoryWatchHandler(FileSystemEventHandler):
             return
         watch = self._get_watch()
         if watch and watch._file_filter(Path(event.src_path)):
+            logger.debug("Watchdog on_modified: %s", event.src_path)
             watch._handle_file_change(Path(event.src_path), from_watchdog=True)
 
     def on_created(self, event):
@@ -619,6 +620,7 @@ class _DirectoryWatchHandler(FileSystemEventHandler):
         watch = self._get_watch()
         if watch and watch._file_filter(Path(event.src_path)):
             path = Path(event.src_path)
+            logger.debug("Watchdog on_created: %s", path)
             if watch._on_created:
                 try:
                     watch._on_created(path)

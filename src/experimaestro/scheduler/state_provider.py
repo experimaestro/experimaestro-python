@@ -951,14 +951,14 @@ class MockJob(BaseJob):
 
         Priority:
         1. _state if set from job events (_has_event_state=True)
-        2. _experiment_status if set by experiment
-        3. UNSCHEDULED as default
+        2. _experiment_status if set by experiment events
+        3. _state from status.json (may be stale but better than hardcoded default)
         """
         if self._has_event_state:
             return self._state
         if self._experiment_status is not None:
             return self._experiment_status
-        return JobState.UNSCHEDULED
+        return self._state
 
     @state.setter
     def state(self, new_state: JobState):
@@ -1024,20 +1024,19 @@ class MockJob(BaseJob):
             self.set_state(marker_state, loading=True)
             self._process_dict = None
 
-        # PID file exists — assume RUNNING without calling fromDefinition
+        # PID file exists — job is SCHEDULED or RUNNING.
+        # Trust status.json for the specific state; only infer RUNNING
+        # as fallback when status.json didn't provide a state.
         elif self.pidfile.exists():
             try:
                 self._process_dict = json.loads(self.pidfile.read_text())
-                self.set_state(JobState.RUNNING, loading=True)
+                if self._state == JobState.UNSCHEDULED:
+                    self.set_state(JobState.RUNNING, loading=True)
             except Exception:
                 pass
 
         # Set _has_event_state for reliable on-disk sources
-        if (
-            self.donefile.exists()
-            or self.failedfile.exists()
-            or (self.pidfile.exists() and self._state == JobState.RUNNING)
-        ):
+        if self.donefile.exists() or self.failedfile.exists() or self.pidfile.exists():
             self._has_event_state = True
 
     def apply_event(self, event: "EventBase") -> None:

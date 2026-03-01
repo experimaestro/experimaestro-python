@@ -1399,6 +1399,22 @@ class EventReader:
 
         return collected
 
+    def ensure_file_polled(self, path: Path) -> None:
+        """Ensure a file is being polled by the file watcher.
+
+        Adds the file to the watcher's polling list if not already tracked.
+        This is needed on shared/network filesystems where watchdog doesn't
+        detect remote file creation (e.g., NFS, GPFS, Lustre).
+
+        Args:
+            path: Path to the event file to ensure is polled
+        """
+        watch = self._find_watcher(path)
+        if watch:
+            watch.add_file(path)
+        elif self._file_watcher:
+            self._file_watcher.add_file(path)
+
     def _read_events_from_file(self, path: Path) -> list[EventBase]:
         """Read all events from a file without calling callbacks.
 
@@ -1509,11 +1525,15 @@ class EventReader:
         """
         entity_id = self._extract_entity_id(path)
         if not entity_id:
+            logger.debug("Could not extract entity_id from %s", path)
             return
 
         dir_config = self._find_dir_config(path)
         if not dir_config:
+            logger.debug("No dir_config found for %s", path)
             return
+
+        logger.debug("Processing file change for entity %s: %s", entity_id, path)
 
         # Check if this entity is being followed
         if entity_id not in self._followed_entities:

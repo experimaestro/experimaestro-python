@@ -91,9 +91,9 @@ class Reporter:
         self.levels: list[LevelInformation] = [LevelInformation(0, None, -1)]
         self.console = False
 
-    def eoj(self):
+    def eoj(self, state: str = "done"):
         """End of job notification"""
-        self.file_reporter.eoj()
+        self.file_reporter.eoj(state)
 
     def set_progress(
         self, progress: float, level: int, desc: Optional[str], console=False
@@ -156,9 +156,13 @@ def progress(value: float, level=0, desc: Optional[str] = None, console=False):
     Reporter.instance().set_progress(value, level, desc, console=console)
 
 
-def report_eoj():
-    """Notify that the job is over"""
-    Reporter.instance().eoj()
+def report_eoj(state: str = "done"):
+    """Notify that the job is over
+
+    Args:
+        state: Final job state ("done" or "error")
+    """
+    Reporter.instance().eoj(state)
 
 
 def start_of_job():

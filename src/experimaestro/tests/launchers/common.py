@@ -3,7 +3,6 @@ import sys
 import time
 import logging
 import asyncio
-from experimaestro.scheduler import JobState
 from experimaestro.connectors import Process, Redirect
 from experimaestro.launchers import Launcher
 from experimaestro import Task, Param
@@ -94,8 +93,8 @@ def takeback(launcher, datapath, txp1, txp2):
                 launcher=launcher
             )
 
-            logger.debug("Waiting for job to be running (scheduler)")
-            while result.__xpm__.job.state != JobState.RUNNING:
+            logger.debug("Waiting for job to be scheduled or running (scheduler)")
+            while not result.__xpm__.job.state.running():
                 time.sleep(0.1)
 
             logger.debug("OK, no we can notify the task")

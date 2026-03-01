@@ -289,9 +289,9 @@ class CommandLineJob(Job):
             json.dump(self._process.tospec(), fp)
 
         # Write status with process info
+        self.state = JobState.SCHEDULED
         self.status_path.write_text(json.dumps(self.state_dict()))
 
-        self.state = JobState.RUNNING
         logger.info("Process started (%s)", self._process)
         return self._process
 
