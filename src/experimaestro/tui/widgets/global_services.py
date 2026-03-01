@@ -2,6 +2,7 @@
 
 import logging
 
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -32,6 +33,7 @@ class GlobalServiceSyncs(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("Running Services", classes="section-title")
+        yield Static("Loading services...", id="services-loading")
         yield DataTable(id="global-services-table", cursor_type="row")
 
     def on_mount(self) -> None:
@@ -46,12 +48,47 @@ class GlobalServiceSyncs(Vertical):
         self.refresh_services()
 
     def refresh_services(self) -> None:
-        """Refresh the services list from state provider
+        """Refresh the services list from state provider (background)"""
+        try:
+            self.query_one("#global-services-table", DataTable)
+        except Exception:
+            return
+        # Show loading indicator
+        try:
+            self.query_one("#services-loading", Static).remove_class("hidden")
+        except Exception:
+            pass
+        self._load_services()
 
-        Sync status is provided by the service's sync_status property,
-        which SSHLocalService overrides to show actual sync state.
-        """
+    @work(thread=True, exclusive=True, group="services_load")
+    def _load_services(self) -> None:
+        """Load services in background thread"""
         from experimaestro.scheduler.services import ServiceState
+
+        try:
+            all_services = self.state_provider.get_services()
+            running_services = [
+                s
+                for s in all_services
+                if hasattr(s, "state") and s.state == ServiceState.RUNNING
+            ]
+            self.log.info(
+                f"GlobalServiceSyncs._load_services: got {len(running_services)} "
+                f"running services (out of {len(all_services)} total)"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load services: {e}")
+            running_services = []
+
+        self.app.call_from_thread(self._on_services_loaded, running_services)
+
+    def _on_services_loaded(self, running_services: list) -> None:
+        """Handle loaded services on main thread"""
+        # Hide loading indicator
+        try:
+            self.query_one("#services-loading", Static).add_class("hidden")
+        except Exception:
+            pass
 
         try:
             table = self.query_one("#global-services-table", DataTable)
@@ -63,91 +100,73 @@ class GlobalServiceSyncs(Vertical):
             return
 
         table.clear()
+        self._services.clear()
 
-        try:
-            # Get all services from state provider and filter to running only
-            all_services = self.state_provider.get_services()
-            running_services = [
-                s
-                for s in all_services
-                if hasattr(s, "state") and s.state == ServiceState.RUNNING
-            ]
+        for service in running_services:
+            service_id = service.id
+            state = service.state if hasattr(service, "state") else None
+            state_name = state.name if state else "UNKNOWN"
+
+            # Format experiment display: "exp_id (YYYY-MM-DD HH:MM)"
+            exp_id = service.experiment_id or "-"
+            run_id = service.run_id
+            if run_id and run_id != "dry-run" and len(run_id) >= 13:
+                # Parse YYYYMMDD_HHMMSS format
+                try:
+                    timestamp = (
+                        f"{run_id[0:4]}-{run_id[4:6]}-{run_id[6:8]} "
+                        f"{run_id[9:11]}:{run_id[11:13]}"
+                    )
+                    exp_display = f"{exp_id} ({timestamp})"
+                except (IndexError, ValueError):
+                    exp_display = f"{exp_id} ({run_id})" if run_id else exp_id
+            else:
+                exp_display = f"{exp_id} ({run_id})" if run_id else exp_id
+
             self.log.info(
-                f"GlobalServiceSyncs.refresh_services: got {len(running_services)} "
-                f"running services (out of {len(all_services)} total)"
+                f"  Service: {service_id}, state={state_name}, exp={exp_display}"
             )
 
-            # Clear services dict before repopulating
-            self._services.clear()
+            # Get description
+            description = ""
+            if hasattr(service, "description"):
+                try:
+                    description = service.description()
+                except Exception:
+                    description = service_id
 
-            for service in running_services:
-                service_id = service.id
-                state = service.state if hasattr(service, "state") else None
-                state_name = state.name if state else "UNKNOWN"
+            # Get sync status from service (SSHLocalService provides actual status)
+            sync_status = service.sync_status or "-"
 
-                # Format experiment display: "exp_id (YYYY-MM-DD HH:MM)"
-                exp_id = service.experiment_id or "-"
-                run_id = service.run_id
-                if run_id and run_id != "dry-run" and len(run_id) >= 13:
-                    # Parse YYYYMMDD_HHMMSS format
-                    try:
-                        timestamp = (
-                            f"{run_id[0:4]}-{run_id[4:6]}-{run_id[6:8]} "
-                            f"{run_id[9:11]}:{run_id[11:13]}"
-                        )
-                        exp_display = f"{exp_id} ({timestamp})"
-                    except (IndexError, ValueError):
-                        exp_display = f"{exp_id} ({run_id})" if run_id else exp_id
-                else:
-                    exp_display = f"{exp_id} ({run_id})" if run_id else exp_id
+            # Show error in URL column if there's one, otherwise show URL
+            error = service.error
+            if error:
+                url_or_error = f"⚠ {error}"
+            else:
+                url_or_error = getattr(service, "url", None) or "-"
 
-                self.log.info(
-                    f"  Service: {service_id}, state={state_name}, exp={exp_display}"
-                )
+            # State icon
+            state_icons = {
+                "RUNNING": "▶",
+                "STOPPED": "⏹",
+                "STARTING": "⏳",
+                "STOPPING": "⏳",
+                "ERROR": "⚠",
+            }
+            state_icon = state_icons.get(state_name, "?")
 
-                # Get description
-                description = ""
-                if hasattr(service, "description"):
-                    try:
-                        description = service.description()
-                    except Exception:
-                        description = service_id
+            service_key = f"{exp_id}:{service_id}"
+            table.add_row(
+                exp_display,
+                description or service_id,
+                f"{state_icon} {state_name}",
+                sync_status,
+                url_or_error,
+                key=service_key,
+            )
 
-                # Get sync status from service (SSHLocalService provides actual status)
-                sync_status = service.sync_status or "-"
-
-                # Show error in URL column if there's one, otherwise show URL
-                error = service.error
-                if error:
-                    url_or_error = f"⚠ {error}"
-                else:
-                    url_or_error = getattr(service, "url", None) or "-"
-
-                # State icon
-                state_icons = {
-                    "RUNNING": "▶",
-                    "STOPPED": "⏹",
-                    "STARTING": "⏳",
-                    "STOPPING": "⏳",
-                    "ERROR": "⚠",
-                }
-                state_icon = state_icons.get(state_name, "?")
-
-                service_key = f"{exp_id}:{service_id}"
-                table.add_row(
-                    exp_display,
-                    description or service_id,
-                    f"{state_icon} {state_name}",
-                    sync_status,
-                    url_or_error,
-                    key=service_key,
-                )
-
-                # Store service for quick access
-                self._services[service_key] = service
-
-        except Exception as e:
-            logger.warning(f"Failed to refresh global services: {e}")
+            # Store service for quick access
+            self._services[service_key] = service
 
         # Update tab title
         self._update_tab_title()

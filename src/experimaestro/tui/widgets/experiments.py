@@ -2,9 +2,10 @@
 
 from datetime import datetime
 from typing import Optional
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.widgets import DataTable, Label
+from textual.widgets import DataTable, Label, Static
 from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
@@ -192,12 +193,14 @@ class ExperimentsList(Widget):
         # Full experiments table
         with Container(id="experiments-table-container"):
             yield Label("Experiments", classes="section-title")
+            yield Static("Loading experiments...", id="experiments-loading")
             yield DataTable(id="experiments-table", cursor_type="row")
 
     def on_mount(self) -> None:
         """Initialize the experiments table"""
         # Start expanded
         self.add_class("expanded")
+        self._initial_load = True
 
         table = self.query_one("#experiments-table", DataTable)
         table.add_column("ID", key="id")
@@ -210,43 +213,67 @@ class ExperimentsList(Widget):
         table.add_column("CO2", key="co2", width=8)
         self.refresh_experiments()
 
-        # If there's only one experiment, automatically select it
-        if len(self.experiments) == 1:
-            exp = self.experiments[0]
-            exp_id = exp.experiment_id
-            run_id = getattr(exp, "current_run_id", None)
-            self.current_experiment = exp_id
-            self.collapse_to_experiment(exp_id)
-            self.post_message(ExperimentSelected(exp_id, run_id))
-
-    def refresh_experiments(self) -> None:  # noqa: C901
-        """Refresh the experiments list from state provider"""
+    def refresh_experiments(self) -> None:
+        """Refresh the experiments list from state provider (background)"""
         # Guard: ensure the table is mounted before querying
         try:
-            table = self.query_one("#experiments-table", DataTable)
+            self.query_one("#experiments-table", DataTable)
         except Exception:
-            # Widget not yet fully composed, will be called again from on_mount
             return
-
-        # Guard: ensure columns have been added (on_mount may not have run yet)
-        if len(table.columns) == 0:
-            return
-
-        self.log.info(
-            f"State provider: {type(self.state_provider).__name__}, is_live={self.state_provider.is_live}"
-        )
-
+        # Show loading indicator
         try:
-            self.experiments = self.state_provider.get_experiments()
+            self.query_one("#experiments-loading", Static).remove_class("hidden")
+        except Exception:
+            pass
+        self._load_experiments()
+
+    @work(thread=True, exclusive=True, group="experiments_load")
+    def _load_experiments(self) -> None:
+        """Load experiments in background thread"""
+        try:
+            experiments = self.state_provider.get_experiments()
             self.log.debug(
-                f"Refreshing experiments: found {len(self.experiments)} experiments"
+                f"Refreshing experiments: found {len(experiments)} experiments"
             )
         except Exception as e:
             self.log.error(f"ERROR refreshing experiments: {e}")
             import traceback
 
             self.log.error(traceback.format_exc())
-            self.experiments = []
+            experiments = []
+
+        # Fetch runs counts in background too (only for offline monitoring)
+        runs_counts: dict[str, str] = {}
+        if not self.state_provider.is_live:
+            for exp in experiments:
+                try:
+                    runs = self.state_provider.get_experiment_runs(exp.experiment_id)
+                    runs_counts[exp.experiment_id] = str(len(runs))
+                except Exception as e:
+                    self.log.error(f"Error getting runs for {exp.experiment_id}: {e}")
+                    runs_counts[exp.experiment_id] = "-"
+
+        self.app.call_from_thread(self._on_experiments_loaded, experiments, runs_counts)
+
+    def _on_experiments_loaded(  # noqa: C901
+        self, experiments: list, runs_counts: dict[str, str]
+    ) -> None:
+        """Handle loaded experiments on main thread"""
+        # Hide loading indicator
+        try:
+            self.query_one("#experiments-loading", Static).add_class("hidden")
+        except Exception:
+            pass
+
+        self.experiments = experiments
+
+        try:
+            table = self.query_one("#experiments-table", DataTable)
+        except Exception:
+            return
+
+        # Guard: ensure columns have been added (on_mount may not have run yet)
+        if len(table.columns) == 0:
             return
 
         # Sort experiments based on selected column
@@ -315,17 +342,8 @@ class ExperimentsList(Widget):
             # Get run_id
             run_id = getattr(exp, "current_run_id", None) or "-"
 
-            # Get runs count for this experiment (only for offline monitoring)
-            runs_count = "-"
-            if not self.state_provider.is_live:
-                try:
-                    runs = self.state_provider.get_experiment_runs(exp_id)
-                    runs_count = str(len(runs))
-                except Exception as e:
-                    self.log.error(f"Error getting runs for {exp_id}: {e}")
-                    import traceback
-
-                    self.log.error(traceback.format_exc())
+            # Get runs count (already fetched in background)
+            runs_count = runs_counts.get(exp_id, "-")
 
             # Get CO2 impact (use 'latest' aggregation if available)
             co2_text = "-"
@@ -405,6 +423,16 @@ class ExperimentsList(Widget):
         # Update collapsed header if viewing an experiment
         if self.collapsed and self.current_experiment:
             self._update_collapsed_header(self.current_experiment)
+
+        # Auto-select if there's only one experiment on initial load
+        if getattr(self, "_initial_load", False) and len(self.experiments) == 1:
+            self._initial_load = False
+            exp = self.experiments[0]
+            exp_id = exp.experiment_id
+            run_id = getattr(exp, "current_run_id", None)
+            self.current_experiment = exp_id
+            self.collapse_to_experiment(exp_id)
+            self.post_message(ExperimentSelected(exp_id, run_id))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle experiment selection"""

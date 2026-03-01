@@ -312,20 +312,15 @@ class JobDetailView(Widget):
         self._update_job_display(job)
 
     def refresh_job_detail(self) -> None:
-        """Refresh job details from state provider"""
+        """Refresh job details from state provider (always background)"""
         if not self.current_job_id or not self.current_task_id:
             return
 
-        if self.state_provider.is_remote:
-            self._load_job_detail(
-                self.current_job_id,
-                self.current_task_id,
-                self.current_experiment_id or "",
-            )
-        else:
-            job = self.state_provider.get_job(self.current_task_id, self.current_job_id)
-            if job:
-                self._update_job_display(job)
+        self._load_job_detail(
+            self.current_job_id,
+            self.current_task_id,
+            self.current_experiment_id or "",
+        )
 
     def _update_job_display(self, job) -> None:
         """Update the display with job data"""
@@ -863,22 +858,11 @@ class JobsTable(Vertical):
         self._refresh_jobs_with_data(jobs)
 
     def refresh_jobs(self) -> None:
-        """Refresh the jobs list from state provider
-
-        For remote providers, this runs in background. For local, it's synchronous.
-        """
+        """Refresh the jobs list from state provider (always background)"""
         if not self.current_experiment:
             return
 
-        if self.state_provider.is_remote:
-            # Use background worker for remote
-            self._load_experiment_data(self.current_experiment, self.current_run_id)
-        else:
-            # Synchronous for local (fast)
-            jobs = self.state_provider.get_jobs(
-                self.current_experiment, run_id=self.current_run_id
-            )
-            self._refresh_jobs_with_data(jobs)
+        self._load_experiment_data(self.current_experiment, self.current_run_id)
 
     def _refresh_jobs_with_data(self, jobs: list) -> None:  # noqa: C901
         """Refresh the jobs display with provided job data"""
