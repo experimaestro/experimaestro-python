@@ -26,6 +26,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -859,6 +860,26 @@ class ExperimentEventWriter(EventWriter):
         if run_dir is None:
             return None
         return run_dir / "status.json"
+
+    def _write_events_count_to_status(self) -> None:
+        """Write the full experiment state to status.json on rotation.
+
+        Instead of just patching events_count, write the experiment's complete
+        state_dict(). This ensures services, job counts, and other event-derived
+        state are persisted so monitors loading from status.json see current state.
+        """
+        status_path = self.status_path
+        if status_path is None or not status_path.exists():
+            return
+
+        try:
+            state = self.experiment.state_dict()
+            state["events_count"] = self._count
+            state["last_updated"] = datetime.now().isoformat()
+            with status_path.open("w") as f:
+                json.dump(state, f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Failed to write experiment state to status: %s", e)
 
     def init_status(self) -> None:
         """Initialize status.json for a new run

@@ -82,6 +82,7 @@ class StateListener:
         self.xp = xp
         self.experiment_id = experiment_id
         self.run_id = run_id
+        self._last_job_states: dict[str, str] = {}
 
     def on_job_submitted(self, job):
         """Called when job is submitted"""
@@ -92,6 +93,12 @@ class StateListener:
         """Write job state change event to experiment event file"""
         # Use the centralized state_changed_event() method from BaseJob
         event = job.state_changed_event()
+        # Skip writing if the job state hasn't actually changed
+        # (filters out progress-only updates that don't change state)
+        last_state = self._last_job_states.get(event.job_id)
+        if last_state == event.state:
+            return
+        self._last_job_states[event.job_id] = event.state
         # Write to experiment event file
         self.event_writer.write_event(event)
 

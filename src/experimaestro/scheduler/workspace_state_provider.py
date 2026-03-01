@@ -648,6 +648,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             if run_dir.exists():
                 exp = MockExperiment.from_disk(run_dir, self.workspace_path)
                 if exp is not None:
+                    self._apply_pending_experiment_events(exp, experiment_id)
                     cache_key = (experiment_id, run_id)
                     with self._experiment_cache_lock:
                         self._experiment_cache[cache_key] = exp
