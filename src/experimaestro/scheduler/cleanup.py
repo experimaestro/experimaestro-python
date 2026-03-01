@@ -34,10 +34,11 @@ def perform_workspace_cleanup(
 
     This function scans the workspace for cleanup scenarios:
     1. Orphaned experiment events (events without events_count in status.json)
-    2. Orphaned job events (events without events_count in status.json)
-    3. Stray jobs (running jobs not in latest run of any experiment)
-    4. Orphan jobs (finished jobs not in any run)
-    5. Orphan partials (partial directories not referenced by any job)
+    2. Stale PID files (dead processes with leftover .pid files)
+    3. Orphaned job events (events without events_count in status.json)
+    4. Stray jobs (running jobs not in latest run of any experiment)
+    5. Orphan jobs (finished jobs not in any run)
+    6. Orphan partials (partial directories not referenced by any job)
 
     Args:
         workspace_path: Path to workspace directory
@@ -65,7 +66,11 @@ def perform_workspace_cleanup(
     warnings.extend(experiment_warnings)
     callbacks.update(experiment_callbacks)
 
-    # 2. Check for orphaned job events
+    # 2. Clean up stale PID files (auto-fix only, no warnings)
+    if auto_fix:
+        _cleanup_stale_pid_files(workspace_path)
+
+    # 3. Check for orphaned job events
     job_warnings, job_callbacks = _check_orphaned_job_events(
         workspace_path, auto_fix=auto_fix
     )
@@ -74,17 +79,17 @@ def perform_workspace_cleanup(
 
     # Skip provider-dependent checks if no provider given (avoids circular dependency)
     if provider is not None:
-        # 3. Check for stray jobs (running jobs not in latest run)
+        # 4. Check for stray jobs (running jobs not in latest run)
         stray_warnings, stray_callbacks = _check_stray_jobs(provider)
         warnings.extend(stray_warnings)
         callbacks.update(stray_callbacks)
 
-        # 4. Check for orphan jobs (finished jobs not in any run)
+        # 5. Check for orphan jobs (finished jobs not in any run)
         orphan_warnings, orphan_callbacks = _check_orphan_jobs(provider)
         warnings.extend(orphan_warnings)
         callbacks.update(orphan_callbacks)
 
-        # 5. Check for orphan partials
+        # 6. Check for orphan partials
         partial_warnings, partial_callbacks = _check_orphan_partials(provider)
         warnings.extend(partial_warnings)
         callbacks.update(partial_callbacks)
@@ -234,6 +239,101 @@ def _consolidate_experiment_events_with_count(
         )
     except Exception as e:
         logger.warning(f"Failed to consolidate experiment {experiment_id}: {e}")
+
+
+def _cleanup_stale_pid_files(workspace_path: Path) -> int:
+    """Scan all job directories and remove stale PID files.
+
+    For each .pid file found, acquires the job lock (non-blocking) and checks
+    if the process is still alive. If the process is dead:
+    - Removes the stale .pid file
+    - Writes a .failed marker if no terminal markers exist
+
+    Returns the number of stale PID files cleaned up.
+    """
+    import filelock
+
+    from experimaestro.connectors import Process
+    from experimaestro.connectors.local import LocalConnector
+    from experimaestro.locking import create_file_lock
+    from experimaestro.scheduler.interfaces import BaseJob
+
+    jobs_base = workspace_path / "jobs"
+    if not jobs_base.exists():
+        return 0
+
+    cleaned = 0
+    for task_dir in jobs_base.iterdir():
+        if not task_dir.is_dir():
+            continue
+        task_id = task_dir.name
+        scriptname = BaseJob.get_scriptname(task_id)
+
+        for job_dir in task_dir.iterdir():
+            if not job_dir.is_dir():
+                continue
+
+            pidfile = BaseJob.get_pidfile(job_dir, scriptname)
+            if not pidfile.exists():
+                continue
+
+            # Try to acquire the lock non-blocking
+            xpm_dir = BaseJob.get_xpm_dir(job_dir)
+            lock_path = xpm_dir / f"{scriptname}.lock"
+            try:
+                lock = create_file_lock(lock_path, timeout=0)
+                with lock:
+                    # Re-check after acquiring lock
+                    if not pidfile.exists():
+                        continue
+
+                    # Check if process is alive
+                    process_alive = False
+                    try:
+                        pinfo = json.loads(pidfile.read_text())
+                        connector = LocalConnector.instance()
+                        process = Process.fromDefinition(connector, pinfo)
+                        if process is not None:
+                            process_alive = True
+                    except Exception:
+                        pass
+
+                    if process_alive:
+                        continue
+
+                    # Process is dead — remove stale PID file
+                    logger.info("Removing stale PID file: %s", pidfile)
+                    pidfile.unlink(missing_ok=True)
+                    cleaned += 1
+
+                    # Write .failed marker if no terminal markers exist
+                    donefile = BaseJob.get_donefile(job_dir, scriptname)
+                    failedfile = BaseJob.get_failedfile(job_dir, scriptname)
+                    if not donefile.exists() and not failedfile.exists():
+                        logger.info(
+                            "Writing .failed marker for crashed job %s/%s",
+                            task_id,
+                            job_dir.name,
+                        )
+                        failedfile.write_text(
+                            json.dumps(
+                                {
+                                    "code": 1,
+                                    "reason": "failed",
+                                    "message": "Process died without writing markers",
+                                }
+                            )
+                        )
+            except filelock.Timeout:
+                # Job is active, skip
+                continue
+            except Exception as e:
+                logger.debug("Error checking PID file %s: %s", pidfile, e)
+                continue
+
+    if cleaned > 0:
+        logger.info("Cleaned up %d stale PID file(s)", cleaned)
+    return cleaned
 
 
 def _is_job_active(job_path: Path, task_id: str) -> bool:
