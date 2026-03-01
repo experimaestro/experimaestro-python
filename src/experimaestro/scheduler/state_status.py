@@ -1144,11 +1144,36 @@ class EventReader:
         self._followed_entities[entity_id] = dir_config
         return True
 
-    def start_watching(self) -> None:
+    def _seek_to_end_of_file(self, path: Path) -> None:
+        """Record end-of-file position so the watcher only picks up new content.
+
+        Used when skipping replay: we need the position tracking to be set to
+        the current end of each file so that only newly appended lines trigger
+        callbacks.
+        """
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+
+        watch = self._find_watcher(path)
+        if watch and watch._tailed_pool is not None:
+            watch.set_tail_position(path, size)
+        else:
+            self._file_positions[path] = size
+
+    def start_watching(self, replay: bool = True) -> None:
         """Start watching for file changes using FileWatcher.
 
-        Discovers existing entities, calls on_created for each, and replays
-        events for entities that should be followed.
+        Discovers existing entities, calls on_created for each, and optionally
+        replays events for entities that should be followed.
+
+        Args:
+            replay: If True (default), replay all historical events via
+                on_event callbacks.  If False, just register entities and
+                seek the latest event file to end-of-file so only new events
+                trigger callbacks.  Older (already-rotated) files are not
+                tracked at all.
         """
         if self._file_watcher is not None:
             return  # Already watching
@@ -1156,12 +1181,22 @@ class EventReader:
         # Discover existing entities
         entities = self._discover_entities()
 
-        # Register entities and replay events for followed ones
+        # Files to track after watchers are set up.
+        # When replaying we track everything; otherwise only the latest per entity.
+        files_to_track: list[Path] = []
+
+        # Register entities and optionally replay events for followed ones
         for entity_id, (dir_config, event_files) in entities.items():
             if self._register_entity(entity_id, dir_config):
-                # Replay events from files
-                for event_file in event_files:
-                    self._replay_events_from_file(event_file, entity_id, dir_config)
+                if replay:
+                    for event_file in event_files:
+                        self._replay_events_from_file(event_file, entity_id, dir_config)
+                elif event_files:
+                    # Only track the latest file (highest numbered); older
+                    # rotated files are already consolidated and won't change.
+                    latest = event_files[-1]  # sorted by name in _discover
+                    self._seek_to_end_of_file(latest)
+                    files_to_track.append(latest)
 
         # Create a DirectoryWatch for each directory (via FileWatcherService)
         # We use the first directory's watch as our primary _file_watcher handle,
@@ -1210,8 +1245,18 @@ class EventReader:
         self._file_positions.clear()
 
         # Add existing event files to be tracked
-        for path in self.get_all_event_files():
-            self._file_watcher.add_file(path)
+        if replay:
+            # Track all event files (replay mode reads them all)
+            for path in self.get_all_event_files():
+                self._file_watcher.add_file(path)
+        else:
+            # Only track the latest file per entity (collected above)
+            for path in files_to_track:
+                watch = self._find_watcher(path)
+                if watch:
+                    watch.add_file(path)
+                else:
+                    self._file_watcher.add_file(path)
 
     def stop_watching(self) -> None:
         """Stop watching for file changes (closes tailed file pools)"""

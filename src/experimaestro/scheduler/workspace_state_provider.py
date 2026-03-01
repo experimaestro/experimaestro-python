@@ -138,12 +138,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     on_deleted=self._on_job_deleted,
                 ),
             )
-            # Start buffering before watching to avoid race condition:
-            # events arriving before entity discovery completes should be
-            # queued and processed after initial state is loaded
+            # Skip replaying historical events: caches are populated lazily
+            # from status.json when get_jobs()/get_experiments() is called.
+            # Only watch for new events going forward.
             self._event_reader.start_buffering()
-            self._event_reader.start_watching()
-            # Now flush any events that arrived during initialization
+            self._event_reader.start_watching(replay=False)
+            # Flush any events that arrived during watcher setup
             self._event_reader.flush_buffer()
 
     def _stop_watcher(self) -> None:
@@ -771,13 +771,18 @@ class WorkspaceStateProvider(OfflineStateProvider):
     def _create_experiment(
         self, experiment_id: str, run_id: str, *, run_dir: Path
     ) -> MockExperiment:
-        """Create an experiment by loading from disk or creating minimal instance"""
+        """Create an experiment by loading from disk or creating minimal instance.
+
+        After loading from status.json, any pending event files are applied
+        to bring the cache up to date.
+        """
         exp = MockExperiment.from_disk(run_dir, self.workspace_path)
         if exp is None:
             exp = MockExperiment(
                 workdir=run_dir,
                 run_id=run_id,
             )
+        self._apply_pending_experiment_events(exp, experiment_id)
         return exp
 
     def _on_cached_experiment_found(
@@ -821,6 +826,51 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     self._jobs_jsonl_mtime[exp.experiment_id] = current_mtime
                 except (OSError, json.JSONDecodeError):
                     pass
+
+    def _apply_pending_experiment_events(
+        self, exp: MockExperiment, experiment_id: str
+    ) -> None:
+        """Apply pending event files to a freshly loaded experiment.
+
+        Reads events_count from the experiment.  Event files with a number
+        >= events_count contain events not yet consolidated and are applied
+        in order.
+        """
+        from experimaestro.scheduler.state_status import EventBase
+
+        exp_events_dir = self._experiments_dir / experiment_id
+        if not exp_events_dir.exists():
+            return
+
+        # events_count == 0 with no event files means fully consolidated.
+        # events_count > 0 or event files present means pending events exist.
+        events_count = exp.events_count
+
+        event_files = sorted(
+            exp_events_dir.glob("events-*.jsonl"), key=lambda p: p.name
+        )
+
+        for event_file in event_files:
+            try:
+                num = int(event_file.stem.rsplit("-", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            if num < events_count:
+                continue
+
+            try:
+                with event_file.open() as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = EventBase.from_dict(json.loads(line))
+                            exp.apply_event(event)
+                        except (json.JSONDecodeError, Exception):
+                            pass
+            except OSError:
+                pass
 
     def _has_event_files(self, experiment_id: str) -> bool:
         """Check if experiment has any event files (is active)"""
@@ -920,11 +970,17 @@ class WorkspaceStateProvider(OfflineStateProvider):
         task_id: str,
         submit_time: float | datetime | None,
     ) -> MockJob:
-        """Create a job by loading from disk or creating minimal instance"""
+        """Create a job by loading from disk or creating minimal instance.
+
+        After loading from status.json, any pending event files (events with
+        file number >= events_count) are applied to bring the cache up to date.
+        """
         job_path = self.workspace_path / "jobs" / task_id / job_id
         if job_path.exists():
             # _mock_job_from_disk handles carbon metrics loading
-            return self._mock_job_from_disk(job_path, task_id, job_id)
+            job = self._mock_job_from_disk(job_path, task_id, job_id)
+            self._apply_pending_job_events(job, task_id, job_id)
+            return job
 
         # Job directory doesn't exist - create minimal MockJob
         submittime_dt = None
@@ -946,6 +1002,71 @@ class WorkspaceStateProvider(OfflineStateProvider):
             updated_at="",
             carbon_metrics=self._load_carbon_metrics_for_job(job_id),
         )
+
+    def _apply_pending_job_events(
+        self, job: MockJob, task_id: str, job_id: str
+    ) -> None:
+        """Apply pending event files to a freshly loaded job.
+
+        Reads events_count from the job's status.json.  Event files with a
+        number >= events_count contain events not yet consolidated and are
+        applied to the job in order.
+        """
+        from experimaestro.scheduler.state_status import EventBase
+
+        events_dir = self._jobs_dir / task_id
+        if not events_dir.exists():
+            return
+
+        # Determine events_count from status.json
+        # When events_count is absent, events are fully consolidated — nothing to do.
+        # When events_count is present (even 0), files numbered >= events_count
+        # contain pending events.
+        status_path = job.path / ".experimaestro" / "status.json"
+        events_count: int | None = None
+        if status_path.exists():
+            try:
+                with status_path.open() as f:
+                    status = json.load(f)
+                events_count = status.get("events_count")
+            except (OSError, json.JSONDecodeError):
+                pass
+        if events_count is None:
+            return
+
+        # Find and sort pending event files
+        prefix = f"event-{job_id}-"
+        event_files = sorted(
+            (
+                f
+                for f in events_dir.iterdir()
+                if f.name.startswith(prefix) and f.name.endswith(".jsonl")
+            ),
+            key=lambda p: p.name,
+        )
+
+        for event_file in event_files:
+            # Extract file number from name like event-{job_id}-{N}.jsonl
+            try:
+                num = int(event_file.stem.rsplit("-", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            if num < events_count:
+                continue
+
+            try:
+                with event_file.open() as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = EventBase.from_dict(json.loads(line))
+                            job.apply_event(event)
+                        except (json.JSONDecodeError, Exception):
+                            pass
+            except OSError:
+                pass
 
     # =========================================================================
     # Experiment methods
