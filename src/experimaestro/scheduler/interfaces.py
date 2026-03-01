@@ -852,7 +852,7 @@ class BaseJob:
         # Mark all events as processed
         self.events_count = None
 
-        # Find and delete old event files for this job
+        # Find and delete old workspace event files for this job
         if events_dir.exists():
             pattern = f"event-{self.identifier}-*.jsonl"
             for event_file in events_dir.glob(pattern):
@@ -862,6 +862,21 @@ class BaseJob:
                 except OSError as e:
                     logger.warning(
                         "Failed to remove job event file %s: %s", event_file, e
+                    )
+
+        # Also delete permanent event files so they can be re-created
+        # (with hardlinks) by the new run
+        permanent_dir = self.path / ".experimaestro" / "events"
+        if permanent_dir.exists():
+            for event_file in permanent_dir.glob("event-*.jsonl"):
+                try:
+                    event_file.unlink()
+                    logger.debug("Removed old permanent event file: %s", event_file)
+                except OSError as e:
+                    logger.warning(
+                        "Failed to remove permanent event file %s: %s",
+                        event_file,
+                        e,
                     )
 
     async def finalize_status(

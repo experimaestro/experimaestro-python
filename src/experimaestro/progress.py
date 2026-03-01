@@ -30,9 +30,8 @@ class FileBasedProgressReporter:
         self.task_id = task_path.parent.name
         workspace_path = task_path.parent.parent.parent
 
-        # Create event writer for this job's events
-        # Pass job_path for permanent storage of events
-        self.event_writer = JobEventWriter(
+        # Get shared event writer for this job (cached, thread-safe)
+        self.event_writer = JobEventWriter.get(
             workspace_path, self.task_id, self.job_id, 0, job_path=task_path
         )
         self.current_progress: dict[int, tuple[float | None, str | None]] = {}

@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
@@ -442,6 +443,7 @@ class EventWriter(ABC):
         self._hardlink_created_for_count: int | None = (
             None  # Track which file has hardlink
         )
+        self._lock = threading.RLock()
 
     @property
     @abstractmethod
@@ -501,44 +503,47 @@ class EventWriter(ABC):
         return self._permanent_dir / f"event-{self._count}.jsonl"
 
     def write_event(self, event: EventBase) -> None:
-        """Write an event to the current event file
+        """Write an event to the current event file (thread-safe)
 
         If permanent storage is configured and hardlinks are supported,
         creates a hardlink immediately when the file is first opened.
         """
-        if self._file is None:
-            self.events_dir.mkdir(parents=True, exist_ok=True)
-            # Use line buffering (buffering=1) so each line is flushed automatically
-            self._file = self._get_event_file_path().open("a", buffering=1)
+        with self._lock:
+            if self._file is None:
+                self.events_dir.mkdir(parents=True, exist_ok=True)
+                # Use line buffering (buffering=1) so each line is flushed
+                self._file = self._get_event_file_path().open("a", buffering=1)
 
-            # Write events_count to status file when opening first event file
-            self._write_events_count_to_status()
+                # Write events_count to status file when opening first event file
+                self._write_events_count_to_status()
 
-            # Create hardlink to permanent storage immediately if supported
-            if self._check_hardlink_support() and self._permanent_dir:
-                temp_path = self._get_event_file_path()
-                perm_path = self._get_permanent_event_file_path()
-                try:
-                    perm_path.parent.mkdir(parents=True, exist_ok=True)
-                    if not perm_path.exists():
-                        os.link(temp_path, perm_path)
-                        self._hardlink_created_for_count = self._count
-                        logger.debug("Created hardlink %s -> %s", temp_path, perm_path)
-                except FileExistsError:
-                    pass  # Already linked
-                except OSError as e:
-                    logger.warning("Failed to create hardlink: %s", e)
+                # Create hardlink to permanent storage immediately if supported
+                if self._check_hardlink_support() and self._permanent_dir:
+                    temp_path = self._get_event_file_path()
+                    perm_path = self._get_permanent_event_file_path()
+                    try:
+                        perm_path.parent.mkdir(parents=True, exist_ok=True)
+                        if not perm_path.exists():
+                            os.link(temp_path, perm_path)
+                            self._hardlink_created_for_count = self._count
+                            logger.debug(
+                                "Created hardlink %s -> %s", temp_path, perm_path
+                            )
+                    except FileExistsError:
+                        pass  # Already linked
+                    except OSError as e:
+                        logger.warning("Failed to create hardlink: %s", e)
 
-        self._file.write(event.to_json() + "\n")
-        self._events_in_current_file += 1
+            self._file.write(event.to_json() + "\n")
+            self._events_in_current_file += 1
 
-        # Check if rotation is needed
-        if self._events_in_current_file >= self.MAX_EVENTS_PER_FILE:
-            new_count = self._count + 1
-            # Call hook to update status file before rotation
-            self._on_rotate(new_count)
-            # Then rotate the file
-            self.rotate(new_count)
+            # Check if rotation is needed
+            if self._events_in_current_file >= self.MAX_EVENTS_PER_FILE:
+                new_count = self._count + 1
+                # Call hook to update status file before rotation
+                self._on_rotate(new_count)
+                # Then rotate the file
+                self.rotate(new_count)
 
     def _on_rotate(self, new_count: int) -> None:
         """Update status file with new events_count before rotation
@@ -558,18 +563,20 @@ class EventWriter(ABC):
         self._write_events_count_to_status()
 
     def flush(self) -> None:
-        """Flush the current event file to disk"""
-        if self._file is not None:
-            self._file.flush()
-            os.fsync(self._file.fileno())
+        """Flush the current event file to disk (thread-safe)"""
+        with self._lock:
+            if self._file is not None:
+                self._file.flush()
+                os.fsync(self._file.fileno())
 
     def close(self) -> None:
-        """Close the current event file"""
-        if self._file is not None:
-            self._file.flush()
-            os.fsync(self._file.fileno())
-            self._file.close()
-            self._file = None
+        """Close the current event file (thread-safe)"""
+        with self._lock:
+            if self._file is not None:
+                self._file.flush()
+                os.fsync(self._file.fileno())
+                self._file.close()
+                self._file = None
 
     def rotate(self, new_count: int) -> None:
         """Rotate to a new event file (called after status file update)"""
@@ -632,7 +639,50 @@ class JobEventWriter(EventWriter):
 
     Events are stored in: {workspace}/.events/jobs/{task_id}/event-{job_id}-{count}.jsonl
     Permanent storage: {job_path}/.experimaestro/events/event-{count}.jsonl
+
+    Use JobEventWriter.get() to obtain a cached instance — this ensures that
+    all threads (progress, carbon reporting) share the same writer and see
+    consistent file rotation state.
     """
+
+    # Class-level cache: (workspace_path, job_id) -> writer instance
+    _cache: dict[tuple[str, str], "JobEventWriter"] = {}
+    _cache_lock = threading.Lock()
+
+    @classmethod
+    def get(
+        cls,
+        workspace_path: Path,
+        task_id: str,
+        job_id: str,
+        initial_count: int = 0,
+        job_path: Path | None = None,
+    ) -> "JobEventWriter":
+        """Get or create a cached JobEventWriter for the given job.
+
+        Returns the same instance for the same (workspace_path, job_id),
+        ensuring all threads share rotation state.
+        """
+        key = (str(workspace_path), job_id)
+        with cls._cache_lock:
+            writer = cls._cache.get(key)
+            if writer is None:
+                writer = cls(workspace_path, task_id, job_id, initial_count, job_path)
+                cls._cache[key] = writer
+            return writer
+
+    @classmethod
+    def clear_cache(cls, workspace_path: Path | None = None, job_id: str | None = None):
+        """Remove a writer from the cache (e.g., on job completion).
+
+        If both workspace_path and job_id are given, removes that specific entry.
+        If neither is given, clears the entire cache.
+        """
+        with cls._cache_lock:
+            if workspace_path is not None and job_id is not None:
+                cls._cache.pop((str(workspace_path), job_id), None)
+            elif workspace_path is None and job_id is None:
+                cls._cache.clear()
 
     def __init__(
         self,
@@ -643,6 +693,8 @@ class JobEventWriter(EventWriter):
         job_path: Path | None = None,
     ):
         """Initialize job event writer
+
+        Prefer using JobEventWriter.get() to obtain a cached instance.
 
         Args:
             workspace_path: Path to workspace directory

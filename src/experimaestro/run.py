@@ -163,9 +163,9 @@ def _carbon_reporter_loop(
 
     task_id = task_path.parent.name
 
-    # Create event writer for this job
+    # Get shared event writer for this job (same instance as progress reporter)
     try:
-        event_writer = JobEventWriter(
+        event_writer = JobEventWriter.get(
             workspace_path, task_id, job_id, 0, job_path=task_path
         )
     except Exception as e:
@@ -215,7 +215,9 @@ def _carbon_reporter_loop(
         except Exception as e:
             logger.debug("Failed to emit final periodic carbon metrics: %s", e)
     finally:
-        event_writer.close()
+        # Don't close — writer is shared with progress reporter.
+        # The progress reporter's eoj() will archive and close.
+        event_writer.flush()
 
 
 def _stop_carbon_tracking(
@@ -295,7 +297,7 @@ def _stop_carbon_tracking(
         )
 
         task_id_from_path = task_path.parent.name
-        event_writer = JobEventWriter(
+        event_writer = JobEventWriter.get(
             workspace_path, task_id_from_path, job_id, 0, job_path=task_path
         )
         try:
@@ -316,7 +318,9 @@ def _stop_carbon_tracking(
             # Apply event to MockJob so it's included in status.json
             mock_job.apply_event(event)
         finally:
-            event_writer.close()
+            # Don't close — writer is shared with progress reporter.
+            # The progress reporter's eoj() will archive and close.
+            event_writer.flush()
 
     except Exception as e:
         logger.warning("Failed to finalize carbon tracking: %s", e)
