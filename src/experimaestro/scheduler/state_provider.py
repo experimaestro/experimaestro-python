@@ -700,6 +700,7 @@ class OfflineStateProvider(StateProvider):
         Handles:
         - JobStateChangedEvent: Updates job state in cache
         - JobProgressEvent: Updates job progress in cache
+        - CarbonMetricsEvent: Updates job carbon metrics in cache
         - JobSubmittedEvent: Adds new job to cache
         - ExperimentUpdatedEvent: Invalidates experiment cache
 
@@ -707,6 +708,7 @@ class OfflineStateProvider(StateProvider):
         from_experiment flag in WorkspaceStateProvider).
         """
         from experimaestro.scheduler.state_status import (
+            CarbonMetricsEvent,
             JobStateChangedEvent,
             JobProgressEvent,
             JobSubmittedEvent,
@@ -714,8 +716,10 @@ class OfflineStateProvider(StateProvider):
         )
         from experimaestro.scheduler.interfaces import BaseJob
 
-        # Handle job state/progress events
-        if isinstance(event, (JobStateChangedEvent, JobProgressEvent)):
+        # Handle job state/progress/carbon events
+        if isinstance(
+            event, (JobStateChangedEvent, JobProgressEvent, CarbonMetricsEvent)
+        ):
             job_id = event.job_id
             with self._job_cache_lock:
                 # Find job in cache by job_id
@@ -1078,6 +1082,12 @@ class MockJob(BaseJob):
         # Convert progress dicts to LevelInformation objects
         progress_list = get_progress_information_from_dict(d.get("progress", []))
 
+        # Restore carbon metrics if present
+        carbon_metrics = None
+        carbon_dict = d.get("carbon_metrics")
+        if carbon_dict:
+            carbon_metrics = CarbonMetricsData(**carbon_dict)
+
         return cls(
             identifier=identifier,
             task_id=task_id,
@@ -1092,6 +1102,7 @@ class MockJob(BaseJob):
             retry_count=d.get("retry_count", 0),
             failure_reason=failure_reason,
             process=d.get("process"),
+            carbon_metrics=carbon_metrics,
         )
 
     @classmethod
