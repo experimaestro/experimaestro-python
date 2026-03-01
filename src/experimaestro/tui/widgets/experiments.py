@@ -434,6 +434,91 @@ class ExperimentsList(Widget):
             self.collapse_to_experiment(exp_id)
             self.post_message(ExperimentSelected(exp_id, run_id))
 
+    def update_experiment_stats(self, experiment_id: str) -> None:
+        """Update stats for a single experiment without full list refresh.
+
+        Reloads just one experiment from the state provider and updates
+        its row in the DataTable in-place. Falls back to full refresh
+        if the experiment is not found in the table.
+        """
+        try:
+            table = self.query_one("#experiments-table", DataTable)
+        except Exception:
+            return
+
+        # Check if this experiment has a row in the table
+        existing_keys = {str(k.value) for k in table.rows.keys()}
+        if experiment_id not in existing_keys:
+            # Experiment not in table yet — need full refresh
+            self.refresh_experiments()
+            return
+
+        # Load single experiment
+        exp = self.state_provider.get_experiment(experiment_id)
+        if exp is None:
+            return
+
+        # Update the cached experiments list in-place
+        for i, cached_exp in enumerate(self.experiments):
+            if cached_exp.experiment_id == experiment_id:
+                self.experiments[i] = exp
+                break
+
+        # Compute row values
+        total = exp.total_jobs
+        finished = exp.finished_jobs
+        failed = exp.failed_jobs
+
+        if failed > 0:
+            status = f"❌ {failed} failed"
+        elif finished == total and total > 0:
+            status = "✓ Done"
+        elif finished < total:
+            status = f"▶ {finished}/{total}"
+        else:
+            status = "Empty"
+
+        if exp.started_at:
+            started = exp.started_at.strftime("%Y-%m-%d %H:%M")
+        else:
+            started = "-"
+
+        duration = "-"
+        if exp.started_at:
+            if exp.ended_at:
+                elapsed = (exp.ended_at - exp.started_at).total_seconds()
+            else:
+                elapsed = (datetime.now() - exp.started_at).total_seconds()
+            duration = format_duration(elapsed)
+
+        hostname = getattr(exp, "hostname", None) or "-"
+        run_id = getattr(exp, "current_run_id", None) or "-"
+
+        co2_text = "-"
+        carbon_impact = getattr(exp, "carbon_impact", None)
+        if carbon_impact:
+            if hasattr(carbon_impact, "latest"):
+                latest = carbon_impact.latest
+                co2_kg = latest.co2_kg if latest else 0
+            else:
+                latest = carbon_impact.get("latest", {})
+                co2_kg = latest.get("co2_kg", 0) if latest else 0
+            if co2_kg > 0:
+                co2_text = format_co2_kg(co2_kg)
+
+        # Update cells in place
+        table.update_cell(experiment_id, "id", experiment_id, update_width=True)
+        table.update_cell(experiment_id, "run", run_id, update_width=True)
+        table.update_cell(experiment_id, "host", hostname, update_width=True)
+        table.update_cell(experiment_id, "status", status, update_width=True)
+        table.update_cell(experiment_id, "started", started, update_width=True)
+        table.update_cell(experiment_id, "duration", duration, update_width=True)
+        table.update_cell(experiment_id, "co2", co2_text, update_width=True)
+
+        # Update collapsed header if viewing this experiment
+        if self.collapsed and self.current_experiment == experiment_id:
+            self._update_collapsed_header(experiment_id)
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle experiment selection"""
         if event.row_key:

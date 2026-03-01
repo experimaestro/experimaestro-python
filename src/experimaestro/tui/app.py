@@ -481,9 +481,9 @@ class ExperimaestroUI(App):
                 # Refresh to show the new job
                 jobs_table.refresh_jobs()
 
-        # Also update experiment stats
+        # Update experiment stats (targeted, no full list scan)
         for exp_list in self.query(ExperimentsList):
-            exp_list.refresh_experiments()
+            exp_list.update_experiment_stats(event_exp_id)
 
     def _handle_job_state_changed(self, event: JobStateChangedEvent) -> None:
         """Handle JobStateChangedEvent - refresh job display

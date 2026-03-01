@@ -104,6 +104,15 @@ class WorkspaceStateProvider(OfflineStateProvider):
         self._event_reader: Optional[EventReader] = None
         self._jobs_dir = self.workspace_path / ".events" / "jobs"
 
+        # Cached sets of known experiment IDs: (v2_ids, v1_ids)
+        # Avoids repeated iterdir() scans. Invalidated only when experiments
+        # are created or deleted.
+        self._known_experiment_ids: tuple[set[str], set[str]] | None = None
+        self._known_experiment_ids_lock = threading.Lock()
+
+        # Track jobs.jsonl mtime per experiment to avoid re-reading unchanged files
+        self._jobs_jsonl_mtime: dict[str, float] = {}
+
         # Perform crash recovery: consolidate orphaned events (unless disabled)
         if not no_cleanup:
             self._consolidate_orphaned_events()
@@ -142,6 +151,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if self._event_reader is not None:
             self._event_reader.stop_watching()
             self._event_reader = None
+
+    def _invalidate_known_experiment_ids(self) -> None:
+        """Invalidate the cached experiment ID set, forcing a directory re-scan"""
+        with self._known_experiment_ids_lock:
+            self._known_experiment_ids = None
 
     # =========================================================================
     # Crash recovery: Consolidate orphaned events
@@ -581,6 +595,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
     def _on_experiment_created(self, experiment_id: str) -> bool:
         """Called when a new experiment is discovered. Pre-load into cache."""
         logger.debug("Discovered experiment: %s", experiment_id)
+        self._invalidate_known_experiment_ids()
 
         # Get current run and pre-load experiment into cache
         run_id = self.get_current_run(experiment_id)
@@ -619,6 +634,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
     def _on_experiment_deleted(self, experiment_id: str) -> None:
         """Handle experiment event files deletion (experiment finalized)"""
+        self._invalidate_known_experiment_ids()
         self._clear_experiment_cache(experiment_id)
         run_id = self.get_current_run(experiment_id) or ""
         self._notify_state_listeners(
@@ -761,10 +777,22 @@ class WorkspaceStateProvider(OfflineStateProvider):
         When an experiment is relaunched, the cache may have been populated
         before all jobs were submitted. Reloading jobs.jsonl picks up new
         submissions that weren't captured by event processing.
+
+        Tracks file mtime to skip re-reading unchanged files.
         """
         if self._has_event_files(exp.experiment_id):
             jobs_jsonl_path = run_dir / "jobs.jsonl"
             if jobs_jsonl_path.exists():
+                try:
+                    current_mtime = jobs_jsonl_path.stat().st_mtime
+                except OSError:
+                    return
+
+                # Skip if file hasn't changed since last read
+                last_mtime = self._jobs_jsonl_mtime.get(exp.experiment_id)
+                if last_mtime is not None and current_mtime == last_mtime:
+                    return
+
                 try:
                     new_infos: dict[str, "ExperimentJobInformation"] = {}
                     with jobs_jsonl_path.open("r") as f:
@@ -779,6 +807,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     for job_id, info in new_infos.items():
                         if job_id not in exp._job_infos:
                             exp._job_infos[job_id] = info
+                    self._jobs_jsonl_mtime[exp.experiment_id] = current_mtime
                 except (OSError, json.JSONDecodeError):
                     pass
 
@@ -911,53 +940,70 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Experiment methods
     # =========================================================================
 
-    def get_experiments(self, since: Optional[datetime] = None) -> List[MockExperiment]:
-        """Get list of all experiments (v2 and v1 layouts)"""
-        experiments = []
-        seen_ids = set()
+    def _get_known_experiment_ids(self) -> tuple[set[str], set[str]]:
+        """Return (v2_ids, v1_ids) using a cached directory listing.
 
-        # v2 layout: experiments/{exp-id}/{run-id}/
+        The cache is invalidated only when experiments are created or deleted,
+        avoiding repeated iterdir() scans on every get_experiments() call.
+        """
+        with self._known_experiment_ids_lock:
+            if self._known_experiment_ids is not None:
+                return self._known_experiment_ids
+
+        v2_ids: set[str] = set()
+        v1_ids: set[str] = set()
+
         experiments_base = self.workspace_path / "experiments"
         if experiments_base.exists():
             for exp_dir in experiments_base.iterdir():
-                if not exp_dir.is_dir():
-                    continue
+                if exp_dir.is_dir():
+                    v2_ids.add(exp_dir.name)
 
-                experiment_id = exp_dir.name
-                seen_ids.add(experiment_id)
-                experiment = self._load_experiment(experiment_id)
-                if experiment is not None:
-                    # Filter by since if provided
-                    if since is not None and experiment.updated_at:
-                        try:
-                            updated = datetime.fromisoformat(experiment.updated_at)
-                            if updated < since:
-                                continue
-                        except ValueError:
-                            pass
-                    experiments.append(experiment)
-
-        # v1 layout: xp/{exp-id}/ (with jobs/, jobs.bak/)
         old_xp_dir = self.workspace_path / "xp"
         if old_xp_dir.exists():
             for exp_dir in old_xp_dir.iterdir():
-                if not exp_dir.is_dir():
-                    continue
+                if exp_dir.is_dir() and exp_dir.name not in v2_ids:
+                    v1_ids.add(exp_dir.name)
 
-                experiment_id = exp_dir.name
-                if experiment_id in seen_ids:
-                    continue  # Already loaded from v2
+        result = (v2_ids, v1_ids)
+        with self._known_experiment_ids_lock:
+            self._known_experiment_ids = result
+        return result
 
-                experiment = self._load_v1_experiment(experiment_id, exp_dir)
-                if experiment is not None:
-                    if since is not None and experiment.updated_at:
-                        try:
-                            updated = datetime.fromisoformat(experiment.updated_at)
-                            if updated < since:
-                                continue
-                        except ValueError:
-                            pass
-                    experiments.append(experiment)
+    def get_experiments(self, since: Optional[datetime] = None) -> List[MockExperiment]:
+        """Get list of all experiments (v2 and v1 layouts)
+
+        Uses a cached set of experiment IDs to avoid repeated directory scans.
+        Individual experiments are loaded via the experiment cache (which is
+        updated in-place by events for active experiments).
+        """
+        v2_ids, v1_ids = self._get_known_experiment_ids()
+        experiments = []
+
+        for experiment_id in v2_ids:
+            experiment = self._load_experiment(experiment_id)
+            if experiment is not None:
+                if since is not None and experiment.updated_at:
+                    try:
+                        updated = datetime.fromisoformat(experiment.updated_at)
+                        if updated < since:
+                            continue
+                    except ValueError:
+                        pass
+                experiments.append(experiment)
+
+        for experiment_id in v1_ids:
+            exp_dir = self.workspace_path / "xp" / experiment_id
+            experiment = self._load_v1_experiment(experiment_id, exp_dir)
+            if experiment is not None:
+                if since is not None and experiment.updated_at:
+                    try:
+                        updated = datetime.fromisoformat(experiment.updated_at)
+                        if updated < since:
+                            continue
+                    except ValueError:
+                        pass
+                experiments.append(experiment)
 
         return experiments
 
@@ -1700,6 +1746,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
     def get_process_info(self, job: MockJob) -> Optional[ProcessInfo]:
         """Get process information for a job
 
+        Uses the cached Process handle from job.getprocess() to avoid
+        repeated Process.fromDefinition() calls (expensive for SLURM).
+
         Returns a ProcessInfo dataclass or None if not available.
         """
         if not job.path or not job.task_id:
@@ -1725,23 +1774,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
             # Try to get more info for running jobs using the process abstraction
             if job.state and job.state.running():
                 try:
-                    from experimaestro.connectors import Process
-                    from experimaestro.connectors.local import LocalConnector
-
-                    connector = LocalConnector.instance()
-                    proc = Process.fromDefinition(connector, pinfo)
-
-                    # Check if process is running (sync via async)
-                    import asyncio
-
-                    try:
-                        asyncio.get_running_loop()
-                        # We're in an async context, can't use asyncio.run
-                        # Just mark as running based on job state
+                    # Use cached process handle from MockJob
+                    proc = job.getprocess()
+                    if proc is not None:
                         result.running = True
-                    except RuntimeError:
-                        # No running loop, safe to use asyncio.run
-                        result.running = asyncio.run(proc.aio_isrunning())
 
                     # For local processes, try to get CPU/memory info via psutil
                     if proc_type == "local" and result.running:

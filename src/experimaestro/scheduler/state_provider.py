@@ -940,6 +940,7 @@ class MockJob(BaseJob):
         self.retry_count = retry_count
         self.transient = transient
         self._process_dict = process
+        self._process = None  # Cached Process handle (avoids repeated fromDefinition)
         self.carbon_metrics = carbon_metrics
         self.run_group_id = run_group_id
         self._previous_carbon_metrics = previous_carbon_metrics
@@ -1035,11 +1036,15 @@ class MockJob(BaseJob):
         """Get process handle for running job
 
         This method is used for compatibility with filter expressions and
-        for killing running jobs.
+        for killing running jobs. The result is cached to avoid repeated
+        Process.fromDefinition() calls (which can be expensive for SLURM).
 
         Returns:
             Process instance or None if process info not available
         """
+        if self._process is not None:
+            return self._process
+
         from experimaestro.connectors import Process
         from experimaestro.connectors.local import LocalConnector
 
@@ -1053,7 +1058,8 @@ class MockJob(BaseJob):
         try:
             connector = LocalConnector.instance()
             pinfo = json.loads(pid_file.read_text())
-            return Process.fromDefinition(connector, pinfo)
+            self._process = Process.fromDefinition(connector, pinfo)
+            return self._process
         except Exception as e:
             logger.warning("Could not get process for job at %s: %s", self.path, e)
             return None
