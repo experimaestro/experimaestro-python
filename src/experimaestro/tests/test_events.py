@@ -636,11 +636,11 @@ class TestEventReaderEntityRegistration:
         # No events yet (all entities rejected)
         assert len(received_events) == 0
 
-        # Now explicitly follow the entity
+        # Now explicitly follow the entity (default replay=True)
         result = reader.follow("new_entity", dir_config)
-        assert result is True
+        assert isinstance(result, list)
 
-        # Events should have been replayed
+        # Events should have been replayed via on_event callback
         assert len(received_events) == 3
 
         reader.stop_watching()
@@ -667,7 +667,7 @@ class TestEventReaderEntityRegistration:
 
         # follow() should succeed even though on_created would reject
         result = reader.follow("some_entity", dir_config)
-        assert result is True
+        assert isinstance(result, list)
         # on_created should NOT be called by follow()
         assert "some_entity" not in created_entities
 
