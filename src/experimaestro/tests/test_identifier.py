@@ -47,7 +47,7 @@ class B(Config):
 
 
 class C(Config):
-    a: Param[int] = field(ignore_default=1)
+    a: Param[int] = field(default=1, ignore_default=True)
     b: Param[int]
 
 
@@ -212,7 +212,7 @@ def test_identifier_option():
     class OptionConfig(Config):
         __xpmid__ = "test.identifier.option"
         a: Param[int]
-        b: Option[int] = field(ignore_default=1)
+        b: Option[int] = field(default=1, ignore_default=True)
 
     assert_notequal(OptionConfig.C(a=2), OptionConfig.C(a=1))
     assert_equal(OptionConfig.C(a=1, b=2), OptionConfig.C(a=1))
@@ -312,7 +312,7 @@ def test_identifier_defaultnew():
         __xpmid__ = "defaultnew"
 
         a: Param[int]
-        b: Param[int] = field(ignore_default=1)
+        b: Param[int] = field(default=1, ignore_default=True)
 
     class A(Config):
         __xpmid__ = "defaultnew"
@@ -413,7 +413,7 @@ def test_identifier_meta():
 
 def test_identifier_meta_default_dict():
     class DictConfig(Config):
-        params: Param[Dict[str, MetaA]] = field(ignore_default={})
+        params: Param[Dict[str, MetaA]] = field(default={}, ignore_default=True)
 
     assert_equal(
         DictConfig.C(params={}),
@@ -429,7 +429,7 @@ def test_identifier_meta_default_dict():
 
 def test_identifier_meta_default_array():
     class ArrayConfigWithDefault(Config):
-        array: Param[List[MetaA]] = field(ignore_default=[])
+        array: Param[List[MetaA]] = field(default=[], ignore_default=True)
 
     # Array (with default) with mixed
     assert_equal(
@@ -740,7 +740,7 @@ def test_identifier_field_ignore_default():
 
     class ConfigWithIgnoreDefault(Config):
         __xpmid__ = "test.identifier.field_ignore_default"
-        a: Param[int] = field(ignore_default=1)
+        a: Param[int] = field(default=1, ignore_default=True)
         b: Param[int]
 
     # When a=1 (matches ignore_default), should be same as not specifying a
@@ -805,7 +805,7 @@ def test_identifier_field_default_vs_ignore_default():
 
     class ConfigWithIgnoreDefault(Config):
         __xpmid__ = "test.identifier.field_default_vs_ignore"
-        a: Param[int] = field(ignore_default=1)
+        a: Param[int] = field(default=1, ignore_default=True)
         b: Param[int]
 
     # Both with a=1, b=2 - should differ because one includes a, other doesn't

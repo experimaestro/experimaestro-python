@@ -394,7 +394,7 @@ class GracefulTimeoutTask(ResumableTask):
     """Task that raises GracefulTimeout"""
 
     checkpoint: Param[Path]
-    should_timeout: Param[bool] = field(ignore_default=True)
+    should_timeout: Param[bool] = field(default=True, ignore_default=True)
 
     def execute(self):
         # Count attempts in checkpoint file

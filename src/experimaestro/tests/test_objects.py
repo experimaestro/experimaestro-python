@@ -19,7 +19,7 @@ def xp():
 
 
 class A(Config):
-    x: Param[int] = field(ignore_default=3)
+    x: Param[int] = field(default=3, ignore_default=True)
 
 
 def test_object_default():
@@ -29,7 +29,7 @@ def test_object_default():
 
 
 class B(Config):
-    a: Param[A] = field(ignore_default=A.C(x=3))
+    a: Param[A] = field(default=A.C(x=3), ignore_default=True)
 
 
 class C(B):
@@ -99,7 +99,7 @@ class CompositionA(Config):
 class CompositionSubA(CompositionA):
     """Subclass of CompositionA"""
 
-    y: Param[int] = field(ignore_default=0)
+    y: Param[int] = field(default=0, ignore_default=True)
 
 
 class CompositionB(Config):
@@ -219,7 +219,7 @@ def test_composition_operator_exact_match():
 
 
 class ValueBasicModel(Config):
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
 
 
 @ValueBasicModel.value_class()
@@ -232,7 +232,7 @@ class ValueBasicModelImpl(ValueBasicModel):
 
 
 class ValueInheritBase(Config):
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
 
 
 @ValueInheritBase.value_class()
@@ -243,14 +243,14 @@ class ValueInheritBaseImpl(ValueInheritBase):
 class ValueInheritSubNoExplicit(ValueInheritBase):
     """Subclass without explicit value class"""
 
-    y: Param[int] = field(ignore_default=2)
+    y: Param[int] = field(default=2, ignore_default=True)
 
 
 # Test 3: Value class with proper inheritance
 
 
 class ValueInheritParent(Config):
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
 
 
 @ValueInheritParent.value_class()
@@ -260,7 +260,7 @@ class ValueInheritParentImpl(ValueInheritParent):
 
 
 class ValueInheritChild(ValueInheritParent):
-    y: Param[int] = field(ignore_default=2)
+    y: Param[int] = field(default=2, ignore_default=True)
 
 
 @ValueInheritChild.value_class()
@@ -273,7 +273,7 @@ class ValueInheritChildImpl(ValueInheritChild, ValueInheritParentImpl):
 
 
 class ValueSkipBase(Config):
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
 
 
 @ValueSkipBase.value_class()
@@ -285,13 +285,13 @@ class ValueSkipBaseImpl(ValueSkipBase):
 class ValueSkipIntermediate(ValueSkipBase):
     """Intermediate class without explicit value class"""
 
-    y: Param[int] = field(ignore_default=2)
+    y: Param[int] = field(default=2, ignore_default=True)
 
 
 class ValueSkipDeep(ValueSkipIntermediate):
     """Deep subclass with value class"""
 
-    z: Param[int] = field(ignore_default=3)
+    z: Param[int] = field(default=3, ignore_default=True)
 
 
 @ValueSkipDeep.value_class()
@@ -366,14 +366,14 @@ def test_value_decorator_must_inherit_parent_value():
     """Test that value class must inherit from parent value class"""
 
     class LocalBase(Config):
-        x: Param[int] = field(ignore_default=1)
+        x: Param[int] = field(default=1, ignore_default=True)
 
     @LocalBase.value_class()
     class LocalBaseImpl(LocalBase):
         pass
 
     class LocalChild(LocalBase):
-        y: Param[int] = field(ignore_default=2)
+        y: Param[int] = field(default=2, ignore_default=True)
 
     with pytest.raises(TypeError, match="must be a subclass of.*parent value class"):
 

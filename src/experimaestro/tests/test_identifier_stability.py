@@ -134,14 +134,14 @@ class ConfigWithOption(Config):
 
     __xpmid__ = "test.stability.ConfigWithOption"
     required: Param[int]
-    optional: Option[int] = field(ignore_default=42)
+    optional: Option[int] = field(default=42, ignore_default=True)
 
 
 class ConfigWithDefault(Config):
     """Config with default parameter"""
 
     __xpmid__ = "test.stability.ConfigWithDefault"
-    x: Param[int] = field(ignore_default=10)
+    x: Param[int] = field(default=10, ignore_default=True)
     y: Param[int]
 
 

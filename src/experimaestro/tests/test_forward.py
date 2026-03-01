@@ -10,7 +10,7 @@ pytestmark = pytest.mark.config
 
 def test_main():
     class MyModel(Config):
-        epochs: Param[int] = field(ignore_default=100)
+        epochs: Param[int] = field(default=100, ignore_default=True)
         """Number of learning epochs"""
 
     @forwardoption.epochs(MyModel)
@@ -24,7 +24,7 @@ def test_main():
 
 def test_rename():
     class MyModel(Config):
-        epochs: Param[int] = field(ignore_default=100)
+        epochs: Param[int] = field(default=100, ignore_default=True)
         """Number of learning epochs"""
 
     @forwardoption.epochs(MyModel, "my-epochs")

@@ -11,7 +11,7 @@ pytestmark = pytest.mark.identifier
 
 
 class A(Config):
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
 
 
 class A1(A):
@@ -53,7 +53,7 @@ class LoadModel(SerializationLWTask):
 
 
 class ConfigWithOptional(Config):
-    x: Param[int] = field(ignore_default=1)
+    x: Param[int] = field(default=1, ignore_default=True)
     y: Param[Optional[int]]
 
 

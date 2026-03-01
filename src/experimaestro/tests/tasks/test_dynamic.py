@@ -257,7 +257,7 @@ class LearnWithLR(ResumableTask):
     """Learn task with learning_rate parameter for testing identifier uniqueness"""
 
     model: Param[Model]
-    learning_rate: Param[float] = field(ignore_default=1e-3)
+    learning_rate: Param[float] = field(default=1e-3, ignore_default=True)
     validation: Param[Validation]
 
     # Control files for synchronization with tests

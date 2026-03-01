@@ -165,7 +165,7 @@ class TreeGenericConfig(Config, Generic[T]):
 class TagTreeGenericConfig(TreeGenericConfig[T], Generic[T]):
     """A tagged version of TreeGenericConfig to test recursive generics"""
 
-    tag: Param[str] = field(ignore_default="default")
+    tag: Param[str] = field(default="default", ignore_default=True)
 
 
 def test_core_generics_recursive():

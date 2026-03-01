@@ -99,9 +99,9 @@ class SlurmResumableTask(ResumableTask):
     """ResumableTask that simulates timeout on first N attempts for SLURM testing"""
 
     checkpoint: Param[Path]
-    timeout_count: Param[int] = field(ignore_default=2)
+    timeout_count: Param[int] = field(default=2, ignore_default=True)
     slurm_jobs_dir: Param[Path]  # Path to mock SLURM jobs directory
-    output_file: Param[Path] = field(ignore_default=None)
+    output_file: Param[Path] = field(default=None, ignore_default=True)
 
     def execute(self):
         import os

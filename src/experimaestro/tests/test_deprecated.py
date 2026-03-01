@@ -70,7 +70,7 @@ def test_deprecated_attribute():
 
     class Values(Config):
         __xpmid__ = "test.deprecated.attribute"
-        values: Param[List[int]] = field(ignore_default=[])
+        values: Param[List[int]] = field(default=[], ignore_default=True)
 
         @deprecate
         def value(self, x):
@@ -611,7 +611,7 @@ def test_deprecate_replace_warns_on_old_attribute(caplog):
         __xpmid__ = "test.deprecate.replace.warn.old"
         value: Param[int]
         extra: Param[str] = field(
-            ignore_default="default"
+            default="default", ignore_default=True
         )  # This doesn't exist in NewConfigForWarn
 
         def __convert__(self):
