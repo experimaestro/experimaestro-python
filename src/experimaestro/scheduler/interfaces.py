@@ -1029,23 +1029,19 @@ class BaseJob:
             self.set_state(marker_state, loading=True)
             self._process_dict = None
 
-        # Check PID file for running state
+        # Check PID file for running state using launcher-independent
+        # Process abstraction (handles local, SSH, SLURM, etc.)
         elif self.pidfile.exists():
             try:
-                self._process_dict = json.loads(self.pidfile.read_text())
-                pid = self._process_dict.get("pid")
-                if pid is not None:
-                    pid = int(pid)
-                    # Check if the process is still running
-                    try:
-                        import psutil
+                from experimaestro.connectors import Process
+                from experimaestro.connectors.local import LocalConnector
 
-                        proc = psutil.Process(pid)
-                        if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
-                            self.set_state(JobState.RUNNING, loading=True)
-                    except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-            except (json.JSONDecodeError, OSError, ValueError, TypeError):
+                self._process_dict = json.loads(self.pidfile.read_text())
+                connector = LocalConnector.instance()
+                process = Process.fromDefinition(connector, self._process_dict)
+                if process is not None:
+                    self.set_state(JobState.RUNNING, loading=True)
+            except Exception:
                 pass
 
     def _load_from_status_dict(self, status_dict: Dict[str, Any]) -> None:

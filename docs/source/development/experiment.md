@@ -182,14 +182,53 @@ Jobs with identical configurations get the same identifier (hash). When resubmit
 
 ### 5. `aio_start(job)` - Actual Execution
 
-1. **Wait for static dependencies**: Sequentially waits for dependent jobs via {py:class}`~experimaestro.scheduler.jobs.JobDependency`
-2. **Acquire locks**: Job lock and launcher lock
-3. **Acquire dynamic dependencies**: Tokens with deadlock prevention
-4. **Create job directory**: Writes metadata files
-5. **Execute**: Calls `job.aio_run()` to start process
-6. **Wait for completion**: Monitors process
-7. **Read final state**: From `.done`/`.failed` marker files
-8. **Return final state**
+The job start sequence involves careful lock management. The scheduler
+and the job process both use the same lock file (`{scriptname}.lock`),
+but at different phases.
+
+```
+Timeline:
+                    Scheduler                         Job Process
+                    ─────────                         ───────────
+  1. Wait for static dependencies (jobs)
+  2. Acquire job lock ──────────────────┐
+  3. Acquire dynamic dependencies       │
+     (tokens, with deadlock prevention) │
+  4. Create job directory               │
+  5. Clean up old markers/events        │
+  6. Write status.json (no PID yet)     │
+  7. aio_run():                         │
+     - Launch process ──────────────────┼──────→ Process spawned
+     - Write {scriptname}.pid           │
+     - Write status.json (with PID)     │
+  8. Write locks.json (dynamic locks)   │
+  9. Release job lock ──────────────────┘
+                                          ┌────── Acquire job lock
+                                          │       Execute task
+                                          │       Write .done or .failed
+                                          │       Write status.json (final)
+                                          └────── Release job lock
+ 10. Wait for process to end
+ 11. Read final state from .done/.failed
+ 12. Return final state
+```
+
+**Note on killed jobs:** If the job process is killed (e.g., SLURM
+`scancel`, OOM), it won't write `.done`/`.failed` or final `status.json`.
+In that case, cleanup is handled by the scheduler (if still running) or
+by a later experimaestro process that detects the stale state.
+
+**Gap between steps 9 and job process lock:** After the scheduler releases
+the job lock (step 9) and before the job process acquires it, the lock is
+**not held** but the job is still active. During this window:
+- `{scriptname}.pid` exists (written by `aio_run()` in step 7)
+- `status.json` exists with PID information
+- No `.done`/`.failed` markers exist yet
+
+Any code that checks whether a job is active (e.g., cleanup) must account
+for this gap by checking not just the lock, but also the PID file and
+the absence of terminal markers. Process liveness is checked using the
+launcher-independent `Process` abstraction (see below).
 
 ## State Management
 

@@ -23,9 +23,26 @@ WORKSPACE_DIR/
 │   └── {task-type-id}/
 │       └── {job-hash}/
 │           ├── params.json         # Job parameters
-│           ├── __xpm__/            # Job metadata
-│           ├── stdout              # Standard output
-│           └── stderr              # Standard error
+│           ├── {scriptname}.pid    # Process info (PID, type) while running
+│           ├── {scriptname}.done   # Marker file when job succeeds
+│           ├── {scriptname}.failed # Marker file when job fails (with reason)
+│           ├── {scriptname}.out    # Standard output
+│           ├── {scriptname}.err    # Standard error
+│           ├── locks.json          # Dynamic dependency locks (tokens)
+│           └── .experimaestro/
+│               ├── status.json     # Job state, timestamps, progress
+│               ├── {scriptname}.lock  # Job lock file
+│               ├── task-outputs.jsonl # Dynamic task output events
+│               └── events/         # Permanent event storage (after archival)
+│                   └── event-{count}.jsonl
+├── .events/                        # Temporary event files (watched by scheduler)
+│   ├── experiments/
+│   │   └── {experiment-id}/
+│   │       ├── current             # Symlink to current run directory
+│   │       └── events-{count}.jsonl
+│   └── jobs/
+│       └── {task-type-id}/
+│           └── event-{job-id}-{count}.jsonl
 ├── partials/                       # Shared partial directories
 │   └── {task-type-id}/
 │       └── {partial-name}/
@@ -176,6 +193,75 @@ The migration:
 :::{note}
 Migration is optional. The TUI, web UI, and CLI commands work with both layouts.
 However, new experiments always use the v2 layout.
+:::
+
+## Job Execution
+
+When a job is started by the scheduler, several files are created and used
+to coordinate execution and track state. The `{scriptname}` is derived from
+the task identifier (last component after the last `.`, e.g., `MyTask` from
+`my.module.MyTask`).
+
+### Locking
+
+The lock file at `jobs/{task-id}/{job-hash}/.experimaestro/{scriptname}.lock`
+ensures exclusive access to a job. Both the scheduler and the job process use
+this lock at different phases:
+
+1. **Scheduler lock phase**: The scheduler acquires the lock before setting up
+   the job directory, writing `status.json`, launching the process, and writing
+   the PID file. The lock is released after the process is launched.
+2. **Process lock phase**: The job process acquires the same lock when it starts
+   executing the task. It holds the lock until the task completes and the
+   terminal marker (`.done`/`.failed`) is written.
+
+There is a brief gap between these two phases where the lock is not held but
+the job is still active.
+
+### PID File
+
+The file `{scriptname}.pid` is written by the scheduler (inside `aio_run()`)
+while it still holds the job lock. It contains a JSON object describing the
+process:
+
+```json
+{"type": "local", "pid": 12345}
+```
+
+The `type` field identifies the process handler (e.g., `local`, `ssh`, `slurm`).
+Process liveness is checked using the launcher-independent `Process` abstraction
+(`Process.fromDefinition()`), not directly via `psutil`, so that it works
+across different launchers.
+
+### Terminal Markers
+
+When a job finishes, the job process writes one of:
+- `{scriptname}.done` — job succeeded
+- `{scriptname}.failed` — job failed, contains a JSON object with failure details
+  (e.g., `{"reason": "FAILED"}`)
+
+The job process also writes a final `status.json` with updated timestamps.
+
+If the job is killed externally (e.g., SLURM `scancel`, OOM killer), these
+markers are **not** written. In that case, cleanup is handled by the scheduler
+(if still running) or by a later experimaestro process.
+
+### Event Files
+
+While a job is running, state change events are written to temporary event
+files in `.events/jobs/{task-id}/event-{job-id}-{count}.jsonl`. The scheduler
+watches this directory to track job progress in real time.
+
+When a job completes, these temporary event files are archived to the permanent
+location at `jobs/{task-id}/{job-hash}/.experimaestro/events/` and then deleted
+from `.events/`.
+
+:::{important}
+The cleanup process that consolidates orphaned event files checks that a job is
+not active before deleting its event files. A job is considered active if:
+- Its lock is held, OR
+- Its PID file references a running process, OR
+- No terminal marker (`.done`/`.failed`) exists
 :::
 
 ## State Tracking

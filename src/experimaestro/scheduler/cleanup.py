@@ -236,6 +236,55 @@ def _consolidate_experiment_events_with_count(
         logger.warning(f"Failed to consolidate experiment {experiment_id}: {e}")
 
 
+def _is_job_active(job_path: Path, task_id: str) -> bool:
+    """Check if a job is currently active (must be called with job lock held).
+
+    A job goes through the following lifecycle during aio_start:
+    1. Scheduler acquires job lock
+    2. Job directory and status.json are created
+    3. Job process is launched (aio_run), {scriptname}.pid is written
+    4. Scheduler releases job lock
+    5. Job process re-acquires lock
+    6. Job runs, writes .done/.failed and status.json, releases lock
+
+    Since this is called with the lock held, the job cannot be in steps 1-4
+    or 5-6. However it could be in the gap between steps 4 and 5 (lock
+    released, process not yet started). We detect this by checking:
+    - PID file exists with a running process (uses launcher-independent
+      Process abstraction), OR
+    - No terminal marker (.done/.failed) exists (could be in the gap)
+    """
+    from experimaestro.connectors import Process
+    from experimaestro.connectors.local import LocalConnector
+    from experimaestro.scheduler.interfaces import BaseJob
+
+    scriptname = BaseJob.get_scriptname(task_id)
+
+    # Check if PID file exists with a running process using the
+    # launcher-independent Process abstraction
+    pidfile = BaseJob.get_pidfile(job_path, scriptname)
+    if pidfile.exists():
+        try:
+            pinfo = json.loads(pidfile.read_text())
+            connector = LocalConnector.instance()
+            process = Process.fromDefinition(connector, pinfo)
+            # fromDefinition succeeds only if the process exists
+            if process is not None:
+                return True
+        except Exception:
+            pass
+
+    # If there's no terminal marker (.done/.failed), the job may be in the
+    # starting gap (between scheduler releasing lock and process acquiring it)
+    donefile = BaseJob.get_donefile(job_path, scriptname)
+    failedfile = BaseJob.get_failedfile(job_path, scriptname)
+
+    if not donefile.exists() and not failedfile.exists():
+        return True
+
+    return False
+
+
 def _check_orphaned_job_events(
     workspace_path: Path, auto_fix: bool
 ) -> tuple[list["WarningEvent"], dict[str, dict[str, Callable[[], None]]]]:
@@ -247,9 +296,19 @@ def _check_orphaned_job_events(
 
     If auto_fix=True, events WITH events_count are consolidated automatically.
 
+    IMPORTANT: Before cleaning up event files, the job lock is acquired
+    (non-blocking). If the lock cannot be acquired, the job is active and
+    its events are skipped. Even with the lock held, we check PID and
+    marker files to handle the gap between scheduler releasing the lock
+    and the job process acquiring it.
+
     Returns:
         Tuple of (warnings, callbacks)
     """
+    import filelock
+
+    from experimaestro.locking import create_file_lock
+    from experimaestro.scheduler.interfaces import BaseJob
 
     warnings: list[WarningEvent] = []
     callbacks: dict[str, dict[str, Callable[[], None]]] = {}
@@ -280,41 +339,73 @@ def _check_orphaned_job_events(
         # Consolidate events for each job
         for job_id, files in job_files_map.items():
             job_path = workspace_path / "jobs" / task_id / job_id
+
             if not job_path.exists():
-                # Job directory doesn't exist, just delete orphaned event files
-                if auto_fix:
-                    for event_file in files:
-                        try:
-                            event_file.unlink()
-                            logger.debug(f"Deleted orphaned event file: {event_file}")
-                        except OSError:
-                            pass
+                # Job directory doesn't exist yet — the job may be in very
+                # early startup (before directory creation in aio_start).
+                # Skip cleanup; will be cleaned once the job finishes.
+                logger.debug(
+                    "Job directory %s does not exist, "
+                    "skipping event cleanup (job may be starting)",
+                    job_path,
+                )
                 continue
 
-            # Load job from disk
-            from experimaestro.scheduler.state_provider import MockJob
+            # Acquire the job lock before any cleanup. If the lock is held
+            # (job is in steps 1-4 or 5-6 of its lifecycle), skip this job.
+            scriptname = BaseJob.get_scriptname(task_id)
+            xpm_dir = BaseJob.get_xpm_dir(job_path)
+            lock_path = xpm_dir / f"{scriptname}.lock"
 
-            job = MockJob.from_disk(
-                job_path=job_path,
-                task_id=task_id,
-                job_id=job_id,
-                workspace_path=workspace_path,
-            )
+            try:
+                lock = create_file_lock(lock_path, timeout=0)
+                with lock:
+                    # Lock acquired — but the job could still be in the gap
+                    # between scheduler releasing and process acquiring the lock
+                    if _is_job_active(job_path, task_id):
+                        logger.debug(
+                            "Job %s/%s is active (running/starting), "
+                            "skipping event cleanup",
+                            task_id,
+                            job_id,
+                        )
+                        continue
 
-            if job.events_count is None:
-                # Already consolidated, just delete event files if auto_fix
-                if auto_fix:
-                    for event_file in files:
-                        try:
-                            event_file.unlink()
-                            logger.debug(
-                                f"Deleted already-consolidated event file: {event_file}"
-                            )
-                        except OSError:
-                            pass
-            elif auto_fix:
-                # Auto-consolidate events with events_count
-                _consolidate_job_events(workspace_path, task_id, job_id, job, job_path)
+                    # Job is truly finished — safe to clean up
+                    from experimaestro.scheduler.state_provider import MockJob
+
+                    job = MockJob.from_disk(
+                        job_path=job_path,
+                        task_id=task_id,
+                        job_id=job_id,
+                        workspace_path=workspace_path,
+                    )
+
+                    if job.events_count is None:
+                        # Already consolidated, just delete event files
+                        if auto_fix:
+                            for event_file in files:
+                                try:
+                                    event_file.unlink()
+                                    logger.debug(
+                                        "Deleted already-consolidated event file: %s",
+                                        event_file,
+                                    )
+                                except OSError:
+                                    pass
+                    elif auto_fix:
+                        # Auto-consolidate events with events_count
+                        _consolidate_job_events(
+                            workspace_path, task_id, job_id, job, job_path
+                        )
+            except filelock.Timeout:
+                # Lock is held — job is actively running, skip cleanup
+                logger.debug(
+                    "Job %s/%s is locked (running), skipping event cleanup",
+                    task_id,
+                    job_id,
+                )
+                continue
 
     return warnings, callbacks
 
