@@ -529,17 +529,29 @@ class SlurmProcessWatcher(threading.Thread):
                     lambda: self.count == 0, timeout=self.launcher.interval
                 )
 
-            # Check if we should stop - must acquire WATCHERS_LOCK first,
-            # then re-check count under cv to avoid race with get()
+            # Check if we should stop - grace period allows reuse
             if self.count == 0:
-                with SlurmProcessWatcher.WATCHERS_LOCK:
-                    with self.cv:
-                        if self.count == 0:
-                            logger.debug(
-                                "Stopping SLURM watcher process (%s)", self.launcher.key
-                            )
-                            del SlurmProcessWatcher.WATCHERS[self.launcher.key]
-                            break
+                # Wait one more interval before stopping, allowing other
+                # callers to reuse this watcher
+                logger.debug(
+                    "SLURM watcher has no holders, entering grace period (%s)",
+                    self.launcher.key,
+                )
+                with self.cv:
+                    self.cv.wait_for(
+                        lambda: self.count > 0, timeout=self.launcher.interval
+                    )
+
+                if self.count == 0:
+                    with SlurmProcessWatcher.WATCHERS_LOCK:
+                        with self.cv:
+                            if self.count == 0:
+                                logger.debug(
+                                    "Stopping SLURM watcher process (%s)",
+                                    self.launcher.key,
+                                )
+                                del SlurmProcessWatcher.WATCHERS[self.launcher.key]
+                                break
 
 
 class BatchSlurmProcess(Process):
