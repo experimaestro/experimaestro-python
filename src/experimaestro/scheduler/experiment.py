@@ -248,9 +248,8 @@ class experiment(BaseExperiment):
         # Store experiment name for ID references
         self.name = name
 
-        # Create experiment base directory (run directories will be created inside)
+        # Experiment base directory (run directories will be created inside)
         self._experiment_base = self.workspace.experimentspath / name
-        self._experiment_base.mkdir(parents=True, exist_ok=True)
 
         # Lock is at experiment level (prevents concurrent runs of same experiment)
         self.xplockpath = self._experiment_base / "lock"
@@ -823,6 +822,7 @@ class experiment(BaseExperiment):
 
         # Only lock and save environment in NORMAL mode
         if self.workspace.run_mode == RunMode.NORMAL:
+            self._experiment_base.mkdir(parents=True, exist_ok=True)
             logger.info("Locking experiment %s", self.xplockpath)
             lock = self.workspace.connector.lock(self.xplockpath, 0)
 
@@ -902,10 +902,9 @@ class experiment(BaseExperiment):
 
             env.save(env_info_path)
         else:
-            # Non-NORMAL mode: use placeholder run_id and workdir
+            # Non-NORMAL mode: use placeholder run_id and workdir (no directories created)
             self.run_id = "dry-run"
             self.workdir = self._experiment_base / self.run_id
-            self.workdir.mkdir(parents=True, exist_ok=True)
 
         # Register experiment with scheduler
         self.scheduler.register_experiment(self)
@@ -915,7 +914,8 @@ class experiment(BaseExperiment):
         self._ended_at = None
 
         self.workspace.__enter__()
-        (self.workspace.path / ".__experimaestro__").touch()
+        if self.workspace.run_mode == RunMode.NORMAL:
+            (self.workspace.path / ".__experimaestro__").touch()
 
         # Initialize filesystem-based state tracking (only in NORMAL mode)
         from .state_status import ExperimentEventWriter
