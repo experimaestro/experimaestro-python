@@ -985,15 +985,54 @@ class MockJob(BaseJob):
         super().set_state(new_state, loading=loading)
 
     def load_from_disk(self):
-        """Override to set _has_event_state only for reliable on-disk sources.
+        """Override to skip expensive Process.fromDefinition() calls.
+
+        In the monitoring context (TUI/web), we trust marker files and
+        status.json for state. We still read PID file content for metadata
+        but don't check if the process is actually alive — cleanup handles
+        stale PID files instead.
 
         Marker files (.done/.failed) and PID files are reliable indicators
         of actual job state. status.json may be stale from a previous run.
         """
-        super().load_from_disk()
+        # Load from status.json (same as parent)
+        status_dict = None
+        if self.status_path.exists():
+            try:
+                with self.status_path.open() as f:
+                    status_dict = json.load(f)
+                    self._load_from_status_dict(status_dict)
+            except Exception as e:
+                logger.debug("Failed to load status.json: %s", e)
 
-        # Marker files (.done/.failed) and PID files are ground truth —
-        # their state should take priority over experiment events
+        if status_dict is None:
+            self._load_fallback_timestamps()
+
+        # Marker files (.done/.failed) override stored state (same as parent)
+        if marker_state := JobState.from_path(self.path, self.scriptname):
+            marker_file = (
+                self.donefile if marker_state == JobState.DONE else self.failedfile
+            )
+            try:
+                self.endtime = datetime.fromtimestamp(marker_file.stat().st_mtime)
+            except OSError:
+                pass
+
+            if self.starttime is None:
+                self._load_starttime_from_params()
+
+            self.set_state(marker_state, loading=True)
+            self._process_dict = None
+
+        # PID file exists — assume RUNNING without calling fromDefinition
+        elif self.pidfile.exists():
+            try:
+                self._process_dict = json.loads(self.pidfile.read_text())
+                self.set_state(JobState.RUNNING, loading=True)
+            except Exception:
+                pass
+
+        # Set _has_event_state for reliable on-disk sources
         if (
             self.donefile.exists()
             or self.failedfile.exists()

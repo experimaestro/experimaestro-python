@@ -274,8 +274,27 @@ def _is_job_active(job_path: Path, task_id: str) -> bool:
         except Exception:
             pass
 
-    # If there's no terminal marker (.done/.failed), the job may be in the
-    # starting gap (between scheduler releasing lock and process acquiring it)
+        # Process is dead — remove stale PID file (lock is held)
+        logger.info("Removing stale PID file for job %s", task_id)
+        pidfile.unlink(missing_ok=True)
+
+        # If no terminal markers, the process crashed — write .failed marker
+        donefile = BaseJob.get_donefile(job_path, scriptname)
+        failedfile = BaseJob.get_failedfile(job_path, scriptname)
+        if not donefile.exists() and not failedfile.exists():
+            logger.info("Writing .failed marker for crashed job %s", task_id)
+            failedfile.write_text(
+                json.dumps(
+                    {
+                        "code": 1,
+                        "reason": "failed",
+                        "message": "Process died without writing markers",
+                    }
+                )
+            )
+        return False
+
+    # No PID file — check terminal markers
     donefile = BaseJob.get_donefile(job_path, scriptname)
     failedfile = BaseJob.get_failedfile(job_path, scriptname)
 
