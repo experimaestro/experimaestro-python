@@ -393,6 +393,135 @@ class TestEventReaderOrdering:
         # Should still get events from file 2
         assert len(received_events) == 3
 
+    def test_job_event_files_extract_file_number(self, events_dir):
+        """_extract_file_number should handle job-style event-{job_id}-{count}.jsonl"""
+        reader = EventReader(
+            WatchedDirectory(path=events_dir, glob_pattern="event-*.jsonl")
+        )
+
+        # Job event files
+        assert reader._extract_file_number(events_dir / "event-abc123-0.jsonl") == 0
+        assert reader._extract_file_number(events_dir / "event-abc123-5.jsonl") == 5
+        assert reader._extract_file_number(events_dir / "event-abc123-12.jsonl") == 12
+
+        # Experiment event files (still works)
+        assert reader._extract_file_number(events_dir / "events-0.jsonl") == 0
+        assert reader._extract_file_number(events_dir / "events-3.jsonl") == 3
+
+        # Non-matching files
+        assert reader._extract_file_number(events_dir / "other.jsonl") is None
+
+    def test_job_event_files_extract_file_prefix(self, events_dir):
+        """_extract_file_prefix should handle both naming patterns"""
+        reader = EventReader(
+            WatchedDirectory(path=events_dir, glob_pattern="event-*.jsonl")
+        )
+
+        assert (
+            reader._extract_file_prefix(events_dir / "event-abc123-0.jsonl")
+            == "event-abc123-"
+        )
+        assert reader._extract_file_prefix(events_dir / "events-3.jsonl") == "events-"
+        assert reader._extract_file_prefix(events_dir / "other.jsonl") is None
+
+    def test_job_event_files_ordering(self, events_dir):
+        """Job event files (event-{job_id}-{count}.jsonl) should be processed in order"""
+        job_id = "abc123"
+
+        # Create job event files
+        for file_num in range(3):
+            event_file = events_dir / f"event-{job_id}-{file_num}.jsonl"
+            with event_file.open("w") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(
+                        job_id=f"file{file_num}-job-{i}", state="running"
+                    )
+                    f.write(event.to_json() + "\n")
+
+        received_events: list[str] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            if isinstance(event, JobStateChangedEvent):
+                received_events.append(event.job_id)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir,
+                glob_pattern=f"event-{job_id}-*.jsonl",
+                on_event=on_event,
+            )
+        )
+
+        # Register entity to be followed
+        reader._followed_entities["test"] = reader.directories[0]
+
+        # Process file 2 directly (should process 0 and 1 first)
+        reader._process_file_change(events_dir / f"event-{job_id}-2.jsonl")
+
+        # All 9 events should be received
+        assert len(received_events) == 9
+
+        # Verify ordering: file0 before file1 before file2
+        file0_events = [e for e in received_events if e.startswith("file0-")]
+        file1_events = [e for e in received_events if e.startswith("file1-")]
+        file2_events = [e for e in received_events if e.startswith("file2-")]
+
+        assert len(file0_events) == 3
+        assert len(file1_events) == 3
+        assert len(file2_events) == 3
+
+        file0_last = max(received_events.index(e) for e in file0_events)
+        file1_first = min(received_events.index(e) for e in file1_events)
+        file1_last = max(received_events.index(e) for e in file1_events)
+        file2_first = min(received_events.index(e) for e in file2_events)
+
+        assert file0_last < file1_first, "File0 events should come before file1"
+        assert file1_last < file2_first, "File1 events should come before file2"
+
+    def test_job_event_files_rotation_drains_previous(self, events_dir):
+        """When a new job event file appears, previous file should be fully drained"""
+        job_id = "deadbeef"
+
+        # Simulate: file 0 has events that haven't been fully read,
+        # then file 1 appears (rotation happened)
+        event_file_0 = events_dir / f"event-{job_id}-0.jsonl"
+        with event_file_0.open("w") as f:
+            for i in range(5):
+                event = JobProgressEvent(job_id=job_id, level=0, progress=i / 10.0)
+                f.write(event.to_json() + "\n")
+
+        event_file_1 = events_dir / f"event-{job_id}-1.jsonl"
+        with event_file_1.open("w") as f:
+            event = JobProgressEvent(job_id=job_id, level=0, progress=0.5)
+            f.write(event.to_json() + "\n")
+
+        received_events: list[EventBase] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            received_events.append(event)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir,
+                glob_pattern=f"event-{job_id}-*.jsonl",
+                on_event=on_event,
+            )
+        )
+
+        reader._followed_entities["test"] = reader.directories[0]
+
+        # Only process file 1 (simulates watchdog notifying about new file)
+        # This should also drain file 0 first
+        reader._process_file_change(event_file_1)
+
+        # Should get all 5 events from file 0 + 1 from file 1 = 6 total
+        assert len(received_events) == 6
+
+        # The last event should be from file 1 (progress=0.5)
+        last = received_events[-1]
+        assert isinstance(last, JobProgressEvent)
+        assert last.progress == 0.5
+
 
 # =============================================================================
 # Tests: EventReader Stress

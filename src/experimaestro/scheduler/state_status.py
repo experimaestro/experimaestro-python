@@ -1349,16 +1349,30 @@ class EventReader:
     def _extract_file_number(self, path: Path) -> int | None:
         """Extract the file number from event file name.
 
-        E.g., "events-2.jsonl" -> 2, "events-10.jsonl" -> 10
+        E.g., "events-2.jsonl" -> 2, "event-abc123-10.jsonl" -> 10
         Returns None if the file name doesn't match the expected pattern.
         """
         import re
 
         name = path.name
-        # Match events-{number}.jsonl pattern
-        match = re.match(r"events-(\d+)\.jsonl$", name)
+        # Match events-{number}.jsonl (experiment) or event-{id}-{number}.jsonl (job)
+        match = re.match(r"events?-(?:.+-)?(\d+)\.jsonl$", name)
         if match:
             return int(match.group(1))
+        return None
+
+    def _extract_file_prefix(self, path: Path) -> str | None:
+        """Extract the filename prefix before the count number.
+
+        E.g., "events-2.jsonl" -> "events-", "event-abc123-10.jsonl" -> "event-abc123-"
+        Returns None if the file name doesn't match.
+        """
+        import re
+
+        name = path.name
+        match = re.match(r"(events?-(?:.+-)?)\d+\.jsonl$", name)
+        if match:
+            return match.group(1)
         return None
 
     def _process_file_change(self, path: Path) -> None:
@@ -1404,10 +1418,12 @@ class EventReader:
 
         # Process all earlier files first (from min_count onwards) to maintain ordering
         if file_number is not None and file_number > min_count:
-            for earlier_num in range(min_count, file_number):
-                earlier_path = entity_dir / f"events-{earlier_num}.jsonl"
-                if earlier_path.exists():
-                    self._process_single_file(earlier_path, entity_id, dir_config)
+            prefix = self._extract_file_prefix(path)
+            if prefix:
+                for earlier_num in range(min_count, file_number):
+                    earlier_path = entity_dir / f"{prefix}{earlier_num}.jsonl"
+                    if earlier_path.exists():
+                        self._process_single_file(earlier_path, entity_id, dir_config)
 
         self._process_single_file(path, entity_id, dir_config)
 
