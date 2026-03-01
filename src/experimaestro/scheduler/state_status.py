@@ -32,6 +32,7 @@ from experimaestro.filewatcher import DirectoryWatch, FileWatcherService
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.interfaces import BaseExperiment
+    from experimaestro.scheduler.state_provider import MockJob
 
 logger = logging.getLogger("xpm.state_status")
 
@@ -715,6 +716,10 @@ class JobEventWriter(EventWriter):
         self.job_path = job_path
         self._events_dir = workspace_path / ".events" / "jobs" / task_id
 
+        # Maintain a MockJob loaded from status.json so that on rotation
+        # we can write back a fully up-to-date state (progress, carbon, etc.)
+        self._mock_job = self._create_mock_job()
+
     @property
     def events_dir(self) -> Path:
         return self._events_dir
@@ -725,6 +730,59 @@ class JobEventWriter(EventWriter):
         if self.job_path is None:
             return None
         return self.job_path / ".experimaestro" / "status.json"
+
+    def _create_mock_job(self) -> "MockJob":
+        """Load or create a MockJob from the job's status.json.
+
+        The mock job mirrors the on-disk state and is kept up-to-date
+        by applying every event that flows through this writer.
+        """
+        from experimaestro.scheduler.state_provider import MockJob
+
+        status_path = self.status_path
+        if status_path is not None and status_path.exists():
+            try:
+                return MockJob.from_disk(self.job_path, self.task_id, self.job_id)
+            except Exception:
+                logger.debug("Failed to load MockJob from disk, creating empty")
+
+        return MockJob(
+            identifier=self.job_id,
+            task_id=self.task_id,
+            path=self.job_path,
+            state="unscheduled",
+            submittime=None,
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+
+    def write_event(self, event: EventBase) -> None:
+        """Write event and apply it to the in-memory mock job"""
+        self._mock_job.apply_event(event)
+        super().write_event(event)
+
+    def _write_events_count_to_status(self) -> None:
+        """Write the full job state (from mock job) to status.json on rotation.
+
+        Instead of just patching events_count into the existing file,
+        we write the mock job's complete state_dict(). This ensures that
+        progress, carbon metrics, and any other event-derived state is
+        persisted so that monitors skipping earlier event files still see
+        the correct state.
+        """
+        status_path = self.status_path
+        if status_path is None or not status_path.exists():
+            return
+
+        try:
+            state = self._mock_job.state_dict()
+            state["events_count"] = self._count
+            with status_path.open("w") as f:
+                json.dump(state, f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Failed to write job state to status: %s", e)
 
     def _get_event_file_path(self) -> Path:
         """Get the path for job event file with job_id in filename"""
@@ -892,6 +950,9 @@ def job_entity_id_extractor(path: Path) -> Optional[str]:
 # Resolver type: given an entity_id, returns the permanent storage path
 PermanentStorageResolver = Callable[[str], Path]
 
+# Resolver type: given an entity_id, returns the starting events_count
+EventsCountResolver = Callable[[str], int]
+
 
 @dataclass
 class WatchedDirectory:
@@ -903,6 +964,9 @@ class WatchedDirectory:
         glob_pattern: Pattern for matching event files
         permanent_storage_resolver: Optional function that returns permanent storage
             path for an entity. Used for hardlink archiving and deletion recovery.
+        events_count_resolver: Optional function that returns the starting
+            events_count for an entity. When None, defaults to 0 (process all files).
+            Replaces reading events_count from status.json in the entity directory.
         on_created: Callback when a new entity is discovered. Returns True to follow
             this entity's events, False to ignore. If None, all entities are followed.
         on_event: Callback for each event (entity_id, event).
@@ -916,6 +980,8 @@ class WatchedDirectory:
     glob_pattern: str = "*/events-*.jsonl"
     # For archiving and deletion handling:
     permanent_storage_resolver: PermanentStorageResolver | None = None
+    # For resolving starting events_count per entity:
+    events_count_resolver: EventsCountResolver | None = None
     # Callbacks for entity lifecycle
     on_created: Callable[[str], bool] | None = None
     on_event: Callable[[str, EventBase], None] | None = None
@@ -954,8 +1020,8 @@ class EventReader:
         self._buffering = False
         self._event_buffer: list[tuple[str, WatchedDirectory, EventBase]] = []
         self._deleted_buffer: list[tuple[str, WatchedDirectory]] = []
-        # Cache for events_count from status.json (entity_dir -> count)
-        self._events_count_cache: dict[Path, int] = {}
+        # Per-entity tracking: entity_id -> path of the file currently being tailed
+        self._current_file: dict[str, Path] = {}
         # All watches (for finding the right one per path)
         self._all_watchers: list[DirectoryWatch] = []
 
@@ -976,28 +1042,22 @@ class EventReader:
                 continue
         return None
 
-    def _get_entity_events_count(self, entity_dir: Path) -> int:
-        """Get events_count from status.json in the entity directory
+    def _get_entity_events_count(
+        self, entity_id: str, dir_config: WatchedDirectory
+    ) -> int:
+        """Get starting events_count for an entity via the resolver callback.
 
-        Returns the events_count from status.json, or 0 if not found.
-        Caches the result and updates when status.json is modified.
+        Returns the events_count from the resolver, or 0 if no resolver is set.
         """
-        status_path = entity_dir / "status.json"
-
-        # Check if status.json exists
-        if not status_path.exists():
-            return 0
-
-        # Read status.json for events_count
-        try:
-            with status_path.open("r") as f:
-                status = json.load(f)
-                events_count = status.get("events_count", 0)
-                self._events_count_cache[entity_dir] = events_count
-                return events_count
-        except (OSError, json.JSONDecodeError):
-            # Fall back to cached value or default
-            return self._events_count_cache.get(entity_dir, 0)
+        if dir_config.events_count_resolver is not None:
+            try:
+                return dir_config.events_count_resolver(entity_id)
+            except Exception:
+                logger.exception(
+                    "Error resolving events_count for entity %s", entity_id
+                )
+                return 0
+        return 0
 
     def get_all_event_files(self) -> list[Path]:
         """Get all event files across all directories, sorted by modification time"""
@@ -1168,12 +1228,14 @@ class EventReader:
         Discovers existing entities, calls on_created for each, and optionally
         replays events for entities that should be followed.
 
+        For each entity, only the latest event file is tracked (tailed).
+        Earlier files are processed during catch-up but not watched.
+
         Args:
             replay: If True (default), replay all historical events via
                 on_event callbacks.  If False, just register entities and
                 seek the latest event file to end-of-file so only new events
-                trigger callbacks.  Older (already-rotated) files are not
-                tracked at all.
+                trigger callbacks.
         """
         if self._file_watcher is not None:
             return  # Already watching
@@ -1181,26 +1243,38 @@ class EventReader:
         # Discover existing entities
         entities = self._discover_entities()
 
-        # Files to track after watchers are set up.
-        # When replaying we track everything; otherwise only the latest per entity.
+        # Files to track: only the latest file per entity
         files_to_track: list[Path] = []
 
         # Register entities and optionally replay events for followed ones
         for entity_id, (dir_config, event_files) in entities.items():
-            if self._register_entity(entity_id, dir_config):
-                if replay:
-                    for event_file in event_files:
-                        self._replay_events_from_file(event_file, entity_id, dir_config)
-                elif event_files:
-                    # Only track the latest file (highest numbered); older
-                    # rotated files are already consolidated and won't change.
-                    latest = event_files[-1]  # sorted by name in _discover
-                    self._seek_to_end_of_file(latest)
-                    files_to_track.append(latest)
+            if not self._register_entity(entity_id, dir_config):
+                continue
+            if not event_files:
+                continue
+
+            # Get starting events_count via resolver
+            min_count = self._get_entity_events_count(entity_id, dir_config)
+
+            # Filter files to those at or above min_count
+            relevant_files = []
+            for ef in event_files:
+                fn = self._extract_file_number(ef)
+                if fn is not None and fn >= min_count:
+                    relevant_files.append(ef)
+
+            if replay and relevant_files:
+                for event_file in relevant_files:
+                    self._replay_events_from_file(event_file, entity_id, dir_config)
+
+            # Track only the latest file
+            latest = event_files[-1]  # sorted by name in _discover
+            if not replay:
+                self._seek_to_end_of_file(latest)
+            self._current_file[entity_id] = latest
+            files_to_track.append(latest)
 
         # Create a DirectoryWatch for each directory (via FileWatcherService)
-        # We use the first directory's watch as our primary _file_watcher handle,
-        # but we set up watches for all directories
         svc = FileWatcherService.instance()
 
         # Use the first directory to create the primary watch
@@ -1244,19 +1318,13 @@ class EventReader:
                 watch.set_tail_position(path, pos)
         self._file_positions.clear()
 
-        # Add existing event files to be tracked
-        if replay:
-            # Track all event files (replay mode reads them all)
-            for path in self.get_all_event_files():
+        # Only track the latest file per entity (not all files)
+        for path in files_to_track:
+            watch = self._find_watcher(path)
+            if watch:
+                watch.add_file(path)
+            else:
                 self._file_watcher.add_file(path)
-        else:
-            # Only track the latest file per entity (collected above)
-            for path in files_to_track:
-                watch = self._find_watcher(path)
-                if watch:
-                    watch.add_file(path)
-                else:
-                    self._file_watcher.add_file(path)
 
     def stop_watching(self) -> None:
         """Stop watching for file changes (closes tailed file pools)"""
@@ -1282,6 +1350,8 @@ class EventReader:
         them for bulk consolidation when replay=False).
         If the entity is already being followed, returns immediately.
 
+        Only the latest event file is tracked for future changes.
+
         Note: This bypasses the on_created callback - use this for explicit
         registration (e.g., scheduler submitting a job) rather than discovery.
 
@@ -1301,6 +1371,7 @@ class EventReader:
         self._followed_entities[entity_id] = dir_config
 
         collected: list[EventBase] = []
+        latest_file: Path | None = None
 
         # Process existing event files for this entity
         if dir_config.path.exists():
@@ -1315,9 +1386,16 @@ class EventReader:
                         self._replay_events_from_file(event_file, entity_id, dir_config)
                     else:
                         collected.extend(self._read_events_from_file(event_file))
-                    # Track file for future changes
-                    if self._file_watcher:
-                        self._file_watcher.add_file(event_file)
+                    latest_file = event_file
+
+        # Track only the latest file for future changes
+        if latest_file is not None:
+            self._current_file[entity_id] = latest_file
+            watch = self._find_watcher(latest_file)
+            if watch:
+                watch.add_file(latest_file)
+            elif self._file_watcher:
+                self._file_watcher.add_file(latest_file)
 
         return collected
 
@@ -1423,13 +1501,11 @@ class EventReader:
     def _process_file_change(self, path: Path) -> None:
         """Process a changed event file and notify callbacks (or buffer)
 
-        IMPORTANT: When processing a file like events-N.jsonl, we first ensure
-        all earlier files (events-{min_count}.jsonl through events-(N-1).jsonl)
-        have been fully read. This guarantees event ordering even when file
-        system notifications arrive out of order.
-
-        Files numbered below the entity's events_count (from status.json) are
-        skipped, as they have already been processed in a previous run.
+        Follows one file per entity and switches on rotation:
+        - If the notified file has a higher number than the current file,
+          drain the current file first, then switch to the new one.
+        - If the notified file has a lower number, ignore it (old file).
+        - On first encounter, catch up from events_count via the resolver.
         """
         entity_id = self._extract_entity_id(path)
         if not entity_id:
@@ -1445,31 +1521,40 @@ class EventReader:
             if not self._register_entity(entity_id, dir_config):
                 return  # Entity rejected by on_created
 
-        entity_dir = path.parent
         file_number = self._extract_file_number(path)
+        current = self._current_file.get(entity_id)
+        current_number = self._extract_file_number(current) if current else None
 
-        # Get the minimum event file number to process
-        min_count = self._get_entity_events_count(entity_dir)
+        if current is None:
+            # First file for this entity: catch up from events_count
+            min_count = self._get_entity_events_count(entity_id, dir_config)
 
-        # Skip files below the events_count threshold
-        if file_number is not None and file_number < min_count:
-            logger.debug(
-                "Skipping %s (file_number=%d < events_count=%d)",
-                path,
-                file_number,
-                min_count,
-            )
-            return
+            # Skip files below the events_count threshold
+            if file_number is not None and file_number < min_count:
+                return
 
-        # Process all earlier files first (from min_count onwards) to maintain ordering
-        if file_number is not None and file_number > min_count:
+            entity_dir = path.parent
             prefix = self._extract_file_prefix(path)
-            if prefix:
+
+            if file_number is not None and prefix:
+                # Process earlier files from min_count up to (but not including)
+                # the notified file
                 for earlier_num in range(min_count, file_number):
                     earlier_path = entity_dir / f"{prefix}{earlier_num}.jsonl"
                     if earlier_path.exists():
                         self._process_single_file(earlier_path, entity_id, dir_config)
 
+            # Set current file to the notified file
+            self._current_file[entity_id] = path
+        elif file_number is not None and current_number is not None:
+            if file_number > current_number:
+                # Rotation: drain current file first, then switch
+                self._process_single_file(current, entity_id, dir_config)
+                self._current_file[entity_id] = path
+            elif file_number < current_number:
+                return  # Old file, ignore
+
+        # Process the current/new file
         self._process_single_file(path, entity_id, dir_config)
 
     def _process_single_file(
@@ -1583,8 +1668,9 @@ class EventReader:
                 except Exception:
                     logger.exception("Error in on_deleted callback")
 
-        # Remove from followed entities
+        # Remove from followed entities and current file tracking
         self._followed_entities.pop(entity_id, None)
+        self._current_file.pop(entity_id, None)
 
     def _read_events_from_permanent(
         self, permanent_dir: Path, entity_id: str

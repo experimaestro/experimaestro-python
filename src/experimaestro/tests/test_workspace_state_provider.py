@@ -1120,8 +1120,9 @@ class TestEventFileOrderingWithStartCount:
     def test_event_ordering_starts_from_status_count(self, mock_workspace):
         """Events should only be read from events_count onwards, ignoring earlier files
 
-        When status.json has events_count=1, events-0.jsonl should be ignored
-        and events-1.jsonl, events-2.jsonl should be read in order.
+        When the experiment's status.json has events_count=1, events-0.jsonl
+        should be ignored and events-1.jsonl, events-2.jsonl should be read
+        in order.
         """
         import threading
 
@@ -1166,18 +1167,27 @@ class TestEventFileOrderingWithStartCount:
         provider.add_listener(listener)
 
         try:
-            # Create events directory structure
-            exp_dir = mock_workspace / ".events" / "experiments" / "test-start-count"
-            exp_dir.mkdir(parents=True, exist_ok=True)
+            experiment_id = "test-start-count"
 
-            # Create status.json that says we're at events_count=1
-            # This means events-0.jsonl should be ignored
-            status_file = exp_dir / "status.json"
-            with open(status_file, "w") as f:
+            # Create events directory structure
+            exp_events_dir = mock_workspace / ".events" / "experiments" / experiment_id
+            exp_events_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create the experiment run directory with status.json containing
+            # events_count=1 (the resolver reads from here via current symlink)
+            run_id = "20260101_150000"
+            exp_run_dir = mock_workspace / "experiments" / experiment_id / run_id
+            exp_run_dir.mkdir(parents=True, exist_ok=True)
+            status_path = exp_run_dir / "status.json"
+            with open(status_path, "w") as f:
                 json.dump({"events_count": 1, "status": "running"}, f)
 
+            # Create 'current' symlink in events dir pointing to run dir
+            current_symlink = exp_events_dir / "current"
+            current_symlink.symlink_to(exp_run_dir)
+
             # Create events-0.jsonl (should be IGNORED because status says count=1)
-            events_file_0 = exp_dir / "events-0.jsonl"
+            events_file_0 = exp_events_dir / "events-0.jsonl"
             with open(events_file_0, "w") as f:
                 for i in range(3):
                     f.write(
@@ -1192,7 +1202,7 @@ class TestEventFileOrderingWithStartCount:
                     )
 
             # Create events-1.jsonl with events
-            events_file_1 = exp_dir / "events-1.jsonl"
+            events_file_1 = exp_events_dir / "events-1.jsonl"
             with open(events_file_1, "w") as f:
                 for i in range(expected_file1_count):
                     f.write(
@@ -1207,7 +1217,7 @@ class TestEventFileOrderingWithStartCount:
                     )
 
             # Create events-2.jsonl
-            events_file_2 = exp_dir / "events-2.jsonl"
+            events_file_2 = exp_events_dir / "events-2.jsonl"
             with open(events_file_2, "w") as f:
                 for i in range(expected_file2_count):
                     f.write(

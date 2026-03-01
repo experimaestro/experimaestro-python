@@ -119,12 +119,55 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         self._start_watcher()
 
+    def _resolve_experiment_events_count(self, entity_id: str) -> int:
+        """Resolve events_count for an experiment from its status.json"""
+        symlink = self._experiments_dir / entity_id / "current"
+        if not symlink.is_symlink():
+            return 0
+        try:
+            run_dir = symlink.resolve()
+            status_path = run_dir / "status.json"
+            if status_path.exists():
+                with status_path.open("r") as f:
+                    status = json.load(f)
+                return status.get("events_count", 0)
+        except (OSError, json.JSONDecodeError):
+            pass
+        return 0
+
+    def _resolve_job_events_count(self, entity_id: str) -> int:
+        """Resolve events_count for a job from its status.json
+
+        entity_id format: "{task_id}:{job_id}"
+        """
+        parts = entity_id.split(":", 1)
+        if len(parts) != 2:
+            return 0
+        task_id, job_id = parts
+        status_path = (
+            self.workspace_path
+            / "jobs"
+            / task_id
+            / job_id
+            / ".experimaestro"
+            / "status.json"
+        )
+        try:
+            if status_path.exists():
+                with status_path.open("r") as f:
+                    status = json.load(f)
+                return status.get("events_count", 0)
+        except (OSError, json.JSONDecodeError):
+            pass
+        return 0
+
     def _start_watcher(self) -> None:
         """Start the event file watcher for experiments and jobs"""
         if self._event_reader is None:
             self._event_reader = EventReader(
                 WatchedDirectory(
                     path=self._experiments_dir,
+                    events_count_resolver=self._resolve_experiment_events_count,
                     on_created=self._on_experiment_created,
                     on_event=self._on_experiment_event,
                     on_deleted=self._on_experiment_deleted,
@@ -133,6 +176,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     path=self._jobs_dir,
                     glob_pattern="*/event-*-*.jsonl",
                     entity_id_extractor=job_entity_id_extractor,
+                    events_count_resolver=self._resolve_job_events_count,
                     on_created=self._on_job_created,
                     on_event=self._on_job_event,
                     on_deleted=self._on_job_deleted,

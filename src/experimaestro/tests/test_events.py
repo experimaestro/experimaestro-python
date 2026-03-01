@@ -264,10 +264,6 @@ class TestEventReaderOrdering:
                     )
                     f.write(event.to_json() + "\n")
 
-        # Create status.json with events_count=0 (start from file 0)
-        status_file = events_dir / "status.json"
-        status_file.write_text(json.dumps({"events_count": 0}))
-
         # Track received events
         received_events: list[str] = []
 
@@ -277,7 +273,10 @@ class TestEventReaderOrdering:
 
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
             )
         )
 
@@ -313,7 +312,7 @@ class TestEventReaderOrdering:
         )
 
     def test_skips_files_below_events_count(self, events_dir):
-        """Files below events_count in status.json should be skipped"""
+        """Files below events_count from resolver should be skipped"""
         # Create event files
         for file_num in range(3):
             event_file = events_dir / f"events-{file_num}.jsonl"
@@ -324,10 +323,6 @@ class TestEventReaderOrdering:
                     )
                     f.write(event.to_json() + "\n")
 
-        # Create status.json with events_count=1 (skip file 0)
-        status_file = events_dir / "status.json"
-        status_file.write_text(json.dumps({"events_count": 1}))
-
         # Track received events
         received_events: list[str] = []
 
@@ -335,9 +330,13 @@ class TestEventReaderOrdering:
             if isinstance(event, JobStateChangedEvent):
                 received_events.append(event.job_id)
 
+        # Resolver returns 1 -> skip file 0
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 1,
             )
         )
 
@@ -367,10 +366,6 @@ class TestEventReaderOrdering:
                 event = JobStateChangedEvent(job_id=f"job-{i}", state="running")
                 f.write(event.to_json() + "\n")
 
-        # Create status.json with events_count=0
-        status_file = events_dir / "status.json"
-        status_file.write_text(json.dumps({"events_count": 0}))
-
         # Track received events
         received_events: list[str] = []
 
@@ -380,7 +375,10 @@ class TestEventReaderOrdering:
 
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
             )
         )
 
@@ -548,10 +546,6 @@ class TestEventReaderStress:
                     )
                     f.write(event.to_json() + "\n")
 
-        # Create status.json
-        status_file = events_dir / "status.json"
-        status_file.write_text(json.dumps({"events_count": 0}))
-
         # Track received events with their file numbers
         received_file_nums: list[int] = []
 
@@ -564,7 +558,10 @@ class TestEventReaderStress:
 
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
             )
         )
 
@@ -586,10 +583,8 @@ class TestEventReaderStress:
                 f"Out of order: file {current_file} event followed by file {next_file}"
             )
 
-    def test_random_file_access_ordering(self, events_dir):
-        """Process files in random order, verify events still ordered"""
-        import random
-
+    def test_sequential_file_rotation_ordering(self, events_dir):
+        """Process files sequentially (simulating rotation), verify all events ordered"""
         num_files = 10
         events_per_file = 5
 
@@ -603,10 +598,6 @@ class TestEventReaderStress:
                     )
                     f.write(event.to_json() + "\n")
 
-        # Create status.json
-        status_file = events_dir / "status.json"
-        status_file.write_text(json.dumps({"events_count": 0}))
-
         received_events: list[str] = []
 
         def on_event(entity_id: str, event: EventBase):
@@ -615,18 +606,18 @@ class TestEventReaderStress:
 
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
             )
         )
 
         # Register entity to be followed
         reader._followed_entities["test"] = reader.directories[0]
 
-        # Process files in random order
-        file_order = list(range(num_files))
-        random.shuffle(file_order)
-
-        for file_num in file_order:
+        # Process files in order (simulates watchdog notifications during rotation)
+        for file_num in range(num_files):
             reader._process_file_change(events_dir / f"events-{file_num}.jsonl")
 
         # Extract file numbers from received events
@@ -634,14 +625,12 @@ class TestEventReaderStress:
             return int(job_id.split("-")[0][1:])  # "f{num}-{i}" -> num
 
         # Verify events from each file are contiguous and in order
-        # (all events from file N appear before any event from file N+1)
         seen_files = set()
         current_file = -1
 
         for job_id in received_events:
             file_num = get_file_num(job_id)
             if file_num != current_file:
-                # Switching to new file
                 assert file_num not in seen_files, (
                     f"Events from file {file_num} appear after we moved to a later file"
                 )
@@ -856,13 +845,6 @@ class TestEventWriterReaderIntegration:
         finally:
             writer.close()
 
-        # Reset events_count to 0 to read all events (simulates fresh reader)
-        with status_file.open() as f:
-            status = json.load(f)
-        status["events_count"] = 0
-        with status_file.open("w") as f:
-            json.dump(status, f)
-
         # Read events
         received_events: list[str] = []
 
@@ -870,9 +852,13 @@ class TestEventWriterReaderIntegration:
             if isinstance(event, JobStateChangedEvent):
                 received_events.append(event.job_id)
 
+        # Resolver returns 0 to read all events
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
             )
         )
 
@@ -888,7 +874,7 @@ class TestEventWriterReaderIntegration:
         assert len(received_events) == 10
 
     def test_resume_from_events_count(self, events_dir, status_file):
-        """EventReader should resume from events_count in status.json"""
+        """EventReader should resume from events_count via resolver"""
 
         class SmallRotationWriter(SimpleEventWriter):
             MAX_EVENTS_PER_FILE = 3
@@ -912,7 +898,7 @@ class TestEventWriterReaderIntegration:
         # - File 2: 3 events, rotation -> events_count=3
         assert status.get("events_count") == 3
 
-        # Create reader that respects events_count
+        # Create reader with resolver returning 3 (all files already processed)
         received_events: list[str] = []
 
         def on_event(entity_id: str, event: EventBase):
@@ -921,7 +907,10 @@ class TestEventWriterReaderIntegration:
 
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 3,
             )
         )
 
@@ -989,7 +978,10 @@ class TestEventReaderTailedPool:
 
         reader = EventReader(
             WatchedDirectory(
-                path=events_dir, glob_pattern="events-*.jsonl", on_event=on_event
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
             ),
             max_open_files=2,
         )
@@ -1004,10 +996,6 @@ class TestEventReaderTailedPool:
                         job_id=f"f{file_num}-job-{i}", state="running"
                     )
                     f.write(event.to_json() + "\n")
-
-        # Create status.json
-        status_file = events_dir / "status.json"
-        status_file.write_text(json.dumps({"events_count": 0}))
 
         reader.start_watching()
         try:
