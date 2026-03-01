@@ -1197,6 +1197,7 @@ class MockExperiment(BaseExperiment):
         run_tags: Optional[set[str]] = None,
         carbon_impact: Optional["CarbonImpactData"] = None,
         job_states: Optional[Dict[str, JobState]] = None,
+        total_jobs: int = 0,
     ):
         self.workdir = workdir
         self.run_id = run_id
@@ -1215,6 +1216,11 @@ class MockExperiment(BaseExperiment):
         self._carbon_impact = carbon_impact
         # Track job states from experiment events
         self._job_states: Dict[str, JobState] = job_states or {}
+        # total_jobs from status.json (0 means use len(_job_infos) fallback)
+        self._total_jobs = total_jobs
+        # Lazy loading support for jobs.jsonl
+        self._jobs_jsonl_path: Optional[Path] = None
+        self._jobs_jsonl_loaded: bool = True
 
     @property
     def experiment_id(self) -> str:
@@ -1231,7 +1237,13 @@ class MockExperiment(BaseExperiment):
 
     @property
     def job_infos(self) -> Dict[str, "ExperimentJobInformation"]:
-        """Lightweight job info from jobs.jsonl (job_id, task_id, tags, timestamp)"""
+        """Lightweight job info from jobs.jsonl (job_id, task_id, tags, timestamp)
+
+        Lazy-loaded: when created from from_disk() with status.json, the
+        jobs.jsonl is not read until this property is first accessed.
+        """
+        if not self._jobs_jsonl_loaded:
+            self._load_jobs_jsonl()
         return self._job_infos
 
     @property
@@ -1243,7 +1255,7 @@ class MockExperiment(BaseExperiment):
         """Build tags dict from job_infos"""
         return {
             job_id: job_info.tags
-            for job_id, job_info in self._job_infos.items()
+            for job_id, job_info in self.job_infos.items()
             if job_info.tags
         }
 
@@ -1269,7 +1281,9 @@ class MockExperiment(BaseExperiment):
 
     @property
     def total_jobs(self) -> int:
-        return len(self._job_infos)
+        if self._total_jobs > 0:
+            return self._total_jobs
+        return len(self.job_infos)
 
     @property
     def finished_jobs(self) -> int:
@@ -1296,6 +1310,29 @@ class MockExperiment(BaseExperiment):
         return self._job_states.get(job_id)
 
     # state_dict() is inherited from BaseExperiment
+
+    def _load_jobs_jsonl(self) -> None:
+        """Load job infos from jobs.jsonl (deferred loading)"""
+        self._jobs_jsonl_loaded = True
+        if self._jobs_jsonl_path is None:
+            return
+        jobs_jsonl_path = self._jobs_jsonl_path
+        if not jobs_jsonl_path.exists():
+            return
+        try:
+            with jobs_jsonl_path.open("r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        job_info = ExperimentJobInformation.from_dict(record)
+                        self._job_infos[job_info.job_id] = job_info
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except OSError as e:
+            logger.warning("Failed to read %s: %s", jobs_jsonl_path, e)
 
     @classmethod
     def from_disk(
@@ -1333,23 +1370,10 @@ class MockExperiment(BaseExperiment):
             # Create experiment from status.json
             exp = cls.from_state_dict(data, workspace_path)
 
-            # Load jobs from jobs.jsonl
+            # Defer jobs.jsonl loading until job_infos is accessed
             jobs_jsonl_path = run_dir / "jobs.jsonl"
-            if jobs_jsonl_path.exists():
-                try:
-                    with jobs_jsonl_path.open("r") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                record = json.loads(line)
-                                job_info = ExperimentJobInformation.from_dict(record)
-                                exp._job_infos[job_info.job_id] = job_info
-                            except (json.JSONDecodeError, KeyError):
-                                continue
-                except OSError as e:
-                    logger.warning("Failed to read %s: %s", jobs_jsonl_path, e)
+            exp._jobs_jsonl_path = jobs_jsonl_path
+            exp._jobs_jsonl_loaded = False
 
             return exp
 
@@ -1413,12 +1437,28 @@ class MockExperiment(BaseExperiment):
         if exp._job_infos:
             exp.status = ExperimentStatus.DONE
 
+        # Set total_jobs from recovered job count
+        exp._total_jobs = len(exp._job_infos)
+
         logger.info(
             "Recovered experiment %s/%s with %d job(s)",
             experiment_id,
             run_id,
             len(exp._job_infos),
         )
+
+        # Write status.json so future loads don't need expensive recovery
+        try:
+            exp.write_status()
+            logger.info(
+                "Wrote status.json for recovered experiment %s/%s",
+                experiment_id,
+                run_id,
+            )
+        except OSError as e:
+            logger.warning(
+                "Failed to write status.json for %s/%s: %s", experiment_id, run_id, e
+            )
 
         return exp
 
@@ -1495,6 +1535,7 @@ class MockExperiment(BaseExperiment):
             failed_jobs=d.get("failed_jobs", 0),
             run_tags=set(d.get("run_tags", [])),
             carbon_impact=CarbonImpactData.from_dict(d.get("carbon_impact")),
+            total_jobs=d.get("total_jobs", 0),
         )
 
     def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:

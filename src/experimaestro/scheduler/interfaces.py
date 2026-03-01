@@ -1424,6 +1424,7 @@ class BaseExperiment:
             "hostname": self.hostname,
             "started_at": serialize_timestamp(self.started_at),
             "ended_at": serialize_timestamp(self.ended_at),
+            "total_jobs": self.total_jobs,
             "finished_jobs": self.finished_jobs,
             "failed_jobs": self.failed_jobs,
             "services": {k: v.full_state_dict() for k, v in self.services.items()},

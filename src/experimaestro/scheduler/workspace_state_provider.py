@@ -737,6 +737,17 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Status cache methods
     # =========================================================================
 
+    def _get_cached_v2_experiment(self, experiment_id: str) -> Optional[MockExperiment]:
+        """Try to get a v2 experiment from cache without triggering re-reads.
+
+        Used by get_experiments() for listing, where we don't need to
+        refresh jobs.jsonl for cached experiments.
+        """
+        current_run_id = self.get_current_run(experiment_id)
+        if current_run_id is None:
+            return None
+        return self._get_cached_experiment(experiment_id, current_run_id)
+
     def _get_or_load_experiment(
         self, experiment_id: str, run_id: str, run_dir: Path
     ) -> MockExperiment:
@@ -974,14 +985,17 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """Get list of all experiments (v2 and v1 layouts)
 
         Uses a cached set of experiment IDs to avoid repeated directory scans.
-        Individual experiments are loaded via the experiment cache (which is
-        updated in-place by events for active experiments).
+        For listing, uses cached experiments directly (skipping _on_cached_experiment_found
+        which re-reads jobs.jsonl). Only does a full load on cache miss.
         """
         v2_ids, v1_ids = self._get_known_experiment_ids()
         experiments = []
 
         for experiment_id in v2_ids:
-            experiment = self._load_experiment(experiment_id)
+            experiment = self._get_cached_v2_experiment(experiment_id)
+            if experiment is None:
+                # Cache miss — do full load (populates cache)
+                experiment = self._load_experiment(experiment_id)
             if experiment is not None:
                 if since is not None and experiment.updated_at:
                     try:
