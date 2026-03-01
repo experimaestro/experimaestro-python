@@ -1222,11 +1222,17 @@ class EventReader:
         self._all_watchers.clear()
         logger.debug("Stopped watching all directories")
 
-    def follow(self, entity_id: str, dir_config: WatchedDirectory) -> bool:
+    def follow(
+        self,
+        entity_id: str,
+        dir_config: WatchedDirectory,
+        replay: bool = True,
+    ) -> list[EventBase]:
         """Start following an entity (e.g., when scheduler submits a new job).
 
-        If the entity already has event files, replays all events.
-        If the entity is already being followed, returns True immediately.
+        If the entity already has event files, replays all events (or returns
+        them for bulk consolidation when replay=False).
+        If the entity is already being followed, returns immediately.
 
         Note: This bypasses the on_created callback - use this for explicit
         registration (e.g., scheduler submitting a job) rather than discovery.
@@ -1234,17 +1240,21 @@ class EventReader:
         Args:
             entity_id: Entity identifier to follow
             dir_config: Directory configuration for this entity
+            replay: If True (default), replay events via on_event callback.
+                If False, return events for the caller to consolidate in bulk.
 
         Returns:
-            True (always succeeds)
+            List of events (only non-empty when replay=False)
         """
         if entity_id in self._followed_entities:
-            return True  # Already following
+            return []
 
         # Register directly without calling on_created (explicit follow)
         self._followed_entities[entity_id] = dir_config
 
-        # Replay any existing events for this entity
+        collected: list[EventBase] = []
+
+        # Process existing event files for this entity
         if dir_config.path.exists():
             event_files = sorted(
                 dir_config.path.glob(dir_config.glob_pattern),
@@ -1253,12 +1263,48 @@ class EventReader:
             for event_file in event_files:
                 file_entity_id = dir_config.entity_id_extractor(event_file)
                 if file_entity_id == entity_id:
-                    self._replay_events_from_file(event_file, entity_id, dir_config)
+                    if replay:
+                        self._replay_events_from_file(event_file, entity_id, dir_config)
+                    else:
+                        collected.extend(self._read_events_from_file(event_file))
                     # Track file for future changes
                     if self._file_watcher:
                         self._file_watcher.add_file(event_file)
 
-        return True
+        return collected
+
+    def _read_events_from_file(self, path: Path) -> list[EventBase]:
+        """Read all events from a file without calling callbacks.
+
+        Updates file position tracking so subsequent reads don't re-read.
+
+        Returns:
+            List of parsed events
+        """
+        events: list[EventBase] = []
+        try:
+            with path.open("r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event_dict = json.loads(line)
+                        events.append(EventBase.from_dict(event_dict))
+                    except json.JSONDecodeError:
+                        pass
+                # Mark file as fully read
+                end_pos = f.tell()
+                watch = self._find_watcher(path)
+                if watch and watch._tailed_pool is not None:
+                    watch.set_tail_position(path, end_pos)
+                else:
+                    self._file_positions[path] = end_pos
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            logger.warning("Failed to read events from %s: %s", path, e)
+        return events
 
     def _replay_events_from_file(
         self, path: Path, entity_id: str, dir_config: WatchedDirectory

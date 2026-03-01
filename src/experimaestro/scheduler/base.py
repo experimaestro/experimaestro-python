@@ -31,6 +31,7 @@ from experimaestro.scheduler.interfaces import (
     BaseService,
     JobStateUnscheduled,
     JobStateWaiting,
+    deserialize_to_datetime,
 )
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
@@ -502,6 +503,11 @@ class Scheduler(StateProvider, threading.Thread):
             if dependency.origin is not None:
                 dependency.origin.dependents.add(dependency)
 
+        # Replay any existing event files for this job (e.g., from a previous
+        # scheduler run). This ensures progress/carbon/start_time are up to date
+        # when picking up an already-running job on restart.
+        self._follow_job_events(job)
+
         return None
 
     def _start_job_event_reader(self, workspace_path: Path) -> None:
@@ -595,12 +601,25 @@ class Scheduler(StateProvider, threading.Thread):
             # Update job's in-memory progress and notify legacy listeners
             job.set_progress(event.level, event.progress, event.desc)
             self.notify_job_state(job)
-            # Notify StateProvider-style listeners (TUI/WebUI)
-            state_event = JobStateChangedEvent(
-                job_id=job.identifier,
-                state=job.state.name.lower(),
+            # Forward the original progress event to state listeners (TUI/WebUI)
+            # so they can handle it specifically, and also send a state changed
+            # event so that a refresh picks up the updated job state
+            self._notify_state_listeners_async(event)
+            self._notify_state_listeners_async(
+                JobStateChangedEvent(
+                    job_id=job.identifier,
+                    state=job.state.name.lower(),
+                )
             )
-            self._notify_state_listeners_async(state_event)
+
+        elif isinstance(event, JobStateChangedEvent):
+            # Update job timestamps from event (e.g., started_time from job process)
+            if event.started_time and job.starttime is None:
+                job.starttime = deserialize_to_datetime(event.started_time)
+            if event.ended_time and job.endtime is None:
+                job.endtime = deserialize_to_datetime(event.ended_time)
+            # Forward to state listeners
+            self._notify_state_listeners_async(event)
 
         elif isinstance(event, CarbonMetricsEvent):
             # Update job's carbon metrics and notify listeners
@@ -621,6 +640,69 @@ class Scheduler(StateProvider, threading.Thread):
             )
             # Notify StateProvider-style listeners (TUI/WebUI)
             self._notify_state_listeners_async(event)
+
+    def _follow_job_events(self, job: Job) -> None:
+        """Tell the EventReader to follow this job's events and consolidate existing ones.
+
+        Called after a job is registered in self.jobs so that event files
+        created before the EventReader started (or before the job was known)
+        are applied in bulk. This ensures progress/carbon/start_time are up to
+        date when picking up an already-running job on restart, without flooding
+        listeners with individual notifications.
+        """
+        workspace_path = job.workspace.path if job.workspace else None
+        if workspace_path is None:
+            return
+
+        with self._job_event_readers_lock:
+            reader = self._job_event_readers.get(workspace_path)
+            if reader is None:
+                return
+
+        # Build the entity_id in the same format as job_entity_id_extractor
+        entity_id = BaseJob.make_full_id(job.task_id, job.identifier)
+
+        # Get the WatchedDirectory config from the reader and collect events
+        # without triggering callbacks (replay=False)
+        for dir_config in reader.directories:
+            if dir_config.on_event == self._on_job_event:
+                events = reader.follow(entity_id, dir_config, replay=False)
+                break
+        else:
+            return
+
+        if not events:
+            return
+
+        # Apply events in bulk to the job (no notifications per event)
+        for event in events:
+            if isinstance(event, JobProgressEvent):
+                job.set_progress(event.level, event.progress, event.desc)
+            elif isinstance(event, JobStateChangedEvent):
+                if event.started_time and job.starttime is None:
+                    job.starttime = deserialize_to_datetime(event.started_time)
+                if event.ended_time and job.endtime is None:
+                    job.endtime = deserialize_to_datetime(event.ended_time)
+            elif isinstance(event, CarbonMetricsEvent):
+                job.carbon_metrics = CarbonMetricsData(
+                    co2_kg=event.co2_kg,
+                    energy_kwh=event.energy_kwh,
+                    cpu_power_w=event.cpu_power_w,
+                    gpu_power_w=event.gpu_power_w,
+                    ram_power_w=event.ram_power_w,
+                    duration_s=event.duration_s,
+                    region=event.region,
+                    is_final=event.is_final,
+                )
+
+        # Single notification after consolidation
+        self.notify_job_state(job)
+        self._notify_state_listeners_async(
+            JobStateChangedEvent(
+                job_id=job.identifier,
+                state=job.state.name.lower(),
+            )
+        )
 
     def _cleanup_job_marker_files(self, job: Job) -> None:
         """Clean up old marker files (.done/.failed) from previous runs
