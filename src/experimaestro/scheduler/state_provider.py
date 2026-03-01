@@ -963,20 +963,42 @@ class MockJob(BaseJob):
         *,
         loading: bool = False,
     ):
-        """Override to track when state is set from disk loading.
+        """Override to track when state comes from a reliable source.
 
-        Any non-UNSCHEDULED state indicates a real state that should be used.
+        _has_event_state is NOT set here — it is set explicitly by:
+        - apply_event() for job events (highest priority)
+        - load_from_disk() for marker files and PID file (reliable on-disk state)
+
+        State loaded from status.json (via _load_from_status_dict) is NOT
+        considered reliable since it may be stale from a previous run.
+        This ensures experiment events can override stale status.json state.
         """
-        if new_state != JobState.UNSCHEDULED:
-            self._has_event_state = True
         super().set_state(new_state, loading=loading)
+
+    def load_from_disk(self):
+        """Override to set _has_event_state only for reliable on-disk sources.
+
+        Marker files (.done/.failed) and PID files are reliable indicators
+        of actual job state. status.json may be stale from a previous run.
+        """
+        super().load_from_disk()
+
+        # Marker files (.done/.failed) and PID files are ground truth —
+        # their state should take priority over experiment events
+        if (
+            self.donefile.exists()
+            or self.failedfile.exists()
+            or (self.pidfile.exists() and self._state == JobState.RUNNING)
+        ):
+            self._has_event_state = True
 
     def apply_event(self, event: "EventBase") -> None:
         """Apply a job event to update this job's state.
 
         Overrides BaseJob.apply_event to handle from_experiment flag:
         - from_experiment=False (job events): high priority, sets _has_event_state
-        - from_experiment=True (experiment events): low priority, only sets _experiment_status
+        - from_experiment=True (experiment events): low priority, only sets
+          _experiment_status
         """
         from experimaestro.scheduler.state_status import JobStateChangedEvent
 
@@ -1508,6 +1530,15 @@ class MockExperiment(BaseExperiment):
                 # Update counters only when state actually changes
                 # (duplicate events in events.jsonl must not double-count)
                 if not merge_mode and previous_state != job_state:
+                    # Decrement counters when leaving a terminal state
+                    # (e.g., job resubmitted after failure)
+                    if previous_state is not None:
+                        if previous_state == JobState.DONE:
+                            self._finished_jobs = max(0, self._finished_jobs - 1)
+                        elif previous_state.is_error():
+                            self._failed_jobs = max(0, self._failed_jobs - 1)
+
+                    # Increment counters when entering a terminal state
                     if event.state == "done":
                         self._finished_jobs += 1
                     elif event.state == "error":

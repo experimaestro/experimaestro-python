@@ -499,13 +499,18 @@ def _verify_cancelled_job(job):
     """Verify that job was marked as cancelled."""
     failed_path = job.path / f"{job.scriptname}.failed"
     counter = 0
-    while not failed_path.is_file():
+    content = ""
+    while counter < MAX_CANCELLATION_WAIT:
+        if failed_path.is_file():
+            content = failed_path.read_text()
+            if content:
+                break
         time.sleep(0.1)
         counter += 1
-        if counter >= MAX_CANCELLATION_WAIT:
-            pytest.fail("Timeout waiting for .failed file")
+    else:
+        pytest.fail("Timeout waiting for .failed file with content")
 
-    failed_content = json.loads(failed_path.read_text())
+    failed_content = json.loads(content)
     assert failed_content["reason"] == "cancelled", (
         f"Expected reason 'cancelled', got {failed_content}"
     )
