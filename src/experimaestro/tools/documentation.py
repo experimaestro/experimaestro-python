@@ -71,6 +71,7 @@ def analyze(
             except Exception:
                 logging.exception(f"Module {info.name} could not be loaded")
                 errors.append(f"Module {info.name} could not be loaded")
+                continue
 
             # Process sub-packages
             if info.ispkg:
