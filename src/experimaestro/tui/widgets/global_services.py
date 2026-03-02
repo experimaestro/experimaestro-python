@@ -23,6 +23,7 @@ class GlobalServiceSyncs(Vertical):
 
     BINDINGS = [
         Binding("ctrl+k", "stop_service", "Stop Service"),
+        Binding("l", "view_logs", "View Logs", priority=True),
     ]
 
     def __init__(self, state_provider: StateProvider) -> None:
@@ -70,11 +71,11 @@ class GlobalServiceSyncs(Vertical):
             running_services = [
                 s
                 for s in all_services
-                if hasattr(s, "state") and s.state == ServiceState.RUNNING
+                if hasattr(s, "state") and s.state != ServiceState.STOPPED
             ]
             self.log.info(
                 f"GlobalServiceSyncs._load_services: got {len(running_services)} "
-                f"running services (out of {len(all_services)} total)"
+                f"active services (out of {len(all_services)} total)"
             )
         except Exception as e:
             logger.warning(f"Failed to load services: {e}")
@@ -228,3 +229,31 @@ class GlobalServiceSyncs(Vertical):
             self.refresh_services()
         except Exception as e:
             self.notify(f"Failed to stop service: {e}", severity="error")
+
+    def action_view_logs(self) -> None:
+        """View service logs"""
+        service = self._get_selected_service()
+        if not service:
+            return
+
+        # Convert to live service to get log paths
+        live_service = service.to_service()
+
+        if not live_service.stdout and not live_service.stderr:
+            self.notify("Service logs not available", severity="warning")
+            return
+
+        stdout_exists = live_service.stdout and live_service.stdout.exists()
+        stderr_exists = live_service.stderr and live_service.stderr.exists()
+        if not stdout_exists and not stderr_exists:
+            self.notify("No log files found", severity="warning")
+            return
+
+        from experimaestro.tui.log_viewer import create_service_log_viewer
+
+        sync_func = None
+        if self.state_provider.is_remote:
+            sync_func = self.state_provider.sync_path
+
+        viewer = create_service_log_viewer(live_service, sync_func)
+        self.app.push_screen(viewer)

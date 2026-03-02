@@ -1,4 +1,5 @@
 import abc
+import atexit
 from enum import Enum
 import logging
 import subprocess
@@ -57,6 +58,7 @@ class Service(BaseService):
         self._listeners: Set[ServiceListener] = set()
         self._listeners_lock = threading.Lock()
         self._error = None
+        self.log_directory: Optional[Path] = None
 
     def set_experiment(self, xp: "Experiment") -> None:
         """Called when the service is added to an experiment.
@@ -68,10 +70,9 @@ class Service(BaseService):
             xp: The experiment this service is being added to.
         """
         self._experiment = xp
-
-        # Create log directory for this service
-        if self.log_directory:
-            self.log_directory.mkdir(parents=True, exist_ok=True)
+        self.log_directory = (
+            self._experiment.workspace.scheduler_services_path / self.id
+        )
 
     @property
     def experiment_id(self) -> str:
@@ -86,13 +87,6 @@ class Service(BaseService):
         if self._experiment is not None:
             return self._experiment.run_id or ""
         return ""
-
-    @property
-    def log_directory(self) -> Optional[Path]:
-        """Return the directory for service logs (None if not attached to experiment)"""
-        if self._experiment is None:
-            return None
-        return self._experiment.workspace.scheduler_services_path / self.id
 
     @property
     def stdout(self) -> Optional[Path]:
@@ -260,6 +254,10 @@ class Service(BaseService):
         """
         if not self.stdout or not self.stderr:
             return None, None
+
+        # Ensure log directory exists
+        if self.log_directory:
+            self.log_directory.mkdir(parents=True, exist_ok=True)
 
         # Get logger for this service
         service_logger = logging.getLogger(f"xpm.service.{self.id}")
@@ -622,18 +620,27 @@ class ProcessWebService(Service):
         """Start the service as a subprocess"""
         # Build command to run service
         cmd = self._build_command()
+        logger.info(
+            "Starting service %s (log_directory=%s): %s",
+            self.id,
+            self.log_directory,
+            " ".join(cmd),
+        )
 
-        # Redirect stdout/stderr to log files
+        # Ensure log directory exists and redirect stdout/stderr to log files
+        if self.log_directory:
+            self.log_directory.mkdir(parents=True, exist_ok=True)
         stdout_file = open(self.stdout, "w") if self.stdout else subprocess.DEVNULL
         stderr_file = open(self.stderr, "w") if self.stderr else subprocess.DEVNULL
 
-        # Start process
+        # Start process (ensure it gets killed when the parent exits)
         self.process = subprocess.Popen(
             cmd,
             stdout=stdout_file,
             stderr=stderr_file,
             cwd=str(self.log_directory) if self.log_directory else None,
         )
+        atexit.register(self._kill_process)
 
         # Monitor process in background thread
         monitor_thread = threading.Thread(
@@ -656,8 +663,9 @@ class ProcessWebService(Service):
             self.process.wait()
 
         except Exception as e:
-            logger.exception(f"Service {self.id} monitoring failed: {e}")
-            self.state = ServiceState.ERROR
+            logger.error("Service %s failed: %s", self.id, e)
+            self.set_error(str(e))
+
         finally:
             if running_event and not running_event.is_set():
                 running_event.set()
@@ -701,6 +709,16 @@ class ProcessWebService(Service):
             running_event.wait()
 
         # Terminate process
+        self._kill_process(timeout=timeout)
+        atexit.unregister(self._kill_process)
+
+        with self._start_lock:
+            self.url = None
+            self._running_event = None
+            self.state = ServiceState.STOPPED
+
+    def _kill_process(self, timeout: float = 2.0):
+        """Kill the subprocess if it is still running."""
         if self.process and self.process.poll() is None:
             logger.info(f"Terminating service {self.id} (PID {self.process.pid})")
             self.process.terminate()
@@ -710,8 +728,3 @@ class ProcessWebService(Service):
                 logger.warning(f"Service {self.id} did not terminate, killing")
                 self.process.kill()
                 self.process.wait()
-
-        with self._start_lock:
-            self.url = None
-            self._running_event = None
-            self.state = ServiceState.STOPPED

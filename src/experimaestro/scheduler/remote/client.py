@@ -126,6 +126,18 @@ class SSHLocalService(BaseService):
     def url(self) -> Optional[str]:
         return getattr(self._inner, "url", None)
 
+    @property
+    def log_directory(self) -> Optional[Path]:
+        return self._inner.log_directory
+
+    @property
+    def stdout(self) -> Optional[Path]:
+        return self._inner.stdout
+
+    @property
+    def stderr(self) -> Optional[Path]:
+        return self._inner.stderr
+
     def description(self) -> str:
         return self._inner.description()
 
@@ -163,8 +175,20 @@ class SSHLocalService(BaseService):
         # Notify initial status
         self._notify_status_change()
 
-        # Start the inner service
-        return self._inner.get_url()
+        # Start the inner service; stop syncs if it fails
+        try:
+            url = self._inner.get_url()
+        except Exception:
+            self._stop_syncs()
+            raise
+
+        # Check if service ended up in error state (e.g. process exited)
+        from experimaestro.scheduler.services import ServiceState
+
+        if self._inner.state == ServiceState.ERROR:
+            self._stop_syncs()
+
+        return url
 
     @property
     def sync_status(self) -> Optional[str]:
@@ -189,16 +213,19 @@ class SSHLocalService(BaseService):
         """Return error message if service failed to start."""
         return self._inner.error
 
+    def _stop_syncs(self) -> None:
+        """Stop all adaptive synchronizers."""
+        for sync in self._synchronizers:
+            sync.stop()
+        self._synchronizers.clear()
+
     def stop(self) -> None:
         """Stop the inner service and stop all syncs."""
         # Stop the inner service first
         if hasattr(self._inner, "stop"):
             self._inner.stop()
 
-        # Stop all synchronizers
-        for sync in self._synchronizers:
-            sync.stop()
-        self._synchronizers.clear()
+        self._stop_syncs()
 
 
 class SSHMockService(MockService):
@@ -305,6 +332,11 @@ class SSHMockService(MockService):
                 path_translator,
             )
             inner_service.id = self.id
+
+            # Set local log directory for service output
+            local_cache = self._state_provider.local_cache_dir
+            if local_cache:
+                inner_service.log_directory = local_cache / "services" / self.id
 
             # Extract remote paths for sync management
             remote_paths = self._extract_paths()

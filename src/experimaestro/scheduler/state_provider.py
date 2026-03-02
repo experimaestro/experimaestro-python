@@ -1777,6 +1777,24 @@ class MockService(BaseService):
         return self._description
 
     @property
+    def log_directory(self) -> Optional[Path]:
+        if self._live_service is not None:
+            return self._live_service.log_directory
+        return None
+
+    @property
+    def stdout(self) -> Optional[Path]:
+        if self._live_service is not None:
+            return self._live_service.stdout
+        return None
+
+    @property
+    def stderr(self) -> Optional[Path]:
+        if self._live_service is not None:
+            return self._live_service.stderr
+        return None
+
+    @property
     def sync_status(self) -> Optional[str]:
         """Return sync status for display.
 

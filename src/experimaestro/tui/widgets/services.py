@@ -284,11 +284,13 @@ class ServicesList(Vertical):
         # Convert to live service to get log paths
         live_service = service.to_service()
 
-        if not live_service.stdout or not live_service.stderr:
+        if not live_service.stdout and not live_service.stderr:
             self.notify("Service logs not available", severity="warning")
             return
 
-        if not live_service.stdout.exists() and not live_service.stderr.exists():
+        stdout_exists = live_service.stdout and live_service.stdout.exists()
+        stderr_exists = live_service.stderr and live_service.stderr.exists()
+        if not stdout_exists and not stderr_exists:
             self.notify("No log files found", severity="warning")
             return
 

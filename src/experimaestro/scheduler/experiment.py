@@ -1015,11 +1015,6 @@ class experiment(BaseExperiment):
             if self._register_signals:
                 SIGNAL_HANDLER.remove(self)
 
-            # Stop services
-            for service in self.services.values():
-                logger.info("Closing service %s", service.description())
-                service.stop()
-
             # Set end time for BaseExperiment interface
             self._ended_at = datetime.now()
 
