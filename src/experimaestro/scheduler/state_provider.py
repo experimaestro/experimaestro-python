@@ -1321,7 +1321,7 @@ class MockExperiment(BaseExperiment):
     def total_jobs(self) -> int:
         if self._total_jobs > 0:
             return self._total_jobs
-        return len(self.job_infos)
+        return max(len(self.job_infos), len(self._job_states))
 
     @property
     def finished_jobs(self) -> int:
@@ -1335,6 +1335,9 @@ class MockExperiment(BaseExperiment):
     @property
     def failed_jobs(self) -> int:
         return self._failed_jobs
+
+    def _serialize_job_states(self) -> dict[str, str]:
+        return {job_id: state.name for job_id, state in self._job_states.items()}
 
     def get_job_state(self, job_id: str) -> JobState | None:
         """Get the tracked state of a job from experiment events.
@@ -1558,6 +1561,20 @@ class MockExperiment(BaseExperiment):
             for job_id, info in job_infos_data.items()
         } or None
 
+        # Parse job_states from status.json and compute counters
+        job_states_raw = d.get("job_states", {})
+        job_states = {
+            job_id: STATE_NAME_TO_JOBSTATE.get(state_name, JobState.UNSCHEDULED)
+            for job_id, state_name in job_states_raw.items()
+        }
+        if job_states:
+            finished_jobs = sum(1 for s in job_states.values() if s == JobState.DONE)
+            failed_jobs = sum(1 for s in job_states.values() if s.is_error())
+        else:
+            # Backward compat: old status.json without job_states
+            finished_jobs = d.get("finished_jobs", 0)
+            failed_jobs = d.get("failed_jobs", 0)
+
         return cls(
             workdir=workdir,
             run_id=run_id,
@@ -1569,11 +1586,12 @@ class MockExperiment(BaseExperiment):
             job_infos=job_infos,
             services=services,
             dependencies=d.get("dependencies", {}),
-            finished_jobs=d.get("finished_jobs", 0),
-            failed_jobs=d.get("failed_jobs", 0),
+            finished_jobs=finished_jobs,
+            failed_jobs=failed_jobs,
             run_tags=set(d.get("run_tags", [])),
             carbon_impact=CarbonImpactData.from_dict(d.get("carbon_impact")),
             total_jobs=d.get("total_jobs", 0),
+            job_states=job_states,
         )
 
     def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:

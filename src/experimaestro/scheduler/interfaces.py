@@ -1445,9 +1445,7 @@ class BaseExperiment:
             "hostname": self.hostname,
             "started_at": serialize_timestamp(self.started_at),
             "ended_at": serialize_timestamp(self.ended_at),
-            "total_jobs": self.total_jobs,
-            "finished_jobs": self.finished_jobs,
-            "failed_jobs": self.failed_jobs,
+            "job_states": self._serialize_job_states(),
             "services": {k: v.full_state_dict() for k, v in self.services.items()},
             "run_tags": self.run_tags,
         }
@@ -1455,6 +1453,14 @@ class BaseExperiment:
         if self.carbon_impact:
             result["carbon_impact"] = self.carbon_impact.to_dict()
         return result
+
+    def _serialize_job_states(self) -> Dict[str, str]:
+        """Serialize per-job states for status.json.
+
+        The live experiment derives this from self.jobs; MockExperiment
+        overrides to use _job_states directly.
+        """
+        return {job_id: job.state.name for job_id, job in self.jobs.items()}
 
     def write_status(self) -> None:
         """Write status.json to disk (calls state_dict internally)

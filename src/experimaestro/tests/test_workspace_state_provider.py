@@ -1440,7 +1440,7 @@ class TestCrashRecovery:
             "status": "running",
             "events_count": 1,
             "started_at": "2026-01-01T10:00:00",
-            "finished_jobs": 1,  # From events-0
+            "job_states": {"old-job": "done"},  # From events-0
         }
         with open(exp_dir / "status.json", "w") as f:
             json.dump(status, f)
@@ -1513,8 +1513,9 @@ class TestCrashRecovery:
             assert "events_count" not in updated_status
             # Status should be done
             assert updated_status["status"] == "done"
-            # finished_jobs should be updated (1 original + 1 from events-1/2)
-            assert updated_status["finished_jobs"] == 2
+            # job_states should include both old and new done jobs
+            assert updated_status["job_states"]["old-job"] == "done"
+            assert updated_status["job_states"]["new-job-1"] == "done"
 
             # All temp event files should be cleaned up
             assert not any(events_dir.glob("events-*.jsonl"))
