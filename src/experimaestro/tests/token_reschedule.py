@@ -38,7 +38,7 @@ if __name__ == "__main__":
             .submit()
         )
         logging.info("Waiting for task (token with %s) to be scheduled", lockingpath)
-        while task.job.state == JobState.UNSCHEDULED:
+        while task.job.scheduler_state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
         # Write so that the test now we are ready

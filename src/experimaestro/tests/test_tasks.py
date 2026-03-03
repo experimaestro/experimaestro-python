@@ -110,7 +110,9 @@ def test_fail_dep():
 
     assert xp.failed
     assert fail.__xpm__.job.state == JobState.ERROR
-    assert dep.__xpm__.job.state == JobState.ERROR
+    # dep never ran (dependency failed), so execution state stays UNSCHEDULED
+    # but scheduler_state is ERROR (set by scheduler when dependency check failed)
+    assert dep.__xpm__.job.scheduler_state == JobState.ERROR
 
 
 def test_unknown_attribute():

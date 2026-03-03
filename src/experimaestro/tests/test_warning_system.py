@@ -80,6 +80,9 @@ class MockStateProvider(StateProvider):
     def get_dependencies_map(self, experiment_id, run_id=None):
         return {}
 
+    def get_experiment_job_info(self, experiment_id, run_id=None):
+        return {}
+
     def get_services(self, experiment_id=None, run_id=None):
         return []
 

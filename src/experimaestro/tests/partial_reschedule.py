@@ -31,7 +31,7 @@ if __name__ == "__main__":
         task = PartialTask.C(path=lockingpath, x=int(x)).submit()
 
         logging.info("Waiting for task (partial with %s) to be scheduled", lockingpath)
-        while task.job.state == JobState.UNSCHEDULED:
+        while task.job.scheduler_state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
         # Write so that the test knows we are ready

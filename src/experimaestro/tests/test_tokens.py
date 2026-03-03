@@ -47,7 +47,7 @@ def token_experiment(xp, token, ntasks=3):
     # Wait that both tasks are scheduled
     logging.info("Waiting that the two tasks are scheduled")
     for task in tasks:
-        while task.__xpm__.job.state == JobState.UNSCHEDULED:
+        while task.__xpm__.job.scheduler_state == JobState.UNSCHEDULED:
             time.sleep(0.01)
 
     # Wait a bit (ENHANCE: find a better way)
