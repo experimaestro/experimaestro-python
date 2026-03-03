@@ -30,11 +30,11 @@ def job_db_to_frontend(db_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Transform job db_state_dict to frontend format
 
     db_state_dict format (snake_case):
-        identifier, task_id, path, state, submittime, starttime, endtime,
+        identifier, task_id, path, state, starttime, endtime,
         progress, exit_code, retry_count, failure_reason
 
     Frontend format (camelCase):
-        jobId, taskId, locator, status, submitted, start, end,
+        jobId, taskId, locator, status, start, end,
         tags, progress, experimentIds, dependsOn
     """
     return {
@@ -42,7 +42,6 @@ def job_db_to_frontend(db_dict: Dict[str, Any]) -> Dict[str, Any]:
         "taskId": db_dict.get("task_id"),
         "locator": db_dict.get("path") or "",
         "status": (db_dict.get("state") or "unknown").lower(),
-        "submitted": db_dict.get("submittime") or "",
         "start": db_dict.get("starttime") or "",
         "end": db_dict.get("endtime") or "",
         "tags": db_dict.get("tags", []),
@@ -141,8 +140,8 @@ def serialize_live_job(job: Job) -> Dict[str, Any]:
         if isinstance(dep, JobDependency)
     ]
 
-    # Get tags
-    tags = list(job.tags.items())
+    # Get tags from config (tags are experiment-specific)
+    tags = list(job.config.tags().items())
 
     return serialize_job(
         job,

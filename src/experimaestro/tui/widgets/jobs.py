@@ -285,6 +285,7 @@ class JobDetailView(Widget):
         # Load tags and dependencies if needed
         tags_map = self.state_provider.get_tags_map(experiment_id)
         deps_map = self.state_provider.get_dependencies_map(experiment_id)
+        experiment_job_info = self.state_provider.get_experiment_job_info(experiment_id)
 
         # Load all jobs for the experiment to build job_id -> task_id mapping
         jobs = self.state_provider.get_jobs(experiment_id)
@@ -293,17 +294,29 @@ class JobDetailView(Widget):
         job = self.state_provider.get_job(task_id, job_id)
 
         self.app.call_from_thread(
-            self._on_job_loaded, job, tags_map, deps_map, job_task_map
+            self._on_job_loaded,
+            job,
+            tags_map,
+            deps_map,
+            job_task_map,
+            experiment_job_info,
         )
 
     def _on_job_loaded(
-        self, job, tags_map: dict, deps_map: dict, job_task_map: dict
+        self,
+        job,
+        tags_map: dict,
+        deps_map: dict,
+        job_task_map: dict,
+        experiment_job_info: dict = None,
     ) -> None:
         """Handle loaded job on main thread"""
         self.query_one("#job-detail-loading", Static).add_class("hidden")
         self.tags_map = tags_map
         self.dependencies_map = deps_map
         self.job_task_id_map = job_task_map
+        if experiment_job_info is not None:
+            self.experiment_job_info = experiment_job_info
 
         if not job:
             self.log(f"Job not found: {self.current_job_id}")
@@ -333,7 +346,11 @@ class JobDetailView(Widget):
         # Format status with icon and name
         status_name = job.state.name if job.state else "unknown"
         failure_reason = job.state.failure_reason if job.state else None
-        transient = getattr(job, "transient", None)
+        job_info = getattr(self, "experiment_job_info", {}).get(job.identifier)
+        transient_val = job_info.transient if job_info else None
+        from experimaestro.scheduler.transient import TransientMode
+
+        transient = TransientMode(transient_val) if transient_val is not None else None
         status_icon = get_status_icon(status_name, failure_reason, transient)
         status_text = f"{status_icon} {status_name}"
         if failure_reason:
@@ -351,7 +368,14 @@ class JobDetailView(Widget):
                 return ts.strftime("%Y-%m-%d %H:%M:%S")
             return "-"
 
-        submitted = format_time(job.submittime)
+        # Get submittime from experiment job info
+        job_info = getattr(self, "experiment_job_info", {}).get(job.identifier)
+        submittime_dt = (
+            datetime.fromtimestamp(job_info.timestamp)
+            if job_info and job_info.timestamp
+            else None
+        )
+        submitted = format_time(submittime_dt)
         start = format_time(job.starttime)
         end = format_time(job.endtime)
 
@@ -503,6 +527,7 @@ class JobsTable(Vertical):
             str, list[str]
         ] = {}  # job_id -> [depends_on_job_ids]
         self.task_id_map: dict[str, str] = {}  # job_id -> task_id
+        self.experiment_job_info: dict = {}  # job_id -> ExperimentJobInformation
 
     def compose(self) -> ComposeResult:
         yield Static("", id="past-run-banner", classes="hidden")
@@ -681,11 +706,12 @@ class JobsTable(Vertical):
     # Status sort order (for sorting by status)
     STATUS_ORDER = {
         "running": 0,
-        "waiting": 1,
-        "error": 2,
-        "done": 3,
-        "unscheduled": 4,
-        "phantom": 5,
+        "scheduled": 1,
+        "done": 2,
+        "error": 3,
+        "waiting": 4,
+        "unscheduled": 5,
+        "phantom": 6,
     }
 
     # Failure reason sort order (within error status)
@@ -823,6 +849,7 @@ class JobsTable(Vertical):
         if not experiment_id:
             self.tags_map = {}
             self.dependencies_map = {}
+            self.experiment_job_info = {}
             self.app.call_from_thread(self._on_data_loaded, [])
             return
 
@@ -831,11 +858,14 @@ class JobsTable(Vertical):
         dependencies_map = self.state_provider.get_dependencies_map(
             experiment_id, run_id
         )
+        experiment_job_info = self.state_provider.get_experiment_job_info(
+            experiment_id, run_id
+        )
         jobs = self.state_provider.get_jobs(experiment_id, run_id=run_id)
 
         # Update on main thread
         self.app.call_from_thread(
-            self._on_data_loaded, jobs, tags_map, dependencies_map
+            self._on_data_loaded, jobs, tags_map, dependencies_map, experiment_job_info
         )
 
     def _on_data_loaded(
@@ -843,6 +873,7 @@ class JobsTable(Vertical):
         jobs: list,
         tags_map: dict = None,
         dependencies_map: dict = None,
+        experiment_job_info: dict = None,
     ) -> None:
         """Handle loaded data on main thread"""
         # Hide loading indicator
@@ -853,6 +884,8 @@ class JobsTable(Vertical):
             self.tags_map = tags_map
         if dependencies_map is not None:
             self.dependencies_map = dependencies_map
+        if experiment_job_info is not None:
+            self.experiment_job_info = experiment_job_info
 
         # Refresh display with loaded jobs
         self._refresh_jobs_with_data(jobs)
@@ -892,9 +925,15 @@ class JobsTable(Vertical):
             )
         else:
             # Default: sort by submission time (oldest first by default)
-            # Jobs without submittime go to the end
+            # Use experiment_job_info timestamp for submittime
+            def _get_submittime(j):
+                info = self.experiment_job_info.get(j.identifier)
+                if info and info.timestamp:
+                    return datetime.fromtimestamp(info.timestamp)
+                return datetime.max
+
             jobs.sort(
-                key=lambda j: j.submittime or datetime.max,
+                key=_get_submittime,
                 reverse=self._sort_reverse,
             )
 
@@ -943,7 +982,13 @@ class JobsTable(Vertical):
                     status_text = "▶"
             else:
                 failure_reason = job.state.failure_reason if job.state else None
-                transient = getattr(job, "transient", None)
+                job_info = self.experiment_job_info.get(job.identifier)
+                transient_val = job_info.transient if job_info else None
+                from experimaestro.scheduler.transient import TransientMode
+
+                transient = (
+                    TransientMode(transient_val) if transient_val is not None else None
+                )
                 status_text = get_status_icon(status, failure_reason, transient)
 
             # Tags are stored in JobTagModel, accessed via tags_map
@@ -959,8 +1004,11 @@ class JobsTable(Vertical):
                 tags_text = Text("-")
 
             submitted = "-"
-            if job.submittime:
-                submitted = job.submittime.strftime("%Y-%m-%d %H:%M")
+            job_info = self.experiment_job_info.get(job.identifier)
+            if job_info and job_info.timestamp:
+                submitted = datetime.fromtimestamp(job_info.timestamp).strftime(
+                    "%Y-%m-%d %H:%M"
+                )
 
             # Calculate duration (starttime/endtime are now datetime objects)
             start = job.starttime

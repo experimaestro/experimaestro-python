@@ -12,6 +12,7 @@ from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
     EventBase,
     ExperimentUpdatedEvent,
+    ExperimentJobStateEvent,
     JobStateChangedEvent,
     JobSubmittedEvent,
     ServiceAddedEvent,
@@ -76,6 +77,7 @@ class StateBridge:
         handlers = {
             ExperimentUpdatedEvent: self._handle_experiment_updated,
             JobStateChangedEvent: self._handle_job_state_changed,
+            ExperimentJobStateEvent: self._handle_experiment_job_state,
             JobSubmittedEvent: self._handle_job_submitted,
             ServiceAddedEvent: self._handle_service_added,
             RunUpdatedEvent: self._handle_run_updated,
@@ -93,13 +95,20 @@ class StateBridge:
             await self.ws_handler.broadcast("experiment.add", payload)
 
     async def _handle_job_state_changed(self, event: JobStateChangedEvent):
-        """Handle job state change - broadcast job.update"""
+        """Handle job execution state change - broadcast job.update"""
+        await self._broadcast_job_update(event.job_id)
+
+    async def _handle_experiment_job_state(self, event: ExperimentJobStateEvent):
+        """Handle scheduler lifecycle state change - broadcast job.update"""
+        await self._broadcast_job_update(event.job_id)
+
+    async def _broadcast_job_update(self, job_id: str):
+        """Broadcast job.update for a given job_id"""
         from experimaestro.webui.websocket import job_db_to_frontend
 
         # Fetch job from state provider
-        # Note: get_all_jobs returns jobs across all experiments
         jobs = self.state_provider.get_all_jobs()
-        job = next((j for j in jobs if j.identifier == event.job_id), None)
+        job = next((j for j in jobs if j.identifier == job_id), None)
         if job:
             payload = job_db_to_frontend(job.db_state_dict())
             await self.ws_handler.broadcast("job.update", payload)

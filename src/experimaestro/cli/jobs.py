@@ -94,8 +94,19 @@ def process(
         all_jobs = [j for j in all_jobs if _filter(j)]
 
     # Sort by submission time (most recent first)
-    # Jobs without submittime go to the end
-    all_jobs.sort(key=lambda j: j.submittime or 0, reverse=True)
+    # Use experiment job info for submittime
+    experiment_job_info = {}
+    if experiment:
+        experiment_job_info = provider.get_experiment_job_info(experiment_id=experiment)
+    all_jobs.sort(
+        key=lambda j: (
+            experiment_job_info[j.identifier].timestamp
+            if j.identifier in experiment_job_info
+            and experiment_job_info[j.identifier].timestamp
+            else 0
+        ),
+        reverse=True,
+    )
 
     # Limit to N most recent jobs if count is specified
     if count > 0:

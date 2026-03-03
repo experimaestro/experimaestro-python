@@ -18,6 +18,7 @@ from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
     EventBase,
     ExperimentUpdatedEvent,
+    ExperimentJobStateEvent,
     RunUpdatedEvent,
     JobStateChangedEvent,
     JobProgressEvent,
@@ -464,10 +465,10 @@ class ExperimaestroUI(App):
                 services_list.refresh_services()
 
     def _handle_job_submitted(self, event: JobSubmittedEvent) -> None:
-        """Handle JobSubmittedEvent - update tags, dependencies, and refresh job list"""
+        """Handle JobSubmittedEvent - update tags, dependencies, job info, and refresh"""
         event_exp_id = event.experiment_id
 
-        # Update tags_map, dependencies_map, and refresh jobs for the affected experiment
+        # Update tags_map, dependencies_map, experiment_job_info for the affected experiment
         for jobs_table in self.query(JobsTable):
             if jobs_table.current_experiment == event_exp_id:
                 # Add the new job's tags to the cache
@@ -478,6 +479,25 @@ class ExperimaestroUI(App):
                 # Add the new job's dependencies to the cache
                 if event.depends_on:
                     jobs_table.dependencies_map[event.job_id] = event.depends_on
+                # Add experiment job info (submittime, transient)
+                from experimaestro.scheduler.interfaces import (
+                    ExperimentJobInformation,
+                    deserialize_to_datetime,
+                )
+
+                timestamp = None
+                if event.submitted_time:
+                    dt = deserialize_to_datetime(event.submitted_time)
+                    timestamp = dt.timestamp() if dt else None
+                jobs_table.experiment_job_info[event.job_id] = ExperimentJobInformation(
+                    job_id=event.job_id,
+                    task_id=event.task_id,
+                    tags=(
+                        {tag.key: tag.value for tag in event.tags} if event.tags else {}
+                    ),
+                    timestamp=timestamp,
+                    transient=event.transient,
+                )
                 # Refresh to show the new job
                 jobs_table.refresh_jobs()
 
@@ -491,6 +511,18 @@ class ExperimaestroUI(App):
         This event is dispatched once per job state change.
         Used for progress updates and state changes from job processes.
         """
+        self._refresh_job_display(event.job_id)
+
+    def _handle_experiment_job_state(self, event: ExperimentJobStateEvent) -> None:
+        """Handle ExperimentJobStateEvent - refresh job display
+
+        This event is dispatched by the scheduler when a job's scheduler lifecycle
+        state changes. Triggers the same UI refresh as execution state changes.
+        """
+        self._refresh_job_display(event.job_id)
+
+    def _refresh_job_display(self, job_id: str) -> None:
+        """Refresh job display for a specific job_id"""
         # Refresh all jobs tables that might contain this job
         for jobs_table in self.query(JobsTable):
             jobs_table.refresh_jobs()
@@ -499,7 +531,7 @@ class ExperimaestroUI(App):
         for job_detail_container in self.query("#job-detail-container"):
             if not job_detail_container.has_class("hidden"):
                 for job_detail_view in self.query(JobDetailView):
-                    if job_detail_view.current_job_id == event.job_id:
+                    if job_detail_view.current_job_id == job_id:
                         job_detail_view.refresh_job_detail()
 
         # Also update the experiment stats in the experiments list
@@ -1001,6 +1033,7 @@ class ExperimaestroUI(App):
     STATE_EVENT_HANDLERS = {
         ExperimentUpdatedEvent: _handle_experiment_updated,
         JobStateChangedEvent: _handle_job_state_changed,
+        ExperimentJobStateEvent: _handle_experiment_job_state,
         JobProgressEvent: _handle_job_progress,
         CarbonMetricsEvent: _handle_carbon_metrics,
         RunUpdatedEvent: _handle_run_updated,
