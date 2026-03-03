@@ -16,13 +16,12 @@ def format_duration(seconds: float) -> str:
         return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
 
 
-def get_status_icon(status: str, failure_reason=None, transient=None):
+def get_status_icon(status: str, failure_reason=None):
     """Get status icon for a job state.
 
     Args:
-        status: Job state name (e.g., "done", "error", "running")
+        status: Job state name (e.g., "done", "error", "running", "transient")
         failure_reason: Optional JobFailureStatus enum for error states
-        transient: Optional TransientMode enum
 
     Returns:
         Status icon string
@@ -52,8 +51,7 @@ def get_status_icon(status: str, failure_reason=None, transient=None):
         return "🕐"  # Scheduled (e.g., in SLURM queue)
     elif status == "waiting":
         return "⌛"  # Waiting for dependencies
-    elif status == "unscheduled" and transient is not None and transient.is_transient:
-        # Transient job that was skipped (not needed)
+    elif status == "transient":
         return "💤"  # Sleeping - dormant, not activated
     else:
         # phantom, unscheduled or unknown

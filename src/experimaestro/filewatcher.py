@@ -190,11 +190,15 @@ class PolledFile:
         self._compute_poll_interval()
         self.schedule_next()
 
-    def update_size(self) -> bool:
-        """Update the last known size and return True if changed"""
+    def update_size(self) -> bool | None:
+        """Update the last known size.
+
+        Returns:
+            True if size changed, False if unchanged, None if file was deleted.
+        """
         try:
             if not self.path.exists():
-                return False
+                return None
             current_size = self.path.stat().st_size
             if current_size != self.last_size:
                 self.last_size = current_size
@@ -547,7 +551,17 @@ class DirectoryWatch:
         for polled in files_snapshot:
             if polled.next_poll <= now:
                 changed = polled.update_size()
-                if changed:
+                if changed is None:
+                    # File was deleted — trigger deletion callback
+                    self.remove_file(polled.path)
+                    if self._on_deleted:
+                        try:
+                            self._on_deleted(polled.path)
+                        except Exception:
+                            logger.exception(
+                                "Error in deleted callback for %s", polled.path
+                            )
+                elif changed:
                     polled.on_poll_detected_change()
                     if self._on_change:
                         try:

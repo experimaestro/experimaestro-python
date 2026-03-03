@@ -34,6 +34,7 @@ from experimaestro.scheduler.interfaces import (
     JobStateWaiting,
     STATE_NAME_TO_JOBSTATE,
     deserialize_to_datetime,
+    serialize_timestamp,
 )
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
@@ -522,7 +523,6 @@ class Scheduler(StateProvider, threading.Thread):
             task_id=str(job.type.identifier),
             tags=job_tags,
             timestamp=_time.time(),
-            transient=job.transient.value,
         )
 
         # Set up dependencies
@@ -846,12 +846,17 @@ class Scheduler(StateProvider, threading.Thread):
                 run_info.dependencies.get(job.identifier, []) if run_info else []
             )
 
+            job_info = run_info.job_infos.get(job.identifier) if run_info else None
             event = JobSubmittedEvent(
                 experiment_id=experiment_id,
                 run_id=run_id,
                 job_id=job.identifier,
+                task_id=str(job.type.identifier),
                 tags=tags,
                 depends_on=depends_on,
+                submitted_time=serialize_timestamp(job_info.timestamp)
+                if job_info
+                else None,
             )
             self._notify_state_listeners_async(event)
 
@@ -880,6 +885,17 @@ class Scheduler(StateProvider, threading.Thread):
                 failure_reason=failure_reason,
             )
             self._notify_state_listeners_async(event)
+
+            # Write to experiment event file for offline monitoring
+            if xp._event_writer is not None:
+                try:
+                    xp._event_writer.write_event(event)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to write scheduler state event to experiment %s: %s",
+                        xp.name,
+                        e,
+                    )
 
     def notify_service_add(
         self, service: Service, experiment_id: str = "", run_id: str = ""
@@ -1028,7 +1044,7 @@ class Scheduler(StateProvider, threading.Thread):
             # Check if this is a transient job that is not needed
             if job.transient.is_transient and not job._needed_transient:
                 logger.debug("Job is transient and not needed, discarding for now")
-                job.set_scheduler_state(JobState.UNSCHEDULED)
+                job.set_scheduler_state(JobState.TRANSIENT)
             else:
                 # Job needs to run, set in WAITING mode
                 job.set_scheduler_state(JobState.WAITING)

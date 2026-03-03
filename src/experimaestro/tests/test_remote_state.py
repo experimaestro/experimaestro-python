@@ -1208,7 +1208,6 @@ class TestEventSerialization:
             experiment_id="exp1",
             task_id="my.Task",
             run_id="run_001",
-            transient=0,
             tags=[JobTag(key="model", value="bert")],
             depends_on=["job123", "job456"],
             timestamp=1704067260.0,

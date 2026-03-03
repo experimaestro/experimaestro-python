@@ -20,6 +20,7 @@ from experimaestro.scheduler.interfaces import (
     BaseExperiment,
     BaseService,
     ExperimentJobInformation,
+    JobState,
 )
 from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
 from experimaestro.experiments.configuration import DirtyGitAction
@@ -432,6 +433,13 @@ class experiment(BaseExperiment):
             if self in job.experiments
         }
 
+    def get_job_state(self, job_id: str) -> JobState | None:
+        """Get experiment/scheduler state for a job"""
+        job = self.scheduler.jobs.get(job_id)
+        if job and self in job.experiments:
+            return job.scheduler_state
+        return None
+
     @property
     def tags(self) -> Dict[str, Dict[str, str]]:
         """Tags for jobs - tracked directly in experiment"""
@@ -614,7 +622,6 @@ class experiment(BaseExperiment):
             event = JobSubmittedEvent(
                 job_id=job.identifier,
                 task_id=str(job.type.identifier),
-                transient=job.transient.value if hasattr(job, "transient") else 0,
                 tags=job_tags,
                 depends_on=depends_on,
                 submitted_time=serialize_timestamp(time.time()),

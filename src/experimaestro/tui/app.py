@@ -496,7 +496,6 @@ class ExperimaestroUI(App):
                         {tag.key: tag.value for tag in event.tags} if event.tags else {}
                     ),
                     timestamp=timestamp,
-                    transient=event.transient,
                 )
                 # Refresh to show the new job
                 jobs_table.refresh_jobs()

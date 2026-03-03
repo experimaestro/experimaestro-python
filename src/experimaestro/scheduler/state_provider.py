@@ -18,6 +18,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cached_property
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
@@ -284,6 +285,39 @@ class StateProvider(ABC):
         """
         with self._warning_actions_lock:
             return list(self._warning_metadata.values())
+
+    @staticmethod
+    def get_resolved_state(
+        job: BaseJob, experiment: BaseExperiment | None
+    ) -> tuple[JobState, bool]:
+        """Resolve display state from experiment and execution states.
+
+        Returns (resolved_state, has_conflict).
+
+        Rules:
+        - Phantom (execution=UNSCHEDULED) => experiment state takes precedence
+        - Running/done/error execution => execution state (ground truth)
+        - has_conflict=True when both states are set and disagree
+        """
+        exec_state = job.state
+        exp_state = experiment.get_job_state(job.identifier) if experiment else None
+
+        if exp_state is None or exp_state == exec_state:
+            return exec_state, False
+
+        # Phantom: execution has no info, trust experiment/scheduler
+        if exec_state == JobState.UNSCHEDULED:
+            return exp_state, False
+
+        # Execution state is authoritative when it has real info
+        if exec_state.running() or exec_state.finished():
+            # No conflict if both are in the same phase (both running or both finished)
+            same_phase = (exec_state.running() and exp_state.running()) or (
+                exec_state.finished() and exp_state.finished()
+            )
+            return exec_state, not same_phase
+
+        return exp_state, exp_state != exec_state
 
     @abstractmethod
     def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
@@ -570,7 +604,8 @@ class OfflineStateProvider(StateProvider):
 
     def _init_job_cache(self) -> None:
         """Initialize job cache - call from subclass __init__"""
-        # Job cache: full_id (task_id:job_id) -> MockJob
+        # Job cache: keyed by "{hash8}:{job_id}" where hash8 = task_id_hash(task_id)
+        # This matches the entity_id format from job_entity_id_extractor / EventReader
         self._job_cache: Dict[str, "MockJob"] = {}
         self._job_cache_lock = threading.Lock()
 
@@ -726,7 +761,6 @@ class OfflineStateProvider(StateProvider):
             JobSubmittedEvent,
             ExperimentUpdatedEvent,
         )
-        from experimaestro.scheduler.interfaces import BaseJob
 
         # Handle job state/progress/carbon events
         if isinstance(
@@ -748,9 +782,11 @@ class OfflineStateProvider(StateProvider):
         # Handle job submitted event - add to cache if we have task_id
         elif isinstance(event, JobSubmittedEvent):
             if event.task_id:
-                full_id = BaseJob.make_full_id(event.task_id, event.job_id)
+                from experimaestro.scheduler.state_status import task_id_hash
+
+                cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
                 with self._job_cache_lock:
-                    if full_id not in self._job_cache:
+                    if cache_key not in self._job_cache:
                         # Create a minimal MockJob for tracking
                         job = MockJob(
                             identifier=event.job_id,
@@ -762,8 +798,8 @@ class OfflineStateProvider(StateProvider):
                             progress=[],
                             updated_at="",
                         )
-                        self._job_cache[full_id] = job
-                        logger.debug("Added job %s to cache from event", full_id)
+                        self._job_cache[cache_key] = job
+                        logger.debug("Added job %s to cache from event", cache_key)
 
         # Handle experiment events - invalidate cache to force refresh
         elif isinstance(event, ExperimentUpdatedEvent):
@@ -972,6 +1008,16 @@ class MockJob(BaseJob):
         """Set state and mark as having event state."""
         self._has_event_state = True
         self.set_state(new_state)
+
+    @cached_property
+    def cache_key(self) -> str:
+        """Cache key: {hash8_task_id}:{job_id}
+
+        Matches the entity_id format from job_entity_id_extractor / EventReader.
+        """
+        from experimaestro.scheduler.state_status import task_id_hash
+
+        return f"{task_id_hash(self.task_id)}:{self.identifier}"
 
     @property
     def scheduler_state(self) -> JobState:
@@ -1612,6 +1658,28 @@ class MockExperiment(BaseExperiment):
             job_states=job_states,
         )
 
+    def _update_job_state(
+        self, job_id: str, job_state: JobState, merge_mode: bool
+    ) -> None:
+        """Update _job_states and counters for a job state change"""
+        if merge_mode and job_id in self._job_states:
+            return
+
+        previous_state = self._job_states.get(job_id)
+        self._job_states[job_id] = job_state
+
+        if not merge_mode and previous_state != job_state:
+            if previous_state is not None:
+                if previous_state == JobState.DONE:
+                    self._finished_jobs = max(0, self._finished_jobs - 1)
+                elif previous_state.is_error():
+                    self._failed_jobs = max(0, self._failed_jobs - 1)
+
+            if job_state == JobState.DONE:
+                self._finished_jobs += 1
+            elif job_state.is_error():
+                self._failed_jobs += 1
+
     def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:
         """Apply an event to update experiment state
 
@@ -1621,6 +1689,7 @@ class MockExperiment(BaseExperiment):
                        (except for timestamps which should use the latest value)
         """
         from experimaestro.scheduler.state_status import (
+            ExperimentJobStateEvent,
             JobSubmittedEvent,
             JobStateChangedEvent,
             ServiceAddedEvent,
@@ -1662,31 +1731,22 @@ class MockExperiment(BaseExperiment):
             if event.service_id in self._services:
                 self._services[event.service_id]._state_name = event.state
 
+        elif isinstance(event, ExperimentJobStateEvent):
+            # Track scheduler lifecycle state from the scheduler
+            job_state = STATE_NAME_TO_JOBSTATE.get(
+                event.scheduler_state, JobState.UNSCHEDULED
+            )
+            if event.failure_reason:
+                try:
+                    job_state = JobStateError(JobFailureStatus[event.failure_reason])
+                except (KeyError, ValueError):
+                    pass
+            self._update_job_state(event.job_id, job_state, merge_mode)
+
         elif isinstance(event, JobStateChangedEvent):
-            # Track individual job states
+            # Track individual job states from execution events
             job_state = STATE_NAME_TO_JOBSTATE.get(event.state, JobState.UNSCHEDULED)
-
-            # In merge mode, use existing state if already set
-            if not (merge_mode and event.job_id in self._job_states):
-                previous_state = self._job_states.get(event.job_id)
-                self._job_states[event.job_id] = job_state
-
-                # Update counters only when state actually changes
-                # (duplicate events in events.jsonl must not double-count)
-                if not merge_mode and previous_state != job_state:
-                    # Decrement counters when leaving a terminal state
-                    # (e.g., job resubmitted after failure)
-                    if previous_state is not None:
-                        if previous_state == JobState.DONE:
-                            self._finished_jobs = max(0, self._finished_jobs - 1)
-                        elif previous_state.is_error():
-                            self._failed_jobs = max(0, self._failed_jobs - 1)
-
-                    # Increment counters when entering a terminal state
-                    if event.state == "done":
-                        self._finished_jobs += 1
-                    elif event.state == "error":
-                        self._failed_jobs += 1
+            self._update_job_state(event.job_id, job_state, merge_mode)
 
         elif isinstance(event, RunCompletedEvent):
             # Map status string to ExperimentStatus
@@ -1708,8 +1768,11 @@ class MockExperiment(BaseExperiment):
             self._status = new_status
 
             # For timestamps, always use the latest (even in merge mode)
-            if self._ended_at is None or event.ended_at > self._ended_at:
-                self._ended_at = event.ended_at
+            ended_at = deserialize_to_datetime(event.ended_at)
+            if ended_at is not None and (
+                self._ended_at is None or ended_at > self._ended_at
+            ):
+                self._ended_at = ended_at
 
 
 class MockService(BaseService):

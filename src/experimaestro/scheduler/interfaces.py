@@ -67,7 +67,6 @@ class ExperimentJobInformation:
             task_id=d["task_id"],
             tags=d.get("tags", {}),
             timestamp=d.get("timestamp"),
-            transient=d.get("transient", 0),
         )
 
 
@@ -163,6 +162,7 @@ class JobState:
     RUNNING: "JobStateRunning"
     DONE: "JobStateDone"
     ERROR: "JobStateError"
+    TRANSIENT: "JobStateTransient"
 
     def notstarted(self):
         """Returns True if the job hasn't started yet"""
@@ -260,6 +260,12 @@ class JobStateUnscheduled(JobState):
 
     name = "unscheduled"
     value = 0
+
+
+class JobStateTransient(JobStateUnscheduled):
+    """Transient job that was not needed (dormant)"""
+
+    name = "transient"
 
 
 class JobStateWaiting(JobState):
@@ -376,6 +382,7 @@ class JobStateError(JobState):
 # Create singleton instances for backward compatibility
 # These can be used in comparisons: if state == JobState.DONE: ...
 JobState.UNSCHEDULED = JobStateUnscheduled()
+JobState.TRANSIENT = JobStateTransient()
 JobState.WAITING = JobStateWaiting()
 JobState.READY = JobStateReady()
 JobState.SCHEDULED = JobStateScheduled()
@@ -387,6 +394,7 @@ JobState.ERROR = JobStateError()  # default error without failure details
 # Mapping from state name string to JobState singleton
 STATE_NAME_TO_JOBSTATE = {
     "unscheduled": JobState.UNSCHEDULED,
+    "transient": JobState.TRANSIENT,
     "waiting": JobState.WAITING,
     "ready": JobState.READY,
     "scheduled": JobState.SCHEDULED,
@@ -1438,6 +1446,20 @@ class BaseExperiment:
     def failed_jobs(self) -> int:
         """Number of failed jobs"""
         return sum(1 for j in self.jobs.values() if j.state.is_error())
+
+    def get_job_state(self, job_id: str) -> "JobState | None":
+        """Get experiment/scheduler state for a job.
+
+        Returns the scheduler lifecycle state for the given job, which may
+        differ from the job's execution state (job.state).
+
+        Args:
+            job_id: The job identifier
+
+        Returns:
+            JobState if tracked, None otherwise
+        """
+        raise NotImplementedError
 
     def get_services(self) -> List["BaseService"]:
         """Get services for this experiment as a list"""

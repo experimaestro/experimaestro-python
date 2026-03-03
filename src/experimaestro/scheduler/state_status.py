@@ -257,7 +257,6 @@ class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
     """
 
     run_id: str = ""
-    transient: int = 0
     tags: list[JobTag] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
     submitted_time: Optional[str] = None  # ISO format timestamp
@@ -786,7 +785,16 @@ class JobEventWriter(EventWriter):
         )
 
     def write_event(self, event: EventBase) -> None:
-        """Write event and apply it to the in-memory mock job"""
+        """Write event and apply it to the in-memory mock job.
+
+        Ensures task_id and job_id are set on JobEventBase events
+        so that readers can resolve the real task_id from events.
+        """
+        if isinstance(event, JobEventBase):
+            if not event.task_id:
+                event.task_id = self.task_id
+            if not event.job_id:
+                event.job_id = self.job_id
         self._mock_job.apply_event(event)
         super().write_event(event)
 

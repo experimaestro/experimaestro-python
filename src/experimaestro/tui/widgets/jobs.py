@@ -346,12 +346,7 @@ class JobDetailView(Widget):
         # Format status with icon and name
         status_name = job.state.name if job.state else "unknown"
         failure_reason = job.state.failure_reason if job.state else None
-        job_info = getattr(self, "experiment_job_info", {}).get(job.identifier)
-        transient_val = job_info.transient if job_info else None
-        from experimaestro.scheduler.transient import TransientMode
-
-        transient = TransientMode(transient_val) if transient_val is not None else None
-        status_icon = get_status_icon(status_name, failure_reason, transient)
+        status_icon = get_status_icon(status_name, failure_reason)
         status_text = f"{status_icon} {status_name}"
         if failure_reason:
             status_text += f" ({failure_reason.name})"
@@ -528,6 +523,7 @@ class JobsTable(Vertical):
         ] = {}  # job_id -> [depends_on_job_ids]
         self.task_id_map: dict[str, str] = {}  # job_id -> task_id
         self.experiment_job_info: dict = {}  # job_id -> ExperimentJobInformation
+        self._current_experiment_obj = None  # BaseExperiment object for resolved state
 
     def compose(self) -> ComposeResult:
         yield Static("", id="past-run-banner", classes="hidden")
@@ -711,7 +707,8 @@ class JobsTable(Vertical):
         "error": 3,
         "waiting": 4,
         "unscheduled": 5,
-        "phantom": 6,
+        "transient": 6,
+        "phantom": 7,
     }
 
     # Failure reason sort order (within error status)
@@ -725,20 +722,22 @@ class JobsTable(Vertical):
         "FAILED": 5,  # Generic failure
     }
 
-    @classmethod
-    def _get_status_sort_key(cls, job):
-        """Get sort key for a job based on status and failure reason.
+    def _get_status_sort_key(self, job):
+        """Get sort key for a job based on resolved status and failure reason.
 
         Returns tuple (status_order, failure_order) for proper sorting.
         """
-        state_name = job.state.name if job.state else "unknown"
-        status_order = cls.STATUS_ORDER.get(state_name, 99)
+        resolved_state, _ = StateProvider.get_resolved_state(
+            job, self._current_experiment_obj
+        )
+        state_name = resolved_state.name if resolved_state else "unknown"
+        status_order = self.STATUS_ORDER.get(state_name, 99)
 
         # For error jobs, also sort by failure reason
         if state_name == "error":
-            failure_reason = job.state.failure_reason if job.state else None
+            failure_reason = resolved_state.failure_reason if resolved_state else None
             if failure_reason:
-                failure_order = cls.FAILURE_ORDER.get(failure_reason.name, 99)
+                failure_order = self.FAILURE_ORDER.get(failure_reason.name, 99)
             else:
                 failure_order = 99  # Unknown failure at end
         else:
@@ -863,9 +862,17 @@ class JobsTable(Vertical):
         )
         jobs = self.state_provider.get_jobs(experiment_id, run_id=run_id)
 
+        # Get the experiment object for resolved state
+        experiment_obj = self.state_provider.get_experiment(experiment_id)
+
         # Update on main thread
         self.app.call_from_thread(
-            self._on_data_loaded, jobs, tags_map, dependencies_map, experiment_job_info
+            self._on_data_loaded,
+            jobs,
+            tags_map,
+            dependencies_map,
+            experiment_job_info,
+            experiment_obj,
         )
 
     def _on_data_loaded(
@@ -874,6 +881,7 @@ class JobsTable(Vertical):
         tags_map: dict = None,
         dependencies_map: dict = None,
         experiment_job_info: dict = None,
+        experiment_obj=None,
     ) -> None:
         """Handle loaded data on main thread"""
         # Hide loading indicator
@@ -886,6 +894,7 @@ class JobsTable(Vertical):
             self.dependencies_map = dependencies_map
         if experiment_job_info is not None:
             self.experiment_job_info = experiment_job_info
+        self._current_experiment_obj = experiment_obj
 
         # Refresh display with loaded jobs
         self._refresh_jobs_with_data(jobs)
@@ -947,10 +956,12 @@ class JobsTable(Vertical):
         # Check if status changed when sorting by status
         status_changed = False
         if self._sort_column == "status" and not jobs_changed:
-            current_statuses = {
-                job.identifier: (job.state.name if job.state else "unknown")
-                for job in jobs
-            }
+            current_statuses = {}
+            for job in jobs:
+                rs, _ = StateProvider.get_resolved_state(
+                    job, self._current_experiment_obj
+                )
+                current_statuses[job.identifier] = rs.name if rs else "unknown"
             if (
                 hasattr(self, "_last_statuses")
                 and self._last_statuses != current_statuses
@@ -968,10 +979,15 @@ class JobsTable(Vertical):
             task_id = job.task_id
             # Track task_id for each job_id
             self.task_id_map[job_id] = task_id or ""
-            status = job.state.name if job.state else "unknown"
+
+            # Resolve display state from experiment and execution states
+            resolved_state, has_conflict = StateProvider.get_resolved_state(
+                job, self._current_experiment_obj
+            )
+            status = resolved_state.name if resolved_state else "unknown"
 
             # Format status with icon (and progress % if running)
-            if status == "running":
+            if resolved_state and resolved_state.running():
                 progress_list = job.progress or []
                 if progress_list:
                     # We only report main progress here (level 0)
@@ -981,15 +997,18 @@ class JobsTable(Vertical):
                 else:
                     status_text = "▶"
             else:
-                failure_reason = job.state.failure_reason if job.state else None
-                job_info = self.experiment_job_info.get(job.identifier)
-                transient_val = job_info.transient if job_info else None
-                from experimaestro.scheduler.transient import TransientMode
-
-                transient = (
-                    TransientMode(transient_val) if transient_val is not None else None
+                failure_reason = (
+                    resolved_state.failure_reason if resolved_state else None
                 )
-                status_text = get_status_icon(status, failure_reason, transient)
+                status_text = get_status_icon(status, failure_reason)
+
+            # Show both icons when states disagree
+            if has_conflict:
+                exec_icon = get_status_icon(
+                    job.state.name if job.state else "unknown",
+                    job.state.failure_reason if job.state else None,
+                )
+                status_text = f"{status_text}/{exec_icon}"
 
             # Tags are stored in JobTagModel, accessed via tags_map
             job_tags = self.tags_map.get(job.identifier, {})
@@ -1112,13 +1131,24 @@ class JobsTable(Vertical):
             if task_id:
                 job = self.state_provider.get_job(task_id, job_id)
                 if job:
-                    status_name = job.state.name if job.state else "unknown"
-                    failure_reason = job.state.failure_reason if job.state else None
-                    transient = getattr(job, "transient", None)
-                    icon = get_status_icon(status_name, failure_reason, transient)
+                    resolved_state, has_conflict = StateProvider.get_resolved_state(
+                        job, self._current_experiment_obj
+                    )
+                    status_name = resolved_state.name if resolved_state else "unknown"
+                    failure_reason = (
+                        resolved_state.failure_reason if resolved_state else None
+                    )
+                    icon = get_status_icon(status_name, failure_reason)
                     status_text = f"{icon} {status_name}"
                     if failure_reason:
                         status_text += f" ({failure_reason.name})"
+                    if has_conflict:
+                        exec_name = job.state.name if job.state else "?"
+                        exec_icon = get_status_icon(
+                            exec_name,
+                            job.state.failure_reason if job.state else None,
+                        )
+                        status_text += f" / {exec_icon} {exec_name}"
                     self.post_message(JobHighlighted(job_id, status_text))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:

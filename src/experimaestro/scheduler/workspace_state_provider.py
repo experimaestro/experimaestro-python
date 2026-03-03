@@ -36,12 +36,12 @@ from experimaestro.scheduler.state_status import (
     EventBase,
     JobEventBase,
     ExperimentEventBase,
-    JobSubmittedEvent,
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
     EventReader,
     WatchedDirectory,
     job_entity_id_extractor,
+    task_id_hash,
 )
 
 if TYPE_CHECKING:
@@ -140,20 +140,25 @@ class WorkspaceStateProvider(OfflineStateProvider):
     def _resolve_job_events_count(self, entity_id: str) -> int:
         """Resolve events_count for a job from its status.json
 
-        entity_id format: "{task_id}:{job_id}"
+        entity_id format: "{hash8}:{job_id}"
         """
         parts = entity_id.split(":", 1)
         if len(parts) != 2:
             return 0
-        task_id, job_id = parts
-        status_path = (
-            self.workspace_path
-            / "jobs"
-            / task_id
-            / job_id
-            / ".experimaestro"
-            / "status.json"
-        )
+        hash8, job_id = parts
+
+        # Find the task directory containing this job_id
+        jobs_dir = self.workspace_path / "jobs"
+        status_path = None
+        if jobs_dir.exists():
+            for task_dir in jobs_dir.iterdir():
+                candidate = task_dir / job_id / ".experimaestro" / "status.json"
+                if candidate.exists():
+                    status_path = candidate
+                    break
+
+        if status_path is None:
+            return 0
         try:
             if status_path.exists():
                 with status_path.open("r") as f:
@@ -170,18 +175,18 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 WatchedDirectory(
                     path=self._experiments_dir,
                     events_count_resolver=self._resolve_experiment_events_count,
-                    on_created=self._on_experiment_created,
+                    on_created=self._on_experiment_events_created,
                     on_event=self._on_experiment_event,
-                    on_deleted=self._on_experiment_deleted,
+                    on_deleted=self._on_experiment_events_deleted,
                 ),
                 WatchedDirectory(
                     path=self._jobs_dir,
                     glob_pattern="*-*-*.jsonl",
                     entity_id_extractor=job_entity_id_extractor,
                     events_count_resolver=self._resolve_job_events_count,
-                    on_created=self._on_job_created,
+                    on_created=self._on_job_events_created,
                     on_event=self._on_job_event,
-                    on_deleted=self._on_job_deleted,
+                    on_deleted=self._on_job_events_deleted,
                 ),
             )
             # Skip replaying historical events: caches are populated lazily
@@ -638,7 +643,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Experiment event callbacks
     # =========================================================================
 
-    def _on_experiment_created(self, experiment_id: str) -> bool:
+    def _on_experiment_events_created(self, experiment_id: str) -> bool:
         """Called when a new experiment is discovered. Pre-load into cache."""
         logger.debug("Discovered experiment: %s", experiment_id)
         self._invalidate_known_experiment_ids()
@@ -679,8 +684,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Forward to listeners
         self._notify_state_listeners(event)
 
-    def _on_experiment_deleted(self, experiment_id: str) -> None:
-        """Handle experiment event files deletion (experiment finalized)"""
+    def _on_experiment_events_deleted(self, experiment_id: str) -> None:
+        """Handle experiment event files deletion (experiment finalized).
+
+        Clears experiment cache (forces reload from consolidated status.json).
+        """
         self._invalidate_known_experiment_ids()
         self._clear_experiment_cache(experiment_id)
         run_id = self.get_current_run(experiment_id) or ""
@@ -695,11 +703,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Job event callbacks
     # =========================================================================
 
-    def _on_job_created(self, entity_id: str) -> bool:
+    def _on_job_events_created(self, entity_id: str) -> bool:
         """Called when a new job is discovered.
 
         Args:
-            entity_id: Job entity ID in format "{task_id}:{job_id}" (same as full_id)
+            entity_id: Job entity ID in format "{task_id}:{job_id}"
         """
         task_id, job_id = BaseJob.parse_full_id(entity_id)
         logger.debug("Discovered job: %s (task: %s)", job_id, task_id)
@@ -709,46 +717,50 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """Handle job event
 
         Args:
-            entity_id: Job entity ID in format "{task_id}:{job_id}" (same as full_id)
+            entity_id: Job entity ID in format "{hash8}:{job_id}"
             event: The job event
         """
-        task_id, job_id = BaseJob.parse_full_id(entity_id)
-        # entity_id is already in full_id format (task_id:job_id)
-        full_id = entity_id
-        logger.debug("Received job event for %s: %s", full_id, event)
+        cache_key = entity_id  # Already in cache key format
+        logger.debug("Received job event for %s: %s", cache_key, event)
 
         if isinstance(event, JobEventBase):
             with self._job_cache_lock:
-                job = self._job_cache.get(full_id)
+                job = self._job_cache.get(cache_key)
 
                 if job is None:
-                    # Job not in cache - create/load it
-                    # This handles both JobSubmittedEvent and other events
-                    # (e.g., JobStateChangedEvent arriving without prior JobSubmittedEvent)
-                    job_path = self.workspace_path / "jobs" / task_id / job_id
+                    # Job not in cache - use event.task_id for filesystem path
+                    task_id = event.task_id
+                    job_id = event.job_id
 
-                    if isinstance(event, JobSubmittedEvent):
-                        # Use task_id from event if available (more reliable)
-                        if event.task_id:
-                            task_id = event.task_id
-                            full_id = BaseJob.make_full_id(task_id, job_id)
-                            job_path = self.workspace_path / "jobs" / task_id / job_id
-
-                    # Load from disk if exists, otherwise create minimal job
-                    if job_path.exists():
-                        job = self._mock_job_from_disk(job_path, task_id, job_id)
+                    if task_id:
+                        job_path = self.workspace_path / "jobs" / task_id / job_id
+                        if job_path.exists():
+                            job = self._mock_job_from_disk(job_path, task_id, job_id)
+                        else:
+                            job = MockJob(
+                                identifier=job_id,
+                                task_id=task_id,
+                                path=job_path,
+                                state="unscheduled",
+                                starttime=None,
+                                endtime=None,
+                                progress=[],
+                                updated_at="",
+                            )
                     else:
+                        # No task_id available - create minimal job
+                        _, job_id = entity_id.split(":", 1)
                         job = MockJob(
                             identifier=job_id,
-                            task_id=task_id,
-                            path=job_path,
+                            task_id="",
+                            path=None,
                             state="unscheduled",
                             starttime=None,
                             endtime=None,
                             progress=[],
                             updated_at="",
                         )
-                    self._job_cache[full_id] = job
+                    self._job_cache[cache_key] = job
 
                 # Apply the event to update job state
                 job.apply_event(event)
@@ -756,15 +768,46 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Forward to listeners
         self._notify_state_listeners(event)
 
-    def _on_job_deleted(self, entity_id: str) -> None:
-        """Handle job event files deletion
+    def _on_job_events_deleted(self, entity_id: str) -> None:
+        """Handle job event files deletion (consolidation by scheduler).
+
+        When the scheduler consolidates events, it writes the final state
+        to status.json and deletes the event files. We reload the job from
+        disk so the cache reflects the consolidated state, and notify
+        listeners so the TUI refreshes.
 
         Args:
-            entity_id: Job entity ID in format "{task_id}:{job_id}"
+            entity_id: Job entity ID in format "{hash8}:{job_id}"
         """
-        # Job deletion doesn't need special handling - job remains in cache
-        # until explicitly removed or cache is cleared
-        pass
+        from experimaestro.scheduler.state_status import JobStateChangedEvent
+
+        logger.debug("Job events deleted for %s", entity_id)
+        cache_key = entity_id
+        with self._job_cache_lock:
+            job = self._job_cache.get(cache_key)
+            if job is None:
+                logger.debug(
+                    "Job %s not in cache (keys: %s)",
+                    cache_key,
+                    list(self._job_cache.keys())[:5],
+                )
+                return
+            if job.path is None or not job.path.exists():
+                logger.debug("Job %s path missing: %s", cache_key, job.path)
+                return
+
+            old_state = job.state
+            job.load_from_disk()
+            logger.debug("Job %s reloaded: %s -> %s", cache_key, old_state, job.state)
+            # Notify listeners if state changed so TUI refreshes
+            if job.state != old_state:
+                self._notify_state_listeners(
+                    JobStateChangedEvent(
+                        job_id=job.identifier,
+                        task_id=job.task_id,
+                        state=job.state.name,
+                    )
+                )
 
     @property
     def read_only(self) -> bool:
@@ -952,9 +995,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 if exp is not None:
                     job_info = exp.job_infos.get(job_id)
                     if job_info is not None:
-                        full_id = BaseJob.make_full_id(job_info.task_id, job_id)
+                        job_cache_key = f"{task_id_hash(job_info.task_id)}:{job_id}"
                         with self._job_cache_lock:
-                            job = self._job_cache.get(full_id)
+                            job = self._job_cache.get(job_cache_key)
                             if job is not None:
                                 job.apply_event(event)
 
@@ -963,7 +1006,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             job_id = event.job_id
             task_id = event.task_id
             if task_id and job_id:
-                full_id = BaseJob.make_full_id(task_id, job_id)
+                job_cache_key = f"{task_id_hash(task_id)}:{job_id}"
                 new_state = STATE_NAME_TO_JOBSTATE.get(event.scheduler_state)
                 if new_state is not None:
                     if event.failure_reason:
@@ -974,7 +1017,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                         except (KeyError, ValueError):
                             pass
                     with self._job_cache_lock:
-                        job = self._job_cache.get(full_id)
+                        job = self._job_cache.get(job_cache_key)
                         if job is not None:
                             job._experiment_status = new_state
 
@@ -1020,8 +1063,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Returns:
             MockJob from cache or freshly loaded from disk
         """
-        full_id = BaseJob.make_full_id(task_id, job_id)
-        return super()._get_or_load_job(full_id, job_id=job_id, task_id=task_id)
+        cache_key = f"{task_id_hash(task_id)}:{job_id}"
+        return super()._get_or_load_job(cache_key, job_id=job_id, task_id=task_id)
 
     def _create_job(
         self,
@@ -1644,7 +1687,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
             # Clear job from cache
             with self._job_cache_lock:
-                self._job_cache.pop(job.full_id, None)
+                self._job_cache.pop(job.cache_key, None)
 
             # Emit state change event (unscheduled = job removed)
             from experimaestro.scheduler.state_status import JobStateChangedEvent
@@ -2098,7 +2141,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         self._clear_experiment_cache(experiment_id)
         with self._job_cache_lock:
             for job in jobs:
-                self._job_cache.pop(job.full_id, None)
+                self._job_cache.pop(job.cache_key, None)
 
         if errors:
             return False, f"Partial deletion: {'; '.join(errors)}"

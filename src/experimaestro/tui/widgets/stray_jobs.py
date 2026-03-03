@@ -208,9 +208,8 @@ class OrphanJobsTab(Vertical):
 
         for job in self._get_sorted_jobs():
             failure_reason = job.state.failure_reason if job.state else None
-            transient = getattr(job, "transient", None)
             status_icon = get_status_icon(
-                job.state.name if job.state else "unknown", failure_reason, transient
+                job.state.name if job.state else "unknown", failure_reason
             )
 
             # Use different styling for running vs finished jobs
