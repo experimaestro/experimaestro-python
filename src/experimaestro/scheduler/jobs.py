@@ -58,7 +58,7 @@ class JobLock(Lock):
         self.job = job
 
     async def _aio_acquire(self):
-        if self.job.state != JobState.DONE:
+        if self.job.scheduler_state != JobState.DONE:
             raise RuntimeError(f"Job {self.job.identifier} not done")
 
     async def _aio_release(self):
@@ -81,7 +81,7 @@ class JobDependency(Dependency):
         origin_job = self.origin
         if (
             origin_job.transient.is_transient
-            and origin_job.state == JobState.UNSCHEDULED
+            and origin_job.scheduler_state == JobState.UNSCHEDULED
         ):
             # Transient job was skipped but now is needed - start it
             from experimaestro.utils import logger
@@ -94,7 +94,7 @@ class JobDependency(Dependency):
             origin_job._needed_transient = True
             # Mark as WAITING and start the job via aio_submit
             # Use aio_submit (not aio_start) to properly handle all job lifecycle
-            origin_job.set_state(JobState.WAITING)
+            origin_job.set_scheduler_state(JobState.WAITING)
             if origin_job.scheduler is not None:
                 # Create a new future for the job so aio_lock can wait on it
                 origin_job._future = asyncio.ensure_future(
@@ -130,9 +130,9 @@ class JobDependency(Dependency):
         await asyncio.wrap_future(self.origin._future)
 
         # Check if the job succeeded
-        if self.origin.state != JobState.DONE:
+        if self.origin.scheduler_state != JobState.DONE:
             raise RuntimeError(
-                f"Dependency job {self.origin} failed with state {self.origin.state} for {self.target}"
+                f"Dependency job {self.origin} failed with state {self.origin.scheduler_state} for {self.target}"
             )
 
         # Job succeeded, acquire and return the lock
@@ -176,7 +176,6 @@ class Job(BaseJob, Resource):
         self.scheduler: Optional["Scheduler"] = None
         self.experiments: List["experiment"] = []  # Experiments this job belongs to
         self.config = config
-        self._state: JobState = JobState.UNSCHEDULED
 
         # Dependencies
         self.dependencies: Set[Dependency] = set()  # as target
@@ -191,7 +190,9 @@ class Job(BaseJob, Resource):
         if max_retries is None and self.workspace:
             max_retries = self.workspace.workspace_settings.max_retries
         self.max_retries = max_retries if max_retries is not None else 3
-        self.retry_count = 0
+
+        # Scheduler lifecycle state (independent from execution state)
+        self._scheduler_state: JobState = JobState.UNSCHEDULED
 
         # Transient mode for intermediary tasks
         self.transient = transient if transient is not None else TransientMode.NONE
@@ -203,20 +204,6 @@ class Job(BaseJob, Resource):
         self.watched_outputs: List["WatchedOutput"] = list(
             config.__xpm__.watched_outputs
         )
-
-        # Process
-        self._process = None
-
-        # Meta-information
-        self.starttime: Optional[datetime] = None
-        self.submittime: Optional[datetime] = None
-        self.endtime: Optional[datetime] = None
-        self.exit_code: Optional[int] = None
-        self._progress: List[LevelInformation] = []
-        self.tags = config.tags()
-
-        # Carbon metrics (updated via events)
-        self.carbon_metrics = None
 
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
@@ -260,29 +247,30 @@ class Job(BaseJob, Resource):
         assert self._future, "Cannot wait a not submitted job"
         return self._future.result()
 
-    def set_state(
+    @property
+    def scheduler_state(self) -> JobState:
+        """Scheduler lifecycle state (independent from execution state)"""
+        return self._scheduler_state
+
+    def set_scheduler_state(
         self,
         new_state: JobState,
-        *,
-        loading: bool = False,
     ):
-        """Set the job state, update timestamps, experiment statistics, and notify
+        """Set the scheduler lifecycle state.
 
-        This method should be called instead of direct state assignment
-        to ensure experiment statistics (unfinishedJobs, failedJobs) are
-        properly updated.
+        Updates experiment statistics and notifies listeners.
+        This does NOT update the execution state (_state) — that is updated
+        only by load_from_disk() and apply_event().
 
-        :param new_state: The new job state
-        :param loading: If True, timestamps are not modified (loading from disk)
+        :param new_state: The new scheduler state
         """
-        old_state = self._state
+        old_state = self._scheduler_state
 
         # Nothing changed
         if old_state == new_state:
             return
 
-        # Call base implementation for state and timestamps
-        super().set_state(new_state, loading=loading)
+        self._scheduler_state = new_state
 
         # Helper to determine if a state should be "counted" in unfinishedJobs
         # A job is counted when it's been submitted and hasn't finished yet
@@ -353,15 +341,6 @@ class Job(BaseJob, Resource):
             self.workspace.env if self.workspace else {},
         )
 
-    @property
-    def progress(self):
-        return self._progress
-
-    @progress.setter
-    def progress(self, value: List):
-        """Setter for progress property (used by remote client and state loading)"""
-        self._progress = value
-
     def set_progress(self, level: int, value: float, desc: Optional[str]):
         if value < 0:
             logger.warning(f"Progress value out of bounds ({value})")
@@ -381,7 +360,7 @@ class Job(BaseJob, Resource):
 
     @property
     def ready(self):
-        return self.state == JobState.READY
+        return self.scheduler_state == JobState.READY
 
     @property
     def jobpath(self) -> Path:

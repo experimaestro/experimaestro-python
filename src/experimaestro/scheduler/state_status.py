@@ -260,13 +260,14 @@ class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
     transient: int = 0
     tags: list[JobTag] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    submitted_time: Optional[str] = None  # ISO format timestamp
 
 
 @dataclass
 class JobStateChangedEvent(JobEventBase):
-    """Event: Job state changed
+    """Event: Job execution state changed (from job process events / disk)
 
-    Fired when a job's state changes (scheduled, running, done, error, etc.)
+    Fired when a job's execution state changes (scheduled, running, done, error, etc.)
     Timestamps are stored as ISO format strings for JSON serialization.
 
     The from_experiment field distinguishes the source of the event:
@@ -277,13 +278,29 @@ class JobStateChangedEvent(JobEventBase):
 
     state: str = ""
     failure_reason: Optional[str] = None
-    submitted_time: Optional[str] = None  # ISO format timestamp
     started_time: Optional[str] = None  # ISO format timestamp
     ended_time: Optional[str] = None  # ISO format timestamp
     exit_code: Optional[int] = None
     retry_count: int = 0
     progress: list[ProgressLevel] = field(default_factory=list)
     from_experiment: bool = False  # True if event came from experiment events
+
+
+@dataclass
+class ExperimentJobStateEvent(ExperimentEventBase, JobEventBase):
+    """Event: Scheduler lifecycle state changed for a job in an experiment
+
+    Fired by the scheduler when a job's scheduler_state changes
+    (UNSCHEDULED → WAITING → READY → SCHEDULED → RUNNING → DONE → ERROR).
+    This is the experiment/scheduler view of the job lifecycle, distinct from
+    the execution state events (JobStateChangedEvent) written by the job process.
+
+    Used by TUI and WebUI to track scheduler-level lifecycle transitions.
+    """
+
+    scheduler_state: str = ""
+    failure_reason: Optional[str] = None
+    run_id: str = ""
 
 
 @dataclass
@@ -762,7 +779,6 @@ class JobEventWriter(EventWriter):
             task_id=self.task_id,
             path=self.job_path,
             state="unscheduled",
-            submittime=None,
             starttime=None,
             endtime=None,
             progress=[],

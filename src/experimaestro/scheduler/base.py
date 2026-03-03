@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -38,6 +39,7 @@ from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
     CarbonMetricsEvent,
     EventReader,
+    ExperimentJobStateEvent,
     JobProgressEvent,
     JobStateChangedEvent,
     WatchedDirectory,
@@ -54,12 +56,30 @@ if TYPE_CHECKING:
     from experimaestro.settings import ServerSettings
     from experimaestro.scheduler.workspace import Workspace
     from experimaestro.connectors import Process
+    from experimaestro.scheduler.interfaces import ExperimentJobInformation
 
     # vulture: ignore
     from experimaestro.scheduler.experiment import experiment as Experiment
 
 
 logger = logging.getLogger("xpm.scheduler")
+
+
+@dataclass
+class SchedulerExperimentRunInfo:
+    """Per-(experiment, run) metadata tracked by the scheduler.
+
+    Unifies tags, dependencies, and experiment job info into one structure.
+    """
+
+    tags: dict[str, dict[str, str]] = field(default_factory=dict)
+    """job_id -> {tag_key: tag_value}"""
+
+    dependencies: dict[str, list[str]] = field(default_factory=dict)
+    """job_id -> [depends_on_job_ids]"""
+
+    job_infos: dict[str, "ExperimentJobInformation"] = field(default_factory=dict)
+    """job_id -> ExperimentJobInformation"""
 
 
 class Listener:
@@ -127,11 +147,8 @@ class Scheduler(StateProvider, threading.Thread):
         # Services: (experiment_id, run_id) -> {service_id -> Service}
         self.services: Dict[tuple[str, str], Dict[str, Service]] = {}
 
-        # Tags map: (experiment_id, run_id) -> {job_id -> {tag_key: tag_value}}
-        self._tags_map: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
-
-        # Dependencies map: (experiment_id, run_id) -> {job_id -> [depends_on_job_ids]}
-        self._dependencies_map: dict[tuple[str, str], dict[str, list[str]]] = {}
+        # Per-(experiment, run) metadata
+        self._run_infos: dict[tuple[str, str], SchedulerExperimentRunInfo] = {}
 
         # List of jobs
         self.waitingjobs: Set[Job] = set()
@@ -375,7 +392,7 @@ class Scheduler(StateProvider, threading.Thread):
         if other is not None:
             # If state is WAITING, it was just reset for resubmission and needs processing
             # If state is RUNNING or finished (DONE), no need to reprocess
-            if other.state != JobState.WAITING:
+            if other.scheduler_state != JobState.WAITING:
                 return other
             # Use 'other' for resubmission since it has the correct experiments list
             job = other
@@ -384,9 +401,9 @@ class Scheduler(StateProvider, threading.Thread):
             try:
                 state = await self.aio_submit(job)
                 # UNSCHEDULED is valid for transient jobs that weren't needed
-                if isinstance(job.state, JobStateWaiting):
+                if isinstance(job.scheduler_state, JobStateWaiting):
                     logger.error("Job ended with unexpected state: %s", state)
-                elif isinstance(job.state, JobStateUnscheduled):
+                elif isinstance(job.scheduler_state, JobStateUnscheduled):
                     if job.transient.is_transient:
                         logger.debug(
                             "Transient job ended unscheduled (not needed): %s", state
@@ -448,12 +465,12 @@ class Scheduler(StateProvider, threading.Thread):
 
             # Check if job needs to be re-started
             need_restart = False
-            if other.state.is_error():
+            if other.scheduler_state.is_error():
                 need_restart = True
             elif (
                 was_transient
                 and not other.transient.is_transient
-                and other.state == JobState.UNSCHEDULED
+                and other.scheduler_state == JobState.UNSCHEDULED
             ):
                 # Job was transient and skipped, but now is non-transient - restart it
                 logger.info("Re-submitting job (was transient, now non-transient)")
@@ -465,7 +482,7 @@ class Scheduler(StateProvider, threading.Thread):
                 if other.pidpath.is_file():
                     other.pidpath.unlink()
                 # Use set_state to handle experiment statistics updates
-                other.set_state(JobState.WAITING)
+                other.set_scheduler_state(JobState.WAITING)
                 self.notify_job_state(other)  # Notify listeners of re-submit
                 # The calling aio_submit will continue with this job and start it
             else:
@@ -479,24 +496,34 @@ class Scheduler(StateProvider, threading.Thread):
         self.jobs[job.identifier] = job
         xp.add_job(job)
 
-        # Update tags map for this experiment/run
-        if job.tags:
-            exp_run_key = (xp.name, xp.run_id)
-            if exp_run_key not in self._tags_map:
-                self._tags_map[exp_run_key] = {}
-            self._tags_map[exp_run_key][job.identifier] = dict(job.tags)
+        # Get tags from config (tags are experiment-specific, not stored on Job)
+        job_tags = dict(job.config.tags()) if job.config.tags() else {}
 
-        # Update dependencies map for this experiment/run
+        # Update per-run info
         exp_run_key = (xp.name, xp.run_id)
-        if exp_run_key not in self._dependencies_map:
-            self._dependencies_map[exp_run_key] = {}
+        run_info = self._run_infos.setdefault(exp_run_key, SchedulerExperimentRunInfo())
+
+        if job_tags:
+            run_info.tags[job.identifier] = job_tags
+
         depends_on_ids = [
             dep.origin.identifier
             for dep in job.dependencies
             if isinstance(dep, JobDependency)
         ]
         if depends_on_ids:
-            self._dependencies_map[exp_run_key][job.identifier] = depends_on_ids
+            run_info.dependencies[job.identifier] = depends_on_ids
+
+        from experimaestro.scheduler.interfaces import ExperimentJobInformation
+        import time as _time
+
+        run_info.job_infos[job.identifier] = ExperimentJobInformation(
+            job_id=job.identifier,
+            task_id=str(job.type.identifier),
+            tags=job_tags,
+            timestamp=_time.time(),
+            transient=job.transient.value,
+        )
 
         # Set up dependencies
         for dependency in job.dependencies:
@@ -617,10 +644,14 @@ class Scheduler(StateProvider, threading.Thread):
             )
 
         elif isinstance(event, JobStateChangedEvent):
-            # Update job state from event (e.g., SCHEDULED→RUNNING from job process)
+            # Update execution state from event (e.g., SCHEDULED→RUNNING from job process)
+            # NOTE: Only update execution state (_state), NOT scheduler_state.
+            # scheduler_state is managed by the scheduler itself (aio_start/finalize).
+            # Calling set_scheduler_state here from the FileWatcher thread would race
+            # with finalize_status and corrupt experiment stats (unfinishedJobs count).
             new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
             if new_state is not None:
-                job.set_state(new_state)
+                job.set_state(new_state, loading=True)
                 self.notify_job_state(job)
             # Update job timestamps from event
             if event.started_time and job.starttime is None:
@@ -700,6 +731,10 @@ class Scheduler(StateProvider, threading.Thread):
             if isinstance(event, JobProgressEvent):
                 job.set_progress(event.level, event.progress, event.desc)
             elif isinstance(event, JobStateChangedEvent):
+                # Apply execution state from event
+                new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
+                if new_state is not None:
+                    job.set_state(new_state, loading=True)
                 if event.started_time and job.starttime is None:
                     job.starttime = deserialize_to_datetime(event.started_time)
                 if event.ended_time and job.endtime is None:
@@ -804,10 +839,11 @@ class Scheduler(StateProvider, threading.Thread):
 
             # Get tags and dependencies for this job
             exp_run_key = (experiment_id, run_id)
-            tags_dict = self._tags_map.get(exp_run_key, {}).get(job.identifier, {})
+            run_info = self._run_infos.get(exp_run_key)
+            tags_dict = run_info.tags.get(job.identifier, {}) if run_info else {}
             tags = [JobTag(key=k, value=v) for k, v in tags_dict.items()]
-            depends_on = self._dependencies_map.get(exp_run_key, {}).get(
-                job.identifier, []
+            depends_on = (
+                run_info.dependencies.get(job.identifier, []) if run_info else []
             )
 
             event = JobSubmittedEvent(
@@ -829,14 +865,21 @@ class Scheduler(StateProvider, threading.Thread):
         # Listener notification (per-experiment)
         self._notify_listeners(lambda lst, j: lst.on_job_state_changed(j), job)
 
-        # Notify StateProvider-style listeners with experiment-independent event
-        from experimaestro.scheduler.state_status import JobStateChangedEvent
+        # Emit ExperimentJobStateEvent for scheduler lifecycle tracking
+        failure_reason = None
+        if job.scheduler_state.failure_reason is not None:
+            failure_reason = job.scheduler_state.failure_reason.name
 
-        event = JobStateChangedEvent(
-            job_id=job.identifier,
-            state=job.state.name.lower(),
-        )
-        self._notify_state_listeners_async(event)
+        for xp in job.experiments:
+            event = ExperimentJobStateEvent(
+                experiment_id=xp.experiment_id,
+                run_id=xp.run_id,
+                job_id=job.identifier,
+                task_id=job.task_id,
+                scheduler_state=job.scheduler_state.name.lower(),
+                failure_reason=failure_reason,
+            )
+            self._notify_state_listeners_async(event)
 
     def notify_service_add(
         self, service: Service, experiment_id: str = "", run_id: str = ""
@@ -911,7 +954,7 @@ class Scheduler(StateProvider, threading.Thread):
                 )
                 pass
 
-        logger.debug("Current job state is %s", job.state)
+        logger.debug("Current job scheduler_state is %s", job.scheduler_state)
 
         # Process job completion: task outputs, final status write, cleanup
         return await self.aio_final_state(job)
@@ -938,13 +981,20 @@ class Scheduler(StateProvider, threading.Thread):
         self._follow_job_events(job)
         logger.debug("Job state after load_from_disk + events: %s", job.state_dict())
 
-        # Check if job is already done
+        # Sync scheduler_state from execution state if disk shows a final result
+        # (e.g., replaying completed experiment, or scheduler restart after job finished).
+        # _load_scheduler_state is a no-op for live Jobs, so scheduler_state may
+        # still be WAITING while execution state is DONE/ERROR from disk.
+        if job.state.finished() and not job.scheduler_state.finished():
+            job.set_scheduler_state(job.state)
+
+        # Check if job is already done (e.g., replaying a completed experiment)
         if job.state == JobState.DONE:
             return
 
-        # Check if job failed with exhausted retries
+        # Check if job failed with exhausted retries (scheduler knows the lifecycle)
         if (
-            job.state.is_error()
+            job.scheduler_state.is_error()
             and job.resumable
             and job.retry_count >= job.max_retries
         ):
@@ -970,7 +1020,7 @@ class Scheduler(StateProvider, threading.Thread):
                 return await self._wait_for_job_process(job, process)
 
         # If not done or running, start the job
-        if not job.state.finished() or job.state.is_error():
+        if not job.state.finished() or job.scheduler_state.is_error():
             # OK, we can reset the job state to run afresh if needed (i.e.
             # error state)
             job._clear_transient_fields()
@@ -978,22 +1028,26 @@ class Scheduler(StateProvider, threading.Thread):
             # Check if this is a transient job that is not needed
             if job.transient.is_transient and not job._needed_transient:
                 logger.debug("Job is transient and not needed, discarding for now")
-                job.set_state(JobState.UNSCHEDULED)
+                job.set_scheduler_state(JobState.UNSCHEDULED)
             else:
                 # Job needs to run, set in WAITING mode
-                job.set_state(JobState.WAITING)
+                job.set_scheduler_state(JobState.WAITING)
 
-            # Start the job if not skipped (state is still WAITING)
+            # Start the job if not skipped (scheduler_state is still WAITING)
             # Loop to handle GracefulTimeout for resumable tasks
-            logger.debug("No process for job %s (state %s), starting", job, job.state)
-            while job.state == JobState.WAITING:
+            logger.debug(
+                "No process for job %s (scheduler_state %s), starting",
+                job,
+                job.scheduler_state,
+            )
+            while job.scheduler_state == JobState.WAITING:
                 try:
                     state = await self.aio_start(job)
                     logger.debug(
                         "aio_start returned %s for job %s", state, job.identifier[:8]
                     )
                     if state is not None:
-                        job.set_state(state)
+                        job.set_scheduler_state(state)
                         logger.debug(
                             "Job %s state after set_state: %s",
                             job.identifier[:8],
@@ -1026,19 +1080,19 @@ class Scheduler(StateProvider, threading.Thread):
         logger.debug("Processing final state for job %s", job.identifier[:8])
 
         # Skip processing for UNSCHEDULED jobs (transient jobs that weren't needed)
-        if job.state == JobState.UNSCHEDULED:
+        if job.scheduler_state == JobState.UNSCHEDULED:
             logger.debug(
                 "Skipping final state for unscheduled job %s", job.identifier[:8]
             )
 
         else:
             # Finalize status: load from disk (carbon info), write if different
-            # Preserve current state since it was already set by aio_submit_inner
+            # Preserve current scheduler_state since it was already set by aio_submit_inner
             # (load_from_disk would otherwise overwrite it with stale disk state)
-            current_state = job.state
+            current_scheduler_state = job.scheduler_state
 
             def preserve_state_callback(j: Job):
-                j.set_state(current_state)
+                j.set_scheduler_state(current_scheduler_state)
 
             await job.finalize_status(callback=preserve_state_callback)
 
@@ -1056,7 +1110,7 @@ class Scheduler(StateProvider, threading.Thread):
             self.exitCondition.notify_all()
 
         # Wait for done handler to complete and notify exit condition
-        return job.state
+        return job.scheduler_state
 
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.
@@ -1101,7 +1155,7 @@ class Scheduler(StateProvider, threading.Thread):
                 logger.error("No .done or .failed file found for job %s", job)
                 state = JobState.ERROR
 
-        job.set_state(state)
+        job.set_scheduler_state(state)
         self.notify_job_state(job)  # Notify listeners of final state
 
     async def aio_start(self, job: Job) -> Optional[JobState]:  # noqa: C901
@@ -1326,7 +1380,7 @@ class Scheduler(StateProvider, threading.Thread):
             # The job process will update this to RUNNING when it starts. We set
             # it to SCHEDULED here to reflect that the job has been launched and
             # is awaiting execution.
-            job.set_state(JobState.SCHEDULED)
+            job.set_scheduler_state(JobState.SCHEDULED)
 
             # Pre-register the job entity with the event reader so that
             # file watcher events are properly routed when the job process
@@ -1407,7 +1461,7 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Finalize status: load from disk (carbon info), set state, increment retry_count
         def finalize_callback(j: Job):
-            j.set_state(state)
+            j.set_scheduler_state(state)
             # Increment retry_count for any failure of a resumable task
             if isinstance(state, JobStateError) and j.resumable:
                 j.retry_count += 1
@@ -1497,9 +1551,9 @@ class Scheduler(StateProvider, threading.Thread):
         if task_id:
             jobs = [j for j in jobs if j.task_id == task_id]
 
-        # Filter by state
+        # Filter by state (uses scheduler_state for live scheduler)
         if state:
-            jobs = [j for j in jobs if j.state.name.lower() == state.lower()]
+            jobs = [j for j in jobs if j.scheduler_state.name.lower() == state.lower()]
 
         # Filter by tags (all tags must match)
         if tags:
@@ -1525,7 +1579,7 @@ class Scheduler(StateProvider, threading.Thread):
         jobs: List[BaseJob] = list(self.jobs.values())
 
         if state:
-            jobs = [j for j in jobs if j.state.name.lower() == state.lower()]
+            jobs = [j for j in jobs if j.scheduler_state.name.lower() == state.lower()]
 
         if tags:
             jobs = [j for j in jobs if all(j.tags.get(k) == v for k, v in tags.items())]
@@ -1569,45 +1623,40 @@ class Scheduler(StateProvider, threading.Thread):
         )
         return services
 
+    def _get_run_info(
+        self, experiment_id: str, run_id: Optional[str] = None
+    ) -> SchedulerExperimentRunInfo | None:
+        """Get the run info for an experiment/run, or None if not found."""
+        exp = self.experiments.get(experiment_id)
+        if not exp:
+            return None
+        if run_id is None:
+            run_id = exp.run_id
+        return self._run_infos.get((experiment_id, run_id))
+
     def get_tags_map(
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
     ) -> dict[str, dict[str, str]]:
-        """Get tags map for jobs in an experiment/run
-
-        Returns a map from job_id to {tag_key: tag_value}.
-        """
-        exp = self.experiments.get(experiment_id)
-        if not exp:
-            return {}
-
-        # Use current run if not specified
-        if run_id is None:
-            run_id = exp.run_id
-
-        exp_run_key = (experiment_id, run_id)
-        return self._tags_map.get(exp_run_key, {})
+        info = self._get_run_info(experiment_id, run_id)
+        return info.tags if info else {}
 
     def get_dependencies_map(
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
     ) -> dict[str, list[str]]:
-        """Get dependencies map for jobs in an experiment/run
+        info = self._get_run_info(experiment_id, run_id)
+        return info.dependencies if info else {}
 
-        Returns a map from job_id to list of job_ids it depends on.
-        """
-        exp = self.experiments.get(experiment_id)
-        if not exp:
-            return {}
-
-        # Use current run if not specified
-        if run_id is None:
-            run_id = exp.run_id
-
-        exp_run_key = (experiment_id, run_id)
-        return self._dependencies_map.get(exp_run_key, {})
+    def get_experiment_job_info(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> dict[str, "ExperimentJobInformation"]:
+        info = self._get_run_info(experiment_id, run_id)
+        return info.job_infos if info else {}
 
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
         """Kill a running or scheduled job.
@@ -1621,9 +1670,9 @@ class Scheduler(StateProvider, threading.Thread):
         """
         if not perform:
             # Just check if the job can be killed
-            return job.state.running()
+            return job.scheduler_state.running()
 
-        if not job.state.running():
+        if not job.scheduler_state.running():
             raise RuntimeError("Job is not running or scheduled")
 
         # Get the actual Job from our jobs dict
@@ -1680,8 +1729,8 @@ class Scheduler(StateProvider, threading.Thread):
             if pid is None:
                 return None
 
-            # Check if running based on job state
-            running = actual_job.state == JobState.RUNNING
+            # Check if running based on scheduler state
+            running = actual_job.scheduler_state == JobState.RUNNING
 
             return ProcessInfo(pid=pid, type=proc_type, running=running)
         except Exception:

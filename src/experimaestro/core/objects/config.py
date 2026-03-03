@@ -792,7 +792,7 @@ class ConfigInformation:
                 experiment.CURRENT.prepare(self.job)
 
             # Check if job is done
-            tags = ", ".join(f"{k}={v}" for k, v in self.job.tags.items())
+            tags = ", ".join(f"{k}={v}" for k, v in self.job.config.tags().items())
             s = f"""Simulating {self.job.relpath} {f"({tags})" if tags else ""}"""
 
             color = "white"

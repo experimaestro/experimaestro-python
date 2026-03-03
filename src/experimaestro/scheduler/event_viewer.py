@@ -11,6 +11,7 @@ from typing import TextIO
 
 from experimaestro.scheduler.state_status import (
     EventBase,
+    ExperimentJobStateEvent,
     JobSubmittedEvent,
     JobStateChangedEvent,
     JobProgressEvent,
@@ -96,6 +97,12 @@ class EventStreamViewer:
                 if event.retry_count > 0:
                     extra += f" retry={event.retry_count}"
                 return f"job={event.job_id[:12]}... state={event.state}{extra}"
+
+            case ExperimentJobStateEvent():
+                extra = ""
+                if event.failure_reason:
+                    extra = f" reason={event.failure_reason}"
+                return f"job={event.job_id[:12]}... scheduler_state={event.scheduler_state}{extra}"
 
             case JobProgressEvent():
                 desc = f" ({event.desc})" if event.desc else ""

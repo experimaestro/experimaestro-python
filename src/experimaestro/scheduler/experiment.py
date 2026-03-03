@@ -561,7 +561,7 @@ class experiment(BaseExperiment):
         """Register a job and its tags to jobs.jsonl file and database
 
         Note: For NEW jobs, the unfinishedJobs counter is updated by
-        job.set_state() when the state transitions from UNSCHEDULED.
+        job.set_scheduler_state() when the state transitions from UNSCHEDULED.
         For jobs already running, we increment here since no state
         transition will occur.
         """
@@ -585,10 +585,13 @@ class experiment(BaseExperiment):
                 self.unfinishedJobs,
             )
 
+        # Get tags from config (tags are experiment-specific, not stored on Job)
+        job_tags = dict(job.config.tags().items()) if job.config.tags() else {}
+
         job_info = ExperimentJobInformation(
             job_id=job.identifier,
             task_id=str(job.type.identifier),
-            tags=dict(job.tags.items()) if job.tags else {},
+            tags=job_tags,
             timestamp=time.time(),
         )
 
@@ -606,13 +609,15 @@ class experiment(BaseExperiment):
                     if hasattr(dep, "identifier"):
                         depends_on.append(dep.identifier)
 
-            job_tags = dict(job.tags.items()) if job.tags else {}
+            from experimaestro.scheduler.interfaces import serialize_timestamp
+
             event = JobSubmittedEvent(
                 job_id=job.identifier,
                 task_id=str(job.type.identifier),
                 transient=job.transient.value if hasattr(job, "transient") else 0,
                 tags=job_tags,
                 depends_on=depends_on,
+                submitted_time=serialize_timestamp(time.time()),
             )
             self._event_writer.write_event(event)
 

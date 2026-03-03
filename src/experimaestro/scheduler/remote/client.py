@@ -35,6 +35,7 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     BaseService,
+    ExperimentJobInformation,
 )
 from experimaestro.scheduler.remote.protocol import (
     RPCMethod,
@@ -984,6 +985,22 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_DEPENDENCIES_MAP, params)
         return result or {}
 
+    def get_experiment_job_info(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, "ExperimentJobInformation"]:
+        """Get experiment-level job info for jobs in an experiment/run
+
+        Falls back to parent class cached experiments which contain job_infos.
+        """
+        # Try to get from cached experiment data
+        experiments = self.get_experiments()
+        for exp in experiments:
+            if exp.experiment_id == experiment_id:
+                return exp.job_infos
+        return {}
+
     def _fetch_services_from_storage(
         self, experiment_id: Optional[str], run_id: Optional[str]
     ) -> List[BaseService]:
@@ -1201,8 +1218,6 @@ class SSHStateProviderClient(OfflineStateProvider):
             job._state = STATE_NAME_TO_JOBSTATE.get(state_str, job._state)
 
         # Update timestamps (these don't conflict with events)
-        if d.get("submittime"):
-            job.submittime = deserialize_to_datetime(d["submittime"])
         if d.get("starttime"):
             job.starttime = deserialize_to_datetime(d["starttime"])
         if d.get("endtime"):

@@ -20,7 +20,9 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseService,
     ExperimentJobInformation,
+    JobFailureStatus,
     JobState,
+    JobStateError,
     STATE_NAME_TO_JOBSTATE,
 )
 from experimaestro.scheduler.state_provider import (
@@ -724,7 +726,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     # This handles both JobSubmittedEvent and other events
                     # (e.g., JobStateChangedEvent arriving without prior JobSubmittedEvent)
                     job_path = self.workspace_path / "jobs" / task_id / job_id
-                    submit_time = None
 
                     if isinstance(event, JobSubmittedEvent):
                         # Use task_id from event if available (more reliable)
@@ -732,8 +733,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
                             task_id = event.task_id
                             full_id = BaseJob.make_full_id(task_id, job_id)
                             job_path = self.workspace_path / "jobs" / task_id / job_id
-                        if event.timestamp:
-                            submit_time = datetime.fromtimestamp(event.timestamp)
 
                     # Load from disk if exists, otherwise create minimal job
                     if job_path.exists():
@@ -744,7 +743,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
                             task_id=task_id,
                             path=job_path,
                             state="unscheduled",
-                            submittime=submit_time,
                             starttime=None,
                             endtime=None,
                             progress=[],
@@ -929,8 +927,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Called by EventReader when experiment events are received.
         For JobStateChangedEvent with from_experiment=True, also applies to
         cached job to set _experiment_status.
+        For ExperimentJobStateEvent, updates _experiment_status on the cached job.
         """
-        from experimaestro.scheduler.state_status import JobStateChangedEvent
+        from experimaestro.scheduler.state_status import (
+            JobStateChangedEvent,
+            ExperimentJobStateEvent,
+        )
 
         run_id = self.get_current_run(experiment_id)
         if run_id is None:
@@ -942,10 +944,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
             if cache_key in self._experiment_cache:
                 self._experiment_cache[cache_key].apply_event(event)
 
-        # Also apply JobStateChangedEvent to job cache to update _experiment_status
+        # Apply JobStateChangedEvent from experiment events to job cache
         if isinstance(event, JobStateChangedEvent) and event.from_experiment:
             job_id = event.job_id
-            # Find the job's task_id from the experiment's job_infos
             with self._experiment_cache_lock:
                 exp = self._experiment_cache.get(cache_key)
                 if exp is not None:
@@ -956,6 +957,26 @@ class WorkspaceStateProvider(OfflineStateProvider):
                             job = self._job_cache.get(full_id)
                             if job is not None:
                                 job.apply_event(event)
+
+        # Apply ExperimentJobStateEvent to update _experiment_status on cached job
+        elif isinstance(event, ExperimentJobStateEvent):
+            job_id = event.job_id
+            task_id = event.task_id
+            if task_id and job_id:
+                full_id = BaseJob.make_full_id(task_id, job_id)
+                new_state = STATE_NAME_TO_JOBSTATE.get(event.scheduler_state)
+                if new_state is not None:
+                    if event.failure_reason:
+                        try:
+                            new_state = JobStateError(
+                                JobFailureStatus[event.failure_reason]
+                            )
+                        except (KeyError, ValueError):
+                            pass
+                    with self._job_cache_lock:
+                        job = self._job_cache.get(full_id)
+                        if job is not None:
+                            job._experiment_status = new_state
 
     def _load_carbon_metrics_for_job(self, job_id: str) -> CarbonMetricsData | None:
         """Load carbon metrics from carbon storage for a job.
@@ -986,9 +1007,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             logger.debug("Failed to load carbon metrics for job %s: %s", job_id, e)
         return None
 
-    def _get_or_load_job(
-        self, job_id: str, task_id: str, submit_time: float | datetime | None
-    ) -> MockJob:
+    def _get_or_load_job(self, job_id: str, task_id: str) -> MockJob:
         """Get job from cache or load from disk and cache it.
 
         This ensures that job events (progress, state changes) can be applied
@@ -997,15 +1016,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
         Args:
             job_id: Job identifier
             task_id: Task identifier (for job path)
-            submit_time: Submit timestamp (fallback if job directory doesn't exist)
 
         Returns:
             MockJob from cache or freshly loaded from disk
         """
         full_id = BaseJob.make_full_id(task_id, job_id)
-        return super()._get_or_load_job(
-            full_id, job_id=job_id, task_id=task_id, submit_time=submit_time
-        )
+        return super()._get_or_load_job(full_id, job_id=job_id, task_id=task_id)
 
     def _create_job(
         self,
@@ -1013,7 +1029,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
         *,
         job_id: str,
         task_id: str,
-        submit_time: float | datetime | None,
     ) -> MockJob:
         """Create a job by loading from disk or creating minimal instance.
 
@@ -1028,19 +1043,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return job
 
         # Job directory doesn't exist - create minimal MockJob
-        submittime_dt = None
-        if submit_time is not None:
-            if isinstance(submit_time, datetime):
-                submittime_dt = submit_time
-            else:
-                submittime_dt = datetime.fromtimestamp(submit_time)
-
         return MockJob(
             identifier=job_id,
             task_id=task_id,
             path=job_path,
             state="unscheduled",
-            submittime=submittime_dt,
             starttime=None,
             endtime=None,
             progress=[],
@@ -1465,7 +1472,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     continue
 
             # Get job from cache or load from disk
-            job = self._get_or_load_job(job_id, job_info.task_id, job_info.timestamp)
+            job = self._get_or_load_job(job_id, job_info.task_id)
 
             # Set experiment status from tracked job states
             exp_state = exp.get_job_state(job_id)
@@ -1488,7 +1495,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if not job_path.exists():
             return None
 
-        return self._get_or_load_job(job_id, task_id, submit_time=None)
+        return self._get_or_load_job(job_id, task_id)
 
     def get_all_jobs(
         self,
@@ -1552,6 +1559,24 @@ class WorkspaceStateProvider(OfflineStateProvider):
         exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
 
         return exp.dependencies
+
+    def get_experiment_job_info(
+        self, experiment_id: str, run_id: Optional[str] = None
+    ) -> Dict[str, ExperimentJobInformation]:
+        """Get experiment-level job info for jobs in an experiment/run"""
+        if run_id is None:
+            run_id = self.get_current_run(experiment_id)
+            if run_id is None:
+                return {}
+
+        run_dir = self.workspace_path / "experiments" / experiment_id / run_id
+        if not run_dir.exists():
+            return {}
+
+        # Get experiment from cache or load from disk
+        exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
+
+        return exp.job_infos
 
     # =========================================================================
     # Services

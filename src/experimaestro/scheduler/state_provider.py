@@ -37,7 +37,6 @@ from experimaestro.scheduler.interfaces import (
     STATE_NAME_TO_JOBSTATE,
     deserialize_to_datetime,
 )
-from experimaestro.scheduler.transient import TransientMode
 from experimaestro.notifications import (
     ProgressInformation,
     get_progress_information_from_dict,
@@ -387,6 +386,19 @@ class StateProvider(ABC):
 
         Returns:
             Dictionary mapping job identifiers to list of job IDs they depend on
+        """
+        ...
+
+    @abstractmethod
+    def get_experiment_job_info(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, ExperimentJobInformation]:
+        """Get experiment-level job info (submittime, transient) for jobs
+
+        Returns:
+            Dictionary mapping job_id to ExperimentJobInformation
         """
         ...
 
@@ -745,7 +757,6 @@ class OfflineStateProvider(StateProvider):
                             task_id=event.task_id,
                             path=None,
                             state="scheduled",
-                            submittime=None,
                             starttime=None,
                             endtime=None,
                             progress=[],
@@ -897,7 +908,6 @@ class MockJob(BaseJob):
         task_id: str,
         path: Path,
         state: str,  # State name string from DB
-        submittime: Optional[datetime],
         starttime: Optional[datetime],
         endtime: Optional[datetime],
         progress: ProgressInformation,
@@ -905,7 +915,6 @@ class MockJob(BaseJob):
         exit_code: Optional[int] = None,
         retry_count: int = 0,
         failure_reason: Optional[JobFailureStatus] = None,
-        transient: TransientMode = TransientMode.NONE,
         process: dict | None = None,
         carbon_metrics: CarbonMetricsData | None = None,
         run_group_id: str | None = None,
@@ -931,14 +940,12 @@ class MockJob(BaseJob):
             # State was explicitly provided (from disk), mark as having state
             self._state = initial_state
             self._has_event_state = True
-        self.submittime = submittime
         self.starttime = starttime
         self.endtime = endtime
         self.progress = progress
         self.updated_at = updated_at
         self.exit_code = exit_code
         self.retry_count = retry_count
-        self.transient = transient
         self._process_dict = process
         self._process = None  # Cached Process handle (avoids repeated fromDefinition)
         self.carbon_metrics = carbon_metrics
@@ -965,6 +972,17 @@ class MockJob(BaseJob):
         """Set state and mark as having event state."""
         self._has_event_state = True
         self.set_state(new_state)
+
+    @property
+    def scheduler_state(self) -> JobState:
+        """Scheduler lifecycle state for offline jobs.
+
+        Returns _experiment_status (from experiment events) if available,
+        otherwise falls back to execution state.
+        """
+        if self._experiment_status is not None:
+            return self._experiment_status
+        return self.state
 
     def set_state(
         self,
@@ -1142,12 +1160,11 @@ class MockJob(BaseJob):
         if prev_carbon_dict:
             previous_carbon_metrics = CarbonMetricsData(**prev_carbon_dict)
 
-        return cls(
+        job = cls(
             identifier=identifier,
             task_id=task_id,
             path=path,
             state=d["state"],
-            submittime=deserialize_to_datetime(d.get("submitted_time")),
             starttime=deserialize_to_datetime(d.get("started_time")),
             endtime=deserialize_to_datetime(d.get("ended_time")),
             progress=progress_list,
@@ -1160,6 +1177,8 @@ class MockJob(BaseJob):
             run_group_id=d.get("run_group_id"),
             previous_carbon_metrics=previous_carbon_metrics,
         )
+        job.resumable = d.get("resumable", False)
+        return job
 
     @classmethod
     def from_disk(
@@ -1188,7 +1207,6 @@ class MockJob(BaseJob):
             task_id=task_id,
             path=job_path,
             state="unscheduled",
-            submittime=None,
             starttime=None,
             endtime=None,
             progress=[],

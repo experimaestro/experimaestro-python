@@ -25,11 +25,8 @@ from experimaestro.locking import create_file_lock
 
 if TYPE_CHECKING:
     from experimaestro.connectors import Process
-    from experimaestro.notifications import ProgressInformation
-    from experimaestro.scheduler.transient import TransientMode
     from experimaestro.scheduler.state_provider import CarbonMetricsData
     from experimaestro.scheduler.state_status import EventBase, JobStateChangedEvent
-    from experimaestro.scheduler.experiment import experiment
     from experimaestro.carbon.base import CarbonImpactData
 
 logger = logging.getLogger("xpm.interfaces")
@@ -48,15 +45,19 @@ class ExperimentJobInformation:
     task_id: str
     tags: Dict[str, str] = field(default_factory=dict)
     timestamp: Optional[float] = None
+    transient: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary for JSON"""
-        return {
+        result = {
             "job_id": self.job_id,
             "task_id": self.task_id,
             "tags": self.tags,
             "timestamp": self.timestamp,
         }
+        if self.transient:
+            result["transient"] = self.transient
+        return result
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ExperimentJobInformation":
@@ -66,6 +67,7 @@ class ExperimentJobInformation:
             task_id=d["task_id"],
             tags=d.get("tags", {}),
             timestamp=d.get("timestamp"),
+            transient=d.get("transient", 0),
         )
 
 
@@ -411,31 +413,27 @@ class BaseJob:
         task_id: Task class identifier (string)
         path: Path to job directory
         state: Current job state (JobState object or compatible)
-        submittime: When job was submitted (datetime or None)
         starttime: When job started running (datetime or None)
         endtime: When job finished (datetime or None)
         progress: List of progress updates
         exit_code: Process exit code (optional)
         retry_count: Number of retries
-        transient: Transient mode (NONE, TRANSIENT, or REMOVE)
     """
 
     identifier: str
     task_id: str
     path: Path
     _state: JobState
-    submittime: Optional[datetime]
     starttime: Optional[datetime]
     endtime: Optional[datetime]
-    progress: "ProgressInformation"
     exit_code: Optional[int]
     retry_count: int
-    transient: "TransientMode"
+    resumable: bool
     carbon_metrics: Optional["CarbonMetricsData"]
     run_group_id: Optional[str]
     _previous_carbon_metrics: Optional["CarbonMetricsData"]
+    _progress: list
     events_count: Optional[int]  # None = all events processed
-    experiments: List["experiment"]  # Experiments this job belongs to
 
     #: The process
     _process: Optional["Process"]
@@ -446,25 +444,46 @@ class BaseJob:
     def __init__(self):
         super().__init__()
         self._state = JobState.UNSCHEDULED
-        self.submittime: datetime | None = None
         self.starttime: datetime | None = None
         self.endtime: datetime | None = None
+        self.exit_code: int | None = None
+        self.retry_count: int = 0
+        self.resumable: bool = False
+        self.carbon_metrics: "CarbonMetricsData | None" = None
+        self._progress: list = []
         self._process = None
         self._process_dict = None
         self.events_count: int | None = None
         self.run_group_id: str | None = None
         self._previous_carbon_metrics: "CarbonMetricsData | None" = None
-        self.experiments: List = []
+
+    @property
+    def progress(self):
+        return self._progress
+
+    @progress.setter
+    def progress(self, value):
+        self._progress = value
 
     @property
     def state(self) -> JobState:
-        """Access to job state"""
+        """Access to execution state (ground truth from events/disk)"""
         return self._state
 
     @state.setter
     def state(self, new_state: JobState):
         """Set state via set_state() to ensure proper handling"""
         self.set_state(new_state)
+
+    @property
+    def scheduler_state(self) -> JobState:
+        """Scheduler lifecycle state.
+
+        For offline jobs (BaseJob, MockJob), this defaults to the execution state.
+        For live jobs (Job), this is an independent state tracking scheduler lifecycle
+        (UNSCHEDULED → WAITING → READY → SCHEDULED → RUNNING → DONE → ERROR).
+        """
+        return self.state
 
     def set_state(
         self,
@@ -479,7 +498,7 @@ class BaseJob:
             loading: If True, timestamps are not modified (loading from disk)
 
         Timestamp rules (when loading=False):
-        - WAITING: sets submittime, clears starttime and endtime
+        - WAITING: clears starttime and endtime
         - RUNNING: sets starttime
         - DONE/ERROR: sets endtime
         """
@@ -492,7 +511,6 @@ class BaseJob:
 
             # Transitioning to WAITING clears later timestamps (for restarts)
             if new_state == JobState.WAITING:
-                self.submittime = ts
                 self.starttime = None
                 self.endtime = None
 
@@ -641,17 +659,25 @@ class BaseJob:
         if self.state and self.state.failure_reason is not None:
             failure_reason = self.state.failure_reason.name
 
+        scheduler_failure_reason = None
+        if self.scheduler_state and self.scheduler_state.failure_reason is not None:
+            scheduler_failure_reason = self.scheduler_state.failure_reason.name
+
         result = {
             "job_id": self.identifier,
             "task_id": self.task_id,
             "path": str(self.path) if self.path else None,
             "state": self.state.name if self.state else None,
             "failure_reason": failure_reason,
-            "submitted_time": serialize_timestamp(self.submittime),
+            "scheduler_state": self.scheduler_state.name
+            if self.scheduler_state
+            else None,
+            "scheduler_failure_reason": scheduler_failure_reason,
             "started_time": serialize_timestamp(self.starttime),
             "ended_time": serialize_timestamp(self.endtime),
             "exit_code": self.exit_code,
             "retry_count": self.retry_count,
+            "resumable": self.resumable,
             "progress": [
                 p.to_dict() if hasattr(p, "to_dict") else p
                 for p in (self.progress or [])
@@ -719,7 +745,6 @@ class BaseJob:
             job_id=state_data["job_id"],
             state=state_data["state"],
             failure_reason=state_data.get("failure_reason"),
-            submitted_time=state_data.get("submitted_time"),
             started_time=state_data.get("started_time"),
             ended_time=state_data.get("ended_time"),
             exit_code=state_data.get("exit_code"),
@@ -783,8 +808,6 @@ class BaseJob:
                         pass
                 self.set_state(new_state, loading=True)
             # Convert ISO string timestamps to datetime
-            if event.submitted_time is not None:
-                self.submittime = deserialize_to_datetime(event.submitted_time)
             if event.started_time is not None:
                 self.starttime = deserialize_to_datetime(event.started_time)
             if event.ended_time is not None:
@@ -1021,8 +1044,9 @@ class BaseJob:
             # After consolidating status.json, write job state event to all experiments
             # This ensures experiment events are immediately available when processing
             # (solves: "job is over but experiment events not yet available")
-            if self.experiments:
-                for xp in self.experiments:
+            experiments = getattr(self, "experiments", [])
+            if experiments:
+                for xp in experiments:
                     if xp._event_writer is not None:
                         try:
                             xp._event_writer.write_event(event)
@@ -1110,11 +1134,6 @@ class BaseJob:
         appropriate timestamp parameter based on the target state.
         """
         # Load timestamps
-        self.submittime = (
-            deserialize_to_datetime(status_dict["submitted_time"])
-            if status_dict.get("submitted_time")
-            else None
-        )
         self.starttime = (
             deserialize_to_datetime(status_dict["started_time"])
             if status_dict.get("started_time")
@@ -1200,12 +1219,18 @@ class BaseJob:
         # Load run_group_id
         self.run_group_id = status_dict.get("run_group_id")
 
+        # Load resumable flag
+        self.resumable = status_dict.get("resumable", False)
+
+        # Note: scheduler_state is NOT loaded from status.json here.
+        # For live Jobs, the scheduler manages _scheduler_state directly.
+        # For MockJobs (monitoring), _experiment_status is set from experiment events.
+        # Loading stale scheduler_state from disk would corrupt experiment stats.
+
     def _load_fallback_timestamps(self) -> None:
         """Load timestamps from directory mtime as fallback"""
         try:
             mtime = datetime.fromtimestamp(self.path.stat().st_mtime)
-            if self.submittime is None:
-                self.submittime = mtime
             if self.starttime is None:
                 self.starttime = mtime
             if (
@@ -1255,7 +1280,6 @@ class BaseJob:
         self.carbon_metrics = None
         self.endtime = None
         self.starttime = None
-        self.submittime = None
 
     def _set_progress(self, progress_list: List) -> None:
         """Set progress from a list. Override in subclasses if needed."""
