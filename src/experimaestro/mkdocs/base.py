@@ -287,7 +287,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
         return config
 
     def on_post_build(self, config):
-        # Custom format export (FIXME: replace by sphinx)
+        # Custom format export (consider replacing with sphinx)
         mapping_path = Path(config["site_dir"]) / "experimaestro-mapping.json"
         logging.info("Writing mapping file %s", mapping_path)
         with mapping_path.open("wt") as fp:
@@ -464,8 +464,9 @@ class Documentation(mkdocs.plugins.BasePlugin):
                 member
                 for key, member in inspect.getmembers(
                     xpminfo.objecttype,
-                    predicate=lambda member: inspect.isfunction(member)
-                    and shoulddocument(member),
+                    predicate=lambda member: (
+                        inspect.isfunction(member) and shoulddocument(member)
+                    ),
                 )
             ]
 
