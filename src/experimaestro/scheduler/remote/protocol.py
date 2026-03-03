@@ -22,7 +22,7 @@ JSONRPC_VERSION = "2.0"
 # Remote monitoring protocol version
 # Increment this when making incompatible changes to the RPC protocol
 # Format: MAJOR.MINOR (e.g., "1.0", "1.1", "2.0")
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "2.0"
 
 # Standard JSON-RPC error codes
 PARSE_ERROR = -32700
