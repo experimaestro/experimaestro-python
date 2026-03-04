@@ -52,7 +52,11 @@ class ConfigurationBase:
     """Python path relative to the parent directory of the YAML file"""
 
     parent: Optional[str] = None
-    """Relative path of a YAML file that should be merged"""
+    """(Deprecated) Relative path of a YAML file that should be merged.
+    Use ``imports`` instead."""
+
+    imports: Optional[List[str]] = None
+    """List of YAML file paths to import (merged in order, current file wins)"""
 
     pre_experiment: Optional[str] = None
     """Python file path or module name to execute before importing the experiment.

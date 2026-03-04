@@ -94,8 +94,28 @@ class ConfigurationLoader:
             # Keeps track of the YAML file where the module was defined
             self.yaml_module_file = yaml_file
 
-        if parent := _data.get("parent", None):
-            self.load(yaml_file.parent / parent)
+        parent = _data.get("parent", None)
+        imports = _data.get("imports", None)
+
+        if parent and imports:
+            raise click.ClickException(
+                f"{yaml_file}: 'parent' and 'imports' cannot both be specified. "
+                "Use 'imports' only."
+            )
+
+        if parent:
+            import warnings
+
+            warnings.warn(
+                f"{yaml_file}: 'parent' is deprecated, use 'imports' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            imports = [parent]
+
+        if imports:
+            for imp in imports:
+                self.load(yaml_file.parent / imp)
 
         self.yamls.append(_data)
 

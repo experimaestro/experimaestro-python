@@ -86,7 +86,8 @@ The YAML configuration file supports the following options from {py:class}`~expe
 | `file` | string | `"experiment"` | Relative path to the Python file containing the `run` function |
 | `module` | string | `None` | Python module containing the `run` function (mutually exclusive with `file`) |
 | `pythonpath` | list | `None` | List of paths to add to Python path (relative to YAML file directory) |
-| `parent` | string | `None` | Relative path to a parent YAML file to inherit from |
+| `imports` | list | `None` | List of YAML file paths to import and merge (current file takes priority) |
+| `parent` | string | `None` | *(Deprecated, use `imports`)* Relative path to a parent YAML file to inherit from |
 | `pre_experiment` | string | `None` | Python file path or module name to execute before importing the experiment |
 | `title` | string | `""` | Short description of the experiment |
 | `subtitle` | string | `""` | Additional details about the experiment |
@@ -97,7 +98,7 @@ The YAML configuration file supports the following options from {py:class}`~expe
 
 #### Configuration inheritance
 
-YAML files can inherit from parent configurations using the `parent` option:
+YAML files can import other configuration files using the `imports` option. Imported files are merged in order, with the current file taking priority:
 
 ```yaml
 # base.yaml
@@ -107,10 +108,25 @@ batch_size: 32
 ```
 
 ```yaml
+# optimizer.yaml
+optimizer: adam
+weight_decay: 0.01
+```
+
+```yaml
 # experiment.yaml
-parent: base.yaml
+imports:
+  - base.yaml
+  - optimizer.yaml
 id: my-experiment
-learning_rate: 1e-4  # Override parent value
+learning_rate: 1e-4  # Override value from base.yaml
+```
+
+The old `parent` option (single file) is deprecated but still supported:
+
+```yaml
+# Deprecated - use imports instead
+parent: base.yaml
 ```
 
 #### Multiple YAML files
@@ -279,7 +295,7 @@ experimaestro experiments --workdir /path/to/workdir list
 # Output: my-experiment [hostname.local] (5/10 jobs)
 
 # TUI - hostname shown in "Host" column
-experimaestro experiments --workdir /path/to/workdir monitor --console 
+experimaestro experiments --workdir /path/to/workdir monitor --console
 ```
 
 with workdir one of the directories defined in the [Settings](settings.md)
