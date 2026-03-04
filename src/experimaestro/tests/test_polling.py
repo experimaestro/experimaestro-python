@@ -107,10 +107,10 @@ class TestPolledFile:
         assert polled.update_size() is False
 
     def test_update_size_nonexistent_file(self, tmp_path):
-        """Test that update_size handles missing files"""
+        """Test that update_size returns None for missing files"""
         polled = PolledFile(path=tmp_path / "nonexistent.txt")
 
-        assert polled.update_size() is False
+        assert polled.update_size() is None
 
 
 class TestDirectoryWatch:
