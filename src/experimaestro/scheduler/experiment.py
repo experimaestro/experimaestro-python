@@ -1012,11 +1012,18 @@ class experiment(BaseExperiment):
                 # Graceful exit - don't wait for jobs, don't log error
                 logger.info("Graceful experiment exit - not waiting for running jobs")
             elif exc_type:
-                # import faulthandler
-                # faulthandler.dump_traceback()
-                logger.exception(
-                    "Not waiting since an exception was thrown (some jobs may be running)"
-                )
+                if issubclass(exc_type, HandledException):
+                    # HandledException is already handled by the caller with
+                    # a user-friendly message — don't log the full traceback
+                    logger.info(
+                        "Not waiting since an exception was thrown"
+                        " (some jobs may be running)"
+                    )
+                else:
+                    logger.exception(
+                        "Not waiting since an exception was thrown"
+                        " (some jobs may be running)"
+                    )
             else:
                 self.wait()
 

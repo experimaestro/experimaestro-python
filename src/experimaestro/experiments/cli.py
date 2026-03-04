@@ -534,7 +534,27 @@ def experiments_cli(  # noqa: C901
                 # For failed experiments, just print the message (already logged details)
                 cprint(str(e), "red", file=sys.stderr)
             else:
-                cprint(f"Experiment failed: {e}", "red", file=sys.stderr)
+                # Show a concise error with the location from the original cause
+                import traceback
+
+                cause = e.__cause__ or e.__context__
+                if cause is not None:
+                    # Format the last frame of the original cause's traceback
+                    tb = traceback.extract_tb(cause.__traceback__)
+                    if tb:
+                        last = tb[-1]
+                        cprint(
+                            f"{last.filename}:{last.lineno} in {last.name}",
+                            "yellow",
+                            file=sys.stderr,
+                        )
+                    cprint(
+                        f"Experiment failed: {type(cause).__name__}: {cause}",
+                        "red",
+                        file=sys.stderr,
+                    )
+                else:
+                    cprint(f"Experiment failed: {e}", "red", file=sys.stderr)
             sys.exit(1)
 
     # Console mode is only available in NORMAL run mode
