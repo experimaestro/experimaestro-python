@@ -11,8 +11,9 @@ from textual.reactive import reactive
 from textual.binding import Binding
 from rich.text import Text
 
+from experimaestro.scheduler.interfaces import JobState
 from experimaestro.scheduler.state_provider import StateProvider
-from experimaestro.tui.utils import format_duration, get_status_icon
+from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import (
     JobSelected,
     JobHighlighted,
@@ -345,9 +346,9 @@ class JobDetailView(Widget):
 
         # Format status with icon and name
         status_name = job.state.name if job.state else "unknown"
-        failure_reason = job.state.failure_reason if job.state else None
-        status_icon = get_status_icon(status_name, failure_reason)
+        status_icon = job.state.icon if job.state else "❓"
         status_text = f"{status_icon} {status_name}"
+        failure_reason = job.state.failure_reason if job.state else None
         if failure_reason:
             status_text += f" ({failure_reason.name})"
 
@@ -981,13 +982,12 @@ class JobsTable(Vertical):
             self.task_id_map[job_id] = task_id or ""
 
             # Resolve display state from experiment and execution states
-            resolved_state, has_conflict = StateProvider.get_resolved_state(
+            resolved_state, conflict_state = StateProvider.get_resolved_state(
                 job, self._current_experiment_obj
             )
-            status = resolved_state.name if resolved_state else "unknown"
 
             # Format status with icon (and progress % if running)
-            if resolved_state and resolved_state.running():
+            if resolved_state and resolved_state == JobState.RUNNING:
                 progress_list = job.progress or []
                 if progress_list:
                     # We only report main progress here (level 0)
@@ -997,18 +997,11 @@ class JobsTable(Vertical):
                 else:
                     status_text = "▶"
             else:
-                failure_reason = (
-                    resolved_state.failure_reason if resolved_state else None
-                )
-                status_text = get_status_icon(status, failure_reason)
+                status_text = resolved_state.icon if resolved_state else "❓"
 
-            # Show both icons when states disagree
-            if has_conflict:
-                exec_icon = get_status_icon(
-                    job.state.name if job.state else "unknown",
-                    job.state.failure_reason if job.state else None,
-                )
-                status_text = f"{status_text}/{exec_icon}"
+            # Show both icons when states conflict (scheduler/exec)
+            if conflict_state is not None:
+                status_text = f"{conflict_state.icon}/{resolved_state.icon if resolved_state else '❓'}"
 
             # Tags are stored in JobTagModel, accessed via tags_map
             job_tags = self.tags_map.get(job.identifier, {})
@@ -1131,24 +1124,23 @@ class JobsTable(Vertical):
             if task_id:
                 job = self.state_provider.get_job(task_id, job_id)
                 if job:
-                    resolved_state, has_conflict = StateProvider.get_resolved_state(
+                    resolved_state, conflict_state = StateProvider.get_resolved_state(
                         job, self._current_experiment_obj
                     )
                     status_name = resolved_state.name if resolved_state else "unknown"
+                    icon = resolved_state.icon if resolved_state else "❓"
+                    status_text = f"{icon} {status_name}"
                     failure_reason = (
                         resolved_state.failure_reason if resolved_state else None
                     )
-                    icon = get_status_icon(status_name, failure_reason)
-                    status_text = f"{icon} {status_name}"
                     if failure_reason:
                         status_text += f" ({failure_reason.name})"
-                    if has_conflict:
-                        exec_name = job.state.name if job.state else "?"
-                        exec_icon = get_status_icon(
-                            exec_name,
-                            job.state.failure_reason if job.state else None,
+                    if conflict_state is not None:
+                        exec_name = resolved_state.name if resolved_state else "?"
+                        status_text = (
+                            f"{conflict_state.icon} {conflict_state.name}"
+                            f" / {icon} {exec_name}"
                         )
-                        status_text += f" / {exec_icon} {exec_name}"
                     self.post_message(JobHighlighted(job_id, status_text))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:

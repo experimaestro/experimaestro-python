@@ -120,7 +120,7 @@ def process(
     for job in all_jobs:
         job_str = str(job.path) if fullpath else f"{job.task_id}/{job.identifier}"
 
-        if job.state is None or job.state == JobState.UNSCHEDULED:
+        if job.state is None or job.state.is_unscheduled():
             print(colored(f"UNSCHED {job_str}", "red"), end="")
         elif job.state.running():
             if kill:

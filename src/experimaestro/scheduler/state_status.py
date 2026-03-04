@@ -1277,38 +1277,14 @@ class EventReader:
         self._followed_entities[entity_id] = dir_config
         return True
 
-    def _seek_to_end_of_file(self, path: Path) -> None:
-        """Record end-of-file position so the watcher only picks up new content.
-
-        Used when skipping replay: we need the position tracking to be set to
-        the current end of each file so that only newly appended lines trigger
-        callbacks.
-        """
-        try:
-            size = path.stat().st_size
-        except OSError:
-            size = 0
-
-        watch = self._find_watcher(path)
-        if watch and watch._tailed_pool is not None:
-            watch.set_tail_position(path, size)
-        else:
-            self._file_positions[path] = size
-
-    def start_watching(self, replay: bool = True) -> None:
+    def start_watching(self) -> None:
         """Start watching for file changes using FileWatcher.
 
-        Discovers existing entities, calls on_created for each, and optionally
-        replays events for entities that should be followed.
+        Discovers existing entities, calls on_created for each, and
+        replays all historical events for entities that should be followed.
 
         For each entity, only the latest event file is tracked (tailed).
         Earlier files are processed during catch-up but not watched.
-
-        Args:
-            replay: If True (default), replay all historical events via
-                on_event callbacks.  If False, just register entities and
-                seek the latest event file to end-of-file so only new events
-                trigger callbacks.
         """
         if self._file_watcher is not None:
             return  # Already watching
@@ -1319,7 +1295,7 @@ class EventReader:
         # Files to track: only the latest file per entity
         files_to_track: list[Path] = []
 
-        # Register entities and optionally replay events for followed ones
+        # Register entities and replay events for followed ones
         for entity_id, (dir_config, event_files) in entities.items():
             if not self._register_entity(entity_id, dir_config):
                 continue
@@ -1336,14 +1312,12 @@ class EventReader:
                 if fn is not None and fn >= min_count:
                     relevant_files.append(ef)
 
-            if replay and relevant_files:
+            if relevant_files:
                 for event_file in relevant_files:
                     self._replay_events_from_file(event_file, entity_id, dir_config)
 
             # Track only the latest file
             latest = event_files[-1]  # sorted by name in _discover
-            if not replay:
-                self._seek_to_end_of_file(latest)
             self._current_file[entity_id] = latest
             files_to_track.append(latest)
 
@@ -1415,15 +1389,13 @@ class EventReader:
         self,
         entity_id: str,
         dir_config: WatchedDirectory,
-        replay: bool = True,
     ) -> list[EventBase]:
         """Start following an entity (e.g., when scheduler submits a new job).
 
-        If the entity already has event files, replays all events (or returns
-        them for bulk consolidation when replay=False).
-        If the entity is already being followed, returns immediately.
+        Returns all existing events for bulk consolidation by the caller,
+        then starts tailing the latest event file for new events.
 
-        Only the latest event file is tracked for future changes.
+        If the entity is already being followed, returns immediately.
 
         Note: This bypasses the on_created callback - use this for explicit
         registration (e.g., scheduler submitting a job) rather than discovery.
@@ -1431,11 +1403,9 @@ class EventReader:
         Args:
             entity_id: Entity identifier to follow
             dir_config: Directory configuration for this entity
-            replay: If True (default), replay events via on_event callback.
-                If False, return events for the caller to consolidate in bulk.
 
         Returns:
-            List of events (only non-empty when replay=False)
+            List of existing events for the caller to consolidate
         """
         if entity_id in self._followed_entities:
             return []
@@ -1455,10 +1425,7 @@ class EventReader:
             for event_file in event_files:
                 file_entity_id = dir_config.entity_id_extractor(event_file)
                 if file_entity_id == entity_id:
-                    if replay:
-                        self._replay_events_from_file(event_file, entity_id, dir_config)
-                    else:
-                        collected.extend(self._read_events_from_file(event_file))
+                    collected.extend(self._read_events_from_file(event_file))
                     latest_file = event_file
 
         # Track only the latest file for future changes

@@ -289,35 +289,27 @@ class StateProvider(ABC):
     @staticmethod
     def get_resolved_state(
         job: BaseJob, experiment: BaseExperiment | None
-    ) -> tuple[JobState, bool]:
+    ) -> tuple[JobState, JobState | None]:
         """Resolve display state from experiment and execution states.
 
-        Returns (resolved_state, has_conflict).
+        Returns (resolved_state, scheduler_state_or_none).
+        - When there's no conflict: (resolved_state, None)
+        - When there's a conflict: (exec_state, exp_state) — caller shows both icons
 
-        Rules:
-        - Phantom (execution=UNSCHEDULED) => experiment state takes precedence
-        - Running/done/error execution => execution state (ground truth)
-        - has_conflict=True when both states are set and disagree
+        Uses JobState.resolve() for dispatch to subclass-specific logic.
         """
         exec_state = job.state
         exp_state = experiment.get_job_state(job.identifier) if experiment else None
 
-        if exp_state is None or exp_state == exec_state:
-            return exec_state, False
+        if exp_state is None:
+            return exec_state, None
 
-        # Phantom: execution has no info, trust experiment/scheduler
-        if exec_state == JobState.UNSCHEDULED:
-            return exp_state, False
+        resolved = exp_state.resolve(exec_state)
+        if resolved is not None:
+            return resolved, None
 
-        # Execution state is authoritative when it has real info
-        if exec_state.running() or exec_state.finished():
-            # No conflict if both are in the same phase (both running or both finished)
-            same_phase = (exec_state.running() and exp_state.running()) or (
-                exec_state.finished() and exp_state.finished()
-            )
-            return exec_state, not same_phase
-
-        return exp_state, exp_state != exec_state
+        # Conflict: resolve() returned None
+        return exec_state, exp_state
 
     @abstractmethod
     def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
@@ -972,7 +964,7 @@ class MockJob(BaseJob):
             # Create a new JobStateError with the specific failure reason
             # (don't mutate the singleton)
             initial_state = JobStateError(failure_reason)
-        if initial_state != JobState.UNSCHEDULED:
+        if not initial_state.is_unscheduled():
             # State was explicitly provided (from disk), mark as having state
             self._state = initial_state
             self._has_event_state = True
@@ -1094,7 +1086,7 @@ class MockJob(BaseJob):
         elif self.pidfile.exists():
             try:
                 self._process_dict = json.loads(self.pidfile.read_text())
-                if self._state == JobState.UNSCHEDULED:
+                if self._state.is_unscheduled():
                     self.set_state(JobState.RUNNING, loading=True)
             except Exception:
                 pass

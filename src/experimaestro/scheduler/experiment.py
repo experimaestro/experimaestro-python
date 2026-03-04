@@ -573,7 +573,6 @@ class experiment(BaseExperiment):
         For jobs already running, we increment here since no state
         transition will occur.
         """
-        from experimaestro.scheduler.interfaces import JobState
 
         if self in job.experiments:
             # Do not double register
@@ -584,7 +583,7 @@ class experiment(BaseExperiment):
 
         # If job is already being tracked (not UNSCHEDULED and not finished),
         # increment unfinishedJobs since no state transition will trigger it
-        if job.state != JobState.UNSCHEDULED and not job.state.finished():
+        if not job.state.is_unscheduled() and not job.state.finished():
             self.unfinishedJobs += 1
             logging.debug(
                 "Job %s already running, unfinished jobs for %s: %d",
@@ -778,14 +777,13 @@ class experiment(BaseExperiment):
                 if self.failedJobs:
                     # Show some more information
                     from experimaestro.scheduler.jobs import (
-                        JobStateError,
                         JobFailureStatus,
                     )
 
                     count = 0
                     for job in self.failedJobs.values():
                         # Skip dependency failures - only log direct failures
-                        if isinstance(job.state, JobStateError):
+                        if job.state.is_error():
                             if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
                                 count += 1
                                 logger.error(

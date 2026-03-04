@@ -10,7 +10,6 @@ from experimaestro.locking import create_file_lock
 import subprocess
 from experimaestro import Task, Param
 from experimaestro.tokens import CounterToken, TokenLockFile
-from experimaestro.scheduler import JobState
 from .utils import (
     TemporaryExperiment,
     TemporaryDirectory,
@@ -47,7 +46,7 @@ def token_experiment(xp, token, ntasks=3):
     # Wait that both tasks are scheduled
     logging.info("Waiting that the two tasks are scheduled")
     for task in tasks:
-        while task.__xpm__.job.scheduler_state == JobState.UNSCHEDULED:
+        while task.__xpm__.job.scheduler_state.is_unscheduled():
             time.sleep(0.01)
 
     # Wait a bit (ENHANCE: find a better way)

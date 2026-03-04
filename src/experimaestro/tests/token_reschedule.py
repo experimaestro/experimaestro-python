@@ -4,7 +4,6 @@ if __name__ == "__main__":
     from pathlib import Path
     import time
 
-    from experimaestro.scheduler import JobState
     from experimaestro.tokens import CounterToken
     from experimaestro.tests.utils import (
         TemporaryExperiment,
@@ -38,7 +37,7 @@ if __name__ == "__main__":
             .submit()
         )
         logging.info("Waiting for task (token with %s) to be scheduled", lockingpath)
-        while task.job.scheduler_state == JobState.UNSCHEDULED:
+        while task.job.scheduler_state.is_unscheduled():
             time.sleep(0.01)
 
         # Write so that the test now we are ready

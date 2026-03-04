@@ -189,13 +189,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     on_deleted=self._on_job_events_deleted,
                 ),
             )
-            # Skip replaying historical events: caches are populated lazily
-            # from status.json when get_jobs()/get_experiments() is called.
-            # Only watch for new events going forward.
-            self._event_reader.start_buffering()
-            self._event_reader.start_watching(replay=False)
-            # Flush any events that arrived during watcher setup
-            self._event_reader.flush_buffer()
+            # Always replay historical events on startup so caches are populated
+            self._event_reader.start_watching()
 
     def _stop_watcher(self) -> None:
         """Stop the event file watcher"""

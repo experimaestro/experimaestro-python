@@ -754,12 +754,13 @@ class TestEventReaderEntityRegistration:
         # No events yet (all entities rejected)
         assert len(received_events) == 0
 
-        # Now explicitly follow the entity (default replay=True)
+        # Now explicitly follow the entity — returns events for bulk update
         result = reader.follow("new_entity", dir_config)
         assert isinstance(result, list)
 
-        # Events should have been replayed via on_event callback
-        assert len(received_events) == 3
+        # Events are returned for bulk consolidation, not replayed via callback
+        assert len(result) == 3
+        assert len(received_events) == 0
 
         reader.stop_watching()
 
@@ -814,11 +815,14 @@ class TestEventReaderEntityRegistration:
         reader = EventReader(dir_config)
 
         # Follow twice
-        reader.follow("entity1", dir_config)
-        reader.follow("entity1", dir_config)
+        result1 = reader.follow("entity1", dir_config)
+        result2 = reader.follow("entity1", dir_config)
 
-        # Events should only be replayed once (second follow() is a no-op)
-        assert len(received_events) == 1
+        # First follow returns events, second is a no-op
+        assert len(result1) == 1
+        assert len(result2) == 0
+        # No events replayed via callback (follow returns them)
+        assert len(received_events) == 0
 
 
 # =============================================================================

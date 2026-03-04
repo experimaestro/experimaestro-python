@@ -81,7 +81,7 @@ class JobDependency(Dependency):
         origin_job = self.origin
         if (
             origin_job.transient.is_transient
-            and origin_job.scheduler_state == JobState.UNSCHEDULED
+            and origin_job.scheduler_state.notstarted()
         ):
             # Transient job was skipped but now is needed - start it
             from experimaestro.utils import logger
@@ -275,7 +275,7 @@ class Job(BaseJob, Resource):
         # Helper to determine if a state should be "counted" in unfinishedJobs
         # A job is counted when it's been submitted and hasn't finished yet
         def is_counted(state):
-            return state != JobState.UNSCHEDULED and not state.finished()
+            return not state.is_unscheduled() and not state.finished()
 
         # Update experiment statistics based on state transition
         for xp in self.experiments:

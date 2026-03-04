@@ -73,7 +73,7 @@ def test_transient_without_dependents():
         a = TransientTask.C(x=1).submit(transient=TransientMode.TRANSIENT)
 
     # Transient task should remain UNSCHEDULED since it was skipped
-    assert a.__xpm__.job.state == JobState.UNSCHEDULED
+    assert a.__xpm__.job.state.is_unscheduled()
 
 
 def test_transient_remove_mode():
@@ -103,7 +103,7 @@ def test_transient_remove_without_dependents():
         a = TransientTask.C(x=1).submit(transient=TransientMode.REMOVE)
 
     # Task should remain UNSCHEDULED since it was skipped
-    assert a.__xpm__.job.state == JobState.UNSCHEDULED
+    assert a.__xpm__.job.state.is_unscheduled()
 
 
 def test_transient_mode_merge_none_wins():
@@ -139,7 +139,7 @@ def test_transient_mode_merge_transient_wins_over_remove():
     assert a1.__xpm__.job.transient == TransientMode.TRANSIENT
 
     # Job should be UNSCHEDULED since no non-transient dependent exists
-    assert a1.__xpm__.job.state == JobState.UNSCHEDULED
+    assert a1.__xpm__.job.state.is_unscheduled()
 
 
 def test_transient_chain():
@@ -167,8 +167,8 @@ def test_transient_chain_all_transient():
     # b has no dependents → UNSCHEDULED
     # a is transient, and b (its only dependent) is also transient and never runs
     # so a is never started via ensure_started() → UNSCHEDULED
-    assert a.__xpm__.job.state == JobState.UNSCHEDULED
-    assert b.__xpm__.job.state == JobState.UNSCHEDULED
+    assert a.__xpm__.job.state.is_unscheduled()
+    assert b.__xpm__.job.state.is_unscheduled()
 
 
 def test_transient_resubmit_within_experiment():
@@ -226,7 +226,7 @@ def test_transient_remove_then_transient_across_experiments():
         assert b2.__xpm__.job.state == JobState.DONE
 
         # A should be UNSCHEDULED (transient with no need to run since B is done)
-        assert a2.__xpm__.job.state == JobState.UNSCHEDULED
+        assert a2.__xpm__.job.state.is_unscheduled()
         # Verify A was never started (aio_start never called)
         assert a2.__xpm__.job.starttime is None, "A should not have been started"
         # Verify no job folder was created (check for .experimaestro subdir)

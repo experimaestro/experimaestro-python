@@ -6,7 +6,6 @@ if __name__ == "__main__":
     from pathlib import Path
     import time
 
-    from experimaestro.scheduler import JobState
     from experimaestro.tests.utils import TemporaryExperiment
     from experimaestro.tests.task_partial import PartialTask
 
@@ -31,7 +30,7 @@ if __name__ == "__main__":
         task = PartialTask.C(path=lockingpath, x=int(x)).submit()
 
         logging.info("Waiting for task (partial with %s) to be scheduled", lockingpath)
-        while task.job.scheduler_state == JobState.UNSCHEDULED:
+        while task.job.scheduler_state.is_unscheduled():
             time.sleep(0.01)
 
         # Write so that the test knows we are ready

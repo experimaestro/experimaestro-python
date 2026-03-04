@@ -33,7 +33,7 @@ def jobmonitor(*outputs: Config):
                     cv.wait(timeout=5000)
 
             # Job already completed
-            if job.state.value == JobState.DONE.value:
+            if job.state == JobState.DONE:
                 print("Job already completed")  # noqa: T201
             else:
                 with tqdm(total=100, unit_scale=True, unit="%") as reporter:
@@ -55,7 +55,7 @@ def jobmonitor(*outputs: Config):
                             with cv:
                                 cv.wait(timeout=5000)
 
-                    if job.state.value == JobState.DONE.value:
+                    if job.state == JobState.DONE:
                         if progress < 100:
                             reporter.update(100 - progress)
                     else:

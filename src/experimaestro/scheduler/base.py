@@ -30,8 +30,6 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
     BaseService,
-    JobStateUnscheduled,
-    JobStateWaiting,
     STATE_NAME_TO_JOBSTATE,
     deserialize_to_datetime,
     serialize_timestamp,
@@ -402,9 +400,9 @@ class Scheduler(StateProvider, threading.Thread):
             try:
                 state = await self.aio_submit(job)
                 # UNSCHEDULED is valid for transient jobs that weren't needed
-                if isinstance(job.scheduler_state, JobStateWaiting):
+                if job.scheduler_state == JobState.WAITING:
                     logger.error("Job ended with unexpected state: %s", state)
-                elif isinstance(job.scheduler_state, JobStateUnscheduled):
+                elif job.scheduler_state.is_unscheduled():
                     if job.transient.is_transient:
                         logger.debug(
                             "Transient job ended unscheduled (not needed): %s", state
@@ -471,7 +469,7 @@ class Scheduler(StateProvider, threading.Thread):
             elif (
                 was_transient
                 and not other.transient.is_transient
-                and other.scheduler_state == JobState.UNSCHEDULED
+                and other.scheduler_state.is_unscheduled()
             ):
                 # Job was transient and skipped, but now is non-transient - restart it
                 logger.info("Re-submitting job (was transient, now non-transient)")
@@ -708,7 +706,7 @@ class Scheduler(StateProvider, threading.Thread):
         for dc in reader.directories:
             if dc.on_event == self._on_job_event:
                 dir_config = dc
-                events = reader.follow(entity_id, dc, replay=False)
+                events = reader.follow(entity_id, dc)
                 break
         else:
             return
@@ -1096,7 +1094,7 @@ class Scheduler(StateProvider, threading.Thread):
         logger.debug("Processing final state for job %s", job.identifier[:8])
 
         # Skip processing for UNSCHEDULED jobs (transient jobs that weren't needed)
-        if job.scheduler_state == JobState.UNSCHEDULED:
+        if job.scheduler_state.is_unscheduled():
             logger.debug(
                 "Skipping final state for unscheduled job %s", job.identifier[:8]
             )
@@ -1151,13 +1149,13 @@ class Scheduler(StateProvider, threading.Thread):
         # the state (it may detect launcher-specific failures like SLURM timeout)
         if (
             state is not None
-            and isinstance(state, JobStateError)
+            and state.is_error()
             and state.failure_reason == JobFailureStatus.FAILED
             and code is not None
         ):
             process_state = process.get_job_state(code)
             if (
-                isinstance(process_state, JobStateError)
+                process_state.is_error()
                 and process_state.failure_reason != JobFailureStatus.FAILED
             ):
                 # Process detected a more specific failure reason
@@ -1432,13 +1430,13 @@ class Scheduler(StateProvider, threading.Thread):
                 # the state (it may detect launcher-specific failures like SLURM timeout)
                 if (
                     state is not None
-                    and isinstance(state, JobStateError)
+                    and state.is_error()
                     and state.failure_reason == JobFailureStatus.FAILED
                     and code is not None
                 ):
                     process_state = process.get_job_state(code)
                     if (
-                        isinstance(process_state, JobStateError)
+                        process_state.is_error()
                         and process_state.failure_reason != JobFailureStatus.FAILED
                     ):
                         # Process detected a more specific failure reason
@@ -1479,7 +1477,7 @@ class Scheduler(StateProvider, threading.Thread):
         def finalize_callback(j: Job):
             j.set_scheduler_state(state)
             # Increment retry_count for any failure of a resumable task
-            if isinstance(state, JobStateError) and j.resumable:
+            if state.is_error() and j.resumable:
                 j.retry_count += 1
 
         logger.debug("[job ended] Finalizing")
@@ -1487,7 +1485,7 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Check if we should restart a resumable task that timed out
         if (
-            isinstance(state, JobStateError)
+            state.is_error()
             and state.failure_reason == JobFailureStatus.TIMEOUT
             and job.resumable
             and job.retry_count <= job.max_retries

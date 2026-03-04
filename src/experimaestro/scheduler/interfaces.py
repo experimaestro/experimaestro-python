@@ -146,10 +146,14 @@ class JobState:
     Job states are represented as instances of JobState subclasses.
     Singleton instances are available as class attributes (e.g., JobState.DONE)
     for backward compatibility.
+
+    Subclasses override notstarted(), running(), finished() to define behavior.
     """
 
     name: str  # Readable name
-    value: int  # Numeric value for ordering comparisons
+    icon: str = "❓"  # Display icon for TUI and other interfaces
+    # Lifecycle progression order for resolution (higher = more progressed)
+    _lifecycle_order: int = 0
     failure_reason: Optional["JobFailureStatus"] = (
         None  # Failure reason (for error states)
     )
@@ -164,30 +168,66 @@ class JobState:
     ERROR: "JobStateError"
     TRANSIENT: "JobStateTransient"
 
+    def is_unscheduled(self):
+        """Returns True if the job is unscheduled (including transient)"""
+        return False
+
     def notstarted(self):
         """Returns True if the job hasn't started yet"""
-        return self.value <= 2  # READY
+        return False
 
     def running(self):
-        """Returns True if the job is currently running or scheduled"""
-        return self.value == 4 or self.value == 3  # RUNNING or SCHEDULED
+        """Returns True if the job is currently running"""
+        return False
 
     def finished(self):
         """Returns True if the job has finished (success or error)"""
-        return self.value >= 5  # DONE or ERROR
+        return False
 
     def is_error(self) -> bool:
         return False
 
+    def resolve(
+        self, exec_state: "JobState", scheduler_ts=None, exec_ts=None
+    ) -> "JobState | None":
+        """Resolve display state given self (experiment/scheduler state) and exec_state.
+
+        Returns a JobState when a definitive display state can be determined,
+        or None when there's a genuine conflict that can't be resolved.
+
+        The more progressed state wins (e.g., RUNNING beats SCHEDULED,
+        DONE beats RUNNING). Conflict only when both finished but disagree
+        (DONE vs ERROR).
+
+        Args:
+            exec_state: The execution state (ground truth from disk/events)
+            scheduler_ts: Timestamp of the scheduler state
+            exec_ts: Timestamp of the execution state
+        """
+        if self == exec_state:
+            return self
+
+        # More progressed state wins
+        if self._lifecycle_order != exec_state._lifecycle_order:
+            if self._lifecycle_order > exec_state._lifecycle_order:
+                return self
+            return exec_state
+
+        # Same lifecycle order but different states (e.g., DONE vs ERROR)
+        # Use timestamps if available, otherwise conflict
+        if scheduler_ts and exec_ts:
+            return self if scheduler_ts > exec_ts else exec_state
+        return None  # Can't resolve → conflict
+
     def __eq__(self, other):
-        """Compare job states by their numeric value"""
+        """Compare job states by class identity"""
         if isinstance(other, JobState):
-            return self.value == other.value
+            return type(self) is type(other)
         return False
 
     def __hash__(self):
         """Allow JobState instances to be used as dict keys"""
-        return hash(self.value)
+        return hash(type(self))
 
     def __repr__(self):
         """String representation of the job state"""
@@ -259,48 +299,80 @@ class JobStateUnscheduled(JobState):
     """Job is not yet scheduled"""
 
     name = "unscheduled"
-    value = 0
+    icon = "👻"
+    _lifecycle_order = 0
+
+    def is_unscheduled(self):
+        return True
+
+    def notstarted(self):
+        return True
+
+    def resolve(self, exec_state, scheduler_ts=None, exec_ts=None):
+        # Phantom: no scheduler info, trust execution
+        return exec_state
 
 
 class JobStateTransient(JobStateUnscheduled):
     """Transient job that was not needed (dormant)"""
 
     name = "transient"
+    icon = "💤"
 
 
 class JobStateWaiting(JobState):
     """Job is waiting for dependencies to be done"""
 
     name = "waiting"
-    value = 1
+    icon = "⌛"
+    _lifecycle_order = 1
+
+    def notstarted(self):
+        return True
 
 
 class JobStateReady(JobState):
     """Job is ready to run"""
 
     name = "ready"
-    value = 2
+    icon = "⏳"
+    _lifecycle_order = 2
+
+    def notstarted(self):
+        return True
 
 
 class JobStateScheduled(JobState):
     """Job is scheduled (e.g., in SLURM queue)"""
 
     name = "scheduled"
-    value = 3
+    icon = "🕐"
+    _lifecycle_order = 3
+
+    def running(self):
+        return True
 
 
 class JobStateRunning(JobState):
     """Job is currently running"""
 
     name = "running"
-    value = 4
+    icon = "▶"
+    _lifecycle_order = 4
+
+    def running(self):
+        return True
 
 
 class JobStateDone(JobState):
     """Job has completed successfully"""
 
     name = "done"
-    value = 5
+    icon = "✅"
+    _lifecycle_order = 5
+
+    def finished(self):
+        return True
 
 
 class JobFailureStatus(enum.Enum):
@@ -348,7 +420,16 @@ class JobStateError(JobState):
     """
 
     name = "error"
-    value = 6
+    _lifecycle_order = 5
+
+    # Icon map for different failure reasons
+    _FAILURE_ICONS: dict = {
+        "DEPENDENCY": "🔗",
+        "TIMEOUT": "⏱",
+        "MEMORY": "💾",
+        "REJECTED_TIMELIMIT": "🚫",
+        "REJECTED_OTHER": "🚫",
+    }
 
     def __init__(self, failure_reason: Optional[JobFailureStatus] = None):
         """Create an error state, optionally with failure details
@@ -358,21 +439,30 @@ class JobStateError(JobState):
         """
         self.failure_reason = failure_reason
 
+    @property
+    def icon(self) -> str:
+        if self.failure_reason is not None:
+            return self._FAILURE_ICONS.get(self.failure_reason.name, "❌")
+        return "❌"
+
     def __repr__(self):
         if self.failure_reason:
             return f"JobStateError(failure_reason={self.failure_reason})"
         return "JobStateError()"
 
     def __eq__(self, other):
-        """Error states are equal if they have the same value
+        """Error states are equal regardless of failure_reason
 
         Note: We intentionally ignore failure_reason in equality comparison
         to maintain backward compatibility with code that does:
         if job.state == JobState.ERROR: ...
         """
         if isinstance(other, JobState):
-            return self.value == other.value
+            return type(other) is JobStateError
         return False
+
+    def finished(self):
+        return True
 
     def is_error(self):
         return True
