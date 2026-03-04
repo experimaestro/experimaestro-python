@@ -1520,7 +1520,6 @@ class MockExperiment(BaseExperiment):
                             task_id=task_id,
                             job_id=job_id,
                             tags={},
-                            dependencies=[],
                         )
                         exp._job_infos[job_id] = job_info
                         logger.debug("Recovered job %s/%s", task_id, job_id)
