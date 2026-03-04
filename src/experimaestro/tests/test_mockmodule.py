@@ -396,6 +396,32 @@ class TestGenericTypes:
         ModuleType = torch.nn.Module[str]
         assert ModuleType is not None
 
+    def test_subclass_of_mocked_class_is_subscriptable(self, mock_torch):
+        """Test that subclasses of mocked classes are subscriptable.
+
+        When torch is mocked, IterableDataset[T] works on the fake class,
+        but a user-defined subclass like ShardedIterableDataset must also
+        support subscripting (e.g., ShardedIterableDataset[T]).
+        """
+        import torch
+        from typing import TypeVar
+
+        T = TypeVar("T")
+
+        class ShardedIterableDataset(torch.utils.data.IterableDataset):
+            pass
+
+        # This must not raise TypeError: 'type' object is not subscriptable
+        result = ShardedIterableDataset[T]
+        assert result is ShardedIterableDataset
+
+        # Also test chained inheritance
+        class FileShardedDataset(ShardedIterableDataset[T]):
+            pass
+
+        obj = FileShardedDataset()
+        assert obj is not None
+
 
 class TestNestedAttributes:
     """Test deeply nested attribute access."""

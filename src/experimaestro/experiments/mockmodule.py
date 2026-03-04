@@ -88,6 +88,10 @@ class _FakeBaseClass:
     def __init__(self, *args, **kwargs):
         pass
 
+    def __class_getitem__(cls, item):
+        """Support subscript notation on subclasses (e.g., ShardedDataset[T])."""
+        return cls
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
