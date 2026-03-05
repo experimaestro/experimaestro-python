@@ -10,6 +10,7 @@ from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 
+from experimaestro.scheduler.interfaces import ExperimentStatus
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import (
@@ -132,18 +133,53 @@ class ExperimentsList(Widget):
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
 
+    @staticmethod
+    def _format_experiment_status(exp) -> str:
+        """Format experiment status for display.
+
+        Uses exp.status (ExperimentStatus enum) to determine whether the
+        experiment is truly running, rather than inferring from job counts.
+        """
+        failed = exp.failed_jobs
+        total = exp.total_jobs
+        finished = exp.finished_jobs
+
+        if failed > 0:
+            return f"❌ {failed} failed"
+        if total == 0:
+            return "Empty"
+
+        try:
+            exp_status = exp.status
+        except (NotImplementedError, AttributeError):
+            exp_status = None
+
+        if exp_status == ExperimentStatus.RUNNING:
+            return f"▶ {finished}/{total}"
+        # Experiment is not running (done/failed status)
+        if finished == total:
+            return "✓ Done"
+        return f"⏹ {finished}/{total}"
+
     def _get_status_category(self, exp) -> str:
         """Get status category for an experiment (for sorting)"""
         failed = exp.failed_jobs
         total = exp.total_jobs
         finished = exp.finished_jobs
 
+        try:
+            exp_status = exp.status
+        except (NotImplementedError, AttributeError):
+            exp_status = None
+
         if failed > 0:
             return "failed"
+        elif exp_status == ExperimentStatus.RUNNING:
+            return "running"
         elif finished == total and total > 0:
             return "done"
-        elif finished < total:
-            return "running"
+        elif total > 0:
+            return "done"  # Not running, has jobs, but not all finished
         else:
             return "empty"
 
@@ -311,19 +347,8 @@ class ExperimentsList(Widget):
         for exp in experiments_sorted:
             exp_id = exp.experiment_id
             current_exp_ids.add(exp_id)
-            total = exp.total_jobs
-            finished = exp.finished_jobs
-            failed = exp.failed_jobs
 
-            # Determine status
-            if failed > 0:
-                status = f"❌ {failed} failed"
-            elif finished == total and total > 0:
-                status = "✓ Done"
-            elif finished < total:
-                status = f"▶ {finished}/{total}"
-            else:
-                status = "Empty"
+            status = self._format_experiment_status(exp)
 
             # Format started time
             if exp.started_at:
@@ -470,19 +495,7 @@ class ExperimentsList(Widget):
                 self.experiments[i] = exp
                 break
 
-        # Compute row values
-        total = exp.total_jobs
-        finished = exp.finished_jobs
-        failed = exp.failed_jobs
-
-        if failed > 0:
-            status = f"❌ {failed} failed"
-        elif finished == total and total > 0:
-            status = "✓ Done"
-        elif finished < total:
-            status = f"▶ {finished}/{total}"
-        else:
-            status = "Empty"
+        status = self._format_experiment_status(exp)
 
         if exp.started_at:
             started = exp.started_at.strftime("%Y-%m-%d %H:%M")
@@ -548,19 +561,8 @@ class ExperimentsList(Widget):
         if not exp_info:
             return
 
-        total = exp_info.total_jobs
-        finished = exp_info.finished_jobs
-        failed = exp_info.failed_jobs
         run_id = getattr(exp_info, "current_run_id", None)
-
-        if failed > 0:
-            status = f"❌ {failed} failed"
-        elif finished == total and total > 0:
-            status = "✓ Done"
-        elif finished < total:
-            status = f"▶ {finished}/{total}"
-        else:
-            status = "Empty"
+        status = self._format_experiment_status(exp_info)
 
         collapsed_label = self.query_one("#collapsed-experiment-info", Label)
         run_text = f" [{run_id}]" if run_id else ""
