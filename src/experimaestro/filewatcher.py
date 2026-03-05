@@ -103,92 +103,182 @@ def _create_observer(watcher_type: WatcherType, polling_interval: float = 1.0):
 
 
 # =============================================================================
-# PolledFile (moved from scheduler/polling.py)
+# AdaptivePoller — generic adaptive polling with watchdog reliability tracking
 # =============================================================================
 
 
 @dataclass
-class PolledFile:
-    """State for a file being watched with polling fallback
+class AdaptivePoller:
+    """Adaptive polling scheduler with watchdog reliability tracking.
 
-    Uses adaptive polling with Polyak averaging to track:
-    - watchdog_reliability: How reliably watchdog detects changes (0.0-1.0)
-    - estimated_change_interval: Expected time between file changes
+    Tracks how reliably watchdog detects changes and adjusts the polling
+    interval accordingly using Polyak (exponential moving) averaging:
 
-    The polling interval adapts based on both metrics:
-    - When watchdog is reliable, poll less frequently
-    - When file changes rapidly, poll more frequently
-    - Uses exponential moving average (Polyak) for smooth adaptation
+    - When watchdog is reliable → poll less frequently
+    - When watchdog misses changes (poll detects them) → poll more frequently
+    - When changes happen rapidly → poll more frequently
+    - When nothing changes for a while → slow down polling
+
+    This class is generic: it owns no I/O or check logic. The caller is
+    responsible for performing the actual check and calling the appropriate
+    notification method based on who detected the change.
     """
 
-    path: Path
-    last_size: int = 0
-    last_change_time: float = field(default_factory=time.time)
-    poll_interval: float = 0.5
-    next_poll: float = 0.0
+    min_interval: float = 0.5
+    max_interval: float = 30.0
 
-    # Adaptive tracking using Polyak averaging
+    # State
     watchdog_reliability: float = 0.5
     estimated_change_interval: float = 5.0
-
-    # Polling interval bounds
-    MIN_INTERVAL: float = field(default=0.5, repr=False)
-    MAX_INTERVAL: float = field(default=30.0, repr=False)
+    poll_interval: float = 0.5
+    next_poll: float = 0.0
+    last_change_time: float = field(default_factory=time.time)
 
     # Polyak averaging parameters
-    POLYAK_ALPHA: float = field(default=0.3, repr=False)
-    RELIABILITY_ALPHA: float = field(default=0.2, repr=False)
+    _polyak_alpha: float = field(default=0.3, repr=False)
+    _reliability_alpha: float = field(default=0.2, repr=False)
 
     def schedule_next(self) -> None:
-        """Schedule the next poll time"""
+        """Schedule the next poll time."""
         self.next_poll = time.time() + self.poll_interval
 
     def _update_change_interval(self) -> None:
-        """Update estimated change interval using Polyak averaging"""
+        """Update estimated change interval using Polyak averaging."""
         now = time.time()
-        observed_interval = now - self.last_change_time
-        observed_interval = max(0.1, min(observed_interval, self.MAX_INTERVAL * 2))
+        observed = now - self.last_change_time
+        observed = max(0.1, min(observed, self.max_interval * 2))
         self.estimated_change_interval = (
-            self.POLYAK_ALPHA * observed_interval
-            + (1 - self.POLYAK_ALPHA) * self.estimated_change_interval
+            self._polyak_alpha * observed
+            + (1 - self._polyak_alpha) * self.estimated_change_interval
         )
         self.last_change_time = now
 
     def _compute_poll_interval(self) -> None:
-        """Compute poll interval based on reliability and change frequency"""
-        base = max(self.MIN_INTERVAL, self.estimated_change_interval * 0.5)
+        """Compute poll interval based on reliability and change frequency."""
+        base = max(self.min_interval, self.estimated_change_interval * 0.5)
         self.poll_interval = min(
-            base + (self.MAX_INTERVAL - base) * self.watchdog_reliability,
-            self.MAX_INTERVAL,
+            base + (self.max_interval - base) * self.watchdog_reliability,
+            self.max_interval,
         )
 
     def on_poll_detected_change(self) -> None:
-        """Called when POLLING detected a change (watchdog missed it)"""
+        """Called when POLLING detected a change (watchdog missed it)."""
         self._update_change_interval()
         self.watchdog_reliability = (
-            self.RELIABILITY_ALPHA * 0.0
-            + (1 - self.RELIABILITY_ALPHA) * self.watchdog_reliability
+            self._reliability_alpha * 0.0
+            + (1 - self._reliability_alpha) * self.watchdog_reliability
         )
         self._compute_poll_interval()
         self.schedule_next()
 
     def on_watchdog_detected_change(self) -> None:
-        """Called when WATCHDOG detected a change"""
+        """Called when WATCHDOG detected a change."""
         self._update_change_interval()
         self.watchdog_reliability = (
-            self.RELIABILITY_ALPHA * 1.0
-            + (1 - self.RELIABILITY_ALPHA) * self.watchdog_reliability
+            self._reliability_alpha * 1.0
+            + (1 - self._reliability_alpha) * self.watchdog_reliability
         )
         self._compute_poll_interval()
         self.schedule_next()
 
     def on_no_activity(self) -> None:
-        """Called when no changes detected during poll"""
+        """Called when no changes detected during poll."""
         self.estimated_change_interval = min(
-            self.estimated_change_interval * 1.2, self.MAX_INTERVAL * 2
+            self.estimated_change_interval * 1.2, self.max_interval * 2
         )
         self._compute_poll_interval()
         self.schedule_next()
+
+    @property
+    def is_due(self) -> bool:
+        """Whether this poller is due for a check."""
+        return time.time() >= self.next_poll
+
+
+# =============================================================================
+# PolledFile — file-specific polling using AdaptivePoller
+# =============================================================================
+
+
+@dataclass
+class PolledFile:
+    """State for a file being watched with adaptive polling fallback.
+
+    Combines file-specific state (path, last_size) with an AdaptivePoller
+    that manages the polling schedule and watchdog reliability tracking.
+    """
+
+    path: Path
+    last_size: int = 0
+    poller: AdaptivePoller = field(default_factory=AdaptivePoller)
+
+    # --- Delegate properties for backward compatibility ---
+
+    @property
+    def poll_interval(self) -> float:
+        return self.poller.poll_interval
+
+    @poll_interval.setter
+    def poll_interval(self, value: float) -> None:
+        self.poller.poll_interval = value
+
+    @property
+    def next_poll(self) -> float:
+        return self.poller.next_poll
+
+    @next_poll.setter
+    def next_poll(self, value: float) -> None:
+        self.poller.next_poll = value
+
+    @property
+    def watchdog_reliability(self) -> float:
+        return self.poller.watchdog_reliability
+
+    @watchdog_reliability.setter
+    def watchdog_reliability(self, value: float) -> None:
+        self.poller.watchdog_reliability = value
+
+    @property
+    def estimated_change_interval(self) -> float:
+        return self.poller.estimated_change_interval
+
+    @estimated_change_interval.setter
+    def estimated_change_interval(self, value: float) -> None:
+        self.poller.estimated_change_interval = value
+
+    @property
+    def MIN_INTERVAL(self) -> float:
+        return self.poller.min_interval
+
+    @MIN_INTERVAL.setter
+    def MIN_INTERVAL(self, value: float) -> None:
+        self.poller.min_interval = value
+
+    @property
+    def MAX_INTERVAL(self) -> float:
+        return self.poller.max_interval
+
+    @MAX_INTERVAL.setter
+    def MAX_INTERVAL(self, value: float) -> None:
+        self.poller.max_interval = value
+
+    def schedule_next(self) -> None:
+        self.poller.schedule_next()
+
+    def _compute_poll_interval(self) -> None:
+        self.poller._compute_poll_interval()
+
+    def on_poll_detected_change(self) -> None:
+        """Called when POLLING detected a change (watchdog missed it)."""
+        self.poller.on_poll_detected_change()
+
+    def on_watchdog_detected_change(self) -> None:
+        """Called when WATCHDOG detected a change."""
+        self.poller.on_watchdog_detected_change()
+
+    def on_no_activity(self) -> None:
+        """Called when no changes detected during poll."""
+        self.poller.on_no_activity()
 
     def update_size(self) -> bool | None:
         """Update the last known size.
@@ -422,6 +512,15 @@ class DirectoryWatch:
             TailedFilePool(max_open=max_open_files) if enable_tailing else None
         )
 
+        # Directory scanning poller: detects new files when watchdog misses
+        # on_created events (e.g. NFS, GPFS, Lustre)
+        self._dir_poller = AdaptivePoller(
+            min_interval=min_poll_interval,
+            max_interval=max_poll_interval,
+        )
+        self._dir_poller.schedule_next()
+        self._known_files: set[Path] = set()
+
         # Set up watchdog
         self._setup_watchdog()
 
@@ -441,6 +540,9 @@ class DirectoryWatch:
         if not self._file_filter(path):
             return
 
+        # Track in known files so directory polling doesn't re-discover it
+        self._known_files.add(path)
+
         with self._lock:
             if path in self._files:
                 return
@@ -452,10 +554,12 @@ class DirectoryWatch:
             polled = PolledFile(
                 path=path,
                 last_size=size,
-                poll_interval=self._min_poll_interval,
+                poller=AdaptivePoller(
+                    min_interval=self._min_poll_interval,
+                    max_interval=self._max_poll_interval,
+                    poll_interval=self._min_poll_interval,
+                ),
             )
-            polled.MIN_INTERVAL = self._min_poll_interval
-            polled.MAX_INTERVAL = self._max_poll_interval
             polled.schedule_next()
             self._files[path] = polled
             logger.debug("DirectoryWatch: tracking %s", path)
@@ -541,15 +645,25 @@ class DirectoryWatch:
                 logger.exception("Error in change callback for %s", path)
 
     def poll(self) -> float:
-        """Poll all tracked files. Returns time until next poll."""
+        """Poll all tracked files and scan directory for new files.
+
+        Returns time until next poll.
+        """
         now = time.time()
         next_wake = now + 1.0
+
+        # Directory scan: detect new files that watchdog missed
+        if self._dir_poller.is_due:
+            self._scan_for_new_files()
+
+        if self._dir_poller.next_poll < next_wake:
+            next_wake = self._dir_poller.next_poll
 
         with self._lock:
             files_snapshot = list(self._files.values())
 
         for polled in files_snapshot:
-            if polled.next_poll <= now:
+            if polled.poller.is_due:
                 changed = polled.update_size()
                 if changed is None:
                     # File was deleted — trigger deletion callback
@@ -577,6 +691,44 @@ class DirectoryWatch:
                 next_wake = polled.next_poll
 
         return max(0.1, next_wake - time.time())
+
+    def _scan_for_new_files(self) -> None:
+        """Scan the watched directory for new files not yet tracked.
+
+        Uses the adaptive _dir_poller to adjust scan frequency based on
+        whether watchdog is reliably detecting new file creation.
+        On NFS/network filesystems, watchdog often misses on_created
+        events, so the poller will gradually increase scan frequency.
+        """
+        try:
+            if self._recursive:
+                current_files = set(p for p in self._path.rglob("*") if p.is_file())
+            else:
+                current_files = set(p for p in self._path.iterdir() if p.is_file())
+        except OSError:
+            self._dir_poller.on_no_activity()
+            return
+
+        # Filter to matching files
+        current_files = {p for p in current_files if self._file_filter(p)}
+
+        new_files = current_files - self._known_files
+        self._known_files = current_files
+
+        if new_files:
+            # Poll discovered new files → watchdog missed them
+            self._dir_poller.on_poll_detected_change()
+            for path in sorted(new_files):
+                logger.debug("Directory poll discovered new file: %s", path)
+                if self._on_created:
+                    try:
+                        self._on_created(path)
+                    except Exception:
+                        logger.exception("Error in created callback for %s", path)
+                self.add_file(path)
+                self._handle_file_change(path, from_watchdog=False)
+        else:
+            self._dir_poller.on_no_activity()
 
     def close(self) -> None:
         """Stop watching and release resources."""
@@ -635,6 +787,8 @@ class _DirectoryWatchHandler(FileSystemEventHandler):
         if watch and watch._file_filter(Path(event.src_path)):
             path = Path(event.src_path)
             logger.debug("Watchdog on_created: %s", path)
+            # Watchdog detected creation → increase directory poller reliability
+            watch._dir_poller.on_watchdog_detected_change()
             if watch._on_created:
                 try:
                     watch._on_created(path)

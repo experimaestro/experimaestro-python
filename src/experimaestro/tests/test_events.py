@@ -6,6 +6,7 @@ This module tests the core event system:
 """
 
 import json
+import weakref
 from pathlib import Path
 
 import pytest
@@ -930,6 +931,148 @@ class TestEventWriterReaderIntegration:
 
         # Should have no events (file 3 doesn't exist, and files 0-2 are below events_count)
         assert len(received_events) == 0
+
+
+# =============================================================================
+# Tests: EventReader file rotation detection (simulates NFS without watchdog)
+# =============================================================================
+
+
+class TestEventReaderFileRotation:
+    """Tests that EventReader detects new event files via polling when watchdog
+    doesn't fire on_created (e.g., on NFS/network filesystems)."""
+
+    def test_detects_new_file_after_rotation_via_poll(self, events_dir):
+        """When event-9.jsonl is being tailed and event-10.jsonl is created,
+        the reader should detect and process the new file via directory polling,
+        even without watchdog firing on_created (simulates NFS)."""
+        import time
+
+        received_events: list[str] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            if isinstance(event, JobStateChangedEvent):
+                received_events.append(event.job_id)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
+            )
+        )
+
+        reader.start_watching()
+        try:
+            # Register entity
+            reader._followed_entities["test"] = reader.directories[0]
+
+            # Create initial event file (events-9.jsonl)
+            event_file_9 = events_dir / "events-9.jsonl"
+            with event_file_9.open("w") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(
+                        job_id=f"file9-job-{i}", state="running"
+                    )
+                    f.write(event.to_json() + "\n")
+
+            # Process file 9 (simulates watchdog detecting it)
+            reader._process_file_change(event_file_9)
+            assert len(received_events) == 3
+
+            # Disable watchdog handler to simulate NFS (no on_created fires)
+            for watch in reader._all_watchers:
+                if watch._handler:
+                    watch._handler._watch_ref = weakref.ref(type("Dead", (), {})())
+                # Enable fast directory polling
+                watch._dir_poller.min_interval = 0.1
+                watch._dir_poller.poll_interval = 0.1
+                watch._dir_poller.schedule_next()
+
+            # Create events-10.jsonl (watchdog won't fire since handler disabled)
+            event_file_10 = events_dir / "events-10.jsonl"
+            with event_file_10.open("w") as f:
+                for i in range(3):
+                    event = JobStateChangedEvent(
+                        job_id=f"file10-job-{i}", state="running"
+                    )
+                    f.write(event.to_json() + "\n")
+
+            # Wait for directory polling to detect the new file
+            deadline = time.time() + 5.0
+            while len(received_events) < 6 and time.time() < deadline:
+                time.sleep(0.1)
+
+            assert len(received_events) == 6, (
+                f"Expected 6 events (3 from file9, 3 from file10), "
+                f"got {len(received_events)}: {received_events}"
+            )
+
+            # Verify events from file10 were received
+            file10_events = [e for e in received_events if e.startswith("file10-")]
+            assert len(file10_events) == 3
+
+        finally:
+            reader.stop_watching()
+
+    def test_detects_multiple_rotations_via_poll(self, events_dir):
+        """Multiple file rotations should all be detected via polling."""
+        import time
+
+        received_events: list[str] = []
+
+        def on_event(entity_id: str, event: EventBase):
+            if isinstance(event, JobStateChangedEvent):
+                received_events.append(event.job_id)
+
+        reader = EventReader(
+            WatchedDirectory(
+                path=events_dir,
+                glob_pattern="events-*.jsonl",
+                on_event=on_event,
+                events_count_resolver=lambda _: 0,
+            )
+        )
+
+        reader.start_watching()
+        try:
+            reader._followed_entities["test"] = reader.directories[0]
+
+            # Create and process initial file
+            event_file_0 = events_dir / "events-0.jsonl"
+            with event_file_0.open("w") as f:
+                event = JobStateChangedEvent(job_id="file0-job", state="running")
+                f.write(event.to_json() + "\n")
+            reader._process_file_change(event_file_0)
+            assert len(received_events) == 1
+
+            # Disable watchdog handler to simulate NFS
+            for watch in reader._all_watchers:
+                if watch._handler:
+                    watch._handler._watch_ref = weakref.ref(type("Dead", (), {})())
+                watch._dir_poller.min_interval = 0.1
+                watch._dir_poller.poll_interval = 0.1
+                watch._dir_poller.schedule_next()
+
+            # Create files 1, 2, 3 without explicit notifications
+            for n in range(1, 4):
+                event_file = events_dir / f"events-{n}.jsonl"
+                with event_file.open("w") as f:
+                    event = JobStateChangedEvent(job_id=f"file{n}-job", state="running")
+                    f.write(event.to_json() + "\n")
+
+            # Wait for polling to pick up all new files
+            deadline = time.time() + 5.0
+            while len(received_events) < 4 and time.time() < deadline:
+                time.sleep(0.1)
+
+            assert len(received_events) == 4, (
+                f"Expected 4 events, got {len(received_events)}: {received_events}"
+            )
+
+        finally:
+            reader.stop_watching()
 
 
 # =============================================================================
