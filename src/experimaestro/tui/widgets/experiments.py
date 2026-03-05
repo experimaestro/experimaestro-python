@@ -37,13 +37,13 @@ class ExperimentsList(Widget):
     collapsed: reactive[bool] = reactive(False)
 
     # Track current sort state
-    _sort_column: Optional[str] = None
+    _sort_column: Optional[str] = "status"
     _sort_reverse: bool = False
 
     # Status sort order (for sorting by status)
     STATUS_ORDER = {
-        "failed": 0,  # Failed experiments first (need attention)
-        "running": 1,  # Running experiments
+        "running": 0,  # Running experiments first
+        "failed": 1,  # Failed experiments (need attention)
         "done": 2,  # Completed experiments
         "empty": 3,  # Empty experiments last
     }
@@ -148,12 +148,17 @@ class ExperimentsList(Widget):
             return "empty"
 
     def _get_status_sort_key(self, exp):
-        """Get sort key for an experiment based on status"""
+        """Get sort key for an experiment based on status
+
+        Primary: status order (running, failed, done, empty)
+        Secondary: started_at descending (newest first)
+        """
         status_category = self._get_status_category(exp)
         status_order = self.STATUS_ORDER.get(status_category, 99)
-        # Secondary sort by failed count (more failures first)
-        failed_count = exp.failed_jobs if status_category == "failed" else 0
-        return (status_order, -failed_count)
+        # Secondary sort by start time (newest first via negative timestamp)
+        started = exp.started_at
+        started_ts = started.timestamp() if started else 0
+        return (status_order, -started_ts)
 
     def _update_column_headers(self) -> None:
         """Update column headers with sort indicators"""
@@ -211,6 +216,7 @@ class ExperimentsList(Widget):
         table.add_column("Started", key="started")
         table.add_column("Duration", key="duration")
         table.add_column("CO2", key="co2", width=8)
+        self._update_column_headers()
         self.refresh_experiments()
 
     def refresh_experiments(self) -> None:
