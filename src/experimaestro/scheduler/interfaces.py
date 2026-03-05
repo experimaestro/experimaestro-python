@@ -1716,8 +1716,11 @@ class BaseExperiment:
 
         1. If events_count is set, reads and applies events from that count onwards
         2. If events_count is None but events exist, raises OrphanedEventsError for user confirmation
-        3. Archives event files from .events/experiments/{exp_id}/ to permanent storage
+        3. Archives event files to permanent storage
         4. Sets events_count to None (all events processed)
+
+        Supports both flat format (.events/experiments/{exp_id}-{count}.jsonl)
+        and old subdir format (.events/experiments/{exp_id}/events-{count}.jsonl).
 
         Called when consolidating experiment state after completion or when cleaning up
         orphaned events.
@@ -1730,7 +1733,19 @@ class BaseExperiment:
         # Get workspace path
         # workdir is {workspace}/experiments/{exp-id}/{run-id}, so parent.parent.parent is workspace
         workspace_path = self.workdir.parent.parent.parent
-        events_dir = workspace_path / ".events" / "experiments" / self.experiment_id
+        events_base_dir = workspace_path / ".events" / "experiments"
+        old_events_dir = events_base_dir / self.experiment_id
+
+        def _collect_event_files() -> list[Path]:
+            """Collect event files from both flat and old subdir formats"""
+            files = []
+            # Flat format: {experiment_id}-{count}.jsonl
+            if events_base_dir.exists():
+                files.extend(events_base_dir.glob(f"{self.experiment_id}-*.jsonl"))
+            # Old subdir format: {experiment_id}/events-{count}.jsonl
+            if old_events_dir.exists():
+                files.extend(old_events_dir.glob("events-*.jsonl"))
+            return files
 
         # Apply pending events if events_count is set
         try:
@@ -1739,19 +1754,19 @@ class BaseExperiment:
             current_events_count = None
 
         # Check for orphaned events (events exist but no events_count)
-        if current_events_count is None and events_dir.exists():
-            event_files = list(events_dir.glob("events-*.jsonl"))
+        if current_events_count is None:
+            event_files = _collect_event_files()
             if event_files:
                 # Edge case: status.json exists without events_count, but events remain
                 # Ask user for confirmation before merging
-                self._raise_orphaned_events_warning(events_dir, event_files)
+                self._raise_orphaned_events_warning(events_base_dir, event_files)
 
-        if current_events_count is not None and events_dir.exists():
+        if current_events_count is not None:
             try:
-                reader = EventReader(WatchedDirectory(path=events_dir))
-                # Event files are at events_dir/events-{count}.jsonl (no subdirectory)
-                # so we pass "." as entity_id to read directly from base_dir
-                events = reader.read_events_since_count(".", current_events_count)
+                reader = EventReader(WatchedDirectory(path=events_base_dir))
+                events = reader.read_events_since_count(
+                    self.experiment_id, current_events_count
+                )
                 for event in events:
                     self.apply_event(event)
                     logger.debug(
@@ -1772,34 +1787,41 @@ class BaseExperiment:
             self._events_count = None
 
         # Archive event files to permanent storage
-        if events_dir.exists():
-            event_files = list(events_dir.glob("events-*.jsonl"))
-            if event_files:
-                perm_events_dir = self.run_dir / "events"
-                perm_events_dir.mkdir(parents=True, exist_ok=True)
+        event_files = _collect_event_files()
+        if event_files:
+            perm_events_dir = self.run_dir / "events"
+            perm_events_dir.mkdir(parents=True, exist_ok=True)
 
-                for event_file in event_files:
+            for event_file in event_files:
+                try:
+                    # Extract count from filename
+                    # Flat: "{exp_id}-{count}.jsonl" or old: "events-{count}.jsonl"
+                    count_str = event_file.stem.rsplit("-", 1)[1]
+                    perm_file = perm_events_dir / f"event-{count_str}.jsonl"
+                    # Try hardlink first, copy if that fails
                     try:
-                        # Rename from "events-N.jsonl" to "event-N.jsonl" (singular)
-                        perm_filename = event_file.name.replace("events-", "event-", 1)
-                        perm_file = perm_events_dir / perm_filename
-                        # Try hardlink first, copy if that fails
-                        try:
-                            perm_file.hardlink_to(event_file)
-                        except (OSError, NotImplementedError):
-                            import shutil
+                        perm_file.hardlink_to(event_file)
+                    except (OSError, NotImplementedError):
+                        import shutil
 
-                            shutil.copy2(event_file, perm_file)
+                        shutil.copy2(event_file, perm_file)
 
-                        # Delete temp event file
-                        event_file.unlink()
-                        logger.debug("Archived experiment event file: %s", event_file)
-                    except OSError as e:
-                        logger.warning(
-                            "Failed to archive experiment event file %s: %s",
-                            event_file,
-                            e,
-                        )
+                    # Delete temp event file
+                    event_file.unlink()
+                    logger.debug("Archived experiment event file: %s", event_file)
+                except OSError as e:
+                    logger.warning(
+                        "Failed to archive experiment event file %s: %s",
+                        event_file,
+                        e,
+                    )
+
+            # Clean up old subdir if now empty
+            if old_events_dir.is_dir():
+                try:
+                    old_events_dir.rmdir()
+                except OSError:
+                    pass
 
     async def finalize_status(
         self,

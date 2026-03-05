@@ -97,14 +97,49 @@ def perform_workspace_cleanup(
     return warnings, callbacks
 
 
+def _collect_experiment_event_files(
+    experiments_dir: Path,
+) -> dict[str, list[Path]]:
+    """Collect experiment event files from both flat and old subdir formats.
+
+    Returns:
+        Dict mapping experiment_id to list of event file paths
+    """
+    from experimaestro.scheduler.state_status import _EXPERIMENT_EVENT_FLAT_RE
+
+    result: dict[str, list[Path]] = {}
+
+    # Scan flat files: {experiment_id}-{count}.jsonl
+    for event_file in experiments_dir.iterdir():
+        if not event_file.is_file() or not event_file.name.endswith(".jsonl"):
+            continue
+        m = _EXPERIMENT_EVENT_FLAT_RE.match(event_file.name)
+        if m:
+            exp_id = m.group(1)
+            result.setdefault(exp_id, []).append(event_file)
+
+    # Scan old subdirectories: {experiment_id}/events-{count}.jsonl
+    for exp_events_dir in experiments_dir.iterdir():
+        if not exp_events_dir.is_dir():
+            continue
+        experiment_id = exp_events_dir.name
+        for event_file in exp_events_dir.glob("events-*.jsonl"):
+            result.setdefault(experiment_id, []).append(event_file)
+
+    return result
+
+
 def _check_orphaned_experiment_events(
     workspace_path: Path, auto_fix: bool
 ) -> tuple[list["WarningEvent"], dict[str, dict[str, Callable[[], None]]]]:
     """Check for orphaned experiment events
 
     Events are orphaned when:
-    - Event files exist in .events/experiments/{experiment_id}/
+    - Event files exist (flat or in subdirectory)
     - status.json exists but has NO events_count field
+
+    Supports both flat format (.events/experiments/{exp_id}-{count}.jsonl)
+    and old subdir format (.events/experiments/{exp_id}/events-{count}.jsonl).
 
     If auto_fix=True, events WITH events_count are consolidated automatically.
 
@@ -122,19 +157,15 @@ def _check_orphaned_experiment_events(
     if not experiments_dir.exists():
         return warnings, callbacks
 
-    for exp_events_dir in experiments_dir.iterdir():
-        if not exp_events_dir.is_dir():
-            continue
+    experiment_event_files = _collect_experiment_event_files(experiments_dir)
 
-        experiment_id = exp_events_dir.name
-
-        # Find event files
-        event_files = list(exp_events_dir.glob("events-*.jsonl"))
+    for experiment_id, event_files in experiment_event_files.items():
         if not event_files:
-            continue  # No orphaned events
+            continue
 
         # Get current run_id from symlink (check new and legacy locations)
         symlink = None
+        exp_events_dir = experiments_dir / experiment_id
         for candidate in [
             workspace_path / "experiments" / experiment_id / "current",
             exp_events_dir / "current",
@@ -145,7 +176,6 @@ def _check_orphaned_experiment_events(
 
         if symlink is None:
             # No symlink found — try to create one from the latest run directory
-            # (run directories are named with timestamps like 20260101_150000)
             exp_base = workspace_path / "experiments" / experiment_id
             if exp_base.is_dir():
                 run_dirs = sorted(
@@ -211,20 +241,17 @@ def _check_orphaned_experiment_events(
             if events_count is not None and auto_fix:
                 # Auto-fix: consolidate events with events_count
                 _consolidate_experiment_events_with_count(
-                    workspace_path, experiment_id, run_dir, exp_events_dir, event_files
+                    workspace_path, experiment_id, run_dir, experiments_dir, event_files
                 )
             elif events_count is None:
                 # Orphaned events without events_count - needs user confirmation
-                # Raise OrphanedEventsError to create warning
                 try:
                     from experimaestro.scheduler.state_provider import MockExperiment
 
-                    # Load experiment
                     exp = MockExperiment.from_disk(run_dir, workspace_path)
                     if exp is not None:
                         exp._cleanup_experiment_event_files()
                 except OrphanedEventsError as e:
-                    # Create warning event
                     warning_event = WarningEvent(
                         experiment_id=e.context.get("experiment_id", experiment_id),
                         run_id=e.context.get("run_id", run_id),
@@ -237,6 +264,15 @@ def _check_orphaned_experiment_events(
                     callbacks[e.warning_key] = e.callbacks
         finally:
             lock.release()
+
+    # Clean up empty old-format experiment subdirectories
+    if auto_fix:
+        for entry in experiments_dir.iterdir():
+            if entry.is_dir():
+                try:
+                    entry.rmdir()  # Only succeeds if empty
+                except OSError:
+                    pass
 
     return warnings, callbacks
 

@@ -41,6 +41,7 @@ from experimaestro.scheduler.state_status import (
     EventReader,
     WatchedDirectory,
     job_entity_id_extractor,
+    experiment_entity_id_extractor,
     task_id_hash,
 )
 
@@ -188,6 +189,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
             self._event_reader = EventReader(
                 WatchedDirectory(
                     path=self._experiments_dir,
+                    glob_pattern="*.jsonl",
+                    entity_id_extractor=experiment_entity_id_extractor,
                     events_count_resolver=self._resolve_experiment_events_count,
                     on_created=self._on_experiment_events_created,
                     on_event=self._on_experiment_event,
@@ -222,11 +225,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # =========================================================================
 
     def _cleanup_legacy_symlinks(self) -> None:
-        """Remove legacy 'current' symlinks from .events/experiments/{id}/
+        """Remove legacy 'current' symlinks and empty experiment event subdirs.
 
-        These symlinks cause watchdog to follow into permanent storage
-        (.experimaestro/events/), generating spurious file change events.
-        The 'current' symlink now lives at experiments/{id}/current.
+        Legacy symlinks in .events/experiments/{id}/ cause watchdog to follow
+        into permanent storage. The 'current' symlink now lives at
+        experiments/{id}/current.
+
+        Also removes empty experiment event subdirectories left over from the
+        old per-experiment subdirectory layout.
         """
         if not self._experiments_dir.exists():
             return
@@ -245,6 +251,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
                         legacy_current,
                         e,
                     )
+            # Remove empty experiment event subdirectories (old layout)
+            try:
+                exp_dir.rmdir()  # Only succeeds if empty
+            except OSError:
+                pass
 
     def _consolidate_orphaned_events(self) -> None:
         """Consolidate orphaned event files from crashed experiments/jobs
@@ -1039,23 +1050,38 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """
         from experimaestro.scheduler.state_status import EventBase
 
-        exp_events_dir = self._experiments_dir / experiment_id
-        if not exp_events_dir.exists():
-            return
-
         # events_count == 0 with no event files means fully consolidated.
         # events_count > 0 or event files present means pending events exist.
         events_count = exp.events_count
 
-        event_files = sorted(
-            exp_events_dir.glob("events-*.jsonl"), key=lambda p: p.name
-        )
+        # Collect event files from flat format and old subdir format
+        event_files: list[tuple[int, Path]] = []
 
-        for event_file in event_files:
+        # Flat format: {experiment_id}-{count}.jsonl
+        for ef in self._experiments_dir.glob(f"{experiment_id}-*.jsonl"):
             try:
-                num = int(event_file.stem.rsplit("-", 1)[1])
+                num = int(ef.stem.rsplit("-", 1)[1])
+                event_files.append((num, ef))
             except (ValueError, IndexError):
                 continue
+
+        # Old subdir format: {experiment_id}/events-{count}.jsonl
+        exp_events_dir = self._experiments_dir / experiment_id
+        if exp_events_dir.is_dir():
+            for ef in exp_events_dir.glob("events-*.jsonl"):
+                try:
+                    num = int(ef.stem.rsplit("-", 1)[1])
+                    event_files.append((num, ef))
+                except (ValueError, IndexError):
+                    continue
+
+        if not event_files:
+            return
+
+        # Sort by count and process
+        event_files.sort(key=lambda t: t[0])
+
+        for num, event_file in event_files:
             if num < events_count:
                 continue
 
@@ -1075,7 +1101,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
     def _has_event_files(self, experiment_id: str) -> bool:
         """Check if experiment has any event files (is active)"""
-        # Format: experiments/{experiment_id}/events-*.jsonl
+        # Flat format: {experiment_id}-*.jsonl
+        if any(self._experiments_dir.glob(f"{experiment_id}-*.jsonl")):
+            return True
+        # Old subdir format: {experiment_id}/events-*.jsonl
         exp_events_dir = self._experiments_dir / experiment_id
         return exp_events_dir.is_dir() and any(exp_events_dir.glob("events-*.jsonl"))
 
@@ -2225,7 +2254,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
             except OSError as e:
                 errors.append(f"Failed to delete experiment dir: {e}")
 
-        # Delete events directory
+        # Delete flat event files: {experiment_id}-*.jsonl
+        for event_file in self._experiments_dir.glob(f"{experiment_id}-*.jsonl"):
+            try:
+                event_file.unlink()
+            except OSError as e:
+                errors.append(f"Failed to delete event file {event_file.name}: {e}")
+
+        # Delete old subdir events directory
         if events_dir.exists():
             try:
                 shutil.rmtree(events_dir)

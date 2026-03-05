@@ -10,7 +10,7 @@ Key components:
 - ExperimentEventWriter/ExperimentEventReader: Experiment-specific event handling
 
 File structure:
-- workspace/.events/experiments/{experiment-id}/events-{count}.jsonl
+- workspace/.events/experiments/{experiment-id}-{count}.jsonl  (flat)
 - workspace/.events/jobs/{hash8}-{job-id}-{count}.jsonl  (flat, hash8 = SHA-256(task-id)[:8])
 - workspace/experiments/{experiment-id}/{run-id}/status.json
 - workspace/jobs/{task-id}/{job-id}/.experimaestro/information.json
@@ -834,7 +834,7 @@ class JobEventWriter(EventWriter):
 class ExperimentEventWriter(EventWriter):
     """Writes events to experiment event files
 
-    Events are stored in: {workspace}/.events/experiments/{experiment_id}/events-{count}.jsonl
+    Events are stored in: {workspace}/.events/experiments/{experiment_id}-{count}.jsonl
     Permanent storage: {run_dir}/events/event-{count}.jsonl
     """
 
@@ -862,9 +862,7 @@ class ExperimentEventWriter(EventWriter):
         super().__init__(initial_count, permanent_dir)
         self.experiment = experiment
         self.workspace_path = workspace_path
-        self._events_dir = (
-            workspace_path / ".events" / "experiments" / experiment.experiment_id
-        )
+        self._events_dir = workspace_path / ".events" / "experiments"
 
     @property
     def events_dir(self) -> Path:
@@ -885,6 +883,25 @@ class ExperimentEventWriter(EventWriter):
         if run_dir is None:
             return None
         return run_dir / "status.json"
+
+    def _get_event_file_path(self) -> Path:
+        """Flat format: {events_dir}/{experiment_id}-{count}.jsonl"""
+        return self.events_dir / f"{self.experiment_id}-{self._count}.jsonl"
+
+    def _get_temp_event_file_path(self, count: int) -> Path:
+        """Flat format: {events_dir}/{experiment_id}-{count}.jsonl"""
+        return self.events_dir / f"{self.experiment_id}-{count}.jsonl"
+
+    def cleanup(self) -> None:
+        """Delete all flat event files for this experiment"""
+        self.close()
+        for i in range(self._count + 1):
+            path = self.events_dir / f"{self.experiment_id}-{i}.jsonl"
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError as e:
+                    logger.warning("Failed to delete event file %s: %s", path, e)
 
     def _write_events_count_to_status(self) -> None:
         """Write the full experiment state to status.json on rotation.
@@ -932,7 +949,7 @@ class ExperimentEventWriter(EventWriter):
         if run_dir is None:
             return
 
-        # Ensure the experiment events directory exists
+        # Ensure the events base directory exists (flat: no per-experiment subdir)
         self._events_dir.mkdir(parents=True, exist_ok=True)
 
         # Handle legacy: remove old symlinks from .experimaestro and .events
@@ -1017,6 +1034,31 @@ def job_entity_id_extractor(path: Path) -> str | None:
         parent_task_id = path.parent.name
         h = task_id_hash(parent_task_id)
         return f"{h}:{m.group(1)}"
+
+    return None
+
+
+# Regex for flat experiment event format: {experiment_id}-{count}.jsonl
+# experiment_id can contain any characters except the trailing -{digits}.jsonl
+_EXPERIMENT_EVENT_FLAT_RE = re.compile(r"(.+)-(\d+)\.jsonl$")
+
+
+def experiment_entity_id_extractor(path: Path) -> str | None:
+    """Extract experiment_id from flat event file path.
+
+    New flat format: {base_dir}/{experiment_id}-{count}.jsonl
+    Old subdir format: {base_dir}/{experiment_id}/events-{count}.jsonl
+    """
+    name = path.name
+
+    # Old subdir format: events-{count}.jsonl inside a subdirectory
+    if name.startswith("events-"):
+        return path.parent.name
+
+    # New flat format: {experiment_id}-{count}.jsonl
+    m = _EXPERIMENT_EVENT_FLAT_RE.match(name)
+    if m:
+        return m.group(1)
 
     return None
 
@@ -1204,7 +1246,7 @@ class EventReader:
         name = path.name
         if not name.endswith(".jsonl") or name.startswith("."):
             return False
-        # Experiment events: events-{count}.jsonl
+        # Old experiment events: events-{count}.jsonl (in subdirectory)
         if name.startswith("events-"):
             return True
         # New flat job events: {hash8}-{job_id}-{count}.jsonl
@@ -1212,6 +1254,9 @@ class EventReader:
             return True
         # Old job events: event-{job_id}-{count}.jsonl
         if name.startswith("event-"):
+            return True
+        # Flat experiment events: {experiment_id}-{count}.jsonl
+        if _EXPERIMENT_EVENT_FLAT_RE.match(name):
             return True
         return False
 
@@ -1799,9 +1844,12 @@ class EventReader:
     ) -> list[EventBase]:
         """Read events for an entity starting from a specific file count
 
+        Tries flat format first ({entity_id}-{count}.jsonl), then falls back
+        to old subdir format ({entity_id}/events-{count}.jsonl).
+
         Args:
             entity_id: Entity identifier (job_id or experiment_id)
-            start_count: File count to start reading from (events-{count}.jsonl)
+            start_count: File count to start reading from
             base_dir: Optional base directory to search in (defaults to first directory)
 
         Returns:
@@ -1816,12 +1864,15 @@ class EventReader:
         if base_dir is None:
             return events
 
-        entity_events_dir = base_dir / entity_id
         count = start_count
         while True:
-            event_path = entity_events_dir / f"events-{count}.jsonl"
+            # Try flat format first: {base_dir}/{entity_id}-{count}.jsonl
+            event_path = base_dir / f"{entity_id}-{count}.jsonl"
             if not event_path.exists():
-                break
+                # Fallback: old subdir format {base_dir}/{entity_id}/events-{count}.jsonl
+                event_path = base_dir / entity_id / f"events-{count}.jsonl"
+                if not event_path.exists():
+                    break
 
             try:
                 with event_path.open("r") as f:
@@ -1965,8 +2016,10 @@ __all__ = [
     "WatchedDirectory",
     "PermanentStorageResolver",
     "job_entity_id_extractor",
+    "experiment_entity_id_extractor",
     "task_id_hash",
     "_JOB_EVENT_FLAT_RE",
+    "_EXPERIMENT_EVENT_FLAT_RE",
     "JobProgressReader",
     # Callback types
     "EntityEventCallback",

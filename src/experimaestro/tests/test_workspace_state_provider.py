@@ -82,7 +82,7 @@ def create_v2_experiment(
 
     v2 layout:
       experiments/{exp-id}/{run-id}/status.json
-      .events/experiments/{exp-id} -> ../../experiments/{exp-id}/{current_run}
+      .events/experiments/{exp-id}-{count}.jsonl  (flat event files)
     """
     exp_dir = workspace / "experiments" / experiment_id
     exp_dir.mkdir(parents=True, exist_ok=True)
@@ -158,9 +158,7 @@ def mock_workspace(tmp_path):
 
     Structure:
       workspace/
-        .events/experiments/
-          v2-multi-run -> ../../experiments/v2-multi-run/20260101_120000
-          v2-failed -> ../../experiments/v2-failed/20260101_110000
+        .events/experiments/             # flat event files go here
         xp/                              # v1 layout
           v1-mixed/
             jobs/
@@ -378,10 +376,10 @@ class TestEventWatcher:
         provider.add_listener(listener)
 
         try:
-            # Create events file in new subdirectory format
-            exp_dir = mock_workspace / ".events" / "experiments" / "v2-multi-run"
+            # Create events file in flat format
+            exp_dir = mock_workspace / ".events" / "experiments"
             exp_dir.mkdir(parents=True, exist_ok=True)
-            events_file = exp_dir / "events-1.jsonl"
+            events_file = exp_dir / "v2-multi-run-1.jsonl"
 
             # Write a job state change event
             event_data = {
@@ -413,10 +411,10 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            # Create events file in new subdirectory format
-            exp_dir = mock_workspace / ".events" / "experiments" / "v2-multi-run"
+            # Create events file in flat format
+            exp_dir = mock_workspace / ".events" / "experiments"
             exp_dir.mkdir(parents=True, exist_ok=True)
-            events_file = exp_dir / "events-1.jsonl"
+            events_file = exp_dir / "v2-multi-run-1.jsonl"
 
             # Write first event
             with open(events_file, "w") as f:
@@ -548,10 +546,10 @@ class TestEventWatcher:
         provider.add_listener(lambda e: events_received.append(e))
 
         try:
-            # Create events file in new subdirectory format
-            exp_dir = mock_workspace / ".events" / "experiments" / "v2-multi-run"
+            # Create events file in flat format
+            exp_dir = mock_workspace / ".events" / "experiments"
             exp_dir.mkdir(parents=True, exist_ok=True)
-            events_file = exp_dir / "events-1.jsonl"
+            events_file = exp_dir / "v2-multi-run-1.jsonl"
 
             # Create then delete events file (simulates finalization)
             events_file.touch()
@@ -619,11 +617,11 @@ class TestEventWatcher:
 
         try:
             # Create events directory
-            exp_dir = mock_workspace / ".events" / "experiments" / "test-order"
+            exp_dir = mock_workspace / ".events" / "experiments"
             exp_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create events-1.jsonl with events
-            events_file_1 = exp_dir / "events-1.jsonl"
+            # Create test-order-1.jsonl with events
+            events_file_1 = exp_dir / "test-order-1.jsonl"
             with open(events_file_1, "w") as f:
                 for i in range(expected_file1_count):
                     f.write(
@@ -637,8 +635,8 @@ class TestEventWatcher:
                         + "\n"
                     )
 
-            # Immediately create events-2.jsonl (simulating rapid file switch)
-            events_file_2 = exp_dir / "events-2.jsonl"
+            # Immediately create test-order-2.jsonl (simulating rapid file switch)
+            events_file_2 = exp_dir / "test-order-2.jsonl"
             with open(events_file_2, "w") as f:
                 for i in range(expected_file2_count):
                     f.write(
@@ -1166,8 +1164,8 @@ class TestEventFileOrderingWithStartCount:
         try:
             experiment_id = "test-start-count"
 
-            # Create events directory structure
-            exp_events_dir = mock_workspace / ".events" / "experiments" / experiment_id
+            # Create events directory structure (flat format)
+            exp_events_dir = mock_workspace / ".events" / "experiments"
             exp_events_dir.mkdir(parents=True, exist_ok=True)
 
             # Create the experiment run directory with status.json containing
@@ -1184,8 +1182,8 @@ class TestEventFileOrderingWithStartCount:
             current_symlink = exp_dir / "current"
             current_symlink.symlink_to(run_id)
 
-            # Create events-0.jsonl (should be IGNORED because status says count=1)
-            events_file_0 = exp_events_dir / "events-0.jsonl"
+            # Create {experiment_id}-0.jsonl (should be IGNORED because status says count=1)
+            events_file_0 = exp_events_dir / f"{experiment_id}-0.jsonl"
             with open(events_file_0, "w") as f:
                 for i in range(3):
                     f.write(
@@ -1199,8 +1197,8 @@ class TestEventFileOrderingWithStartCount:
                         + "\n"
                     )
 
-            # Create events-1.jsonl with events
-            events_file_1 = exp_events_dir / "events-1.jsonl"
+            # Create {experiment_id}-1.jsonl with events
+            events_file_1 = exp_events_dir / f"{experiment_id}-1.jsonl"
             with open(events_file_1, "w") as f:
                 for i in range(expected_file1_count):
                     f.write(
@@ -1214,8 +1212,8 @@ class TestEventFileOrderingWithStartCount:
                         + "\n"
                     )
 
-            # Create events-2.jsonl
-            events_file_2 = exp_events_dir / "events-2.jsonl"
+            # Create {experiment_id}-2.jsonl
+            events_file_2 = exp_events_dir / f"{experiment_id}-2.jsonl"
             with open(events_file_2, "w") as f:
                 for i in range(expected_file2_count):
                     f.write(
@@ -1269,7 +1267,7 @@ class TestCrashRecovery:
         """Provider should consolidate orphaned events during initialization
 
         Scenario: Experiment crashed after writing events but before finalization.
-        The events-0.jsonl exists, status.json has events_count=0.
+        The {exp_id}-0.jsonl exists, status.json has events_count=0.
         On init, provider should apply events and remove events_count from status.json.
         """
         workspace = tmp_path
@@ -1280,11 +1278,13 @@ class TestCrashRecovery:
         exp_dir = workspace / "experiments" / experiment_id / run_id
         exp_dir.mkdir(parents=True)
 
-        # Create events directory with symlink
-        events_dir = workspace / ".events" / "experiments" / experiment_id
-        events_dir.mkdir(parents=True)
-        symlink = events_dir / "current"
-        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+        # Create 'current' symlink in experiment dir
+        exp_base = workspace / "experiments" / experiment_id
+        (exp_base / "current").symlink_to(run_id)
+
+        # Create events base directory (flat format)
+        events_base_dir = workspace / ".events" / "experiments"
+        events_base_dir.mkdir(parents=True)
 
         # Create status.json WITH events_count (indicates unprocessed events)
         status = {
@@ -1297,8 +1297,8 @@ class TestCrashRecovery:
         with open(exp_dir / "status.json", "w") as f:
             json.dump(status, f)
 
-        # Create orphaned event file with events
-        events_file = events_dir / "events-0.jsonl"
+        # Create orphaned event file with events (flat format)
+        events_file = events_base_dir / f"{experiment_id}-0.jsonl"
         events = [
             {
                 "event_type": "JobSubmittedEvent",
@@ -1343,7 +1343,7 @@ class TestCrashRecovery:
 
             # Event files should be archived and cleaned up
             assert not events_file.exists(), "Temp event file should be removed"
-            assert not events_dir.exists() or not any(events_dir.glob("events-*.jsonl"))
+            assert not any(events_base_dir.glob(f"{experiment_id}-*.jsonl"))
 
             # Permanent events should be archived
             perm_events_dir = exp_dir / "events"
@@ -1365,11 +1365,13 @@ class TestCrashRecovery:
         exp_dir = workspace / "experiments" / experiment_id / run_id
         exp_dir.mkdir(parents=True)
 
-        # Create events directory with symlink
-        events_dir = workspace / ".events" / "experiments" / experiment_id
-        events_dir.mkdir(parents=True)
-        symlink = events_dir / "current"
-        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+        # Create 'current' symlink in experiment dir
+        exp_base = workspace / "experiments" / experiment_id
+        (exp_base / "current").symlink_to(run_id)
+
+        # Create events base directory (flat format)
+        events_base_dir = workspace / ".events" / "experiments"
+        events_base_dir.mkdir(parents=True)
 
         # Create status.json WITHOUT events_count (already consolidated)
         status = {
@@ -1383,8 +1385,8 @@ class TestCrashRecovery:
         with open(exp_dir / "status.json", "w") as f:
             json.dump(status, f)
 
-        # Create stale event file (should be cleaned up)
-        events_file = events_dir / "events-0.jsonl"
+        # Create stale event file (flat format, should be cleaned up)
+        events_file = events_base_dir / f"{experiment_id}-0.jsonl"
         with open(events_file, "w") as f:
             f.write(json.dumps({"event_type": "TestEvent"}) + "\n")
 
@@ -1407,8 +1409,8 @@ class TestCrashRecovery:
     def test_consolidates_multiple_event_files(self, tmp_path):
         """Provider should consolidate multiple event files in order
 
-        When events_count=1, events-0.jsonl is already processed.
-        Events from events-1.jsonl and events-2.jsonl should be applied.
+        When events_count=1, {exp_id}-0.jsonl is already processed.
+        Events from {exp_id}-1.jsonl and {exp_id}-2.jsonl should be applied.
         """
         workspace = tmp_path
         experiment_id = "multi-events-exp"
@@ -1418,26 +1420,28 @@ class TestCrashRecovery:
         exp_dir = workspace / "experiments" / experiment_id / run_id
         exp_dir.mkdir(parents=True)
 
-        # Create events directory with symlink
-        events_dir = workspace / ".events" / "experiments" / experiment_id
-        events_dir.mkdir(parents=True)
-        symlink = events_dir / "current"
-        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+        # Create 'current' symlink in experiment dir
+        exp_base = workspace / "experiments" / experiment_id
+        (exp_base / "current").symlink_to(run_id)
 
-        # Create status.json with events_count=1 (events-0 already processed)
+        # Create events base directory (flat format)
+        events_base_dir = workspace / ".events" / "experiments"
+        events_base_dir.mkdir(parents=True)
+
+        # Create status.json with events_count=1 ({exp_id}-0 already processed)
         status = {
             "experiment_id": experiment_id,
             "run_id": run_id,
             "status": "running",
             "events_count": 1,
             "started_at": "2026-01-01T10:00:00",
-            "job_states": {"old-job": "done"},  # From events-0
+            "job_states": {"old-job": "done"},  # From file 0
         }
         with open(exp_dir / "status.json", "w") as f:
             json.dump(status, f)
 
-        # Create events-0.jsonl (already processed, should be ignored for consolidation)
-        with open(events_dir / "events-0.jsonl", "w") as f:
+        # Create {exp_id}-0.jsonl (already processed, should be ignored for consolidation)
+        with open(events_base_dir / f"{experiment_id}-0.jsonl", "w") as f:
             f.write(
                 json.dumps(
                     {
@@ -1450,8 +1454,8 @@ class TestCrashRecovery:
                 + "\n"
             )
 
-        # Create events-1.jsonl (should be processed)
-        with open(events_dir / "events-1.jsonl", "w") as f:
+        # Create {exp_id}-1.jsonl (should be processed)
+        with open(events_base_dir / f"{experiment_id}-1.jsonl", "w") as f:
             f.write(
                 json.dumps(
                     {
@@ -1466,8 +1470,8 @@ class TestCrashRecovery:
                 + "\n"
             )
 
-        # Create events-2.jsonl with completion event
-        with open(events_dir / "events-2.jsonl", "w") as f:
+        # Create {exp_id}-2.jsonl with completion event
+        with open(events_base_dir / f"{experiment_id}-2.jsonl", "w") as f:
             f.write(
                 json.dumps(
                     {
@@ -1511,8 +1515,8 @@ class TestCrashRecovery:
             assert updated_status["job_states"]["old-job"] == "done"
             assert updated_status["job_states"]["new-job-1"] == "done"
 
-            # All temp event files should be cleaned up
-            assert not any(events_dir.glob("events-*.jsonl"))
+            # All flat event files should be cleaned up
+            assert not any(events_base_dir.glob(f"{experiment_id}-*.jsonl"))
         finally:
             provider.close()
 
@@ -1529,14 +1533,16 @@ class TestCrashRecovery:
         exp_dir = workspace / "experiments" / experiment_id / run_id
         exp_dir.mkdir(parents=True)
 
-        # Create events directory with symlink
-        events_dir = workspace / ".events" / "experiments" / experiment_id
-        events_dir.mkdir(parents=True)
-        symlink = events_dir / "current"
-        symlink.symlink_to(f"../../../experiments/{experiment_id}/{run_id}")
+        # Create 'current' symlink in experiment dir
+        exp_base = workspace / "experiments" / experiment_id
+        (exp_base / "current").symlink_to(run_id)
 
-        # Create events-0.jsonl with events
-        events_file = events_dir / "events-0.jsonl"
+        # Create events base directory (flat format)
+        events_base_dir = workspace / ".events" / "experiments"
+        events_base_dir.mkdir(parents=True)
+
+        # Create {exp_id}-0.jsonl with events
+        events_file = events_base_dir / f"{experiment_id}-0.jsonl"
         events = [
             {
                 "event_type": "JobSubmittedEvent",
