@@ -491,18 +491,28 @@ class StateProvider(ABC):
         Returns:
             Tuple of (success, message)
         """
-        # Check if job is running - cannot delete running jobs
-        if job.state and job.state.running():
-            return False, f"Cannot delete running job {job.identifier}"
+        # Only allow deletion of finished or unscheduled jobs
+        if job.state and not (job.state.finished() or job.state.is_unscheduled()):
+            return (
+                False,
+                f"Cannot delete job {job.identifier} (state: {job.state.name})",
+            )
 
         # Use clean_job for the actual deletion
-        if self.clean_job(job, perform=perform):
-            if perform:
-                return True, f"Deleted job {job.identifier}"
+        try:
+            if self.clean_job(job, perform=perform):
+                if perform:
+                    return True, f"Deleted job {job.identifier}"
+                else:
+                    return True, f"Job {job.identifier} can be deleted"
             else:
-                return True, f"Job {job.identifier} can be deleted"
-        else:
-            return False, f"Failed to delete job {job.identifier}"
+                state_name = job.state.name if job.state else "unknown"
+                return (
+                    False,
+                    f"Failed to delete job {job.identifier} (state: {state_name})",
+                )
+        except Exception as e:
+            return False, f"Failed to delete job {job.identifier}: {e}"
 
     def delete_experiment(
         self, experiment_id: str, delete_jobs: bool = False, perform: bool = True

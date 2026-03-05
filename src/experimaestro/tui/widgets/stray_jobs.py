@@ -402,12 +402,15 @@ class OrphanJobsPanel(_JobListPanel):
     def _delete_job(self, job) -> None:
         def handle_delete(confirmed: bool) -> None:
             if confirmed:
-                success, msg = self.state_provider.delete_job_safely(job)
-                if success:
-                    self.notify(msg, severity="information")
-                    self.refresh_jobs()
-                else:
-                    self.notify(msg, severity="error")
+                try:
+                    success, msg = self.state_provider.delete_job_safely(job)
+                    if success:
+                        self.notify(msg, severity="information")
+                        self.refresh_jobs()
+                    else:
+                        self.notify(msg, severity="error")
+                except Exception as e:
+                    self.notify(f"Delete failed: {e}", severity="error")
 
         self.app.push_screen(
             DeleteConfirmScreen("orphan job", job.identifier), handle_delete

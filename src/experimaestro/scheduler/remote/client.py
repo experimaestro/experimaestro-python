@@ -1084,6 +1084,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         params = {
             "job_id": job.identifier,
+            "task_id": job.task_id,
             "experiment_id": getattr(job, "experiment_id", ""),
             "run_id": getattr(job, "run_id", ""),
             "perform": True,

@@ -1799,8 +1799,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
             raise RuntimeError(f"Failed to kill process: {e}") from e
 
     def clean_job(self, job: MockJob, perform: bool = False) -> bool:
-        """Clean a finished job"""
-        if not job.state.finished():
+        """Clean a finished or unscheduled job"""
+        if job.state and not (job.state.finished() or job.state.is_unscheduled()):
             return False
 
         if not perform:
