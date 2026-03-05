@@ -1145,16 +1145,11 @@ class TestEventSerialization:
             exit_code=None,
             retry_count=2,
             progress=[],
-            from_experiment=False,
             timestamp=1704067260.0,
         )
 
         # Server side: serialize using asdict (as server.py does)
         event_dict = asdict(event)
-
-        # Verify from_experiment is in the serialized dict
-        assert "from_experiment" in event_dict
-        assert event_dict["from_experiment"] is False
 
         # Client side: deserialize using EventBase.from_dict
         from experimaestro.scheduler.state_status import EventBase
@@ -1166,33 +1161,7 @@ class TestEventSerialization:
         assert isinstance(restored, JobStateChangedEvent)
         assert restored.job_id == "job123"
         assert restored.state == "running"
-        assert restored.from_experiment is False
         assert restored.retry_count == 2
-
-    def test_job_state_changed_event_from_experiment_true(self):
-        """Test that from_experiment=True is preserved through serialization"""
-        from experimaestro.scheduler.state_status import JobStateChangedEvent, EventBase
-        from dataclasses import asdict
-
-        # Create event with from_experiment=True (as experiment events set it)
-        event = JobStateChangedEvent(
-            job_id="job456",
-            state="done",
-            from_experiment=True,
-            timestamp=1704067260.0,
-        )
-
-        # Server side: serialize
-        event_dict = asdict(event)
-        assert event_dict["from_experiment"] is True
-
-        # Client side: deserialize
-        restored = EventBase.from_dict(
-            {"event_type": "JobStateChangedEvent", **event_dict}
-        )
-
-        assert isinstance(restored, JobStateChangedEvent)
-        assert restored.from_experiment is True
 
     def test_job_submitted_event_serialization(self):
         """Test JobSubmittedEvent serialization through SSH pipeline"""
@@ -1444,7 +1413,6 @@ class TestServerEventNotification:
         event = JobStateChangedEvent(
             job_id="job123",
             state="running",
-            from_experiment=True,
             timestamp=1704067260.0,
         )
 
@@ -1460,8 +1428,6 @@ class TestServerEventNotification:
         assert notification_data["params"]["event_type"] == "JobStateChangedEvent"
         assert notification_data["params"]["data"]["job_id"] == "job123"
         assert notification_data["params"]["data"]["state"] == "running"
-        # The from_experiment field should be in the notification
-        assert notification_data["params"]["data"]["from_experiment"] is True
 
     def test_server_on_state_event_job_progress(self, mock_state_provider, tmp_path):
         """Test server converts JobProgressEvent to notification"""
@@ -1525,7 +1491,6 @@ class TestClientEventHandling:
                 "data": {
                     "job_id": "job123",
                     "state": "running",
-                    "from_experiment": True,
                     "timestamp": 1704067260.0,
                 },
             },
@@ -1534,7 +1499,6 @@ class TestClientEventHandling:
         assert isinstance(event, JobStateChangedEvent)
         assert event.job_id == "job123"
         assert event.state == "running"
-        assert event.from_experiment is True
 
     def test_client_notification_to_event_job_progress(self, client):
         """Test client converts notification to JobProgressEvent"""
@@ -1652,7 +1616,6 @@ class TestWorkspaceToServerEventFlow:
             WorkspaceStateProvider,
         )
         from experimaestro.scheduler.state_status import (
-            JobStateChangedEvent,
             ExperimentEventWriter,
         )
         from experimaestro.scheduler.interfaces import ExperimentStatus
@@ -1681,11 +1644,8 @@ class TestWorkspaceToServerEventFlow:
         )
 
         # Create symlink for "current" run
-        events_dir = workspace / ".events" / "experiments" / "test_exp"
-        events_dir.mkdir(parents=True, exist_ok=True)
-        (events_dir / "current").symlink_to(
-            workspace / "experiments" / "test_exp" / "run_001"
-        )
+        exp_dir = workspace / "experiments" / "test_exp"
+        (exp_dir / "current").symlink_to("run_001")
 
         # Create provider and register listener
         received_events = []
@@ -1697,10 +1657,16 @@ class TestWorkspaceToServerEventFlow:
         provider = WorkspaceStateProvider(workspace)
         provider.add_listener(listener)
 
-        # Write an event
-        event = JobStateChangedEvent(
+        # Write an ExperimentJobStateEvent (experiment event files no longer
+        # contain JobStateChangedEvent)
+        from experimaestro.scheduler.state_status import ExperimentJobStateEvent
+
+        event = ExperimentJobStateEvent(
             job_id="job123",
-            state="running",
+            task_id="test.task",
+            experiment_id="test_exp",
+            run_id="run_001",
+            scheduler_state="running",
             timestamp=time.time(),
         )
         event_writer.write_event(event)
@@ -1719,12 +1685,10 @@ class TestWorkspaceToServerEventFlow:
         job_events = [
             e
             for e in received_events
-            if isinstance(e, JobStateChangedEvent) and e.job_id == "job123"
+            if isinstance(e, ExperimentJobStateEvent) and e.job_id == "job123"
         ]
         assert len(job_events) >= 1
-        assert job_events[0].state == "running"
-        # from_experiment should be True because it came from experiment events
-        assert job_events[0].from_experiment is True
+        assert job_events[0].scheduler_state == "running"
 
     def test_listener_receives_job_progress_event(self, tmp_path):
         """Test that listener receives JobProgressEvent when written to event file"""
@@ -1762,11 +1726,8 @@ class TestWorkspaceToServerEventFlow:
         )
 
         # Create symlink for "current" run
-        events_dir = workspace / ".events" / "experiments" / "test_exp"
-        events_dir.mkdir(parents=True, exist_ok=True)
-        (events_dir / "current").symlink_to(
-            workspace / "experiments" / "test_exp" / "run_001"
-        )
+        exp_dir = workspace / "experiments" / "test_exp"
+        (exp_dir / "current").symlink_to("run_001")
 
         # Create provider and register listener
         received_events = []
@@ -1777,7 +1738,7 @@ class TestWorkspaceToServerEventFlow:
         provider = WorkspaceStateProvider(workspace)
         provider.add_listener(listener)
 
-        # Write a progress event
+        # Write a progress event (after provider started watching)
         event = JobProgressEvent(
             job_id="job456",
             level=0,

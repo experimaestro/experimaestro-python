@@ -583,13 +583,15 @@ class Scheduler(StateProvider, threading.Thread):
                     logger.debug("Stopped job event reader for %s", path)
                 self._job_event_readers.clear()
 
-    def _on_job_created(self, entity_id: str) -> bool:
+    def _on_job_created(self, entity_id: str, events: list) -> bool:
         """Handle new job discovery from EventReader.
 
         Only follow jobs that this scheduler knows about (was submitted to it).
+        Applies historical events in bulk and emits a single notification.
 
         Args:
             entity_id: Job entity ID in format "{task_id}:{job_id}"
+            events: Historical events collected during catch-up
 
         Returns:
             True if this scheduler should follow the job's events
@@ -597,14 +599,27 @@ class Scheduler(StateProvider, threading.Thread):
         # Parse entity_id (full_id) to get job_id
         _task_id, job_id = BaseJob.parse_full_id(entity_id)
         # Only follow jobs that this scheduler is managing
-        found = job_id in self.jobs
+        job = self.jobs.get(job_id)
+        if job is None:
+            logger.debug(
+                "Job created event for %s (job_id=%s): rejected (not in scheduler)",
+                entity_id,
+                job_id[:8] if job_id else "",
+            )
+            return False
+
         logger.debug(
-            "Job created event for %s (job_id=%s): %s",
+            "Job created event for %s (job_id=%s): accepted (%d events)",
             entity_id,
             job_id[:8] if job_id else "",
-            "accepted" if found else "rejected (not in scheduler)",
+            len(events),
         )
-        return found
+
+        if events:
+            job.apply_events(events)
+            self.notify_job_state(job)
+
+        return True
 
     def _on_job_event(self, entity_id: str, event) -> None:
         """Handle job events from EventReader
@@ -725,29 +740,7 @@ class Scheduler(StateProvider, threading.Thread):
             return
 
         # Apply events in bulk to the job (no notifications per event)
-        for event in events:
-            if isinstance(event, JobProgressEvent):
-                job.set_progress(event.level, event.progress, event.desc)
-            elif isinstance(event, JobStateChangedEvent):
-                # Apply execution state from event
-                new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
-                if new_state is not None:
-                    job.set_state(new_state, loading=True)
-                if event.started_time and job.starttime is None:
-                    job.starttime = deserialize_to_datetime(event.started_time)
-                if event.ended_time and job.endtime is None:
-                    job.endtime = deserialize_to_datetime(event.ended_time)
-            elif isinstance(event, CarbonMetricsEvent):
-                job.carbon_metrics = CarbonMetricsData(
-                    co2_kg=event.co2_kg,
-                    energy_kwh=event.energy_kwh,
-                    cpu_power_w=event.cpu_power_w,
-                    gpu_power_w=event.gpu_power_w,
-                    ram_power_w=event.ram_power_w,
-                    duration_s=event.duration_s,
-                    region=event.region,
-                    is_final=event.is_final,
-                )
+        job.apply_events(events)
 
         # Single notification after consolidation
         self.notify_job_state(job)
@@ -828,7 +821,7 @@ class Scheduler(StateProvider, threading.Thread):
         self._notify_listeners(lambda lst, j: lst.on_job_submitted(j), job)
 
         # Also notify StateProvider-style listeners (for TUI etc.)
-        from experimaestro.scheduler.state_status import JobSubmittedEvent, JobTag
+        from experimaestro.scheduler.state_status import ExperimentJobStateEvent, JobTag
 
         # Get experiment info from job's experiments list
         for exp in job.experiments:
@@ -845,11 +838,12 @@ class Scheduler(StateProvider, threading.Thread):
             )
 
             job_info = run_info.job_infos.get(job.identifier) if run_info else None
-            event = JobSubmittedEvent(
+            event = ExperimentJobStateEvent(
                 experiment_id=experiment_id,
                 run_id=run_id,
                 job_id=job.identifier,
                 task_id=str(job.type.identifier),
+                scheduler_state="submitted",
                 tags=tags,
                 depends_on=depends_on,
                 submitted_time=serialize_timestamp(job_info.timestamp)

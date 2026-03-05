@@ -520,6 +520,10 @@ class ExperimaestroUI(App):
         """
         self._refresh_job_display(event.job_id)
 
+        # Update experiment stats (targeted, no full list scan)
+        for exp_list in self.query(ExperimentsList):
+            exp_list.update_experiment_stats(event.experiment_id)
+
     def _refresh_job_display(self, job_id: str) -> None:
         """Refresh job display for a specific job_id"""
         # Refresh all jobs tables that might contain this job
@@ -533,9 +537,8 @@ class ExperimaestroUI(App):
                     if job_detail_view.current_job_id == job_id:
                         job_detail_view.refresh_job_detail()
 
-        # Also update the experiment stats in the experiments list
-        for exp_list in self.query(ExperimentsList):
-            exp_list.refresh_experiments()
+        # Note: experiment stats are updated by _handle_experiment_job_state
+        # which has the experiment_id for targeted updates
 
     def _handle_job_progress(self, event: JobProgressEvent) -> None:
         """Handle JobProgressEvent - refresh job progress display
@@ -561,10 +564,6 @@ class ExperimaestroUI(App):
         # Refresh all jobs tables to show updated CO2
         for jobs_table in self.query(JobsTable):
             jobs_table.refresh_jobs()
-
-        # Refresh experiments list to show aggregated CO2
-        for exp_list in self.query(ExperimentsList):
-            exp_list.refresh_experiments()
 
         # Also refresh job detail if viewing this job
         for job_detail_container in self.query("#job-detail-container"):

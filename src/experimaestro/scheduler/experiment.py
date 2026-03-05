@@ -83,7 +83,6 @@ class StateListener:
         self.xp = xp
         self.experiment_id = experiment_id
         self.run_id = run_id
-        self._last_job_states: dict[str, str] = {}
 
     def on_job_submitted(self, job):
         """Called when job is submitted"""
@@ -91,17 +90,13 @@ class StateListener:
         pass
 
     def on_job_state_changed(self, job):
-        """Write job state change event to experiment event file"""
-        # Use the centralized state_changed_event() method from BaseJob
-        event = job.state_changed_event()
-        # Skip writing if the job state hasn't actually changed
-        # (filters out progress-only updates that don't change state)
-        last_state = self._last_job_states.get(event.job_id)
-        if last_state == event.state:
-            return
-        self._last_job_states[event.job_id] = event.state
-        # Write to experiment event file
-        self.event_writer.write_event(event)
+        """Job state changes are tracked via ExperimentJobStateEvent, not here.
+
+        JobStateChangedEvent is only written to job event files by the job
+        process itself. Experiment event files only contain
+        ExperimentJobStateEvent for scheduler lifecycle tracking.
+        """
+        pass
 
     def on_service_added(self, service):
         """Write service added event to filesystem"""
@@ -605,9 +600,9 @@ class experiment(BaseExperiment):
         with self.jobs_jsonl_path.open("a") as f:
             f.write(json.dumps(job_info.to_dict()) + "\n")
 
-        # Write job submitted event to filesystem (only in NORMAL mode)
+        # Write initial ExperimentJobStateEvent to filesystem (only in NORMAL mode)
         if self._event_writer is not None:
-            from .state_status import JobSubmittedEvent
+            from .state_status import ExperimentJobStateEvent, JobTag
 
             # Get dependency job IDs
             depends_on = []
@@ -618,10 +613,14 @@ class experiment(BaseExperiment):
 
             from experimaestro.scheduler.interfaces import serialize_timestamp
 
-            event = JobSubmittedEvent(
+            tags = [JobTag(key=k, value=v) for k, v in job_tags.items()]
+            event = ExperimentJobStateEvent(
                 job_id=job.identifier,
                 task_id=str(job.type.identifier),
-                tags=job_tags,
+                experiment_id=self.experiment_id,
+                run_id=self.run_id,
+                scheduler_state="submitted",
+                tags=tags,
                 depends_on=depends_on,
                 submitted_time=serialize_timestamp(time.time()),
             )

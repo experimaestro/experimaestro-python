@@ -268,11 +268,7 @@ class JobStateChangedEvent(JobEventBase):
 
     Fired when a job's execution state changes (scheduled, running, done, error, etc.)
     Timestamps are stored as ISO format strings for JSON serialization.
-
-    The from_experiment field distinguishes the source of the event:
-    - True: event came from experiment events (.events/experiments/)
-    - False: event came from job events (.events/jobs/)
-    This allows the state provider to prioritize job events over experiment events.
+    Only written to job event files (.events/jobs/), never to experiment event files.
     """
 
     state: str = ""
@@ -282,7 +278,6 @@ class JobStateChangedEvent(JobEventBase):
     exit_code: Optional[int] = None
     retry_count: int = 0
     progress: list[ProgressLevel] = field(default_factory=list)
-    from_experiment: bool = False  # True if event came from experiment events
 
 
 @dataclass
@@ -294,12 +289,18 @@ class ExperimentJobStateEvent(ExperimentEventBase, JobEventBase):
     This is the experiment/scheduler view of the job lifecycle, distinct from
     the execution state events (JobStateChangedEvent) written by the job process.
 
+    Supersedes JobSubmittedEvent: the initial event for a job includes tags,
+    depends_on, and submitted_time fields.
+
     Used by TUI and WebUI to track scheduler-level lifecycle transitions.
     """
 
     scheduler_state: str = ""
     failure_reason: Optional[str] = None
     run_id: str = ""
+    tags: list[JobTag] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
+    submitted_time: Optional[str] = None  # ISO format timestamp
 
 
 @dataclass
@@ -921,7 +922,11 @@ class ExperimentEventWriter(EventWriter):
         """Create/update symlink to current run directory
 
         The symlink is created at:
-        .events/experiments/{experiment_id}/current -> run_dir
+        experiments/{experiment_id}/current -> run_dir
+
+        This is placed in the main experiments directory (not .events/) to
+        avoid the file watcher following the symlink into job permanent
+        storage directories.
         """
         run_dir = self.experiment.run_dir
         if run_dir is None:
@@ -930,20 +935,26 @@ class ExperimentEventWriter(EventWriter):
         # Ensure the experiment events directory exists
         self._events_dir.mkdir(parents=True, exist_ok=True)
 
-        # Handle legacy: if experiment_id path is a symlink (old format), remove it
-        # Check both old .experimaestro and current .events paths
+        # Handle legacy: remove old symlinks from .experimaestro and .events
         for events_base in [".experimaestro", ".events"]:
             experiments_dir = self.workspace_path / events_base / "experiments"
+            # Old format: symlink was the experiment_id directory itself
             old_symlink = experiments_dir / self.experiment_id
             if old_symlink.is_symlink():
                 old_symlink.unlink()
+            # Previous format: current symlink inside .events experiment dir
+            old_current = experiments_dir / self.experiment_id / "current"
+            if old_current.is_symlink():
+                old_current.unlink()
 
-        # Create symlink inside the experiment directory
-        symlink = self._events_dir / "current"
+        # Create symlink in the main experiment directory
+        exp_dir = self.workspace_path / "experiments" / self.experiment_id
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        symlink = exp_dir / "current"
 
         # Compute relative path from symlink location to run_dir
         try:
-            rel_path = os.path.relpath(run_dir, self._events_dir)
+            rel_path = os.path.relpath(run_dir, exp_dir)
         except ValueError:
             # On Windows, relpath fails for paths on different drives
             rel_path = str(run_dir)
@@ -1030,8 +1041,10 @@ class WatchedDirectory:
         events_count_resolver: Optional function that returns the starting
             events_count for an entity. When None, defaults to 0 (process all files).
             Replaces reading events_count from status.json in the entity directory.
-        on_created: Callback when a new entity is discovered. Returns True to follow
-            this entity's events, False to ignore. If None, all entities are followed.
+        on_created: Callback when a new entity is discovered. Receives (entity_id, events)
+            where events is the list of historical events read during catch-up. Returns
+            True to follow this entity's events, False to ignore. If None, all entities
+            are followed.
         on_event: Callback for each event (entity_id, event).
         on_deleted: Callback when entity's event files are deleted.
     """
@@ -1046,7 +1059,7 @@ class WatchedDirectory:
     # For resolving starting events_count per entity:
     events_count_resolver: EventsCountResolver | None = None
     # Callbacks for entity lifecycle
-    on_created: Callable[[str], bool] | None = None
+    on_created: Callable[[str, list[EventBase]], bool] | None = None
     on_event: Callable[[str, EventBase], None] | None = None
     on_deleted: Callable[[str], None] | None = None
 
@@ -1060,7 +1073,6 @@ class EventReader:
     - One-shot reading: read_events_since_count()
     - Incremental reading: read_new_events() - tracks file positions
     - File watching: start_watching(), stop_watching() - uses watchdog
-    - Buffered mode: buffer events during initialization, flush after
     - Entity tracking: on_created callback determines which entities to follow
     """
 
@@ -1079,10 +1091,6 @@ class EventReader:
         self._file_watcher: DirectoryWatch | None = None
         # Set of entity IDs being followed (entity_id -> dir_config)
         self._followed_entities: dict[str, WatchedDirectory] = {}
-        # Buffering mode: queue events instead of forwarding immediately
-        self._buffering = False
-        self._event_buffer: list[tuple[str, WatchedDirectory, EventBase]] = []
-        self._deleted_buffer: list[tuple[str, WatchedDirectory]] = []
         # Per-entity tracking: entity_id -> path of the file currently being tailed
         self._current_file: dict[str, Path] = {}
         # All watches (for finding the right one per path)
@@ -1254,14 +1262,21 @@ class EventReader:
 
         return entities
 
-    def _register_entity(self, entity_id: str, dir_config: WatchedDirectory) -> bool:
+    def _register_entity(
+        self,
+        entity_id: str,
+        dir_config: WatchedDirectory,
+        events: list[EventBase] | None = None,
+    ) -> bool:
         """Register an entity to be followed.
 
-        Calls on_created callback if present. Returns True if entity should be followed.
+        Calls on_created callback if present, passing historical events.
+        Returns True if entity should be followed.
 
         Args:
             entity_id: Entity identifier
             dir_config: Directory configuration for this entity
+            events: Historical events collected during catch-up (passed to on_created)
 
         Returns:
             True if entity is now being followed, False if rejected
@@ -1271,7 +1286,7 @@ class EventReader:
 
         # Call on_created callback if present
         if dir_config.on_created is not None:
-            if not dir_config.on_created(entity_id):
+            if not dir_config.on_created(entity_id, events or []):
                 return False  # Callback rejected this entity
 
         self._followed_entities[entity_id] = dir_config
@@ -1295,11 +1310,11 @@ class EventReader:
         # Files to track: only the latest file per entity
         files_to_track: list[Path] = []
 
-        # Register entities and replay events for followed ones
+        # Register entities and collect events for followed ones
         for entity_id, (dir_config, event_files) in entities.items():
-            if not self._register_entity(entity_id, dir_config):
-                continue
             if not event_files:
+                if not self._register_entity(entity_id, dir_config):
+                    continue
                 continue
 
             # Get starting events_count via resolver
@@ -1312,14 +1327,31 @@ class EventReader:
                 if fn is not None and fn >= min_count:
                     relevant_files.append(ef)
 
+            # Collect all historical events
+            collected_events: list[EventBase] = []
             if relevant_files:
                 for event_file in relevant_files:
-                    self._replay_events_from_file(event_file, entity_id, dir_config)
+                    collected_events.extend(self._read_events_from_file(event_file))
 
-            # Track only the latest file
-            latest = event_files[-1]  # sorted by name in _discover
-            self._current_file[entity_id] = latest
-            files_to_track.append(latest)
+            if not self._register_entity(entity_id, dir_config, collected_events):
+                continue
+
+            # When on_created is None, deliver events via on_event
+            if dir_config.on_created is None and dir_config.on_event:
+                for event in collected_events:
+                    try:
+                        dir_config.on_event(entity_id, event)
+                    except Exception:
+                        logger.exception("Error in on_event callback")
+
+            # Track only the latest relevant file (skip files below events_count
+            # to avoid reading old events when the job appends to them)
+            if relevant_files:
+                latest = relevant_files[-1]
+                self._current_file[entity_id] = latest
+                files_to_track.append(latest)
+            # else: no current_file — _process_file_change will do
+            # catch-up with events_count filtering when a new file appears
 
         # Create a DirectoryWatch for each directory (via FileWatcherService)
         svc = FileWatcherService.instance()
@@ -1488,43 +1520,6 @@ class EventReader:
             logger.warning("Failed to read events from %s: %s", path, e)
         return events
 
-    def _replay_events_from_file(
-        self, path: Path, entity_id: str, dir_config: WatchedDirectory
-    ) -> None:
-        """Replay all events from a file, calling on_event for each.
-
-        Updates file position tracking so subsequent calls don't re-read.
-        """
-        try:
-            with path.open("r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event_dict = json.loads(line)
-                        event = EventBase.from_dict(event_dict)
-                        if self._buffering:
-                            self._event_buffer.append((entity_id, dir_config, event))
-                        elif dir_config.on_event:
-                            try:
-                                dir_config.on_event(entity_id, event)
-                            except Exception:
-                                logger.exception("Error in on_event callback")
-                    except json.JSONDecodeError:
-                        pass
-                # Mark file as fully read
-                end_pos = f.tell()
-                watch = self._find_watcher(path)
-                if watch and watch._tailed_pool is not None:
-                    watch.set_tail_position(path, end_pos)
-                else:
-                    self._file_positions[path] = end_pos
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger.warning("Failed to replay events from %s: %s", path, e)
-
     def _extract_file_number(self, path: Path) -> int | None:
         """Extract the file number from event file name.
 
@@ -1575,16 +1570,13 @@ class EventReader:
         logger.debug("Processing file change for entity %s: %s", entity_id, path)
 
         # Check if this entity is being followed
-        if entity_id not in self._followed_entities:
-            # New entity - try to register it
-            if not self._register_entity(entity_id, dir_config):
-                return  # Entity rejected by on_created
+        is_new = entity_id not in self._followed_entities
 
         file_number = self._extract_file_number(path)
         current = self._current_file.get(entity_id)
         current_number = self._extract_file_number(current) if current else None
 
-        if current is None:
+        if is_new or current is None:
             # First file for this entity: catch up from events_count
             min_count = self._get_entity_events_count(entity_id, dir_config)
 
@@ -1592,19 +1584,45 @@ class EventReader:
             if file_number is not None and file_number < min_count:
                 return
 
+            # Collect catch-up events from earlier files
+            collected_events: list[EventBase] = []
             entity_dir = path.parent
             prefix = self._extract_file_prefix(path)
 
             if file_number is not None and prefix:
-                # Process earlier files from min_count up to (but not including)
-                # the notified file
                 for earlier_num in range(min_count, file_number):
                     earlier_path = entity_dir / f"{prefix}{earlier_num}.jsonl"
                     if earlier_path.exists():
-                        self._process_single_file(earlier_path, entity_id, dir_config)
+                        collected_events.extend(
+                            self._read_events_from_file(earlier_path)
+                        )
+
+            # Also read the notified file itself for catch-up
+            collected_events.extend(self._read_events_from_file(path))
+
+            if is_new:
+                if not self._register_entity(entity_id, dir_config, collected_events):
+                    return  # Entity rejected by on_created
+
+                # When on_created is None, events were not delivered to any
+                # callback — fall through to deliver via on_event
+                if dir_config.on_created is not None:
+                    # on_created handled the events
+                    self._current_file[entity_id] = path
+                    return
+
+            # Deliver events via on_event (either already-followed entity
+            # with no current file, or new entity with no on_created)
+            if dir_config.on_event and collected_events:
+                for event in collected_events:
+                    try:
+                        dir_config.on_event(entity_id, event)
+                    except Exception:
+                        logger.exception("Error in on_event callback")
 
             # Set current file to the notified file
             self._current_file[entity_id] = path
+            return  # Already read this file during catch-up
         elif file_number is not None and current_number is not None:
             if file_number > current_number:
                 # Rotation: drain current file first, then switch
@@ -1619,7 +1637,7 @@ class EventReader:
     def _process_single_file(
         self, path: Path, entity_id: str, dir_config: WatchedDirectory
     ) -> None:
-        """Process a single event file and notify callbacks (or buffer)"""
+        """Process a single event file and notify callbacks"""
         watch = self._find_watcher(path)
         if watch and watch._tailed_pool is not None:
             # Use tailed file pool for efficient reading
@@ -1631,9 +1649,7 @@ class EventReader:
                 try:
                     event_dict = json.loads(line)
                     event = EventBase.from_dict(event_dict)
-                    if self._buffering:
-                        self._event_buffer.append((entity_id, dir_config, event))
-                    elif dir_config.on_event:
+                    if dir_config.on_event:
                         try:
                             dir_config.on_event(entity_id, event)
                         except Exception:
@@ -1659,11 +1675,7 @@ class EventReader:
                         try:
                             event_dict = json.loads(line)
                             event = EventBase.from_dict(event_dict)
-                            if self._buffering:
-                                self._event_buffer.append(
-                                    (entity_id, dir_config, event)
-                                )
-                            elif dir_config.on_event:
+                            if dir_config.on_event:
                                 try:
                                     dir_config.on_event(entity_id, event)
                                 except Exception:
@@ -1705,40 +1717,41 @@ class EventReader:
         # Try to read remaining events from permanent storage
         if dir_config and dir_config.permanent_storage_resolver:
             permanent_dir = dir_config.permanent_storage_resolver(entity_id)
+            min_count = self._get_entity_events_count(entity_id, dir_config)
 
-            # Read any events from permanent storage that we haven't processed
-            events = self._read_events_from_permanent(permanent_dir, entity_id)
+            # Read only events from files >= events_count (older ones are
+            # already consolidated into status.json)
+            events = self._read_events_from_permanent(
+                permanent_dir, entity_id, min_count=min_count
+            )
             for event in events:
-                if self._buffering:
-                    self._event_buffer.append((entity_id, dir_config, event))
-                elif dir_config.on_event:
+                if dir_config.on_event:
                     try:
                         dir_config.on_event(entity_id, event)
                     except Exception:
                         logger.exception("Error in on_event callback")
 
         # Notify deletion callback
-        if dir_config:
-            if self._buffering:
-                self._deleted_buffer.append((entity_id, dir_config))
-            elif dir_config.on_deleted:
-                try:
-                    dir_config.on_deleted(entity_id)
-                except Exception:
-                    logger.exception("Error in on_deleted callback")
+        if dir_config and dir_config.on_deleted:
+            try:
+                dir_config.on_deleted(entity_id)
+            except Exception:
+                logger.exception("Error in on_deleted callback")
 
         # Remove from followed entities and current file tracking
         self._followed_entities.pop(entity_id, None)
         self._current_file.pop(entity_id, None)
 
     def _read_events_from_permanent(
-        self, permanent_dir: Path, entity_id: str
+        self, permanent_dir: Path, entity_id: str, min_count: int = 0
     ) -> list[EventBase]:
         """Read events from permanent storage directory
 
         Args:
             permanent_dir: Path to permanent storage directory
             entity_id: Entity identifier (for logging)
+            min_count: Only read files with count >= this value (files below
+                are already consolidated into status.json)
 
         Returns:
             List of events read from permanent storage
@@ -1747,8 +1760,14 @@ class EventReader:
         if not permanent_dir.exists():
             return events
 
-        # Read all event files in permanent storage
+        # Read event files in permanent storage, skipping consolidated ones
         event_files = sorted(permanent_dir.glob("event-*.jsonl"))
+        if min_count > 0:
+            event_files = [
+                ef
+                for ef in event_files
+                if (fn := self._extract_file_number(ef)) is not None and fn >= min_count
+            ]
         for event_file in event_files:
             try:
                 with event_file.open("r") as f:
@@ -1774,42 +1793,6 @@ class EventReader:
                 entity_id,
             )
         return events
-
-    def start_buffering(self) -> None:
-        """Start buffering events instead of forwarding to callbacks
-
-        Call this before start_watching() to ensure events arriving
-        during initialization are queued and not lost.
-        """
-        self._buffering = True
-        self._event_buffer.clear()
-        self._deleted_buffer.clear()
-
-    def flush_buffer(self) -> None:
-        """Stop buffering and forward all buffered events to callbacks
-
-        Call this after initial state loading is complete.
-        """
-        self._buffering = False
-
-        # Forward buffered events
-        for entity_id, dir_config, event in self._event_buffer:
-            if dir_config.on_event:
-                try:
-                    dir_config.on_event(entity_id, event)
-                except Exception:
-                    logger.exception("Error in on_event callback")
-
-        # Forward buffered deletions
-        for entity_id, dir_config in self._deleted_buffer:
-            if dir_config.on_deleted:
-                try:
-                    dir_config.on_deleted(entity_id)
-                except Exception:
-                    logger.exception("Error in on_deleted callback")
-
-        self._event_buffer.clear()
-        self._deleted_buffer.clear()
 
     def read_events_since_count(
         self, entity_id: str, start_count: int, base_dir: Optional[Path] = None

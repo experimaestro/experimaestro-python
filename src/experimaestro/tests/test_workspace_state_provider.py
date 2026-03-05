@@ -142,15 +142,12 @@ def create_v2_experiment(
         env_data = {"run": {"status": run_status}}
         (run_dir / "environment.json").write_text(json.dumps(env_data))
 
-    # Create symlink for current run
+    # Create symlink for current run in main experiment directory
     if current_run:
-        symlinks_dir = workspace / ".events" / "experiments"
-        symlinks_dir.mkdir(parents=True, exist_ok=True)
-        symlink = symlinks_dir / experiment_id
-        if symlink.exists():
+        symlink = exp_dir / "current"
+        if symlink.is_symlink() or symlink.exists():
             symlink.unlink()
-        target = Path("../..") / "experiments" / experiment_id / current_run
-        symlink.symlink_to(target)
+        symlink.symlink_to(current_run)
 
     return exp_dir
 
@@ -601,8 +598,6 @@ class TestEventWatcher:
             with lock:
                 job_id = event.job_id
                 if job_id.startswith("file1-"):
-                    # Receiving file1 event after file2 started is OK
-                    # (file2 events wait for file1 to finish)
                     file1_events_received.append(job_id)
                     if len(file1_events_received) == expected_file1_count:
                         all_file1_received.set()
@@ -733,12 +728,9 @@ class TestJobStateFromJobEvents:
         }
         (exp_dir / "jobs.jsonl").write_text(json.dumps(job_info) + "\n")
 
-        # Create symlink for current run
-        symlinks_dir = workspace / ".events" / "experiments" / experiment_id
-        symlinks_dir.mkdir(parents=True, exist_ok=True)
-        symlink = symlinks_dir / "current"
-        target = Path("../../..") / "experiments" / experiment_id / run_id
-        symlink.symlink_to(target)
+        # Create symlink for current run in main experiment directory
+        symlink = exp_dir / "current"
+        symlink.symlink_to(run_id)
 
         # Create job directory with status.json showing "waiting"
         job_dir = workspace / "jobs" / task_id / job_id
@@ -1187,9 +1179,10 @@ class TestEventFileOrderingWithStartCount:
             with open(status_path, "w") as f:
                 json.dump({"events_count": 1, "status": "running"}, f)
 
-            # Create 'current' symlink in events dir pointing to run dir
-            current_symlink = exp_events_dir / "current"
-            current_symlink.symlink_to(exp_run_dir)
+            # Create 'current' symlink in experiment dir pointing to run dir
+            exp_dir = mock_workspace / "experiments" / experiment_id
+            current_symlink = exp_dir / "current"
+            current_symlink.symlink_to(run_id)
 
             # Create events-0.jsonl (should be IGNORED because status says count=1)
             events_file_0 = exp_events_dir / "events-0.jsonl"
@@ -1478,9 +1471,12 @@ class TestCrashRecovery:
             f.write(
                 json.dumps(
                     {
-                        "event_type": "JobStateChangedEvent",
+                        "event_type": "ExperimentJobStateEvent",
                         "job_id": "new-job-1",
-                        "state": "done",
+                        "task_id": "pkg.NewTask1",
+                        "experiment_id": experiment_id,
+                        "run_id": run_id,
+                        "scheduler_state": "done",
                         "timestamp": 1704103300.0,
                     }
                 )

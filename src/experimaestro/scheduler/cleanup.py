@@ -133,11 +133,44 @@ def _check_orphaned_experiment_events(
         if not event_files:
             continue  # No orphaned events
 
-        # Get current run_id from symlink
-        symlink = exp_events_dir / "current"
-        if not symlink.is_symlink():
-            logger.debug(f"No 'current' symlink for experiment {experiment_id}")
-            continue
+        # Get current run_id from symlink (check new and legacy locations)
+        symlink = None
+        for candidate in [
+            workspace_path / "experiments" / experiment_id / "current",
+            exp_events_dir / "current",
+        ]:
+            if candidate.is_symlink():
+                symlink = candidate
+                break
+
+        if symlink is None:
+            # No symlink found — try to create one from the latest run directory
+            # (run directories are named with timestamps like 20260101_150000)
+            exp_base = workspace_path / "experiments" / experiment_id
+            if exp_base.is_dir():
+                run_dirs = sorted(
+                    (d for d in exp_base.iterdir() if d.is_dir()),
+                    key=lambda d: d.name,
+                )
+                if run_dirs:
+                    latest_run = run_dirs[-1]
+                    symlink_path = exp_base / "current"
+                    try:
+                        symlink_path.symlink_to(latest_run.name)
+                        symlink = symlink_path
+                        logger.info(
+                            "Created missing 'current' symlink for experiment "
+                            f"{experiment_id} -> {latest_run.name}"
+                        )
+                    except OSError as e:
+                        logger.warning(
+                            f"Failed to create 'current' symlink for "
+                            f"experiment {experiment_id}: {e}"
+                        )
+
+            if symlink is None:
+                logger.debug(f"No 'current' symlink for experiment {experiment_id}")
+                continue
 
         try:
             run_dir = symlink.resolve()

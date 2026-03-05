@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from experimaestro.locking import create_file_lock
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from experimaestro.connectors import Process
     from experimaestro.scheduler.state_provider import CarbonMetricsData
     from experimaestro.scheduler.state_status import EventBase, JobStateChangedEvent
@@ -936,6 +938,11 @@ class BaseJob:
                 event.progress,
             )
 
+    def apply_events(self, events: "Iterable[EventBase]") -> None:
+        """Apply multiple events in bulk without per-event notifications."""
+        for event in events:
+            self.apply_event(event)
+
     def _cleanup_event_files(self) -> None:
         """Clean up job event files, applying pending events first.
 
@@ -1128,9 +1135,8 @@ class BaseJob:
                 except (json.JSONDecodeError, OSError):
                     pass
 
-            # Get new state and create event
+            # Get new state
             new_dict = self.state_dict()
-            event = self.state_changed_event()
 
             # Compare and write only if different
             status_written = False
@@ -1138,27 +1144,6 @@ class BaseJob:
                 self.status_path.parent.mkdir(parents=True, exist_ok=True)
                 self.status_path.write_text(json.dumps(new_dict))
                 status_written = True
-
-            # After consolidating status.json, write job state event to all experiments
-            # This ensures experiment events are immediately available when processing
-            # (solves: "job is over but experiment events not yet available")
-            experiments = getattr(self, "experiments", [])
-            if experiments:
-                for xp in experiments:
-                    if xp._event_writer is not None:
-                        try:
-                            xp._event_writer.write_event(event)
-                            logger.debug(
-                                "Wrote job state event for %s to experiment %s",
-                                self.identifier[:8],
-                                xp.name,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "Failed to write job state event to experiment %s: %s",
-                                xp.name,
-                                e,
-                            )
 
             return status_written
 
@@ -1635,6 +1620,11 @@ class BaseExperiment:
         # Default implementation does nothing
         # MockExperiment overrides this with actual event handling
         pass
+
+    def apply_events(self, events: "Iterable[EventBase]") -> None:
+        """Apply multiple events in bulk without per-event notifications."""
+        for event in events:
+            self.apply_event(event)
 
     def _raise_orphaned_events_warning(
         self, events_dir: Path, event_files: list[Path]

@@ -661,7 +661,7 @@ class TestEventReaderEntityRegistration:
 
         created_entities: list[str] = []
 
-        def on_created(entity_id: str) -> bool:
+        def on_created(entity_id: str, events: list) -> bool:
             created_entities.append(entity_id)
             return True  # Follow this entity
 
@@ -693,15 +693,15 @@ class TestEventReaderEntityRegistration:
                 )
                 f.write(event.to_json() + "\n")
 
-        received_events: list[str] = []
+        created_events: dict[str, list] = {}
 
-        def on_created(entity_id: str) -> bool:
+        def on_created(entity_id: str, events: list) -> bool:
+            created_events[entity_id] = events
             # Only follow entity1, ignore entity2
             return entity_id == "entity1"
 
         def on_event(entity_id: str, event: EventBase):
-            if isinstance(event, JobStateChangedEvent):
-                received_events.append(event.job_id)
+            pass
 
         reader = EventReader(
             WatchedDirectory(
@@ -714,9 +714,12 @@ class TestEventReaderEntityRegistration:
 
         reader.start_watching()
 
-        # Should only have events from entity1
-        assert "job-1" in received_events
-        assert "job-2" not in received_events
+        # Both entities should have on_created called with their events
+        assert "entity1" in created_events
+        assert len(created_events["entity1"]) == 1
+        assert "entity2" in created_events
+        # entity2 was rejected, but on_created was still called
+        assert len(created_events["entity2"]) == 1
 
         reader.stop_watching()
 
@@ -733,7 +736,7 @@ class TestEventReaderEntityRegistration:
 
         received_events: list[str] = []
 
-        def on_created(entity_id: str) -> bool:
+        def on_created(entity_id: str, events: list) -> bool:
             # Reject all entities initially
             return False
 
@@ -768,7 +771,7 @@ class TestEventReaderEntityRegistration:
         """follow() should bypass on_created and always succeed"""
         created_entities: list[str] = []
 
-        def on_created(entity_id: str) -> bool:
+        def on_created(entity_id: str, events: list) -> bool:
             created_entities.append(entity_id)
             return False  # Would reject, but follow bypasses this
 

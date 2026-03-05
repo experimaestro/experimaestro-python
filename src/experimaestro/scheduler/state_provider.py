@@ -743,11 +743,11 @@ class OfflineStateProvider(StateProvider):
         - JobSubmittedEvent: Adds new job to cache
         - ExperimentUpdatedEvent: Invalidates experiment cache
 
-        Subclasses may override this for additional logic (e.g., setting
-        from_experiment flag in WorkspaceStateProvider).
+        Subclasses may override this for additional logic.
         """
         from experimaestro.scheduler.state_status import (
             CarbonMetricsEvent,
+            ExperimentJobStateEvent,
             JobStateChangedEvent,
             JobProgressEvent,
             JobSubmittedEvent,
@@ -771,7 +771,29 @@ class OfflineStateProvider(StateProvider):
                         )
                         break
 
-        # Handle job submitted event - add to cache if we have task_id
+        # Handle ExperimentJobStateEvent with scheduler_state="submitted"
+        # (supersedes JobSubmittedEvent)
+        elif isinstance(event, ExperimentJobStateEvent):
+            if event.scheduler_state == "submitted" and event.task_id:
+                from experimaestro.scheduler.state_status import task_id_hash
+
+                cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
+                with self._job_cache_lock:
+                    if cache_key not in self._job_cache:
+                        job = MockJob(
+                            identifier=event.job_id,
+                            task_id=event.task_id,
+                            path=None,
+                            state="scheduled",
+                            starttime=None,
+                            endtime=None,
+                            progress=[],
+                            updated_at="",
+                        )
+                        self._job_cache[cache_key] = job
+                        logger.debug("Added job %s to cache from event", cache_key)
+
+        # Legacy: handle old JobSubmittedEvent from event files
         elif isinstance(event, JobSubmittedEvent):
             if event.task_id:
                 from experimaestro.scheduler.state_status import task_id_hash
@@ -779,7 +801,6 @@ class OfflineStateProvider(StateProvider):
                 cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
                 with self._job_cache_lock:
                     if cache_key not in self._job_cache:
-                        # Create a minimal MockJob for tracking
                         job = MockJob(
                             identifier=event.job_id,
                             task_id=event.task_id,
@@ -1098,28 +1119,13 @@ class MockJob(BaseJob):
     def apply_event(self, event: "EventBase") -> None:
         """Apply a job event to update this job's state.
 
-        Overrides BaseJob.apply_event to handle from_experiment flag:
-        - from_experiment=False (job events): high priority, sets _has_event_state
-        - from_experiment=True (experiment events): low priority, only sets
-          _experiment_status
+        All events here come from job event files (.events/jobs/).
         """
         from experimaestro.scheduler.state_status import JobStateChangedEvent
 
         if isinstance(event, JobStateChangedEvent):
-            if event.from_experiment:
-                # Event from experiment events - only update _experiment_status
-                # This is lower priority than job events
-                job_state = STATE_NAME_TO_JOBSTATE.get(
-                    event.state, JobState.UNSCHEDULED
-                )
-                self._experiment_status = job_state
-                # Don't call parent - we only want to update _experiment_status
-                return
-            else:
-                # Event from job events - high priority
-                self._has_event_state = True
+            self._has_event_state = True
 
-        # Call parent implementation for non-experiment events
         super().apply_event(event)
 
     def process_state_dict(self) -> dict | None:
@@ -1268,7 +1274,7 @@ class MockExperiment(BaseExperiment):
 
     Job state tracking:
     - _job_states: Dict[str, JobState] tracks the latest known state of each job
-      from experiment events (JobStateChangedEvent). This is used to provide
+      from experiment events (ExperimentJobStateEvent). This is used to provide
       _experiment_status to MockJob instances when they are loaded.
     """
 
@@ -1328,6 +1334,10 @@ class MockExperiment(BaseExperiment):
     @property
     def status(self) -> ExperimentStatus:
         return self._status
+
+    @status.setter
+    def status(self, value: ExperimentStatus) -> None:
+        self._status = value
 
     @property
     def job_infos(self) -> Dict[str, "ExperimentJobInformation"]:
@@ -1682,18 +1692,16 @@ class MockExperiment(BaseExperiment):
         from experimaestro.scheduler.state_status import (
             ExperimentJobStateEvent,
             JobSubmittedEvent,
-            JobStateChangedEvent,
             ServiceAddedEvent,
             ServiceStateChangedEvent,
             RunCompletedEvent,
         )
 
         if isinstance(event, JobSubmittedEvent):
-            # In merge mode, only add if not already present
+            # Legacy event type — still supported for reading old event files
             if merge_mode and event.job_id in self._job_infos:
                 return  # Already exists, skip
 
-            # Add lightweight job info (tags are stored in ExperimentJobInformation)
             self._job_infos[event.job_id] = ExperimentJobInformation(
                 job_id=event.job_id,
                 task_id=event.task_id,
@@ -1734,10 +1742,18 @@ class MockExperiment(BaseExperiment):
                     pass
             self._update_job_state(event.job_id, job_state, merge_mode)
 
-        elif isinstance(event, JobStateChangedEvent):
-            # Track individual job states from execution events
-            job_state = STATE_NAME_TO_JOBSTATE.get(event.state, JobState.UNSCHEDULED)
-            self._update_job_state(event.job_id, job_state, merge_mode)
+            # Populate job info from ExperimentJobStateEvent (supersedes
+            # JobSubmittedEvent) — only when tags/depends are present
+            if event.tags or event.depends_on:
+                if not (merge_mode and event.job_id in self._job_infos):
+                    self._job_infos[event.job_id] = ExperimentJobInformation(
+                        job_id=event.job_id,
+                        task_id=event.task_id,
+                        tags={t.key: t.value for t in event.tags} if event.tags else {},
+                        timestamp=event.timestamp,
+                    )
+                    if event.depends_on:
+                        self._dependencies[event.job_id] = event.depends_on
 
         elif isinstance(event, RunCompletedEvent):
             # Map status string to ExperimentStatus

@@ -119,12 +119,26 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if not no_cleanup:
             self._consolidate_orphaned_events()
 
+        # Remove legacy 'current' symlinks from .events/experiments/{id}/current
+        # to prevent watchdog from following them into permanent storage
+        self._cleanup_legacy_symlinks()
+
         self._start_watcher()
+
+    def _find_current_symlink(self, experiment_id: str) -> Path | None:
+        """Find the 'current' symlink for an experiment.
+
+        Location: experiments/{id}/current
+        """
+        symlink = self.workspace_path / "experiments" / experiment_id / "current"
+        if symlink.is_symlink():
+            return symlink
+        return None
 
     def _resolve_experiment_events_count(self, entity_id: str) -> int:
         """Resolve events_count for an experiment from its status.json"""
-        symlink = self._experiments_dir / entity_id / "current"
-        if not symlink.is_symlink():
+        symlink = self._find_current_symlink(entity_id)
+        if symlink is None:
             return 0
         try:
             run_dir = symlink.resolve()
@@ -206,6 +220,31 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # =========================================================================
     # Crash recovery: Consolidate orphaned events
     # =========================================================================
+
+    def _cleanup_legacy_symlinks(self) -> None:
+        """Remove legacy 'current' symlinks from .events/experiments/{id}/
+
+        These symlinks cause watchdog to follow into permanent storage
+        (.experimaestro/events/), generating spurious file change events.
+        The 'current' symlink now lives at experiments/{id}/current.
+        """
+        if not self._experiments_dir.exists():
+            return
+
+        for exp_dir in self._experiments_dir.iterdir():
+            if not exp_dir.is_dir():
+                continue
+            legacy_current = exp_dir / "current"
+            if legacy_current.is_symlink():
+                try:
+                    legacy_current.unlink()
+                    logger.info("Removed legacy 'current' symlink: %s", legacy_current)
+                except OSError as e:
+                    logger.warning(
+                        "Failed to remove legacy symlink %s: %s",
+                        legacy_current,
+                        e,
+                    )
 
     def _consolidate_orphaned_events(self) -> None:
         """Consolidate orphaned event files from crashed experiments/jobs
@@ -386,8 +425,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return  # No orphaned events
 
         # Get current run_id from symlink
-        symlink = exp_events_dir / "current"
-        if not symlink.is_symlink():
+        symlink = self._find_current_symlink(experiment_id)
+        if symlink is None:
             logger.debug(
                 "No 'current' symlink for experiment %s, skipping consolidation",
                 experiment_id,
@@ -638,9 +677,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Experiment event callbacks
     # =========================================================================
 
-    def _on_experiment_events_created(self, experiment_id: str) -> bool:
-        """Called when a new experiment is discovered. Pre-load into cache."""
-        logger.debug("Discovered experiment: %s", experiment_id)
+    def _on_experiment_events_created(self, experiment_id: str, events: list) -> bool:
+        """Called when a new experiment is discovered. Pre-load into cache
+        and apply historical events in bulk."""
+        logger.debug(
+            "Discovered experiment: %s (%d events)", experiment_id, len(events)
+        )
         self._invalidate_known_experiment_ids()
 
         # Get current run and pre-load experiment into cache
@@ -651,28 +693,39 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 exp = MockExperiment.from_disk(run_dir, self.workspace_path)
                 if exp is not None:
                     self._apply_pending_experiment_events(exp, experiment_id)
+                    if events:
+                        exp.apply_events(events)
                     cache_key = (experiment_id, run_id)
                     with self._experiment_cache_lock:
                         self._experiment_cache[cache_key] = exp
+                    logger.debug(
+                        "Experiment %s after on_created: status=%s, "
+                        "job_states=%s, services=%d",
+                        experiment_id,
+                        exp.status.name if hasattr(exp.status, "name") else exp.status,
+                        getattr(exp, "_job_states", {}),
+                        len(getattr(exp, "services", [])),
+                    )
+
+        # Forward events to listeners and emit summary notification
+        if events:
+            for event in events:
+                self._notify_state_listeners(event)
+            self._notify_state_listeners(
+                ExperimentUpdatedEvent(experiment_id=experiment_id)
+            )
 
         return True  # Follow all experiments
 
     def _on_experiment_event(self, experiment_id: str, event: EventBase) -> None:
         """Handle experiment event
 
-        Experiment events include both ExperimentEventBase (experiment-level events)
-        and JobEventBase (job events written to experiment's event file).
+        Experiment events include ExperimentEventBase (experiment-level events
+        like ExperimentJobStateEvent) and other events (services, etc.).
         """
-        from experimaestro.scheduler.state_status import JobStateChangedEvent
-
         logger.debug("Received experiment event for %s: %s", experiment_id, event)
 
-        # Mark JobStateChangedEvent as coming from experiment events
-        if isinstance(event, JobStateChangedEvent):
-            event.from_experiment = True
-
         # Update experiment status cache for all experiment events
-        # This includes JobStateChangedEvent which updates exp._job_states
         if isinstance(event, (ExperimentEventBase, JobEventBase)):
             self._handle_experiment_event(experiment_id, event)
 
@@ -698,14 +751,81 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Job event callbacks
     # =========================================================================
 
-    def _on_job_events_created(self, entity_id: str) -> bool:
-        """Called when a new job is discovered.
+    def _on_job_events_created(self, entity_id: str, events: list) -> bool:
+        """Called when a new job is discovered. Apply historical events in bulk.
 
         Args:
             entity_id: Job entity ID in format "{task_id}:{job_id}"
+            events: Historical events collected during catch-up
         """
+        from experimaestro.scheduler.state_status import JobEventBase
+
         task_id, job_id = BaseJob.parse_full_id(entity_id)
-        logger.debug("Discovered job: %s (task: %s)", job_id, task_id)
+        logger.debug(
+            "Discovered job: %s (task: %s, %d events)",
+            job_id,
+            task_id,
+            len(events),
+        )
+
+        if events:
+            cache_key = entity_id
+            with self._job_cache_lock:
+                job = self._job_cache.get(cache_key)
+                if job is None:
+                    # Try to get task_id from events
+                    ev_task_id = task_id
+                    for ev in events:
+                        if isinstance(ev, JobEventBase) and ev.task_id:
+                            ev_task_id = ev.task_id
+                            break
+
+                    if ev_task_id:
+                        job_path = self.workspace_path / "jobs" / ev_task_id / job_id
+                        if job_path.exists():
+                            job = self._mock_job_from_disk(job_path, ev_task_id, job_id)
+                        else:
+                            job = MockJob(
+                                identifier=job_id,
+                                task_id=ev_task_id,
+                                path=job_path,
+                                state="unscheduled",
+                                starttime=None,
+                                endtime=None,
+                                progress=[],
+                                updated_at="",
+                            )
+                    else:
+                        job = MockJob(
+                            identifier=job_id,
+                            task_id="",
+                            path=None,
+                            state="unscheduled",
+                            starttime=None,
+                            endtime=None,
+                            progress=[],
+                            updated_at="",
+                        )
+                    self._job_cache[cache_key] = job
+
+                job.apply_events(events)
+
+            logger.debug(
+                "Job %s after on_created: state=%s, progress=%s, "
+                "starttime=%s, carbon=%.4f kg CO2",
+                entity_id,
+                job.state,
+                job.progress,
+                job.starttime,
+                getattr(job.carbon_metrics, "co2_kg", 0.0)
+                if job.carbon_metrics
+                else 0.0,
+            )
+
+            # Forward events to listeners
+            for event in events:
+                self._notify_state_listeners(event)
+
         return True  # Follow all jobs
 
     def _on_job_event(self, entity_id: str, event: EventBase) -> None:
@@ -963,12 +1083,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """Update cached experiment from an experiment event
 
         Called by EventReader when experiment events are received.
-        For JobStateChangedEvent with from_experiment=True, also applies to
-        cached job to set _experiment_status.
         For ExperimentJobStateEvent, updates _experiment_status on the cached job.
         """
         from experimaestro.scheduler.state_status import (
-            JobStateChangedEvent,
             ExperimentJobStateEvent,
         )
 
@@ -982,22 +1099,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
             if cache_key in self._experiment_cache:
                 self._experiment_cache[cache_key].apply_event(event)
 
-        # Apply JobStateChangedEvent from experiment events to job cache
-        if isinstance(event, JobStateChangedEvent) and event.from_experiment:
-            job_id = event.job_id
-            with self._experiment_cache_lock:
-                exp = self._experiment_cache.get(cache_key)
-                if exp is not None:
-                    job_info = exp.job_infos.get(job_id)
-                    if job_info is not None:
-                        job_cache_key = f"{task_id_hash(job_info.task_id)}:{job_id}"
-                        with self._job_cache_lock:
-                            job = self._job_cache.get(job_cache_key)
-                            if job is not None:
-                                job.apply_event(event)
-
         # Apply ExperimentJobStateEvent to update _experiment_status on cached job
-        elif isinstance(event, ExperimentJobStateEvent):
+        if isinstance(event, ExperimentJobStateEvent):
             job_id = event.job_id
             task_id = event.task_id
             if task_id and job_id:
@@ -1418,7 +1521,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return runs
 
         for run_dir in sorted(exp_dir.iterdir(), reverse=True):
-            if not run_dir.is_dir() or run_dir.name.startswith("."):
+            if (
+                run_dir.is_symlink()
+                or not run_dir.is_dir()
+                or run_dir.name.startswith(".")
+            ):
                 continue
 
             # Use MockExperiment.from_disk to load the experiment
@@ -1430,17 +1537,17 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current run ID for an experiment"""
-        # Check new symlink location: .events/experiments/{experiment_id}/current
-        exp_events_dir = self._experiments_dir / experiment_id
-        symlink = exp_events_dir / "current"
-        if symlink.is_symlink():
+        # Check symlink locations (new: experiments/{id}/current,
+        # legacy: .events/experiments/{id}/current)
+        symlink = self._find_current_symlink(experiment_id)
+        if symlink is not None:
             try:
                 target = symlink.resolve()
                 return target.name
             except OSError:
                 pass
 
-        # Check legacy symlink location (old .experimaestro path)
+        # Check oldest legacy symlink location (.experimaestro path)
         legacy_experiments_dir = self.workspace_path / ".experimaestro" / "experiments"
         legacy_symlink = legacy_experiments_dir / experiment_id
         if legacy_symlink.is_symlink():
