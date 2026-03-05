@@ -803,16 +803,22 @@ class ExperimaestroUI(App):
 
     def on_delete_experiment_request(self, message: DeleteExperimentRequest) -> None:
         """Handle experiment deletion request"""
+        # Check if the experiment is currently running
+        experiments = self.state_provider.get_experiments()
+        exp = next(
+            (e for e in experiments if e.experiment_id == message.experiment_id), None
+        )
+        if exp is not None:
+            from experimaestro.scheduler.interfaces import ExperimentStatus
+
+            if exp.status == ExperimentStatus.RUNNING:
+                self.notify(
+                    "Cannot delete: experiment is still running",
+                    severity="warning",
+                )
+                return
+
         jobs = self.state_provider.get_jobs(message.experiment_id)
-        running_jobs = [j for j in jobs if j.state.running()]
-
-        if running_jobs:
-            self.notify(
-                f"Cannot delete: {len(running_jobs)} jobs are running",
-                severity="warning",
-            )
-            return
-
         warning = (
             f"{len(jobs)} jobs will remain (not deleted by default)" if jobs else None
         )
