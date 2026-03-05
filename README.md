@@ -14,11 +14,30 @@ The full documentation can be read by going to the following URL: [https://exper
 
 ## Textual interface (new in v2)
 
-![Experiment screen](docs/source/img/tui-experiments.png)
+<figure>
+  <img src="docs/source/img/tui-experiments.png" alt="Experiments screen">
+  <figcaption>Experiments overview: monitor (local or SSH) running and completed experiments</figcaption>
+</figure>
 
-![Jobs screen](docs/source/img/tui-jobs.png)
+<figure>
+  <img src="docs/source/img/tui-jobs.png" alt="Jobs screen">
+  <figcaption>Jobs view: track job status, progress, and dependencies</figcaption>
+</figure>
 
-![Log screen](docs/source/img/tui-logs.png)
+<figure>
+  <img src="docs/source/img/tui-job-details.png" alt="Job details screen">
+  <figcaption>Job details: inspect individual job parameters and output</figcaption>
+</figure>
+
+<figure>
+  <img src="docs/source/img/tui-logs.png" alt="Logs screen">
+  <figcaption>Logs view: real-time log streaming for running tasks</figcaption>
+</figure>
+
+<figure>
+  <img src="docs/source/img/tui-services.png" alt="Services screen">
+  <figcaption>Services view: monitor background services and their status</figcaption>
+</figure>
 
 # Install
 
