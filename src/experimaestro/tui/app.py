@@ -306,19 +306,21 @@ class ExperimaestroUI(App):
             pass
 
     def update_orphan_tab_title(self) -> None:
-        """Update the Orphans tab title with orphan job count
+        """Update the Orphans tab title with stray/orphan job counts
 
-        Format: Orphans (X/Y) where X=running (stray), Y=non-running (finished)
+        Format: Orphans (X/Y) where X=stray (running), Y=orphans
         """
         try:
             orphan_tab = self.query_one(OrphanJobsTab)
             running = orphan_tab.running_count
             finished = orphan_tab.finished_count
-            # Find and update the tab pane title
+            # Update main tab title
             tabs = self.query_one("#main-tabs", TabbedContent)
             tab = tabs.get_tab("orphan-tab")
             if tab:
                 tab.label = f"Orphans ({running}/{finished})"
+            # Update sub-tab titles
+            orphan_tab._update_subtab_titles()
         except Exception:
             pass
 

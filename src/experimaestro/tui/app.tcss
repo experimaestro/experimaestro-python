@@ -473,10 +473,17 @@ StrayJobsTab {
 OrphanJobsTab {
     height: 1fr;
     width: 100%;
+}
+
+StrayJobsPanel,
+OrphanJobsPanel {
+    height: 1fr;
+    width: 100%;
     padding: 1;
 }
 
-OrphanJobsTab #orphan-warning {
+StrayJobsPanel .warning-banner,
+OrphanJobsPanel .warning-banner {
     background: $warning-darken-2;
     color: $text;
     padding: 0 1;
@@ -485,31 +492,33 @@ OrphanJobsTab #orphan-warning {
     height: auto;
 }
 
-OrphanJobsTab #orphan-warning.hidden {
+StrayJobsPanel .warning-banner.hidden,
+OrphanJobsPanel .warning-banner.hidden {
     display: none;
 }
 
-OrphanJobsTab #orphan-controls {
+StrayJobsPanel .controls-bar,
+OrphanJobsPanel .controls-bar {
     height: auto;
     margin-bottom: 1;
     align: left middle;
 }
 
-OrphanJobsTab #orphan-controls Button {
+StrayJobsPanel .controls-bar Button,
+OrphanJobsPanel .controls-bar Button {
     margin-right: 1;
     min-width: 8;
     height: auto;
     padding: 0 1;
 }
 
-OrphanJobsTab #orphan-table {
+StrayJobsPanel DataTable,
+OrphanJobsPanel DataTable {
     height: 1fr;
     min-height: 10;
 }
 
-OrphanJobsTab #orphan-job-info {
+StrayJobsPanel Static,
+OrphanJobsPanel Static {
     height: auto;
-    margin-top: 1;
-    padding: 0 1;
-    color: $text-muted;
 }

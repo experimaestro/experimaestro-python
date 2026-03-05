@@ -70,6 +70,8 @@ class RPCMethod(str, Enum):
     GET_PROCESS_INFO = "get_process_info"
     EXECUTE_WARNING_ACTION = "execute_warning_action"
     GET_UNRESOLVED_WARNINGS = "get_unresolved_warnings"
+    GET_ORPHAN_JOBS = "get_orphan_jobs"
+    GET_STRAY_JOBS = "get_stray_jobs"
 
 
 @dataclass

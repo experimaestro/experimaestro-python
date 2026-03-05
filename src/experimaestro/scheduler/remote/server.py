@@ -89,6 +89,8 @@ class SSHStateProviderServer:
             RPCMethod.GET_PROCESS_INFO.value: self._handle_get_process_info,
             RPCMethod.EXECUTE_WARNING_ACTION.value: self._handle_execute_warning_action,
             RPCMethod.GET_UNRESOLVED_WARNINGS.value: self._handle_get_unresolved_warnings,
+            RPCMethod.GET_ORPHAN_JOBS.value: self._handle_get_orphan_jobs,
+            RPCMethod.GET_STRAY_JOBS.value: self._handle_get_stray_jobs,
         }
 
     def start(self):
@@ -338,6 +340,16 @@ class SSHStateProviderServer:
             tags=params.get("tags"),
             since=since,
         )
+        return [job.state_dict() for job in jobs]
+
+    def _handle_get_orphan_jobs(self, params: Dict) -> list:
+        """Handle get_orphan_jobs request"""
+        jobs = self._state_provider.get_orphan_jobs()
+        return [job.state_dict() for job in jobs]
+
+    def _handle_get_stray_jobs(self, params: Dict) -> list:
+        """Handle get_stray_jobs request"""
+        jobs = self._state_provider.get_stray_jobs()
         return [job.state_dict() for job in jobs]
 
     def _handle_get_services(self, params: Dict) -> list:

@@ -959,6 +959,24 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_ALL_JOBS, params)
         return [self._get_or_load_job(d) for d in result]
 
+    def get_orphan_jobs(self) -> List[BaseJob]:
+        """Get orphan jobs (not referenced by any experiment)"""
+        try:
+            result = self._call_sync(RPCMethod.GET_ORPHAN_JOBS, {})
+            return [self._get_or_load_job(d) for d in result]
+        except RuntimeError:
+            # Server may not support this method (old version)
+            return []
+
+    def get_stray_jobs(self) -> List[BaseJob]:
+        """Get stray jobs (running jobs not in latest run)"""
+        try:
+            result = self._call_sync(RPCMethod.GET_STRAY_JOBS, {})
+            return [self._get_or_load_job(d) for d in result]
+        except RuntimeError:
+            # Server may not support this method (old version)
+            return []
+
     def get_tags_map(
         self,
         experiment_id: str,

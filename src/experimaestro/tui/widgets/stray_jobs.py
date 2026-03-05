@@ -1,15 +1,15 @@
-"""Orphan jobs tab widget for the TUI
+"""Stray and orphan jobs tab widget for the TUI
 
-Displays orphan jobs: Jobs on disk not referenced by any experiment.
-Running orphan jobs (stray) are highlighted differently and can be killed.
-Non-running orphan jobs can be deleted.
+Displays two sub-tabs:
+- Stray jobs: Running jobs from old experiment runs (not in the latest run)
+- Orphan jobs: Jobs on disk not referenced by any experiment run
 """
 
 import logging
 from typing import Optional
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
-from textual.widgets import DataTable, Static, Button
+from textual.widgets import DataTable, Static, Button, TabbedContent, TabPane
 from textual.binding import Binding
 
 from experimaestro.scheduler.state_provider import StateProvider
@@ -20,179 +20,95 @@ from experimaestro.tui.messages import SizeCalculated
 logger = logging.getLogger("xpm.tui.orphan_jobs")
 
 
-class OrphanJobsTab(Vertical):
-    """Tab widget for viewing and managing orphan jobs
+class _JobListPanel(Vertical):
+    """Base panel for displaying a list of jobs in a DataTable
 
-    Orphan jobs: Jobs on disk not referenced by any experiment.
-    - Running orphan jobs (stray) are shown in yellow and can be killed (ctrl+k)
-    - Non-running orphan jobs can be deleted (ctrl+d)
+    Subclasses override _fetch_jobs() to provide the appropriate job list.
     """
-
-    BINDINGS = [
-        Binding("r", "refresh", "Refresh"),
-        Binding("ctrl+d", "delete_selected", "Delete", show=False),
-        Binding("ctrl+k", "kill_selected", "Kill", show=False),
-        Binding("T", "sort_by_task", "Sort Task", show=False),
-        Binding("Z", "sort_by_size", "Sort Size", show=False),
-    ]
 
     _size_cache: dict = {}  # Class-level cache (formatted strings)
     _size_bytes_cache: dict = {}  # Class-level cache (raw bytes for sorting)
 
-    def __init__(self, state_provider: StateProvider) -> None:
+    def __init__(self, state_provider: StateProvider, panel_id: str) -> None:
         super().__init__()
         self.state_provider = state_provider
-        self.orphan_jobs = []  # All orphan jobs
-        self._pending_jobs = []  # Jobs waiting for size calculation
+        self.jobs: list = []
+        self._pending_jobs: list = []
         self._sort_column: Optional[str] = None
         self._sort_reverse: bool = False
+        self._panel_id = panel_id
+
+    @property
+    def table_id(self) -> str:
+        return f"{self._panel_id}-table"
+
+    @property
+    def info_id(self) -> str:
+        return f"{self._panel_id}-info"
+
+    @property
+    def warning_id(self) -> str:
+        return f"{self._panel_id}-warning"
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="orphan-warning", classes="warning-banner hidden")
-        with Horizontal(id="orphan-controls", classes="controls-bar"):
-            yield Button("Refresh", id="orphan-refresh-btn")
-            yield Button("Kill All", id="orphan-kill-all-btn", variant="error")
-            yield Button("Delete All", id="orphan-delete-all-btn", variant="warning")
-        yield DataTable(id="orphan-table", cursor_type="row")
-        yield Static("", id="orphan-job-info")
+        yield Static("", id=self.warning_id, classes="warning-banner hidden")
+        with Horizontal(classes="controls-bar"):
+            yield Button("Refresh", id=f"{self._panel_id}-refresh-btn")
+            yield from self._extra_buttons()
+        yield DataTable(id=self.table_id, cursor_type="row")
+        yield Static("", id=self.info_id)
+
+    def _extra_buttons(self) -> ComposeResult:
+        """Override to add panel-specific buttons"""
+        return
+        yield  # make it a generator
 
     def on_mount(self) -> None:
-        """Initialize the orphan jobs table"""
-        table = self.query_one("#orphan-table", DataTable)
+        table = self.query_one(f"#{self.table_id}", DataTable)
         table.add_column("", key="status", width=3)
         table.add_column("Job ID", key="job_id", width=10)
         table.add_column("Task", key="task")
         table.add_column("Size", key="size", width=10)
-        self.refresh_orphan_jobs()
+        self.refresh_jobs()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses"""
-        if event.button.id == "orphan-refresh-btn":
-            self.action_refresh()
-        elif event.button.id == "orphan-kill-all-btn":
-            self.action_kill_all()
-        elif event.button.id == "orphan-delete-all-btn":
-            self.action_delete_all()
+        if event.button.id == f"{self._panel_id}-refresh-btn":
+            self.refresh_jobs()
+            self.notify("Refreshed", severity="information")
 
-    def action_sort_by_task(self) -> None:
-        """Sort by task name"""
-        if self._sort_column == "task":
-            self._sort_reverse = not self._sort_reverse
-        else:
-            self._sort_column = "task"
-            self._sort_reverse = False
-        self._rebuild_table()
-        order = "desc" if self._sort_reverse else "asc"
-        self.notify(f"Sorted by task ({order})", severity="information")
+    def _fetch_jobs(self) -> list:
+        """Override to fetch the appropriate job list"""
+        raise NotImplementedError
 
-    def action_sort_by_size(self) -> None:
-        """Sort by size"""
-        if self._sort_column == "size":
-            self._sort_reverse = not self._sort_reverse
-        else:
-            self._sort_column = "size"
-            self._sort_reverse = True  # Default: largest first
-        self._rebuild_table()
-        order = "largest first" if self._sort_reverse else "smallest first"
-        self.notify(f"Sorted by size ({order})", severity="information")
+    def refresh_jobs(self) -> None:
+        """Refresh the job list"""
+        self.jobs = self._fetch_jobs()
 
-    def refresh_orphan_jobs(self) -> None:
-        """Refresh the orphan jobs list"""
-        # Check if remote provider
-        if self.state_provider.is_remote:
-            self._show_warning(
-                "Orphan job detection not available for remote workspaces"
-            )
-            return
-
-        # Get all orphan jobs (only those with existing folders)
-        all_orphans = self.state_provider.get_orphan_jobs()
-        self.orphan_jobs = [j for j in all_orphans if j.path and j.path.exists()]
-
-        # Count running jobs
-        running_count = sum(
-            1 for j in self.orphan_jobs if j.state and j.state.running()
-        )
-
-        # Update warning based on scheduler status
-        self._update_scheduler_warning(running_count)
-
-        # Update tab title in parent app
-        self._update_tab_title()
-
-        # Collect jobs needing size calculation
+        # Only calculate sizes for local paths that exist
         self._pending_jobs = [
-            j for j in self.orphan_jobs if j.identifier not in self._size_cache
+            j
+            for j in self.jobs
+            if j.identifier not in self._size_cache and j.path and j.path.exists()
         ]
 
-        # Rebuild table
         self._rebuild_table()
+        self._update_parent_title()
 
-        # Start calculating sizes
         if self._pending_jobs:
             self._calculate_next_size()
 
-    def _update_scheduler_warning(self, running_count: int) -> None:
-        """Update warning banner based on scheduler status"""
-        warning = self.query_one("#orphan-warning", Static)
-
-        # Check if any experiments are running (ended_at is None means still running)
-        running_experiments = [
-            e
-            for e in self.state_provider.get_experiments()
-            if e.run_id and getattr(e, "ended_at", None) is None
-        ]
-
-        if running_experiments or self.state_provider.is_live:
-            warning.update(
-                "WARNING: At least one experiment is running. "
-                "Killing stray jobs or deleting orphans may cause issues!"
-            )
-            warning.remove_class("hidden")
-        elif running_count > 0:
-            warning.update(
-                f"{running_count} orphan jobs are still running (stray). "
-                "Use ctrl+k to kill them."
-            )
-            warning.remove_class("hidden")
-        else:
-            warning.add_class("hidden")
-
-    def _show_warning(self, message: str) -> None:
-        """Show a warning message"""
-        warning = self.query_one("#orphan-warning", Static)
-        warning.update(f"{message}")
-        warning.remove_class("hidden")
-
-    def _update_tab_title(self) -> None:
-        """Update the tab title with orphan job count"""
+    def _update_parent_title(self) -> None:
+        """Update the parent tab title"""
         try:
             self.app.update_orphan_tab_title()
         except Exception:
             pass
 
-    @property
-    def orphan_count(self) -> int:
-        """Number of all orphan jobs"""
-        return len(self.orphan_jobs)
-
-    @property
-    def running_count(self) -> int:
-        """Number of running orphan jobs (stray)"""
-        return sum(1 for j in self.orphan_jobs if j.state and j.state.running())
-
-    @property
-    def finished_count(self) -> int:
-        """Number of non-running orphan jobs"""
-        return len(self.orphan_jobs) - self.running_count
-
     def _get_sorted_jobs(self):
-        """Return jobs sorted by current sort column"""
-        jobs = self.orphan_jobs[:]
+        jobs = self.jobs[:]
         if self._sort_column == "task":
             jobs.sort(key=lambda j: j.task_id or "", reverse=self._sort_reverse)
         elif self._sort_column == "size":
-            # Sort by raw bytes, jobs not in cache go to end
             jobs.sort(
                 key=lambda j: self._size_bytes_cache.get(j.identifier, -1),
                 reverse=self._sort_reverse,
@@ -200,10 +116,9 @@ class OrphanJobsTab(Vertical):
         return jobs
 
     def _rebuild_table(self) -> None:
-        """Rebuild the table with current sort order"""
         from rich.text import Text
 
-        table = self.query_one("#orphan-table", DataTable)
+        table = self.query_one(f"#{self.table_id}", DataTable)
         table.clear()
 
         for job in self._get_sorted_jobs():
@@ -212,46 +127,28 @@ class OrphanJobsTab(Vertical):
                 job.state.name if job.state else "unknown", failure_reason
             )
 
-            # Use different styling for running vs finished jobs
             is_running = job.state and job.state.running()
             if is_running:
-                # Running jobs (stray) in yellow/bold
                 job_id_text = Text(job.identifier[:7], style="bold yellow")
                 task_text = Text(job.task_id or "", style="yellow")
             else:
-                # Finished jobs in normal style
                 job_id_text = Text(job.identifier[:7])
                 task_text = Text(job.task_id or "")
 
-            if job.identifier in self._size_cache:
-                size_text = self._size_cache[job.identifier]
-            else:
-                size_text = "waiting"
+            size_text = self._size_cache.get(job.identifier, "waiting")
 
             table.add_row(
-                status_icon,
-                job_id_text,
-                task_text,
-                size_text,
-                key=job.identifier,
+                status_icon, job_id_text, task_text, size_text, key=job.identifier
             )
 
     def _calculate_next_size(self) -> None:
-        """Calculate size for the next pending job using a worker"""
         if not self._pending_jobs:
             return
-
         job = self._pending_jobs.pop(0)
-        # Update to "calc..."
         self._update_size_cell(job.identifier, "calc...")
-        # Run calculation in worker thread
-        self.run_worker(
-            self._calc_size_worker(job.identifier, job.path),
-            thread=True,
-        )
+        self.run_worker(self._calc_size_worker(job.identifier, job.path), thread=True)
 
     async def _calc_size_worker(self, job_id: str, path):
-        """Worker to calculate folder size"""
         size_bytes = await self._get_folder_size_async(path)
         size_str = self._format_size(size_bytes)
         self._size_cache[job_id] = size_str
@@ -259,24 +156,19 @@ class OrphanJobsTab(Vertical):
         self.post_message(SizeCalculated(job_id, size_str, size_bytes))
 
     def on_size_calculated(self, message: SizeCalculated) -> None:
-        """Handle size calculation completion"""
         self._size_bytes_cache[message.job_id] = message.size_bytes
         self._update_size_cell(message.job_id, message.size)
-        # Calculate next one
         self._calculate_next_size()
 
     @staticmethod
     async def _get_folder_size_async(path) -> int:
-        """Calculate total size of a folder using du command if available"""
         import asyncio
         import shutil
         import sys
 
-        # Try using du command for better performance
         if shutil.which("du"):
             try:
                 if sys.platform == "darwin":
-                    # macOS: du -sk gives size in KB
                     proc = await asyncio.create_subprocess_exec(
                         "du",
                         "-sk",
@@ -286,11 +178,8 @@ class OrphanJobsTab(Vertical):
                     )
                     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
                     if proc.returncode == 0 and stdout:
-                        # Output format: "SIZE\tPATH"
-                        size_kb = int(stdout.decode().split()[0])
-                        return size_kb * 1024
+                        return int(stdout.decode().split()[0]) * 1024
                 else:
-                    # Linux: du -sb gives size in bytes
                     proc = await asyncio.create_subprocess_exec(
                         "du",
                         "-sb",
@@ -300,17 +189,14 @@ class OrphanJobsTab(Vertical):
                     )
                     stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
                     if proc.returncode == 0 and stdout:
-                        # Output format: "SIZE\tPATH"
                         return int(stdout.decode().split()[0])
             except (asyncio.TimeoutError, ValueError, IndexError, OSError):
-                pass  # Fall back to Python implementation
+                pass
 
-        # Fallback: Python implementation
-        return OrphanJobsTab._get_folder_size_sync(path)
+        return _JobListPanel._get_folder_size_sync(path)
 
     @staticmethod
     def _get_folder_size_sync(path) -> int:
-        """Calculate total size of a folder using Python (fallback)"""
         total = 0
         try:
             for entry in path.rglob("*"):
@@ -322,7 +208,6 @@ class OrphanJobsTab(Vertical):
 
     @staticmethod
     def _format_size(size: int) -> str:
-        """Format size in human-readable format"""
         for unit in ["B", "KB", "MB", "GB"]:
             if size < 1024:
                 return f"{size:.1f}{unit}" if unit != "B" else f"{size}{unit}"
@@ -330,28 +215,21 @@ class OrphanJobsTab(Vertical):
         return f"{size:.1f}TB"
 
     def _update_size_cell(self, job_id: str, value: str = None) -> None:
-        """Update the size cell for a job"""
         try:
-            table = self.query_one("#orphan-table", DataTable)
+            table = self.query_one(f"#{self.table_id}", DataTable)
             size_text = (
                 value if value is not None else self._size_cache.get(job_id, "-")
             )
             table.update_cell(job_id, "size", size_text)
         except Exception:
-            pass  # Table may have changed
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Show job details when a row is selected"""
-        self._update_job_info()
+            pass
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        """Show job details when cursor moves"""
         self._update_job_info()
 
     def _update_job_info(self) -> None:
-        """Update the job info display"""
-        table = self.query_one("#orphan-table", DataTable)
-        info = self.query_one("#orphan-job-info", Static)
+        table = self.query_one(f"#{self.table_id}", DataTable)
+        info = self.query_one(f"#{self.info_id}", Static)
 
         if table.cursor_row is None:
             info.update("")
@@ -365,173 +243,324 @@ class OrphanJobsTab(Vertical):
 
         if row_key:
             job_id = str(row_key.value)
-            job = next((j for j in self.orphan_jobs if j.identifier == job_id), None)
+            job = next((j for j in self.jobs if j.identifier == job_id), None)
             if job and job.path:
                 size = self._size_cache.get(job.identifier, "calculating...")
                 state = job.state.name if job.state else "unknown"
-                is_running = job.state and job.state.running()
-                hint = "(ctrl+k to kill)" if is_running else "(ctrl+d to delete)"
                 display_path = self.state_provider.get_display_path(job)
-                info.update(
-                    f"Path: {display_path}  |  Size: {size}  |  State: {state} {hint}"
-                )
+                info.update(f"Path: {display_path}  |  Size: {size}  |  State: {state}")
             else:
                 info.update("")
 
+    def action_copy_path(self) -> None:
+        """Copy the selected job's path to clipboard"""
+        from experimaestro.tui.clipboard import copy
+
+        job = self._get_selected_job()
+        if not job or not job.path:
+            self.notify("No path available", severity="warning")
+            return
+        display_path = self.state_provider.get_display_path(job)
+        if copy(display_path):
+            self.notify(f"Path copied: {display_path}", severity="information")
+        else:
+            self.notify("Failed to copy path", severity="error")
+
     def _get_selected_job(self):
-        """Get the currently selected job"""
-        table = self.query_one("#orphan-table", DataTable)
+        table = self.query_one(f"#{self.table_id}", DataTable)
         if table.cursor_row is None:
             return None
-
         try:
             row_key = list(table.rows.keys())[table.cursor_row]
         except IndexError:
             return None
-
         if row_key:
             job_id = str(row_key.value)
-            return next((j for j in self.orphan_jobs if j.identifier == job_id), None)
+            return next((j for j in self.jobs if j.identifier == job_id), None)
         return None
 
-    def action_refresh(self) -> None:
-        """Refresh the orphan jobs list"""
-        self.refresh_orphan_jobs()
-        self.notify("Refreshed orphan jobs list", severity="information")
 
-    def action_delete_selected(self) -> None:
-        """Delete the selected orphan job (if not running)"""
-        job = self._get_selected_job()
-        if not job:
-            return
+class StrayJobsPanel(_JobListPanel):
+    """Panel for stray jobs (running jobs from old experiment runs)"""
 
-        if job.state and job.state.running():
-            self.notify(
-                "Cannot delete a running job - kill it first (ctrl+k)",
-                severity="warning",
-            )
-            return
+    BINDINGS = [
+        Binding("f", "copy_path", "Copy Path", show=False),
+        Binding("ctrl+k", "kill_selected", "Kill", show=False),
+    ]
 
-        self._delete_job(job)
+    def __init__(self, state_provider: StateProvider) -> None:
+        super().__init__(state_provider, "stray")
+
+    def _extra_buttons(self) -> ComposeResult:
+        yield Button("Kill All", id="stray-kill-all-btn", variant="error")
+
+    def _fetch_jobs(self) -> list:
+        return self.state_provider.get_stray_jobs()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        super().on_button_pressed(event)
+        if event.button.id == "stray-kill-all-btn":
+            self._action_kill_all()
 
     def action_kill_selected(self) -> None:
-        """Kill the selected running orphan job"""
         job = self._get_selected_job()
         if not job:
             return
-
         if not job.state or not job.state.running():
             self.notify("Job is not running", severity="warning")
             return
-
         self._kill_job(job)
 
-    def _delete_job(self, job) -> None:
-        """Delete a single orphan job with confirmation"""
-
-        def handle_delete(confirmed: bool) -> None:
-            if confirmed:
-                success, msg = self.state_provider.delete_job_safely(job)
-                if success:
-                    self.notify(msg, severity="information")
-                    self.refresh_orphan_jobs()
-                else:
-                    self.notify(msg, severity="error")
-
-        self.app.push_screen(
-            DeleteConfirmScreen("orphan job", job.identifier),
-            handle_delete,
-        )
-
     def _kill_job(self, job) -> None:
-        """Kill a running orphan job with confirmation"""
-
         def handle_kill(confirmed: bool) -> None:
             if confirmed:
                 try:
                     self.state_provider.kill_job(job, perform=True)
                     self.notify(f"Job {job.identifier} killed", severity="information")
-                    self.refresh_orphan_jobs()
+                    self.refresh_jobs()
                 except Exception as e:
                     self.notify(f"Failed to kill job: {e}", severity="error")
 
         self.app.push_screen(
-            KillConfirmScreen("orphan job", job.identifier),
-            handle_kill,
+            KillConfirmScreen("stray job", job.identifier), handle_kill
         )
 
-    def action_kill_all(self) -> None:
-        """Kill all running orphan jobs"""
-        running_jobs = [j for j in self.orphan_jobs if j.state and j.state.running()]
-
+    def _action_kill_all(self) -> None:
+        running_jobs = [j for j in self.jobs if j.state and j.state.running()]
         if not running_jobs:
-            self.notify("No running orphan jobs to kill", severity="warning")
+            self.notify("No stray jobs to kill", severity="warning")
             return
 
         def handle_kill_all(confirmed: bool) -> None:
             if confirmed:
-                killed = 0
-                failed = 0
+                killed = failed = 0
                 for job in running_jobs:
                     try:
                         self.state_provider.kill_job(job, perform=True)
                         killed += 1
                     except Exception:
                         failed += 1
-
+                msg = f"Killed {killed}/{len(running_jobs)} jobs"
                 if failed:
-                    self.notify(
-                        f"Killed {killed} of {len(running_jobs)} jobs ({failed} failed)",
-                        severity="warning",
-                    )
+                    msg += f" ({failed} failed)"
+                self.notify(msg, severity="information" if not failed else "warning")
+                self.refresh_jobs()
+
+        self.app.push_screen(
+            KillConfirmScreen("all stray jobs", f"{len(running_jobs)} jobs"),
+            handle_kill_all,
+        )
+
+
+class OrphanJobsPanel(_JobListPanel):
+    """Panel for orphan jobs (not referenced by any experiment)"""
+
+    BINDINGS = [
+        Binding("f", "copy_path", "Copy Path", show=False),
+        Binding("ctrl+d", "delete_selected", "Delete", show=False),
+        Binding("ctrl+k", "kill_selected", "Kill", show=False),
+    ]
+
+    def __init__(self, state_provider: StateProvider) -> None:
+        super().__init__(state_provider, "orphan")
+
+    def _extra_buttons(self) -> ComposeResult:
+        yield Button("Kill All", id="orphan-kill-all-btn", variant="error")
+        yield Button("Delete All", id="orphan-delete-all-btn", variant="warning")
+
+    def _fetch_jobs(self) -> list:
+        return self.state_provider.get_orphan_jobs()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        super().on_button_pressed(event)
+        if event.button.id == "orphan-kill-all-btn":
+            self._action_kill_all()
+        elif event.button.id == "orphan-delete-all-btn":
+            self._action_delete_all()
+
+    def action_delete_selected(self) -> None:
+        job = self._get_selected_job()
+        if not job:
+            return
+        if job.state and job.state.running():
+            self.notify(
+                "Cannot delete a running job - kill it first (ctrl+k)",
+                severity="warning",
+            )
+            return
+        self._delete_job(job)
+
+    def action_kill_selected(self) -> None:
+        job = self._get_selected_job()
+        if not job:
+            return
+        if not job.state or not job.state.running():
+            self.notify("Job is not running", severity="warning")
+            return
+        self._kill_job(job)
+
+    def _delete_job(self, job) -> None:
+        def handle_delete(confirmed: bool) -> None:
+            if confirmed:
+                success, msg = self.state_provider.delete_job_safely(job)
+                if success:
+                    self.notify(msg, severity="information")
+                    self.refresh_jobs()
                 else:
-                    self.notify(
-                        f"Killed {killed} of {len(running_jobs)} running jobs",
-                        severity="information",
-                    )
-                self.refresh_orphan_jobs()
+                    self.notify(msg, severity="error")
+
+        self.app.push_screen(
+            DeleteConfirmScreen("orphan job", job.identifier), handle_delete
+        )
+
+    def _kill_job(self, job) -> None:
+        def handle_kill(confirmed: bool) -> None:
+            if confirmed:
+                try:
+                    self.state_provider.kill_job(job, perform=True)
+                    self.notify(f"Job {job.identifier} killed", severity="information")
+                    self.refresh_jobs()
+                except Exception as e:
+                    self.notify(f"Failed to kill job: {e}", severity="error")
+
+        self.app.push_screen(
+            KillConfirmScreen("orphan job", job.identifier), handle_kill
+        )
+
+    def _action_kill_all(self) -> None:
+        running_jobs = [j for j in self.jobs if j.state and j.state.running()]
+        if not running_jobs:
+            self.notify("No running orphan jobs to kill", severity="warning")
+            return
+
+        def handle_kill_all(confirmed: bool) -> None:
+            if confirmed:
+                killed = failed = 0
+                for job in running_jobs:
+                    try:
+                        self.state_provider.kill_job(job, perform=True)
+                        killed += 1
+                    except Exception:
+                        failed += 1
+                msg = f"Killed {killed}/{len(running_jobs)} jobs"
+                if failed:
+                    msg += f" ({failed} failed)"
+                self.notify(msg, severity="information" if not failed else "warning")
+                self.refresh_jobs()
 
         self.app.push_screen(
             KillConfirmScreen("all running orphan jobs", f"{len(running_jobs)} jobs"),
             handle_kill_all,
         )
 
-    def action_delete_all(self) -> None:
-        """Delete all non-running orphan jobs"""
-        deletable_jobs = [
-            j for j in self.orphan_jobs if not j.state or not j.state.running()
-        ]
-
-        if not deletable_jobs:
-            self.notify(
-                "No deletable orphan jobs (all are running)", severity="warning"
-            )
+    def _action_delete_all(self) -> None:
+        deletable = [j for j in self.jobs if not j.state or not j.state.running()]
+        if not deletable:
+            self.notify("No deletable orphan jobs", severity="warning")
             return
 
         def handle_delete_all(confirmed: bool) -> None:
             if confirmed:
                 deleted = 0
-                for job in deletable_jobs:
-                    success, _ = self.state_provider.delete_job_safely(
-                        job, cascade_orphans=False
-                    )
+                for job in deletable:
+                    success, _ = self.state_provider.delete_job_safely(job)
                     if success:
                         deleted += 1
-
-                # Clean up orphan partials once at the end
-                self.state_provider.cleanup_orphan_partials(perform=True)
-
                 self.notify(f"Deleted {deleted} orphan jobs", severity="information")
-                self.refresh_orphan_jobs()
+                self.refresh_jobs()
 
         self.app.push_screen(
             DeleteConfirmScreen(
                 "all finished orphan jobs",
-                f"{len(deletable_jobs)} jobs",
+                f"{len(deletable)} jobs",
                 "This action cannot be undone",
             ),
             handle_delete_all,
         )
+
+
+class OrphanJobsTab(Vertical):
+    """Container with sub-tabs for stray and orphan jobs"""
+
+    BINDINGS = [
+        Binding("r", "refresh", "Refresh"),
+        Binding("T", "sort_by_task", "Sort Task", show=False),
+        Binding("Z", "sort_by_size", "Sort Size", show=False),
+    ]
+
+    def __init__(self, state_provider: StateProvider) -> None:
+        super().__init__()
+        self.state_provider = state_provider
+
+    def compose(self) -> ComposeResult:
+        with TabbedContent(id="orphan-subtabs"):
+            with TabPane("Stray (0)", id="stray-subtab"):
+                yield StrayJobsPanel(self.state_provider)
+            with TabPane("Orphans (0)", id="orphan-subtab"):
+                yield OrphanJobsPanel(self.state_provider)
+
+    @property
+    def stray_panel(self) -> StrayJobsPanel:
+        return self.query_one(StrayJobsPanel)
+
+    @property
+    def orphan_panel(self) -> OrphanJobsPanel:
+        return self.query_one(OrphanJobsPanel)
+
+    @property
+    def running_count(self) -> int:
+        """Number of stray (running) jobs"""
+        return len(self.stray_panel.jobs)
+
+    @property
+    def finished_count(self) -> int:
+        """Number of orphan jobs"""
+        return len(self.orphan_panel.jobs)
+
+    @property
+    def orphan_count(self) -> int:
+        """Total count for backwards compat"""
+        return self.running_count + self.finished_count
+
+    def refresh_orphan_jobs(self) -> None:
+        """Refresh both panels"""
+        self.stray_panel.refresh_jobs()
+        self.orphan_panel.refresh_jobs()
+        self._update_subtab_titles()
+
+    def _update_subtab_titles(self) -> None:
+        try:
+            tabs = self.query_one("#orphan-subtabs", TabbedContent)
+            stray_tab = tabs.get_tab("stray-subtab")
+            if stray_tab:
+                stray_tab.label = f"Stray ({self.running_count})"
+            orphan_tab = tabs.get_tab("orphan-subtab")
+            if orphan_tab:
+                orphan_tab.label = f"Orphans ({self.finished_count})"
+        except Exception:
+            pass
+
+    def action_refresh(self) -> None:
+        self.refresh_orphan_jobs()
+        self.notify("Refreshed", severity="information")
+
+    def action_sort_by_task(self) -> None:
+        for panel in [self.stray_panel, self.orphan_panel]:
+            if panel._sort_column == "task":
+                panel._sort_reverse = not panel._sort_reverse
+            else:
+                panel._sort_column = "task"
+                panel._sort_reverse = False
+            panel._rebuild_table()
+
+    def action_sort_by_size(self) -> None:
+        for panel in [self.stray_panel, self.orphan_panel]:
+            if panel._sort_column == "size":
+                panel._sort_reverse = not panel._sort_reverse
+            else:
+                panel._sort_column = "size"
+                panel._sort_reverse = True
+            panel._rebuild_table()
 
 
 # Keep old name for backwards compatibility

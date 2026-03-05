@@ -13,7 +13,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional
 
 from experimaestro.scheduler.interfaces import (
     BaseExperiment,
@@ -21,7 +21,6 @@ from experimaestro.scheduler.interfaces import (
     BaseService,
     ExperimentJobInformation,
     JobFailureStatus,
-    JobState,
     JobStateError,
     STATE_NAME_TO_JOBSTATE,
 )
@@ -44,9 +43,6 @@ from experimaestro.scheduler.state_status import (
     experiment_entity_id_extractor,
     task_id_hash,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger("xpm.workspace_state")
 
@@ -1855,9 +1851,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         # Collect all job paths referenced by experiments
         referenced_jobs = self._collect_referenced_job_paths()
+        logger.debug(
+            "Orphan detection: %d referenced job paths across all runs",
+            len(referenced_jobs),
+        )
 
         # Scan workspace/jobs/ for all job directories
         orphan_jobs = []
+        total_on_disk = 0
         for task_dir in jobs_base.iterdir():
             if not task_dir.is_dir():
                 continue
@@ -1868,6 +1869,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 if not job_dir.is_dir():
                     continue
 
+                total_on_disk += 1
                 job_id = job_dir.name
 
                 # Resolve to canonical path for comparison
@@ -1882,6 +1884,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     job = self._mock_job_from_disk(job_path, task_id, job_id)
                     orphan_jobs.append(job)
 
+        logger.debug(
+            "Orphan detection: %d jobs on disk, %d orphans found",
+            total_on_disk,
+            len(orphan_jobs),
+        )
+
         return orphan_jobs
 
     def get_stray_jobs(self) -> list[MockJob]:
@@ -1891,119 +1899,59 @@ class WorkspaceStateProvider(OfflineStateProvider):
         experiment, but the experiment has since been relaunched with different
         parameters (i.e., a new run was started).
 
-        This differs from orphan jobs which considers ALL runs. Stray jobs only
-        look at the LATEST run of each experiment.
+        Uses the provider's loaded experiments to collect job full_ids from
+        latest runs, then checks non-latest run jobs for running state on disk.
 
         Returns:
             List of MockJob objects for running jobs not in any current experiment
         """
-        jobs_base = self.workspace_path / "jobs"
-        if not jobs_base.exists():
-            return []
+        # Collect full_ids of jobs in the latest run of each experiment
+        latest_run_full_ids: set[str] = set()
+        v2_ids, v1_ids = self._get_known_experiment_ids()
 
-        # Collect job paths from LATEST runs only
-        latest_run_jobs = self._collect_latest_run_job_paths()
-
-        # Scan workspace/jobs/ for all running job directories
-        stray_jobs = []
-        for task_dir in jobs_base.iterdir():
-            if not task_dir.is_dir():
+        for experiment_id in v2_ids:
+            current_run_id = self.get_current_run(experiment_id)
+            if current_run_id is None:
                 continue
+            run_dir = (
+                self.workspace_path / "experiments" / experiment_id / current_run_id
+            )
+            if not run_dir.is_dir():
+                continue
+            exp = self._get_or_load_experiment(experiment_id, current_run_id, run_dir)
+            for job_info in exp.job_infos.values():
+                latest_run_full_ids.add(
+                    MockJob.make_full_id(job_info.task_id, job_info.job_id)
+                )
 
-            task_id = task_dir.name
+        # For v1 experiments, all jobs are in the "current" run
+        for experiment_id in v1_ids:
+            for job in self._get_v1_jobs(experiment_id):
+                latest_run_full_ids.add(job.full_id)
 
-            for job_dir in task_dir.iterdir():
-                if not job_dir.is_dir():
-                    continue
+        logger.debug(
+            "Stray detection: %d jobs in latest runs", len(latest_run_full_ids)
+        )
 
-                job_id = job_dir.name
+        # Now scan all non-latest runs for running jobs
+        stray_jobs: list[MockJob] = []
+        seen_full_ids: set[str] = set()
 
-                # Resolve to canonical path for comparison
-                try:
-                    job_path = job_dir.resolve()
-                except OSError:
-                    continue
+        for experiment_id in v2_ids:
+            for run in self.get_experiment_runs(experiment_id):
+                for job_info in run.job_infos.values():
+                    full_id = MockJob.make_full_id(job_info.task_id, job_info.job_id)
+                    if full_id in latest_run_full_ids or full_id in seen_full_ids:
+                        continue
+                    seen_full_ids.add(full_id)
 
-                # Check if this job is in any latest run
-                if job_path not in latest_run_jobs:
-                    # Always verify running state from PID file (don't trust metadata)
-                    scriptname = task_id.rsplit(".", 1)[-1]
-                    actual_state = self._check_running_from_pid(job_path, scriptname)
-
-                    # Only include if the job is actually running
-                    if actual_state == JobState.RUNNING:
-                        # Create MockJob for the running job
-                        job = self._mock_job_from_disk(job_path, task_id, job_id)
-                        # Update state to verified running state
-                        job.state = JobState.RUNNING
+                    # Load job from disk to check its actual state
+                    job = self._get_or_load_job(job_info.job_id, job_info.task_id)
+                    if job.state and job.state.running():
+                        logger.debug("Stray job found: %s", full_id)
                         stray_jobs.append(job)
 
         return stray_jobs
-
-    def _collect_latest_run_job_paths(self) -> set[Path]:
-        """Collect job paths from the latest run of each experiment only
-
-        Returns:
-            Set of resolved job paths that are in the latest run of any experiment
-        """
-        referenced = set()
-
-        # v2 layout: experiments/{exp-id}/{run-id}/status.json
-        experiments_base = self.workspace_path / "experiments"
-        if experiments_base.exists():
-            for exp_dir in experiments_base.iterdir():
-                if not exp_dir.is_dir():
-                    continue
-
-                experiment_id = exp_dir.name
-
-                # Get the latest run for this experiment
-                latest_run_id = self.get_current_run(experiment_id)
-                if latest_run_id is None:
-                    continue
-
-                run_dir = exp_dir / latest_run_id
-                if not run_dir.is_dir():
-                    continue
-
-                # Use cached experiment (EventReader keeps it up to date)
-                exp = self._get_or_load_experiment(
-                    experiment_id, latest_run_id, run_dir
-                )
-
-                # Add all job paths from this run
-                for job_info in exp.job_infos.values():
-                    job_path = (
-                        self.workspace_path
-                        / "jobs"
-                        / job_info.task_id
-                        / job_info.job_id
-                    )
-                    try:
-                        referenced.add(job_path.resolve())
-                    except OSError:
-                        pass
-
-        # v1 layout: only most recent jobs/ (not jobs.bak/)
-        old_xp_dir = self.workspace_path / "xp"
-        if old_xp_dir.exists():
-            for exp_dir in old_xp_dir.iterdir():
-                if not exp_dir.is_dir():
-                    continue
-
-                # Only check current jobs/ (not jobs.bak/)
-                jobs_dir = exp_dir / "jobs"
-                if not jobs_dir.exists():
-                    continue
-
-                for job_link in jobs_dir.glob("*/*"):
-                    try:
-                        job_path = job_link.resolve()
-                        referenced.add(job_path)
-                    except OSError:
-                        pass
-
-        return referenced
 
     def _collect_referenced_job_paths(self) -> set[Path]:
         """Collect all job paths referenced by experiments (v1 and v2 layouts)
@@ -2091,46 +2039,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
             job.carbon_metrics = carbon_metrics
 
         return job
-
-    def _check_running_from_pid(
-        self, job_path: Path, scriptname: str
-    ) -> Optional[JobState]:
-        """Check if a job is running by reading its PID file and checking the process
-
-        Args:
-            job_path: Path to the job directory
-            scriptname: The script name (used for file naming)
-
-        Returns:
-            JobState.RUNNING if the process is still running, None otherwise
-        """
-        pid_file = job_path / f"{scriptname}.pid"
-        if not pid_file.exists():
-            return None
-
-        try:
-            pinfo = json.loads(pid_file.read_text())
-            pid = pinfo.get("pid")
-            if pid is None:
-                return None
-
-            # Ensure pid is an integer (JSON may store it as string)
-            pid = int(pid)
-
-            # Check if the process is still running
-            try:
-                import psutil
-
-                proc = psutil.Process(pid)
-                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
-                    return JobState.RUNNING
-            except (ImportError, psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-
-        except (json.JSONDecodeError, OSError, ValueError, TypeError):
-            pass
-
-        return None
 
     # =========================================================================
     # Process information
