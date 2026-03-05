@@ -2217,11 +2217,18 @@ class WorkspaceStateProvider(OfflineStateProvider):
         """
         import shutil
 
-        # Check for running jobs first
+        # Check if experiment is still running
+        from experimaestro.scheduler.interfaces import ExperimentStatus
+
+        exp = self.get_experiment(experiment_id)
+        if exp is not None:
+            try:
+                if exp.status == ExperimentStatus.RUNNING:
+                    return False, "Cannot delete: experiment is still running"
+            except (NotImplementedError, AttributeError):
+                pass
+
         jobs = self.get_jobs(experiment_id=experiment_id)
-        running_jobs = [j for j in jobs if j.state and j.state.running()]
-        if running_jobs:
-            return False, f"Cannot delete: {len(running_jobs)} jobs are still running"
 
         # Find experiment directories (v2 layout)
         exp_dir = self.workspace_path / "experiments" / experiment_id
