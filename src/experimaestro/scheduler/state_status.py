@@ -175,6 +175,16 @@ class EventBase:
         # Filter to only known fields for the event class
         valid_fields = {f for f in event_class.__dataclass_fields__}
         filtered = {k: v for k, v in d.items() if k in valid_fields}
+        # Convert nested dataclass fields
+        if "tags" in filtered and filtered["tags"]:
+            filtered["tags"] = [
+                JobTag(**t) if isinstance(t, dict) else t for t in filtered["tags"]
+            ]
+        if "progress" in filtered and isinstance(filtered["progress"], list):
+            filtered["progress"] = [
+                ProgressLevel.from_dict(p) if isinstance(p, dict) else p
+                for p in filtered["progress"]
+            ]
         return event_class(**filtered)
 
     @classmethod
