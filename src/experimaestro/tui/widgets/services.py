@@ -31,7 +31,7 @@ class ServicesList(Vertical):
     STATE_ICONS = {
         "STOPPED": "⏹",
         "STARTING": "⏳",
-        "RUNNING": "▶",
+        "RUNNING": "🏃",
         "STOPPING": "⏳",
         "ERROR": "⚠",
     }

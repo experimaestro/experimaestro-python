@@ -46,7 +46,7 @@ def get_status_icon(status: str, failure_reason=None):
             # FAILED or unknown - use default error icon
         return "❌"
     elif status == "running":
-        return "▶"
+        return "🏃"
     elif status == "scheduled":
         return "🕐"  # Scheduled (e.g., in SLURM queue)
     elif status == "waiting":

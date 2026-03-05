@@ -1,11 +1,15 @@
 """Jobs-related widgets for the TUI"""
 
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
-from textual.widgets import DataTable, Label, Input, Static
+from textual.widgets import DataTable, Label, Input, Static, Tree
+from textual.widgets.tree import TreeNode
 from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
@@ -29,6 +33,28 @@ from experimaestro.carbon.utils import (
     format_energy_kwh,
     format_power,
 )
+
+# Progress bar using Unicode block characters
+_PROGRESS_BLOCKS = " ▏▎▍▌▋▊▉█"
+
+
+def _format_progress_bar(fraction: float, width: int = 10) -> Text:
+    """Render a compact progress bar with percentage using Unicode blocks"""
+    fraction = max(0.0, min(1.0, fraction))
+    pct = int(fraction * 100)
+    filled_float = fraction * width
+    full = int(filled_float)
+    remainder = filled_float - full
+
+    bar = "█" * full
+    if full < width:
+        bar += _PROGRESS_BLOCKS[int(remainder * 8)]
+        bar += " " * (width - full - 1)
+
+    text = Text()
+    text.append(bar, style="bold green")
+    text.append(f" {pct:3d}%", style="green")
+    return text
 
 
 class SearchBar(Widget):
@@ -489,6 +515,605 @@ class JobDetailView(Widget):
             self.query_one("#job-logs-hint", Label).update("")
 
 
+class GroupLevel(Enum):
+    """Grouping levels for the tree view"""
+
+    STATUS = "status"
+    TASK_ID = "task_id"
+    TAG = "tag"
+
+
+# Default grouping order
+DEFAULT_GROUP_ORDER = [GroupLevel.STATUS, GroupLevel.TASK_ID, GroupLevel.TAG]
+
+# Display names for group levels
+GROUP_LEVEL_NAMES = {
+    GroupLevel.STATUS: "Status",
+    GroupLevel.TASK_ID: "Task",
+    GroupLevel.TAG: "Tag",
+}
+
+
+@dataclass
+class TreeJobData:
+    """Data attached to a job leaf node in the tree"""
+
+    job_id: str
+    task_id: str
+    status_text: str
+    tags: dict[str, str]
+
+
+@dataclass
+class TreeGroupData:
+    """Data attached to a group node in the tree"""
+
+    level: GroupLevel
+    value: str
+    job_count: int
+
+
+class JobsTreeView(Widget):
+    """Tree-based job view with configurable grouping hierarchy"""
+
+    BINDINGS = [
+        Binding("g", "cycle_grouping", "Cycle Group"),
+        Binding("1", "toggle_level('status')", "Tog Status", show=False),
+        Binding("2", "toggle_level('task_id')", "Tog Task", show=False),
+        Binding("3", "toggle_level('tag')", "Tog Tag", show=False),
+        Binding("e", "expand_all", "Expand All", show=False),
+        Binding("E", "collapse_all", "Collapse All", show=False),
+        Binding("enter", "select_node", "Select", show=False),
+        Binding("l", "view_logs", "Logs", key_display="l"),
+        Binding("ctrl+d", "delete_job", "Delete", show=False),
+        Binding("ctrl+k", "kill_job", "Kill", show=False),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.grouping_order: list[GroupLevel] = list(DEFAULT_GROUP_ORDER)
+        self._disabled_levels: set[GroupLevel] = set()
+        self._jobs: list = []
+        self._tags_map: dict[str, dict[str, str]] = {}
+        self._experiment_obj = None
+        self._experiment_job_info: dict = {}
+        self._task_id_map: dict[str, str] = {}
+        self.current_experiment: str | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="tree-grouping-indicator")
+        yield Tree("Jobs", id="jobs-tree")
+
+    def on_mount(self) -> None:
+        tree = self.query_one("#jobs-tree", Tree)
+        tree.show_root = False
+        tree.guide_depth = 3
+        self._update_grouping_indicator()
+
+    def _active_levels(self) -> list[GroupLevel]:
+        """Return the grouping order with disabled levels removed"""
+        return [lvl for lvl in self.grouping_order if lvl not in self._disabled_levels]
+
+    def _update_grouping_indicator(self) -> None:
+        parts = []
+        for lvl in self.grouping_order:
+            name = GROUP_LEVEL_NAMES[lvl]
+            idx = list(GroupLevel).index(lvl) + 1
+            if lvl in self._disabled_levels:
+                part = f"[dim]{idx}[/dim]:[on red]{name}[/on red]"
+            else:
+                part = f"[dim]{idx}[/dim]:[on green]{name}[/on green]"
+            parts.append(part)
+        separator = " [bold]>[/bold] "
+        indicator = self.query_one("#tree-grouping-indicator", Static)
+        indicator.update(
+            f"[bold]Grouping:[/bold] {separator.join(parts)}  [dim](g cycle)[/dim]"
+        )
+
+    def action_cycle_grouping(self) -> None:
+        """Rotate the grouping order: move first level to end"""
+        self.grouping_order = self.grouping_order[1:] + self.grouping_order[:1]
+        self._update_grouping_indicator()
+        self.rebuild_tree()
+        active = self._active_levels()
+        order_str = " > ".join(GROUP_LEVEL_NAMES[lvl] for lvl in active)
+        self.notify(f"Grouping: {order_str}", severity="information")
+
+    def action_toggle_level(self, level_value: str) -> None:
+        """Toggle a grouping level on/off"""
+        level = GroupLevel(level_value)
+        if level in self._disabled_levels:
+            self._disabled_levels.discard(level)
+            self.notify(
+                f"{GROUP_LEVEL_NAMES[level]} grouping enabled",
+                severity="information",
+            )
+        else:
+            # Don't allow disabling all levels
+            active = self._active_levels()
+            if len(active) <= 1 and level in active:
+                self.notify("Cannot disable all grouping levels", severity="warning")
+                return
+            self._disabled_levels.add(level)
+            self.notify(
+                f"{GROUP_LEVEL_NAMES[level]} grouping disabled",
+                severity="information",
+            )
+        self._update_grouping_indicator()
+        self.rebuild_tree()
+
+    def _expand_recursive(self, node: TreeNode, expand: bool) -> None:
+        """Expand or collapse all group nodes recursively"""
+        for child in node.children:
+            if isinstance(child.data, TreeGroupData):
+                if expand:
+                    child.expand()
+                else:
+                    child.collapse()
+                self._expand_recursive(child, expand)
+
+    def action_expand_all(self) -> None:
+        """Expand all tree nodes"""
+        tree = self.query_one("#jobs-tree", Tree)
+        self._expand_recursive(tree.root, True)
+
+    def action_collapse_all(self) -> None:
+        """Collapse all tree nodes"""
+        tree = self.query_one("#jobs-tree", Tree)
+        self._expand_recursive(tree.root, False)
+
+    def set_data(
+        self,
+        jobs: list,
+        tags_map: dict[str, dict[str, str]],
+        experiment_obj,
+        experiment_job_info: dict,
+        task_id_map: dict[str, str],
+        current_experiment: str | None,
+    ) -> None:
+        """Update the tree with new job data"""
+        self._jobs = jobs
+        self._tags_map = tags_map
+        self._experiment_obj = experiment_obj
+        self._experiment_job_info = experiment_job_info
+        self._task_id_map = task_id_map
+        self.current_experiment = current_experiment
+        self.rebuild_tree()
+
+    def _collect_expanded_paths(self, node: TreeNode, path: tuple = ()) -> set[tuple]:
+        """Collect paths of expanded group nodes"""
+        expanded = set()
+        for child in node.children:
+            if isinstance(child.data, TreeGroupData):
+                child_path = path + (child.data.value,)
+                if child.is_expanded:
+                    expanded.add(child_path)
+                expanded |= self._collect_expanded_paths(child, child_path)
+        return expanded
+
+    def _restore_expanded(
+        self, node: TreeNode, expanded: set[tuple], path: tuple = ()
+    ) -> None:
+        """Restore expanded state of group nodes"""
+        for child in node.children:
+            if isinstance(child.data, TreeGroupData):
+                child_path = path + (child.data.value,)
+                if child_path in expanded:
+                    child.expand()
+                self._restore_expanded(child, expanded, child_path)
+
+    def rebuild_tree(self) -> None:
+        """Rebuild the tree from current data, preserving expanded state"""
+        tree = self.query_one("#jobs-tree", Tree)
+
+        # Save expanded state before clearing
+        expanded_paths = self._collect_expanded_paths(tree.root)
+        first_build = not bool(tree.root.children)
+
+        tree.clear()
+
+        if not self._jobs:
+            tree.root.add_leaf("[dim]No jobs[/dim]")
+            return
+
+        # Build enriched job records for grouping
+        enriched = []
+        for job in self._jobs:
+            resolved_state, _ = StateProvider.get_resolved_state(
+                job, self._experiment_obj
+            )
+            status_name = resolved_state.name if resolved_state else "unknown"
+            status_icon = resolved_state.icon if resolved_state else "?"
+            tags = self._tags_map.get(job.identifier, {})
+
+            # Progress (for running jobs)
+            progress_text = ""
+            progress_fraction = -1.0
+            if resolved_state and resolved_state == JobState.RUNNING:
+                progress_list = job.progress or []
+                if progress_list:
+                    progress_fraction = progress_list[0].progress
+                    progress_text = f"{progress_fraction * 100:.0f}%"
+
+            # Duration
+            start = job.starttime
+            end = job.endtime
+            duration = ""
+            if start:
+                if end:
+                    elapsed = (end - start).total_seconds()
+                else:
+                    elapsed = (datetime.now() - start).total_seconds()
+                duration = format_duration(elapsed)
+
+            # Submitted time
+            submitted = ""
+            job_info = self._experiment_job_info.get(job.identifier)
+            if job_info and job_info.timestamp:
+                submitted = datetime.fromtimestamp(job_info.timestamp).strftime(
+                    "%m-%d %H:%M"
+                )
+
+            # Carbon
+            carbon_metrics = getattr(job, "carbon_metrics", None)
+            co2_text = format_co2_kg(carbon_metrics.co2_kg) if carbon_metrics else ""
+
+            enriched.append(
+                {
+                    "job": job,
+                    "status_name": status_name,
+                    "status_icon": status_icon,
+                    "task_id": job.task_id or "",
+                    "tags": tags,
+                    "progress": progress_text,
+                    "progress_fraction": progress_fraction,
+                    "duration": duration,
+                    "submitted": submitted,
+                    "co2": co2_text,
+                }
+            )
+
+        self._active_group_levels = self._active_levels()
+        self._build_group(tree.root, enriched, level_index=0)
+
+        if first_build:
+            # First build: expand all top-level nodes
+            for child in tree.root.children:
+                child.expand()
+        else:
+            # Restore previous expanded state
+            self._restore_expanded(tree.root, expanded_paths)
+
+    def _build_group(
+        self,
+        parent: TreeNode,
+        jobs: list[dict],
+        level_index: int,
+    ) -> None:
+        """Recursively build tree groups, skipping non-discriminating levels"""
+        if not jobs:
+            return
+
+        # If we've exhausted all grouping levels, add job leaves
+        if level_index >= len(self._active_group_levels):
+            self._add_job_leaves(parent, jobs)
+            return
+
+        level = self._active_group_levels[level_index]
+
+        if level == GroupLevel.TAG:
+            self._build_tag_group(parent, jobs, level_index)
+        else:
+            groups = self._group_by_level(jobs, level)
+
+            # Skip this level if it doesn't discriminate
+            if len(groups) <= 1:
+                self._build_group(parent, jobs, level_index + 1)
+                return
+
+            for group_key, group_jobs in sorted(groups.items()):
+                label = self._format_group_label(level, group_key, len(group_jobs))
+                node = parent.add(
+                    label, data=TreeGroupData(level, group_key, len(group_jobs))
+                )
+                self._build_group(node, group_jobs, level_index + 1)
+
+    def _build_tag_group(
+        self,
+        parent: TreeNode,
+        jobs: list[dict],
+        level_index: int,
+    ) -> None:
+        """Handle TAG grouping: find the most discriminating tag key and split on it.
+
+        If no tag discriminates, skip to next level."""
+        # Collect all tag keys across these jobs
+        tag_keys: Counter[str] = Counter()
+        for j in jobs:
+            for k in j["tags"]:
+                tag_keys[k] += 1
+
+        if not tag_keys:
+            # No tags at all, skip to next level
+            self._build_group(parent, jobs, level_index + 1)
+            return
+
+        # Find the tag key that produces the most distinct groups
+        # (best discrimination), only counting jobs that have the key
+        best_key = None
+        best_score = 0
+        for key, count in tag_keys.most_common():
+            values_with_key = {str(j["tags"][key]) for j in jobs if key in j["tags"]}
+            if len(values_with_key) > 1 and len(values_with_key) > best_score:
+                best_key = key
+                best_score = len(values_with_key)
+
+        if best_key is None:
+            # No tag discriminates, skip
+            self._build_group(parent, jobs, level_index + 1)
+            return
+
+        # Split jobs: those with the tag key vs those without
+        jobs_with_tag: list[dict] = []
+        jobs_without_tag: list[dict] = []
+        for j in jobs:
+            if best_key in j["tags"]:
+                jobs_with_tag.append(j)
+            else:
+                jobs_without_tag.append(j)
+
+        # Group jobs that have this tag key
+        groups: dict[str, list[dict]] = {}
+        for j in jobs_with_tag:
+            val = str(j["tags"][best_key])
+            groups.setdefault(val, []).append(j)
+
+        for group_val, group_jobs in sorted(groups.items()):
+            label = Text()
+            label.append(f"{best_key}", style="bold")
+            label.append(f"={group_val} ({len(group_jobs)})")
+            node = parent.add(
+                label,
+                data=TreeGroupData(
+                    GroupLevel.TAG, f"{best_key}={group_val}", len(group_jobs)
+                ),
+            )
+            # Continue with TAG level again (for remaining tag keys)
+            # but also allow other levels after
+            self._build_tag_subgroup(node, group_jobs, best_key, level_index)
+
+        # Jobs without this tag: continue to next grouping levels
+        if jobs_without_tag:
+            self._build_tag_subgroup(parent, jobs_without_tag, best_key, level_index)
+
+    def _build_tag_subgroup(
+        self,
+        parent: TreeNode,
+        jobs: list[dict],
+        used_key: str,
+        original_level_index: int,
+    ) -> None:
+        """After splitting on a tag key, try remaining tag keys, then continue
+        with the rest of the grouping order."""
+        # Collect remaining tag keys (exclude already used)
+        remaining_keys: Counter[str] = Counter()
+        for j in jobs:
+            for k in j["tags"]:
+                if k != used_key:
+                    remaining_keys[k] += 1
+
+        # Find next discriminating tag key (only among jobs that have it)
+        best_key = None
+        best_score = 0
+        for key, count in remaining_keys.most_common():
+            values_with_key = {str(j["tags"][key]) for j in jobs if key in j["tags"]}
+            if len(values_with_key) > 1 and len(values_with_key) > best_score:
+                best_key = key
+                best_score = len(values_with_key)
+
+        if best_key is not None:
+            # Split jobs: those with the tag key vs those without
+            jobs_with_tag = [j for j in jobs if best_key in j["tags"]]
+            jobs_without_tag = [j for j in jobs if best_key not in j["tags"]]
+
+            groups: dict[str, list[dict]] = {}
+            for j in jobs_with_tag:
+                val = str(j["tags"][best_key])
+                groups.setdefault(val, []).append(j)
+
+            for group_val, group_jobs in sorted(groups.items()):
+                label = Text()
+                label.append(f"{best_key}", style="bold")
+                label.append(f"={group_val} ({len(group_jobs)})")
+                node = parent.add(
+                    label,
+                    data=TreeGroupData(
+                        GroupLevel.TAG, f"{best_key}={group_val}", len(group_jobs)
+                    ),
+                )
+                self._build_tag_subgroup(
+                    node, group_jobs, best_key, original_level_index
+                )
+
+            # Jobs without this tag: continue without it
+            if jobs_without_tag:
+                self._build_tag_subgroup(
+                    parent, jobs_without_tag, best_key, original_level_index
+                )
+        else:
+            # No more discriminating tags, continue with remaining group levels
+            self._build_group(parent, jobs, original_level_index + 1)
+
+    def _group_by_level(
+        self, jobs: list[dict], level: GroupLevel
+    ) -> dict[str, list[dict]]:
+        """Group jobs by a specific level"""
+        groups: dict[str, list[dict]] = {}
+        for j in jobs:
+            if level == GroupLevel.STATUS:
+                key = j["status_name"]
+            elif level == GroupLevel.TASK_ID:
+                key = j["task_id"]
+            else:
+                key = ""
+            groups.setdefault(key, []).append(j)
+        return groups
+
+    # Build status name -> icon map from JobState singletons
+    _STATUS_ICONS: dict[str, str] = {
+        state.name: state.icon
+        for state in [
+            JobState.DONE,
+            JobState.ERROR,
+            JobState.RUNNING,
+            JobState.SCHEDULED,
+            JobState.WAITING,
+            JobState.READY,
+            JobState.UNSCHEDULED,
+            JobState.TRANSIENT,
+        ]
+    }
+
+    def _format_group_label(self, level: GroupLevel, key: str, count: int) -> Text:
+        """Format a group node label"""
+        label = Text()
+        if level == GroupLevel.STATUS:
+            icon = self._STATUS_ICONS.get(key, "❓")
+            label.append(f"{icon} {key}", style="bold")
+            label.append(f" ({count})")
+        elif level == GroupLevel.TASK_ID:
+            label.append(f"{key}", style="bold cyan")
+            label.append(f" ({count})")
+        else:
+            label.append(f"{key} ({count})")
+        return label
+
+    def _add_job_leaves(self, parent: TreeNode, jobs: list[dict]) -> None:
+        """Add job leaf nodes with table-like information"""
+        # Collect which group levels are already represented in ancestor nodes
+        ancestor_levels = self._ancestor_group_levels(parent)
+        # Collect which tag keys are already grouped on
+        ancestor_tag_keys: set[str] = set()
+        for level, value in ancestor_levels:
+            if level == GroupLevel.TAG and "=" in value:
+                ancestor_tag_keys.add(value.split("=", 1)[0])
+
+        grouped_by_task = any(lv == GroupLevel.TASK_ID for lv, _ in ancestor_levels)
+        grouped_by_status = any(lv == GroupLevel.STATUS for lv, _ in ancestor_levels)
+
+        for j in jobs:
+            job = j["job"]
+            label = Text()
+
+            # Status icon (only if not already grouped by status)
+            if not grouped_by_status:
+                label.append(f"{j['status_icon']} ")
+
+            # Progress bar (for running jobs)
+            if j["progress_fraction"] >= 0:
+                label.append_text(_format_progress_bar(j["progress_fraction"]))
+                label.append(" ")
+
+            # Short job ID
+            label.append(f"{job.identifier[:7]} ", style="dim")
+
+            # Task ID (only if not already grouped by task)
+            if not grouped_by_task:
+                label.append(f"{j['task_id']} ", style="cyan")
+
+            # Tags not already used for grouping
+            remaining_tags = {
+                k: v for k, v in j["tags"].items() if k not in ancestor_tag_keys
+            }
+            if remaining_tags:
+                tag_parts = [f"{k}={v}" for k, v in remaining_tags.items()]
+                label.append(", ".join(tag_parts), style="dim")
+
+            # Duration
+            if j["duration"]:
+                label.append(f" [{j['duration']}]", style="yellow")
+
+            # Submitted
+            if j["submitted"]:
+                label.append(f" {j['submitted']}", style="dim italic")
+
+            # CO2
+            if j["co2"]:
+                label.append(f" CO2:{j['co2']}", style="green")
+
+            data = TreeJobData(
+                job_id=job.identifier,
+                task_id=j["task_id"],
+                status_text=j["status_name"],
+                tags=j["tags"],
+            )
+            parent.add_leaf(label, data=data)
+
+    def _ancestor_group_levels(self, node: TreeNode) -> list[tuple[GroupLevel, str]]:
+        """Collect (level, value) pairs from ancestor group nodes"""
+        result: list[tuple[GroupLevel, str]] = []
+        current = node
+        while current.parent is not None:
+            if isinstance(current.data, TreeGroupData):
+                result.append((current.data.level, current.data.value))
+            current = current.parent
+        return result
+
+    def _get_selected_job_data(self) -> TreeJobData | None:
+        """Get TreeJobData from the currently highlighted tree node"""
+        tree = self.query_one("#jobs-tree", Tree)
+        node = tree.cursor_node
+        if node and isinstance(node.data, TreeJobData):
+            return node.data
+        return None
+
+    def action_select_node(self) -> None:
+        """Handle enter on a tree node"""
+        tree = self.query_one("#jobs-tree", Tree)
+        node = tree.cursor_node
+        if node is None:
+            return
+        if isinstance(node.data, TreeJobData):
+            # Job leaf - select it
+            self.post_message(
+                JobSelected(
+                    node.data.job_id, node.data.task_id, self.current_experiment or ""
+                )
+            )
+        elif isinstance(node.data, TreeGroupData):
+            # Group node - toggle expand/collapse
+            node.toggle()
+
+    def action_view_logs(self) -> None:
+        data = self._get_selected_job_data()
+        if data and self.current_experiment:
+            self.post_message(
+                ViewJobLogsRequest(data.job_id, data.task_id, self.current_experiment)
+            )
+
+    def action_delete_job(self) -> None:
+        data = self._get_selected_job_data()
+        if data and self.current_experiment:
+            self.post_message(
+                DeleteJobRequest(data.job_id, data.task_id, self.current_experiment)
+            )
+
+    def action_kill_job(self) -> None:
+        data = self._get_selected_job_data()
+        if data and self.current_experiment:
+            self.post_message(
+                KillJobRequest(data.job_id, data.task_id, self.current_experiment)
+            )
+
+    def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+        """Update status bar when tree cursor moves"""
+        node = event.node
+        if isinstance(node.data, TreeJobData):
+            self.post_message(
+                JobHighlighted(node.data.job_id, f"{node.data.status_text}")
+            )
+
+
 class JobsTable(Vertical):
     """Widget displaying jobs for selected experiment"""
 
@@ -503,6 +1128,7 @@ class JobsTable(Vertical):
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("T", "sort_by_task", "Sort Task", show=False),
         Binding("D", "sort_by_submitted", "Sort Date", show=False),
+        Binding("t", "toggle_tree_view", "Tree"),
         Binding("escape", "clear_search", show=False, priority=True),
     ]
 
@@ -510,6 +1136,7 @@ class JobsTable(Vertical):
     _sort_column: Optional[str] = None
     _sort_reverse: bool = False
     _needs_rebuild: bool = True  # Start with rebuild needed
+    _tree_mode: bool = False
 
     def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
@@ -531,6 +1158,47 @@ class JobsTable(Vertical):
         yield Static("Loading jobs...", id="jobs-loading", classes="hidden")
         yield SearchBar()
         yield DataTable(id="jobs-table", cursor_type="row")
+        tree_view = JobsTreeView()
+        tree_view.display = False
+        yield tree_view
+
+    def action_toggle_tree_view(self) -> None:
+        """Toggle between table and tree view"""
+        self._tree_mode = not self._tree_mode
+        table = self.query_one("#jobs-table", DataTable)
+        tree_view = self.query_one(JobsTreeView)
+        table.display = not self._tree_mode
+        tree_view.display = self._tree_mode
+        if self._tree_mode:
+            self._update_tree_view()
+            tree_view.query_one("#jobs-tree", Tree).focus()
+            self.notify("Tree view", severity="information")
+        else:
+            table.focus()
+            self.notify("Table view", severity="information")
+
+    def _update_tree_view(self) -> None:
+        """Update the tree view with current data"""
+        if not self._tree_mode:
+            return
+        tree_view = self.query_one(JobsTreeView)
+        jobs = (
+            self.state_provider.get_jobs(
+                self.current_experiment, run_id=self.current_run_id
+            )
+            if self.current_experiment
+            else []
+        )
+        if self.filter_fn:
+            jobs = [j for j in jobs if self.filter_fn(j)]
+        tree_view.set_data(
+            jobs=jobs,
+            tags_map=self.tags_map,
+            experiment_obj=self._current_experiment_obj,
+            experiment_job_info=self.experiment_job_info,
+            task_id_map=self.task_id_map,
+            current_experiment=self.current_experiment,
+        )
 
     def action_toggle_search(self) -> None:
         """Toggle search bar visibility"""
@@ -898,7 +1566,22 @@ class JobsTable(Vertical):
         self._current_experiment_obj = experiment_obj
 
         # Refresh display with loaded jobs
-        self._refresh_jobs_with_data(jobs)
+        if self._tree_mode:
+            # In tree mode, update the tree with filtered jobs
+            filtered = jobs
+            if self.filter_fn:
+                filtered = [j for j in jobs if self.filter_fn(j)]
+            tree_view = self.query_one(JobsTreeView)
+            tree_view.set_data(
+                jobs=filtered,
+                tags_map=self.tags_map,
+                experiment_obj=self._current_experiment_obj,
+                experiment_job_info=self.experiment_job_info,
+                task_id_map=self.task_id_map,
+                current_experiment=self.current_experiment,
+            )
+        else:
+            self._refresh_jobs_with_data(jobs)
 
     def refresh_jobs(self) -> None:
         """Refresh the jobs list from state provider (always background)"""
@@ -993,9 +1676,9 @@ class JobsTable(Vertical):
                     # We only report main progress here (level 0)
                     last_progress = progress_list[0]
                     progress_pct = last_progress.progress * 100
-                    status_text = f"▶ {progress_pct:.0f}%"
+                    status_text = f"🏃 {progress_pct:.0f}%"
                 else:
-                    status_text = "▶"
+                    status_text = "🏃"
             else:
                 status_text = resolved_state.icon if resolved_state else "❓"
 

@@ -148,7 +148,7 @@ class GlobalServiceSyncs(Vertical):
 
             # State icon
             state_icons = {
-                "RUNNING": "▶",
+                "RUNNING": "🏃",
                 "STOPPED": "⏹",
                 "STARTING": "⏳",
                 "STOPPING": "⏳",

@@ -83,7 +83,7 @@ class RunsList(Widget):
                 jobs_parts = [f"{run.finished_jobs}/{run.total_jobs}"]
                 if run.failed_jobs > 0:
                     jobs_parts.append(f"{run.failed_jobs}✗")
-                status = f"▶ {' '.join(jobs_parts)}"
+                status = f"🏃 {' '.join(jobs_parts)}"
             elif run.status == "completed":
                 status = "✓ Done"
             elif run.status == "failed":

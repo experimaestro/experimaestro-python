@@ -144,6 +144,10 @@ class HelpScreen(ModalScreen[None]):
   T         Sort by task
   D         Sort by date
   f         Copy folder path
+  t         Toggle tree view
+  g         Cycle tree grouping (in tree view)
+  1/2/3     Toggle Status/Task/Tag grouping
+  e/E       Expand/Collapse all tree nodes
 
 [bold cyan]Log Viewer[/bold cyan]
   f         Toggle follow mode

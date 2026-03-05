@@ -359,7 +359,7 @@ class JobStateRunning(JobState):
     """Job is currently running"""
 
     name = "running"
-    icon = "▶"
+    icon = "🏃"
     _lifecycle_order = 4
 
     def running(self):

@@ -80,6 +80,25 @@ JobsTable {
     min-height: 10;
 }
 
+/* Jobs Tree View */
+JobsTreeView {
+    width: 100%;
+    height: 1fr;
+}
+
+#tree-grouping-indicator {
+    background: $boost;
+    color: $text;
+    padding: 0 1;
+    height: auto;
+}
+
+#jobs-tree {
+    width: 100%;
+    height: 1fr;
+    min-height: 10;
+}
+
 .hidden {
     display: none;
 }

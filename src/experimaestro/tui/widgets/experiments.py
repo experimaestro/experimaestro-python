@@ -155,7 +155,7 @@ class ExperimentsList(Widget):
             exp_status = None
 
         if exp_status == ExperimentStatus.RUNNING:
-            return f"▶ {finished}/{total}"
+            return f"🏃 {finished}/{total}"
         # Experiment is not running (done/failed status)
         if finished == total:
             return "✓ Done"
