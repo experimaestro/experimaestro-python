@@ -333,9 +333,7 @@ class OrphanJobsScreen(Screen):
             if confirmed:
                 deleted = 0
                 for job in deletable_jobs:
-                    success, _ = self.state_provider.delete_job_safely(
-                        job, cascade_orphans=False
-                    )
+                    success, _ = self.state_provider.delete_job_safely(job)
                     if success:
                         deleted += 1
 
