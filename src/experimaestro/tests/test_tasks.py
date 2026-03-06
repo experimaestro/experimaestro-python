@@ -562,3 +562,21 @@ def test_graceful_termination_no_reraise():
         if p is not None and p.is_running():
             logging.warning("Force killing task process %d", p.pid)
             p.kill()
+
+
+def test_wait_blocks_until_all_jobs_finished():
+    """Verify that xp.wait() blocks until all submitted jobs reach a terminal state."""
+    with TemporaryExperiment("wait_test", timeout_multiplier=3) as xp:
+        tasks = []
+        for i in range(5):
+            task = Say.C(word=f"word{i}")
+            task.submit()
+            tasks.append(task)
+        xp.wait()
+
+        # All jobs must be in a terminal state after wait() returns
+        for i, task in enumerate(tasks):
+            state = task.__xpm__.job.state
+            assert state == JobState.DONE, (
+                f"Task {i} has state {state} after xp.wait(), expected DONE"
+            )

@@ -1588,10 +1588,18 @@ class BaseExperiment:
     def _serialize_job_states(self) -> Dict[str, str]:
         """Serialize per-job states for status.json.
 
+        Error states include the failure reason (e.g., "error:DEPENDENCY").
         The live experiment derives this from self.jobs; MockExperiment
         overrides to use _job_states directly.
         """
-        return {job_id: job.state.name for job_id, job in self.jobs.items()}
+        result = {}
+        for job_id, job in self.jobs.items():
+            state = job.state
+            if state.is_error() and state.failure_reason is not None:
+                result[job_id] = f"error:{state.failure_reason.name}"
+            else:
+                result[job_id] = state.name
+        return result
 
     def write_status(self) -> None:
         """Write status.json to disk (calls state_dict internally)
