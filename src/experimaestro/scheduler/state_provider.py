@@ -1413,7 +1413,13 @@ class MockExperiment(BaseExperiment):
         return self._failed_jobs
 
     def _serialize_job_states(self) -> dict[str, str]:
-        return {job_id: state.name for job_id, state in self._job_states.items()}
+        result = {}
+        for job_id, state in self._job_states.items():
+            if state.is_error() and state.failure_reason is not None:
+                result[job_id] = f"error:{state.failure_reason.name}"
+            else:
+                result[job_id] = state.name
+        return result
 
     def get_job_state(self, job_id: str) -> JobState | None:
         """Get the tracked state of a job from experiment events.
@@ -1638,10 +1644,18 @@ class MockExperiment(BaseExperiment):
 
         # Parse job_states from status.json and compute counters
         job_states_raw = d.get("job_states", {})
-        job_states = {
-            job_id: STATE_NAME_TO_JOBSTATE.get(state_name, JobState.UNSCHEDULED)
-            for job_id, state_name in job_states_raw.items()
-        }
+        job_states = {}
+        for job_id, state_str in job_states_raw.items():
+            if state_str.startswith("error:"):
+                reason_name = state_str[6:]
+                try:
+                    job_states[job_id] = JobStateError(JobFailureStatus[reason_name])
+                except KeyError:
+                    job_states[job_id] = JobStateError()
+            else:
+                job_states[job_id] = STATE_NAME_TO_JOBSTATE.get(
+                    state_str, JobState.UNSCHEDULED
+                )
         if job_states:
             finished_jobs = sum(1 for s in job_states.values() if s == JobState.DONE)
             failed_jobs = sum(1 for s in job_states.values() if s.is_error())

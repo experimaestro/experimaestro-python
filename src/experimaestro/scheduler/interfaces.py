@@ -469,6 +469,16 @@ class JobStateError(JobState):
     def is_error(self):
         return True
 
+    def resolve(self, exec_state, scheduler_ts=None, exec_ts=None):
+        """When both states are errors, prefer the one with a failure reason."""
+        if isinstance(exec_state, JobStateError):
+            # Both are errors — prefer whichever has a failure reason,
+            # with exec_state (from disk) taking priority
+            if exec_state.failure_reason is not None:
+                return exec_state
+            return self
+        return super().resolve(exec_state, scheduler_ts, exec_ts)
+
 
 # NOTE: Consider removing these singleton instances in a future refactor
 # Create singleton instances for backward compatibility
