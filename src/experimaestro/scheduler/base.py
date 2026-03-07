@@ -561,6 +561,7 @@ class Scheduler(StateProvider, threading.Thread):
                     path=jobs_dir,
                     glob_pattern="*-*-*.jsonl",
                     entity_id_extractor=job_entity_id_extractor,
+                    on_should_follow=self._should_follow_job,
                     on_created=self._on_job_created,
                     on_event=self._on_job_event,
                 )
@@ -588,6 +589,11 @@ class Scheduler(StateProvider, threading.Thread):
                     reader.stop_watching()
                     logger.debug("Stopped job event reader for %s", path)
                 self._job_event_readers.clear()
+
+    def _should_follow_job(self, entity_id: str) -> bool:
+        """Cheap filter: check if a job is managed by this scheduler (no file I/O)."""
+        _task_id, job_id = BaseJob.parse_full_id(entity_id)
+        return job_id in self.jobs
 
     def _on_job_created(self, entity_id: str, events: list) -> bool:
         """Handle new job discovery from EventReader.
