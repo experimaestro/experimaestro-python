@@ -96,9 +96,11 @@ class RemoteFileSynchronizer:
                 cmd.extend(["--include", pattern])
             cmd.extend(["--exclude", "*"])
 
-        # SSH options
+        # SSH options (use shlex.join for proper quoting of paths)
         if self.ssh_options:
-            ssh_cmd = "ssh " + " ".join(self.ssh_options)
+            import shlex
+
+            ssh_cmd = "ssh " + " ".join(shlex.quote(opt) for opt in self.ssh_options)
             cmd.extend(["-e", ssh_cmd])
 
         cmd.extend([source, dest])

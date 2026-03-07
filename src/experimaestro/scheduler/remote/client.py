@@ -423,6 +423,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._connected = False
 
         self._synchronizer: Optional["RemoteFileSynchronizer"] = None
+        self._control_path: Optional[str] = None
 
         # Throttled notification delivery to avoid flooding UI
         self._pending_events: List[EventBase] = []
@@ -450,8 +451,22 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Register cleanup on exit (in case disconnect isn't called)
         atexit.register(self._cleanup_temp_dir)
 
+        # Set up SSH ControlMaster for connection multiplexing
+        # This allows rsync and other SSH commands to reuse the same connection
+        # Use a short temp path to stay under Unix socket path limit (104 bytes)
+        self._control_path = tempfile.mktemp(prefix="xpm-", dir="/tmp")
+        control_opts = [
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={self._control_path}",
+            "-o",
+            "ControlPersist=yes",
+        ]
+
         # Build SSH command
         cmd = ["ssh"]
+        cmd.extend(control_opts)
         cmd.extend(self.ssh_options)
         cmd.append(self.host)
 
@@ -606,6 +621,30 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Clear job and experiment caches (using inherited methods)
         self._clear_job_cache()
         self._clear_experiment_cache_all()
+
+        # Close SSH ControlMaster socket
+        if self._control_path:
+            try:
+                subprocess.run(
+                    [
+                        "ssh",
+                        "-o",
+                        f"ControlPath={self._control_path}",
+                        "-O",
+                        "exit",
+                        self.host,
+                    ],
+                    capture_output=True,
+                    timeout=5.0,
+                )
+            except Exception:
+                pass
+            # Remove socket file if still present
+            try:
+                Path(self._control_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+            self._control_path = None
 
         # Clean up temporary cache directory
         self._cleanup_temp_dir()
@@ -1414,11 +1453,20 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         # Create synchronizer lazily
         if self._synchronizer is None:
+            # Build SSH options including ControlPath for connection reuse
+            sync_ssh_options = list(self.ssh_options)
+            if self._control_path:
+                sync_ssh_options.extend(
+                    [
+                        "-o",
+                        f"ControlPath={self._control_path}",
+                    ]
+                )
             self._synchronizer = RemoteFileSynchronizer(
                 host=self.host,
                 remote_workspace=Path(self.remote_workspace),
                 local_cache=self.local_cache_dir,
-                ssh_options=self.ssh_options,
+                ssh_options=sync_ssh_options,
             )
 
         try:
