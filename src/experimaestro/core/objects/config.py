@@ -1631,8 +1631,11 @@ class ConfigMixin:
         xpm = ConfigInformation(self)
 
         # Get the line where the object was created (error reporting)
-        caller = inspect.getframeinfo(inspect.stack()[1][0])
-        xpm._initinfo = "%s:%s" % (str(Path(caller.filename).absolute()), caller.lineno)
+        frame = sys._getframe(1)
+        xpm._initinfo = "%s:%s" % (
+            str(Path(frame.f_code.co_filename).absolute()),
+            frame.f_lineno,
+        )
 
         self.__xpm__ = xpm
 
