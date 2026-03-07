@@ -749,6 +749,7 @@ class experiment(BaseExperiment):
             assert self.scheduler is not None
             async with self.scheduler.exitCondition:
                 self.exitMode = True
+                self.scheduler.exitmode = True
                 logging.debug("Setting exit mode to true")
                 self.scheduler.exitCondition.notify_all()
 

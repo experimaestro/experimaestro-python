@@ -2,6 +2,13 @@ class HandledException(Exception):
     pass
 
 
+class ExperimentStopped(HandledException):
+    """Raised when a job is submitted after the experiment has been stopped (e.g., Ctrl+C)."""
+
+    def __init__(self):
+        super().__init__("Experiment has been stopped, no more jobs can be submitted")
+
+
 class GracefulTimeout(Exception):
     """Exception raised to signal a graceful timeout in resumable tasks.
 

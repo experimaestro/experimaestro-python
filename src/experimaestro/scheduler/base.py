@@ -377,6 +377,11 @@ class Scheduler(StateProvider, threading.Thread):
         return job.state
 
     def submit(self, job: Job) -> Optional[Job]:
+        if self.exitmode:
+            from experimaestro.exceptions import ExperimentStopped
+
+            raise ExperimentStopped()
+
         # Wait for the future containing the submitted job
         logger.debug("Submit job %s to the scheduler", job)
         otherFuture = asyncio.run_coroutine_threadsafe(
@@ -431,8 +436,9 @@ class Scheduler(StateProvider, threading.Thread):
         logger.debug("Registering job %s", job)
 
         if self.exitmode:
-            logger.warning("Exit mode: not submitting")
-            return
+            from experimaestro.exceptions import ExperimentStopped
+
+            raise ExperimentStopped()
 
         # Job was already submitted
         if job.identifier in self.jobs:
