@@ -1093,6 +1093,9 @@ class WatchedDirectory:
         events_count_resolver: Optional function that returns the starting
             events_count for an entity. When None, defaults to 0 (process all files).
             Replaces reading events_count from status.json in the entity directory.
+        on_should_follow: Cheap filter callback (entity_id) -> bool. Called before
+            reading any event files. If it returns False, the entity is skipped
+            entirely (no file I/O). If None, all entities pass the filter.
         on_created: Callback when a new entity is discovered. Receives (entity_id, events)
             where events is the list of historical events read during catch-up. Returns
             True to follow this entity's events, False to ignore. If None, all entities
@@ -1111,6 +1114,7 @@ class WatchedDirectory:
     # For resolving starting events_count per entity:
     events_count_resolver: EventsCountResolver | None = None
     # Callbacks for entity lifecycle
+    on_should_follow: Callable[[str], bool] | None = None
     on_created: Callable[[str, list[EventBase]], bool] | None = None
     on_event: Callable[[str, EventBase], None] | None = None
     on_deleted: Callable[[str], None] | None = None
@@ -1367,6 +1371,11 @@ class EventReader:
 
         # Register entities and collect events for followed ones
         for entity_id, (dir_config, event_files) in entities.items():
+            # Fast filter: skip entities we don't care about before any file I/O
+            if dir_config.on_should_follow is not None:
+                if not dir_config.on_should_follow(entity_id):
+                    continue
+
             if not event_files:
                 if not self._register_entity(entity_id, dir_config):
                     continue
@@ -1626,6 +1635,11 @@ class EventReader:
 
         # Check if this entity is being followed
         is_new = entity_id not in self._followed_entities
+
+        # Fast filter: skip entities we don't care about before any file I/O
+        if is_new and dir_config.on_should_follow is not None:
+            if not dir_config.on_should_follow(entity_id):
+                return
 
         file_number = self._extract_file_number(path)
         current = self._current_file.get(entity_id)

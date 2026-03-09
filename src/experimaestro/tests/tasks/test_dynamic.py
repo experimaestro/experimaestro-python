@@ -373,3 +373,48 @@ def test_task_dynamic_dependency():
             f"Checkpoints from different learning rates should have different "
             f"identifiers: {id1} vs {id2}"
         )
+
+
+def test_wait_blocks_until_dynamic_tasks_finished():
+    """Verify that xp.wait() blocks until dynamically submitted tasks are also finished.
+
+    This test submits a Learn task that produces dynamic checkpoints, which trigger
+    callbacks that submit Evaluate tasks. After xp.wait(), all tasks (both the original
+    Learn and the dynamically submitted Evaluate tasks) must be in a terminal state.
+    """
+    from experimaestro.scheduler import JobState
+
+    evaluations = []
+
+    def collect_checkpoint(checkpoint: Checkpoint):
+        task = Evaluate.C(model=checkpoint.model)
+        checkpoint_loader = CheckpointLoader.C(checkpoint=checkpoint)
+        evaluations.append(task.submit(init_tasks=[checkpoint_loader]))
+
+    with TemporaryDirectory() as workdir:
+        with TemporaryExperiment(
+            "dynamic_wait", timeout_multiplier=6, workdir=workdir
+        ) as xp:
+            model = Model.C()
+            validation = Validation.C(model=model)
+            learn = Learn.C(model=model, validation=validation)
+            learn.watch_output(validation.checkpoint, collect_checkpoint)
+
+            learn.submit()
+
+            # Allow the task to run up to step 30 (produces 2 checkpoints)
+            learn.max_step_file.parent.mkdir(parents=True, exist_ok=True)
+            with learn.max_step_file.open("w") as f:
+                f.write("30")
+
+            xp.wait()
+
+            # All dynamically submitted evaluation tasks must be finished
+            assert len(evaluations) == 2, (
+                f"Expected 2 evaluations, got {len(evaluations)}"
+            )
+            for i, task in enumerate(evaluations):
+                state = task.__xpm__.job.state
+                assert state == JobState.DONE, (
+                    f"Dynamic task {i} has state {state} after xp.wait(), expected DONE"
+                )

@@ -576,13 +576,18 @@ class experiment(BaseExperiment):
         # Track which experiments this job belongs to
         job.experiments.append(self)
 
-        # If job is already being tracked (not UNSCHEDULED and not finished),
-        # increment unfinishedJobs since no state transition will trigger it
-        if not job.state.is_unscheduled() and not job.state.finished():
+        # Count this job as unfinished if it hasn't reached a terminal state.
+        # This includes UNSCHEDULED jobs (about to be submitted via aio_submit)
+        # to prevent wait() from returning before submissions are processed.
+        if (
+            not job.scheduler_state.finished()
+            and job.scheduler_state != JobState.TRANSIENT
+        ):
             self.unfinishedJobs += 1
             logging.debug(
-                "Job %s already running, unfinished jobs for %s: %d",
+                "Job %s tracked (state=%s), unfinished jobs for %s: %d",
                 job.identifier[:8],
+                job.scheduler_state.name,
                 self.name,
                 self.unfinishedJobs,
             )
@@ -744,6 +749,7 @@ class experiment(BaseExperiment):
             assert self.scheduler is not None
             async with self.scheduler.exitCondition:
                 self.exitMode = True
+                self.scheduler.exitmode = True
                 logging.debug("Setting exit mode to true")
                 self.scheduler.exitCondition.notify_all()
 
@@ -801,7 +807,12 @@ class experiment(BaseExperiment):
                     logger.error("Experiment Failed: %d failed jobs", count)
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
-        return future.result()
+        future.result()
+
+        # If wait ended because of a signal (Ctrl+C), raise KeyboardInterrupt
+        # so callers don't continue as if all jobs completed successfully
+        if self.exitMode:
+            raise KeyboardInterrupt()
 
     def setenv(self, name, value, override=True):
         """Shortcut to set the environment value"""

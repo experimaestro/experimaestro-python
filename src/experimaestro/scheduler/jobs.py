@@ -273,9 +273,11 @@ class Job(BaseJob, Resource):
         self._scheduler_state = new_state
 
         # Helper to determine if a state should be "counted" in unfinishedJobs
-        # A job is counted when it's been submitted and hasn't finished yet
+        # A job is counted from UNSCHEDULED (registered) until finished or TRANSIENT.
+        # UNSCHEDULED is counted because add_job increments unfinishedJobs at
+        # registration time, before aio_submit processes the job asynchronously.
         def is_counted(state):
-            return not state.is_unscheduled() and not state.finished()
+            return not state.finished() and state != JobState.TRANSIENT
 
         # Update experiment statistics based on state transition
         for xp in self.experiments:
