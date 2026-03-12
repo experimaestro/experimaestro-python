@@ -9,6 +9,7 @@ from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 
+from experimaestro.scheduler.interfaces import ExperimentStatus
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import RunSelected
@@ -78,18 +79,18 @@ class RunsList(Widget):
         self.runs = self.state_provider.get_experiment_runs(self.experiment_id)
 
         for run in self.runs:
-            # Format status with jobs info when running
-            if run.status == "active":
-                jobs_parts = [f"{run.finished_jobs}/{run.total_jobs}"]
-                if run.failed_jobs > 0:
-                    jobs_parts.append(f"{run.failed_jobs}✗")
-                status = f"🏃 {' '.join(jobs_parts)}"
-            elif run.status == "completed":
-                status = "✓ Done"
-            elif run.status == "failed":
-                status = "❌ Failed"
-            else:
-                status = run.status or "-"
+            match run.status:
+                case ExperimentStatus.RUNNING:
+                    jobs_parts = [f"{run.finished_jobs}/{run.total_jobs}"]
+                    if run.failed_jobs > 0:
+                        jobs_parts.append(f"{run.failed_jobs}✗")
+                    status = f"🏃 {' '.join(jobs_parts)}"
+                case ExperimentStatus.DONE:
+                    status = "✓ Done"
+                case ExperimentStatus.FAILED:
+                    status = "❌ Failed"
+                case _:  # The "else" or default case
+                    status = str(run.status.value) if run.status else "-"
 
             # Mark current run
             run_id_display = run.run_id
