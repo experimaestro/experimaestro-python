@@ -867,4 +867,23 @@ class GenericType(Type):
                 f"{type(value)} is not of type {target} (MRO:{type(value).__mro__})"
             )
 
+        # Check type arguments compatibility
+        matching_args = get_args(matching)
+        if self.args and matching_args:
+            for expected, actual in zip(self.args, matching_args):
+                if isinstance(expected, TypeVar) or isinstance(actual, TypeVar):
+                    continue
+                if isinstance(expected, type) and isinstance(actual, type):
+                    if not issubclass(actual, expected):
+                        raise TypeError(
+                            f"{type(value).__qualname__} has type argument "
+                            f"{actual.__qualname__} which is not a subtype of "
+                            f"expected {expected.__qualname__}"
+                        )
+                elif expected != actual:
+                    raise TypeError(
+                        f"{type(value).__qualname__} has type argument "
+                        f"{actual} which does not match expected {expected}"
+                    )
+
         return value

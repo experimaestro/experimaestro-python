@@ -372,7 +372,6 @@ def test_core_generics_override_nested_subtype():
     Child.__getxpmtype__().arguments
 
 
-@pytest.mark.xfail(reason="Generic type args not yet validated at runtime")
 def test_core_generics_validate_rejects_wrong_type_arg():
     """Param[Base[X]] should reject an instance of Base[Y] where Y is not
     a subtype of X"""
