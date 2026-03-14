@@ -370,3 +370,32 @@ def test_core_generics_override_nested_subtype():
         wrapper: Param[WrapperConfig[ConfigB]] = field(overrides=True)
 
     Child.__getxpmtype__().arguments
+
+
+@pytest.mark.xfail(reason="Generic type args not yet validated at runtime")
+def test_core_generics_validate_rejects_wrong_type_arg():
+    """Param[Base[X]] should reject an instance of Base[Y] where Y is not
+    a subtype of X"""
+
+    class PairwiseSample:
+        pass
+
+    class BatchwiseSample:
+        pass
+
+    U = TypeVar("U")
+
+    class Sampler(Config, Generic[U]):
+        pass
+
+    PairwiseSampler = Sampler[PairwiseSample]
+    BatchwiseSampler = Sampler[BatchwiseSample]
+
+    class MyBatchSampler(BatchwiseSampler):
+        pass
+
+    class Container(Config):
+        sampler: Param[PairwiseSampler]
+
+    with pytest.raises((ValueError, TypeError)):
+        Container.C(sampler=MyBatchSampler.C())
