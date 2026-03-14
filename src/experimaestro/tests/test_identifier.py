@@ -675,9 +675,9 @@ def test_instanceconfig_backwards_compat():
     """Model using single InstanceConfig should have same ID as with regular Config"""
     # Using InstanceConfig (first occurrence only, no instance marker added)
     sm1 = SubModel.C()
-    sm1.__xpmtype__.identifier.name = "test.SubModel"  # Match the __xpmid__
+    sm1.__xpmtype__.identifier.name = "test.submodel"  # Match the __xpmid__
     m_instance = Model.C(m1=sm1, m2=sm1)
-    m_instance.__xpmtype__.identifier.name = "test.Model"
+    m_instance.__xpmtype__.identifier.name = "test.model"
 
     # Using regular Config
     sc1 = SubModelAsConfig.C()

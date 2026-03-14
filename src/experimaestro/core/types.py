@@ -50,7 +50,7 @@ class DeprecationInfo:
 class Identifier:
     def __init__(self, name: str):
         assert isinstance(name, str)
-        self.name = name
+        self.name = name.lower()
 
     def __hash__(self):
         return self.name.__hash__()
