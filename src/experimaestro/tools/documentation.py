@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import docutils.nodes as nodes
 import sphobjinv
-from docutils.frontend import OptionParser
+from docutils.frontend import get_default_settings
 from docutils.nodes import document
 from docutils.parsers.rst import Directive, Parser, directives
 from docutils.utils import new_document
@@ -156,7 +156,7 @@ def get_parser():
     directives.register_directive("toctree", AutotocDirective)
     directives.register_directive("autoxpmconfig", AutoXPMDirective)
     directives.register_directive("currentmodule", CurrentModuleDirective)
-    settings = OptionParser(components=(Parser,)).get_default_values()
+    settings = get_default_settings(Parser)
 
     return Parser(), settings
 
