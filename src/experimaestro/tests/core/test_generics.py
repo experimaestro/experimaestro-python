@@ -1,6 +1,6 @@
 """Tests for the use of generics in configurations"""
 
-from typing import Generic, Optional, TypeVar
+from typing import Generic, List, Optional, Tuple, TypeVar, Union
 
 import pytest
 from experimaestro import field, Config, Param
@@ -398,3 +398,48 @@ def test_core_generics_validate_rejects_wrong_type_arg():
 
     with pytest.raises((ValueError, TypeError)):
         Container.C(sampler=MyBatchSampler.C())
+
+
+# =============================================================================
+# Tests for Union type compatibility in generic type arguments
+# =============================================================================
+
+V = TypeVar("V")
+W = TypeVar("W")
+
+
+class Converter(Config, Generic[V, W]):
+    pass
+
+
+HFTokenizerInput = Union[str, List[str], List[Tuple[str, str]]]
+
+
+class TopicTextConverter(Converter[str, str]):
+    pass
+
+
+def test_core_generics_union_type_arg_accepts_member():
+    """Param[Base[str, Union[str, ...]]] should accept Base[str, str]
+    since str is a member of the Union"""
+
+    class HFTokenizerAdapter(Config):
+        converter: Param[Converter[str, HFTokenizerInput]]
+
+    converter = TopicTextConverter.C()
+    adapter = HFTokenizerAdapter.C(converter=converter)
+    assert adapter.converter is converter
+
+
+def test_core_generics_union_type_arg_rejects_non_member():
+    """Param[Base[str, Union[str, ...]]] should reject Base[str, int]
+    since int is not a member of the Union"""
+
+    class IntConverter(Converter[str, int]):
+        pass
+
+    class HFTokenizerAdapter(Config):
+        converter: Param[Converter[str, HFTokenizerInput]]
+
+    with pytest.raises(TypeError):
+        HFTokenizerAdapter.C(converter=IntConverter.C())

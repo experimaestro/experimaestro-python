@@ -837,6 +837,47 @@ class DictType(Type):
         return str(self)
 
 
+def _is_type_arg_compatible(actual, expected) -> bool:
+    """Check if an actual type argument is compatible with the expected one.
+
+    Handles Union types: actual is compatible with Union[X, Y, Z] if actual
+    is a subtype of any member of the union.
+    """
+    # Both concrete types: use subclass check
+    if isinstance(expected, type) and isinstance(actual, type):
+        return issubclass(actual, expected)
+
+    # Expected is a Union: actual must be compatible with at least one member
+    if get_origin(expected) is typing.Union:
+        return any(
+            _is_type_arg_compatible(actual, member) for member in get_args(expected)
+        )
+
+    # Actual is a Union: each member of actual must be compatible with expected
+    if get_origin(actual) is typing.Union:
+        return all(
+            _is_type_arg_compatible(member, expected) for member in get_args(actual)
+        )
+
+    # For generic types (e.g., List[str]), check origin and args recursively
+    expected_origin = get_origin(expected)
+    actual_origin = get_origin(actual)
+    if expected_origin is not None and actual_origin is not None:
+        if not issubclass(actual_origin, expected_origin):
+            return False
+        expected_args = get_args(expected)
+        actual_args = get_args(actual)
+        if expected_args and actual_args:
+            return all(
+                _is_type_arg_compatible(a, e)
+                for a, e in zip(actual_args, expected_args)
+            )
+        return True
+
+    # Fallback: exact equality
+    return expected == actual
+
+
 class GenericType(Type):
     def __init__(self, type: typing.Type):
         self.type = type
@@ -873,17 +914,11 @@ class GenericType(Type):
             for expected, actual in zip(self.args, matching_args):
                 if isinstance(expected, TypeVar) or isinstance(actual, TypeVar):
                     continue
-                if isinstance(expected, type) and isinstance(actual, type):
-                    if not issubclass(actual, expected):
-                        raise TypeError(
-                            f"{type(value).__qualname__} has type argument "
-                            f"{actual.__qualname__} which is not a subtype of "
-                            f"expected {expected.__qualname__}"
-                        )
-                elif expected != actual:
+                if not _is_type_arg_compatible(actual, expected):
                     raise TypeError(
                         f"{type(value).__qualname__} has type argument "
-                        f"{actual} which does not match expected {expected}"
+                        f"{actual} which is not compatible with "
+                        f"expected {expected}"
                     )
 
         return value
