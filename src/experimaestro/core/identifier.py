@@ -65,12 +65,30 @@ def is_ignored(value):
 
 
 def remove_meta(value):
-    """Cleanup a dict/list by removing ignored values"""
+    """Cleanup a dict/list/set by removing ignored values"""
     if isinstance(value, list):
         return [el for el in value if not is_ignored(el)]
+    if isinstance(value, set):
+        return {el for el in value if not is_ignored(el)}
     if isinstance(value, dict):
         return {key: value for key, value in value.items() if not is_ignored(value)}
     return value
+
+
+def _element_sort_key(value, version):
+    """Compute an independent sort key for a set element.
+
+    Uses a fresh ConfigPath to avoid interfering with ongoing identifier computation.
+    """
+    h = hashlib.sha256()
+    computer = IdentifierComputer.__new__(IdentifierComputer)
+    computer._hasher = h
+    computer.config = None
+    computer.config_path = ConfigPath()
+    computer.version = version
+    computer.partial = None
+    computer.update(value)
+    return h.digest()
 
 
 class Identifier:
@@ -130,6 +148,7 @@ class IdentifierComputer:
     CYCLE_REFERENCE = b"\x0b"
     INIT_TASKS = b"\x0c"
     INSTANCE_ID = b"\x0d"
+    SET_ID = b"\x0e"
 
     def __init__(
         self,
@@ -188,6 +207,15 @@ class IdentifierComputer:
             self._hashupdate(IdentifierComputer.LIST_ID)
             self._hashupdate(struct.pack("!d", len(values)))
             for x in values:
+                self.update(x)
+        elif isinstance(value, set):
+            values = [el for el in value if not is_ignored(el)]
+            self._hashupdate(IdentifierComputer.SET_ID)
+            self._hashupdate(struct.pack("!d", len(values)))
+            sorted_values = sorted(
+                values, key=lambda el: _element_sort_key(el, self.version)
+            )
+            for x in sorted_values:
                 self.update(x)
         elif isinstance(value, Enum):
             self._hashupdate(IdentifierComputer.ENUM_ID)

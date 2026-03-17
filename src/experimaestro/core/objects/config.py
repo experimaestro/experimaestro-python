@@ -865,6 +865,14 @@ class ConfigInformation:
         elif isinstance(value, (list, tuple)):
             return [ConfigInformation._outputjsonvalue(el, context) for el in value]
 
+        elif isinstance(value, set):
+            return {
+                "type": "set",
+                "items": [
+                    ConfigInformation._outputjsonvalue(el, context) for el in value
+                ],
+            }
+
         elif isinstance(value, dict):
             return {
                 name: ConfigInformation._outputjsonvalue(el, context)
@@ -977,7 +985,7 @@ class ConfigInformation:
 
         if isinstance(value, Config):
             value.__xpm__.__get_objects__(objects, context)
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, (list, tuple, set)):
             for el in value:
                 ConfigInformation.__collect_objects__(el, objects, context)
         elif isinstance(value, dict):
@@ -1122,6 +1130,12 @@ class ConfigInformation:
 
             if value["type"] == "path.serialized":
                 return SerializedPath(value["value"], value["is_folder"])
+
+            if value["type"] == "set":
+                return {
+                    ConfigInformation._objectFromParameters(x, objects)
+                    for x in value["items"]
+                }
 
             if value["type"] == "enum":
                 module = importlib.import_module(value["module"])
@@ -1723,12 +1737,38 @@ class ConfigMixin:
         return self
 
     def __eq__(self, other):
+        if not isinstance(other, Config):
+            return NotImplemented
         if self.__class__ != other.__class__:
             return False
+        # Use identifier-based comparison when both are sealed
+        if self.__xpm__._sealed and other.__xpm__._sealed:
+            return self.__xpm__.identifier == other.__xpm__.identifier
         for argument, value in self.__xpm__.xpmvalues():
             if value != getattr(other, argument.name, None):
                 return False
         return True
+
+    def __hash__(self):
+        if not self.__xpm__._sealed:
+            raise TypeError(
+                f"Unhashable: {self.__class__.__qualname__} is not sealed. "
+                f"Use sealed_set() to create sets of Config objects."
+            )
+        return hash(self.__xpm__.identifier)
+
+    def seal(self):
+        """Seal this configuration, computing and caching its identifier.
+
+        After sealing, the configuration is immutable and hashable,
+        allowing it to be used in sets and as dictionary keys.
+
+        :return: self (for chaining)
+        """
+        if not self.__xpm__._sealed:
+            context = ConfigWalkContext()
+            self.__xpm__.seal(context)
+        return self
 
     def __arguments__(self):
         """Returns a map containing all the arguments"""
@@ -2142,6 +2182,33 @@ def setmeta(config: Config, flag: bool):
     """
     config.__xpm__.set_meta(flag)
     return config
+
+
+def sealed_set(*elements: Config) -> set[Config]:
+    """Create a set of sealed Config objects.
+
+    Each element is sealed (its identifier computed and cached) before
+    being added to the set. This makes Config objects hashable by their
+    identifier, enabling use in Python sets.
+
+    Non-Config elements (primitives, enums, etc.) are passed through as-is.
+
+    Example::
+
+        model1 = Model.C(lr=0.01)
+        model2 = Model.C(lr=0.02)
+        ensemble = Ensemble.C(models=sealed_set(model1, model2))
+
+    :param elements: Config objects to seal and add to the set
+    :return: A set containing the sealed elements
+    :raises TypeError: If a Config element cannot be sealed
+    """
+    result = set()
+    for el in elements:
+        if isinstance(el, Config):
+            el.seal()
+        result.add(el)
+    return result
 
 
 class ResumableTask(Task):

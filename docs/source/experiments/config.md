@@ -359,10 +359,66 @@ class MyConfig(Config):
 Possible types are:
 
 - basic Python types (`str`, `int`, `float`, `bool`) and paths `pathlib.Path`
-- lists, using `typing.List[T]`
+- lists, using `list[T]`
+- sets, using `set[T]` (see [Sets](#sets) below)
 - enumerations, using `Enum` from the `enum` package
-- dictionaries (support for basic types in keys only) with `typing.Dict[U, V]`
+- dictionaries (support for basic types in keys only) with `dict[U, V]`
 - Other configurations
+
+(sets)=
+### Sets
+
+Sets (`set[T]`) are supported as parameter types. Since sets are unordered,
+experimaestro sorts elements deterministically before computing the identifier,
+ensuring that `{A, B}` and `{B, A}` always produce the same identifier.
+
+For **primitive types** (int, str, float, enum), sets work directly:
+
+```python
+from experimaestro import Config, Param
+
+class MyConfig(Config):
+    tags: Param[set[str]]
+
+# Order does not matter for identifiers
+c1 = MyConfig.C(tags={"a", "b", "c"})
+c2 = MyConfig.C(tags={"c", "a", "b"})
+# c1 and c2 have the same identifier
+```
+
+For **Config objects**, elements must be **sealed** before being placed in a set,
+because Config objects are only hashable once their identifier has been computed
+and cached. Use {py:func}`~experimaestro.sealed_set` to seal and collect elements
+in one step:
+
+```python
+from experimaestro import Config, Param, sealed_set
+
+class Model(Config):
+    lr: Param[float]
+
+class Ensemble(Config):
+    models: Param[set[Model]]
+
+m1 = Model.C(lr=0.01)
+m2 = Model.C(lr=0.02)
+
+# sealed_set seals each Config element and returns a set
+ensemble = Ensemble.C(models=sealed_set(m1, m2))
+```
+
+Alternatively, you can seal configs individually with {py:meth}`~experimaestro.Config.seal`:
+
+```python
+m1 = Model.C(lr=0.01).seal()
+m2 = Model.C(lr=0.02).seal()
+ensemble = Ensemble.C(models={m1, m2})
+```
+
+:::{warning}
+Attempting to put an unsealed Config object in a `set[T]` parameter will raise
+a `TypeError`. Always use `sealed_set()` or call `.seal()` on each element first.
+:::
 
 (parameters)=
 ## Parameters

@@ -73,6 +73,15 @@ get_list = get_list_component
 """
 
 
+def get_set(typehint):
+    """Returns the set component (or None if not a set)"""
+    if isgenericalias(typehint):
+        if typehint.__origin__ in [typing.Set, set]:
+            assert len(typehint.__args__) == 1
+            return typehint.__args__[0]
+    return None
+
+
 def is_annotated(typehint):
     return isinstance(typehint, AnnotatedAlias)
 

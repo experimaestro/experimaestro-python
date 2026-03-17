@@ -12,6 +12,7 @@ from .config import (
     DependentMarker,
     copyconfig,
     setmeta,
+    sealed_set,
     cache,
     logger,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "getqualattr",
     "copyconfig",
     "setmeta",
+    "sealed_set",
     "cache",
     "add_to_path",
     "logger",

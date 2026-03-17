@@ -16,6 +16,7 @@ from experimaestro import (
     Task,
     LightweightTask,
     Option,
+    sealed_set,
 )
 from experimaestro.scheduler.workspace import RunMode
 
@@ -246,6 +247,20 @@ class ConfigFieldFactoryIgnore(Config):
     b: Param[int]
 
 
+class ConfigSet(Config):
+    """Config with set parameter"""
+
+    __xpmid__ = "test.stability.ConfigSet"
+    items: Param[set[int]]
+
+
+class ConfigNestedSet(Config):
+    """Config with nested set of configs"""
+
+    __xpmid__ = "test.stability.ConfigNestedSet"
+    configs: Param[set[ConfigInt]]
+
+
 class SubModel(InstanceConfig):
     """InstanceConfig for testing instance identity"""
 
@@ -304,6 +319,18 @@ def get_configurations():
     configs["dict_nested_single"] = ConfigNestedDict.C(configs={"x": ConfigInt.C(x=1)})
     configs["dict_nested_multiple"] = ConfigNestedDict.C(
         configs={"a": ConfigInt.C(x=1), "b": ConfigInt.C(x=2), "c": ConfigInt.C(x=3)}
+    )
+
+    # Sets
+    configs["set_empty"] = ConfigSet.C(items=set())
+    configs["set_single"] = ConfigSet.C(items={1})
+    configs["set_multiple"] = ConfigSet.C(items={1, 2, 3, 4, 5})
+    configs["set_nested_empty"] = ConfigNestedSet.C(configs=set())
+    configs["set_nested_single"] = ConfigNestedSet.C(
+        configs=sealed_set(ConfigInt.C(x=1))
+    )
+    configs["set_nested_multiple"] = ConfigNestedSet.C(
+        configs=sealed_set(ConfigInt.C(x=1), ConfigInt.C(x=2), ConfigInt.C(x=3))
     )
 
     # Nested configs

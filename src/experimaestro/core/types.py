@@ -146,6 +146,10 @@ class Type:
         if t:
             return ArrayType(Type.fromType(t))
 
+        t = typingutils.get_set(key)
+        if t:
+            return SetType(Type.fromType(t))
+
         t = typingutils.get_dict(key)
         if t:
             return DictType(Type.fromType(t[0]), Type.fromType(t[1]))
@@ -767,6 +771,35 @@ class ArrayType(Type):
 
     def __repr__(self):
         return f"Array({self.type})"
+
+
+class SetType(Type):
+    def __init__(self, type: Type):
+        self.type = type
+
+    def name(self):
+        return f"Set[{self.type.name()}]"
+
+    def validate(self, value):
+        if not isinstance(value, set):
+            raise ValueError("value is not a set")
+
+        from .objects import Config
+
+        for x in value:
+            if isinstance(x, Config) and not x.__xpm__._sealed:
+                raise TypeError(
+                    f"Config {x.__class__.__qualname__} in set is not sealed. "
+                    f"Use sealed_set() to create sets of Config objects."
+                )
+
+        return {self.type.validate(x) for x in value}
+
+    def __str__(self):
+        return f"Set({self.type})"
+
+    def __repr__(self):
+        return f"Set({self.type})"
 
 
 class EnumType(Type):

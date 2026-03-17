@@ -161,6 +161,12 @@ Type annotations are used to declare parameters in configurations and tasks.
 .. autofunction:: experimaestro.setmeta
 ```
 
+### sealed_set
+
+```{eval-rst}
+.. autofunction:: experimaestro.sealed_set
+```
+
 ### cache
 
 ```{eval-rst}

@@ -19,6 +19,7 @@ from experimaestro import (
     LightweightTask,
     partial,
     param_group,
+    sealed_set,
 )
 from experimaestro.core.objects import (
     ConfigInformation,
@@ -1002,3 +1003,142 @@ def test_partial_identifier_exclude_no_group():
 
     # y has no group, so it IS excluded by exclude_no_group
     assert pid1 == pid3, "y has no group - should have same partial ID"
+
+
+# --- Set type ---
+
+
+class SetElement(Config):
+    value: Param[int]
+
+
+class SetConfig(Config):
+    items: Param[set[SetElement]]
+
+
+class SetPrimitiveConfig(Config):
+    items: Param[set[int]]
+
+
+def test_identifier_set_permutation_invariance():
+    """Set with elements in different order should have same identifier"""
+    e1 = SetElement.C(value=1)
+    e2 = SetElement.C(value=2)
+    assert_equal(
+        SetConfig.C(items=sealed_set(e1, e2)),
+        SetConfig.C(items=sealed_set(e2, e1)),
+        "Set order should not matter",
+    )
+
+
+def test_identifier_set_stability():
+    """Same set should give same identifier across calls"""
+    e1 = SetElement.C(value=1)
+    e2 = SetElement.C(value=2)
+    c1 = SetConfig.C(items=sealed_set(e1, e2))
+    e3 = SetElement.C(value=1)
+    e4 = SetElement.C(value=2)
+    c2 = SetConfig.C(items=sealed_set(e3, e4))
+    assert_equal(c1, c2, "Same set should give same identifier")
+
+
+def test_identifier_set_different():
+    """Different sets should give different identifiers"""
+    e1 = SetElement.C(value=1)
+    e2 = SetElement.C(value=2)
+    e3 = SetElement.C(value=3)
+    assert_notequal(
+        SetConfig.C(items=sealed_set(e1, e2)),
+        SetConfig.C(items=sealed_set(e1, e3)),
+        "Different sets should differ",
+    )
+
+
+def test_identifier_set_empty():
+    """Empty set should have a valid identifier"""
+    c1 = SetConfig.C(items=set())
+    c2 = SetConfig.C(items=set())
+    assert_equal(c1, c2, "Empty sets should be equal")
+
+
+def test_identifier_set_primitives():
+    """Set with primitive types should work"""
+    assert_equal(
+        SetPrimitiveConfig.C(items={1, 2, 3}),
+        SetPrimitiveConfig.C(items={3, 2, 1}),
+        "Primitive set order should not matter",
+    )
+    assert_notequal(
+        SetPrimitiveConfig.C(items={1, 2}),
+        SetPrimitiveConfig.C(items={1, 3}),
+        "Different primitive sets should differ",
+    )
+
+
+def test_identifier_set_vs_list():
+    """Sets and lists should produce different identifiers"""
+
+    class ListConfig(Config):
+        __xpmid__ = "test.set_vs_list"
+        items: Param[list[int]]
+
+    class SetConfig2(Config):
+        __xpmid__ = "test.set_vs_list"
+        items: Param[set[int]]
+
+    assert_notequal(
+        ListConfig.C(items=[1, 2, 3]),
+        SetConfig2.C(items={1, 2, 3}),
+        "Set and list should have different identifiers",
+    )
+
+
+def test_identifier_set_meta():
+    """Meta elements in sets should be ignored"""
+
+    class SetMetaConfig(Config):
+        items: Param[set[MetaA]]
+
+    assert_equal(
+        SetMetaConfig.C(items=sealed_set(MetaA.C(x=1))),
+        SetMetaConfig.C(items=sealed_set(MetaA.C(x=1), setmeta(MetaA.C(x=2), True))),
+        "Meta elements in sets should be ignored",
+    )
+
+
+def test_identifier_set_reload():
+    """Set identifiers should be stable after serialization"""
+    e1 = SetElement.C(value=1)
+    e2 = SetElement.C(value=2)
+    config = SetConfig.C(items=sealed_set(e1, e2))
+    check_reload(config)
+
+
+def test_identifier_set_seal_required():
+    """Unsealed Config objects in sets should raise TypeError on validation"""
+    e1 = SetElement.C(value=1)
+
+    with pytest.raises(TypeError, match="not sealed"):
+        # Manually create a set with unsealed config (bypassing sealed_set)
+        SetConfig.C(items={e1})
+
+
+def test_identifier_set_seal_method():
+    """Config.seal() should make configs hashable"""
+    e1 = SetElement.C(value=1)
+    e2 = SetElement.C(value=2)
+
+    # Before sealing, configs are not hashable
+    with pytest.raises(TypeError, match="not sealed"):
+        hash(e1)
+
+    # After sealing, configs are hashable
+    e1.seal()
+    e2.seal()
+    h1 = hash(e1)
+    h2 = hash(e2)
+    assert h1 != h2, "Different configs should have different hashes"
+
+    # Can now use in a set
+    s = {e1, e2}
+    assert len(s) == 2
