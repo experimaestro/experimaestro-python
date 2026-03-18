@@ -40,6 +40,7 @@ class ServicesList(Vertical):
         super().__init__()
         self.state_provider = state_provider
         self.current_experiment: Optional[str] = None
+        self.current_run_id: Optional[str] = None
         self._services: dict = {}  # service_id -> Service object
 
     def compose(self) -> ComposeResult:
@@ -57,9 +58,12 @@ class ServicesList(Vertical):
         table.add_columns("ID", "Description", "State", "Sync", "URL")
         table.cursor_type = "row"
 
-    def set_experiment(self, experiment_id: Optional[str]) -> None:
+    def set_experiment(
+        self, experiment_id: Optional[str], run_id: Optional[str] = None
+    ) -> None:
         """Set the current experiment and refresh services"""
         self.current_experiment = experiment_id
+        self.current_run_id = run_id
 
         # Clear and show loading for remote
         if self.state_provider.is_remote:
@@ -69,16 +73,18 @@ class ServicesList(Vertical):
             self.query_one("#services-loading", Static).remove_class("hidden")
 
         # Load in background
-        self._load_services(experiment_id)
+        self._load_services(experiment_id, run_id)
 
     @work(thread=True, exclusive=True, group="services_load")
-    def _load_services(self, experiment_id: Optional[str]) -> None:
+    def _load_services(
+        self, experiment_id: Optional[str], run_id: Optional[str] = None
+    ) -> None:
         """Load services in background thread"""
         if not experiment_id:
             self.app.call_from_thread(self._on_services_loaded, [])
             return
 
-        services = self.state_provider.get_services(experiment_id)
+        services = self.state_provider.get_services(experiment_id, run_id=run_id)
         self.app.call_from_thread(self._on_services_loaded, services)
 
     def _on_services_loaded(self, services: list) -> None:
@@ -96,7 +102,7 @@ class ServicesList(Vertical):
             return
 
         # Reload services from state provider to pick up new services
-        self._load_services(self.current_experiment)
+        self._load_services(self.current_experiment, self.current_run_id)
 
     def _refresh_services_with_data(self, services: list) -> None:
         """Refresh the services display with provided data (initial load)

@@ -582,7 +582,7 @@ class ExperimaestroUI(App):
 
         # Set up services list
         services_list = self.query_one(ServicesList)
-        services_list.set_experiment(message.experiment_id)
+        services_list.set_experiment(message.experiment_id, message.run_id)
 
         # Set up jobs table
         jobs_table_widget = self.query_one(JobsTable)
@@ -928,7 +928,7 @@ class ExperimaestroUI(App):
 
         # Set up services list
         services_list = self.query_one(ServicesList)
-        services_list.set_experiment(message.experiment_id)
+        services_list.set_experiment(message.experiment_id, message.run_id)
 
         # Show the tabbed content
         tabs = self.query_one("#experiment-tabs", TabbedContent)
