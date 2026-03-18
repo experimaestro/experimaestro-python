@@ -436,7 +436,7 @@ class JobDetailView(Widget):
         # Tags are stored in JobTagModel, accessed via tags_map
         tags = self.tags_map.get(job.identifier, {})
         if tags:
-            tags_text = ", ".join(f"{k}={v}" for k, v in tags.items())
+            tags_text = "\n".join(f"{k}={v}" for k, v in tags.items())
         else:
             tags_text = "(no tags)"
         self.query_one("#job-tags-label", Label).update(tags_text)
