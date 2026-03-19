@@ -162,6 +162,7 @@ log_cli_format = "[%(levelname)s] %(asctime)s %(name)s [%(process)d/%(threadName
 log_date_format = "%H:%M:%S"
 log_cli_date_format = "%H:%M:%S"
 addopts = "--order-dependencies --ignore-unknown-dependency"
+timeout = 300
 
 markers = [
     # Core foundation (no dependencies)

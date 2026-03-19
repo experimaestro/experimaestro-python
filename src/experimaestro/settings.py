@@ -1,4 +1,4 @@
-import os
+import sys
 from omegaconf import OmegaConf, SCMode
 from dataclasses import field, dataclass
 from functools import lru_cache
@@ -134,8 +134,10 @@ class Settings:
 
 @lru_cache()
 def get_settings(path: Optional[Path] = None) -> Settings:
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        return Settings()
+    if getattr(sys, "_called_from_test", False):
+        settings = Settings()
+        settings.carbon.enabled = False
+        return settings
     else:
         schema = OmegaConf.structured(Settings)
 

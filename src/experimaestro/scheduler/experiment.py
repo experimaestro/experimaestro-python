@@ -344,8 +344,8 @@ class experiment(BaseExperiment):
                         "[Carbon Tracking] Disabled - %s",
                         reason or "Not available",
                     )
-        except ImportError:
-            # Carbon module not available at all
+        except Exception:
+            # Carbon module not available or broken installation
             if carbon_settings.warn_if_unavailable:
                 self._show_carbon_warning(None)
             else:
