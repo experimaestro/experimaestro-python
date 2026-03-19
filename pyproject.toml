@@ -128,6 +128,7 @@ path = "hatch_build.py"
 include = [
     "/src",
     "/app",
+    "/.agents",
     "/hatch_build.py",
     "/README.md",
     "/LICENSE",

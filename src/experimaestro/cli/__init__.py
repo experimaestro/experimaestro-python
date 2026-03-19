@@ -301,6 +301,11 @@ from .refactor import refactor as refactor_cli  # noqa: E402
 
 cli.add_command(refactor_cli)
 
+# Import and add install-skill command
+from .skill import install_skill as install_skill_cli  # noqa: E402
+
+cli.add_command(install_skill_cli)
+
 
 @cli.group()
 def migrate():

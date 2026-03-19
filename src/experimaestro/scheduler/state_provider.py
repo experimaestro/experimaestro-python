@@ -21,7 +21,7 @@ from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.state_status import WarningEvent
@@ -310,6 +310,30 @@ class StateProvider(ABC):
 
         # Conflict: resolve() returned None
         return exec_state, exp_state
+
+    def load_configs(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, Any]:
+        """Load all job configs from a past experiment run.
+
+        Returns a dict mapping job_id to its deserialized Config object,
+        with shared object references preserved across configs. Tags are
+        restored on each config.
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier (None = current/latest run)
+
+        Returns:
+            Dictionary mapping job identifiers to their Config objects
+
+        Raises:
+            FileNotFoundError: If configs.json doesn't exist for the run
+            NotImplementedError: If the provider doesn't support this
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support load_configs"
+        )
 
     @abstractmethod
     def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:

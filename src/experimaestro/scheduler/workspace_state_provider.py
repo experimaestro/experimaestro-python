@@ -1691,6 +1691,39 @@ class WorkspaceStateProvider(OfflineStateProvider):
         return all_jobs
 
     # =========================================================================
+    # Config loading
+    # =========================================================================
+
+    def load_configs(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, object]:
+        """Load all job configs from a past experiment run.
+
+        Returns a dict mapping job_id to its deserialized Config object,
+        with shared object references preserved across configs. Tags are
+        restored on each config.
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier (None = current/latest run)
+
+        Returns:
+            Dictionary mapping job identifiers to their Config objects
+
+        Raises:
+            FileNotFoundError: If configs.json doesn't exist for the run
+        """
+        from experimaestro.core.serialization import load_configs
+
+        if run_id is None:
+            run_id = self.get_current_run(experiment_id)
+            if run_id is None:
+                raise FileNotFoundError(f"No runs found for experiment {experiment_id}")
+
+        run_dir = self.workspace_path / "experiments" / experiment_id / run_id
+        return load_configs(run_dir)
+
+    # =========================================================================
     # Tags and dependencies
     # =========================================================================
 
