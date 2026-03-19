@@ -660,6 +660,9 @@ class experiment(BaseExperiment):
         # Close the event writer to flush any buffered events
         self._event_writer.close()
 
+        # Save all job configs together for later analysis
+        self._save_configs()
+
         # Consolidate carbon metrics for this experiment
         self._consolidate_carbon_metrics()
 
@@ -668,6 +671,40 @@ class experiment(BaseExperiment):
 
         # Archive event files to permanent storage
         self._event_writer.archive_events()
+
+    def _save_configs(self) -> None:
+        """Save all job configs together into configs.json for later analysis.
+
+        Serializes {job_id: config} with shared object references preserved,
+        along with tags for each job. This allows loading all configs from a
+        past experiment with shared references intact.
+        """
+        try:
+            from experimaestro.core.serialization import state_dict
+            from experimaestro.core.context import SerializationContext
+
+            jobs = self.jobs
+            if not jobs:
+                return
+
+            configs = {job_id: job.config for job_id, job in jobs.items()}
+            tags = {}
+            for job_id, job in jobs.items():
+                job_tags = dict(job.config.tags().items()) if job.config.tags() else {}
+                if job_tags:
+                    tags[job_id] = job_tags
+
+            context = SerializationContext(save_directory=None)
+            data = state_dict(context, configs)
+            data["tags"] = tags
+
+            configs_path = self.workdir / "configs.json"
+            with configs_path.open("w") as f:
+                json.dump(data, f)
+
+            logger.info("Saved %d job configs to %s", len(configs), configs_path)
+        except Exception as e:
+            logger.warning("Failed to save configs.json: %s", e)
 
     def _consolidate_carbon_metrics(self) -> None:
         """Consolidate carbon metrics for this experiment's jobs.

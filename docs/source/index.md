@@ -17,6 +17,7 @@ experiments/config
 experiments/task
 experiments/plan
 experiments/workspace
+experiments/analysis
 experiments
 ```
 

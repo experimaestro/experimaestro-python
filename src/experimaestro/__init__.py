@@ -16,6 +16,7 @@ from .annotations import (
 from .core.types import Identifier
 from .core.serialization import (
     load,
+    load_configs,
     save,
     state_dict,
     from_state_dict,
@@ -112,6 +113,7 @@ __all__ = [
     "SubmitHook",
     # Serialization
     "load",
+    "load_configs",
     "save",
     "state_dict",
     "from_state_dict",

@@ -237,3 +237,43 @@ def deserialize(
         return object
 
     return object, init_tasks
+
+
+def load_configs(
+    path: Union[str, Path],
+) -> Dict[str, Any]:
+    """Load all job configs from an experiment run directory.
+
+    Loads ``configs.json`` produced automatically at experiment finalization.
+    Shared object references across configs are preserved, and tags are restored
+    on each config.
+
+    This is a standalone function -- no experiment context or
+    ``WorkspaceStateProvider`` is required.
+
+    :param path: Path to the experiment run directory (containing
+        ``configs.json``), or directly to ``configs.json`` itself.
+    :return: Dictionary mapping job identifiers to their Config objects
+    :raises FileNotFoundError: If ``configs.json`` cannot be found
+    """
+    path = Path(path)
+    if path.is_file():
+        configs_path = path
+    else:
+        configs_path = path / "configs.json"
+
+    if not configs_path.exists():
+        raise FileNotFoundError(f"configs.json not found at {configs_path}")
+
+    with configs_path.open() as f:
+        data = json.load(f)
+
+    tags = data.pop("tags", {})
+    configs = from_state_dict(data)
+
+    for job_id, job_tags in tags.items():
+        if job_id in configs:
+            for tag_name, tag_value in job_tags.items():
+                configs[job_id].tag(tag_name, tag_value)
+
+    return configs

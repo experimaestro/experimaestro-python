@@ -526,6 +526,72 @@ experimaestro experiments --workdir /path/to/workdir monitor --console
 experimaestro experiments --workdir /path/to/workdir monitor --port 12345
 ```
 
+## Analyzing Experiment Results
+
+### Auto-saved configs
+
+At experiment finalization, all job configs are serialized into `configs.json`
+in the run directory. Shared object references are preserved, and tags are
+included.
+
+### Loading configs from a past experiment
+
+Simplest way -- standalone `load_configs()` (no provider or experiment context needed):
+
+```python
+from experimaestro import load_configs
+
+# From a run directory
+configs = load_configs("/path/to/workspace/experiments/my-exp/20260319_120000")
+# Or directly from configs.json
+configs = load_configs("/path/to/configs.json")
+# configs is {job_id: Config} with shared references preserved and tags restored
+```
+
+When you need to look up experiments by name, use `WorkspaceStateProvider`:
+
+```python
+from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+provider = WorkspaceStateProvider(workspace_path)
+configs = provider.load_configs("my-experiment")
+# Optionally specify run_id: provider.load_configs("my-experiment", run_id="20260319_120000")
+```
+
+### Building DataFrames with tags
+
+Tags are restored on each config, so `config.tags()` works directly:
+
+```python
+from experimaestro import load_configs
+import pandas as pd
+
+configs = load_configs("/path/to/run_dir")
+rows = []
+for job_id, config in configs.items():
+    tags = config.tags()
+    row = dict(tags)
+    row["job_id"] = job_id
+    row["param"] = config.some_param
+    rows.append(row)
+df = pd.DataFrame(rows)
+```
+
+You can also combine with `provider.get_tags_map()` for the same result.
+
+### Explicit save/load
+
+For custom objects beyond job configs:
+
+```python
+# Save
+with experiment(workdir, "my-experiment") as xp:
+    xp.save(my_object, name="results")
+
+# Load
+with experiment(workdir, "other-experiment") as xp:
+    obj = xp.load("my-experiment", name="results")
+```
+
 ## Common Pitfalls
 
 1. **Identifier stability**: Changing parameter names, types, or `__xpmid__` breaks caching. Use `deprecate` for backward compatibility.
