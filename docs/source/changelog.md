@@ -233,7 +233,7 @@ When enabled, experimaestro tracks CO2 emissions, energy consumption, and power 
 Monitor experiments running on remote servers directly from your local machine:
 
 ```bash
-experimaestro experiments ssh-monitor user@cluster /path/to/workspace --console
+experimaestro experiments ssh-monitor user@cluster /path/to/workspace
 ```
 
 Features include JSON-RPC communication over SSH, on-demand file synchronization for logs, and support for both Web UI and TUI. See [Remote Monitoring via SSH](interfaces.md#remote-monitoring-via-ssh) for details.

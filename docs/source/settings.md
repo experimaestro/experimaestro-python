@@ -117,10 +117,10 @@ Once configured, use `--workspace` with `ssh-monitor` to avoid repeating host/op
 
 ```bash
 # All settings come from the workspace configuration
-experimaestro experiments ssh-monitor --workspace my-cluster --console
+experimaestro experiments ssh-monitor --workspace my-cluster
 
 # CLI flags override workspace settings
-experimaestro experiments ssh-monitor --workspace my-cluster --uv-offline --console
+experimaestro experiments ssh-monitor --workspace my-cluster --uv-offline
 ```
 
 All SSH settings can be overridden by CLI flags (`--remote-shell-init`, `--uv-offline`,

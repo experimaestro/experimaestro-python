@@ -275,7 +275,7 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--console` | Use terminal TUI instead of web UI |
+| `--web` | Use web UI instead of console TUI (console is default) |
 | `--port PORT` | Port for local web server (default: 12345) |
 | `--remote-xpm PATH` | Path to experimaestro on remote host |
 | `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
@@ -287,14 +287,14 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 Examples:
 
 ```bash
-# Basic monitoring with web UI
+# Basic monitoring (console TUI by default)
 experimaestro experiments ssh-monitor myserver /home/user/experiments
 
-# With console TUI
-experimaestro experiments ssh-monitor user@host /workspace --console
+# With web UI
+experimaestro experiments ssh-monitor user@host /workspace --web
 
 # Using workspace SSH settings from settings.yaml
-experimaestro experiments ssh-monitor --workspace my-cluster --console
+experimaestro experiments ssh-monitor --workspace my-cluster
 
 # With shell init for HPC environments
 experimaestro experiments ssh-monitor host /workspace --remote-shell-init "source /etc/profile; module load python/3.10"

@@ -218,11 +218,11 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 ### Examples
 
 ```bash
-# Basic SSH monitoring with web UI
+# Basic SSH monitoring (console TUI by default)
 experimaestro experiments ssh-monitor myserver /home/user/experiments
 
-# With console TUI instead of web UI
-experimaestro experiments ssh-monitor user@cluster.example.com /scratch/experiments --console
+# With web UI instead of console TUI
+experimaestro experiments ssh-monitor user@cluster.example.com /scratch/experiments --web
 
 # Custom port for web interface
 experimaestro experiments ssh-monitor myserver /workspace --port 8080
@@ -238,7 +238,7 @@ experimaestro experiments ssh-monitor myserver /workspace --remote-xpm /opt/cond
 
 | Option | Description |
 |--------|-------------|
-| `--console` | Use terminal TUI instead of web UI |
+| `--web` | Use web UI instead of console TUI (console is default) |
 | `--port PORT` | Port for local web server (default: 12345) |
 | `--remote-xpm PATH` | Path to experimaestro executable on remote host |
 | `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
@@ -272,7 +272,7 @@ workspaces:
 Then use `--workspace` to load settings automatically:
 
 ```bash
-experimaestro experiments ssh-monitor --workspace my-cluster --console
+experimaestro experiments ssh-monitor --workspace my-cluster
 ```
 
 See [Remote Workspaces (SSH)](settings.md#remote-workspaces-ssh) for all available settings.

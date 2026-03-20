@@ -634,7 +634,9 @@ def monitor(
 @experiments.command("ssh-monitor")
 @click.argument("host", type=str, required=False, default=None)
 @click.argument("remote_workdir", type=str, required=False, default=None)
-@click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
+@click.option(
+    "--web", is_flag=True, help="Use web UI instead of console TUI (default is console)"
+)
 @click.option(
     "--events-viewer",
     is_flag=True,
@@ -713,7 +715,7 @@ def monitor(
 def ssh_monitor(
     host: str | None,
     remote_workdir: str | None,
-    console: bool,
+    web: bool,
     events_viewer: bool,
     events_format: str,
     no_progress: bool,
@@ -739,8 +741,8 @@ def ssh_monitor(
 
     Examples:
         experimaestro experiments ssh-monitor myserver /path/to/workspace
-        experimaestro experiments ssh-monitor user@host /workspace --console
-        experimaestro experiments ssh-monitor --workspace my-cluster --console
+        experimaestro experiments ssh-monitor user@host /workspace --web
+        experimaestro experiments ssh-monitor --workspace my-cluster
         experimaestro experiments ssh-monitor host /workspace --remote-shell-init "source /etc/profile; module load python/3.10"
         experimaestro experiments ssh-monitor host /workspace --uv-offline --remote-python python3
     """
@@ -827,7 +829,7 @@ def ssh_monitor(
     _run_monitor_ui(
         state_provider,
         state_provider.local_cache_dir,
-        console,
+        not web,
         port,
         title=effective_host,
         events_viewer=events_viewer,
