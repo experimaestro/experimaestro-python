@@ -51,10 +51,14 @@ def save_definition(obj: Any, context: SerializationContext, path: Path):
         json.dump(data, out)
 
 
-def save(obj: Any, save_directory: Optional[Path]):
+def save(
+    obj: Any,
+    save_directory: Optional[Path],
+    definition_filename: str = "experimaestro.json",
+):
     """Save a configuration to a directory.
 
-    The serialization process stores the configuration in "definition.json"
+    The serialization process stores the configuration in the definition file
     and copies any files or folders registered as DataPath parameters.
 
     Example::
@@ -64,11 +68,15 @@ def save(obj: Any, save_directory: Optional[Path]):
 
     :param obj: The configuration to save
     :param save_directory: The directory in which the object and its data will
-        be saved (object is saved in "definition.json")
+        be saved
+    :param definition_filename: The filename for the definition file
+        (default: "experimaestro.json")
     """
     context = SerializationContext(save_directory=save_directory)
     save_definition(
-        obj, context, save_directory / "definition.json" if save_directory else None
+        obj,
+        context,
+        save_directory / definition_filename if save_directory else None,
     )
 
 
@@ -129,10 +137,21 @@ def from_state_dict(
     return ConfigInformation._objectFromParameters(state["data"], objects)
 
 
+def _resolve_definition_filename(data_loader, definition_filename: str | None) -> str:
+    """Resolve the definition filename, trying experimaestro.json first if not specified."""
+    if definition_filename is not None:
+        return definition_filename
+    xpm_path = data_loader("experimaestro.json")
+    if xpm_path.exists():
+        return "experimaestro.json"
+    return "definition.json"
+
+
 def load(
     path: Union[str, Path, SerializedPathLoader],
     as_instance: bool = False,
     partial_loading: Optional[bool] = None,
+    definition_filename: str | None = None,
 ) -> Tuple[Any, List["LightweightTask"]]:
     """Load a configuration from a directory.
 
@@ -147,11 +166,14 @@ def load(
     :param as_instance: If True, return an instance instead of a config
     :param partial_loading: If True, skip loading task references. If None
         (default), partial_loading is enabled when as_instance is True.
+    :param definition_filename: The definition filename. If None, tries
+        "experimaestro.json" first, then falls back to "definition.json".
     :return: The loaded configuration or instance
     """
     data_loader = get_data_loader(path)
+    definition_filename = _resolve_definition_filename(data_loader, definition_filename)
 
-    with data_loader("definition.json").open("rt") as fh:
+    with data_loader(definition_filename).open("rt") as fh:
         content = json.load(fh)
     return from_state_dict(
         content, as_instance=as_instance, partial_loading=partial_loading
@@ -187,7 +209,11 @@ def from_task_dir(
 
 
 def serialize(
-    obj: Any, save_directory: Path, *, init_tasks: list["LightweightTask"] = []
+    obj: Any,
+    save_directory: Path,
+    *,
+    init_tasks: list["LightweightTask"] = [],
+    definition_filename: str = "experimaestro.json",
 ):
     """Serialize a configuration to a directory with initialization tasks.
 
@@ -196,17 +222,20 @@ def serialize(
 
     :param obj: The configuration to serialize
     :param save_directory: The directory in which the object and its data will
-        be saved (object is saved in "definition.json")
+        be saved
     :param init_tasks: List of lightweight tasks to run on deserialization
+    :param definition_filename: The filename for the definition file
+        (default: "experimaestro.json")
     """
     context = SerializationContext(save_directory=save_directory)
-    save_definition((obj, init_tasks), context, save_directory / "definition.json")
+    save_definition((obj, init_tasks), context, save_directory / definition_filename)
 
 
 def deserialize(
     path: Union[str, Path, SerializedPathLoader],
     as_instance: bool = False,
     partial_loading: Optional[bool] = None,
+    definition_filename: str | None = None,
 ) -> tuple[Any, List["LightweightTask"]] | Any:
     """Deserialize a configuration from a directory.
 
@@ -218,12 +247,15 @@ def deserialize(
     :param as_instance: If True, return an instance and run init tasks
     :param partial_loading: If True, skip loading task references. If None
         (default), partial_loading is enabled when as_instance is True.
+    :param definition_filename: The definition filename. If None, tries
+        "experimaestro.json" first, then falls back to "definition.json".
     :return: The configuration/instance (if as_instance), or tuple of
         (configuration, init_tasks)
     """
     data_loader = get_data_loader(path)
+    definition_filename = _resolve_definition_filename(data_loader, definition_filename)
 
-    with data_loader("definition.json").open("rt") as fh:
+    with data_loader(definition_filename).open("rt") as fh:
         content = json.load(fh)
 
     object, init_tasks = from_state_dict(

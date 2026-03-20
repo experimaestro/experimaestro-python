@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, List, Optional, Protocol, Set, Union
 
 try:
     from pathlib import UnsupportedOperation
 except ImportError:
     UnsupportedOperation = OSError
-import shutil
-from typing import List, Optional, Protocol, Set, Union
 import os
+import shutil
+
+if TYPE_CHECKING:
+    from experimaestro.core.objects import ConfigMixin
 
 
 def shallow_copy(src_path: Path, dest_path: Path):
@@ -51,7 +56,16 @@ class SerializationContext:
         self.var_path = []
         self.serialized = set()
 
-    def serialize(self, var_path: List[str], data_path: Path) -> SerializedPath:
+    def serialize(
+        self, var_path: List[str], data_path: Path, config: ConfigMixin
+    ) -> SerializedPath:
+        """Serialize data files into the save directory
+
+        :param var_path: The variable path (list of field names from root)
+        :param data_path: The path to the data file/folder to serialize
+        :param config: The config object owning this data path
+        :return: A SerializedPath referencing the serialized data
+        """
         if self.save_directory:
             # Creates a relative path from the configuration qualified name
             path = Path(*var_path)

@@ -1,16 +1,27 @@
 from pathlib import Path
 from typing import Optional, Union
-from experimaestro import Config
-from experimaestro.core.context import SerializedPath
-from experimaestro.core.objects import ConfigInformation
+from experimaestro.core.context import SerializationContext, SerializedPath
+from experimaestro.core.objects import ConfigInformation, ConfigMixin
 from huggingface_hub import ModelHubMixin, hf_hub_download, snapshot_download
 import os
 
 
 class ExperimaestroHFHub(ModelHubMixin):
-    """Defines models that can be uploaded/downloaded from the Hub"""
+    """Defines models that can be uploaded/downloaded from the Hub
 
-    def __init__(self, config: Config, variant: Optional[str] = None):
+    Subclass to customize serialization behavior:
+    - ``definition_filename``: Override the JSON definition filename
+      (default: ``"experimaestro.json"``)
+    - ``serialization_context_class``: Override the SerializationContext class
+    """
+
+    #: The filename used for the definition JSON file
+    definition_filename: str = "experimaestro.json"
+
+    #: The SerializationContext class to use for serialization
+    serialization_context_class: type[SerializationContext] = SerializationContext
+
+    def __init__(self, config: ConfigMixin, variant: Optional[str] = None):
         self.config = config
         self.variant = variant
 
@@ -20,7 +31,12 @@ class ExperimaestroHFHub(ModelHubMixin):
             save_directory = save_directory / self.variant
             save_directory.mkdir()
         assert self.config is not None
-        self.config.__xpm__.serialize(save_directory)
+        context = self.serialization_context_class(save_directory=save_directory)
+        self.config.__xpm__.serialize(
+            save_directory,
+            definition_filename=self.definition_filename,
+            context=context,
+        )
 
     @classmethod
     def _from_pretrained(
@@ -83,7 +99,10 @@ class ExperimaestroHFHub(ModelHubMixin):
                 return hf_path
 
         return ConfigInformation.deserialize(
-            data_loader, as_instance=as_instance, partial_loading=True
+            data_loader,
+            as_instance=as_instance,
+            partial_loading=True,
+            definition_filename=cls.definition_filename,
         )
 
 

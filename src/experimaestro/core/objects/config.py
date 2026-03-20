@@ -976,7 +976,7 @@ class ConfigInformation:
                     assert isinstance(value, Path), (
                         f"Data arguments should be paths (type is {type(value)})"
                     )
-                    value = context.serialize(var_path, value)
+                    value = context.serialize(var_path, value, self.pyobject)
 
                 jsonfields[argument.name] = ConfigInformation._outputjsonvalue(
                     value, context
@@ -1060,11 +1060,22 @@ class ConfigInformation:
         """Returns the JSON representation of the object itself"""
         return json.dumps(self.__get_objects__([], SerializationContext()))
 
-    def serialize(self, save_directory: Path):
-        """Serialize the configuration and its data files into a directory"""
-        context = SerializationContext(save_directory=save_directory)
+    def serialize(
+        self,
+        save_directory: Path,
+        definition_filename: str = "experimaestro.json",
+        context: SerializationContext | None = None,
+    ):
+        """Serialize the configuration and its data files into a directory
 
-        with (save_directory / "definition.json").open("wt") as out:
+        :param save_directory: The directory to serialize into
+        :param definition_filename: The filename for the definition file
+        :param context: Optional serialization context (created if not provided)
+        """
+        if context is None:
+            context = SerializationContext(save_directory=save_directory)
+
+        with (save_directory / definition_filename).open("wt") as out:
             objects = self.__get_objects__([], context)
             json.dump(objects, out)
 
@@ -1074,6 +1085,7 @@ class ConfigInformation:
         as_instance: bool = False,
         return_tasks: bool = False,
         partial_loading: Optional[bool] = None,
+        definition_filename: str | None = None,
     ) -> "Config":
         """Deserialize a configuration
 
@@ -1085,6 +1097,9 @@ class ConfigInformation:
             (default), partial_loading is enabled when as_instance is True.
             This is useful when loading configurations from disk (e.g.,
             HuggingFace) where the task code may have changed.
+        :param definition_filename: The filename of the definition file.
+            If None, tries "experimaestro.json" first, then falls back to
+            "definition.json".
         :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
@@ -1101,7 +1116,15 @@ class ConfigInformation:
                     return path / Path(s.path)
                 return path / Path(s)
 
-        with data_loader("definition.json").open("rt") as fh:
+        if definition_filename is None:
+            # Try experimaestro.json first, fall back to definition.json
+            xpm_path = data_loader("experimaestro.json")
+            if xpm_path.exists():
+                definition_filename = "experimaestro.json"
+            else:
+                definition_filename = "definition.json"
+
+        with data_loader(definition_filename).open("rt") as fh:
             config = json.load(fh)
 
         return ConfigInformation.fromParameters(
