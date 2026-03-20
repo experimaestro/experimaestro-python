@@ -416,10 +416,11 @@ class ConfigInformation:
                         existing_value, existing_source = self.tags_with_source[name]
                         if existing_value != value:
                             logger.warning(
-                                "Tag '%s' has conflicting values: "
+                                "Tag '%s' has conflicting values for %s: "
                                 "'%s' (set at %s) vs '%s' (set at %s). "
                                 "Using the latter value.",
                                 name,
+                                config.__xpmtype__,
                                 existing_value,
                                 existing_source,
                                 value,
