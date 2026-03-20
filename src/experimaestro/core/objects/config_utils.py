@@ -48,9 +48,40 @@ class SealedError(Exception):
     pass
 
 
-class TaggedValue:
-    def __init__(self, value):
+class ConfigWrapper:
+    """Wraps a config value with properties that modify how the parent processes it.
+
+    Properties:
+        tagged: If True, the value is tagged (appears in experiment tags)
+        stop_tags: If True, tags from this sub-config don't propagate to parent
+
+    Wrappers can be nested — properties are merged automatically::
+
+        stop_tags(tag(value))  # both tagged=True and stop_tags=True
+    """
+
+    def __init__(self, value, *, tagged: bool = False, stop_tags: bool = False):
         self.value = value
+        self.tagged = tagged
+        self.stop_tags = stop_tags
+
+    @staticmethod
+    def ensure(value) -> "ConfigWrapper":
+        """Return value as a ConfigWrapper, reusing it if already one."""
+        if isinstance(value, ConfigWrapper):
+            return value
+        return ConfigWrapper(value)
+
+    def apply(self, config_info: "ConfigInformation", arg_name: str, *, source: str):  # noqa: F821
+        """Apply all wrapper properties to the parent ConfigInformation"""
+        if self.tagged:
+            config_info.addtag(arg_name, self.value, source=source)
+        if self.stop_tags:
+            config_info._args_properties.setdefault(arg_name, set()).add("stop_tags")
+
+
+# Backwards-compatible alias
+TaggedValue = ConfigWrapper
 
 
 class classproperty(property):

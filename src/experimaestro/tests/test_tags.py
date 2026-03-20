@@ -6,6 +6,7 @@ import pytest
 
 from experimaestro import (
     tag,
+    stop_tags,
     LightweightTask,
     Config,
     Task,
@@ -260,3 +261,109 @@ def test_tag_setattr_conflict_warning(caplog):
     assert any("value" in record.message for record in caplog.records)
     assert tags["value"] == 99  # Last value wins
     assert tags["x"] == 2
+
+
+# --- stop_tags tests ---
+
+
+def test_stop_tags_prevents_propagation():
+    """stop_tags prevents nested tags from propagating to parent"""
+
+    class Inner(Config):
+        lr: Param[float]
+
+    class Outer(Config):
+        x: Param[Inner]
+
+    inner = Inner.C(lr=tag(0.1))
+    outer = Outer.C(x=stop_tags(inner))
+
+    assert inner.tags() == {"lr": 0.1}
+    assert outer.tags() == {}
+
+
+def test_stop_tags_parent_tags_still_work():
+    """Tags on the parent itself still work with stop_tags on a child"""
+
+    class Inner(Config):
+        lr: Param[float]
+
+    class Outer(Config):
+        x: Param[Inner]
+        y: Param[int]
+
+    inner = Inner.C(lr=tag(0.1))
+    outer = Outer.C(x=stop_tags(inner), y=tag(42))
+
+    assert outer.tags() == {"y": 42}
+
+
+def test_stop_tags_via_setattr():
+    """stop_tags works when set via attribute assignment"""
+
+    class Inner(Config):
+        lr: Param[float]
+
+    class Outer(Config):
+        x: Param[Inner]
+
+    inner = Inner.C(lr=tag(0.1))
+    outer = Outer.C(x=Inner.C(lr=0.5))
+    outer.x = stop_tags(inner)
+
+    assert outer.tags() == {}
+
+
+def test_stop_tags_deeply_nested():
+    """stop_tags blocks tags from all descendants, not just direct child"""
+
+    class Deep(Config):
+        v: Param[int]
+
+    class Mid(Config):
+        d: Param[Deep]
+
+    class Top(Config):
+        m: Param[Mid]
+        label: Param[str]
+
+    deep = Deep.C(v=tag(1))
+    mid = Mid.C(d=deep).tag("mid_tag", "hello")
+    top = Top.C(m=stop_tags(mid), label=tag("test"))
+
+    assert top.tags() == {"label": "test"}
+
+
+def test_stop_tags_combined_with_tag():
+    """stop_tags and tag can be combined via nesting"""
+
+    class Inner(Config):
+        lr: Param[float]
+
+    class Outer(Config):
+        x: Param[Inner]
+
+    inner = Inner.C(lr=tag(0.1))
+    # tag the argument itself, but stop inner tags from propagating
+    outer = Outer.C(x=stop_tags(tag(inner)))
+
+    # "x" is tagged (from tag()), but "lr" is blocked (from stop_tags())
+    assert outer.tags() == {"x": inner}
+
+
+def test_stop_tags_does_not_affect_siblings():
+    """stop_tags on one argument doesn't affect other arguments"""
+
+    class Inner(Config):
+        v: Param[int]
+
+    class Outer(Config):
+        a: Param[Inner]
+        b: Param[Inner]
+
+    inner_a = Inner.C(v=tag(1))
+    inner_b = Inner.C(v=tag(2))
+    outer = Outer.C(a=stop_tags(inner_a), b=inner_b)
+
+    # Only inner_b's tag propagates
+    assert outer.tags() == {"v": 2}

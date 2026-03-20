@@ -47,7 +47,7 @@ from .config_walk import ConfigWalk, ConfigWalkContext
 from .config_utils import (
     getqualattr,
     add_to_path,
-    TaggedValue,
+    ConfigWrapper,
     ObjectStore,
     classproperty,
 )
@@ -200,6 +200,10 @@ class ConfigInformation:
         # where source_location is "file:line" string for error reporting
         self._tags: dict[str, tuple[Any, str]] = {}
         self._initinfo = ""
+
+        # Per-argument properties set by ConfigWrapper (e.g., "stop_tags")
+        # Maps argument name -> set of property strings
+        self._args_properties: dict[str, set[str]] = {}
 
         self._taskoutput = None
         """Task output (caches the value of a submit)"""
@@ -401,6 +405,10 @@ class ConfigInformation:
                 super().__init__(recurse_task=True)
                 # Store {name: (value, source)} for conflict detection
                 self.tags_with_source: dict[str, tuple[Any, str]] = {}
+
+            def should_recurse_arg(self, config, arg_name: str) -> bool:
+                props = config.__xpm__._args_properties.get(arg_name)
+                return props is None or "stop_tags" not in props
 
             def postprocess(self, stub, config: Config, values):
                 for name, (value, source) in config.__xpm__._tags.items():
@@ -1607,14 +1615,12 @@ class ConfigMixin:
         # Check if this is an XPM argument
         xpmtype = self.__xpmtype__
         if name in xpmtype.arguments:
-            # Handle TaggedValue: extract value and add tag
-            if isinstance(value, TaggedValue):
-                actual_value = value.value
+            # Handle ConfigWrapper (tag, stop_tags, etc.)
+            if isinstance(value, ConfigWrapper):
                 source = get_caller_location(skip_frames=1)
-                xpm.addtag(name, actual_value, source=source)
-                xpm.set(name, actual_value)
-            else:
-                xpm.set(name, value)
+                value.apply(xpm, name, source=source)
+                value = value.value
+            xpm.set(name, value)
             return
 
         # Check for deprecated replacement warning
@@ -1672,11 +1678,10 @@ class ConfigMixin:
                     continue
                 raise ValueError("%s is not an argument for %s" % (name, xpmtype))
 
-            # Special case of a tagged value
-            if isinstance(value, TaggedValue):
+            # Handle ConfigWrapper (tag, stop_tags, etc.)
+            if isinstance(value, ConfigWrapper):
+                value.apply(xpm, name, source=xpm._initinfo)
                 value = value.value
-                # Use _initinfo as source since tag is set at config creation
-                self.__xpm__.addtag(name, value, source=xpm._initinfo)
 
             # Really set the value
             xpm.set(name, value)

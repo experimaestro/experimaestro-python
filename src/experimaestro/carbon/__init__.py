@@ -72,6 +72,16 @@ def _is_codecarbon_available() -> bool:
         import codecarbon  # noqa: F401
     except ImportError:
         return False
+    except Exception:
+        # Handle broken installations (e.g., missing data files like
+        # nordic_emissions.json). Clean up partially-loaded modules to prevent
+        # subsequent imports from using a corrupted module object.
+        import sys
+
+        for key in list(sys.modules):
+            if key == "codecarbon" or key.startswith("codecarbon."):
+                del sys.modules[key]
+        return False
 
     system = platform.system()
     machine = platform.machine()

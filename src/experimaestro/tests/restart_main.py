@@ -7,5 +7,5 @@ if __name__ == "__main__":
     wspath, module, functionname = sys.argv[1:]
     print("Importing", module)
     f = getattr(importlib.import_module(module), functionname)
-    with experiment(wspath, "restart") as xp:
+    with experiment(wspath, "restart", no_environmental_impact=True) as xp:
         f(xp)

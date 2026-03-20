@@ -108,7 +108,29 @@ def tag(value):
     :param value: The value to tag (str, int, float, or bool)
     :return: A tagged value wrapper that preserves the original value
     """
-    return objects.TaggedValue(value)
+    wrapper = objects.ConfigWrapper.ensure(value)
+    wrapper.tagged = True
+    return wrapper
+
+
+def stop_tags(value):
+    """Prevent tags from a sub-configuration from propagating to the parent.
+
+    Example::
+
+        config = MyConfig.C(x=stop_tags(SubConfig.C(lr=tag(0.001))))
+        tags(config)  # Will NOT include "lr"
+
+    Can be combined with ``tag``::
+
+        config = MyConfig.C(x=stop_tags(tag(SubConfig.C(lr=tag(0.001)))))
+
+    :param value: The value to wrap
+    :return: A wrapped value that stops tag propagation
+    """
+    wrapper = objects.ConfigWrapper.ensure(value)
+    wrapper.stop_tags = True
+    return wrapper
 
 
 class TagDict(SortedDict):
