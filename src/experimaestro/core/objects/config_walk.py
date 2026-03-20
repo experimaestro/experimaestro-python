@@ -94,6 +94,10 @@ class ConfigWalk:
         """Provides a path context when processing a tree"""
         return self.context.push(k)
 
+    def should_recurse_arg(self, config, arg_name: str) -> bool:
+        """Whether to recurse into this argument. Override to skip."""
+        return True
+
     def stub(self, config):
         return config
 
@@ -123,7 +127,7 @@ class ConfigWalk:
             # Process all the arguments
             result = {}
             for arg, v in info.xpmvalues():
-                if v is not None:
+                if v is not None and self.should_recurse_arg(x, arg.name):
                     with self.map(arg.name):
                         result[arg.name] = self(v)
                 else:

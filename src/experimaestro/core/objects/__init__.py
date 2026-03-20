@@ -22,6 +22,7 @@ from .config_utils import (
     add_to_path,
     ObjectStore,
     SealedError,
+    ConfigWrapper,
     TaggedValue,
 )
 
@@ -41,6 +42,7 @@ __all__ = [
     "WatchedOutput",
     "SealedError",
     "DependentMarker",
+    "ConfigWrapper",
     "TaggedValue",
     "getqualattr",
     "copyconfig",
