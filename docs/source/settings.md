@@ -78,3 +78,50 @@ workspaces:
 ```
 
 If an experiment's ID matches multiple workspace triggers, the first matching workspace in the list wins.
+
+## Remote Workspaces (SSH)
+
+Workspaces can be configured with SSH settings for remote monitoring. A workspace
+with `ssh` settings is a **remote workspace** — it is automatically excluded from
+local experiment workspace discovery (trigger matching and default workspace selection).
+
+```yaml
+workspaces:
+  - id: my-cluster
+    path: /remote/path/to/experiments
+    ssh:
+      host: user@cluster
+      shell_init: "source /etc/profile; module load python/3.10"
+      uv_offline: true
+      python: python3
+
+  - id: local-workspace
+    path: ~/experiments/local
+    # No ssh — this is a local workspace
+```
+
+### SSH Settings
+
+| Setting | Description |
+|---------|-------------|
+| `host` | SSH host (e.g., `user@cluster` or SSH config alias). Required. |
+| `shell_init` | Shell commands to run before the remote experimaestro command (e.g., `source /etc/profile; module load python/3.10`) |
+| `uv_offline` | Pass `--offline` to `uv tool run` (use cached packages, no network). Useful on HPC clusters without direct PyPI access. |
+| `python` | Python interpreter for `uv tool run --python` |
+| `xpm_path` | Path to experimaestro on remote host (bypasses `uv tool run` entirely) |
+| `options` | Additional SSH options (e.g., `["-p", "2222"]`) |
+
+### Using Workspace SSH Settings
+
+Once configured, use `--workspace` with `ssh-monitor` to avoid repeating host/options:
+
+```bash
+# All settings come from the workspace configuration
+experimaestro experiments ssh-monitor --workspace my-cluster --console
+
+# CLI flags override workspace settings
+experimaestro experiments ssh-monitor --workspace my-cluster --uv-offline --console
+```
+
+All SSH settings can be overridden by CLI flags (`--remote-shell-init`, `--uv-offline`,
+`--remote-python`, `--remote-xpm`, `-o`).

@@ -632,8 +632,8 @@ def monitor(
 
 
 @experiments.command("ssh-monitor")
-@click.argument("host", type=str)
-@click.argument("remote_workdir", type=str)
+@click.argument("host", type=str, required=False, default=None)
+@click.argument("remote_workdir", type=str, required=False, default=None)
 @click.option("--console", is_flag=True, help="Use console TUI instead of web UI")
 @click.option(
     "--events-viewer",
@@ -678,9 +678,41 @@ def monitor(
     multiple=True,
     help="Additional SSH options (can be repeated, e.g., -o '-p 2222')",
 )
+@click.option(
+    "--workspace",
+    "ssh_workspace",
+    type=str,
+    default=None,
+    help="Load SSH settings from a workspace in settings.yaml",
+)
+@click.option(
+    "--remote-shell-init",
+    type=str,
+    default=None,
+    help="Shell commands to run before remote experimaestro "
+    "(e.g., 'source /etc/profile; module load python/3.10')",
+)
+@click.option(
+    "--uv-offline",
+    is_flag=True,
+    default=False,
+    help="Pass --offline to uv tool run (use cached packages, no network)",
+)
+@click.option(
+    "--remote-python",
+    type=str,
+    default=None,
+    help="Python interpreter for uv tool run --python on the remote host",
+)
+@click.option(
+    "--force-version",
+    is_flag=True,
+    default=False,
+    help="Pin exact experimaestro version (==X.Y.Z) instead of minor (>=X.Y.0)",
+)
 def ssh_monitor(
-    host: str,
-    remote_workdir: str,
+    host: str | None,
+    remote_workdir: str | None,
     console: bool,
     events_viewer: bool,
     events_format: str,
@@ -688,19 +720,82 @@ def ssh_monitor(
     port: int,
     watcher: str,
     polling_interval: float,
-    remote_xpm: str,
+    remote_xpm: str | None,
     ssh_option: tuple,
+    ssh_workspace: str | None,
+    remote_shell_init: str | None,
+    uv_offline: bool,
+    remote_python: str | None,
+    force_version: bool,
 ):
     """Monitor experiments on a remote server via SSH
 
     HOST is the SSH host (e.g., user@server)
     REMOTE_WORKDIR is the workspace path on the remote server
 
+    When --workspace is provided, HOST and REMOTE_WORKDIR can be omitted
+    if the workspace has SSH settings configured in settings.yaml.
+    CLI flags override workspace SSH settings.
+
     Examples:
         experimaestro experiments ssh-monitor myserver /path/to/workspace
         experimaestro experiments ssh-monitor user@host /workspace --console
-        experimaestro experiments ssh-monitor host /workspace --remote-xpm /opt/xpm/bin/experimaestro
+        experimaestro experiments ssh-monitor --workspace my-cluster --console
+        experimaestro experiments ssh-monitor host /workspace --remote-shell-init "source /etc/profile; module load python/3.10"
+        experimaestro experiments ssh-monitor host /workspace --uv-offline --remote-python python3
     """
+    # Load workspace SSH settings if --workspace is provided
+    from experimaestro.settings import get_workspace as _get_workspace
+
+    ws_ssh = None
+    ws_settings = None
+    if ssh_workspace:
+        ws_settings = _get_workspace(ssh_workspace, include_remote=True)
+        if ws_settings is None:
+            cprint(f"Workspace '{ssh_workspace}' not found in settings", "red")
+            raise click.Abort()
+        ws_ssh = ws_settings.ssh
+
+    # Merge: CLI flags override workspace SSH settings
+    effective_host = host
+    effective_workdir = remote_workdir
+    effective_xpm = remote_xpm
+    effective_shell_init = remote_shell_init
+    effective_uv_offline = uv_offline
+    effective_python = remote_python
+    effective_ssh_options = list(ssh_option) if ssh_option else []
+
+    if ws_ssh:
+        if not effective_host and ws_ssh.host:
+            effective_host = ws_ssh.host
+        if not effective_workdir and ws_settings:
+            effective_workdir = ws_settings._raw_path
+        if not effective_xpm and ws_ssh.xpm_path:
+            effective_xpm = ws_ssh.xpm_path
+        if not effective_shell_init and ws_ssh.shell_init:
+            effective_shell_init = ws_ssh.shell_init
+        if not effective_uv_offline and ws_ssh.uv_offline:
+            effective_uv_offline = True
+        if not effective_python and ws_ssh.python:
+            effective_python = ws_ssh.python
+        if not effective_ssh_options and ws_ssh.options:
+            effective_ssh_options = ws_ssh.options
+
+    # Validate required arguments
+    if not effective_host:
+        cprint(
+            "Error: HOST is required (provide as argument or via --workspace SSH settings)",
+            "red",
+        )
+        raise click.Abort()
+    if not effective_workdir:
+        cprint(
+            "Error: REMOTE_WORKDIR is required "
+            "(provide as argument or via --workspace path)",
+            "red",
+        )
+        raise click.Abort()
+
     # Configure filesystem watcher type
     from experimaestro.filewatcher import FileWatcherService, WatcherType
 
@@ -711,16 +806,20 @@ def ssh_monitor(
 
     from experimaestro.scheduler.remote.client import SSHStateProviderClient
 
-    cprint(f"Connecting to {host}...", "yellow")
+    cprint(f"Connecting to {effective_host}...", "yellow")
     state_provider = SSHStateProviderClient(
-        host=host,
-        remote_workspace=remote_workdir,
-        ssh_options=list(ssh_option) if ssh_option else None,
-        remote_xpm_path=remote_xpm,
+        host=effective_host,
+        remote_workspace=effective_workdir,
+        ssh_options=effective_ssh_options or None,
+        remote_xpm_path=effective_xpm,
+        remote_shell_init=effective_shell_init,
+        uv_offline=effective_uv_offline,
+        remote_python=effective_python,
+        force_version=force_version,
     )
     try:
         state_provider.connect()
-        cprint(f"Connected to {host}", "green")
+        cprint(f"Connected to {effective_host}", "green")
     except Exception as e:
         cprint(f"Failed to connect: {e}", "red")
         raise click.Abort()
@@ -730,7 +829,7 @@ def ssh_monitor(
         state_provider.local_cache_dir,
         console,
         port,
-        title=host,
+        title=effective_host,
         events_viewer=events_viewer,
         events_format=events_format,
         events_show_progress=not no_progress,

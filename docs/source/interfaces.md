@@ -253,6 +253,30 @@ experimaestro experiments ssh-monitor myserver /workspace --remote-xpm /opt/cond
    on-demand using rsync over SSH
 5. **Real-time Updates**: The server sends notifications when job states change
 
+### Configuring SSH Settings in `settings.yaml`
+
+Instead of passing all options on the command line, you can configure SSH settings
+per-workspace in your `~/.config/experimaestro/settings.yaml`:
+
+```yaml
+workspaces:
+  - id: my-cluster
+    path: /scratch/experiments
+    ssh:
+      host: user@cluster
+      shell_init: "source /etc/profile; module load python/3.10"
+      uv_offline: true
+      python: python3
+```
+
+Then use `--workspace` to load settings automatically:
+
+```bash
+experimaestro experiments ssh-monitor --workspace my-cluster --console
+```
+
+See [Remote Workspaces (SSH)](settings.md#remote-workspaces-ssh) for all available settings.
+
 ### Remote experimaestro Installation
 
 By default, the SSH client runs `uv tool run experimaestro==<version>` on the
@@ -260,6 +284,12 @@ remote host. This requires:
 
 - `uv` installed on the remote host
 - Network access to PyPI (or a local mirror)
+
+For environments without direct PyPI access (common on HPC clusters), use
+`--uv-offline` or configure `uv_offline: true` in workspace SSH settings.
+If the remote host requires environment setup before running commands
+(e.g., `module load`), use `--remote-shell-init` or configure `shell_init`
+in workspace SSH settings.
 
 Alternatively, specify a pre-installed experimaestro path:
 
@@ -285,6 +315,15 @@ Remote server output (logs, warnings) is displayed locally with a colored
 connection issues or see remote server activity.
 
 ### Troubleshooting
+
+**`uv tool run` hangs (no output):**
+- The remote host likely has no outbound HTTPS access to PyPI
+- Use `uv_offline: true` in workspace SSH settings or `--uv-offline` CLI flag
+- Ensure the package is already cached: `ssh host "uv tool install experimaestro==X.Y.Z"` (run once with network access)
+
+**Wrong Python version or missing modules:**
+- Non-interactive SSH skips `.profile`/`.bash_profile`
+- Use `shell_init` in workspace SSH settings or `--remote-shell-init` to run setup commands (e.g., `source /etc/profile; module load python/3.10`)
 
 **Connection refused or timeout:**
 - Verify SSH access: `ssh user@host echo "connected"`

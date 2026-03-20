@@ -76,6 +76,22 @@ def _strip_dev_version(version: str) -> str:
     return re.sub(r"\.dev\d+$", "", version)
 
 
+def _version_minor_constraint(version: str) -> str:
+    """Return a >=major.minor.0 constraint from a full version string.
+
+    Examples:
+        '2.1.3' -> '>=2.1.0'
+        '2.0.0b3' -> '>=2.0.0'
+        '1.2.3' -> '>=1.2.0'
+    """
+    import re
+
+    m = re.match(r"(\d+\.\d+)\.", version)
+    if m:
+        return f">={m.group(1)}.0"
+    return f">={version}"
+
+
 class SSHLocalService(BaseService):
     """Local service wrapper that manages sync lifecycle for SSH remote monitoring.
 
@@ -377,6 +393,10 @@ class SSHStateProviderClient(OfflineStateProvider):
         ssh_options: Optional[List[str]] = None,
         remote_xpm_path: Optional[str] = None,
         output_callback: Optional[Callable[[str], None]] = None,
+        remote_shell_init: Optional[str] = None,
+        uv_offline: bool = False,
+        remote_python: Optional[str] = None,
+        force_version: bool = False,
     ):
         """Initialize the client
 
@@ -389,6 +409,11 @@ class SSHStateProviderClient(OfflineStateProvider):
             output_callback: Callback for SSH process output (stderr).
                 If None, a default callback prints with colored prefix.
                 Set to False (or a no-op lambda) to disable output display.
+            remote_shell_init: Shell commands to run before the remote
+                experimaestro command (e.g., 'source /etc/profile; module load python/3.10')
+            uv_offline: Pass --offline to uv tool run (use cached packages, no network)
+            remote_python: Python interpreter for uv tool run --python
+            force_version: Pin exact version (==X.Y.Z) instead of minor (>=X.Y.0)
         """
         # Initialize base class (includes service cache)
         super().__init__()
@@ -398,6 +423,10 @@ class SSHStateProviderClient(OfflineStateProvider):
         self.ssh_options = ssh_options or []
         self.remote_xpm_path = remote_xpm_path
         self._output_callback = output_callback
+        self.remote_shell_init = remote_shell_init
+        self.uv_offline = uv_offline
+        self.remote_python = remote_python
+        self.force_version = force_version
 
         # Session-specific temporary cache directory (created on connect)
         self._temp_dir: Optional[str] = None
@@ -487,21 +516,36 @@ class SSHStateProviderClient(OfflineStateProvider):
             except Exception:
                 xpm_version = None
 
+            remote_cmd_parts = ["uv", "tool", "run"]
+            if self.uv_offline:
+                remote_cmd_parts.append("--offline")
+            if self.remote_python:
+                remote_cmd_parts.extend(["--python", self.remote_python])
             if xpm_version:
-                remote_cmd_parts = [
-                    "uv",
-                    "tool",
-                    "run",
-                    f"experimaestro=={xpm_version}",
-                ]
+                if self.force_version:
+                    remote_cmd_parts.append(f"experimaestro=={xpm_version}")
+                else:
+                    version_spec = _version_minor_constraint(xpm_version)
+                    remote_cmd_parts.append(f"experimaestro{version_spec}")
             else:
-                remote_cmd_parts = ["uv", "tool", "run", "experimaestro"]
+                remote_cmd_parts.append("experimaestro")
 
         # Add the subcommand arguments
         remote_cmd_parts.extend(
             ["experiments", "--workdir", self.remote_workspace, "monitor-server"]
         )
-        cmd.extend(remote_cmd_parts)
+
+        # If shell_init is set, wrap the entire remote command as a single
+        # shell string so the preamble runs in the same shell.
+        # SSH executes remote args by joining them with spaces and passing
+        # to the remote shell, so we pass the full command as a single string.
+        if self.remote_shell_init:
+            full_remote_cmd = (
+                f"{self.remote_shell_init}; {shlex.join(remote_cmd_parts)}"
+            )
+            cmd.append(full_remote_cmd)
+        else:
+            cmd.extend(remote_cmd_parts)
 
         logger.info("Connecting to %s, workspace: %s", self.host, self.remote_workspace)
         logger.debug("SSH command: %s", shlex.join(cmd))

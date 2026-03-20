@@ -279,6 +279,10 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 | `--port PORT` | Port for local web server (default: 12345) |
 | `--remote-xpm PATH` | Path to experimaestro on remote host |
 | `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
+| `--workspace ID` | Load SSH settings from a workspace in settings.yaml |
+| `--remote-shell-init CMD` | Shell commands to run before remote experimaestro |
+| `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
+| `--remote-python NAME` | Python interpreter for `uv tool run --python` |
 
 Examples:
 
@@ -288,6 +292,15 @@ experimaestro experiments ssh-monitor myserver /home/user/experiments
 
 # With console TUI
 experimaestro experiments ssh-monitor user@host /workspace --console
+
+# Using workspace SSH settings from settings.yaml
+experimaestro experiments ssh-monitor --workspace my-cluster --console
+
+# With shell init for HPC environments
+experimaestro experiments ssh-monitor host /workspace --remote-shell-init "source /etc/profile; module load python/3.10"
+
+# Offline mode (no PyPI access)
+experimaestro experiments ssh-monitor host /workspace --uv-offline --remote-python python3
 
 # With SSH port and identity file
 experimaestro experiments ssh-monitor myserver /workspace -o "-p 2222" -o "-i ~/.ssh/mykey"

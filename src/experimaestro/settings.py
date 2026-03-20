@@ -89,6 +89,31 @@ class HistorySettings:
 
 
 @dataclass
+class SSHSettings:
+    """SSH settings for remote workspace access."""
+
+    host: str = ""
+    """SSH host (e.g., 'user@cluster' or SSH config alias).
+    Marks the workspace as remote."""
+
+    shell_init: Optional[str] = None
+    """Shell commands to run before the remote experimaestro command
+    (e.g., 'source /etc/profile; module load python/3.10.4')"""
+
+    uv_offline: bool = False
+    """Pass --offline to uv tool run (use cached packages, no network)"""
+
+    python: Optional[str] = None
+    """Python interpreter for uv tool run --python"""
+
+    xpm_path: Optional[str] = None
+    """Path to experimaestro on remote host (bypasses uv tool run entirely)"""
+
+    options: List[str] = field(default_factory=list)
+    """Additional SSH options (e.g., ['-p', '2222'])"""
+
+
+@dataclass
 class WorkspaceSettings:
     """Defines the workspace"""
 
@@ -113,8 +138,20 @@ class WorkspaceSettings:
     history: HistorySettings = field(default_factory=HistorySettings)
     """Settings for experiment history cleanup"""
 
+    ssh: Optional[SSHSettings] = None
+    """SSH settings for remote workspace access"""
+
+    @property
+    def is_remote(self) -> bool:
+        """Returns True when ssh is set and ssh.host is non-empty."""
+        return self.ssh is not None and bool(self.ssh.host)
+
     def __post_init__(self):
-        self.path = self.path.expanduser().resolve()
+        # Store the raw path string before resolution (needed for remote workspaces
+        # where the path refers to a location on a different machine)
+        self._raw_path = str(self.path)
+        if not self.is_remote:
+            self.path = self.path.expanduser().resolve()
 
 
 @dataclass
@@ -153,12 +190,24 @@ def get_settings(path: Optional[Path] = None) -> Settings:
         )
 
 
-def get_workspace(id: Optional[str] = None) -> Optional[WorkspaceSettings]:
-    """Return the workspace settings given an id (or None for the default one)"""
+def get_workspace(
+    id: Optional[str] = None, *, include_remote: bool = False
+) -> Optional[WorkspaceSettings]:
+    """Return the workspace settings given an id (or None for the default one)
+
+    Args:
+        id: Workspace ID to look up, or None for the default workspace
+        include_remote: If False (default), skip remote workspaces when
+            looking for the default workspace (id=None). When id is specified,
+            remote workspaces are always returned.
+    """
     workspaces = get_settings().workspaces
     if workspaces:
         if id is None:
-            return workspaces[0]
+            for workspace in workspaces:
+                if include_remote or not workspace.is_remote:
+                    return workspace
+            return None
         for workspace in workspaces:
             if id == workspace.id:
                 return workspace
@@ -199,10 +248,13 @@ def find_workspace(
         ws_env = WorkspaceSettings("", workdir)
     else:
         # Try to match experiment_id against workspace triggers
+        # (skip remote workspaces - they can't run experiments locally)
         matched_workspace = None
         if experiment_id:
             workspaces = get_settings().workspaces
             for ws in workspaces:
+                if ws.is_remote:
+                    continue
                 for trigger in ws.triggers:
                     if fnmatch.fnmatch(experiment_id, trigger):
                         matched_workspace = ws
