@@ -45,6 +45,7 @@ class SerializationContext:
     save_directory: Optional[Path]
     var_path: List[str]
     serialized: Set[int]
+    serialized_paths: Set[str]
 
     def __init__(self, *, save_directory: Optional[Path] = None):
         """Creates a new serialization context
@@ -55,6 +56,7 @@ class SerializationContext:
         self.save_directory = save_directory
         self.var_path = []
         self.serialized = set()
+        self.serialized_paths = set()
 
     def serialize(
         self, var_path: List[str], data_path: Path, config: ConfigMixin
@@ -65,10 +67,18 @@ class SerializationContext:
         :param data_path: The path to the data file/folder to serialize
         :param config: The config object owning this data path
         :return: A SerializedPath referencing the serialized data
+        :raises ValueError: If the destination path was already used
         """
         if self.save_directory:
             # Creates a relative path from the configuration qualified name
             path = Path(*var_path)
+            path_str = str(path)
+
+            if path_str in self.serialized_paths:
+                raise ValueError(
+                    f"Serialization path conflict: '{path}' is already used"
+                )
+            self.serialized_paths.add(path_str)
 
             # Creates the directory if needed
             dest = self.save_directory / path
@@ -84,6 +94,11 @@ class SerializationContext:
         self.var_path.append(varname)
         yield self.var_path
         self.var_path.pop()
+
+    @property
+    def depth(self) -> int:
+        """The current depth in the configuration tree (root = 0)"""
+        return len(self.var_path)
 
 
 class SerializedPathLoader(Protocol):

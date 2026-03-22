@@ -968,19 +968,25 @@ class ConfigInformation:
         if not self.xpmtype._package:
             state_dict["file"] = str(self.xpmtype._file)
 
+        # Serialize data files via the config's __xpm_serialize__ method
+        serialized_data = self.pyobject.__xpm_serialize__(context)
+
         # Serialize identifier and typename
         jsonfields = state_dict["fields"] = {}
         for argument, value in self.xpmvalues():
-            with context.push(argument.name) as var_path:
-                if argument.is_data and value is not None:
-                    assert isinstance(value, Path), (
-                        f"Data arguments should be paths (type is {type(value)})"
-                    )
-                    value = context.serialize(var_path, value, self.pyobject)
+            with context.push(argument.name):
+                if argument.name in serialized_data:
+                    value = serialized_data.pop(argument.name)
 
                 jsonfields[argument.name] = ConfigInformation._outputjsonvalue(
                     value, context
                 )
+
+        # Add any extra data entries not corresponding to fields
+        for name, serialized_path in serialized_data.items():
+            jsonfields[name] = ConfigInformation._outputjsonvalue(
+                serialized_path, context
+            )
 
         objects.append(state_dict)
         return objects
@@ -1979,6 +1985,29 @@ class Config:
     __xpmtype__: ClassVar[ObjectType]
     """The object type holds all the information about a specific subclass
     experimaestro metadata"""
+
+    def __xpm_serialize__(
+        self, context: "SerializationContext"
+    ) -> dict[str, "SerializedPath"]:
+        """Serialize data files for this configuration.
+
+        Returns a mapping from names to SerializedPath objects. By default,
+        serializes all DataPath fields using the context. Override to
+        customize data serialization (e.g. change paths, add new entries).
+
+        :param context: The serialization context
+        :return: A dict mapping names to SerializedPath objects
+        """
+        result: dict[str, SerializedPath] = {}
+        for argument, value in self.__xpm__.xpmvalues():
+            if argument.is_data and value is not None:
+                assert isinstance(value, Path), (
+                    f"Data arguments should be paths (type is {type(value)})"
+                )
+                result[argument.name] = context.serialize(
+                    context.var_path + [argument.name], value, self
+                )
+        return result
 
     @classproperty
     def XPMConfig(cls):

@@ -75,13 +75,74 @@ Configurations can be serialized with the data necessary
 to restore their state. This can be useful to share a
 model (e.g. with HuggingFace hub).
 
+Use `DataPath` to annotate fields whose file or directory content
+should be copied into the save directory during serialization:
+
 ```python
-from experimaestro import DataPath
+from experimaestro import Config, DataPath
 
 class MyConfig(Config):
     to_serialize: DataPath
-    """This path will be serialized on the hub"""
+    """This path will be serialized alongside the configuration"""
 ```
+
+When saving, each `DataPath` field is copied (using hard links when
+possible) into the save directory under a relative path derived from
+the field name. On loading, the relative path is resolved back to an
+absolute path.
+
+`DataPath` fields are **ignored in identifier computation** — changing
+the data path does not change the task identifier.
+
+
+### Custom data serialization
+
+For more control over which files are serialized and where they are
+stored, override the `__xpm_serialize__` method on your `Config` subclass.
+This method receives a {py:class}`~experimaestro.SerializationContext` and
+returns a dict mapping names to
+{py:class}`~experimaestro.core.context.SerializedPath` objects.
+
+By default, it serializes all `DataPath` fields. You can override it to
+change destination paths, add extra data files, or skip certain fields:
+
+```python
+from pathlib import Path
+from experimaestro import Config, Param, DataPath
+from experimaestro.core.context import SerializationContext, SerializedPath
+
+class MyModel(Config):
+    name: Param[str]
+    weights: DataPath
+
+    def __xpm_serialize__(self, context: SerializationContext) -> dict[str, SerializedPath]:
+        # Call super() for default DataPath handling
+        result = super().__xpm_serialize__(context)
+
+        # Or customize: serialize weights under a different name
+        result["weights"] = context.serialize(
+            context.var_path + ["model_weights.bin"],
+            self.weights,
+            self,
+        )
+
+        # Add extra files not declared as DataPath
+        vocab_path = self.weights.parent / "vocab.txt"
+        if vocab_path.exists():
+            result["vocab"] = context.serialize(
+                context.var_path + ["vocab.txt"],
+                vocab_path,
+                self,
+            )
+
+        return result
+```
+
+The {py:class}`~experimaestro.SerializationContext` can also be subclassed
+to customize the serialization process globally (e.g. to change how files
+are copied or where they are stored). The `serialize` method receives the
+config object, enabling per-config path logic.
+
 
 ## HuggingFace integration
 
@@ -95,11 +156,33 @@ as_instance = False
 
 # Save and load a configuration
 ExperimaestroHFHub(config).push_to_hub(hf_id)
-ExperimaestroHFHub().from_pretrained(hf_id_or_folder, as_instance=as_instance)
+ExperimaestroHFHub.from_pretrained(hf_id_or_folder, as_instance=as_instance)
 
 # Save and load a configuration (with a variant)
 ExperimaestroHFHub(config).push_to_hub(hf_id, variant)
-ExperimaestroHFHub().from_pretrained(hf_id_or_folder, variant=variant, as_instance=as_instance)
+ExperimaestroHFHub.from_pretrained(hf_id_or_folder, variant=variant, as_instance=as_instance)
 ```
 
 {py:class}`~experimaestro.huggingface.ExperimaestroHFHub` - HuggingFace Hub integration for experimaestro configurations. Key methods: `from_pretrained()`, `push_to_hub()`.
+
+### Customizing HuggingFace serialization
+
+Subclass `ExperimaestroHFHub` to customize the definition filename
+or the serialization context:
+
+```python
+from experimaestro.huggingface import ExperimaestroHFHub
+from experimaestro.core.context import SerializationContext
+
+class MyHFHub(ExperimaestroHFHub):
+    # Use a custom filename for the definition JSON
+    definition_filename = "my_model.json"
+
+    # Use a custom SerializationContext subclass
+    serialization_context_class = MySerializationContext
+```
+
+- `definition_filename`: The JSON file storing the configuration definition
+  (default: `"experimaestro.json"`, with fallback to `"definition.json"` on load)
+- `serialization_context_class`: The `SerializationContext` class used during
+  serialization (default: `SerializationContext`)

@@ -1,9 +1,11 @@
+from pathlib import Path
 from typing import Optional
 
 import pytest
 
 from experimaestro import (
     Config,
+    DataPath,
     Param,
     Task,
     state_dict,
@@ -201,3 +203,167 @@ def test_partial_loading_preserves_shared_configs():
     # The task should be a stub
     task_obj = objects[definitions[1]["id"]]
     assert isinstance(task_obj, TaskStub)
+
+
+# --- Tests for DataPath serialization ---
+
+
+class ConfigWithDataPath(Config):
+    name: Param[str]
+    data: DataPath
+
+
+def test_datapath_serialization(tmp_path):
+    """Test that DataPath fields are serialized (copied) into save_directory"""
+    src_file = tmp_path / "source_data.txt"
+    src_file.write_text("hello data")
+
+    save_dir = tmp_path / "saved"
+    save_dir.mkdir()
+
+    config = ConfigWithDataPath.C(name="test", data=src_file)
+    context = SerializationContext(save_directory=save_dir)
+    config.__xpm__.seal(context)
+
+    data = state_dict(context, config)
+
+    # The data field should be serialized as path.serialized
+    fields = data["objects"][0]["fields"]
+    assert fields["data"]["type"] == "path.serialized"
+
+    # The file should have been copied into save_dir
+    serialized_path = Path(fields["data"]["value"])
+    assert (save_dir / serialized_path).exists()
+    assert (save_dir / serialized_path).read_text() == "hello data"
+
+
+def test_datapath_deserialization(tmp_path):
+    """Test round-trip: serialize then deserialize a DataPath config"""
+    src_file = tmp_path / "source_data.txt"
+    src_file.write_text("round trip")
+
+    save_dir = tmp_path / "saved"
+    save_dir.mkdir()
+
+    config = ConfigWithDataPath.C(name="test", data=src_file)
+    config.__xpm__.serialize(save_dir)
+
+    loaded = ConfigInformation.deserialize(save_dir, as_instance=True)
+    assert isinstance(loaded, ConfigWithDataPath)
+    assert loaded.name == "test"
+    assert isinstance(loaded.data, Path)
+    assert loaded.data.read_text() == "round trip"
+
+
+# --- Tests for custom __xpm_serialize__ ---
+
+
+class ConfigWithCustomSerialize(Config):
+    name: Param[str]
+    data: DataPath
+
+    def __xpm_serialize__(self, context):
+        """Custom serialization: rename the data path"""
+        result = {}
+        for argument, value in self.__xpm__.xpmvalues():
+            if argument.is_data and value is not None:
+                # Serialize under a custom name instead of field name
+                result[argument.name] = context.serialize(
+                    context.var_path + ["custom_name"], value, self
+                )
+        return result
+
+
+def test_custom_xpm_serialize(tmp_path):
+    """Test that __xpm_serialize__ override changes the serialized path"""
+    src_file = tmp_path / "source.txt"
+    src_file.write_text("custom path")
+
+    save_dir = tmp_path / "saved"
+    save_dir.mkdir()
+
+    config = ConfigWithCustomSerialize.C(name="test", data=src_file)
+    context = SerializationContext(save_directory=save_dir)
+    config.__xpm__.seal(context)
+
+    data = state_dict(context, config)
+
+    # The serialized path should use "custom_name" not "data"
+    fields = data["objects"][0]["fields"]
+    assert fields["data"]["type"] == "path.serialized"
+    assert "custom_name" in fields["data"]["value"]
+
+    # The file should exist at the custom path
+    serialized_path = Path(fields["data"]["value"])
+    assert (save_dir / serialized_path).exists()
+    assert (save_dir / serialized_path).read_text() == "custom path"
+
+
+class ConfigWithExtraData(Config):
+    name: Param[str]
+
+    def __xpm_serialize__(self, context):
+        """Add extra data entries beyond declared fields"""
+        result = super().__xpm_serialize__(context)
+        # Add an extra entry that doesn't correspond to any field
+        extra_path = Path(__file__)  # Use this test file as data
+        result["extra_file"] = context.serialize(
+            context.var_path + ["extra_file"], extra_path, self
+        )
+        return result
+
+
+def test_custom_xpm_serialize_extra_entries(tmp_path):
+    """Test that __xpm_serialize__ can add data entries beyond declared fields"""
+    save_dir = tmp_path / "saved"
+    save_dir.mkdir()
+
+    config = ConfigWithExtraData.C(name="test")
+    context = SerializationContext(save_directory=save_dir)
+    config.__xpm__.seal(context)
+
+    data = state_dict(context, config)
+
+    fields = data["objects"][0]["fields"]
+    # The extra entry should appear in the serialized fields
+    assert "extra_file" in fields
+    assert fields["extra_file"]["type"] == "path.serialized"
+
+    # The file should have been copied
+    serialized_path = Path(fields["extra_file"]["value"])
+    assert (save_dir / serialized_path).exists()
+
+
+class ConfigWithPathClash(Config):
+    name: Param[str]
+    data1: DataPath
+    data2: DataPath
+
+    def __xpm_serialize__(self, context):
+        """Intentionally serialize two fields to the same path"""
+        result = {}
+        for argument, value in self.__xpm__.xpmvalues():
+            if argument.is_data and value is not None:
+                # Both fields serialize to the same destination
+                result[argument.name] = context.serialize(
+                    context.var_path + ["same_name"], value, self
+                )
+        return result
+
+
+def test_serialization_path_clash(tmp_path):
+    """Test that serializing two data entries to the same path raises an error"""
+    src1 = tmp_path / "file1.txt"
+    src1.write_text("one")
+    src2 = tmp_path / "file2.txt"
+    src2.write_text("two")
+
+    save_dir = tmp_path / "saved"
+    save_dir.mkdir()
+
+    config = ConfigWithPathClash.C(name="test", data1=src1, data2=src2)
+    context = SerializationContext(save_directory=save_dir)
+    config.__xpm__.seal(context)
+
+    with pytest.raises(ValueError, match="Serialization path conflict"):
+        state_dict(context, config)
