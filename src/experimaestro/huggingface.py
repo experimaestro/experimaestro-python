@@ -2,8 +2,15 @@ from pathlib import Path
 from typing import Optional, Union
 from experimaestro.core.context import SerializationContext, SerializedPath
 from experimaestro.core.objects import ConfigInformation, ConfigMixin
-from huggingface_hub import ModelHubMixin, hf_hub_download, snapshot_download
 import os
+
+try:
+    from huggingface_hub import ModelHubMixin, hf_hub_download, snapshot_download
+except ImportError:
+    raise ImportError(
+        "huggingface-hub is required for ExperimaestroHFHub. "
+        "Install it with: pip install experimaestro[huggingface]"
+    )
 
 
 class ExperimaestroHFHub(ModelHubMixin):

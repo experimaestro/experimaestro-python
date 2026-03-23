@@ -36,7 +36,6 @@ dependencies = [
     "httpx >=0.26,<1",
     "humanfriendly >=10",
     "jinja2 >=3",
-    "huggingface-hub >0.17",
     "marshmallow >=3.20,<4",
     "omegaconf >=2.3,<3",
     "psutil >=7,<8",
@@ -73,6 +72,9 @@ docs = [
     "sphinx-rtd-theme>=2.0",
     "sphinx-codeautolink>=0.15",
     "sphinx-copybutton>=0.5",
+]
+huggingface = [
+    "huggingface-hub>0.17",
 ]
 ssh = [
     "paramiko>=3.3",

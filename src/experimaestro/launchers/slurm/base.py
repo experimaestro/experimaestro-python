@@ -833,6 +833,9 @@ class SlurmOptions:
     nodelist: Optional[str] = None
     """Request a specific list of hosts"""
 
+    ntasks_per_node: Optional[int] = None
+    """Number of tasks to run on each node"""
+
     # GPU-related
     gpus: Optional[int] = None
     """Number of GPUs"""
