@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 from experimaestro.core.context import SerializationContext, SerializedPath
 from experimaestro.core.objects import ConfigInformation, ConfigMixin
 import os
@@ -28,15 +28,11 @@ class ExperimaestroHFHub(ModelHubMixin):
     #: The SerializationContext class to use for serialization
     serialization_context_class: type[SerializationContext] = SerializationContext
 
-    def __init__(self, config: ConfigMixin, variant: Optional[str] = None):
+    def __init__(self, config: ConfigMixin):
         self.config = config
-        self.variant = variant
 
     def _save_pretrained(self, save_directory: Union[str, Path]):
         save_directory = Path(save_directory)
-        if self.variant:
-            save_directory = save_directory / self.variant
-            save_directory.mkdir()
         assert self.config is not None
         context = self.serialization_context_class(save_directory=save_directory)
         self.config.__xpm__.serialize(
@@ -57,7 +53,6 @@ class ExperimaestroHFHub(ModelHubMixin):
         local_files_only,
         token,
         *,
-        variant: Optional[str] = None,
         as_instance: bool = False,
         **model_kwargs,
     ):
@@ -65,8 +60,6 @@ class ExperimaestroHFHub(ModelHubMixin):
             save_directory = Path(model_id)
 
             def data_loader(path: Path):
-                if variant:
-                    return save_directory / path / variant
                 return save_directory / path
 
         else:
@@ -93,7 +86,7 @@ class ExperimaestroHFHub(ModelHubMixin):
                 hf_path = Path(
                     hf_hub_download(
                         repo_id=model_id,
-                        filename=str(path if variant is None else Path(variant) / path),
+                        filename=str(path),
                         revision=revision,
                         cache_dir=cache_dir,
                         force_download=force_download,
