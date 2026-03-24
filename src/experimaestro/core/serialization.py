@@ -176,7 +176,7 @@ def load(
     with data_loader(definition_filename).open("rt") as fh:
         content = json.load(fh)
     return from_state_dict(
-        content, as_instance=as_instance, partial_loading=partial_loading
+        content, path=path, as_instance=as_instance, partial_loading=partial_loading
     )
 
 

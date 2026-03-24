@@ -290,6 +290,9 @@ Example::
         model_weights: DataPath
 """
 
+OptionalDataPath = Annotated[Optional[Path], dataHint]
+"""Optional version of DataPath"""
+
 
 class field:
     """Specify additional properties for a configuration parameter.

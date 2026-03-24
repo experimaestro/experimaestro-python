@@ -934,10 +934,12 @@ class ConfigInformation:
 
         context.serialized.add(id(self.pyobject))
 
-        # Serialize sub-objects
+        # Serialize sub-objects (push field names and dict/list keys
+        # so that DataPath serialization gets unique var_paths)
         for argument, value in self.xpmvalues():
             if value is not None:
-                ConfigInformation.__collect_objects__(value, objects, context)
+                with context.push(argument.name):
+                    ConfigInformation.__collect_objects__(value, objects, context)
 
         # Adds task
         if self.task is not None and self.task is not self:
@@ -998,14 +1000,16 @@ class ConfigInformation:
         if value is None:
             return
 
-        if isinstance(value, Config):
+        if isinstance(value, ConfigMixin):
             value.__xpm__.__get_objects__(objects, context)
         elif isinstance(value, (list, tuple, set)):
-            for el in value:
-                ConfigInformation.__collect_objects__(el, objects, context)
+            for ix, el in enumerate(value):
+                with context.push(str(ix)):
+                    ConfigInformation.__collect_objects__(el, objects, context)
         elif isinstance(value, dict):
-            for el in value.values():
-                ConfigInformation.__collect_objects__(el, objects, context)
+            for key, el in value.items():
+                with context.push(str(key)):
+                    ConfigInformation.__collect_objects__(el, objects, context)
         elif isinstance(value, (Path, int, float, str, Enum)):
             pass
         else:
