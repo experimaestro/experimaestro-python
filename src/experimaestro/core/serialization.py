@@ -322,10 +322,10 @@ def load_xp_info(
 def _load_from_objects_jsonl(run_dir: Path) -> ExperimentInfo:
     """Load experiment info from objects.jsonl format.
 
-    Object IDs are Python id() values (memory addresses) that are globally
-    unique within the same writer session. Since ObjectsWriter uses a shared
-    SerializationContext, shared objects only appear once across all entries.
-    We accumulate all objects into a single list and deserialize them together.
+    Each line is a single serialized object dict. Object IDs are Python id()
+    values, globally unique within the writer session. Objects are matched to
+    jobs/actions by their ``identifier`` field (the config hash), which
+    corresponds to job_id in jobs.jsonl and action_id in status.json.
     """
     objects_path = run_dir / "objects.jsonl"
 
@@ -349,39 +349,34 @@ def _load_from_objects_jsonl(run_dir: Path) -> ExperimentInfo:
             for action_id in status.get("actions", {}):
                 action_ids.add(action_id)
 
-    # Read objects.jsonl: accumulate all serialized objects and track entries
+    # Read objects.jsonl: one serialized object per line
     all_objects: list = []
-    entries: list[tuple[str, Any]] = []  # (id, data_ref)
-
     with objects_path.open() as f:
         for line in f:
             line = line.strip()
-            if not line:
-                continue
-            entry = json.loads(line)
-            entry_id = entry["id"]
-            new_objects = entry.get("objects", [])
-
-            # No remapping needed — IDs are globally unique id() values
-            all_objects.extend(new_objects)
-            entries.append((entry_id, entry["data"]))
+            if line:
+                all_objects.append(json.loads(line))
 
     # Deserialize all objects at once (shared references preserved)
     deserialized = ConfigInformation.load_objects(all_objects, as_instance=False)
 
-    # Classify entries into jobs and actions
+    # Build identifier -> python id mapping from serialized objects
+    identifier_to_python_id: dict[str, int] = {}
+    for obj in all_objects:
+        if "identifier" in obj:
+            identifier_to_python_id[obj["identifier"]] = obj["id"]
+
+    # Classify by matching identifiers to job_ids and action_ids
     jobs: Dict[str, Any] = {}
     actions: Dict[str, Any] = {}
 
-    for entry_id, data_ref in entries:
-        obj = ConfigInformation._objectFromParameters(data_ref, deserialized)
-        if entry_id in job_ids:
-            jobs[entry_id] = obj
-        elif entry_id in action_ids:
-            actions[entry_id] = obj
-        else:
-            # Unknown ID — store in jobs by default
-            jobs[entry_id] = obj
+    for identifier, python_id in identifier_to_python_id.items():
+        data_ref = {"type": "python", "value": python_id}
+        config = ConfigInformation._objectFromParameters(data_ref, deserialized)
+        if identifier in job_ids:
+            jobs[identifier] = config
+        elif identifier in action_ids:
+            actions[identifier] = config
 
     return ExperimentInfo(jobs=jobs, actions=actions)
 

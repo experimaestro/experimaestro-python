@@ -615,7 +615,7 @@ class experiment(BaseExperiment):
         # Stream job config to objects.jsonl
         if self._objects_writer is not None:
             try:
-                self._objects_writer.write(job.identifier, job.config)
+                self._objects_writer.write(job.config)
             except Exception as e:
                 logger.warning(
                     "Failed to serialize config for job %s: %s", job.identifier, e
@@ -1230,7 +1230,7 @@ class experiment(BaseExperiment):
         # Stream serialized action to objects.jsonl
         if self._objects_writer is not None:
             try:
-                self._objects_writer.write(action_id, action)
+                self._objects_writer.write(action)
             except Exception as e:
                 logger.warning("Failed to serialize action %s: %s", action_id, e)
 

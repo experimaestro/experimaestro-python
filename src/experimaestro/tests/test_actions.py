@@ -142,12 +142,17 @@ def test_experiment_add_action():
         assert objects_path.exists(), "objects.jsonl not created"
 
         lines = objects_path.read_text().strip().split("\n")
-        assert len(lines) >= 2, "Expected at least 2 entries (job + action)"
+        # Each line is a single serialized object
+        assert len(lines) >= 2, "Expected at least 2 object entries"
 
-        # Check action entry exists
-        action_ids_in_file = {json.loads(line)["id"] for line in lines}
-        assert action_id in action_ids_in_file, (
-            "Action entry not found in objects.jsonl"
+        # Check action's identifier exists in serialized objects
+        identifiers_in_file = {
+            json.loads(line).get("identifier")
+            for line in lines
+            if "identifier" in json.loads(line)
+        }
+        assert action_id in identifiers_in_file, (
+            "Action identifier not found in objects.jsonl"
         )
 
         # Verify status.json contains action metadata
@@ -256,7 +261,7 @@ def test_submit_priority_order():
 
 
 def test_objects_jsonl_streaming():
-    """objects.jsonl streams configs as jobs are submitted."""
+    """objects.jsonl streams objects as jobs are submitted, with deduplication."""
     with TemporaryDirectory(prefix="xpm") as workdir:
         with TemporaryExperiment("test-streaming", workdir=workdir) as xp:
             shared = SharedConfig.C(value="stream")
@@ -269,14 +274,16 @@ def test_objects_jsonl_streaming():
         objects_path = run_dir / "objects.jsonl"
         assert objects_path.exists()
         lines = objects_path.read_text().strip().split("\n")
-        assert len(lines) == 3
 
-        # Shared config should only appear in first entry's objects
-        first_entry = json.loads(lines[0])
-        second_entry = json.loads(lines[1])
+        # Should have objects but shared config only serialized once
+        all_objects = [json.loads(line) for line in lines]
+        identifiers = [
+            obj.get("identifier") for obj in all_objects if "identifier" in obj
+        ]
 
-        # Second entry should have fewer objects (shared already serialized)
-        assert len(second_entry["objects"]) < len(first_entry["objects"])
+        # 3 tasks + 1 shared config = 4 unique identifiers
+        assert len(identifiers) == 4
+        assert len(set(identifiers)) == 4  # all unique (no duplication)
 
 
 def test_load_xp_info_backward_compat_configs_json():

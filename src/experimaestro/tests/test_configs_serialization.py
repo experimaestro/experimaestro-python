@@ -45,16 +45,15 @@ def test_objects_jsonl_created():
         objects_path = run_dir / "objects.jsonl"
         assert objects_path.exists(), f"objects.jsonl not created at {objects_path}"
 
-        # Should have 2 entries (one per job)
+        # Each line is a single serialized object
         lines = [line for line in objects_path.read_text().strip().split("\n") if line]
-        assert len(lines) == 2
+        assert len(lines) >= 2, "Expected at least 2 serialized objects"
 
-        # Each line should be valid JSON with expected structure
+        # Each line should be valid JSON with object structure
         for line in lines:
-            entry = json.loads(line)
-            assert "id" in entry
-            assert "objects" in entry
-            assert "data" in entry
+            obj = json.loads(line)
+            assert "id" in obj  # Python id()
+            assert "type" in obj  # class qualname
 
 
 def test_load_xp_info_shared_references():
