@@ -23,6 +23,7 @@ from experimaestro.scheduler.state_status import (
     JobStateChangedEvent,
     JobProgressEvent,
     JobSubmittedEvent,
+    ActionAddedEvent,
     ServiceAddedEvent,
     ServiceStateChangedEvent,
     CarbonMetricsEvent,
@@ -57,6 +58,7 @@ from experimaestro.tui.dialogs import (
     WarningDialog,
 )
 from experimaestro.tui.widgets import (
+    ActionsList,
     CaptureLog,
     ExperimentsList,
     ServicesList,
@@ -186,6 +188,8 @@ class ExperimaestroUI(App):
                 yield JobsTable(self.state_provider)
             with TabPane("Services", id="services-tab"):
                 yield ServicesList(self.state_provider)
+            with TabPane("Actions", id="actions-tab"):
+                yield ActionsList(self.state_provider)
         # Job detail view (hidden initially)
         with Vertical(id="job-detail-container", classes="hidden"):
             yield JobDetailView(self.state_provider)
@@ -242,6 +246,7 @@ class ExperimaestroUI(App):
         runs_list = RunsList(self.state_provider)
         jobs_table = JobsTable(self.state_provider)
         services_list = ServicesList(self.state_provider)
+        actions_list = ActionsList(self.state_provider)
         job_detail_view = JobDetailView(self.state_provider)
 
         # Mount experiments and runs lists
@@ -252,10 +257,13 @@ class ExperimaestroUI(App):
         experiment_tabs = TabbedContent(id="experiment-tabs", classes="hidden")
         jobs_pane = TabPane("Jobs", id="jobs-tab")
         services_pane = TabPane("Services", id="services-tab")
+        actions_pane = TabPane("Actions", id="actions-tab")
         jobs_pane.compose_add_child(jobs_table)
         services_pane.compose_add_child(services_list)
+        actions_pane.compose_add_child(actions_list)
         experiment_tabs.compose_add_child(jobs_pane)
         experiment_tabs.compose_add_child(services_pane)
+        experiment_tabs.compose_add_child(actions_pane)
         monitor_pane.mount(experiment_tabs)
 
         # Create job detail container
@@ -429,6 +437,12 @@ class ExperimaestroUI(App):
         for exp_list in self.query(ExperimentsList):
             exp_list.refresh_experiments()
 
+    def _handle_action_added(self, event: ActionAddedEvent) -> None:
+        """Handle ActionAddedEvent - refresh actions list"""
+        for actions_list in self.query(ActionsList):
+            if actions_list.current_experiment == event.experiment_id:
+                actions_list.refresh_actions()
+
     def _handle_service_added(self, event: ServiceAddedEvent) -> None:
         """Handle ServiceAddedEvent - refresh services list and update tab title"""
         event_exp_id = event.experiment_id
@@ -580,9 +594,11 @@ class ExperimaestroUI(App):
             f"Experiment selected: {message.experiment_id} (run: {message.run_id})"
         )
 
-        # Set up services list
+        # Set up services and actions lists
         services_list = self.query_one(ServicesList)
         services_list.set_experiment(message.experiment_id, message.run_id)
+        actions_list = self.query_one(ActionsList)
+        actions_list.set_experiment(message.experiment_id, message.run_id)
 
         # Set up jobs table
         jobs_table_widget = self.query_one(JobsTable)
@@ -926,9 +942,11 @@ class ExperimaestroUI(App):
             is_past_run=not message.is_current,
         )
 
-        # Set up services list
+        # Set up services and actions lists
         services_list = self.query_one(ServicesList)
         services_list.set_experiment(message.experiment_id, message.run_id)
+        actions_list = self.query_one(ActionsList)
+        actions_list.set_experiment(message.experiment_id, message.run_id)
 
         # Show the tabbed content
         tabs = self.query_one("#experiment-tabs", TabbedContent)
@@ -1043,6 +1061,7 @@ class ExperimaestroUI(App):
         JobProgressEvent: _handle_job_progress,
         CarbonMetricsEvent: _handle_carbon_metrics,
         RunUpdatedEvent: _handle_run_updated,
+        ActionAddedEvent: _handle_action_added,
         ServiceAddedEvent: _handle_service_added,
         ServiceStateChangedEvent: _handle_service_state_changed,
         JobSubmittedEvent: _handle_job_submitted,

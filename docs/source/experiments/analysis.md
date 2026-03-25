@@ -1,38 +1,35 @@
 # Analyzing Experiment Results
 
-Experimaestro automatically saves all job configurations at the end of each
-experiment run, preserving shared object references. This makes it easy to load
-and analyze past results without manually tracking which configs were used.
+Experimaestro automatically saves all job configurations as they are submitted,
+preserving shared object references. This makes it easy to load and analyze past
+results without manually tracking which configs were used.
 
 ## How it works
 
-When an experiment completes (or fails), all job configs are serialized together
-into `configs.json` in the run directory. Unlike individual `params.json` files
-in each job directory, this single file preserves shared references between
+As jobs are submitted during an experiment, their configs are streamed to
+`objects.jsonl` in the run directory. Unlike individual `params.json` files
+in each job directory, this shared serialization preserves references between
 configs -- if two tasks share the same sub-config, loading them back gives you
 the same Python object.
-
-Tags set on configs (via `.tag()`) are also stored and restored on load.
 
 ## Loading configs from a past experiment
 
 ### Standalone function (simplest)
 
-The easiest way to load configs is the standalone `load_configs()` function.
-Just point it at a run directory (or directly at `configs.json`):
+The easiest way to load experiment data is the `load_xp_info()` function.
+Point it at a run directory:
 
 ```python
-from experimaestro import load_configs
+from experimaestro import load_xp_info
 
-# From a run directory
-configs = load_configs("/path/to/workspace/experiments/my-experiment/20260319_120000")
+info = load_xp_info("/path/to/workspace/experiments/my-experiment/20260319_120000")
 
-# Or directly from configs.json
-configs = load_configs("/path/to/configs.json")
-
-for job_id, config in configs.items():
+for job_id, config in info.jobs.items():
     print(f"Job {job_id}: {config}")
-    print(f"  Tags: {config.tags()}")
+
+# Actions are also available (see experiments/actions.md)
+for action_id, action in info.actions.items():
+    print(f"Action {action_id}: {action.describe()}")
 ```
 
 ### Via `WorkspaceStateProvider`
@@ -46,10 +43,10 @@ from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvi
 provider = WorkspaceStateProvider(workspace_path)
 
 # Loads from the latest run
-configs = provider.load_configs("my-experiment")
+info = provider.load_xp_info("my-experiment")
 
 # Or specify a run_id
-configs = provider.load_configs("my-experiment", run_id="20260319_120000")
+info = provider.load_xp_info("my-experiment", run_id="20260319_120000")
 ```
 
 The provider also gives access to `get_tags_map()` for combining tags with
@@ -64,11 +61,11 @@ from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvi
 import pandas as pd
 
 provider = WorkspaceStateProvider(workspace_path)
-configs = provider.load_configs("my-experiment")
+info = provider.load_xp_info("my-experiment")
 tags_map = provider.get_tags_map("my-experiment")
 
 rows = []
-for job_id, config in configs.items():
+for job_id, config in info.jobs.items():
     row = tags_map.get(job_id, {}).copy()
     row["job_id"] = job_id
     # Extract values from config
@@ -78,27 +75,6 @@ for job_id, config in configs.items():
 
 df = pd.DataFrame(rows)
 print(df)
-```
-
-Since tags are also restored on the configs themselves, you can also use
-`config.tags()` directly:
-
-```python
-from experimaestro import load_configs
-import pandas as pd
-
-configs = load_configs("/path/to/run_dir")
-
-rows = []
-for job_id, config in configs.items():
-    tags = config.tags()
-    rows.append({
-        "job_id": job_id,
-        "lr": float(tags["lr"]),
-        "model": config.model.name,
-    })
-
-df = pd.DataFrame(rows)
 ```
 
 ## Full worked example
@@ -137,17 +113,18 @@ with experiment(workdir, "grid-search") as xp:
 ### Analyze in a notebook
 
 ```python
-from experimaestro import load_configs
+from experimaestro import load_xp_info
 import pandas as pd
 
-configs = load_configs(workdir / "experiments" / "grid-search" / "20260319_120000")
+info = load_xp_info(workdir / "experiments" / "grid-search" / "20260319_120000")
+tags_map = ...  # from provider.get_tags_map()
 
 rows = []
-for job_id, config in configs.items():
-    tags = config.tags()
+for job_id, config in info.jobs.items():
+    tags = tags_map.get(job_id, {})
     rows.append({
-        "lr": tags["learning_rate"],
-        "hidden_size": tags["hidden_size"],
+        "lr": tags.get("learning_rate"),
+        "hidden_size": tags.get("hidden_size"),
         "model": config.model.name,
     })
 
@@ -176,9 +153,11 @@ with experiment(workdir, "analysis") as xp:
 
 ## Notes
 
-- `configs.json` is only created in `NORMAL` run mode (not dry-run)
+- `objects.jsonl` is only created in `NORMAL` run mode (not dry-run)
 - If serialization fails (e.g., unsupported types), a warning is logged but the
   experiment still completes normally
 - Shared references are preserved: if two tasks share the same sub-config object,
-  `load_configs()` returns configs where the sub-config is the same Python object
+  `load_xp_info()` returns configs where the sub-config is the same Python object
   (not just equal)
+- For backward compatibility, experiments created before `objects.jsonl` was introduced
+  will fall back to loading from `configs.json`

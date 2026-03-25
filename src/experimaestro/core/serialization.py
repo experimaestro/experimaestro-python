@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from experimaestro.core.context import (
@@ -13,9 +14,9 @@ if TYPE_CHECKING:
 
 
 def json_object(context: SerializationContext, value: Any, objects=[]):
-    from experimaestro import Config
+    from experimaestro.core.objects import ConfigMixin
 
-    if isinstance(value, Config):
+    if isinstance(value, ConfigMixin):
         value.__xpm__.__get_objects__(objects, context)
     elif isinstance(value, (list, tuple)):
         for el in value:
@@ -271,32 +272,122 @@ def deserialize(
     return object, init_tasks
 
 
-def load_configs(
-    path: Union[str, Path],
-) -> Dict[str, Any]:
-    """Load all job configs from an experiment run directory.
+@dataclass
+class ExperimentInfo:
+    """Structured result from loading experiment objects.
 
-    Loads ``configs.json`` produced automatically at experiment finalization.
-    Shared object references across configs are preserved, and tags are restored
-    on each config.
+    Contains deserialized job configs and actions from an experiment run.
+    """
+
+    jobs: Dict[str, Any]
+    """Mapping of job_id to Config objects"""
+
+    actions: Dict[str, Any]
+    """Mapping of action_id to Action objects"""
+
+
+def load_xp_info(
+    path: Union[str, Path],
+) -> ExperimentInfo:
+    """Load all serialized objects from an experiment run directory.
+
+    Reads ``objects.jsonl`` (streaming format) to reconstruct job configs
+    and actions. Uses ``jobs.jsonl`` for job IDs and ``status.json`` for
+    action IDs to classify entries.
+
+    Falls back to ``configs.json`` for experiments created before the
+    ``objects.jsonl`` format was introduced.
 
     This is a standalone function -- no experiment context or
     ``WorkspaceStateProvider`` is required.
 
-    :param path: Path to the experiment run directory (containing
-        ``configs.json``), or directly to ``configs.json`` itself.
-    :return: Dictionary mapping job identifiers to their Config objects
-    :raises FileNotFoundError: If ``configs.json`` cannot be found
+    :param path: Path to the experiment run directory
+    :return: ExperimentInfo with .jobs and .actions dictionaries
+    :raises FileNotFoundError: If neither objects.jsonl nor configs.json exists
     """
     path = Path(path)
-    if path.is_file():
-        configs_path = path
-    else:
-        configs_path = path / "configs.json"
+    objects_path = path / "objects.jsonl"
 
-    if not configs_path.exists():
-        raise FileNotFoundError(f"configs.json not found at {configs_path}")
+    if objects_path.exists():
+        return _load_from_objects_jsonl(path)
 
+    # Backward compat: fall back to configs.json
+    configs_path = path / "configs.json"
+    if configs_path.exists():
+        return _load_from_configs_json(configs_path)
+
+    raise FileNotFoundError(f"Neither objects.jsonl nor configs.json found at {path}")
+
+
+def _load_from_objects_jsonl(run_dir: Path) -> ExperimentInfo:
+    """Load experiment info from objects.jsonl format.
+
+    Object IDs are Python id() values (memory addresses) that are globally
+    unique within the same writer session. Since ObjectsWriter uses a shared
+    SerializationContext, shared objects only appear once across all entries.
+    We accumulate all objects into a single list and deserialize them together.
+    """
+    objects_path = run_dir / "objects.jsonl"
+
+    # Read job IDs from jobs.jsonl
+    job_ids: set[str] = set()
+    jobs_path = run_dir / "jobs.jsonl"
+    if jobs_path.exists():
+        with jobs_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    entry = json.loads(line)
+                    job_ids.add(entry["job_id"])
+
+    # Read action IDs from status.json
+    action_ids: set[str] = set()
+    status_path = run_dir / "status.json"
+    if status_path.exists():
+        with status_path.open() as f:
+            status = json.load(f)
+            for action_id in status.get("actions", {}):
+                action_ids.add(action_id)
+
+    # Read objects.jsonl: accumulate all serialized objects and track entries
+    all_objects: list = []
+    entries: list[tuple[str, Any]] = []  # (id, data_ref)
+
+    with objects_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            entry_id = entry["id"]
+            new_objects = entry.get("objects", [])
+
+            # No remapping needed — IDs are globally unique id() values
+            all_objects.extend(new_objects)
+            entries.append((entry_id, entry["data"]))
+
+    # Deserialize all objects at once (shared references preserved)
+    deserialized = ConfigInformation.load_objects(all_objects, as_instance=False)
+
+    # Classify entries into jobs and actions
+    jobs: Dict[str, Any] = {}
+    actions: Dict[str, Any] = {}
+
+    for entry_id, data_ref in entries:
+        obj = ConfigInformation._objectFromParameters(data_ref, deserialized)
+        if entry_id in job_ids:
+            jobs[entry_id] = obj
+        elif entry_id in action_ids:
+            actions[entry_id] = obj
+        else:
+            # Unknown ID — store in jobs by default
+            jobs[entry_id] = obj
+
+    return ExperimentInfo(jobs=jobs, actions=actions)
+
+
+def _load_from_configs_json(configs_path: Path) -> ExperimentInfo:
+    """Backward-compatible loading from old configs.json format."""
     with configs_path.open() as f:
         data = json.load(f)
 
@@ -308,4 +399,25 @@ def load_configs(
             for tag_name, tag_value in job_tags.items():
                 configs[job_id].tag(tag_name, tag_value)
 
-    return configs
+    return ExperimentInfo(jobs=configs, actions={})
+
+
+def load_configs(
+    path: Union[str, Path],
+) -> Dict[str, Any]:
+    """Load all job configs from an experiment run directory.
+
+    .. deprecated::
+        Use :func:`load_xp_info` instead, which returns both jobs and actions.
+
+    :param path: Path to the experiment run directory
+    :return: Dictionary mapping job identifiers to their Config objects
+    """
+    import warnings
+
+    warnings.warn(
+        "load_configs() is deprecated, use load_xp_info() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return load_xp_info(path).jobs

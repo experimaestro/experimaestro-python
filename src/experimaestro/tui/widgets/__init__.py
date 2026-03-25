@@ -1,5 +1,6 @@
 """TUI Widgets"""
 
+from experimaestro.tui.widgets.actions import ActionsList
 from experimaestro.tui.widgets.log import CaptureLog
 from experimaestro.tui.widgets.experiments import ExperimentsList
 from experimaestro.tui.widgets.services import ServicesList
@@ -11,6 +12,7 @@ from experimaestro.tui.widgets.stray_jobs import OrphanJobsTab
 from experimaestro.tui.widgets.warnings import WarningsTab
 
 __all__ = [
+    "ActionsList",
     "CaptureLog",
     "ExperimentsList",
     "ServicesList",

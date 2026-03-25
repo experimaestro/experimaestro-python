@@ -18,6 +18,8 @@ from .core.types import Identifier
 from .core.serialization import (
     load,
     load_configs,
+    load_xp_info,
+    ExperimentInfo,
     save,
     state_dict,
     from_state_dict,
@@ -25,6 +27,7 @@ from .core.serialization import (
     serialize,
     deserialize,
 )
+from .actions import Action, Interaction, CLIInteraction
 from .core.arguments import (
     Param,
     Option,
@@ -118,6 +121,8 @@ __all__ = [
     # Serialization
     "load",
     "load_configs",
+    "load_xp_info",
+    "ExperimentInfo",
     "save",
     "state_dict",
     "from_state_dict",
@@ -169,6 +174,10 @@ __all__ = [
     "DirectoryContext",
     "documentation",
     "DirtyGitAction",
+    # Actions (alpha)
+    "Action",
+    "Interaction",
+    "CLIInteraction",
     # Avoid breaking old code by re-exporting pathlib
     "Path",
 ]

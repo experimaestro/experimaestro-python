@@ -1412,6 +1412,24 @@ class BaseJob:
         return None
 
 
+def _action_to_dict(action_id: str, action) -> dict[str, Any]:
+    """Convert an action to dict for status.json serialization.
+
+    Handles both BaseAction instances (have to_dict) and live Action
+    instances (Config subclasses that need special handling).
+    """
+    if isinstance(action, BaseAction):
+        return action.to_dict()
+    # Live Action (Config subclass) — extract metadata
+    action_class = f"{action.__class__.__module__}.{action.__class__.__name__}"
+    description = action.describe() if hasattr(type(action), "describe") else ""
+    return {
+        "action_id": action_id,
+        "description": description,
+        "class": action_class,
+    }
+
+
 # =============================================================================
 # Base Experiment Interface
 # =============================================================================
@@ -1471,6 +1489,11 @@ class BaseExperiment:
     def services(self) -> Dict[str, "BaseService"]:
         """Services in this experiment"""
         raise NotImplementedError
+
+    @property
+    def actions(self) -> Dict[str, "BaseAction"]:
+        """Actions in this experiment"""
+        return {}
 
     @property
     def tags(self) -> Dict[str, Dict[str, str]]:
@@ -1578,6 +1601,7 @@ class BaseExperiment:
             "ended_at": serialize_timestamp(self.ended_at),
             "job_states": self._serialize_job_states(),
             "services": {k: v.full_state_dict() for k, v in self.services.items()},
+            "actions": {k: _action_to_dict(k, v) for k, v in self.actions.items()},
             "run_tags": self.run_tags,
         }
         # Include carbon_impact if available
@@ -1994,3 +2018,47 @@ class BaseService(ABC):
             Error message string or None if no error
         """
         return None
+
+
+# =============================================================================
+# Base Action Interface
+# =============================================================================
+
+
+class BaseAction:
+    """Base interface for action information.
+
+    Both live Action instances and MockAction instances should provide
+    these attributes. Actions are lightweight metadata — the full Config
+    state is stored in objects.jsonl.
+    """
+
+    action_id: str
+    _description: str
+    action_class: str
+
+    def __init__(self, action_id: str, description: str, action_class: str):
+        self.action_id = action_id
+        self._description = description
+        self.action_class = action_class
+
+    def description(self) -> str:
+        """Human-readable description of this action"""
+        return self._description
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary for status.json"""
+        return {
+            "action_id": self.action_id,
+            "description": self._description,
+            "class": self.action_class,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BaseAction":
+        """Create from dictionary"""
+        return cls(
+            action_id=d["action_id"],
+            description=d.get("description", ""),
+            action_class=d.get("class", ""),
+        )

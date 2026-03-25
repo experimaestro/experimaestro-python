@@ -262,6 +262,8 @@ class experiment(BaseExperiment):
         self.xplock = None
         self.old_experiment = None
         self._services: Dict[str, Service] = {}
+        self._actions: Dict[str, Any] = {}  # action_id -> Action
+        self._objects_writer = None
         self._job_listener: Optional[Listener] = None
         self._register_signals = register_signals
         self._dirty_git = dirty_git
@@ -473,6 +475,11 @@ class experiment(BaseExperiment):
         return self._services
 
     @property
+    def actions(self) -> Dict[str, Any]:
+        """Actions in this experiment"""
+        return self._actions
+
+    @property
     def carbon_impact(self) -> Optional["CarbonImpactData"]:
         """Carbon impact metrics aggregated from all jobs in this experiment.
 
@@ -605,6 +612,15 @@ class experiment(BaseExperiment):
         with self.jobs_jsonl_path.open("a") as f:
             f.write(json.dumps(job_info.to_dict()) + "\n")
 
+        # Stream job config to objects.jsonl
+        if self._objects_writer is not None:
+            try:
+                self._objects_writer.write(job.identifier, job.config)
+            except Exception as e:
+                logger.warning(
+                    "Failed to serialize config for job %s: %s", job.identifier, e
+                )
+
         # Write initial ExperimentJobStateEvent to filesystem (only in NORMAL mode)
         if self._event_writer is not None:
             from .state_status import ExperimentJobStateEvent, JobTag
@@ -660,8 +676,9 @@ class experiment(BaseExperiment):
         # Close the event writer to flush any buffered events
         self._event_writer.close()
 
-        # Save all job configs together for later analysis
-        self._save_configs()
+        # Close objects writer (configs and actions already streamed)
+        if self._objects_writer is not None:
+            self._objects_writer.close()
 
         # Consolidate carbon metrics for this experiment
         self._consolidate_carbon_metrics()
@@ -671,40 +688,6 @@ class experiment(BaseExperiment):
 
         # Archive event files to permanent storage
         self._event_writer.archive_events()
-
-    def _save_configs(self) -> None:
-        """Save all job configs together into configs.json for later analysis.
-
-        Serializes {job_id: config} with shared object references preserved,
-        along with tags for each job. This allows loading all configs from a
-        past experiment with shared references intact.
-        """
-        try:
-            from experimaestro.core.serialization import state_dict
-            from experimaestro.core.context import SerializationContext
-
-            jobs = self.jobs
-            if not jobs:
-                return
-
-            configs = {job_id: job.config for job_id, job in jobs.items()}
-            tags = {}
-            for job_id, job in jobs.items():
-                job_tags = dict(job.config.tags().items()) if job.config.tags() else {}
-                if job_tags:
-                    tags[job_id] = job_tags
-
-            context = SerializationContext(save_directory=None)
-            data = state_dict(context, configs)
-            data["tags"] = tags
-
-            configs_path = self.workdir / "configs.json"
-            with configs_path.open("w") as f:
-                json.dump(data, f)
-
-            logger.info("Saved %d job configs to %s", len(configs), configs_path)
-        except Exception as e:
-            logger.warning("Failed to save configs.json: %s", e)
 
     def _consolidate_carbon_metrics(self) -> None:
         """Consolidate carbon metrics for this experiment's jobs.
@@ -1027,6 +1010,11 @@ class experiment(BaseExperiment):
             )
             self.scheduler.addlistener(self._state_listener)
 
+            # Initialize objects writer for streaming serialization
+            from experimaestro.scheduler.objects_writer import ObjectsWriter
+
+            self._objects_writer = ObjectsWriter(self.workdir / "objects.jsonl")
+
         # Number of unfinished jobs
         self.unfinishedJobs = 0
         self.taskOutputQueueSize = 0
@@ -1218,6 +1206,47 @@ class experiment(BaseExperiment):
         self.scheduler.notify_service_add(service, self.name, self.run_id or "")
 
         return service
+
+    def add_action(self, action) -> str:
+        """Add an action to the experiment.
+
+        Actions are serialized immediately to objects.jsonl and their metadata
+        is written to the experiment event stream. The action ID is derived
+        from its sealed identifier hash.
+
+        :param action: An Action instance (Config subclass)
+        :return: The action ID (hash of the sealed config)
+        """
+        from experimaestro.scheduler.state_status import ActionAddedEvent
+
+        # Seal the action config to compute its identifier
+        action.seal()
+
+        # Use the sealed identifier hash as the action ID
+        action_id = str(action.__xpm__.identifier)
+
+        self._actions[action_id] = action
+
+        # Stream serialized action to objects.jsonl
+        if self._objects_writer is not None:
+            try:
+                self._objects_writer.write(action_id, action)
+            except Exception as e:
+                logger.warning("Failed to serialize action %s: %s", action_id, e)
+
+        # Emit event for live monitoring
+        if self._event_writer is not None:
+            action_class = f"{action.__class__.__module__}.{action.__class__.__name__}"
+            event = ActionAddedEvent(
+                experiment_id=self.experiment_id,
+                run_id=self.run_id,
+                action_id=action_id,
+                description=action.describe(),
+                action_class=action_class,
+            )
+            self._event_writer.write_event(event)
+
+        return action_id
 
     def service_state_changed(self, service):
         """Called when a service state changes - notify listeners"""

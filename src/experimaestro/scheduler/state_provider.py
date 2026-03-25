@@ -24,9 +24,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from experimaestro.core.serialization import ExperimentInfo
     from experimaestro.scheduler.state_status import WarningEvent
 
 from experimaestro.scheduler.interfaces import (
+    BaseAction,
     BaseJob,
     BaseExperiment,
     BaseService,
@@ -311,29 +313,44 @@ class StateProvider(ABC):
         # Conflict: resolve() returned None
         return exec_state, exp_state
 
-    def load_configs(
+    def load_xp_info(
         self, experiment_id: str, run_id: str | None = None
-    ) -> dict[str, Any]:
-        """Load all job configs from a past experiment run.
+    ) -> "ExperimentInfo":
+        """Load all serialized objects from a past experiment run.
 
-        Returns a dict mapping job_id to its deserialized Config object,
-        with shared object references preserved across configs. Tags are
-        restored on each config.
+        Returns an ExperimentInfo with .jobs and .actions dictionaries.
 
         Args:
             experiment_id: Experiment identifier
             run_id: Run identifier (None = current/latest run)
 
         Returns:
-            Dictionary mapping job identifiers to their Config objects
+            ExperimentInfo with jobs and actions
 
         Raises:
-            FileNotFoundError: If configs.json doesn't exist for the run
+            FileNotFoundError: If objects.jsonl/configs.json doesn't exist
             NotImplementedError: If the provider doesn't support this
         """
         raise NotImplementedError(
-            f"{type(self).__name__} does not support load_configs"
+            f"{type(self).__name__} does not support load_xp_info"
         )
+
+    def load_configs(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, Any]:
+        """Load all job configs from a past experiment run.
+
+        .. deprecated::
+            Use :meth:`load_xp_info` instead.
+        """
+        import warnings
+
+        warnings.warn(
+            "load_configs() is deprecated, use load_xp_info() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.load_xp_info(experiment_id, run_id).jobs
 
     @abstractmethod
     def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
@@ -1342,6 +1359,7 @@ class MockExperiment(BaseExperiment):
         self._ended_at = ended_at
         self._job_infos = job_infos or {}
         self._services = services or {}
+        self._actions: Dict[str, "BaseAction"] = {}
         self._dependencies = dependencies or {}
         self._experiment_id_override = experiment_id_override
         self._finished_jobs = finished_jobs
@@ -1387,6 +1405,10 @@ class MockExperiment(BaseExperiment):
     @property
     def services(self) -> Dict[str, "BaseService"]:
         return self._services
+
+    @property
+    def actions(self) -> Dict[str, "BaseAction"]:
+        return self._actions
 
     @property
     def tags(self) -> Dict[str, Dict[str, str]]:
@@ -1688,7 +1710,7 @@ class MockExperiment(BaseExperiment):
             finished_jobs = d.get("finished_jobs", 0)
             failed_jobs = d.get("failed_jobs", 0)
 
-        return cls(
+        exp = cls(
             workdir=workdir,
             run_id=run_id,
             status=status,
@@ -1706,6 +1728,13 @@ class MockExperiment(BaseExperiment):
             total_jobs=d.get("total_jobs", 0),
             job_states=job_states,
         )
+
+        # Parse actions from status.json
+        actions_data = d.get("actions", {})
+        for action_id, action_dict in actions_data.items():
+            exp._actions[action_id] = BaseAction.from_dict(action_dict)
+
+        return exp
 
     def _update_job_state(
         self, job_id: str, job_state: JobState, merge_mode: bool
@@ -1738,6 +1767,7 @@ class MockExperiment(BaseExperiment):
                        (except for timestamps which should use the latest value)
         """
         from experimaestro.scheduler.state_status import (
+            ActionAddedEvent,
             ExperimentJobStateEvent,
             JobSubmittedEvent,
             ServiceAddedEvent,
@@ -1777,6 +1807,14 @@ class MockExperiment(BaseExperiment):
             # Update service state when it changes
             if event.service_id in self._services:
                 self._services[event.service_id]._state_name = event.state
+
+        elif isinstance(event, ActionAddedEvent):
+            if not (merge_mode and event.action_id in self._actions):
+                self._actions[event.action_id] = BaseAction(
+                    action_id=event.action_id,
+                    description=event.description,
+                    action_class=event.action_class,
+                )
 
         elif isinstance(event, ExperimentJobStateEvent):
             # Track scheduler lifecycle state from the scheduler

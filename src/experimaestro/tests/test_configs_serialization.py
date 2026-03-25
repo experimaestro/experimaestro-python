@@ -1,10 +1,10 @@
-"""Tests for auto-serialization of experiment configs at finalize time."""
+"""Tests for auto-serialization of experiment configs via objects.jsonl."""
 
 import json
 
 import pytest
 
-from experimaestro import Config, Param, Task
+from experimaestro import Config, Param, Task, load_xp_info
 from experimaestro.tests.utils import TemporaryExperiment, TemporaryDirectory
 
 
@@ -31,8 +31,8 @@ class TaskY(Task):
         pass
 
 
-def test_configs_json_created():
-    """Test that configs.json is created in the run dir after experiment finalize."""
+def test_objects_jsonl_created():
+    """Test that objects.jsonl is created in the run dir after experiment."""
     with TemporaryDirectory(prefix="xpm") as workdir:
         with TemporaryExperiment("test-configs", workdir=workdir) as xp:
             shared = SharedConfig.C(value="hello")
@@ -41,75 +41,60 @@ def test_configs_json_created():
 
             run_dir = xp.workdir
 
-        # After experiment exit, configs.json should exist
-        configs_path = run_dir / "configs.json"
-        assert configs_path.exists(), f"configs.json not created at {configs_path}"
+        # After experiment exit, objects.jsonl should exist
+        objects_path = run_dir / "objects.jsonl"
+        assert objects_path.exists(), f"objects.jsonl not created at {objects_path}"
 
-        # Should be valid JSON with expected structure
-        with configs_path.open() as f:
-            data = json.load(f)
+        # Should have 2 entries (one per job)
+        lines = [line for line in objects_path.read_text().strip().split("\n") if line]
+        assert len(lines) == 2
 
-        assert "objects" in data
-        assert "data" in data
-        assert "tags" in data
-
-        # Should have tags for both jobs
-        assert len(data["tags"]) == 2
-        tag_values = {v["model"] for v in data["tags"].values()}
-        assert tag_values == {"A", "B"}
+        # Each line should be valid JSON with expected structure
+        for line in lines:
+            entry = json.loads(line)
+            assert "id" in entry
+            assert "objects" in entry
+            assert "data" in entry
 
 
-def test_load_configs_shared_references():
+def test_load_xp_info_shared_references():
     """Test that loading configs preserves shared object references."""
-    from experimaestro.scheduler.workspace_state_provider import (
-        WorkspaceStateProvider,
-    )
-
     with TemporaryDirectory(prefix="xpm") as workdir:
-        with TemporaryExperiment("test-shared", workdir=workdir):
+        with TemporaryExperiment("test-shared", workdir=workdir) as xp:
             shared = SharedConfig.C(value="shared-val")
             TaskX.C(shared=shared, x=10).tag("run", "first").submit()
             TaskY.C(shared=shared, y=20).tag("run", "second").submit()
 
-        # Load configs via WorkspaceStateProvider
-        provider = WorkspaceStateProvider(workdir, no_cleanup=True)
-        try:
-            configs = provider.load_configs("test-shared")
+            run_dir = xp.workdir
 
-            # Should have 2 configs
-            assert len(configs) == 2
+        info = load_xp_info(run_dir)
 
-            # Get the two configs
-            config_list = list(configs.values())
-            shared_refs = [getattr(c, "shared", None) for c in config_list]
+        # Should have 2 job configs
+        assert len(info.jobs) == 2
 
-            # Both should reference the SAME SharedConfig instance
-            assert shared_refs[0] is not None
-            assert shared_refs[1] is not None
-            assert shared_refs[0] is shared_refs[1], (
-                "Shared config references should be the same object"
-            )
+        # Get the two configs
+        config_list = list(info.jobs.values())
+        shared_refs = [getattr(c, "shared", None) for c in config_list]
 
-            # Check value is correct
-            assert shared_refs[0].value == "shared-val"
+        # Both should reference the SAME SharedConfig instance
+        assert shared_refs[0] is not None
+        assert shared_refs[1] is not None
+        assert shared_refs[0] is shared_refs[1], (
+            "Shared config references should be the same object"
+        )
 
-            # Check tags were restored
-            for job_id, config in configs.items():
-                tags = config.tags()
-                assert "run" in tags, f"Tag 'run' not found on config {job_id}"
-                assert tags["run"] in ("first", "second")
-        finally:
-            provider.close()
+        # Check value is correct
+        assert shared_refs[0].value == "shared-val"
 
 
-def test_load_configs_tags_match_tags_map():
-    """Test that tags from load_configs match get_tags_map for DataFrame building."""
+def test_load_xp_info_via_provider():
+    """Test loading via WorkspaceStateProvider."""
     from experimaestro.scheduler.workspace_state_provider import (
         WorkspaceStateProvider,
     )
 
     with TemporaryDirectory(prefix="xpm") as workdir:
-        with TemporaryExperiment("test-tags-map", workdir=workdir):
+        with TemporaryExperiment("test-provider", workdir=workdir):
             shared = SharedConfig.C(value="v")
             TaskX.C(shared=shared, x=1).tag("lr", "0.01").tag("model", "big").submit()
             TaskX.C(shared=shared, x=2).tag("lr", "0.001").tag(
@@ -119,23 +104,14 @@ def test_load_configs_tags_match_tags_map():
 
         provider = WorkspaceStateProvider(workdir, no_cleanup=True)
         try:
-            configs = provider.load_configs("test-tags-map")
-            tags_map = provider.get_tags_map("test-tags-map")
+            info = provider.load_xp_info("test-provider")
+            tags_map = provider.get_tags_map("test-provider")
 
-            assert len(configs) == 3
+            assert len(info.jobs) == 3
 
-            # Every job_id in configs should have tags in tags_map
-            for job_id in configs:
+            # Every job_id in jobs should have tags in tags_map
+            for job_id in info.jobs:
                 assert job_id in tags_map, f"Job {job_id} missing from tags_map"
-
-            # Tags from load_configs (restored on config) should match tags_map
-            for job_id, config in configs.items():
-                config_tags = config.tags()
-                map_tags = tags_map[job_id]
-                assert config_tags == map_tags, (
-                    f"Tags mismatch for {job_id}: "
-                    f"config.tags()={config_tags} vs tags_map={map_tags}"
-                )
 
             # Verify specific tag values are present
             all_lrs = {tags_map[jid]["lr"] for jid in tags_map}
@@ -147,10 +123,8 @@ def test_load_configs_tags_match_tags_map():
             provider.close()
 
 
-def test_load_configs_standalone():
-    """Test loading configs with standalone load_configs (no provider needed)."""
-    from experimaestro import load_configs
-
+def test_load_xp_info_standalone():
+    """Test loading with standalone load_xp_info (no provider needed)."""
     with TemporaryDirectory(prefix="xpm") as workdir:
         with TemporaryExperiment("test-standalone", workdir=workdir) as xp:
             shared = SharedConfig.C(value="standalone")
@@ -160,33 +134,25 @@ def test_load_configs_standalone():
             run_dir = xp.workdir
 
         # Load directly from run dir path
-        configs = load_configs(run_dir)
+        info = load_xp_info(run_dir)
 
-        assert len(configs) == 2
+        assert len(info.jobs) == 2
 
         # Shared references preserved
-        config_list = list(configs.values())
+        config_list = list(info.jobs.values())
         shared_refs = [getattr(c, "shared", None) for c in config_list]
         assert shared_refs[0] is shared_refs[1]
         assert shared_refs[0].value == "standalone"
 
-        # Tags restored
-        tag_values = {config.tags()["group"] for config in configs.values()}
-        assert tag_values == {"alpha", "beta"}
 
-        # Also works pointing directly at configs.json
-        configs2 = load_configs(run_dir / "configs.json")
-        assert len(configs2) == 2
-
-
-def test_load_configs_not_found():
-    """Test that FileNotFoundError is raised when configs.json doesn't exist."""
+def test_load_xp_info_not_found():
+    """Test that FileNotFoundError is raised when no serialization files exist."""
     from experimaestro.scheduler.workspace_state_provider import (
         WorkspaceStateProvider,
     )
 
     with TemporaryDirectory(prefix="xpm") as workdir:
-        # Create minimal experiment structure without configs.json
+        # Create minimal experiment structure without objects.jsonl
         exp_dir = workdir / "experiments" / "nonexistent" / "20260101_000000"
         exp_dir.mkdir(parents=True)
 
@@ -197,6 +163,33 @@ def test_load_configs_not_found():
             current.symlink_to(exp_dir)
 
             with pytest.raises(FileNotFoundError):
-                provider.load_configs("nonexistent")
+                provider.load_xp_info("nonexistent")
         finally:
             provider.close()
+
+
+def test_load_xp_info_backward_compat_configs_json():
+    """Test that load_xp_info falls back to configs.json for old experiments."""
+    import tempfile
+    from pathlib import Path
+    from experimaestro.core.serialization import state_dict
+    from experimaestro.core.context import SerializationContext
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        run_dir = Path(tmpdir)
+
+        # Create old-format configs.json
+        config = SharedConfig.C(value="old-format")
+        config.seal()
+
+        context = SerializationContext(save_directory=None)
+        data = state_dict(context, {"job1": config})
+        data["tags"] = {}
+
+        with (run_dir / "configs.json").open("w") as f:
+            json.dump(data, f)
+
+        info = load_xp_info(run_dir)
+        assert len(info.jobs) == 1
+        assert "job1" in info.jobs
+        assert len(info.actions) == 0

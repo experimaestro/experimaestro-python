@@ -1698,3 +1698,191 @@ def carbon_stats(workdir: Path):
     else:
         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
     print(f"  Storage size:  {size_str}")
+
+
+# === Action commands (alpha) ===
+
+
+@experiments.group("actions")
+def actions_group():
+    """Manage experiment actions (alpha feature)"""
+    pass
+
+
+def _select_experiment(state_provider, experiment_id: str | None):
+    """Select an experiment, prompting interactively if not specified.
+
+    Returns the selected experiment or None if not found/cancelled.
+    """
+    from rich.console import Console
+    from rich.prompt import IntPrompt
+
+    experiments_list = list(state_provider.get_experiments())
+    if not experiments_list:
+        cprint("No experiments found in workspace", "yellow")
+        return None
+
+    if experiment_id is not None:
+        matching = [
+            exp for exp in experiments_list if exp.experiment_id == experiment_id
+        ]
+        if not matching:
+            cprint(f"Experiment '{experiment_id}' not found", "red")
+            return None
+        return matching[0]
+
+    # Interactive selection
+    console = Console()
+    console.print("\n[bold]Select an experiment:[/bold]")
+    for i, exp in enumerate(experiments_list, 1):
+        status = exp.status.value if hasattr(exp.status, "value") else "?"
+        console.print(f"  [cyan]{i}[/cyan]) {exp.experiment_id}  [{status}]")
+
+    idx = IntPrompt.ask(
+        "\n[dim]Select[/dim]",
+        choices=[str(i) for i in range(1, len(experiments_list) + 1)],
+        show_choices=False,
+    )
+    return experiments_list[idx - 1]
+
+
+@actions_group.command("list")
+@click.argument("experiment_id", type=str, required=False, default=None)
+@pass_cfg
+def list_actions(workdir: Path, experiment_id: str | None):
+    """List actions for an experiment.
+
+    If EXPERIMENT_ID is not given, prompts for interactive selection.
+    """
+    from experimaestro.scheduler.workspace_state_provider import (
+        WorkspaceStateProvider,
+    )
+
+    state_provider = WorkspaceStateProvider(workdir, no_cleanup=True)
+    try:
+        exp = _select_experiment(state_provider, experiment_id)
+        if exp is None:
+            return
+
+        actions = exp.actions
+        if not actions:
+            cprint(
+                f"No actions registered for experiment '{exp.experiment_id}'",
+                "yellow",
+            )
+            return
+
+        cprint(f"Actions for experiment '{exp.experiment_id}':", "cyan")
+        for action_id, action in actions.items():
+            desc = action.description() if hasattr(action, "description") else ""
+            action_class = getattr(action, "action_class", "")
+            print(f"  {action_id:<30} {desc:<40} [{action_class}]")
+    finally:
+        state_provider.close()
+
+
+def _select_action(state_provider, exp, action_id: str | None):
+    """Select an action from an experiment, prompting interactively if not specified.
+
+    Returns the action_id or None if not found/cancelled.
+    """
+    from rich.console import Console
+    from rich.prompt import IntPrompt
+
+    actions = exp.actions
+    if not actions:
+        cprint(
+            f"No actions registered for experiment '{exp.experiment_id}'",
+            "yellow",
+        )
+        return None
+
+    if action_id is not None:
+        if action_id not in actions:
+            cprint(f"Action '{action_id}' not found in experiment", "red")
+            available = list(actions.keys())
+            if available:
+                cprint(f"Available actions: {', '.join(available)}", "yellow")
+            return None
+        return action_id
+
+    # Interactive selection
+    action_list = list(actions.items())
+    console = Console()
+    console.print("\n[bold]Select an action:[/bold]")
+    for i, (aid, action) in enumerate(action_list, 1):
+        desc = action.description() if hasattr(action, "description") else ""
+        console.print(f"  [cyan]{i}[/cyan]) {desc}  [dim]({aid})[/dim]")
+
+    idx = IntPrompt.ask(
+        "\n[dim]Select[/dim]",
+        choices=[str(i) for i in range(1, len(action_list) + 1)],
+        show_choices=False,
+    )
+    return action_list[idx - 1][0]
+
+
+@actions_group.command("run")
+@click.argument("experiment_id", type=str, required=False, default=None)
+@click.argument("action_id", type=str, required=False, default=None)
+@click.option(
+    "--set",
+    "prefill_args",
+    multiple=True,
+    help="Pre-fill answer: key=value (can be repeated)",
+)
+@pass_cfg
+def run_action(
+    workdir: Path,
+    experiment_id: str | None,
+    action_id: str | None,
+    prefill_args: tuple[str, ...],
+):
+    """Execute an experiment action.
+
+    If EXPERIMENT_ID or ACTION_ID are not given, prompts for interactive selection.
+    """
+    from experimaestro.actions import CLIInteraction
+    from experimaestro.core.serialization import load_xp_info
+    from experimaestro.scheduler.workspace_state_provider import (
+        WorkspaceStateProvider,
+    )
+
+    state_provider = WorkspaceStateProvider(workdir, no_cleanup=True)
+    try:
+        exp = _select_experiment(state_provider, experiment_id)
+        if exp is None:
+            return
+
+        selected_action_id = _select_action(state_provider, exp, action_id)
+        if selected_action_id is None:
+            return
+
+        # Load full action from objects.jsonl
+        xp_info = load_xp_info(exp.workdir)
+        if selected_action_id not in xp_info.actions:
+            cprint(
+                f"Action '{selected_action_id}' not found in objects.jsonl",
+                "red",
+            )
+            return
+
+        action = xp_info.actions[selected_action_id]
+
+        # Parse pre-fill args
+        prefill: dict[str, str] = {}
+        for arg in prefill_args:
+            if "=" not in arg:
+                cprint(f"Invalid --set format: '{arg}' (expected key=value)", "red")
+                return
+            key, value = arg.split("=", 1)
+            prefill[key] = value
+
+        # Execute with CLI interaction
+        interaction = CLIInteraction(prefill=prefill if prefill else None)
+        cprint(f"Running action: {action.describe()}", "cyan")
+        action.execute(interaction)
+        cprint("Action completed successfully", "green")
+
+    finally:
+        state_provider.close()

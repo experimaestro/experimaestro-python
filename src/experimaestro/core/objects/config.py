@@ -833,8 +833,18 @@ class ConfigInformation:
         # Mark this configuration also
         self.task = self.pyobject
 
-        if hasattr(self.pyobject, "task_outputs"):
-            self._taskoutput = self.pyobject.task_outputs(self.mark_output)
+        from experimaestro.scheduler.experiment import experiment as _experiment
+
+        # Look up __submit__ or task_outputs on the value type (original class),
+        # not on the C proxy, to avoid MRO issues where ConfigMixin comes first
+        value_type = type(self.pyobject).__xpmtype__.value_type
+        if hasattr(value_type, "__submit__"):
+            add_action = _experiment.CURRENT.add_action if _experiment.CURRENT else None
+            self._taskoutput = value_type.__submit__(
+                self.pyobject, self.mark_output, add_action
+            )
+        elif hasattr(value_type, "task_outputs"):
+            self._taskoutput = value_type.task_outputs(self.pyobject, self.mark_output)
         else:
             self._taskoutput = self.task = self.pyobject
 

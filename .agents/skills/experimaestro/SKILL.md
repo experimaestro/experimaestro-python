@@ -190,21 +190,25 @@ class ModelLearn(Task):
         save(self.parameters)
 ```
 
-### Task outputs and dependencies
+### Task outputs with `__submit__`
 
-By default, `task_outputs` returns `dep(self)`. Override for custom outputs:
+Override `__submit__` to customize task outputs and register actions.
+The `add_action` callable registers actions with the experiment.
+Use `**kwargs` to ensure forward compatibility:
 
 ```python
 class RandomFold(Task):
     dataset: Param[Dataset]
     topics: Param[Path] = field(default_factory=PathGenerator("topics.tsv"))
 
-    def task_outputs(self, dep) -> Dataset:
+    def __submit__(self, dep, add_action, **kwargs) -> Dataset:
         return dep(Dataset.C(
             topics=dep(Topics.C(path=self.topics)),
             documents=self.dataset.documents,  # No dep() = no dependency
         ))
 ```
+
+Legacy `task_outputs(self, dep)` still works for backward compatibility.
 
 ### Task dependencies
 
@@ -526,70 +530,93 @@ experimaestro experiments --workdir /path/to/workdir monitor --console
 experimaestro experiments --workdir /path/to/workdir monitor --port 12345
 ```
 
-## Analyzing Experiment Results
+## Experiment Actions (alpha)
 
-### Auto-saved configs
+Actions are user-defined operations (`Config` subclasses) registered during
+submission and executable after completion. They support interactive user input.
 
-At experiment finalization, all job configs are serialized into `configs.json`
-in the run directory. Shared object references are preserved, and tags are
-included.
-
-### Loading configs from a past experiment
-
-Simplest way -- standalone `load_configs()` (no provider or experiment context needed):
+### Defining an Action
 
 ```python
-from experimaestro import load_configs
+from experimaestro import Action, Interaction, Param
 
-# From a run directory
-configs = load_configs("/path/to/workspace/experiments/my-exp/20260319_120000")
-# Or directly from configs.json
-configs = load_configs("/path/to/configs.json")
-# configs is {job_id: Config} with shared references preserved and tags restored
+class ExportToHub(Action):
+    model: Param[Model]
+
+    def describe(self) -> str:
+        return "Export model to HF Hub"
+
+    def execute(self, interaction: Interaction) -> None:
+        name = interaction.text("name", "Hub model name:", default="my-model")
+        self.model.push_to_hub(name)
 ```
 
-When you need to look up experiments by name, use `WorkspaceStateProvider`:
+### Registering actions via `__submit__`
+
+```python
+class TrainModel(Task):
+    model: Param[Model]
+
+    def __submit__(self, dep, add_action, **kwargs):
+        add_action(ExportToHub.C(model=self.model))
+        return self
+```
+
+### Running actions
+
+```bash
+# List actions
+experimaestro experiments actions list my-experiment
+
+# Run interactively
+experimaestro experiments actions run my-experiment <action_id>
+
+# Pre-fill answers
+experimaestro experiments actions run my-experiment <action_id> --set name=my-model
+```
+
+In the TUI, select an experiment, go to the **Actions** tab, and press Enter.
+
+## Analyzing Experiment Results
+
+### Loading experiment data
+
+Job configs and actions are streamed to `objects.jsonl` during submission.
+Use `load_xp_info()` to load them:
+
+```python
+from experimaestro import load_xp_info
+
+info = load_xp_info("/path/to/workspace/experiments/my-exp/20260319_120000")
+# info.jobs: dict[str, Config] — job configs with shared references preserved
+# info.actions: dict[str, Action] — registered actions
+```
+
+Via `WorkspaceStateProvider` (lookup by experiment name):
 
 ```python
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 provider = WorkspaceStateProvider(workspace_path)
-configs = provider.load_configs("my-experiment")
-# Optionally specify run_id: provider.load_configs("my-experiment", run_id="20260319_120000")
+info = provider.load_xp_info("my-experiment")
 ```
 
 ### Building DataFrames with tags
 
-Tags are restored on each config, so `config.tags()` works directly:
+Use `provider.get_tags_map()` to combine tags with configs:
 
 ```python
-from experimaestro import load_configs
+from experimaestro import load_xp_info
 import pandas as pd
 
-configs = load_configs("/path/to/run_dir")
+info = load_xp_info("/path/to/run_dir")
+# tags_map from provider.get_tags_map()
 rows = []
-for job_id, config in configs.items():
-    tags = config.tags()
-    row = dict(tags)
+for job_id, config in info.jobs.items():
+    row = tags_map.get(job_id, {}).copy()
     row["job_id"] = job_id
     row["param"] = config.some_param
     rows.append(row)
 df = pd.DataFrame(rows)
-```
-
-You can also combine with `provider.get_tags_map()` for the same result.
-
-### Explicit save/load
-
-For custom objects beyond job configs:
-
-```python
-# Save
-with experiment(workdir, "my-experiment") as xp:
-    xp.save(my_object, name="results")
-
-# Load
-with experiment(workdir, "other-experiment") as xp:
-    obj = xp.load("my-experiment", name="results")
 ```
 
 ## Common Pitfalls

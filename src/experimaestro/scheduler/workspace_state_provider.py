@@ -13,7 +13,10 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from experimaestro.core.serialization import ExperimentInfo
 
 from experimaestro.scheduler.interfaces import (
     BaseExperiment,
@@ -1694,26 +1697,24 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Config loading
     # =========================================================================
 
-    def load_configs(
+    def load_xp_info(
         self, experiment_id: str, run_id: str | None = None
-    ) -> dict[str, object]:
-        """Load all job configs from a past experiment run.
+    ) -> "ExperimentInfo":
+        """Load all serialized objects from a past experiment run.
 
-        Returns a dict mapping job_id to its deserialized Config object,
-        with shared object references preserved across configs. Tags are
-        restored on each config.
+        Returns an ExperimentInfo with .jobs and .actions dictionaries.
 
         Args:
             experiment_id: Experiment identifier
             run_id: Run identifier (None = current/latest run)
 
         Returns:
-            Dictionary mapping job identifiers to their Config objects
+            ExperimentInfo with jobs and actions
 
         Raises:
-            FileNotFoundError: If configs.json doesn't exist for the run
+            FileNotFoundError: If objects.jsonl/configs.json doesn't exist
         """
-        from experimaestro.core.serialization import load_configs
+        from experimaestro.core.serialization import load_xp_info
 
         if run_id is None:
             run_id = self.get_current_run(experiment_id)
@@ -1721,7 +1722,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 raise FileNotFoundError(f"No runs found for experiment {experiment_id}")
 
         run_dir = self.workspace_path / "experiments" / experiment_id / run_id
-        return load_configs(run_dir)
+        return load_xp_info(run_dir)
 
     # =========================================================================
     # Tags and dependencies

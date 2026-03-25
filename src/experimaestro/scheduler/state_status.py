@@ -415,6 +415,21 @@ class ServiceStateChangedEvent(ServiceEventBase):
     state: str = ""
 
 
+# -----------------------------------------------------------------------------
+# Action Events
+# -----------------------------------------------------------------------------
+
+
+@dataclass
+class ActionAddedEvent(ExperimentEventBase):
+    """Event: Action was added to the experiment"""
+
+    run_id: str = ""
+    action_id: str = ""
+    description: str = ""
+    action_class: str = ""
+
+
 @dataclass
 class WarningEvent(ExperimentEventBase):
     """Event: Generic warning with user actions
@@ -2029,6 +2044,7 @@ __all__ = [
     "JobProgressEvent",
     "ServiceAddedEvent",
     "ServiceStateChangedEvent",
+    "ActionAddedEvent",
     "RunCompletedEvent",
     "EVENT_TYPES",
     # Event writer classes
