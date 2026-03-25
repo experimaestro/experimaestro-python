@@ -1,5 +1,76 @@
 # Changelog
 
+## Version 2.3.0 (2026)
+
+### New Features
+
+#### [Experiment Actions](experiments/actions.md) (alpha)
+
+Actions are user-defined operations that can be registered during task submission
+and executed after experiment completion. They support interactive user input
+via CLI (rich prompts) and TUI (modal dialogs).
+
+```python
+from experimaestro import Task, Action, Interaction, Param
+
+class ExportToHub(Action):
+    model: Param[Model]
+
+    def describe(self) -> str:
+        return "Export model to HF Hub"
+
+    def execute(self, interaction: Interaction) -> None:
+        name = interaction.text("name", "Hub model name:")
+        self.model.push_to_hub(name)
+
+class TrainModel(Task):
+    model: Param[Model]
+
+    def __submit__(self, dep, add_action, **kwargs):
+        add_action(ExportToHub.C(model=self.model))
+        return self
+```
+
+Run actions via CLI or TUI:
+```bash
+experimaestro experiments actions list
+experimaestro experiments actions run
+```
+
+#### Streaming config serialization (`objects.jsonl`)
+
+Job configs and actions are now streamed to `objects.jsonl` as they are submitted,
+replacing the old `configs.json` batch serialization at experiment finalization.
+Use `load_xp_info()` to load experiment data:
+
+```python
+from experimaestro import load_xp_info
+
+info = load_xp_info("/path/to/run_dir")
+info.jobs     # dict[str, Config]
+info.actions  # dict[str, Action]
+```
+
+#### `__submit__` method
+
+The new `__submit__(self, dep, add_action, **kwargs)` method on tasks replaces
+`task_outputs`. It receives an `add_action` callable for registering actions.
+Legacy `task_outputs` methods continue to work.
+
+### Bug Fixes
+
+- Fixed race condition where `on_completed` callbacks could run after experiment
+  exit. Exit notifications are now routed through the notification executor to
+  ensure all callbacks complete before `wait()` returns.
+
+### Deprecations
+
+- `load_configs()` is deprecated in favor of `load_xp_info()`.
+- `configs.json` is replaced by `objects.jsonl` (old format still loadable for
+  backward compatibility).
+
+---
+
 ## Version 2.0 (2025)
 
 Version 2.0 is a major release with significant new features, improved developer experience, and important breaking changes.
