@@ -1159,7 +1159,11 @@ class experiment(BaseExperiment):
                 "Task output queue size should always be >= 0"
             )
             if self.taskOutputQueueSize == 0:
-                self.scheduler.exitCondition.notify_all()
+                # Route through notification executor so wait() only wakes
+                # up after all pending notifications have been processed
+                self.scheduler._notification_executor.submit(
+                    self.scheduler._notify_exit_condition
+                )
             return self.taskOutputQueueSize
 
     def watch_output(self, watched: "WatchedOutput"):

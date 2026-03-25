@@ -1125,12 +1125,25 @@ class Scheduler(StateProvider, threading.Thread):
         # Notify with final state
         self.notify_job_state(job)
 
-        # Notify the experiments
+        # Notify exitCondition AFTER all queued notifications have been
+        # processed (including on_completed callbacks). This is done by
+        # submitting the notification to the executor queue, so it runs
+        # after all pending _do_notify tasks.
+        self._notification_executor.submit(self._notify_exit_condition)
+
+        return job.scheduler_state
+
+    def _notify_exit_condition(self):
+        """Notify exitCondition from the notification thread.
+
+        Scheduled via the notification executor so it runs after all
+        pending listener notifications (including on_completed callbacks).
+        """
+        asyncio.run_coroutine_threadsafe(self._async_notify_exit(), self.loop)
+
+    async def _async_notify_exit(self):
         async with self.exitCondition:
             self.exitCondition.notify_all()
-
-        # Wait for done handler to complete and notify exit condition
-        return job.scheduler_state
 
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.

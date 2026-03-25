@@ -1,9 +1,10 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
 
-from experimaestro import Task, Param
+from experimaestro import Task, Param, field
 from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
 from experimaestro.scheduler.experiment import cleanup_experiment_history
 from experimaestro.settings import HistorySettings
@@ -46,6 +47,66 @@ def test_experiment_events():
         task_a.on_completed(flag.set)
 
     assert flag.is_set()
+
+
+class SlowCallbackTask(Task):
+    x: Param[int] = field(default=0)
+
+    def execute(self):
+        pass
+
+
+def test_on_completed_waits_for_callbacks():
+    """Experiment must not exit before on_completed callbacks finish.
+
+    Registers a callback that sleeps, then records a timestamp. The experiment
+    exit timestamp must be after the callback timestamp — proving that wait()
+    blocked until the callback completed.
+    """
+    callback_done_at = [None]
+
+    def slow_callback():
+        time.sleep(0.3)
+        callback_done_at[0] = time.monotonic()
+
+    with TemporaryExperiment("test-callback-wait"):
+        task = SlowCallbackTask.C()
+        task.submit()
+        task.on_completed(slow_callback)
+
+    exit_at = time.monotonic()
+
+    assert callback_done_at[0] is not None, "on_completed callback was never called"
+    assert exit_at >= callback_done_at[0], (
+        f"Experiment exited at {exit_at} before callback finished at {callback_done_at[0]}"
+    )
+
+
+def test_on_completed_slow_callback_blocks_exit():
+    """Experiment exit must block until a slow on_completed callback finishes.
+
+    Runs the slow callback test multiple times to stress-test the timing.
+    """
+    for i in range(3):
+        callback_done_at = [None]
+
+        def slow_callback():
+            time.sleep(0.2)
+            callback_done_at[0] = time.monotonic()
+
+        with TemporaryExperiment(f"test-stress-{i}"):
+            task = SlowCallbackTask.C(x=i)
+            task.submit()
+            task.on_completed(slow_callback)
+
+        exit_at = time.monotonic()
+
+        assert callback_done_at[0] is not None, (
+            f"Iteration {i}: on_completed callback was never called"
+        )
+        assert exit_at >= callback_done_at[0], (
+            f"Iteration {i}: experiment exited before callback finished"
+        )
 
 
 # === Tests for cleanup_experiment_history ===
