@@ -156,7 +156,7 @@ class GlobalServiceSyncs(Vertical):
             }
             state_icon = state_icons.get(state_name, "?")
 
-            service_key = f"{exp_id}:{service_id}"
+            service_key = f"{exp_id}:{run_id}:{service_id}"
             table.add_row(
                 exp_display,
                 description or service_id,
