@@ -206,3 +206,34 @@ def test_validation_taskargument():
     with TemporaryExperiment("fake"):
         x.submit(run_mode=RunMode.DRY_RUN)
         expect_validate(TaskConfigConsumer.C(x=x))
+
+
+# --- Nested structures (list, dict, set)
+
+
+class ListConfig(Config):
+    items: Param[list[A]]
+
+
+class DictConfig(Config):
+    items: Param[dict[str, A]]
+
+
+def test_validation_list_valid():
+    """Validate recurses into list elements"""
+    expect_validate(ListConfig.C(items=[A.C(value=1), A.C(value=2)]))
+
+
+def test_validation_list_missing():
+    """Validate catches missing required params inside list elements"""
+    expect_notvalidate(ListConfig.C(items=[A.C(value=1), A.C()]))
+
+
+def test_validation_dict_valid():
+    """Validate recurses into dict values"""
+    expect_validate(DictConfig.C(items={"x": A.C(value=1), "y": A.C(value=2)}))
+
+
+def test_validation_dict_missing():
+    """Validate catches missing required params inside dict values"""
+    expect_notvalidate(DictConfig.C(items={"x": A.C(value=1), "y": A.C()}))

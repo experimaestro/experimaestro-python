@@ -434,6 +434,20 @@ class ConfigInformation:
 
         return TagFinder()(self.pyobject)
 
+    def _validate_value(self, value):
+        """Recursively validate a value, handling Config, list, dict, and set"""
+        if isinstance(value, Config):
+            value.__xpm__.validate()
+        elif isinstance(value, list):
+            for item in value:
+                self._validate_value(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                self._validate_value(item)
+        elif isinstance(value, set):
+            for item in value:
+                self._validate_value(item)
+
     def validate(self):
         """Validate a value"""
         if not self._validated:
@@ -443,8 +457,7 @@ class ConfigInformation:
             for k, argument in self.xpmtype.arguments.items():
                 value = self.values.get(k)
                 if value is not None:
-                    if isinstance(value, Config):
-                        value.__xpm__.validate()
+                    self._validate_value(value)
                 elif argument.required:
                     if not argument.generator:
                         raise ValueError(
