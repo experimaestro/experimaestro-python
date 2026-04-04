@@ -39,6 +39,7 @@ serialization
 settings
 services
 interfaces
+utilities
 ```
 
 ```{toctree}

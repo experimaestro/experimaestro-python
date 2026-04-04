@@ -425,9 +425,12 @@ def migrate_v1_to_v2(workdir: Path, dry_run: bool):
 @click.pass_context
 def experiments(ctx, workdir, workspace):
     """Manage experiments"""
-    ws = find_workspace(workdir=workdir, workspace=workspace)
-    path = check_xp_path(None, None, ws.path)
-    ctx.obj = path
+    try:
+        ws = find_workspace(workdir=workdir, workspace=workspace)
+        path = check_xp_path(None, None, ws.path)
+        ctx.obj = path
+    except (SystemExit, Exception):
+        ctx.obj = None
 
 
 @experiments.command("list")
@@ -1698,6 +1701,166 @@ def carbon_stats(workdir: Path):
     else:
         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
     print(f"  Storage size:  {size_str}")
+
+
+# === Copy command ===
+
+
+@experiments.command("copy")
+@click.argument("experiment_id", type=str, required=False, default=None)
+@click.argument("run_id", type=str, required=False, default=None)
+@click.option(
+    "--from-workspace", "from_ws", type=str, default=None, help="Source workspace ID"
+)
+@click.option(
+    "--to-workspace", "to_ws", type=str, default=None, help="Destination workspace ID"
+)
+@click.option("--yes", "-y", is_flag=True, help="Actually copy (default is dry-run)")
+def copy_experiment_cmd(experiment_id, run_id, from_ws, to_ws, yes):
+    """Copy an experiment between workspaces.
+
+    Copies the experiment run directory and all referenced job directories
+    from one workspace to another. Supports local and remote (SSH) workspaces.
+
+    If EXPERIMENT_ID or RUN_ID are not given, prompts for interactive selection.
+    """
+    from rich.console import Console
+    from rich.prompt import IntPrompt
+
+    from experimaestro.cli.copy_experiment import (
+        copy_experiment,
+        format_run_id,
+        list_experiments as list_ws_experiments,
+        list_runs,
+        resolve_current_run,
+    )
+    from experimaestro.settings import get_settings, get_workspace
+
+    console = Console()
+    settings = get_settings()
+    workspaces = settings.workspaces
+
+    if not workspaces:
+        cprint("No workspaces configured in settings.yaml", "red")
+        sys.exit(1)
+
+    # --- Resolve source workspace ---
+    if from_ws:
+        src_ws = get_workspace(from_ws, include_remote=True)
+        if src_ws is None:
+            cprint(f"Source workspace '{from_ws}' not found", "red")
+            sys.exit(1)
+    else:
+        console.print("\n[bold]Select source workspace:[/bold]")
+        for i, ws in enumerate(workspaces, 1):
+            remote_tag = " [dim](remote)[/dim]" if ws.is_remote else ""
+            console.print(
+                f"  [cyan]{i}[/cyan]) {ws.id}{remote_tag}  [dim]{ws._raw_path}[/dim]"
+            )
+        idx = IntPrompt.ask(
+            "\n[dim]Select[/dim]",
+            choices=[str(i) for i in range(1, len(workspaces) + 1)],
+            show_choices=False,
+        )
+        src_ws = workspaces[idx - 1]
+
+    # --- Resolve destination workspace ---
+    if to_ws:
+        dst_ws = get_workspace(to_ws, include_remote=True)
+        if dst_ws is None:
+            cprint(f"Destination workspace '{to_ws}' not found", "red")
+            sys.exit(1)
+    else:
+        # Filter out source workspace
+        dst_candidates = [ws for ws in workspaces if ws.id != src_ws.id]
+        if not dst_candidates:
+            cprint("No other workspaces available as destination", "red")
+            sys.exit(1)
+        console.print("\n[bold]Select destination workspace:[/bold]")
+        for i, ws in enumerate(dst_candidates, 1):
+            remote_tag = " [dim](remote)[/dim]" if ws.is_remote else ""
+            console.print(
+                f"  [cyan]{i}[/cyan]) {ws.id}{remote_tag}  [dim]{ws._raw_path}[/dim]"
+            )
+        idx = IntPrompt.ask(
+            "\n[dim]Select[/dim]",
+            choices=[str(i) for i in range(1, len(dst_candidates) + 1)],
+            show_choices=False,
+        )
+        dst_ws = dst_candidates[idx - 1]
+
+    # --- Resolve experiment ID ---
+    if experiment_id is None:
+        exp_list = list_ws_experiments(src_ws)
+        if not exp_list:
+            cprint("No experiments found in source workspace", "yellow")
+            sys.exit(1)
+        console.print("\n[bold]Select experiment:[/bold]")
+        for i, eid in enumerate(exp_list, 1):
+            console.print(f"  [cyan]{i}[/cyan]) {eid}")
+        idx = IntPrompt.ask(
+            "\n[dim]Select[/dim]",
+            choices=[str(i) for i in range(1, len(exp_list) + 1)],
+            show_choices=False,
+        )
+        experiment_id = exp_list[idx - 1]
+
+    # --- Resolve run ID ---
+    if run_id is None:
+        current = resolve_current_run(src_ws, experiment_id)
+        runs = list_runs(src_ws, experiment_id)
+        if not runs:
+            if current:
+                run_id = current
+                console.print(
+                    f"Using current run: [cyan]{format_run_id(run_id)}[/cyan]"
+                )
+            else:
+                cprint(f"No runs found for experiment '{experiment_id}'", "yellow")
+                sys.exit(1)
+        elif len(runs) == 1:
+            run_id = runs[0]
+            console.print(
+                f"Using only available run: [cyan]{format_run_id(run_id)}[/cyan]"
+            )
+        else:
+            console.print("\n[bold]Select run:[/bold]")
+            for i, rid in enumerate(runs, 1):
+                label = format_run_id(rid)
+                current_tag = " [green](current)[/green]" if rid == current else ""
+                console.print(
+                    f"  [cyan]{i}[/cyan]) {label}{current_tag}  [dim]{rid}[/dim]"
+                )
+            idx = IntPrompt.ask(
+                "\n[dim]Select[/dim]",
+                choices=[str(i) for i in range(1, len(runs) + 1)],
+                show_choices=False,
+            )
+            run_id = runs[idx - 1]
+
+    # --- Execute copy ---
+    dry_run = not yes
+    console.print(
+        f"\nCopying experiment [bold]{experiment_id}[/bold] run [bold]{run_id}[/bold]"
+        f"\n  from [cyan]{src_ws.id}[/cyan] ({src_ws._raw_path})"
+        f"\n  to   [cyan]{dst_ws.id}[/cyan] ({dst_ws._raw_path})"
+    )
+    if dry_run:
+        console.print("[yellow]  (dry run — use --yes to actually copy)[/yellow]")
+
+    result = copy_experiment(src_ws, dst_ws, experiment_id, run_id, dry_run=dry_run)
+
+    # --- Print summary ---
+    console.print("\n[bold]Summary:[/bold]")
+    console.print(f"  Jobs copied:  {result.jobs_copied}")
+    console.print(f"  Jobs skipped: {result.jobs_skipped}")
+    if result.errors:
+        console.print(f"  [red]Errors: {len(result.errors)}[/red]")
+        for err in result.errors:
+            console.print(f"    [red]- {err}[/red]")
+        sys.exit(1)
+    else:
+        console.print("[green]Copy completed successfully.[/green]")
 
 
 # === Action commands (alpha) ===
