@@ -172,6 +172,15 @@ class Scheduler(StateProvider, threading.Thread):
         # Track which workspaces have logging setup
         self._workspace_logging_setup: set[Path] = set()
 
+        # Last (scheduler_state, failure_reason) written to each experiment's
+        # event file per job. Used to deduplicate ExperimentJobStateEvent
+        # writes in notify_job_state (avoids huge logs when notify_job_state
+        # is called repeatedly without an actual scheduler_state change, e.g.
+        # on every JobProgressEvent from the job process).
+        self._last_written_scheduler_state: Dict[
+            tuple[str, str, str], tuple[str, Optional[str]]
+        ] = {}
+
     @staticmethod
     def has_instance() -> bool:
         """Check if a scheduler instance exists without creating one"""
@@ -890,7 +899,19 @@ class Scheduler(StateProvider, threading.Thread):
             )
             self._notify_state_listeners_async(event)
 
-            # Write to experiment event file for offline monitoring
+            # Write to experiment event file for offline monitoring,
+            # but only when the scheduler_state actually changed for this job.
+            # notify_job_state may be called many times for the same job
+            # (e.g. on every progress event from the job process); without
+            # this dedup we would append a duplicate ExperimentJobStateEvent
+            # to the experiment event log every time.
+            last_key = (xp.experiment_id, xp.run_id, job.identifier)
+            last = self._last_written_scheduler_state.get(last_key)
+            current = (event.scheduler_state, failure_reason)
+            if last == current:
+                continue
+            self._last_written_scheduler_state[last_key] = current
+
             if xp._event_writer is not None:
                 try:
                     xp._event_writer.write_event(event)
