@@ -1840,13 +1840,19 @@ class BaseExperiment:
                     # Flat: "{exp_id}-{count}.jsonl" or old: "events-{count}.jsonl"
                     count_str = event_file.stem.rsplit("-", 1)[1]
                     perm_file = perm_events_dir / f"event-{count_str}.jsonl"
-                    # Try hardlink first, copy if that fails
-                    try:
-                        perm_file.hardlink_to(event_file)
-                    except (OSError, NotImplementedError):
-                        import shutil
+                    # If perm_file already exists and refers to the same inode
+                    # (e.g., previously hardlinked), skip copying.
+                    already_linked = perm_file.exists() and perm_file.samefile(
+                        event_file
+                    )
+                    if not already_linked:
+                        # Try hardlink first, copy if that fails
+                        try:
+                            perm_file.hardlink_to(event_file)
+                        except (OSError, NotImplementedError):
+                            import shutil
 
-                        shutil.copy2(event_file, perm_file)
+                            shutil.copy2(event_file, perm_file)
 
                     # Delete temp event file
                     event_file.unlink()
