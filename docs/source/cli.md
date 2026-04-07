@@ -284,6 +284,7 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 | `--remote-shell-init CMD` | Shell commands to run before remote experimaestro |
 | `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
 | `--remote-python NAME` | Python interpreter for `uv tool run --python` |
+| `--request-timeout SECS` | Timeout for remote RPC requests (default: 60) |
 
 Examples:
 

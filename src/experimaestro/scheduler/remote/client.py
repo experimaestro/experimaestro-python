@@ -397,6 +397,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         uv_offline: bool = False,
         remote_python: Optional[str] = None,
         force_version: bool = False,
+        request_timeout: float = DEFAULT_TIMEOUT,
     ):
         """Initialize the client
 
@@ -427,6 +428,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         self.uv_offline = uv_offline
         self.remote_python = remote_python
         self.force_version = force_version
+        self.request_timeout = request_timeout
 
         # Session-specific temporary cache directory (created on connect)
         self._temp_dir: Optional[str] = None
@@ -932,7 +934,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         return future
 
     def _call_sync(
-        self, method: RPCMethod, params: Dict, timeout: float = DEFAULT_TIMEOUT
+        self, method: RPCMethod, params: Dict, timeout: Optional[float] = None
     ):
         """Send an RPC request and wait for the response
 
@@ -948,6 +950,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             TimeoutError: If the request times out
             RuntimeError: If the RPC call returns an error
         """
+        if timeout is None:
+            timeout = self.request_timeout
         future = self._call(method, params)
         try:
             return future.result(timeout=timeout)

@@ -715,6 +715,12 @@ def monitor(
     default=False,
     help="Pin exact experimaestro version (==X.Y.Z) instead of minor (>=X.Y.0)",
 )
+@click.option(
+    "--request-timeout",
+    type=float,
+    default=60.0,
+    help="Timeout in seconds for remote RPC requests (default: 60)",
+)
 def ssh_monitor(
     host: str | None,
     remote_workdir: str | None,
@@ -732,6 +738,7 @@ def ssh_monitor(
     uv_offline: bool,
     remote_python: str | None,
     force_version: bool,
+    request_timeout: float,
 ):
     """Monitor experiments on a remote server via SSH
 
@@ -821,6 +828,7 @@ def ssh_monitor(
         uv_offline=effective_uv_offline,
         remote_python=effective_python,
         force_version=force_version,
+        request_timeout=request_timeout,
     )
     try:
         state_provider.connect()
