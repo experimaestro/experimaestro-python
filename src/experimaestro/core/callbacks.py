@@ -47,6 +47,6 @@ class TaskEventListener(Listener):
 
             if (
                 config_information.job is not None
-                and config_information.job == JobState.DONE
+                and config_information.job.state == JobState.DONE
             ):
                 callback()
