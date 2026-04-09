@@ -11,17 +11,16 @@ class TaskEventListener(Listener):
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.experiments: set[int] = set()
 
         self._on_completed: defaultdict[int, Callable] = defaultdict(list)
 
     @staticmethod
     def connect(xp: experiment):
         _self = TaskEventListener.instance()
-        with _self.lock:
-            if id(xp) not in _self.experiments:
-                _self.experiments.add(id(xp))
-                xp.scheduler.addlistener(_self)
+        # Always call addlistener — it uses a set internally so duplicates
+        # are harmless, and listeners may have been cleared between tests
+        # or experiment runs (e.g., scheduler.clear_listeners()).
+        xp.scheduler.addlistener(_self)
 
     @staticmethod
     def instance():
