@@ -153,10 +153,29 @@ class _FakeClass:
 
 
 class _FakeClassProxy:
-    """Wrapper that intercepts attribute access on fake classes."""
+    """Wrapper that intercepts attribute access on fake classes.
+
+    Provides ``__repr__``, ``__module__``, and ``__qualname__`` so that
+    Sphinx renders type annotations using the original dotted path
+    (e.g. ``torch.Tensor``) instead of the proxy's internal class name.
+    """
 
     def __init__(self, fake_class):
+        path = getattr(fake_class, "_path", "") or "MockedClass"
+        parts = path.rsplit(".", 1)
         object.__setattr__(self, "_fake_class", fake_class)
+        object.__setattr__(self, "_path", path)
+        # Set dunder attributes so Sphinx renders type annotations correctly
+        # (e.g. "torch.Tensor" instead of "_FakeClassProxy object at 0x...")
+        object.__setattr__(self, "__qualname__", parts[-1])
+        object.__setattr__(self, "__name__", parts[-1])
+        object.__setattr__(self, "__module__", parts[0] if len(parts) > 1 else path)
+
+    def __repr__(self):
+        return object.__getattribute__(self, "_path")
+
+    def __str__(self):
+        return self.__repr__()
 
     def __getattr__(self, name):
         if name.startswith("_"):
