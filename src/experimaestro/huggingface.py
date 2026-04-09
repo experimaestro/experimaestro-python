@@ -45,13 +45,13 @@ class ExperimaestroHFHub(ModelHubMixin):
     def _from_pretrained(
         cls,
         model_id,
-        revision,
-        cache_dir,
-        force_download,
-        proxies,
-        resume_download,
-        local_files_only,
-        token,
+        revision=None,
+        cache_dir=None,
+        force_download=False,
+        proxies=None,
+        resume_download=None,
+        local_files_only=False,
+        token=None,
         *,
         as_instance: bool = False,
         **model_kwargs,
@@ -59,7 +59,11 @@ class ExperimaestroHFHub(ModelHubMixin):
         if os.path.isdir(model_id):
             save_directory = Path(model_id)
 
-            def data_loader(path: Path):
+            def data_loader(path: Union[Path, str, SerializedPath]):
+                if isinstance(path, SerializedPath):
+                    path = path.path
+                else:
+                    path = Path(path)
                 return save_directory / path
 
         else:
