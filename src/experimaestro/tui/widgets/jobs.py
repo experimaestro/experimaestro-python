@@ -1329,44 +1329,62 @@ class JobsTable(Vertical):
 
     def action_view_logs(self) -> None:
         """Request to view logs for the selected job"""
-        table = self.query_one("#jobs-table", DataTable)
-        if table.cursor_row is None or not self.current_experiment:
+        selected = self._get_selected_job_info()
+        if selected is None:
             return
 
-        row_key = list(table.rows.keys())[table.cursor_row]
-        if row_key:
-            job_id = str(row_key.value)
-            task_id = self.task_id_map.get(job_id, "")
+        job_id, task_id = selected
+        if task_id:
             self.post_message(
                 ViewJobLogsRequest(job_id, task_id, self.current_experiment)
             )
+
+    def _get_selected_job_info(self) -> tuple[str, str] | None:
+        """Get (job_id, task_id) for the currently selected job in either view.
+
+        Returns None if no valid selection exists.
+        """
+        if not self.current_experiment:
+            return None
+
+        if self._tree_mode:
+            tree_view = self.query_one(JobsTreeView)
+            data = tree_view._get_selected_job_data()
+            if data is None:
+                return None
+            return data.job_id, data.task_id
+        else:
+            table = self.query_one("#jobs-table", DataTable)
+            if table.cursor_row is None:
+                return None
+            row_key = list(table.rows.keys())[table.cursor_row]
+            if not row_key:
+                return None
+            job_id = str(row_key.value)
+            task_id = self.task_id_map.get(job_id, "")
+            return job_id, task_id
 
     def action_copy_path(self) -> None:
         """Copy the job folder path to clipboard"""
         from experimaestro.tui.clipboard import copy
 
-        table = self.query_one("#jobs-table", DataTable)
-        if table.cursor_row is None or not self.current_experiment:
+        selected = self._get_selected_job_info()
+        if selected is None:
             return
 
-        row_key = list(table.rows.keys())[table.cursor_row]
-        if row_key:
-            job_id = str(row_key.value)
-            task_id = self.task_id_map.get(job_id, "")
-            if task_id:
-                job = self.state_provider.get_job(task_id, job_id)
-                if job and job.path:
-                    display_path = self.state_provider.get_display_path(job)
-                    if copy(display_path):
-                        self.notify(
-                            f"Path copied: {display_path}", severity="information"
-                        )
-                    else:
-                        self.notify("Failed to copy path", severity="error")
+        job_id, task_id = selected
+        if task_id:
+            job = self.state_provider.get_job(task_id, job_id)
+            if job and job.path:
+                display_path = self.state_provider.get_display_path(job)
+                if copy(display_path):
+                    self.notify(f"Path copied: {display_path}", severity="information")
                 else:
-                    self.notify("No path available for this job", severity="warning")
+                    self.notify("Failed to copy path", severity="error")
             else:
-                self.notify("Cannot find task ID for this job", severity="warning")
+                self.notify("No path available for this job", severity="warning")
+        else:
+            self.notify("Cannot find task ID for this job", severity="warning")
 
     # Status sort order (for sorting by status)
     STATUS_ORDER = {
