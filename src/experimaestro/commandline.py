@@ -150,7 +150,7 @@ class AbstractCommand(CommandPart):
 
             # Write named pipes
             def mkfifo(file: Path):
-                out.write(" mkfifo {}" % context.relpath(file))
+                out.write(" mkfifo {}".format(context.relpath(file)))
 
             for file in namedRedirections.redirections():
                 mkfifo(file)

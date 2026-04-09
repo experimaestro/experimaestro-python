@@ -229,6 +229,7 @@ experimaestro experiments [OPTIONS] COMMAND
 | `ssh-monitor` | Monitor experiments on a remote server via SSH |
 | `monitor-server` | Start SSH monitoring server (internal, for remote monitoring) |
 | `sync` | Synchronize workspace database from disk state |
+| `copy` | Copy an experiment between workspaces |
 
 ### List Command
 
@@ -283,6 +284,7 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 | `--remote-shell-init CMD` | Shell commands to run before remote experimaestro |
 | `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
 | `--remote-python NAME` | Python interpreter for `uv tool run --python` |
+| `--request-timeout SECS` | Timeout for remote RPC requests (default: 60) |
 
 Examples:
 
@@ -310,6 +312,51 @@ experimaestro experiments ssh-monitor host /workspace --remote-xpm /path/to/venv
 ```
 
 See [Remote Monitoring via SSH](interfaces.md#remote-monitoring-via-ssh) for detailed documentation.
+
+### Copy Command
+
+Copy an experiment (run directory and all referenced job directories) between workspaces.
+Supports local and remote (SSH) workspaces.
+
+```bash
+experimaestro experiments copy [OPTIONS] [EXPERIMENT_ID] [RUN_ID]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--from-workspace ID` | Source workspace ID (from settings.yaml) |
+| `--to-workspace ID` | Destination workspace ID |
+| `-y, --yes` | Actually perform the copy (default is dry-run) |
+
+When arguments or options are omitted, the command prompts for interactive selection.
+
+**Examples:**
+
+```bash
+# Dry-run (default) — shows what would be copied
+experimaestro experiments copy --from-workspace cluster --to-workspace local my_experiment
+
+# Actually copy
+experimaestro experiments copy --from-workspace cluster --to-workspace local my_experiment -y
+
+# Interactive mode — prompts for everything
+experimaestro experiments copy
+```
+
+**What gets copied:**
+
+- The experiment run directory (`experiments/<id>/<run_id>/`) — metadata, events, configs
+- All job directories referenced in `jobs.jsonl` — outputs, logs, params
+- Jobs that already exist at the destination are skipped
+
+**Path rewriting:** After copying, workspace-dependent paths in each job's `params.json`
+are automatically rewritten to point to the destination workspace.
+
+**Atomic staging:** Each job is first rsynced into a temporary staging directory
+(`.xpm-staging/`) inside the destination workspace, then moved to its final location.
+This prevents partial copies from leaving broken state.
+
+See also the [Python API](utilities.md#copying-experiments) for programmatic use.
 
 ## Cleaning Up Orphans
 

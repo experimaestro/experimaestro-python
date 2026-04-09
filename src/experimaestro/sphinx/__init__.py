@@ -120,7 +120,7 @@ class ConfigDocumenter(ClassDocumenter):
     @staticmethod
     def formatDefault(value) -> str:
         if isinstance(value, Config):
-            value_type = value.__xpmtype__.value_type
+            value_type = value.__getxpmtype__().value_type
             params = ", ".join(
                 [f"{key}={value}" for key, value in value.__xpm__.values.items()]
             )
