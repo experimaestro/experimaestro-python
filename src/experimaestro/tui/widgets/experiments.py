@@ -28,6 +28,7 @@ class ExperimentsList(Widget):
 
     BINDINGS = [
         Binding("d", "show_runs", "Runs"),
+        Binding("f", "copy_path", "Copy Path", show=False),
         Binding("ctrl+d", "delete_experiment", "Delete", show=False),
         Binding("ctrl+k", "kill_experiment", "Kill", show=False),
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
@@ -82,6 +83,27 @@ class ExperimentsList(Widget):
         if row_key:
             return str(row_key.value)
         return None
+
+    def action_copy_path(self) -> None:
+        """Copy the experiment path to clipboard"""
+        from experimaestro.tui.clipboard import copy
+
+        exp_id = self._get_selected_experiment_id()
+        if not exp_id:
+            return
+
+        exp_info = next(
+            (exp for exp in self.experiments if exp.experiment_id == exp_id),
+            None,
+        )
+        if exp_info and exp_info.workdir:
+            path_str = str(exp_info.workdir)
+            if copy(path_str):
+                self.notify(f"Path copied: {path_str}", severity="information")
+            else:
+                self.notify("Failed to copy path", severity="error")
+        else:
+            self.notify("No path available for this experiment", severity="warning")
 
     def action_delete_experiment(self) -> None:
         """Request to delete the selected experiment"""
