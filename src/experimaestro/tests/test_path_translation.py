@@ -1,5 +1,4 @@
 
-import pytest
 from pathlib import Path
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.remote.client import SSHStateProviderClient
@@ -33,7 +32,7 @@ def test_state_provider_translate_path():
     provider = MockStateProvider()
     path = Path("/some/local/path")
     assert provider.translate_path(path) == str(path)
-    
+
     job = MockJob(path)
     assert provider.get_display_path(job) == str(path)
 
@@ -44,20 +43,20 @@ def test_ssh_state_provider_client_translate_path():
     )
     # Set local_cache_dir which is normally set during connect/init
     client.local_cache_dir = Path("/tmp/local/cache")
-    
+
     # Path in local cache should be translated
     local_path = Path("/tmp/local/cache/experiments/exp1/run1")
     expected_remote = "/remote/workspace/experiments/exp1/run1"
     assert client.translate_path(local_path) == expected_remote
-    
+
     # Path NOT in local cache should be returned as-is
     other_path = Path("/some/other/path")
     assert client.translate_path(other_path) == str(other_path)
-    
+
     # Test get_display_path (which now uses translate_path)
     job = MockJob(local_path)
     assert client.get_display_path(job) == expected_remote
-    
+
     # Test for experiments (direct use of translate_path as in experiments.py)
     exp = MockExperiment(local_path)
     assert client.translate_path(exp.workdir) == expected_remote
