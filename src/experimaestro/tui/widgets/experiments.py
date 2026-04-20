@@ -97,7 +97,7 @@ class ExperimentsList(Widget):
             None,
         )
         if exp_info and exp_info.workdir:
-            path_str = str(exp_info.workdir)
+            path_str = self.state_provider.translate_path(exp_info.workdir)
             if copy(path_str):
                 self.notify(f"Path copied: {path_str}", severity="information")
             else:

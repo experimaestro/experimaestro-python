@@ -599,6 +599,17 @@ class StateProvider(ABC):
         """
         return False
 
+    def translate_path(self, path: Path) -> str:
+        """Translate a local path to a display path (e.g. remote path)
+
+        Args:
+            path: Local path to translate
+
+        Returns:
+            Path string suitable for display and copying
+        """
+        return str(path)
+
     def get_display_path(self, job: BaseJob) -> str:
         """Get the path to display/copy for a job
 
@@ -611,7 +622,7 @@ class StateProvider(ABC):
         Returns:
             Path string suitable for display and copying
         """
-        return str(job.path) if job.path else ""
+        return self.translate_path(job.path) if job.path else ""
 
 
 # =============================================================================
