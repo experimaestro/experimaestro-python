@@ -717,9 +717,11 @@ class TaskRunner:
             self.handle_error(1, None)
 
         except SystemExit as e:
+            env = taskglobals.Env.instance()
             if e.code == 0:
-                # Normal exit, just create the ".done" file
-                self.donepath.touch()
+                if not env.slave:
+                    # Normal exit, just create the ".done" file
+                    self.donepath.touch()
 
                 # ... and finish the exit process
                 raise
