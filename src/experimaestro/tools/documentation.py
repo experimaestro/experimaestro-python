@@ -11,10 +11,24 @@ from dataclasses import dataclass
 
 import docutils.nodes as nodes
 import sphobjinv
-from docutils.frontend import get_default_settings
 from docutils.nodes import document
 from docutils.parsers.rst import Directive, Parser, directives
 from docutils.utils import new_document
+
+
+# ``docutils.frontend.get_default_settings`` is the modern API (docutils >=
+# 0.19); older versions exposed the same through ``OptionParser``. Support
+# both so users aren't forced to a docutils floor just to import this
+# module.
+try:
+    from docutils.frontend import get_default_settings as _get_default_settings
+except ImportError:  # pragma: no cover - exercised only on old docutils
+    from docutils.frontend import OptionParser as _OptionParser
+
+    def _get_default_settings(*components):
+        return _OptionParser(components=components).get_default_values()
+
+
 from sphinx.directives.other import TocTree
 from sphinx.domains.python import PyCurrentModule
 from termcolor import cprint
@@ -156,7 +170,7 @@ def get_parser():
     directives.register_directive("toctree", AutotocDirective)
     directives.register_directive("autoxpmconfig", AutoXPMDirective)
     directives.register_directive("currentmodule", CurrentModuleDirective)
-    settings = get_default_settings(Parser)
+    settings = _get_default_settings(Parser)
 
     return Parser(), settings
 
