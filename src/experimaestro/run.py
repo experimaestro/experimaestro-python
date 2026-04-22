@@ -431,7 +431,10 @@ class TaskRunner:
         if not self.cleaned:
             self.cleaned = True
             logger.info("Cleaning up")
-            rmfile(self.pidfile)
+            env = taskglobals.Env.instance()
+
+            if not env.slave:
+                rmfile(self.pidfile)
 
             # Load MockJob for state tracking
             self._mock_job = self._load_mock_job()
@@ -471,7 +474,8 @@ class TaskRunner:
                 self._carbon_tracker = None
 
             # Write status.json while still holding locks
-            self._write_status()
+            if not env.slave:
+                self._write_status()
 
             # Release IPC locks
             for lock in self.locks:
@@ -486,7 +490,7 @@ class TaskRunner:
             # Note: dynamic dependency locks are released via context manager
             # in the run() method, not here
 
-            if self.started:
+            if self.started and not env.slave:
                 # Report final state: "error" if .failed exists, "done" otherwise
                 final_state = "error" if self.failedpath.exists() else "done"
                 report_eoj(final_state)
@@ -502,10 +506,13 @@ class TaskRunner:
             message: Optional message with details
         """
         logger.info("Error handler: finished with code %d, reason=%s", code, reason)
-        failure_info = {"code": code, "reason": reason}
-        if message:
-            failure_info["message"] = message
-        self.failedpath.write_text(json.dumps(failure_info))
+        env = taskglobals.Env.instance()
+        if not env.slave:
+            failure_info = {"code": code, "reason": reason}
+            if message:
+                failure_info["message"] = message
+            self.failedpath.write_text(json.dumps(failure_info))
+
         self.cleanup()
         logger.info("Exiting")
         delayed_shutdown(60, exit_code=code)
@@ -515,10 +522,12 @@ class TaskRunner:
         """Run framework cleanup in background thread."""
         try:
             logger.info("Background cleanup: reason=%s", reason)
-            failure_info = {"code": signal.SIGTERM, "reason": reason}
-            if message:
-                failure_info["message"] = message
-            self.failedpath.write_text(json.dumps(failure_info))
+            env = taskglobals.Env.instance()
+            if not env.slave:
+                failure_info = {"code": signal.SIGTERM, "reason": reason}
+                if message:
+                    failure_info["message"] = message
+                self.failedpath.write_text(json.dumps(failure_info))
             self.cleanup()
             logger.info("Background cleanup finished")
         except Exception:
@@ -579,15 +588,31 @@ class TaskRunner:
             os.getpid()
             logger.info("Working in directory %s", workdir)
 
-            for lockfile in self.lockfiles:
-                fullpath = str(Path(lockfile).resolve())
-                logger.info("Locking %s", fullpath)
-                lock = create_file_lock(fullpath)
-                # MAYBE: should have a clever way to lock
-                # Problem = slurm would have a job doing nothing...
-                # Fix = maybe with two files
-                lock.acquire()
-                self.locks.append(lock)
+            # Identify non-zero ranks in distributed settings (SLURM, DDP, etc.)
+            # A process is a slave if any distributed rank environment variable is > 0
+            def get_rank(name):
+                val = os.environ.get(name)
+                logger.debug("Rank detection: %s=%s", name, val)
+                return int(val) if val is not None else 0
+
+            rank = max(get_rank("SLURM_PROCID"), get_rank("RANK"), get_rank("LOCAL_RANK"))
+            env = taskglobals.Env.instance()
+            if rank > 0:
+                logger.info("Non-zero rank (%d): marking as slave process", rank)
+                env.slave = True
+            else:
+                logger.debug("Rank 0 or no distributed environment detected (rank=%d)", rank)
+
+            if not env.slave:
+                for lockfile in self.lockfiles:
+                    fullpath = str(Path(lockfile).resolve())
+                    logger.info("Locking %s", fullpath)
+                    lock = create_file_lock(fullpath)
+                    # MAYBE: should have a clever way to lock
+                    # Problem = slurm would have a job doing nothing...
+                    # Fix = maybe with two files
+                    lock.acquire()
+                    self.locks.append(lock)
 
             # Load and setup dynamic dependency locks from locks.json
             locks_path = workdir / "locks.json"
@@ -610,11 +635,12 @@ class TaskRunner:
                 rmfile(self.failedpath)
                 self.started = True
 
-                # Update status.json to "running" before writing events
-                self._update_status_running()
+                if not env.slave:
+                    # Update status.json to "running" before writing events
+                    self._update_status_running()
 
-                # Notify that the job has started (writes event file)
-                start_of_job()
+                    # Notify that the job has started (writes event file)
+                    start_of_job()
 
                 # Initialize carbon tracking
                 self._job_start_time = datetime.now()
@@ -633,7 +659,7 @@ class TaskRunner:
                     except Exception as e:
                         logger.debug("Failed to load params for carbon tracking: %s", e)
 
-                if workspace_path:
+                if workspace_path and not env.slave:
                     # Load previous carbon metrics from status.json for accumulation
                     try:
                         init_mock = self._load_mock_job()
@@ -658,6 +684,7 @@ class TaskRunner:
                     )
 
                 # Acquire dynamic dependency locks while running the task
+                # Non-slave processes acquire actual locks, slaves get dummy locks
                 with self.dynamic_locks.dependency_locks():
                     run(workdir / "params.json")
 
@@ -690,9 +717,11 @@ class TaskRunner:
             self.handle_error(1, None)
 
         except SystemExit as e:
+            env = taskglobals.Env.instance()
             if e.code == 0:
-                # Normal exit, just create the ".done" file
-                self.donepath.touch()
+                if not env.slave:
+                    # Normal exit, just create the ".done" file
+                    self.donepath.touch()
 
                 # ... and finish the exit process
                 raise
