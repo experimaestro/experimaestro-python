@@ -1,9 +1,8 @@
 import os
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from experimaestro.run import TaskRunner
 import experimaestro.taskglobals as taskglobals
-from pathlib import Path
 
 @pytest.fixture
 def env():
@@ -37,18 +36,18 @@ def test_task_runner_rank_detection(
     script_path = tmp_path / "test.py"
     script_path.touch()
     lockfiles = [str(tmp_path / "test.lock")]
-    
+
     # Case 1: Main process (rank 0)
     with patch.dict(os.environ, {"SLURM_PROCID": "0", "LOCAL_RANK": "0"}):
         runner = TaskRunner(str(script_path), lockfiles)
         # We need to stop run() from exiting or failing
-        # We'll mock its internal exit/cleanup calls if necessary, 
+        # We'll mock its internal exit/cleanup calls if necessary,
         # or just catch the SystemExit
         try:
             runner.run()
         except SystemExit:
             pass
-            
+
         assert env.slave is False
         mock_create_file_lock.assert_called()
         mock_start_of_job.assert_called()
@@ -67,7 +66,7 @@ def test_task_runner_rank_detection(
             runner.run()
         except SystemExit:
             pass
-            
+
         assert env.slave is True
         mock_create_file_lock.assert_not_called()
         mock_start_of_job.assert_not_called()
@@ -81,6 +80,6 @@ def test_task_runner_rank_detection(
             runner.run()
         except SystemExit:
             pass
-            
+
         assert env.slave is True
         mock_create_file_lock.assert_not_called()
