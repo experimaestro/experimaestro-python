@@ -2025,6 +2025,10 @@ class MockService(BaseService):
             "description": self._description,
             "class": self._service_class,
             "state_dict": self._state_dict_data,
+            "experiment_id": self.experiment_id,
+            "run_id": self.run_id,
+            "state": self.state.name if hasattr(self.state, "name") else str(self.state),
+            "url": self.url,
         }
 
     @property
@@ -2040,7 +2044,7 @@ class MockService(BaseService):
             d: Dictionary from full_state_dict()
 
         Returns:
-            MockService instance (state is always MOCK, not from dict)
+            MockService instance
         """
         return cls(
             service_id=d["service_id"],
@@ -2050,6 +2054,7 @@ class MockService(BaseService):
             experiment_id=d.get("experiment_id"),
             run_id=d.get("run_id"),
             url=d.get("url"),
+            state=d.get("state"),
         )
 
     def to_service(self) -> "BaseService":

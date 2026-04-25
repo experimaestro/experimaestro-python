@@ -273,6 +273,10 @@ class TestServiceSerialization:
         # Preserves original service class, not MockService's class name
         assert result["class"] == "mymodule.MyService"
         assert result["state_dict"] == {"port": 8080}
+        assert result["experiment_id"] == "exp1"
+        assert result["run_id"] == "run1"
+        assert result["url"] == "http://localhost:8080"
+        assert result["state"] == "STOPPED"
 
     def test_serialize_mock_service_no_class(self):
         """Test serializing a MockService with service_class=None"""

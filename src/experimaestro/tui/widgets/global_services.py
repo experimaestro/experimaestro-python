@@ -68,6 +68,12 @@ class GlobalServiceSyncs(Vertical):
 
         try:
             all_services = self.state_provider.get_services()
+            for s in all_services:
+                self.log.info(
+                    f"DEBUG: raw_service id={getattr(s, 'id', 'N/A')} "
+                    f"exp_id={getattr(s, 'experiment_id', 'N/A')} "
+                    f"run_id={getattr(s, 'run_id', 'N/A')}"
+                )
             running_services = [
                 s
                 for s in all_services
@@ -157,6 +163,10 @@ class GlobalServiceSyncs(Vertical):
             state_icon = state_icons.get(state_name, "?")
 
             service_key = f"{exp_id}:{run_id}:{service_id}"
+            self.log.info(
+                f"DEBUG: service_key='{service_key}' (exp_id='{exp_id}', "
+                f"run_id='{run_id}', service_id='{service_id}')"
+            )
             table.add_row(
                 exp_display,
                 description or service_id,

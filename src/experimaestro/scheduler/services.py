@@ -132,6 +132,10 @@ class Service(BaseService):
             "description": self.description(),
             "class": f"{self.__class__.__module__}.{self.__class__.__name__}",
             "state_dict": self.serialize_state_dict(self.state_dict()),
+            "experiment_id": self.experiment_id,
+            "run_id": self.run_id,
+            "state": self.state.name if hasattr(self.state, "name") else str(self.state),
+            "url": getattr(self, "url", None),
         }
 
     @staticmethod
