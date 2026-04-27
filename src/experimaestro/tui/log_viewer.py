@@ -18,6 +18,17 @@ CHUNK_SIZE = 64 * 1024
 INITIAL_TAIL_SIZE = 256 * 1024  # 256KB
 
 
+def _apply_carriage_returns(line: str) -> str:
+    """Collapse a line as a terminal would: keep only content after the last \\r.
+
+    tqdm-like progress bars rewrite the same line via \\r; treat that as
+    overwrite rather than as a new line.
+    """
+    if "\r" in line:
+        return line.rsplit("\r", 1)[-1]
+    return line
+
+
 class LogFile:
     """Efficient log file reader that tracks position and watches for changes"""
 
@@ -25,6 +36,9 @@ class LogFile:
         self.path = Path(path)
         self.position = 0
         self.size = 0
+        # Buffer for the last incomplete line (no trailing \n yet).
+        # Stored already collapsed for any \r updates seen so far.
+        self._partial_line = ""
         self._update_size()
 
     def _update_size(self) -> None:
@@ -34,17 +48,35 @@ class LogFile:
         except OSError:
             self.size = 0
 
-    def read_tail(self, max_bytes: int = INITIAL_TAIL_SIZE) -> str:
-        """Read the last N bytes of the file"""
+    def _process_content(self, content: str) -> tuple[list[str], str]:
+        """Split a chunk into completed lines plus a trailing partial line.
+
+        Carriage returns are handled like a terminal would: within each
+        \\n-terminated line, only the substring after the last \\r is kept.
+        """
+        combined = self._partial_line + content
+        parts = combined.split("\n")
+        # parts[-1] is the partial trailing line (empty if combined ended in \n)
+        complete = [_apply_carriage_returns(line) for line in parts[:-1]]
+        partial = _apply_carriage_returns(parts[-1])
+        self._partial_line = partial
+        return complete, partial
+
+    def read_tail(self, max_bytes: int = INITIAL_TAIL_SIZE) -> tuple[list[str], str]:
+        """Read the last N bytes of the file.
+
+        Returns ``(complete_lines, partial_line)``. ``partial_line`` is the
+        in-progress last line (no trailing \\n yet) and may be empty.
+        """
         if not self.path.exists():
-            return ""
+            return [], ""
 
         self._update_size()
         if self.size == 0:
-            return ""
+            return [], ""
 
         try:
-            with open(self.path, "r", errors="replace") as f:
+            with open(self.path, "r", errors="replace", newline="") as f:
                 # Start from max_bytes before end, or beginning
                 start_pos = max(0, self.size - max_bytes)
                 f.seek(start_pos)
@@ -55,32 +87,40 @@ class LogFile:
 
                 content = f.read()
                 self.position = f.tell()
-                return content
+                # Reset partial buffer since we're reading from a known boundary
+                self._partial_line = ""
+                return self._process_content(content)
         except Exception:
-            return ""
+            return [], ""
 
-    def read_new_content(self) -> str:
-        """Read any new content since last read"""
+    def read_new_content(self) -> tuple[list[str], str]:
+        """Read any new content since last read.
+
+        Returns ``(new_complete_lines, partial_line)``. ``partial_line`` is the
+        current in-progress last line (which may have changed even when no new
+        complete lines were produced).
+        """
         if not self.path.exists():
-            return ""
+            return [], self._partial_line
 
         self._update_size()
 
         # File was truncated or rotated
         if self.size < self.position:
             self.position = 0
+            self._partial_line = ""
 
         if self.position >= self.size:
-            return ""
+            return [], self._partial_line
 
         try:
-            with open(self.path, "r", errors="replace") as f:
+            with open(self.path, "r", errors="replace", newline="") as f:
                 f.seek(self.position)
                 content = f.read()
                 self.position = f.tell()
-                return content
+                return self._process_content(content)
         except Exception:
-            return ""
+            return [], self._partial_line
 
     def has_new_content(self) -> bool:
         """Check if there's new content without reading it"""
@@ -96,29 +136,39 @@ class LogWidget(Vertical):
         self.file_path = file_path
         self.log_file = LogFile(file_path)
         self.following = True
+        self._last_partial = ""
 
     def compose(self) -> ComposeResult:
         yield Static(f"📄 {self.file_path}", classes="log-file-path")
         yield RichLog(id=f"{self.id}-content", wrap=True, highlight=True, markup=False)
+        yield Static("", id=f"{self.id}-partial", classes="log-partial")
+
+    def _apply_update(self, complete_lines: list[str], partial: str) -> None:
+        if complete_lines:
+            log_widget = self.query_one(f"#{self.id}-content", RichLog)
+            for line in complete_lines:
+                log_widget.write(line)
+        if partial != self._last_partial:
+            partial_widget = self.query_one(f"#{self.id}-partial", Static)
+            partial_widget.update(partial)
+            partial_widget.display = bool(partial)
+            self._last_partial = partial
 
     def on_mount(self) -> None:
         """Load initial content from tail of file"""
-        content = self.log_file.read_tail()
-        if content:
-            log_widget = self.query_one(f"#{self.id}-content", RichLog)
-            for line in content.splitlines():
-                log_widget.write(line)
+        complete_lines, partial = self.log_file.read_tail()
+        # Hide partial widget when there is nothing in progress
+        partial_widget = self.query_one(f"#{self.id}-partial", Static)
+        partial_widget.display = bool(partial)
+        self._apply_update(complete_lines, partial)
 
     def refresh_content(self) -> None:
         """Check for and append new content"""
         if not self.following:
             return
 
-        new_content = self.log_file.read_new_content()
-        if new_content:
-            log_widget = self.query_one(f"#{self.id}-content", RichLog)
-            for line in new_content.splitlines():
-                log_widget.write(line)
+        complete_lines, partial = self.log_file.read_new_content()
+        self._apply_update(complete_lines, partial)
 
     def scroll_to_end(self) -> None:
         """Scroll to end of log"""
@@ -174,6 +224,14 @@ class LogViewerScreen(Screen, inherit_bindings=False):
     LogWidget RichLog {
         height: 1fr;
         border: solid $primary;
+    }
+
+    .log-partial {
+        background: $boost;
+        padding: 0 1;
+        height: auto;
+        color: $text;
+        text-style: italic;
     }
     """
 
