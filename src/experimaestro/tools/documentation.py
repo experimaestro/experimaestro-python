@@ -14,12 +14,18 @@ import sphobjinv
 from docutils.nodes import document
 from docutils.parsers.rst import Directive, Parser, directives
 from docutils.utils import new_document
+from sphinx.directives.other import TocTree
+from sphinx.domains.python import PyCurrentModule
+from termcolor import cprint
+
+from experimaestro import Config
+from experimaestro.sphinx import PyObject
 
 
-# ``docutils.frontend.get_default_settings`` is the modern API (docutils >=
-# 0.19); older versions exposed the same through ``OptionParser``. Support
-# both so users aren't forced to a docutils floor just to import this
-# module.
+# ``docutils.frontend.get_default_settings`` is the modern API (docutils
+# >= 0.19); older versions exposed the same through ``OptionParser``.
+# Support both so users aren't forced to a docutils floor just to import
+# this module.
 try:
     from docutils.frontend import get_default_settings as _get_default_settings
 except ImportError:  # pragma: no cover - exercised only on old docutils
@@ -27,14 +33,6 @@ except ImportError:  # pragma: no cover - exercised only on old docutils
 
     def _get_default_settings(*components):
         return _OptionParser(components=components).get_default_values()
-
-
-from sphinx.directives.other import TocTree
-from sphinx.domains.python import PyCurrentModule
-from termcolor import cprint
-
-from experimaestro import Config
-from experimaestro.sphinx import PyObject
 
 
 def documented_from_objects(objects_inv: Path) -> Set[str]:
