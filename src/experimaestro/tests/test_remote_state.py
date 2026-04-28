@@ -780,6 +780,50 @@ class TestServerRequestHandling:
         assert result["success"] is False
         assert "error" in result
 
+    def test_handle_get_process_info_returns_metrics(
+        self, server_with_mock, mock_state_provider
+    ):
+        """get_process_info response includes cpu/memory/threads metrics"""
+        from experimaestro.scheduler.state_provider import ProcessInfo
+
+        mock_job = MockJob(
+            identifier="job1",
+            task_id="task.Test",
+            path=Path("/tmp/jobs/job1"),
+            state="running",
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+        mock_state_provider.get_job.return_value = mock_job
+        mock_state_provider.get_process_info.return_value = ProcessInfo(
+            pid=42,
+            type="local",
+            running=True,
+            cpu_percent=12.5,
+            memory_mb=128.0,
+            num_threads=4,
+        )
+
+        result = server_with_mock._handle_get_process_info(
+            {"task_id": "task.Test", "job_id": "job1"}
+        )
+
+        assert result == {
+            "pid": 42,
+            "type": "local",
+            "running": True,
+            "cpu_percent": 12.5,
+            "memory_mb": 128.0,
+            "num_threads": 4,
+        }
+
+    def test_handle_get_process_info_missing_task_id(self, server_with_mock):
+        """get_process_info raises TypeError when task_id is missing"""
+        with pytest.raises(TypeError, match="task_id and job_id are required"):
+            server_with_mock._handle_get_process_info({"job_id": "job1"})
+
     def test_handle_get_sync_info(self, server_with_mock):
         """Test handling get_sync_info request"""
         result = server_with_mock._handle_get_sync_info({})
@@ -1016,6 +1060,114 @@ class TestClientDataConversion:
 
         # Path outside workspace should be kept as-is
         assert job.path == Path("/other/path/job123")
+
+
+class TestClientRPCParams:
+    """Verify the client serializes the parameters expected by the server"""
+
+    @pytest.fixture
+    def client(self, tmp_path):
+        from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+        client = SSHStateProviderClient(
+            host="testhost",
+            remote_workspace="/remote/workspace",
+        )
+        client._temp_dir = str(tmp_path)
+        client.local_cache_dir = tmp_path
+        client.workspace_path = tmp_path
+        return client
+
+    @pytest.fixture
+    def running_job(self):
+        job = MockJob(
+            identifier="job1",
+            task_id="task.Test",
+            path=Path("/tmp/jobs/job1"),
+            state="running",
+            starttime=None,
+            endtime=None,
+            progress=[],
+            updated_at="",
+        )
+        return job
+
+    def test_kill_job_includes_task_id(self, client, running_job):
+        """Client must send task_id alongside job_id (issue #219)"""
+        captured = {}
+
+        def fake_call_sync(method, params, timeout=None):
+            captured["method"] = method
+            captured["params"] = params
+            return {"success": True}
+
+        client._call_sync = fake_call_sync
+
+        assert client.kill_job(running_job, perform=True) is True
+        assert captured["method"] == RPCMethod.KILL_JOB
+        assert captured["params"]["task_id"] == "task.Test"
+        assert captured["params"]["job_id"] == "job1"
+
+    def test_clean_job_includes_task_id(self, client, running_job):
+        """Client must send task_id alongside job_id for clean_job (issue #219)"""
+        captured = {}
+
+        def fake_call_sync(method, params, timeout=None):
+            captured["method"] = method
+            captured["params"] = params
+            return {"success": True}
+
+        client._call_sync = fake_call_sync
+
+        assert client.clean_job(running_job, perform=True) is True
+        assert captured["method"] == RPCMethod.CLEAN_JOB
+        assert captured["params"]["task_id"] == "task.Test"
+        assert captured["params"]["job_id"] == "job1"
+
+    def test_get_process_info_includes_task_id_and_metrics(self, client, running_job):
+        """get_process_info sends task_id and surfaces metric fields (issue #219)"""
+        captured = {}
+
+        def fake_call_sync(method, params, timeout=None):
+            captured["method"] = method
+            captured["params"] = params
+            return {
+                "pid": 42,
+                "type": "local",
+                "running": True,
+                "cpu_percent": 12.5,
+                "memory_mb": 128.0,
+                "num_threads": 4,
+            }
+
+        client._call_sync = fake_call_sync
+
+        pinfo = client.get_process_info(running_job)
+        assert captured["method"] == RPCMethod.GET_PROCESS_INFO
+        assert captured["params"]["task_id"] == "task.Test"
+        assert captured["params"]["job_id"] == "job1"
+        assert pinfo is not None
+        assert pinfo.pid == 42
+        assert pinfo.type == "local"
+        assert pinfo.running is True
+        assert pinfo.cpu_percent == 12.5
+        assert pinfo.memory_mb == 128.0
+        assert pinfo.num_threads == 4
+
+    def test_get_process_info_old_server_response(self, client, running_job):
+        """An old server omitting metric fields still yields a valid ProcessInfo"""
+
+        def fake_call_sync(method, params, timeout=None):
+            return {"pid": 42, "type": "slurm", "running": False}
+
+        client._call_sync = fake_call_sync
+
+        pinfo = client.get_process_info(running_job)
+        assert pinfo is not None
+        assert pinfo.pid == 42
+        assert pinfo.cpu_percent is None
+        assert pinfo.memory_mb is None
+        assert pinfo.num_threads is None
 
 
 # =============================================================================

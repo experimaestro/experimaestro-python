@@ -1137,6 +1137,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             return job.state.running()
 
         params = {
+            "task_id": job.task_id,
             "job_id": job.identifier,
             "experiment_id": getattr(job, "experiment_id", ""),
             "run_id": getattr(job, "run_id", ""),
@@ -1154,6 +1155,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             return job.state.finished()
 
         params = {
+            "task_id": job.task_id,
             "job_id": job.identifier,
             "experiment_id": getattr(job, "experiment_id", ""),
             "run_id": getattr(job, "run_id", ""),
@@ -1199,6 +1201,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         from experimaestro.scheduler.state_provider import ProcessInfo
 
         params = {
+            "task_id": job.task_id,
             "job_id": job.identifier,
             "experiment_id": getattr(job, "experiment_id", ""),
             "run_id": getattr(job, "run_id", ""),
@@ -1217,6 +1220,9 @@ class SSHStateProviderClient(OfflineStateProvider):
             pid=result["pid"],
             type=result["type"],
             running=result.get("running", False),
+            cpu_percent=result.get("cpu_percent"),
+            memory_mb=result.get("memory_mb"),
+            num_threads=result.get("num_threads"),
         )
 
     def execute_warning_action(

@@ -466,6 +466,9 @@ class SSHStateProviderServer:
             "pid": pinfo.pid,
             "type": pinfo.type,
             "running": pinfo.running,
+            "cpu_percent": pinfo.cpu_percent,
+            "memory_mb": pinfo.memory_mb,
+            "num_threads": pinfo.num_threads,
         }
 
     def _handle_execute_warning_action(self, params: Dict) -> None:
