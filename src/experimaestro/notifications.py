@@ -191,7 +191,8 @@ class xpm_tqdm(std_tqdm):
         _file = file or sys.stderr
         self.is_tty = hasattr(_file, "isatty") or _file.isatty()
 
-        super().__init__(iterable, disable=False, file=file, *args, **kwargs)
+        kwargs.setdefault("disable", False)
+        super().__init__(iterable, file=file, *args, **kwargs)
         progress(0.0, level=self.pos, desc=kwargs.get("desc", None), console=False)
 
     def update(self, n=1):
