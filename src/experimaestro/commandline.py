@@ -2,6 +2,8 @@
 
 import json
 import io
+import os
+import sys
 from pathlib import Path
 from typing import List, Optional, Union, Callable, Dict
 import itertools
@@ -280,7 +282,21 @@ class CommandLineJob(Job):
         logger.debug("Starting job %s", self.jobpath)
         processbuilder = self.launcher.processbuilder()
         processbuilder.environ = self.environ
-        processbuilder.command.append(self.launcher.connector.resolve(scriptPath))
+        processbuilder.workingDirectory = self.workspace.path
+
+        script_command = self.launcher.connector.resolve(scriptPath)
+
+        # Windows does not honor shebang lines for local execution, so the
+        # Python interpreter has to be supplied explicitly. Remote launchers
+        # (SSH, SLURM) execute the script on the target system, where the
+        # local OS does not matter.
+        if os.name == "nt":
+            from experimaestro.connectors.local import LocalConnector
+
+            if isinstance(self.launcher.connector, LocalConnector):
+                processbuilder.command.append(sys.executable)
+
+        processbuilder.command.append(script_command)
         processbuilder.stderr = Redirect.file(self.stderr)
         processbuilder.stdout = Redirect.file(self.stdout)
         self._process = processbuilder.start(True)

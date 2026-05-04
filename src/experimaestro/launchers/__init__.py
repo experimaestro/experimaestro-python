@@ -1,4 +1,4 @@
-from pathlib import Path, PosixPath
+from pathlib import Path, PosixPath, WindowsPath
 import random
 from typing import Callable, Dict, List, Optional
 from experimaestro.commandline import AbstractCommand, Job, CommandLineJob
@@ -102,7 +102,7 @@ class Launcher(ABC):
     @staticmethod
     def get(path: Path):
         """Get a default launcher for a given path"""
-        if isinstance(path, PosixPath):
+        if isinstance(path, (PosixPath, WindowsPath)):
             from .direct import DirectLauncher
 
             return DirectLauncher(LocalConnector())

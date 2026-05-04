@@ -144,6 +144,17 @@ class LocalProcessBuilder(ProcessBuilder):
         stdout = getstream(self.stdout, True)
         stderr = getstream(self.stderr, True)
 
+        # On Windows, the child Python process needs system variables like
+        # SystemRoot to load asyncio's _overlapped module, so merge with
+        # os.environ. On POSIX, preserve the previous behavior of passing the
+        # job-defined env as-is (or inheriting if empty).
+        if os.name == "nt":
+            env = {**os.environ, **self.environ} if self.environ else None
+        else:
+            env = self.environ or None
+
+        cwd = str(self.workingDirectory) if self.workingDirectory else None
+
         logger.debug("Popen process")
         if self.detach:
             p = subprocess.Popen(
@@ -151,9 +162,9 @@ class LocalProcessBuilder(ProcessBuilder):
                 stdin=stdin,
                 stderr=stderr,
                 stdout=stdout,
-                env=self.environ,
+                env=env,
                 close_fds=True,
-                cwd="/",
+                cwd=cwd,
             )
         else:
             p = subprocess.Popen(
@@ -161,7 +172,8 @@ class LocalProcessBuilder(ProcessBuilder):
                 stdin=stdin,
                 stderr=stderr,
                 stdout=stdout,
-                env=self.environ,
+                env=env,
+                cwd=cwd,
             )
 
         process = LocalProcess(p)
@@ -277,6 +289,11 @@ class LocalConnector(Connector):
 
     def setExecutable(self, path: Path, flag: bool):
         import stat
+
+        if os.name == "nt":
+            # Windows has no execute bit; scripts are run via an explicit
+            # interpreter (see CommandLineJob.aio_run).
+            return
 
         current_mode = path.stat().st_mode
 

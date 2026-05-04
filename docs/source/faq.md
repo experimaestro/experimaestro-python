@@ -1,5 +1,20 @@
 # Frequently Asked Questions
 
+## Platform support
+
+### Running on Windows
+
+Experimaestro creates symbolic links inside the workspace (e.g. to point at the
+latest run of an experiment, to track partial dependencies, and for the
+``current`` symlink). On Windows, ``os.symlink`` requires either administrator
+privileges or **Developer Mode** to be enabled (Settings → Update & Security →
+For developers). If neither is available, the scheduler will fail with an
+``OSError`` when it tries to create those links.
+
+Enable Developer Mode (recommended) or run the experiment from an elevated
+shell. SSH support is currently not functional on any platform and is unrelated
+to this requirement.
+
 ## Controlling tasks
 
 ### Wait a for a task to complete

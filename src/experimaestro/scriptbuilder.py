@@ -5,10 +5,9 @@ import os
 from experimaestro.utils import logger
 from .connectors import RedirectType, Redirect
 from .commandline import CommandLineJob, AbstractCommand, CommandContext
-from shlex import quote as shquote
 
 
-# TODO: should be reworked with the new way to build commands
+# Note: should be reworked with the new way to build commands
 class ShCommandContext(CommandContext):
     def writeRedirection(self, out, redirect, stream):
         if redirect.type == RedirectType.INHERIT:
@@ -81,10 +80,14 @@ class PythonScriptBuilder:
             ws, job.launcher.connector, directory, job.name, job.config
         )
 
-        def relpath(path: Path):
-            return shquote(context.relpath(path))
+        def py_literal(value):
+            """Format a value as a Python string literal (cross-platform safe)."""
+            return repr(str(value))
 
-        # FIXME: big hack to generate the params.json file
+        def py_relpath(path: Path):
+            return py_literal(context.relpath(path))
+
+        # HACK: big hack to generate the params.json file
         # which is all what we need for now, but this might not be true in the future
         with open(os.devnull, "w") as fpnull:
             self.command.output(context, fpnull)
@@ -111,20 +114,22 @@ class PythonScriptBuilder:
 
             out.write("    lockfiles = [\n")
             for path in self.lockfiles:
-                out.write(f"       '''{relpath(path)}''',\n")
+                out.write(f"       {py_relpath(path)},\n")
             out.write("    ]\n")
 
             for name, value in job.environ.items():
                 if name == "PYTHONPATH":
                     # Handles properly python path
-                    for path in value.split(":"):
-                        out.write(f"""    sys.path.insert(0, "{shquote(path)}")\n""")
+                    for path in value.split(os.pathsep):
+                        out.write(f"    sys.path.insert(0, {py_literal(path)})\n")
                 else:
-                    out.write(f"""    os.environ["{name}"] = "{shquote(value)}"\n""")
+                    out.write(
+                        f"    os.environ[{py_literal(name)}] = {py_literal(value)}\n"
+                    )
             out.write("\n")
 
             for path in job.python_path:
-                out.write(f"""    sys.path.insert(0, "{shquote(str(path))}")\n""")
+                out.write(f"    sys.path.insert(0, {py_literal(path)})\n")
 
             # Write launcher info code (for remaining_time support)
             launcher_info_code = job.launcher.launcher_info_code()
@@ -134,8 +139,8 @@ class PythonScriptBuilder:
                 out.write("\n")
 
             out.write(
-                f"""    TaskRunner("{shquote(connector.resolve(scriptpath))}","""
-                """ lockfiles).run()\n"""
+                f"    TaskRunner({py_literal(connector.resolve(scriptpath))},"
+                " lockfiles).run()\n"
             )
 
         # Set the file as executable
