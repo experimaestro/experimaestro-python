@@ -30,7 +30,7 @@
     "json-schema": ">=0.4.0",
     "mini-css-extract-plugin": "^2.10.0",
     "nollup": "^0.21.0",
-    "postcss": "^8.5.3",
+    "postcss": "^8.5.13",
     "postcss-loader": "^8.2.1",
     "postcss-prefix-selector": "^2.1.1",
     "postcss-url": "^10.1.3",
