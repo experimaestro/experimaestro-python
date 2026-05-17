@@ -43,6 +43,8 @@ def get_status_icon(status: str, failure_reason=None):
                 return "🚫"  # Rejected (time limit)
             elif failure_reason == JobFailureStatus.REJECTED_OTHER:
                 return "🚫"  # Rejected (other reason)
+            elif failure_reason == JobFailureStatus.DELETED:
+                return "🗑"  # Job data deleted by user
             # FAILED or unknown - use default error icon
         return "❌"
     elif status == "running":

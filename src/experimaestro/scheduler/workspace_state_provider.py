@@ -1850,13 +1850,27 @@ class WorkspaceStateProvider(OfflineStateProvider):
             with self._job_cache_lock:
                 self._job_cache.pop(job.cache_key, None)
 
-            # Emit state change event (unscheduled = job removed)
+            # Mark the job as deleted in any cached experiments that
+            # reference it, so the UI reflects the deletion instead of the
+            # stale finished/error state. Collect affected runs to also
+            # persist the change to status.json on disk.
+            affected_runs: List[tuple[str, str, MockExperiment]] = []
+            with self._experiment_cache_lock:
+                for (exp_id, run_id), exp in self._experiment_cache.items():
+                    if exp.mark_job_deleted(job.identifier):
+                        affected_runs.append((exp_id, run_id, exp))
+
+            for exp_id, run_id, exp in affected_runs:
+                self._persist_job_deletion(exp_id, run_id, exp, job.identifier)
+
+            # Emit state change event so listeners refresh their view
             from experimaestro.scheduler.state_status import JobStateChangedEvent
 
             self._notify_state_listeners(
                 JobStateChangedEvent(
                     job_id=job.identifier,
-                    state="unscheduled",
+                    state="error",
+                    failure_reason="DELETED",
                 )
             )
 
@@ -1864,6 +1878,49 @@ class WorkspaceStateProvider(OfflineStateProvider):
         except Exception as e:
             logger.warning("Failed to clean job %s: %s", job.identifier, e)
             return False
+
+    def _persist_job_deletion(
+        self,
+        experiment_id: str,
+        run_id: str,
+        exp: MockExperiment,
+        job_id: str,
+    ) -> None:
+        """Persist the deleted job state for a single experiment run.
+
+        Rewrites the status.json job_states map so the deletion survives a
+        restart. Preserves the existing events_count field if present so
+        pending-event handling is not disturbed.
+        """
+        run_dir = self.workspace_path / "experiments" / experiment_id / run_id
+        status_path = run_dir / "status.json"
+        if not status_path.exists():
+            return
+
+        try:
+            with status_path.open("r") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(
+                "Failed to read status.json for %s/%s: %s",
+                experiment_id,
+                run_id,
+                e,
+            )
+            return
+
+        existing["job_states"] = exp._serialize_job_states()
+        try:
+            with status_path.open("w") as f:
+                json.dump(existing, f, indent=2)
+        except OSError as e:
+            logger.warning(
+                "Failed to update status.json for %s/%s after deleting job %s: %s",
+                experiment_id,
+                run_id,
+                job_id,
+                e,
+            )
 
     # =========================================================================
     # Orphan job detection

@@ -794,6 +794,121 @@ class TestJobStateFromJobEvents:
 
 
 # =============================================================================
+# Tests: Job deletion (issue #210)
+# =============================================================================
+
+
+class TestCleanJob:
+    """Tests for clean_job() / delete_job_safely() updating the displayed state.
+
+    When a finished job is deleted from the monitor, the displayed state must
+    refresh from the stale finished/error state to a deleted marker so the
+    user can see the deletion (issue #210).
+    """
+
+    def _setup_workspace_with_done_job(self, tmp_path):
+        """Build a minimal workspace with one DONE job tracked in status.json."""
+        from experimaestro.scheduler.interfaces import JobState
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        experiment_id = "test-exp"
+        run_id = "20260118_100000"
+        task_id = "my.test.Task"
+        job_id = "abc123"
+
+        # Experiment dir + status.json (status.json explicitly tracks the
+        # job's scheduler state so we can verify mark_job_deleted overrides it)
+        exp_dir = workspace / "experiments" / experiment_id / run_id
+        exp_dir.mkdir(parents=True)
+        status = {
+            "version": 1,
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "hostname": "test-host",
+            "started_at": "2026-01-18T10:00:00",
+            "ended_at": "2026-01-18T11:00:00",
+            "status": "completed",
+            "job_states": {job_id: JobState.DONE.name},
+            "dependencies": {},
+            "services": {},
+        }
+        (exp_dir / "status.json").write_text(json.dumps(status))
+
+        # jobs.jsonl so the job shows up in get_jobs()
+        job_info = {
+            "job_id": job_id,
+            "task_id": task_id,
+            "tags": {},
+            "timestamp": 1768752000.0,
+        }
+        (exp_dir / "jobs.jsonl").write_text(json.dumps(job_info) + "\n")
+        (exp_dir.parent / "current").symlink_to(run_id)
+
+        # Job directory with .done marker
+        scriptname = task_id.rsplit(".", 1)[-1]
+        job_dir = workspace / "jobs" / task_id / job_id
+        job_dir.mkdir(parents=True)
+        (job_dir / f"{scriptname}.done").touch()
+
+        return workspace, experiment_id, task_id, job_id
+
+    def test_clean_job_marks_state_as_deleted(self, tmp_path):
+        """After clean_job, the job should show as error with DELETED reason."""
+        from experimaestro.scheduler.interfaces import JobFailureStatus
+
+        workspace, exp_id, task_id, job_id = self._setup_workspace_with_done_job(
+            tmp_path
+        )
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            # Sanity check: job is initially DONE
+            jobs = provider.get_jobs(experiment_id=exp_id)
+            assert len(jobs) == 1
+            assert jobs[0].state.name == "done"
+
+            # Delete the job
+            success, _ = provider.delete_job_safely(jobs[0], perform=True)
+            assert success
+
+            # Re-query: job should now be reported as error with DELETED reason
+            jobs = provider.get_jobs(experiment_id=exp_id)
+            assert len(jobs) == 1
+            state = jobs[0].state
+            assert state.is_error()
+            assert state.failure_reason == JobFailureStatus.DELETED
+        finally:
+            provider.close()
+
+    def test_clean_job_persists_deleted_state_to_status_json(self, tmp_path):
+        """The deleted marker should survive a fresh provider load."""
+        from experimaestro.scheduler.interfaces import JobFailureStatus
+
+        workspace, exp_id, task_id, job_id = self._setup_workspace_with_done_job(
+            tmp_path
+        )
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            jobs = provider.get_jobs(experiment_id=exp_id)
+            provider.delete_job_safely(jobs[0], perform=True)
+        finally:
+            provider.close()
+
+        # Reload from disk - the deleted state should still be there
+        WorkspaceStateProvider._instances.clear()
+        provider = WorkspaceStateProvider(workspace)
+        try:
+            jobs = provider.get_jobs(experiment_id=exp_id)
+            assert len(jobs) == 1
+            state = jobs[0].state
+            assert state.is_error()
+            assert state.failure_reason == JobFailureStatus.DELETED
+        finally:
+            provider.close()
+
+
+# =============================================================================
 # Tests: Tags and Dependencies
 # =============================================================================
 

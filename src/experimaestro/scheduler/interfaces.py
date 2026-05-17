@@ -401,6 +401,9 @@ class JobFailureStatus(enum.Enum):
     #: Job rejected for other reasons (e.g., invalid partition, resource constraints)
     REJECTED_OTHER = 6
 
+    #: Job data was deleted by the user
+    DELETED = 7
+
 
 class ExperimentStatus(enum.Enum):
     """Status of an experiment run"""
@@ -431,6 +434,7 @@ class JobStateError(JobState):
         "MEMORY": "💾",
         "REJECTED_TIMELIMIT": "🚫",
         "REJECTED_OTHER": "🚫",
+        "DELETED": "🗑",
     }
 
     def __init__(self, failure_reason: Optional[JobFailureStatus] = None):
@@ -1992,7 +1996,9 @@ class BaseService(ABC):
             "state_dict": self.state_dict(),
             "experiment_id": self.experiment_id,
             "run_id": self.run_id,
-            "state": self.state.name if hasattr(self.state, "name") else str(self.state),
+            "state": self.state.name
+            if hasattr(self.state, "name")
+            else str(self.state),
             "url": getattr(self, "url", None),
         }
 

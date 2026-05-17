@@ -133,6 +133,7 @@ UNSCHEDULED → WAITING → READY → SCHEDULED → RUNNING → DONE/ERROR
 - `FAILED`: Job execution failed
 - `MEMORY`: Out of memory
 - `TIMEOUT`: Walltime exceeded (allows retries for resumable tasks)
+- `DELETED`: Job data was deleted by the user from the monitor
 
 ## Job Submission Pipeline
 

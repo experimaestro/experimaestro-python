@@ -1489,6 +1489,32 @@ class MockExperiment(BaseExperiment):
         """
         return self._job_states.get(job_id)
 
+    def mark_job_deleted(self, job_id: str) -> bool:
+        """Mark a tracked job as deleted (its data has been removed).
+
+        Sets the job's tracked state to ``JobStateError(DELETED)`` and updates
+        the finished/failed counters so the experiment summary stays consistent.
+
+        Args:
+            job_id: The job identifier
+
+        Returns:
+            True if a tracked state existed and was updated, False otherwise.
+        """
+        if job_id not in self._job_states and job_id not in self._job_infos:
+            return False
+
+        previous_state = self._job_states.get(job_id)
+        new_state = JobStateError(JobFailureStatus.DELETED)
+        self._job_states[job_id] = new_state
+
+        if previous_state == JobState.DONE:
+            self._finished_jobs = max(0, self._finished_jobs - 1)
+            self._failed_jobs += 1
+        elif previous_state is None or not previous_state.is_error():
+            self._failed_jobs += 1
+        return True
+
     # state_dict() is inherited from BaseExperiment
 
     def _load_jobs_jsonl(self) -> None:
@@ -2027,7 +2053,9 @@ class MockService(BaseService):
             "state_dict": self._state_dict_data,
             "experiment_id": self.experiment_id,
             "run_id": self.run_id,
-            "state": self.state.name if hasattr(self.state, "name") else str(self.state),
+            "state": self.state.name
+            if hasattr(self.state, "name")
+            else str(self.state),
             "url": self.url,
         }
 
