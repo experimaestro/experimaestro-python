@@ -876,6 +876,10 @@ def _is_type_arg_compatible(actual, expected) -> bool:
     Handles Union types: actual is compatible with Union[X, Y, Z] if actual
     is a subtype of any member of the union.
     """
+    # typing.Any acts as a wildcard on either side (matches mypy/pyright)
+    if expected is typing.Any or actual is typing.Any:
+        return True
+
     # Both concrete types: use subclass check
     if isinstance(expected, type) and isinstance(actual, type):
         return issubclass(actual, expected)
