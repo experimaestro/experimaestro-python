@@ -2,9 +2,15 @@ from collections import ChainMap
 from enum import Enum
 from functools import cached_property
 import logging
+import warnings
 from pathlib import Path
-from typing import Optional
-from experimaestro.settings import WorkspaceSettings, Settings
+from typing import List, Optional
+from experimaestro.settings import (
+    FolderMode,
+    FolderSettings,
+    WorkspaceSettings,
+    Settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +43,9 @@ class Workspace:
     CURRENT = None
     settings: "Settings"
     workspace_settings: "WorkspaceSettings"
+
+    # One-time beta banner for the folders feature
+    _folders_beta_warned: bool = False
 
     def __init__(
         self,
@@ -106,13 +115,49 @@ class Workspace:
             Workspace.CURRENT = self.old_workspace
 
     @cached_property
-    def alt_workspaces(self):
-        for ws_id in self.workspace_settings.alt_workspaces:
-            yield self.settings.workspaces[ws_id]
+    def folders(self) -> List[FolderSettings]:
+        """Auxiliary folders attached to this workspace.
+
+        Includes both the new ``folders`` setting and the deprecated
+        ``alt_workspaces`` field (treated as ``mode=use``). **Beta**.
+        """
+        resolved: List[FolderSettings] = []
+
+        # Deprecated alt_workspaces -> FolderMode.USE
+        if self.workspace_settings.alt_workspaces:
+            warnings.warn(
+                "WorkspaceSettings.alt_workspaces is deprecated; use "
+                "WorkspaceSettings.folders with mode=use instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            ws_index = {ws.id: ws for ws in self.settings.workspaces}
+            for ref in self.workspace_settings.alt_workspaces:
+                # Accept either a workspace id or a raw path string
+                ws = ws_index.get(ref)
+                path = ws.path if ws is not None else Path(ref).expanduser()
+                resolved.append(FolderSettings(path=path, mode=FolderMode.USE))
+
+        for folder in self.workspace_settings.folders:
+            resolved.append(folder)
+
+        if resolved and not Workspace._folders_beta_warned:
+            Workspace._folders_beta_warned = True
+            logger.warning(
+                "WorkspaceSettings.folders is a BETA feature; the on-disk "
+                "layout and Python API may change in a future release."
+            )
+
+        return resolved
 
     @property
-    def alt_workdirs(self):
-        yield from map(lambda ws: ws.path, self.workspace_settings.alt_workspaces)
+    def alt_jobspaths(self):
+        """Yield ``<folder>/jobs`` for every attached folder.
+
+        Used for read-through job lookups across all modes.
+        """
+        for folder in self.folders:
+            yield folder.path / "jobs"
 
     @property
     def connector(self):

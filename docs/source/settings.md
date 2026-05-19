@@ -79,6 +79,112 @@ workspaces:
 
 If an experiment's ID matches multiple workspace triggers, the first matching workspace in the list wins.
 
+## Auxiliary Folders (Beta)
+
+```{warning}
+This feature is **beta**. The YAML schema and Python API may change
+based on user feedback. Track [issue #55](https://github.com/experimaestro/experimaestro-python/issues/55)
+for updates.
+```
+
+Each workspace can declare additional **folders** where successful
+jobs are archived, looked up read-only, or migrated. This is useful
+for time-limited fast partitions on a cluster, sharing results across
+workspaces, or rotating storage tiers.
+
+```yaml
+workspaces:
+  - id: nlp
+    path: ~/experiments/nlp
+    folders:
+      - path: /scratch/old-workspace/jobs   # alternative read-only location
+        mode: use
+      - path: /slow/backup/nlp
+        mode: backup
+      - path: /fast-read/nlp
+        mode: move
+```
+
+### Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `use` | Read-only attachment. Jobs found here are picked up by the scheduler if the primary workspace has no copy. Nothing is ever written or deleted. |
+| `backup` | After a job completes successfully, its directory is copied into the folder. The folder acts as a recovery source if the primary copy is deleted. |
+| `move` | After a job completes successfully, its directory is moved into the folder and replaced by a symlink in the primary workspace. Use case: fast-read SSD tier with archive on slow storage. |
+
+Copies and moves are **atomic** (staged in a sibling `.tmp.*`
+directory, then renamed) and run on a **background worker thread**, so
+the scheduler is never blocked on filesystem I/O.
+
+The on-disk layout mirrors the primary workspace
+(`<folder>/jobs/<task_id>/<hash>/`). Experimaestro-internal files
+(`*.lock`, `*.pid`, `.scheduler/`) are excluded from copies; the
+`.experimaestro/` directory (which holds `task-outputs.jsonl`) is
+preserved so dynamic-output callbacks can replay correctly.
+
+### Automatic recovery
+
+When the scheduler submits a job whose primary directory is missing
+but a copy exists in any attached folder, it is restored transparently
+before execution. This lets you delete the primary workspace contents
+and still benefit from previously computed results.
+
+### Orphan handling
+
+`experimaestro orphans` and the TUI orphans tab treat a job as
+**recoverable, not orphan**, when it appears in a `backup` or `move`
+folder. Use `experimaestro orphans --no-folders` to ignore folders and
+list everything missing from the primary workspace. Jobs in `use`
+folders are never considered orphan candidates.
+
+### Per-job opt-out
+
+Pass `backup=False` to `.submit()` to skip archival for a single job:
+
+```python
+task = MyTask.C(...).submit(backup=False)
+```
+
+### Manual recovery
+
+```bash
+experimaestro jobs recover mymodule.MyTask/abc123
+```
+
+Copies the named job from the first folder that has it back into the
+primary workspace.
+
+### Migration from `alt_workspaces`
+
+`WorkspaceSettings.alt_workspaces` is deprecated. Replace it with
+`folders` entries of `mode: use`:
+
+```yaml
+# Old (deprecated)
+workspaces:
+  - id: nlp
+    alt_workspaces: ["other-workspace-id"]
+
+# New
+workspaces:
+  - id: nlp
+    folders:
+      - path: /path/to/other/workspace
+        mode: use
+```
+
+### Caveats
+
+- Only `params.json` files written by experimaestro **v3+** (paths
+  encoded relative to the job or workspace) are guaranteed to survive
+  a copy or move. Older absolute-path encodings may need manual
+  rewriting.
+- A `move` folder must remain mounted for the primary workspace to
+  resolve job paths (they are reached through a symlink).
+- `use` folders should never be cleaned by `experimaestro orphans
+  --clean` against a different workspace.
+
 ## Remote Workspaces (SSH)
 
 Workspaces can be configured with SSH settings for remote monitoring. A workspace

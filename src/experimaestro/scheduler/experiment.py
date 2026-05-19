@@ -543,9 +543,12 @@ class experiment(BaseExperiment):
 
     @property
     def alt_jobspaths(self):
-        """Return potential other directories"""
-        for alt_workdir in self.workspace.alt_workdirs:
-            yield alt_workdir / "jobs"
+        """Return potential other ``jobs/`` directories to look in.
+
+        Currently this aggregates every folder attached to the workspace
+        (see :attr:`Workspace.folders`).
+        """
+        yield from self.workspace.alt_jobspaths
 
     @property
     def jobs_jsonl_path(self):
@@ -1063,6 +1066,16 @@ class experiment(BaseExperiment):
             # Wait for all pending notifications to be processed
             # before removing listeners
             self.scheduler.wait_for_notifications()
+
+            # Drain pending folder archives BEFORE transient cleanup
+            # so archives finish copying their source dirs before any
+            # cleanup can remove them.
+            try:
+                from experimaestro.scheduler.folders import wait_for_pending
+
+                wait_for_pending()
+            except Exception:
+                logger.exception("Folder archive drain failed")
         finally:
             if self._register_signals:
                 SIGNAL_HANDLER.remove(self)

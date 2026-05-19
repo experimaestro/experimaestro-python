@@ -1,4 +1,5 @@
 import sys
+from enum import Enum
 from omegaconf import OmegaConf, SCMode
 from dataclasses import field, dataclass
 from functools import lru_cache
@@ -6,6 +7,47 @@ from pathlib import Path
 from typing import Dict, Optional, List
 import logging
 import fnmatch
+
+
+class FolderMode(str, Enum):
+    """Mode for an auxiliary workspace folder.
+
+    See :class:`FolderSettings`. **Beta**: API may change.
+    """
+
+    USE = "use"
+    """Read-only: look up jobs that may already exist in this folder.
+    Never copy, move, or delete anything here."""
+
+    BACKUP = "backup"
+    """Copy successful jobs here after completion. Jobs remain in the
+    primary workspace; the folder is used as a recovery source."""
+
+    MOVE = "move"
+    """Move successful jobs here after completion, then leave a symlink
+    in the primary workspace. Use case: fast-read, slow-write tiers."""
+
+
+@dataclass
+class FolderSettings:
+    """Auxiliary workspace folder. **Beta**: API may change.
+
+    Allows attaching extra job-storage locations to a workspace, for
+    archival, read-through alternative workspaces, or migration.
+    """
+
+    path: Path
+    """Folder path (the jobs are stored under ``<path>/jobs/<task_id>/<hash>/``)"""
+
+    mode: FolderMode = FolderMode.USE
+    """How this folder is used. See :class:`FolderMode`."""
+
+    def __post_init__(self):
+        if isinstance(self.path, str):
+            self.path = Path(self.path)
+        self.path = self.path.expanduser()
+        if isinstance(self.mode, str):
+            self.mode = FolderMode(self.mode)
 
 
 @dataclass
@@ -127,7 +169,17 @@ class WorkspaceSettings:
     """Workspace specific environment variables"""
 
     alt_workspaces: List[str] = field(default_factory=list)
-    """Alternative workspaces to find jobs or experiments"""
+    """Alternative workspaces to find jobs or experiments.
+
+    .. deprecated::
+        Use :attr:`folders` with ``mode: use`` instead. This field is
+        kept for backwards-compatibility and silently merged into
+        :attr:`folders` at load time.
+    """
+
+    folders: List[FolderSettings] = field(default_factory=list)
+    """**Beta**: auxiliary folders for jobs (archival / read-through /
+    migration). See :class:`FolderSettings` and :class:`FolderMode`."""
 
     max_retries: int = 3
     """Maximum number of retries for resumable tasks that timeout (default: 3)"""

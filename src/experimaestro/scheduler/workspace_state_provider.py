@@ -1926,11 +1926,19 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Orphan job detection
     # =========================================================================
 
-    def get_orphan_jobs(self) -> List[MockJob]:
-        """Get orphan jobs (jobs not associated with any experiment run)
+    def get_orphan_jobs(self, *, include_folders: bool = True) -> List[MockJob]:
+        """Get orphan jobs (jobs not associated with any experiment run).
 
         Scans workspace/jobs/ for all job directories and compares against
         jobs referenced by experiments (both v1 and v2 layouts).
+
+        Args:
+            include_folders: When True (default), a job that has been
+                archived to a ``backup`` or ``move`` folder attached to
+                the workspace is NOT reported as orphan (it's reachable
+                via recovery). ``use`` folders are always excluded from
+                this check — they may legitimately hold jobs that don't
+                belong to this workspace.
 
         Returns:
             List of MockJob objects for jobs that exist on disk but are not
@@ -1946,6 +1954,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
             "Orphan detection: %d referenced job paths across all runs",
             len(referenced_jobs),
         )
+
+        archive_rels: set[tuple[str, str]] = set()
+        if include_folders:
+            archive_rels = self._collect_archived_job_rels()
 
         # Scan workspace/jobs/ for all job directories
         orphan_jobs = []
@@ -1970,10 +1982,16 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     continue
 
                 # Check if this job is referenced by any experiment
-                if job_path not in referenced_jobs:
-                    # This is an orphan job - create MockJob from filesystem state
-                    job = self._mock_job_from_disk(job_path, task_id, job_id)
-                    orphan_jobs.append(job)
+                if job_path in referenced_jobs:
+                    continue
+                # Or by an archive folder (backup/move) — those are
+                # recoverable, not orphan
+                if (task_id, job_id) in archive_rels:
+                    continue
+
+                # This is an orphan job - create MockJob from filesystem state
+                job = self._mock_job_from_disk(job_path, task_id, job_id)
+                orphan_jobs.append(job)
 
         logger.debug(
             "Orphan detection: %d jobs on disk, %d orphans found",
@@ -1982,6 +2000,43 @@ class WorkspaceStateProvider(OfflineStateProvider):
         )
 
         return orphan_jobs
+
+    def _collect_archived_job_rels(self) -> set[tuple[str, str]]:
+        """Return ``{(task_id, job_id)}`` covered by any backup/move folder.
+
+        ``use`` folders are excluded: those are read-only attachments
+        whose contents are not "this workspace's jobs".
+        """
+        from experimaestro.settings import FolderMode, get_settings
+
+        rels: set[tuple[str, str]] = set()
+        settings = get_settings()
+        # Find the workspace this provider serves
+        ws = next(
+            (
+                w
+                for w in settings.workspaces
+                if Path(w.path).expanduser().resolve() == self.workspace_path
+            ),
+            None,
+        )
+        if ws is None:
+            return rels
+
+        for folder in ws.folders:
+            if folder.mode == FolderMode.USE:
+                continue
+            jobs_root = Path(folder.path).expanduser() / "jobs"
+            if not jobs_root.is_dir():
+                continue
+            for task_dir in jobs_root.iterdir():
+                if not task_dir.is_dir():
+                    continue
+                for job_dir in task_dir.iterdir():
+                    if not job_dir.is_dir():
+                        continue
+                    rels.add((task_dir.name, job_dir.name))
+        return rels
 
     def get_stray_jobs(self) -> list[MockJob]:
         """Get stray jobs (running jobs not in the latest run of any experiment)

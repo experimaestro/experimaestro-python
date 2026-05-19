@@ -240,6 +240,7 @@ class CommandLineJob(Job):
         run_mode: RunMode = None,
         max_retries=None,
         transient=None,
+        backup=None,
     ):
         super().__init__(
             parameters,
@@ -248,6 +249,7 @@ class CommandLineJob(Job):
             run_mode=run_mode,
             max_retries=max_retries,
             transient=transient,
+            backup=backup,
         )
         self.commandline = commandline
 
@@ -329,6 +331,7 @@ class CommandLineTask:
         run_mode=None,
         max_retries=None,
         transient=None,
+        backup=None,
     ) -> Job:
         return CommandLineJob(
             self.commandline,
@@ -338,4 +341,5 @@ class CommandLineTask:
             run_mode=run_mode,
             max_retries=max_retries,
             transient=transient,
+            backup=backup,
         )

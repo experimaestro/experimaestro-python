@@ -772,6 +772,35 @@ class Scheduler(StateProvider, threading.Thread):
             )
         )
 
+    def _auto_recover_from_folders(self, job: Job) -> None:
+        """Pull a missing job directory back from a folder, if available.
+
+        Called from :meth:`aio_submit_inner` before reading state from
+        disk. If the primary job path is missing (or has no
+        ``.done``/``.failed`` marker) and any attached folder contains
+        a copy, restore it. **Beta**: behaviour may change.
+        """
+        if job.workspace is None:
+            return
+        folders = job.workspace.folders
+        if not folders:
+            return
+
+        # Skip if we already have a usable directory locally
+        if job.path.exists() and (job.donepath.exists() or job.failedpath.exists()):
+            return
+
+        from experimaestro.scheduler.folders import recover_from_folders
+
+        rel = Path(job.relpath)
+        try:
+            dest = recover_from_folders(rel, job.workspace.jobspath, folders)
+        except Exception:
+            logger.exception("Auto-recovery from folders failed for %s", job)
+            return
+        if dest is not None:
+            logger.info("Auto-recovered job %s from folder into %s", job, dest)
+
     def _cleanup_job_marker_files(self, job: Job) -> None:
         """Clean up old marker files (.done/.failed) from previous runs
 
@@ -1012,6 +1041,12 @@ class Scheduler(StateProvider, threading.Thread):
         Args:
             job: The job to submit
         """
+        # Try to recover the job directory from any attached folder
+        # (backup/move/use) before reading state from disk. If the job
+        # ran successfully in a prior experiment and was archived, this
+        # lets us reuse the result instead of re-running.
+        self._auto_recover_from_folders(job)
+
         # Load existing job status if available (from previous run)
         # set_state(loading=True) properly handles experiment statistics
         job.load_from_disk()
@@ -1139,6 +1174,24 @@ class Scheduler(StateProvider, threading.Thread):
 
             # Process task outputs (queues remaining events for processing)
             await job.aio_done_handler()
+
+            # Archive to attached folders (beta). Only on successful
+            # completion, and only if the per-job opt-out wasn't set.
+            # Skip transient jobs whose source dir will be deleted at
+            # experiment exit — archiving them would be wasted work
+            # (or worse, a race with the cleanup pass).
+            if (
+                job.scheduler_state == JobState.DONE
+                and job.backup
+                and job.workspace is not None
+                and not job.transient.should_remove
+            ):
+                from experimaestro.scheduler.folders import archive_job_async
+
+                try:
+                    archive_job_async(job, job.workspace.folders)
+                except Exception:
+                    logger.exception("Failed to schedule folder archive for %s", job)
 
         # Remove from waiting jobs
         self.waitingjobs.discard(job)

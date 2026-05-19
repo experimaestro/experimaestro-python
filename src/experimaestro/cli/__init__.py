@@ -190,9 +190,17 @@ def diff(path: Path):
 
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")
 @click.option("--size", is_flag=True, help="Show size of each folder")
+@click.option(
+    "--include-folders/--no-folders",
+    default=True,
+    help=(
+        "Treat jobs reachable through backup/move folders as non-orphan "
+        "(default: enabled). Disable to scan only the primary workspace."
+    ),
+)
 @click.argument("path", type=Path, callback=check_xp_path)
 @cli.command()
-def orphans(path: Path, clean: bool, size: bool):
+def orphans(path: Path, clean: bool, size: bool, include_folders: bool):
     """Check for tasks that are not part of an experimental plan
 
     Uses the same orphan detection as the TUI (WorkspaceStateProvider.get_orphan_jobs).
@@ -214,7 +222,7 @@ def orphans(path: Path, clean: bool, size: bool):
 
     # Use WorkspaceStateProvider.get_orphan_jobs() - same as TUI
     provider = WorkspaceStateProvider.get_instance(path)
-    orphan_jobs = provider.get_orphan_jobs()
+    orphan_jobs = provider.get_orphan_jobs(include_folders=include_folders)
 
     if not orphan_jobs:
         print("No orphan jobs found.")

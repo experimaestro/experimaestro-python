@@ -752,6 +752,7 @@ class ConfigInformation:
         init_tasks: List["LightweightTask"] = [],
         max_retries: Optional[int] = None,
         transient: "TransientMode" = None,
+        backup: Optional[bool] = None,
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
@@ -782,6 +783,7 @@ class ConfigInformation:
             run_mode=run_mode,
             max_retries=max_retries,
             transient=transient,
+            backup=backup,
         )
 
         # Validate the object

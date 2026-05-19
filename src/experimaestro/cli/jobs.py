@@ -290,6 +290,29 @@ def path(ctx, jobid: str):
     print(job_path)
 
 
+@click.argument("jobid", type=str)
+@jobs.command()
+@click.pass_context
+def recover(ctx, jobid: str):
+    """Recover a job from a configured backup folder (**Beta**).
+
+    JOBID format: task.name/hash. Copies the job back into the primary
+    workspace if it is missing locally but present in any folder
+    attached to the workspace (mode=backup / move / use).
+    """
+    from experimaestro.scheduler.folders import recover_from_folders
+
+    task_name, task_hash = jobid.split("/")
+    primary = ctx.obj.workspace.path / "jobs"
+    rel = Path(task_name) / task_hash
+
+    dest = recover_from_folders(rel, primary, ctx.obj.workspace.folders)
+    if dest is None:
+        cprint(f"No folder contained job {jobid}", "red")
+        return
+    cprint(f"Recovered {jobid} into {dest}", "green")
+
+
 @click.option(
     "--kill", is_flag=True, help="Kill running stray jobs (requires --perform)"
 )

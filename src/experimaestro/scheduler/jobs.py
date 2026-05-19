@@ -156,10 +156,17 @@ class Job(BaseJob, Resource):
         run_mode: RunMode = RunMode.NORMAL,
         max_retries: Optional[int] = None,
         transient: TransientMode = TransientMode.NONE,
+        backup: Optional[bool] = None,
     ):
         from experimaestro.scheduler.base import Scheduler
 
         super().__init__()
+
+        # Per-job backup override for the folders feature (beta).
+        # None  -> use workspace defaults (archive to every BACKUP/MOVE folder)
+        # True  -> force archival even if workspace has no folders configured
+        # False -> opt out of all folder archival for this job
+        self.backup: bool = True if backup is None else backup
 
         self.workspace = workspace or Workspace.CURRENT
         self.launcher = launcher or self.workspace.launcher if self.workspace else None
