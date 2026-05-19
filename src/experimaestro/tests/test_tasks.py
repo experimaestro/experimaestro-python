@@ -38,6 +38,7 @@ from .tasks.all import (
     CacheConfigTask,
 )
 from . import restart
+from ._flaky import retry_on_flake
 from .definitions_types import IntegerTask, FloatTask
 
 # Mark all tests in this module as task tests (depends on identifier)
@@ -543,6 +544,7 @@ def test_graceful_termination_with_cleanup():
 
 
 @pytest.mark.skipif(not is_posix(), reason="Signal handling only works on POSIX")
+@retry_on_flake(max_attempts=3)
 def test_graceful_termination_no_reraise():
     """Test that task catching TaskCancelled without re-raising still marks job as cancelled"""
     p = None

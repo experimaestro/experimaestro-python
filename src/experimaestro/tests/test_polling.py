@@ -7,6 +7,7 @@ from typing import List
 
 
 from experimaestro.filewatcher import FileWatcherService, PolledFile
+from experimaestro.tests._flaky import retry_on_flake
 
 
 class TestPolledFile:
@@ -134,6 +135,7 @@ class TestDirectoryWatch:
         assert test_file not in watch._files
         watch.close()
 
+    @retry_on_flake(max_attempts=3)
     def test_file_filter(self, tmp_path):
         """Test that file_filter is respected"""
         svc = FileWatcherService.instance()

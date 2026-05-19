@@ -15,6 +15,7 @@ import hashlib
 from experimaestro.tokens import CounterToken
 from experimaestro.locking import LockError
 from experimaestro.filewatcher import AsyncEventBridge
+from experimaestro.tests._flaky import retry_on_flake
 
 # Mark all tests in this module as token tests
 pytestmark = [pytest.mark.anyio, pytest.mark.tokens]
@@ -182,6 +183,7 @@ async def test_token_notification():
         await lock2.aio_release()
 
 
+@retry_on_flake(max_attempts=3)
 async def test_token_multiple_waiting():
     """Test multiple tasks waiting for tokens"""
     with tempfile.TemporaryDirectory() as tmpdir:

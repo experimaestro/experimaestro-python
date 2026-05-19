@@ -3,6 +3,7 @@ import sys
 # Set test flag immediately to prevent cli/__init__.py from calling basicConfig
 sys._called_from_test = True
 
+import faulthandler  # noqa: E402
 import logging  # noqa: E402
 import pytest  # noqa: E402
 import os  # noqa: E402
@@ -49,6 +50,31 @@ class MockProcess(Process):
 # Call handler() first to trigger real initialization from entry points
 Process.handler("mock")  # This initializes HANDLERS if needed
 Process.HANDLERS["mock"] = MockProcess
+
+
+# --- Hang watchdog --------------------------------------------------------
+#
+# When a test hangs in CI, pytest-timeout fires at 300s and kills it, but
+# we get no information about which threads were stuck where. We arm
+# faulthandler.dump_traceback_later so that every thread's stack is
+# dumped to stderr after XPM_TEST_THREAD_DUMP_AFTER seconds per test.
+# Tuned aggressively (10s default) so it fires well before pytest-timeout
+# and we capture state on the hanging test, not the next one. ``repeat``
+# is off so legitimately-slow tests don't spam the log.
+
+_THREAD_DUMP_AFTER = float(os.environ.get("XPM_TEST_THREAD_DUMP_AFTER", "10"))
+
+
+@pytest.fixture(autouse=True)
+def _hang_watchdog():
+    """Dump every thread's stack to stderr if the test hangs."""
+    # faulthandler.dump_traceback_later replaces any previous timer, so
+    # arming it per-test is safe.
+    faulthandler.dump_traceback_later(_THREAD_DUMP_AFTER, repeat=False, file=sys.stderr)
+    try:
+        yield
+    finally:
+        faulthandler.cancel_dump_traceback_later()
 
 
 @pytest.fixture(scope="session")
