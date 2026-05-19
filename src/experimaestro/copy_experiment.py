@@ -281,9 +281,18 @@ def _rewrite_json_paths(obj, src_prefix: str, dst_prefix: str):
 
     Rewrites ``{"type": "path", "value": "..."}`` and
     ``{"type": "path.serialized", "value": "..."}`` entries.
+
+    With the job/workspace-relative path encoding introduced for issue #228,
+    new-format entries carry a ``"base"`` key and store relative values that
+    do not need rewriting; this function leaves them untouched and is only
+    load-bearing for old absolute-path entries.
     """
     if isinstance(obj, dict):
-        if obj.get("type") in ("path", "path.serialized") and "value" in obj:
+        if (
+            obj.get("type") in ("path", "path.serialized")
+            and "value" in obj
+            and "base" not in obj
+        ):
             obj["value"] = _rewrite_path(obj["value"], src_prefix, dst_prefix)
         else:
             for v in obj.values():

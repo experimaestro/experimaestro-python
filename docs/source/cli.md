@@ -349,8 +349,11 @@ experimaestro experiments copy
 - All job directories referenced in `jobs.jsonl` — outputs, logs, params
 - Jobs that already exist at the destination are skipped
 
-**Path rewriting:** After copying, workspace-dependent paths in each job's `params.json`
-are automatically rewritten to point to the destination workspace.
+**Path encoding:** Since experimaestro 2.4, `params.json` stores paths relative to
+the job root or workspace (see [serialization](serialization.md#paths-in-paramsjson)),
+so copying a job between workspaces does not require rewriting paths inside the file.
+The top-level `"workspace"` field — and any absolute paths produced by older
+versions — are still rewritten for backward compatibility.
 
 **Atomic staging:** Each job is first rsynced into a temporary staging directory
 (`.xpm-staging/`) inside the destination workspace, then moved to its final location.

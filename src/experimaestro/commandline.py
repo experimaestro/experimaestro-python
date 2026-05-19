@@ -70,6 +70,10 @@ class CommandContext(SerializationContext):
         self.namedPipeRedirectionsMap: Dict["CommandPart", NamedPipeRedirections] = {}
         self.auxiliary: Dict[str, int] = {}
 
+        # Anchors used by ``_outputjsonvalue`` to encode paths relatively
+        self.job_path = path
+        self.workspace_path = workspace.path
+
     def getAuxiliaryFile(self, name, suffix):
         ix = self.auxiliary.get(name, 0) + 1
         self.auxiliary[name] = ix

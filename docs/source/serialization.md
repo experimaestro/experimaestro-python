@@ -144,6 +144,28 @@ are copied or where they are stored). The `serialize` method receives the
 config object, enabling per-config path logic.
 
 
+## Paths in `params.json`
+
+Each submitted task writes its parameters to `params.json` in the job directory.
+Starting with the v3 schema (experimaestro 2.4), `Path` values are encoded with
+a `"base"` field that records what the value is relative to:
+
+| Encoding | Stored as | Used when |
+|---|---|---|
+| Job-relative | `{"type": "path", "value": "out/file.txt", "base": "job"}` | the path is inside the current job directory (typical for [`PathGenerator`](experiments/task.md) outputs) |
+| Workspace-relative | `{"type": "path", "value": "jobs/<id>/<hash>/file", "base": "workspace"}` | the path points into another job in the same workspace (cross-job dependencies) |
+| Absolute | `{"type": "path", "value": "/abs/path"}` | the path lies outside the workspace, or was written by an older version |
+
+Resolution at load time uses `Env.taskpath` for `"job"` and `Env.wspath` for
+`"workspace"`; these are set automatically by `run.py`, `from_task_dir`, and
+`tools.jobs.load_job`. Absolute paths and entries without a `"base"` key load
+unchanged for backward compatibility.
+
+The top-level `"version"` field records the schema version (`PARAMS_JSON_VERSION`
+on `ConfigInformation`). A loader refuses to run a task whose `params.json` was
+written by a newer experimaestro — upgrade rather than risk a silently wrong
+path resolution.
+
 ## HuggingFace integration
 
 ```python

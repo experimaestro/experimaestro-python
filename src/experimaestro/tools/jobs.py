@@ -9,7 +9,9 @@ import json
 def load_job(job_path: Path, discard_id=True):
     logger.info("Loading configuration %s", job_path.parent)
     params = json.loads(job_path.resolve().read_text())
+    ConfigInformation.check_params_version(params, source=str(job_path))
     taskglobals.Env.instance().wspath = Path(params["workspace"])
+    taskglobals.Env.instance().taskpath = job_path.resolve().parent
 
     try:
         return params, ConfigInformation.fromParameters(

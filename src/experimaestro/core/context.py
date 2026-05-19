@@ -47,6 +47,11 @@ class SerializationContext:
     serialized: Set[int]
     serialized_paths: Set[str]
 
+    # Optional anchors used to encode ``Path`` values relatively when possible.
+    # Subclasses with workspace/job knowledge (e.g. ``CommandContext``) set them.
+    job_path: Optional[Path] = None
+    workspace_path: Optional[Path] = None
+
     def __init__(self, *, save_directory: Optional[Path] = None):
         """Creates a new serialization context
 

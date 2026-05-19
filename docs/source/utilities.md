@@ -30,12 +30,13 @@ if result.errors:
 
 ### Path Rewriting
 
-After copying, workspace-dependent paths in each job's `params.json` are
-automatically rewritten to point to the destination workspace. This includes:
-
-- The top-level `"workspace"` field
-- All `{"type": "path", ...}` and `{"type": "path.serialized", ...}` entries
-  within serialized objects
+Since experimaestro 2.4, paths inside `params.json` objects are stored relative
+to the job root or workspace (see
+[serialization](serialization.md#paths-in-paramsjson)), so they survive a copy
+without any rewriting. The top-level `"workspace"` field is still rewritten to
+point to the destination workspace, and entries written by older versions
+(absolute `{"type": "path", "value": "/..."}`) are rewritten as before for
+backward compatibility.
 
 ### Atomic Staging
 

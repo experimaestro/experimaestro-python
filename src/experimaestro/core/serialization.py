@@ -202,6 +202,17 @@ def from_task_dir(
     with data_loader("params.json").open("rt") as fh:
         content = json.load(fh)
 
+    ConfigInformation.check_params_version(content, source=f"{path}/params.json")
+
+    # Make taskpath/wspath available so job/workspace-relative paths
+    # stored in params.json can be resolved during deserialization.
+    import experimaestro.taskglobals as taskglobals
+
+    if not callable(path):
+        taskglobals.Env.instance().taskpath = Path(path).resolve()
+    if "workspace" in content:
+        taskglobals.Env.instance().wspath = Path(content["workspace"])
+
     content["data"] = {"type": "python", "value": content["objects"][-1]["id"]}
 
     return from_state_dict(

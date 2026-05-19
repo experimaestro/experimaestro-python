@@ -189,6 +189,30 @@ class ConfigInformation:
     # Set to true when loading from JSON
     LOADING: ClassVar[bool] = False
 
+    # params.json format version. Bumped whenever the on-disk schema gains a
+    # feature that older readers cannot interpret correctly:
+    #   v2 - paths stored as absolute strings
+    #   v3 - paths may be encoded job- or workspace-relative (see issue #228)
+    PARAMS_JSON_VERSION: ClassVar[int] = 3
+
+    @staticmethod
+    def check_params_version(params: Dict, source: str = "params.json") -> None:
+        """Refuse to load a params.json written by a newer experimaestro.
+
+        Older versions are loaded transparently (the deserializer handles
+        absolute and relative path encodings). A newer version may contain
+        encodings we cannot interpret, so we fail fast rather than silently
+        producing wrong paths.
+        """
+        version = params.get("version", 0)
+        if version > ConfigInformation.PARAMS_JSON_VERSION:
+            raise RuntimeError(
+                f"{source} was written by a newer experimaestro "
+                f"(params.json version {version}); this installation only "
+                f"supports up to version {ConfigInformation.PARAMS_JSON_VERSION}. "
+                f"Please upgrade experimaestro to run this task."
+            )
+
     def __init__(self, pyobject: "ConfigMixin"):
         # The underlying pyobject and XPM type
         self.pyobject = pyobject
@@ -912,6 +936,23 @@ class ConfigInformation:
             }
 
         elif isinstance(value, Path):
+            # Encode the path relative to the job (or, failing that, the
+            # workspace) so that copying a job between workspaces does not
+            # require rewriting path values. Falls back to an absolute path.
+            if context.job_path is not None:
+                try:
+                    rel = value.relative_to(context.job_path)
+                    return {"type": "path", "value": str(rel), "base": "job"}
+                except ValueError:
+                    pass
+
+            if context.workspace_path is not None:
+                try:
+                    rel = value.relative_to(context.workspace_path)
+                    return {"type": "path", "value": str(rel), "base": "workspace"}
+                except ValueError:
+                    pass
+
             return {"type": "path", "value": str(value)}
 
         elif isinstance(value, SerializedPath):
@@ -1046,7 +1087,7 @@ class ConfigInformation:
         The format is an array of objects
         {
             "workspace": FOLDERPATH,
-            "version": 2,
+            "version": ConfigInformation.PARAMS_JSON_VERSION,
             "objects": [
                 {
                     "id": <ID of the object>,
@@ -1076,7 +1117,7 @@ class ConfigInformation:
 
         data = {
             "workspace": str(context.workspace.path.absolute()),
-            "version": 2,
+            "version": ConfigInformation.PARAMS_JSON_VERSION,
             "experimaestro": experimaestro.__version__,
             "objects": self.__get_objects__([], context),
         }
@@ -1191,6 +1232,23 @@ class ConfigInformation:
 
             # A path
             if value["type"] == "path":
+                base = value.get("base")
+                if base == "job":
+                    taskpath = taskglobals.Env.instance().taskpath
+                    if taskpath is None:
+                        raise RuntimeError(
+                            "Cannot resolve job-relative path %r: taskpath is "
+                            "not set" % value["value"]
+                        )
+                    return taskpath / value["value"]
+                if base == "workspace":
+                    wspath = taskglobals.Env.instance().wspath
+                    if wspath is None:
+                        raise RuntimeError(
+                            "Cannot resolve workspace-relative path %r: wspath "
+                            "is not set" % value["value"]
+                        )
+                    return wspath / value["value"]
                 return Path(value["value"])
 
             if value["type"] == "path.serialized":

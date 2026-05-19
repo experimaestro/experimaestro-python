@@ -39,8 +39,9 @@ def parse_commandline(argv=None):
 def run(parameters: Path):
     with open(parameters, "r") as fp:
         params = json.load(fp)
-        env = taskglobals.Env.instance()
+        ConfigInformation.check_params_version(params, source=str(parameters))
 
+        env = taskglobals.Env.instance()
         env.wspath = Path(params["workspace"])
         env.taskpath = parameters.parent
 
@@ -595,13 +596,17 @@ class TaskRunner:
                 logger.debug("Rank detection: %s=%s", name, val)
                 return int(val) if val is not None else 0
 
-            rank = max(get_rank("SLURM_PROCID"), get_rank("RANK"), get_rank("LOCAL_RANK"))
+            rank = max(
+                get_rank("SLURM_PROCID"), get_rank("RANK"), get_rank("LOCAL_RANK")
+            )
             env = taskglobals.Env.instance()
             if rank > 0:
                 logger.info("Non-zero rank (%d): marking as slave process", rank)
                 env.slave = True
             else:
-                logger.debug("Rank 0 or no distributed environment detected (rank=%d)", rank)
+                logger.debug(
+                    "Rank 0 or no distributed environment detected (rank=%d)", rank
+                )
 
             if not env.slave:
                 for lockfile in self.lockfiles:
