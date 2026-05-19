@@ -24,7 +24,15 @@ import sys
 import time
 from typing import Any, Callable
 
+import pytest
+
 logger = logging.getLogger("xpm.tests.flaky")
+
+
+# pytest.fail() raises a Failed exception that extends BaseException
+# (not Exception) precisely so user code can't accidentally swallow it.
+# A retry-on-flake decorator legitimately needs to catch it.
+_DEFAULT_CATCH: tuple[type[BaseException], ...] = (Exception, pytest.fail.Exception)
 
 
 def dump_thread_stacks(prefix: str = "Thread dump") -> None:
@@ -43,7 +51,7 @@ def retry_on_flake(
     max_attempts: int = 3,
     *,
     delay: float = 0.5,
-    catch: tuple[type[BaseException], ...] = (Exception,),
+    catch: tuple[type[BaseException], ...] = _DEFAULT_CATCH,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Re-run a test up to ``max_attempts`` times on failure.
 
