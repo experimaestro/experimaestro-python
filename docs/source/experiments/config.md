@@ -1015,6 +1015,63 @@ During identifier computation, Experimaestro tracks `InstanceConfig` instances b
 The instance order is deterministic and based on the traversal order during identifier computation, ensuring reproducibility across runs.
 
 
+## Prepare configurations (data preparation)
+
+A {py:class}`~experimaestro.Prepare` is a `Config` that declares an in-process
+preparation step — typically downloading a dataset, fetching credentials, or
+populating a local cache — that should run *before* any task that depends on
+it. Library authors return a `Prepare` instance from helper functions like
+`prepare_dataset(...)`; experimaestro discovers them automatically in any
+submitted task's parameters and invokes `prepare()` exactly once per
+identifier, in the driver Python process.
+
+```python
+from experimaestro import Prepare, Task, Param
+
+class DatasetPrep(Prepare):
+    name: Param[str]
+
+    def prepare(self) -> None:
+        # Idempotent: the underlying tool should no-op if the cache is warm.
+        actually_fetch_huggingface(self.name)
+
+class Train(Task):
+    dataset: Param[DatasetPrep]
+
+    def execute(self):
+        ...
+
+# Submitting the task auto-attaches a dependency on the Prepare:
+Train.C(dataset=DatasetPrep.C(name="hf:foo")).submit()
+```
+
+Key properties:
+
+- **No on-disk footprint.** A `Prepare` is a {py:class}`Resource
+  <experimaestro.scheduler.dependencies.Resource>`, not a `Job`: there is no
+  workdir under `jobs/`, no `.done` marker, no `params.json`. Idempotence is
+  the responsibility of `prepare()` itself.
+- **Dedup by identifier.** Two `Prepare` instances with the same parameters
+  share a single execution. Many tasks referencing the same Prepare trigger
+  at most one `prepare()` call per Python process.
+- **Concurrent.** Distinct Prepares run in parallel — each task starts as
+  soon as *its* prepares have completed.
+- **`RunMode.PREPARE`.** Setting `--run-mode prepare` on
+  `experimaestro run-experiment` runs every discovered `Prepare` referenced
+  by submitted tasks while skipping the tasks themselves. This is useful to
+  pre-warm a cache before submitting jobs to an offline cluster.
+
+```bash
+# Pre-warm all downloads referenced by the experiment, then run tasks
+# (the second invocation can be offline).
+experimaestro run-experiment --run-mode prepare my_experiment.py
+experimaestro run-experiment my_experiment.py
+```
+
+`Prepare.prepare()` runs in the driver process via `asyncio.to_thread`, so
+blocking I/O does not stall the scheduler loop.
+
+
 ## How is a configuration identifier computed?
 
 The principale is the following. Any value can be associated with a unique byte

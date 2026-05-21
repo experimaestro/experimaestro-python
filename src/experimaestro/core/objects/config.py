@@ -1,5 +1,6 @@
 """Configuration and tasks"""
 
+import asyncio
 import json
 
 from attr import define
@@ -105,6 +106,57 @@ def updatedependencies(
         pass
     else:
         raise NotImplementedError("update dependencies for type %s" % type(value))
+
+
+def _collect_prepares(
+    value,
+    *,
+    visited: Optional[Set[int]] = None,
+    out: Optional[List["Prepare"]] = None,
+) -> List["Prepare"]:
+    """Recursively yield every ``Prepare`` instance reachable through ``value``.
+
+    Walks Config params (and the containers list/set/tuple/dict). Stops at
+    Configs that already represent a submitted Task (its own ``submit`` will
+    have triggered prep discovery for its own params). The walker does
+    descend *through* ``Prepare`` instances themselves, so a Prepare nested
+    inside another Prepare is also reported.
+
+    The walker tolerates arbitrary leaf types (paths, primitives, enums,
+    custom data classes) silently — unlike ``updatedependencies`` it does
+    not raise on unknown types, since collecting prepares is best-effort
+    discovery rather than a correctness requirement of the dep graph.
+    """
+    if out is None:
+        out = []
+    if visited is None:
+        visited = set()
+
+    if isinstance(value, Config):
+        if id(value) in visited:
+            return out
+        visited.add(id(value))
+
+        if isinstance(value, Prepare):
+            out.append(value)
+
+        info = value.__xpm__
+        # Don't descend into a Config that already corresponds to a
+        # submitted Task — its own submit() handled its own prep walk.
+        if info.task is not None and not info.loaded:
+            return out
+
+        for _, val in info.xpmvalues():
+            if val is not None:
+                _collect_prepares(val, visited=visited, out=out)
+    elif isinstance(value, (list, set, tuple)):
+        for el in value:
+            _collect_prepares(el, visited=visited, out=out)
+    elif isinstance(value, dict):
+        for key, val in value.items():
+            _collect_prepares(key, visited=visited, out=out)
+            _collect_prepares(val, visited=visited, out=out)
+    return out
 
 
 NOT_SET = object()
@@ -825,6 +877,15 @@ class ConfigInformation:
             partial_dep = resource.dependency(name)
             self.job.dependencies.add(partial_dep)
 
+        # Discover Prepare configs in params and attach in-memory deps.
+        # Done before the run_mode branch so PREPARE mode also has the list.
+        from experimaestro.scheduler.prepare import PrepareResource
+
+        prepare_configs = _collect_prepares(self.pyobject)
+        prepare_resources = [PrepareResource.for_config(p) for p in prepare_configs]
+        for resource in prepare_resources:
+            self.job.dependencies.add(resource.dependency())
+
         run_mode = (
             workspace.run_mode if run_mode is None else run_mode
         ) or RunMode.NORMAL
@@ -834,6 +895,21 @@ class ConfigInformation:
             if other:
                 # Our job = previously submitted job
                 self.job = other
+        elif run_mode == RunMode.PREPARE:
+            # Run discovered Prepare resources synchronously; skip the task.
+            for resource in prepare_resources:
+                if not resource._executed:
+                    asyncio.run(resource.aio_ensure_prepared())
+
+            tags = ", ".join(f"{k}={v}" for k, v in self.job.config.tags().items())
+            s = f"""Preparing {self.job.relpath} {f"({tags})" if tags else ""}"""
+            if prepare_resources:
+                cprint(f"[prepare] {s}", "light_cyan", file=sys.stderr)
+                for resource in prepare_resources:
+                    cprint(f"   [Prepare] {resource}", "light_cyan", file=sys.stderr)
+            else:
+                cprint(f"[prepare: nothing to do] {s}", "white", file=sys.stderr)
+            print(file=sys.stderr)  # noqa: T201
         else:
             # Show a warning
             if run_mode == RunMode.GENERATE_ONLY:
@@ -2242,6 +2318,30 @@ class InstanceConfig(Config):
     """
 
     pass
+
+
+class Prepare(Config):
+    """A Config that declares an in-process preparation step.
+
+    Subclasses override ``prepare(self)`` to do the actual work (download a
+    dataset, fetch credentials, populate a cache). When a Task references a
+    ``Prepare`` instance in its params, experimaestro auto-attaches an
+    in-memory dependency on it: ``prepare()`` runs once in the driver
+    process before any dependent task starts.
+
+    Preparation is NOT a job: it has no workdir, no ``.done`` marker, no
+    entry under ``jobs/``. Idempotence is the responsibility of
+    ``prepare()`` itself (typically the underlying tool — e.g. datamaestro's
+    download — is a no-op when the cache is already populated).
+
+    The ``RunMode.PREPARE`` mode triggers all Prepare instances referenced
+    by submitted tasks while skipping the tasks themselves; useful for
+    pre-warming caches before going offline.
+    """
+
+    def prepare(self, *args, **kwargs) -> None:
+        """Override to perform the preparation work. Default: no-op."""
+        pass
 
 
 class LightweightTask(Config):

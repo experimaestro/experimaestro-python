@@ -31,6 +31,9 @@ class RunMode(str, Enum):
     DRY_RUN = "dry-run"
     """Do not run"""
 
+    PREPARE = "prepare"
+    """Only run discovered Prepare configs; skip Task execution"""
+
 
 class Workspace:
     """Workspace environment for experiments

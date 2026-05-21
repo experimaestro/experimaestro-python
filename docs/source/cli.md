@@ -13,7 +13,7 @@ experimaestro run-experiment [OPTIONS] YAML_FILE [ARGS]
 
 | Option | Description |
 |--------|-------------|
-| `--run-mode MODE` | Set run mode: `NORMAL`, `DRY_RUN`, or `GENERATE_ONLY` |
+| `--run-mode MODE` | Set run mode: `NORMAL`, `DRY_RUN`, `GENERATE_ONLY`, or `PREPARE` |
 | `--workspace ID` | Use a workspace from settings by ID |
 | `--workdir PATH` | Specify working directory directly |
 | `--port PORT` | Port for web monitoring interface |
@@ -31,11 +31,15 @@ experimaestro run-experiment [OPTIONS] YAML_FILE [ARGS]
 
 ### Run Modes
 
-`experimaestro run-experiment --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY]`
+`experimaestro run-experiment --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY|PREPARE]`
 
 - `DRY_RUN` - Display task hashes and dependencies without launching
 - `GENERATE_ONLY` - Generate job folders without [launching](./launchers/index.md) tasks
 - `NORMAL` - Generate and launch jobs (default)
+- `PREPARE` - Run only data-preparation steps (every
+  {py:class}`~experimaestro.Prepare` instance referenced by submitted tasks),
+  skipping the tasks themselves. Useful for pre-warming caches before
+  running jobs on an offline cluster. See [Prepare configurations](./experiments/config.md#prepare-configurations-data-preparation).
 
 ## Job Control
 
