@@ -398,6 +398,13 @@ class experiment(BaseExperiment):
     @property
     def resultspath(self):
         """Return the directory in which results can be stored for this experiment"""
+        if self.workspace.run_mode != RunMode.NORMAL:
+            raise RuntimeError(
+                "xp.resultspath is not available in "
+                f"{self.workspace.run_mode.value} mode; guard the call with "
+                "`if xp.workspace.run_mode == RunMode.NORMAL` to avoid "
+                "creating files outside a real run."
+            )
         return self.workdir / "results"
 
     @property
