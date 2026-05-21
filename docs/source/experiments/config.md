@@ -1068,8 +1068,28 @@ experimaestro run-experiment --run-mode prepare my_experiment.py
 experimaestro run-experiment my_experiment.py
 ```
 
+### Where do results land in each run mode?
+
+| Run mode      | `workspace/jobs/...`             | Cache populated by `prepare()` |
+|---------------|----------------------------------|--------------------------------|
+| `NORMAL`      | One folder per task (logs, outputs, `.done` / `.failed`) | Yes (prep runs before each task) |
+| `PREPARE`     | **Nothing**                      | Yes (only effect on disk) |
+| `GENERATE_ONLY` | `params.json` per task (no execution) | No |
+| `DRY_RUN`     | Nothing                          | No |
+
+The cache location is owned by whatever `prepare()` calls — usually
+`~/.cache/datamaestro/` for datasets resolved via
+[datamaestro](https://datamaestro.readthedocs.io), or
+`~/.cache/huggingface/` for direct HF Hub downloads. Experimaestro itself
+writes nothing for a `Prepare`.
+
 `Prepare.prepare()` runs in the driver process via `asyncio.to_thread`, so
 blocking I/O does not stall the scheduler loop.
+
+**See also:** [How do I pre-download datasets / resources before running on
+an offline cluster?](../faq.md#how-do-i-pre-download-datasets-resources-before-running-on-an-offline-cluster)
+in the FAQ; the [MNIST demo](https://github.com/experimaestro/experimaestro-demo)
+exercises the end-to-end flow.
 
 
 ## How is a configuration identifier computed?

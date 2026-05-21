@@ -138,3 +138,12 @@ info = load_xp_info("/path/to/workspace/experiments/my-experiment/20260325_12000
 print(info.jobs)     # dict[str, Config]
 print(info.actions)  # dict[str, Action]
 ```
+
+## See also
+
+- The [MNIST demo](https://github.com/experimaestro/experimaestro-demo)
+  registers an `ExportBestModel` action that picks the best CNN by
+  validation accuracy and copies its parameters to a user-chosen path.
+- FAQ: [How do I run code after my experiment finishes?](../faq.md#how-do-i-run-code-after-my-experiment-finishes)
+- [Prepare configurations](config.md#prepare-configurations-data-preparation)
+  — the analogous mechanism for code that runs *before* tasks.
