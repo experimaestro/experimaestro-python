@@ -71,6 +71,7 @@ debugging experimaestro.
 
 ```{eval-rst}
 .. autoclass:: experimaestro.scheduler.experiment.experiment
+   :no-index:
    :members: submit, prepare, stop, wait, add_job, add_service, watch_output, save, load
    :show-inheritance:
 ```

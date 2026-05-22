@@ -29,7 +29,7 @@ output.__xpm__.wait()
 
 ## Data preparation
 
-### How do I pre-download datasets / resources before running on an offline cluster?
+### How do I pre-download datasets or resources before running on an offline cluster?
 
 Use {py:class}`~experimaestro.Prepare`: a `Config` subclass whose `prepare()`
 method is auto-invoked once before any task that references it. Library

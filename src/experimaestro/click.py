@@ -12,6 +12,11 @@ def cli():
 class forwardoptionMetaclass(type):
     def __getattr__(self, key):
         """Access to a class field"""
+        # Skip dunder names so introspection tools (inspect.signature,
+        # Sphinx autodoc, IPython completion, ...) don't get a
+        # forwardoption instance for things like __signature__ / __wrapped__.
+        if key.startswith("__") and key.endswith("__"):
+            raise AttributeError(key)
         return forwardoption([key])
 
 
@@ -41,4 +46,6 @@ class forwardoption(metaclass=forwardoptionMetaclass):
 
     def __getattr__(self, key):
         """Access to a class field"""
+        if key.startswith("__") and key.endswith("__"):
+            raise AttributeError(key)
         return forwardoption([key])

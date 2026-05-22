@@ -1086,10 +1086,7 @@ writes nothing for a `Prepare`.
 `Prepare.prepare()` runs in the driver process via `asyncio.to_thread`, so
 blocking I/O does not stall the scheduler loop.
 
-**See also:** [How do I pre-download datasets / resources before running on
-an offline cluster?](../faq.md#how-do-i-pre-download-datasets-resources-before-running-on-an-offline-cluster)
-in the FAQ; the [MNIST demo](https://github.com/experimaestro/experimaestro-demo)
-exercises the end-to-end flow.
+**See also:** [How do I pre-download datasets or resources before running on an offline cluster?](../faq.md#how-do-i-pre-download-datasets-or-resources-before-running-on-an-offline-cluster) in the FAQ; the [MNIST demo](https://github.com/experimaestro/experimaestro-demo) exercises the end-to-end flow.
 
 
 ## How is a configuration identifier computed?

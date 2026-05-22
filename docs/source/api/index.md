@@ -10,7 +10,7 @@ The core classes form the foundation of experimaestro's configuration and task s
 
 ```{eval-rst}
 .. autoxpmconfig:: experimaestro.Config
-   :members: XPMConfig, XPMValue, value_class, __validate__, __post_init__, __identifier__, copy_dependencies, register_task_output
+   :members: XPMConfig, XPMValue, value_class, __post_init__, register_task_output
    :show-inheritance:
 ```
 
@@ -18,7 +18,7 @@ The core classes form the foundation of experimaestro's configuration and task s
 
 ```{eval-rst}
 .. autoclass:: experimaestro.core.objects.ConfigMixin
-   :members: add_dependencies, copy, copy_dependencies, instance, tag, tags, submit, wait
+   :members: add_dependencies, copy, copy_dependencies, instance, tag, tags, submit, wait, __validate__, __identifier__
 ```
 
 ### Task
@@ -287,6 +287,19 @@ Type annotations are used to declare parameters in configurations and tasks.
    :members:
 ```
 
+### load_xp_info
+
+```{eval-rst}
+.. autofunction:: experimaestro.load_xp_info
+```
+
+### ExperimentInfo
+
+```{eval-rst}
+.. autoclass:: experimaestro.ExperimentInfo
+   :members:
+```
+
 ## Launchers
 
 ### DirectLauncher
@@ -498,5 +511,4 @@ Type annotations are used to declare parameters in configurations and tasks.
 
 ```{eval-rst}
 .. autoclass:: experimaestro.click.forwardoption
-   :members:
 ```

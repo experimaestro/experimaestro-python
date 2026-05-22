@@ -336,10 +336,9 @@ This is useful when:
 - You're monitoring remaining walltime via scheduler environment variables (e.g., `SLURM_JOB_END_TIME`)
 - You want to ensure checkpoints are saved cleanly before termination
 
-(graceful-termination)=
-### Graceful Termination (SIGTERM/SIGINT)
+### Graceful Termination
 
-When a task receives SIGTERM (e.g., from `scancel`) or SIGINT (Ctrl+C), the framework provides a mechanism for graceful cleanup:
+When a task receives `SIGTERM` (e.g., from `scancel`) or `SIGINT` (Ctrl+C), the framework provides a mechanism for graceful cleanup:
 
 1. A background thread starts the framework cleanup (writes `.failed` with `reason: "cancelled"`, releases locks)
 2. A {py:class}`~experimaestro.TaskCancelled` exception is raised in the main thread

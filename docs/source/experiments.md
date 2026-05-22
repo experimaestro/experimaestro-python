@@ -122,13 +122,6 @@ id: my-experiment
 learning_rate: 1e-4  # Override value from base.yaml
 ```
 
-The old `parent` option (single file) is deprecated but still supported:
-
-```yaml
-# Deprecated - use imports instead
-parent: base.yaml
-```
-
 #### Multiple YAML files
 
 You can also merge multiple YAML files using CLI options:

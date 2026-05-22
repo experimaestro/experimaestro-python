@@ -345,7 +345,7 @@ resulting in more predictable behavior and reduced race conditions.
 - **Override warnings**: Warns when overriding arguments without `overrides=True` flag
 - **[`value_class` decorator](experiments/config.md#value-classes)**: Register external types as experimaestro values
 - **[Explicit default behavior](experiments/config.md#parameters)**: `field(ignore_default=...)` and `field(default=...)`
-- **[DynamicLauncher](launchers/index.md#dynamic)**: Select launchers dynamically based on priority
+- **[DynamicLauncher](launchers/index.md#dynamic-launcher)**: Select launchers dynamically based on priority
 - **[AcceleratorSpecification](launchers/index.md#accelerator-types)**: Cross-platform GPU support (CUDA, MPS, generic)
 - **[Protocol version checking](interfaces.md#version-compatibility)**: Client-server compatibility for remote monitoring
 - **Colored logging**: ISO timestamps and colored output for CLI (`--logging` option)

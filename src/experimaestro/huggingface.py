@@ -14,12 +14,12 @@ except ImportError:
 
 
 class ExperimaestroHFHub(ModelHubMixin):
-    """Defines models that can be uploaded/downloaded from the Hub
+    """Defines models that can be uploaded/downloaded from the Hub.
 
     Subclass to customize serialization behavior:
-    - ``definition_filename``: Override the JSON definition filename
-      (default: ``"experimaestro.json"``)
-    - ``serialization_context_class``: Override the SerializationContext class
+
+    - ``definition_filename``: Override the JSON definition filename (default: ``"experimaestro.json"``).
+    - ``serialization_context_class``: Override the SerializationContext class.
     """
 
     #: The filename used for the definition JSON file
