@@ -386,6 +386,11 @@ class TaskRunner:
         # if task catches and suppresses TaskCancelled
         self._cancelled = False
 
+        # Background thread spawned by the SIGTERM handler to write the .failed
+        # file and release locks. The main thread joins it before exiting so the
+        # interpreter shutdown does not kill it mid-write (see _join_cleanup_thread).
+        self._cleanup_thread: "threading.Thread | None" = None
+
         # Carbon tracking state
         self._carbon_tracker = None
         self._carbon_reporter_thread = None
@@ -534,6 +539,22 @@ class TaskRunner:
         except Exception:
             logger.exception("Error during background cleanup")
 
+    def _join_cleanup_thread(self, timeout: float = 30.0):
+        """Wait for the SIGTERM cleanup thread (if any) to finish.
+
+        The cleanup thread writes the ``.failed`` file and releases locks. The
+        main thread must wait for it before exiting, otherwise interpreter
+        shutdown can kill the daemon thread mid-write, leaving an empty or
+        truncated ``.failed`` file (which the scheduler then fails to parse).
+        """
+        thread = self._cleanup_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=timeout)
+            if thread.is_alive():
+                logger.warning(
+                    "Background cleanup thread did not finish within %.0fs", timeout
+                )
+
     def handle_sigterm(self, signum, frame):
         """Handle SIGTERM signal for graceful termination.
 
@@ -553,6 +574,7 @@ class TaskRunner:
             args=("cancelled", "Job terminated by SIGTERM"),
             daemon=True,
         )
+        self._cleanup_thread = cleanup_thread
         cleanup_thread.start()
 
         # Get remaining time from launcher if available
@@ -701,6 +723,8 @@ class TaskRunner:
                     logger.info(
                         "Task completed but was cancelled - not marking as done"
                     )
+                    # Wait for the background cleanup to flush .failed before exiting
+                    self._join_cleanup_thread()
                     sys.exit(1)
 
                 # Everything went OK
@@ -713,8 +737,10 @@ class TaskRunner:
 
         except TaskCancelled as e:
             # Cleanup is already running in background thread (started by signal handler)
-            # Just log and exit - the background thread handles everything
+            # Wait for it to flush .failed and release locks before exiting, so
+            # interpreter shutdown does not kill it mid-write
             logger.info("Task cancelled: %s", e.message)
+            self._join_cleanup_thread()
             sys.exit(1)
 
         except Exception:
