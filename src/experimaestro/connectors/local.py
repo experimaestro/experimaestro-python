@@ -157,6 +157,13 @@ class LocalProcessBuilder(ProcessBuilder):
 
         logger.debug("Popen process")
         if self.detach:
+            # Start the task in its own session (new process group, detached
+            # from the controlling terminal) so that a terminal-generated
+            # signal — most notably SIGINT from Ctrl+C, which the shell sends
+            # to the whole foreground process group — does not reach the task.
+            # This is what allows Ctrl+C to interrupt the experiment driver
+            # while leaving submitted jobs running. (POSIX only; ignored on
+            # Windows.)
             p = subprocess.Popen(
                 self.command,
                 stdin=stdin,
@@ -165,6 +172,7 @@ class LocalProcessBuilder(ProcessBuilder):
                 env=env,
                 close_fds=True,
                 cwd=cwd,
+                start_new_session=True,
             )
         else:
             p = subprocess.Popen(

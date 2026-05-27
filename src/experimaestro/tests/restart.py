@@ -1,3 +1,4 @@
+import os
 import time
 from pathlib import Path
 import sys
@@ -132,3 +133,90 @@ def restart(terminate: Callable, experiment):
         if p and p.is_running():
             logging.warning("Forcing to quit process %s", p.pid)
             p.terminate()
+
+
+def ctrlc_leaves_jobs_running(experiment):
+    """Check that Ctrl-C interrupts the driver but leaves jobs running.
+
+    Pressing Ctrl-C in a terminal sends SIGINT to the whole *foreground
+    process group* — the experiment driver and every local task it launched.
+    The driver must stop promptly, but the submitted jobs must keep running
+    (so they can be picked up again later).
+
+    We reproduce a terminal Ctrl-C by launching the driver in its own session
+    (so it is a process-group leader, and signalling its group does not hit
+    the test runner) and sending SIGINT to that whole process group.
+    """
+    p = None
+    xpmprocess = None
+    task = None
+    try:
+        with TemporaryExperiment("ctrlc", timeout_multiplier=9) as xp:
+            # Compute the task file paths without running it
+            task = Restart.C()
+            task.submit(run_mode=RunMode.DRY_RUN)
+
+        command = [
+            sys.executable,
+            restart_main.__file__,
+            xp.workspace.path,
+            experiment.__module__,
+            experiment.__name__,
+        ]
+
+        logging.debug("Starting driver process with: %s", command)
+        # start_new_session: the driver becomes a session/process-group leader,
+        # so os.killpg targets only the experiment (driver + its local tasks),
+        # never the pytest process.
+        xpmprocess = subprocess.Popen(command, start_new_session=True)
+        pgid = os.getpgid(xpmprocess.pid)
+
+        # Wait for the task to start
+        counter = 0
+        while not task.touch.is_file():
+            time.sleep(0.1)
+            counter += 1
+            if xpmprocess.poll() is not None:
+                assert False, (
+                    f"Driver exited early (code {xpmprocess.returncode}) "
+                    "before the task started"
+                )
+            if counter >= MAX_RESTART_WAIT:
+                os.killpg(pgid, signal.SIGKILL)
+                assert False, "Timeout waiting for task to be executed"
+
+        jobinfo = json.loads(task.__xpm__.job.pidpath.read_text())
+        pid = int(jobinfo["pid"])
+        p = psutil.Process(pid)
+        assert p.is_running()
+
+        # Mimic a terminal Ctrl-C: SIGINT to the whole foreground process group
+        logging.debug("Sending SIGINT to process group %d", pgid)
+        os.killpg(pgid, signal.SIGINT)
+
+        # The driver must stop promptly (regression: it used to hang)
+        try:
+            errorcode = xpmprocess.wait(10)
+            logging.debug("Driver exited with status %d", errorcode)
+        except subprocess.TimeoutExpired:
+            os.killpg(pgid, signal.SIGKILL)
+            assert False, "Experiment driver did not exit after Ctrl-C (SIGINT)"
+
+        # ... but the job must still be running
+        assert p.is_running(), "Job was killed by Ctrl-C (it should keep running)"
+    finally:
+        # Tell the task to finish, then force-clean any leftovers
+        try:
+            if task is not None:
+                with task.wait.open("w") as fp:
+                    fp.write("done")
+        except Exception:
+            pass
+
+        if p is not None and p.is_running():
+            logging.warning("Forcing to quit job process %s", p.pid)
+            p.terminate()
+
+        if xpmprocess and xpmprocess.poll() is None:
+            logging.warning("Forcing to quit driver process %s", xpmprocess.pid)
+            xpmprocess.kill()

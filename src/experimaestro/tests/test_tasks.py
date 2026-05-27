@@ -147,6 +147,16 @@ def test_restart(terminate):
     restart.restart(terminate, restart_function)
 
 
+@pytest.mark.skipif(not is_posix(), reason="Process groups are POSIX-only")
+def test_ctrlc_leaves_jobs_running():
+    """Ctrl-C must stop the driver while leaving submitted jobs running.
+
+    Reproduces a terminal Ctrl-C (SIGINT to the whole foreground process
+    group); regression test for local tasks being killed / the driver hanging.
+    """
+    restart.ctrlc_leaves_jobs_running(restart_function)
+
+
 def test_submitted_twice():
     """Check that a job cannot be submitted twice within the same experiment"""
     with TemporaryExperiment("duplicate", timeout_multiplier=9):
