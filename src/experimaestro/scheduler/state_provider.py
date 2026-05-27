@@ -1812,6 +1812,15 @@ class MockExperiment(BaseExperiment):
             RunCompletedEvent,
         )
 
+        # Ignore events that belong to a different run of the same experiment.
+        # Experiment event files are flat (one stream per experiment id, shared
+        # across all runs), so without this guard a previous run's jobs would
+        # leak into the current run's view (e.g. an old failed job reappearing
+        # after the experiment is relaunched with a different task set).
+        event_run_id = getattr(event, "run_id", "") or ""
+        if event_run_id and self.run_id and event_run_id != self.run_id:
+            return
+
         if isinstance(event, JobSubmittedEvent):
             # Legacy event type — still supported for reading old event files
             if merge_mode and event.job_id in self._job_infos:

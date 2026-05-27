@@ -355,6 +355,82 @@ class TestGetJobs:
         assert "job-a1" in job_ids
         assert "job-b1" in job_ids
 
+    def test_get_jobs_ignores_other_run_events(self, tmp_path):
+        """Regression: relaunching an experiment with a different task set must
+        not surface jobs from the previous run.
+
+        Experiment event files are a single flat stream per experiment id
+        (shared across runs). When such a stream still holds a previous run's
+        job-state event, it must not be applied to the current run's job list.
+
+        Scenario: experiment "relaunch" has an old failed run (t1 + t2) and a
+        new current run (t1 + t3); the flat event stream still contains the old
+        run's event for t2. get_jobs() for the current run must return t1 and
+        t3 only — never the stale t2.
+        """
+        from experimaestro.scheduler.state_status import (
+            ExperimentJobStateEvent,
+            JobTag,
+        )
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        old_run = "20260101_100000"
+        new_run = "20260101_120000"
+        create_v2_experiment(
+            workspace,
+            "relaunch",
+            runs=[
+                (
+                    old_run,
+                    "failed",
+                    [("pkg.T1", "t1", "done"), ("pkg.T2", "t2", "error")],
+                ),
+                (
+                    new_run,
+                    "active",
+                    [("pkg.T1", "t1", "done"), ("pkg.T3", "t3", "running")],
+                ),
+            ],
+            current_run=new_run,
+        )
+
+        # Flat per-experiment event stream still holding the old run's t2 event
+        # (plus the current run's t3 event).
+        events_dir = workspace / ".events" / "experiments"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        old_event = ExperimentJobStateEvent(
+            experiment_id="relaunch",
+            run_id=old_run,
+            job_id="t2",
+            task_id="pkg.T2",
+            scheduler_state="error",
+            tags=[JobTag(key="task", value="T2")],
+        )
+        new_event = ExperimentJobStateEvent(
+            experiment_id="relaunch",
+            run_id=new_run,
+            job_id="t3",
+            task_id="pkg.T3",
+            scheduler_state="running",
+            tags=[JobTag(key="task", value="T3")],
+        )
+        (events_dir / "relaunch-0.jsonl").write_text(
+            old_event.to_json() + "\n" + new_event.to_json() + "\n"
+        )
+
+        # no_cleanup: keep the orphaned event stream so get_jobs exercises the
+        # event-application path deterministically.
+        provider = WorkspaceStateProvider(workspace, no_cleanup=True)
+        job_ids = {j.identifier for j in provider.get_jobs("relaunch")}
+
+        assert "t1" in job_ids
+        assert "t3" in job_ids
+        assert "t2" not in job_ids, (
+            "Job from a previous run leaked into the current run's job list"
+        )
+
 
 # =============================================================================
 # Tests: Event Detection (File Watcher)
