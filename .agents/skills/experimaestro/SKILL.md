@@ -220,6 +220,26 @@ task2 = Task2.C(...).submit()
 task3 = Task3.C(inputs=[task1, task2]).submit()  # Waits for task1 and task2
 ```
 
+### Getting a task's identifier
+
+Every `Config`/`Task` has a unique identifier computed from its parameters.
+Use `__identifier__()` to retrieve it:
+
+```python
+task = MyTask.C(x=1, y="a")
+
+ident = task.__identifier__()    # Identifier object
+hexid = ident.all.hex()          # hex hash that names the job directory
+str(ident)                       # same hex string
+
+# Task class id (the __xpmid__ / type name)
+type_id = str(task.__xpmtype__.identifier)
+```
+
+The job directory is `workdir/jobs/<type_id>/<hexid>/`. The identifier reflects
+the current parameter values; it is frozen once the config is sealed (at submit
+time), so changing a parameter afterwards is not allowed.
+
 ## Resumable Tasks
 
 For long-running tasks that may timeout (e.g., SLURM walltime):
