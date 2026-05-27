@@ -324,8 +324,9 @@ Default launcher, runs tasks as local processes.
 ```python
 from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
 
-launcher = SlurmLauncher(nodes=1)
-gpulauncher = launcher.config(gpu_per_node=1)
+launcher = SlurmLauncher(options=SlurmOptions(nodes=1))
+# .config(**kwargs) returns a new launcher with the options merged in
+gpulauncher = launcher.config(gpus_per_node=1)
 
 with experiment(workdir, "my-experiment", launcher=launcher) as xp:
     # Default launcher
@@ -422,6 +423,46 @@ def on_checkpoint(checkpoint: Checkpoint):
 learn = Learn.C(model=model, validation=validation)
 learn.watch_output(validation.checkpoint, on_checkpoint)
 learn.submit()
+```
+
+## Prepare (data preparation)
+
+`Prepare` is a `Config` declaring an in-process step that runs *before* any task
+depending on it (downloading a dataset, fetching credentials, warming a cache).
+Subclass it and override `prepare()`:
+
+```python
+from experimaestro import Prepare, Task, Param
+
+class DatasetPrep(Prepare):
+    name: Param[str]
+
+    def prepare(self) -> None:
+        # Must be idempotent: the underlying tool should no-op when cache is warm
+        actually_fetch_dataset(self.name)
+
+class Train(Task):
+    dataset: Param[DatasetPrep]
+
+    def execute(self):
+        ...
+
+# Referencing a Prepare in a task's params auto-attaches an in-memory dependency
+Train.C(dataset=DatasetPrep.C(name="foo")).submit()
+```
+
+Key points:
+
+- **No on-disk footprint**: a `Prepare` is a resource, not a job — no workdir
+  under `jobs/`, no `.done` marker. Idempotence is `prepare()`'s responsibility.
+- **Dedup by identifier**: instances with the same params share one `prepare()`
+  call per process; distinct ones run concurrently.
+- **`prepare()` runs in the driver process** (via `asyncio.to_thread`).
+- **`RunMode.PREPARE`**: run only the discovered Prepares, skipping tasks — useful
+  to pre-warm caches before submitting to an offline cluster:
+
+```bash
+experimaestro run-experiment --run-mode PREPARE my_experiment.yaml
 ```
 
 ## Deprecation
