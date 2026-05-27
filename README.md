@@ -53,6 +53,27 @@ Checkout the git directory, then
 pip install -e .
 ```
 
+# Coding assistant skill
+
+Experimaestro ships an [agent skill](https://www.anthropic.com/news/skills) that
+teaches LLM coding assistants (Claude Code, Cursor, …) the framework's
+conventions and best practices. Install it with:
+
+```bash
+# Default: ~/.agents/skills/ (cross-client open standard)
+experimaestro install-skill
+
+# Install for a specific tool
+experimaestro install-skill claude     # ~/.claude/skills/
+experimaestro install-skill cursor     # ~/.cursor/skills/
+
+# Install to several targets at once
+experimaestro install-skill agents claude
+
+# List available targets and what is already installed
+experimaestro install-skill --list
+```
+
 # Example
 
 This very simple example shows how to submit two tasks that concatenate two strings.
