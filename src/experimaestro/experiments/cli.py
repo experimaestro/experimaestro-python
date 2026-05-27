@@ -156,7 +156,7 @@ class ConfigurationLoader:
 )
 @click.option(
     "--run-mode",
-    type=click.Choice(RunMode),
+    type=click.Choice(RunMode, case_sensitive=False),
     default=RunMode.NORMAL,
     help="Sets the run mode",
 )
