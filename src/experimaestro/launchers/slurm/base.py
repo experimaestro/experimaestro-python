@@ -110,7 +110,10 @@ class SlurmLauncherInformation:
                 return None
 
             time_str = result.stdout.strip()
-            if not time_str or time_str == "UNLIMITED":
+            # SLURM may return non-numeric placeholders depending on job state:
+            # UNLIMITED (no time limit), NOT_SET (not yet started),
+            # INVALID / N/A (no meaningful remaining time, e.g. completed jobs).
+            if not time_str or time_str in ("UNLIMITED", "NOT_SET", "INVALID", "N/A"):
                 return None
 
             return self._parse_slurm_time(time_str)
