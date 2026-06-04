@@ -54,11 +54,11 @@ class Service(BaseService):
     _experiment: Optional["Experiment"] = None
     _error: Optional[str] = None
 
-    def __init__(self):
+    def __init__(self, log_directory: Optional[Path] = None):
         self._listeners: Set[ServiceListener] = set()
         self._listeners_lock = threading.Lock()
         self._error = None
-        self.log_directory: Optional[Path] = None
+        self.log_directory: Optional[Path] = log_directory
 
     def set_experiment(self, xp: "Experiment") -> None:
         """Called when the service is added to an experiment.
@@ -73,6 +73,7 @@ class Service(BaseService):
         self.log_directory = (
             self._experiment.workspace.scheduler_services_path / self.id
         )
+        logger.debug(f"DEBUG: Service {self.id} log_directory set to {self.log_directory}")
 
     @property
     def experiment_id(self) -> str:
@@ -120,7 +121,7 @@ class Service(BaseService):
         Returns:
             Dict with constructor kwargs.
         """
-        return {}
+        return {"log_directory": self.log_directory}
 
     def full_state_dict(self) -> dict:
         """Serialize service to dictionary for JSON serialization.
@@ -367,8 +368,8 @@ class WebService(Service):
                     time.sleep(1)
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, log_directory: Optional[Path] = None):
+        super().__init__(log_directory=log_directory)
         self.url = None
         self.thread = None
         self._stop_event = threading.Event()
@@ -580,8 +581,8 @@ class ProcessWebService(Service):
                     time.sleep(0.1)
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, log_directory: Optional[Path] = None):
+        super().__init__(log_directory=log_directory)
         self.url = None
         self.process: Optional[subprocess.Popen] = None
         self._start_lock = threading.Lock()
@@ -624,6 +625,13 @@ class ProcessWebService(Service):
         """Start the service as a subprocess"""
         # Build command to run service
         cmd = self._build_command()
+        
+        if self.log_directory is None:
+            raise RuntimeError(
+                f"Cannot start service {self.id}: log_directory is not set. "
+                "Ensure set_experiment() has been called or log_directory was provided."
+            )
+
         logger.info(
             "Starting service %s (log_directory=%s): %s",
             self.id,
@@ -632,8 +640,7 @@ class ProcessWebService(Service):
         )
 
         # Ensure log directory exists and redirect stdout/stderr to log files
-        if self.log_directory:
-            self.log_directory.mkdir(parents=True, exist_ok=True)
+        self.log_directory.mkdir(parents=True, exist_ok=True)
         stdout_file = open(self.stdout, "w") if self.stdout else subprocess.DEVNULL
         stderr_file = open(self.stderr, "w") if self.stderr else subprocess.DEVNULL
 
