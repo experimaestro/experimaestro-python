@@ -625,7 +625,7 @@ class ProcessWebService(Service):
         """Start the service as a subprocess"""
         # Build command to run service
         cmd = self._build_command()
-        
+
         if self.log_directory is None:
             raise RuntimeError(
                 f"Cannot start service {self.id}: log_directory is not set. "
