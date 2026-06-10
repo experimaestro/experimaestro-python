@@ -601,9 +601,9 @@ class ConfigInformation:
                                         logging.warning("Ignoring %s", k)
                                     value = argument.generator(self.context, config)
                                 else:
-                                    assert False, (
-                                        "generator has either two parameters (context and config), or none"
-                                    )
+                                    assert (
+                                        False
+                                    ), "generator has either two parameters (context and config), or none"
                             config.__xpm__.set(k, value, bypass=True)
                         else:
                             value = config.__xpm__.values.get(k)
@@ -975,9 +975,9 @@ class ConfigInformation:
             be able to run concurrently with the producing task.
         """
         assert not isinstance(config, Task), "Cannot set a dependency on a task"
-        assert isinstance(config, ConfigMixin), (
-            "Only configurations can be marked as dependent on a task"
-        )
+        assert isinstance(
+            config, ConfigMixin
+        ), "Only configurations can be marked as dependent on a task"
 
         if config.__xpm__.task is self.pyobject:
             return
@@ -1255,9 +1255,9 @@ class ConfigInformation:
         :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
-        assert not (as_instance and return_tasks), (
-            "Cannot set as_instance and return_tasks to True"
-        )
+        assert not (
+            as_instance and return_tasks
+        ), "Cannot set as_instance and return_tasks to True"
         if callable(path):
             data_loader = path
         else:
@@ -1588,9 +1588,9 @@ class ConfigInformation:
                     # Unwrap the value if needed
                     setattr(o, name, v)
 
-                    assert getattr(o, name) is v, (
-                        f"Problem with deserialization {name} of {o.__class__}"
-                    )
+                    assert (
+                        getattr(o, name) is v
+                    ), f"Problem with deserialization {name} of {o.__class__}"
                 else:
                     o.__xpm__.set(name, v, bypass=True)
 
@@ -1655,9 +1655,16 @@ class ConfigInformation:
         return o
 
     class FromPython(ConfigWalk):
-        def __init__(self, context: ConfigWalkContext, *, objects: ObjectStore = None):
+        def __init__(
+            self,
+            context: ConfigWalkContext,
+            *,
+            objects: ObjectStore = None,
+            keep: bool = False,
+        ):
             super().__init__(context)
             self.objects = ObjectStore() if objects is None else objects
+            self.keep = keep
 
         def preprocess(self, config: "Config"):
             if self.objects.is_constructed(id(config)):
@@ -1684,17 +1691,26 @@ class ConfigInformation:
             # Call __post_init__
             stub.__post_init__()
 
+            if self.keep:
+                object.__setattr__(stub, "__config__", config)
+
             self.objects.set_constructed(id(config))
             return stub
 
-    def fromConfig(self, context: ConfigWalkContext, *, objects: ObjectStore = None):
+    def fromConfig(
+        self,
+        context: ConfigWalkContext,
+        *,
+        objects: ObjectStore = None,
+        keep: bool = False,
+    ):
         """Generate an instance given the current configuration"""
 
         # Validate and seal
         self.validate()
         self.seal(context)
 
-        processor = ConfigInformation.FromPython(context, objects=objects)
+        processor = ConfigInformation.FromPython(context, objects=objects, keep=keep)
         last_object = processor(self.pyobject)
 
         return last_object
@@ -2001,14 +2017,11 @@ class ConfigMixin:
 
             context = EmptyContext()
         else:
-            assert isinstance(context, ConfigWalkContext), (
-                f"{context.__class__} is not an instance of ConfigWalkContext"
-            )
+            assert isinstance(
+                context, ConfigWalkContext
+            ), f"{context.__class__} is not an instance of ConfigWalkContext"
 
-        instance = self.__xpm__.fromConfig(context, objects=objects)  # type: ignore
-        if keep:
-            object.__setattr__(instance, "__config__", self)
-        return instance
+        return self.__xpm__.fromConfig(context, objects=objects, keep=keep)  # type: ignore
 
     def submit(
         self,
@@ -2164,13 +2177,31 @@ class Config:
         result: dict[str, SerializedPath] = {}
         for argument, value in self.__xpm__.xpmvalues():
             if argument.is_data and value is not None:
-                assert isinstance(value, Path), (
-                    f"Data arguments should be paths (type is {type(value)})"
-                )
+                assert isinstance(
+                    value, Path
+                ), f"Data arguments should be paths (type is {type(value)})"
                 result[argument.name] = context.serialize(
                     context.var_path + [argument.name], value, self
                 )
         return result
+
+    @property
+    def xpmconfig(self) -> T:
+        """Returns the original configuration for this instance.
+
+        This property is available if the instance was created with
+        `keep=True` (which is the default for `Config.instance`).
+        If called on a configuration object, it returns the object itself.
+        """
+        if isinstance(self, ConfigMixin):
+            return self  # type: ignore
+
+        if hasattr(self, "__config__"):
+            return getattr(self, "__config__")
+        raise AttributeError(
+            f"Object of type {type(self)} has no configuration tracked. "
+            "Ensure it was instantiated with .instance(keep=True)"
+        )
 
     @classproperty
     def XPMConfig(cls):
