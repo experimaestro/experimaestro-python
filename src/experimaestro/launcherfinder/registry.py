@@ -32,7 +32,7 @@ def load_yaml(schema, path: Path):
     with path.open("rt") as fp:
         cfg = OmegaConf.load(fp)
         return OmegaConf.to_container(
-            OmegaConf.merge(cfg, schema), structured_config_mode=SCMode.INSTANTIATE
+            OmegaConf.merge(schema, cfg), structured_config_mode=SCMode.INSTANTIATE
         )
 
 
