@@ -947,6 +947,54 @@ class LeafImpl(Leaf, BaseImpl):
     pass
 ```
 
+(accessing-configuration)=
+## Accessing configuration from instances
+
+When a configuration is instantiated (via `config.instance()`), it is often
+useful to access the original configuration object from the resulting instance.
+This is made possible by the `xpmconfig` property.
+
+By default, `config.instance()` tracks the original configuration. This
+behavior can be controlled with the `keep` parameter (which defaults to `True`).
+
+```python
+config = MyModel.C(gamma=0.1)
+instance = config.instance()
+
+# Access the original configuration
+assert instance.xpmconfig is config
+```
+
+### Recursive tracking
+
+Configuration tracking is recursive. If a configuration contains other
+configuration objects as parameters, those sub-configurations are also
+instantiated, and their instances will also have their `xpmconfig` property
+set to the corresponding original sub-configuration.
+
+```python
+sub_config = SubModel.C(x=1)
+main_config = MainModel.C(sub=sub_config)
+instance = main_config.instance()
+
+# Recursive tracking
+assert instance.sub.xpmconfig is sub_config
+```
+
+### Unified API
+
+The `xpmconfig` property is available on both configuration objects and
+their instances. When called on a configuration object, it returns
+the object itself. This allows configuration and instances to be used
+interchangeably in many contexts.
+
+```python
+def process(obj):
+    # Works whether obj is a Config or an instantiated value
+    config = obj.xpmconfig
+    print(f"Processing with config: {config}")
+```
+
 (instance-based-configurations)=
 ## Instance-based configurations
 
