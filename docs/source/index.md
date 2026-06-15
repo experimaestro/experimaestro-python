@@ -1,23 +1,26 @@
-# Experimaestro 
+# Experimaestro
 
 [![GitHub Release](https://img.shields.io/github/v/release/experimaestro/experimaestro-python)](https://github.com/experimaestro/experimaestro-python)
 
-## Introduction
+**Experimaestro** is a Python framework designed for researchers and engineers who need to manage complex, large-scale experimental workflows without losing track of reproducibility.
 
-Experimaestro is a versatile tool for designing and managing complex workflows.
-It enables the definition of tasks and their dependencies, ensuring orderly
-execution within a workflow. Key features of Experimaestro include:
+Unlike traditional schedulers, Experimaestro focuses on the **experimental logic**: how configurations relate to each other and how results are organized.
 
-- **Task Automation and Caching**: Automates repetitive tasks, facilitating large-scale
-  experiments, especially useful when varying parameters or datasets.
-- **Extensibility**: Designed for flexibility, Experimaestro can easily be integrated with
-  existing libraries, serving the diverse needs of data science and research.
-- **Reproducibility**: Maintains comprehensive records of experiments, including
-  parameters and environments, supporting the essential research principle of
-  reproducibility.
-- **User Interface**: Offers a user interface for workflow management and
-  visualization, complementing its primary back-end functionality.
+![Experimaestro TUI](./img/tui-jobs.png)
 
+## Why Experimaestro?
+
+Experimaestro solves common pain points in research workflows by providing:
+
+- **🚀 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
+
+- 🛡️ **Deduplication & Reproducibility**: Every task is assigned a unique identifier based on its parameters. If you try to run the same experiment twice, Experimaestro knows—ensuring you never waste compute time on results you already have.
+
+- 📁 **Organized by Design** Results are automatically cached in a predictable directory structure derived from task identifiers. No more "results_v2_final_fixed.pt"—your file system stays as clean as your code.
+
+- 🏗️ **Built-in Scalability** Seamlessly transition from local testing to high-performance clusters. Use **Connectors** (Local, SSH) and **Launchers** (Direct, Slurm) to run the same experimental code across different environments.
+
+---
 
 ## Difference with Other Projects
 
@@ -67,7 +70,7 @@ Control where and how your code runs:
   - [Jupyter Integration](./jupyter.md): Interact with your experiments from notebooks.
   - [API Reference](./api/index.md): Deep dive into the classes and methods.
 
-# Documentation Outline
+# Detailed Outline
 
 ```{toctree}
 ---
