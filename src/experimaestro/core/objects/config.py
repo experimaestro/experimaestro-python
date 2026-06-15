@@ -1660,7 +1660,7 @@ class ConfigInformation:
             context: ConfigWalkContext,
             *,
             objects: ObjectStore = None,
-            keep: bool = False,
+            keep: bool = True,
         ):
             super().__init__(context)
             self.objects = ObjectStore() if objects is None else objects
@@ -1702,7 +1702,7 @@ class ConfigInformation:
         context: ConfigWalkContext,
         *,
         objects: ObjectStore = None,
-        keep: bool = False,
+        keep: bool = True,
     ):
         """Generate an instance given the current configuration"""
 
