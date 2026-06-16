@@ -1,5 +1,7 @@
 import sys
 import yaml
+import os
+import re
 from enum import Enum
 from pydantic import TypeAdapter
 from dataclasses import field, dataclass
@@ -222,6 +224,26 @@ class Settings:
     """Settings for environmental impact tracking"""
 
 
+def _interpolate(obj, is_env=False):
+    """Interpolate environment variables and coerce types if needed"""
+    if isinstance(obj, dict):
+        return {k: _interpolate(v, is_env or k == "env") for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_interpolate(v, is_env) for v in obj]
+    if isinstance(obj, str):
+        # Handle ${oc.env:VAR} and ${oc.env.VAR}
+        pattern = re.compile(r"\$\{oc\.env[:.]([^}]+)\}")
+
+        def replacer(match):
+            var_name = match.group(1)
+            return os.environ.get(var_name, match.group(0))
+
+        return pattern.sub(replacer, obj)
+    if is_env and isinstance(obj, (int, float, bool)):
+        return str(obj)
+    return obj
+
+
 @lru_cache()
 def get_settings(path: Optional[Path] = None) -> Settings:
     if getattr(sys, "_called_from_test", False):
@@ -229,6 +251,7 @@ def get_settings(path: Optional[Path] = None) -> Settings:
         settings.carbon.enabled = False
         return settings
     else:
+        # Pydantic 2.x adapter
         adapter = TypeAdapter(Settings)
 
         path = path or Path("~/.config/experimaestro/settings.yaml").expanduser()
@@ -237,6 +260,10 @@ def get_settings(path: Optional[Path] = None) -> Settings:
 
         with path.open("rt") as fp:
             conf = yaml.safe_load(fp)
+
+        # Interpolate environment variables and coerce env values
+        conf = _interpolate(conf)
+
         return adapter.validate_python(conf)
 
 
