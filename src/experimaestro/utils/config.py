@@ -1,0 +1,97 @@
+import logging
+from functools import partial
+from typing import Any, Dict, List, Type, TypeVar, Annotated
+import attr
+from pydantic import create_model, ConfigDict, BeforeValidator
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge two dictionaries"""
+    for key, value in overrides.items():
+        if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+            deep_merge(base[key], value)
+        else:
+            if key in base:
+                logger.debug(f"Overwriting key '{key}': {base[key]} -> {value}")
+            base[key] = value
+    return base
+
+
+def from_dotlist(dotlist: List[str]) -> Dict[str, Any]:
+    """Convert a dotlist (key=value) to a nested dictionary"""
+    result = {}
+    for item in dotlist:
+        if "=" not in item:
+            logger.warning(f"Invalid dotlist item (missing '='): {item}")
+            continue
+        key, value = item.split("=", 1)
+        parts = key.split(".")
+        d = result
+        for part in parts[:-1]:
+            d = d.setdefault(part, {})
+        d[parts[-1]] = value
+    return result
+
+
+def validate_attrs(cls: Type[T], data: Any) -> T:
+    """Validate data against an attrs class using Pydantic"""
+    if isinstance(data, cls):
+        return data
+
+    if not isinstance(data, dict):
+        # Let Pydantic handle it if it's not a dict (might be invalid)
+        from pydantic import TypeAdapter
+        return TypeAdapter(cls, config={"arbitrary_types_allowed": True}).validate_python(data)
+
+    if not attr.has(cls):
+        # Fallback to standard Pydantic validation if not an attrs class
+        from pydantic import TypeAdapter
+        return TypeAdapter(cls, config={"arbitrary_types_allowed": True}).validate_python(data)
+
+    fields = attr.fields(cls)
+    model_fields = {}
+    for f in fields:
+        # Get the type, handle missing types as Any
+        f_type = f.type if f.type is not None else Any
+
+        # Recursively handle nested attrs classes
+        if attr.has(f_type):
+            f_type = Annotated[f_type, BeforeValidator(partial(validate_attrs, f_type))]
+
+        # Handle default value
+        if f.default is not attr.NOTHING:
+            if isinstance(f.default, attr.Factory):
+                model_fields[f.name] = (f_type, None)
+            else:
+                model_fields[f.name] = (f_type, f.default)
+        else:
+            model_fields[f.name] = (f_type, ...)
+
+    # Create a dynamic Pydantic model
+    PydanticModel = create_model(
+        cls.__name__,
+        __config__=ConfigDict(extra="allow", arbitrary_types_allowed=True),
+        **model_fields
+    )
+
+    # Validate
+    validated_model = PydanticModel(**data)
+
+    # Extract only the fields that the attrs class expects
+    attrs_data = {}
+    for f in fields:
+        if hasattr(validated_model, f.name):
+            val = getattr(validated_model, f.name)
+
+            # If the value is None and it wasn't explicitly provided in the data,
+            # and there's a factory, let attrs handle it at instantiation
+            if val is None and f.name not in data and isinstance(f.default, attr.Factory):
+                continue
+
+            attrs_data[f.name] = val
+
+    return cls(**attrs_data)
