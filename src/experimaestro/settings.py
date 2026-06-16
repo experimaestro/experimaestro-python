@@ -1,6 +1,7 @@
 import sys
+import yaml
 from enum import Enum
-from omegaconf import OmegaConf, SCMode
+from pydantic import TypeAdapter
 from dataclasses import field, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -228,18 +229,15 @@ def get_settings(path: Optional[Path] = None) -> Settings:
         settings.carbon.enabled = False
         return settings
     else:
-        schema = OmegaConf.structured(Settings)
+        adapter = TypeAdapter(Settings)
 
         path = path or Path("~/.config/experimaestro/settings.yaml").expanduser()
         if not path.is_file():
-            return OmegaConf.to_container(
-                schema, structured_config_mode=SCMode.INSTANTIATE
-            )
+            return adapter.validate_python({})
 
-        conf = OmegaConf.load(path)
-        return OmegaConf.to_container(
-            OmegaConf.merge(schema, conf), structured_config_mode=SCMode.INSTANTIATE
-        )
+        with path.open("rt") as fp:
+            conf = yaml.safe_load(fp)
+        return adapter.validate_python(conf)
 
 
 def get_workspace(

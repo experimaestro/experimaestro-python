@@ -1,7 +1,15 @@
 from enum import Enum
-from omegaconf import MISSING
-from typing import Optional, List
+from typing import Optional, List, Any
 import attr
+
+class MissingSentinel:
+    def __repr__(self):
+        return "MISSING"
+
+    def __bool__(self):
+        return False
+
+MISSING: Any = MissingSentinel()
 
 try:
     from typing import dataclass_transform

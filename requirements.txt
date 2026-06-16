@@ -1,6 +1,6 @@
 # CLI
 click
-omegaconf
+pydantic
 
 # Supports recent typing
 typing_extensions >= 4.2; python_version < "3.11"

@@ -5,7 +5,8 @@ from typing import ClassVar, Dict, Optional, Set, Type, Union
 
 from pathlib import Path
 import typing
-from omegaconf import DictConfig, OmegaConf, SCMode
+import yaml
+from pydantic import TypeAdapter
 from importlib.metadata import entry_points
 from experimaestro.utils import logger
 from .base import ConnectorConfiguration, TokenConfiguration
@@ -24,16 +25,22 @@ Connectors = Dict[str, Dict[str, ConnectorConfiguration]]
 Tokens = Dict[str, Dict[str, TokenConfiguration]]
 
 
-def load_yaml(schema, path: Path):
+def load_yaml(schema_map: Dict[str, Type], path: Path):
     if not path.is_file():
         return {}
 
     logger.debug("Loading %s", path)
     with path.open("rt") as fp:
-        cfg = OmegaConf.load(fp)
-        return OmegaConf.to_container(
-            OmegaConf.merge(schema, cfg), structured_config_mode=SCMode.INSTANTIATE
-        )
+        cfg = yaml.safe_load(fp)
+
+    result = {}
+    for key, value in cfg.items():
+        if key in schema_map:
+            adapter = TypeAdapter(schema_map[key])
+            result[key] = adapter.validate_python(value)
+        else:
+            result[key] = value
+    return result
 
 
 @contextmanager
@@ -70,8 +77,8 @@ class LauncherRegistry:
         LauncherRegistry.CURRENT_CONFIG_DIR = config_dir
 
     def __init__(self, basepath: Path):
-        self.connectors_schema = DictConfig({})
-        self.tokens_schema = DictConfig({})
+        self.connectors_schema: Dict[str, Type] = {}
+        self.tokens_schema: Dict[str, Type] = {}
         self.find_launcher_fn = None
 
         # Use entry points for connectors and launchers
@@ -106,10 +113,10 @@ class LauncherRegistry:
         self.tokens = load_yaml(self.tokens_schema, basepath / "tokens.yaml")
 
     def register_connector(self, identifier: str, cls: Type):
-        self.connectors_schema.merge_with({identifier: cls})
+        self.connectors_schema[identifier] = cls
 
     def register_token(self, identifier: str, cls: Type):
-        self.tokens_schema.merge_with({identifier: cls})
+        self.tokens_schema[identifier] = cls
 
     def getToken(self, identifier: str) -> "Token":
         for tokens in self.tokens.values():

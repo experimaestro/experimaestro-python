@@ -10,8 +10,6 @@ from pathlib import Path
 import threading
 from typing import Dict, Type
 
-from omegaconf import DictConfig
-
 from experimaestro.core.objects import Config
 from experimaestro.launcherfinder.base import TokenConfiguration
 from experimaestro.launcherfinder.registry import LauncherRegistry
@@ -223,7 +221,7 @@ class CounterToken(Token, TrackedDynamicResource):
     def init_registry(registry: LauncherRegistry):
         registry.register_token(
             "countertoken",
-            DictConfig({}, key_type=str, element_type=CounterConfiguration),
+            Dict[str, CounterConfiguration],
         )
 
     @property

@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Protocol, Tuple
 
 import click
-import omegaconf
 import yaml
-from omegaconf import OmegaConf, SCMode
 from termcolor import cprint
 
 from experimaestro.exceptions import HandledException
@@ -18,6 +16,7 @@ from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.launcherfinder.registry import LauncherRegistry
 from experimaestro.scheduler.workspace import RunMode
 from experimaestro.settings import find_workspace
+from experimaestro.utils.config import deep_merge, from_dotlist, validate_attrs
 from experimaestro.utils.logging import setup_logging
 
 if TYPE_CHECKING:
@@ -302,9 +301,12 @@ def experiments_cli(  # noqa: C901
         conf_loader.load(Path(y))
 
     # --- Merge the YAMLs
-    configuration = OmegaConf.merge(*conf_loader.yamls)
+    configuration = {}
+    for yaml_dict in conf_loader.yamls:
+        deep_merge(configuration, yaml_dict)
+
     if extra_conf:
-        configuration.merge_with(OmegaConf.from_dotlist(extra_conf))
+        deep_merge(configuration, from_dotlist(extra_conf))
 
     # --- Get the XP file
     python_path = list(conf_loader.python_path)
@@ -429,23 +431,16 @@ def experiments_cli(  # noqa: C901
             f"in module {module_name}"
         )
 
-    omegaconf_schema = OmegaConf.structured(schema())
-
-    if omegaconf_schema is not None:
-        try:
-            configuration = OmegaConf.merge(omegaconf_schema, configuration)
-        except omegaconf.errors.ConfigKeyError as e:
-            cprint(f"Error in configuration:\n\n{e}", "red", file=sys.stderr)
-            raise click.ClickException("Error in configuration")
-
     if show:
-        print(json.dumps(OmegaConf.to_container(configuration)))  # noqa: T201
+        print(json.dumps(configuration))  # noqa: T201
         sys.exit(0)
 
     # Move to an object container
-    xp_configuration: ConfigurationBase = OmegaConf.to_container(
-        configuration, structured_config_mode=SCMode.INSTANTIATE
-    )
+    try:
+        xp_configuration: ConfigurationBase = validate_attrs(schema, configuration)
+    except Exception as e:
+        cprint(f"Error in configuration:\n\n{e}", "red", file=sys.stderr)
+        raise click.ClickException("Error in configuration")
 
     # --- Sets up the experiment ID
     if xp_configuration.add_timestamp:
