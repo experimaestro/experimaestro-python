@@ -231,8 +231,8 @@ def _interpolate(obj, is_env=False):
     if isinstance(obj, list):
         return [_interpolate(v, is_env) for v in obj]
     if isinstance(obj, str):
-        # Handle ${oc.env:VAR} and ${oc.env.VAR}
-        pattern = re.compile(r"\$\{oc\.env[:.]([^}]+)\}")
+        # Handle ${env:VAR}, ${env.VAR}, ${oc.env:VAR} and ${oc.env.VAR}
+        pattern = re.compile(r"\$\{(?:oc\.)?env[:.]([^}]+)\}")
 
         def replacer(match):
             var_name = match.group(1)
