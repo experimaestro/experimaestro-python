@@ -1,4 +1,5 @@
 import logging
+from enum import Enum
 from functools import partial
 from typing import Any, Dict, List, Type, TypeVar, Annotated
 import attr
@@ -7,6 +8,31 @@ from pydantic import create_model, ConfigDict, BeforeValidator
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def _suggest_enum(enum_cls: Type[Enum], value: Any) -> Any:
+    """Give a helpful error for near-miss enum strings (e.g. ``WARN`` -> ``warn``).
+
+    Valid inputs are passed through to Pydantic's enum validation untouched.
+    A string that does not match a value but matches one case-insensitively
+    (either the value or the member name) raises a message suggesting the
+    canonical (lowercase) value rather than the generic enum error.
+    """
+    if isinstance(value, str):
+        valid_values = {m.value for m in enum_cls}
+        if value not in valid_values:
+            lowered = value.lower()
+            for m in enum_cls:
+                canonical = m.value
+                if (
+                    isinstance(canonical, str)
+                    and canonical.lower() == lowered
+                    or m.name.lower() == lowered
+                ):
+                    raise ValueError(
+                        f"{value!r} is not valid; use the lowercase value {canonical!r}"
+                    )
+    return value
 
 
 def deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
@@ -45,12 +71,18 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
     if not isinstance(data, dict):
         # Let Pydantic handle it if it's not a dict (might be invalid)
         from pydantic import TypeAdapter
-        return TypeAdapter(cls, config={"arbitrary_types_allowed": True}).validate_python(data)
+
+        return TypeAdapter(
+            cls, config={"arbitrary_types_allowed": True}
+        ).validate_python(data)
 
     if not attr.has(cls):
         # Fallback to standard Pydantic validation if not an attrs class
         from pydantic import TypeAdapter
-        return TypeAdapter(cls, config={"arbitrary_types_allowed": True}).validate_python(data)
+
+        return TypeAdapter(
+            cls, config={"arbitrary_types_allowed": True}
+        ).validate_python(data)
 
     fields = attr.fields(cls)
     model_fields = {}
@@ -61,6 +93,10 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
         # Recursively handle nested attrs classes
         if attr.has(f_type):
             f_type = Annotated[f_type, BeforeValidator(partial(validate_attrs, f_type))]
+
+        # Suggest the canonical (lowercase) value for near-miss enum strings
+        elif isinstance(f_type, type) and issubclass(f_type, Enum):
+            f_type = Annotated[f_type, BeforeValidator(partial(_suggest_enum, f_type))]
 
         # Handle default value
         if f.default is not attr.NOTHING:
@@ -75,7 +111,7 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
     PydanticModel = create_model(
         cls.__name__,
         __config__=ConfigDict(extra="allow", arbitrary_types_allowed=True),
-        **model_fields
+        **model_fields,
     )
 
     # Validate
@@ -89,7 +125,11 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
 
             # If the value is None and it wasn't explicitly provided in the data,
             # and there's a factory, let attrs handle it at instantiation
-            if val is None and f.name not in data and isinstance(f.default, attr.Factory):
+            if (
+                val is None
+                and f.name not in data
+                and isinstance(f.default, attr.Factory)
+            ):
                 continue
 
             attrs_data[f.name] = val

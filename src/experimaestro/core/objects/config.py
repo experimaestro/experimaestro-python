@@ -8,6 +8,7 @@ from attr import define
 from experimaestro import taskglobals
 from experimaestro.locking import create_file_lock
 
+from pydantic_core import ValidationError
 from termcolor import cprint
 from pathlib import Path
 import logging
@@ -232,6 +233,22 @@ class TaskStub:
     """The type name of the task (e.g., 'mymodule.MyTask')"""
 
 
+@define
+class SetInfo:
+    """Provenance of a parameter value: where and how it was set.
+
+    This is pure debug metadata -- it never enters the identifier hash and is
+    not serialized. It exists to help users trace where a (possibly invalid)
+    value came from in their own code.
+    """
+
+    #: Source location as "path:line", or a marker like "<generated>"
+    location: str
+
+    #: How the value was set
+    kind: str  # "explicit" | "default" | "generated" | "deserialized" | "composed"
+
+
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
@@ -270,6 +287,11 @@ class ConfigInformation:
         self.pyobject = pyobject
         self.xpmtype: "ObjectType" = pyobject.__xpmtype__
         self.values = {}
+
+        # Per-parameter provenance: maps argument name -> SetInfo (where/how the
+        # value was set). Debug metadata only -- never part of the identifier and
+        # not serialized.
+        self.provenance: dict[str, SetInfo] = {}
 
         # Meta-informations
         # Tags are stored as {name: (value, source_location)}
@@ -369,7 +391,7 @@ class ConfigInformation:
 
         return False
 
-    def set(self, k, v, bypass=False):
+    def set(self, k, v, bypass=False, *, source: str | None = None, kind="explicit"):
         from experimaestro.generators import Generator
 
         # Not an argument, bypass
@@ -400,7 +422,16 @@ class ConfigInformation:
                 ):
                     raise AttributeError("Property %s is read-only" % (k))
                 if v is not None:
-                    self.values[k] = argument.validate(v)
+                    try:
+                        self.values[k] = argument.validate(v)
+                    except ValidationError as e:
+                        # Enrich the pydantic error (which carries the location
+                        # within the value) with where the parameter was set.
+                        where = source or self._initinfo or "<unknown>"
+                        raise ValueError(
+                            f"Invalid value for parameter '{k}' of "
+                            f"{self.xpmtype.identifier} (set at {where}): {e}"
+                        ) from e
                     # Check for type variables
                     if type(argument.type) is TypeVarType:
                         self.check_typevar(argument.type.typevar, type(v))
@@ -412,6 +443,11 @@ class ConfigInformation:
                     raise AttributeError("Cannot set required attribute to None")
                 else:
                     self.values[k] = None
+
+                # Record provenance (debug metadata only)
+                self.provenance[k] = SetInfo(
+                    location=source or self._initinfo or "<unknown>", kind=kind
+                )
             else:
                 raise AttributeError(
                     "Cannot set non existing attribute %s in %s" % (k, self.xpmtype)
@@ -419,6 +455,14 @@ class ConfigInformation:
         except Exception:
             logger.exception("Error while setting value %s in %s", k, self.xpmtype)
             raise
+
+    def provenance_of(self, name: str) -> "SetInfo | None":
+        """Return where/how the given parameter was set, or None if unknown.
+
+        Useful for debugging: pairs the source location with the kind of set
+        (explicit, default, generated, deserialized, composed).
+        """
+        return self.provenance.get(name)
 
     def fuse_concrete_typevars(self, typevars: Dict[TypeVar, type]):
         """Fuses concrete type variables with the current ones"""
@@ -601,10 +645,16 @@ class ConfigInformation:
                                         logging.warning("Ignoring %s", k)
                                     value = argument.generator(self.context, config)
                                 else:
-                                    assert (
-                                        False
-                                    ), "generator has either two parameters (context and config), or none"
-                            config.__xpm__.set(k, value, bypass=True)
+                                    assert False, (
+                                        "generator has either two parameters (context and config), or none"
+                                    )
+                            config.__xpm__.set(
+                                k,
+                                value,
+                                bypass=True,
+                                source="<generated>",
+                                kind="generated",
+                            )
                         else:
                             value = config.__xpm__.values.get(k)
                     except Exception:
@@ -975,9 +1025,9 @@ class ConfigInformation:
             be able to run concurrently with the producing task.
         """
         assert not isinstance(config, Task), "Cannot set a dependency on a task"
-        assert isinstance(
-            config, ConfigMixin
-        ), "Only configurations can be marked as dependent on a task"
+        assert isinstance(config, ConfigMixin), (
+            "Only configurations can be marked as dependent on a task"
+        )
 
         if config.__xpm__.task is self.pyobject:
             return
@@ -1255,9 +1305,9 @@ class ConfigInformation:
         :return: a Config object, its instance or a tuple (instance, init_tasks) is return_tasks is True
         """
         # Load
-        assert not (
-            as_instance and return_tasks
-        ), "Cannot set as_instance and return_tasks to True"
+        assert not (as_instance and return_tasks), (
+            "Cannot set as_instance and return_tasks to True"
+        )
         if callable(path):
             data_loader = path
         else:
@@ -1588,11 +1638,13 @@ class ConfigInformation:
                     # Unwrap the value if needed
                     setattr(o, name, v)
 
-                    assert (
-                        getattr(o, name) is v
-                    ), f"Problem with deserialization {name} of {o.__class__}"
+                    assert getattr(o, name) is v, (
+                        f"Problem with deserialization {name} of {o.__class__}"
+                    )
                 else:
-                    o.__xpm__.set(name, v, bypass=True)
+                    o.__xpm__.set(
+                        name, v, bypass=True, source="<loaded>", kind="deserialized"
+                    )
 
             if as_instance:
                 # Calls post-init
@@ -1823,12 +1875,12 @@ class ConfigMixin:
         # Check if this is an XPM argument
         xpmtype = self.__xpmtype__
         if name in xpmtype.arguments:
+            source = get_caller_location(skip_frames=1)
             # Handle ConfigWrapper (tag, stop_tags, etc.)
             if isinstance(value, ConfigWrapper):
-                source = get_caller_location(skip_frames=1)
                 value.apply(xpm, name, source=source)
                 value = value.value
-            xpm.set(name, value)
+            xpm.set(name, value, source=source, kind="explicit")
             return
 
         # Check for deprecated replacement warning
@@ -1872,9 +1924,21 @@ class ConfigMixin:
         for name, value in xpmtype.arguments.items():
             if name not in kwargs:
                 if value.default is not None:
-                    self.__xpm__.set(name, clone(value.default), bypass=True)
+                    self.__xpm__.set(
+                        name,
+                        clone(value.default),
+                        bypass=True,
+                        source=xpm._initinfo,
+                        kind="default",
+                    )
                 elif not value.required:
-                    self.__xpm__.set(name, None, bypass=True)
+                    self.__xpm__.set(
+                        name,
+                        None,
+                        bypass=True,
+                        source=xpm._initinfo,
+                        kind="default",
+                    )
 
         # Initialize with arguments
         for name, value in kwargs.items():
@@ -1892,7 +1956,7 @@ class ConfigMixin:
                 value = value.value
 
             # Really set the value
-            xpm.set(name, value)
+            xpm.set(name, value, source=xpm._initinfo, kind="explicit")
 
     def __repr__(self):
         return f"Config[{self.__xpmtype__.identifier}]"
@@ -2017,9 +2081,9 @@ class ConfigMixin:
 
             context = EmptyContext()
         else:
-            assert isinstance(
-                context, ConfigWalkContext
-            ), f"{context.__class__} is not an instance of ConfigWalkContext"
+            assert isinstance(context, ConfigWalkContext), (
+                f"{context.__class__} is not an instance of ConfigWalkContext"
+            )
 
         return self.__xpm__.fromConfig(context, objects=objects, keep=keep)  # type: ignore
 
@@ -2177,9 +2241,9 @@ class Config:
         result: dict[str, SerializedPath] = {}
         for argument, value in self.__xpm__.xpmvalues():
             if argument.is_data and value is not None:
-                assert isinstance(
-                    value, Path
-                ), f"Data arguments should be paths (type is {type(value)})"
+                assert isinstance(value, Path), (
+                    f"Data arguments should be paths (type is {type(value)})"
+                )
                 result[argument.name] = context.serialize(
                     context.var_path + [argument.name], value, self
                 )

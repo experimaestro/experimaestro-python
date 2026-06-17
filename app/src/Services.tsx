@@ -1,31 +1,111 @@
-import React, { useState, useMemo } from "react";
-import { Spinner } from "react-bootstrap";
-import NavDropdown from 'react-bootstrap/NavDropdown';
+import React, { useState } from "react";
+import { Table, Badge, Button } from "react-bootstrap";
 
 import { useAppSelector } from "./store";
+import client from "./client";
+import LogViewer, { LogTarget } from "./LogViewer";
+
+const STATE_COLOR: { [key: string]: string } = {
+  STOPPED: "secondary",
+  STARTING: "info",
+  RUNNING: "success",
+  STOPPING: "warning",
+  ERROR: "danger",
+};
 
 const Services = () => {
-    const services = useAppSelector((state) => state.db.services);
+  const services = useAppSelector((state) => state.db.services);
+  const [logTarget, setLogTarget] = useState<LogTarget>();
 
-    if (services.ids.length == 0) return <></>
+  return (
+    <div className="mt-3">
+      <h5 className="mb-3">Services</h5>
+      {services.ids.length === 0 ? (
+        <p className="text-muted">No services.</p>
+      ) : (
+        <Table hover responsive className="align-middle">
+          <thead>
+            <tr>
+              <th>State</th>
+              <th>Service</th>
+              <th>Description</th>
+              <th>Sync</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {services.ids.map((id) => {
+              const svc = services.byId[id];
+              const running = svc.state === "RUNNING";
+              return (
+                <tr key={id}>
+                  <td>
+                    <Badge bg={STATE_COLOR[svc.state] || "secondary"}>
+                      {svc.state}
+                    </Badge>
+                  </td>
+                  <td>
+                    <code>{id}</code>
+                  </td>
+                  <td className="small">
+                    {svc.description}
+                    {svc.error && (
+                      <div className="text-danger small">{svc.error}</div>
+                    )}
+                  </td>
+                  <td className="text-muted small">{svc.syncStatus || "—"}</td>
+                  <td className="text-nowrap">
+                    {running ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline-primary"
+                          className="me-1"
+                          href={`/services/${id}`}
+                          target="_blank"
+                        >
+                          Open
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-danger"
+                          className="me-1"
+                          onClick={() => client.service_stop(id)}
+                        >
+                          Stop
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline-success"
+                        className="me-1"
+                        onClick={() => client.service_start(id)}
+                      >
+                        Start
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      onClick={() =>
+                        setLogTarget({ kind: "service", serviceId: id, title: id })
+                      }
+                    >
+                      Logs
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
+      {logTarget && (
+        <LogViewer target={logTarget} onHide={() => setLogTarget(undefined)} />
+      )}
+    </div>
+  );
+};
 
-    const STATE_COMPONENTS = {
-        STOPPED: <i className="fas fa-circle" style={{color: "red"}}></i>,
-        STARTING: <i className="fa-solid fa-circle-notch fa-spin" style={{color: "green"}}></i>,
-        RUNNING: <i className="fa-solid fa-circle" style={{color: "green"}}></i>,
-        STOPPING: <i className="fa-solid fa-circle-notch fa-spin" style={{color: "red"}}></i>
-    }
-    return <NavDropdown title="Services" id="basic-nav-dropdown">{
-        services.ids.map(id =>
-            <NavDropdown.Item key={id} href={`/services/${id}`} target='_blank'>
-                <code>{id}</code> {services.byId[id].description}{" "}
-                {STATE_COMPONENTS[services.byId[id].state] ?? services.byId[id].state}
-            </NavDropdown.Item>
-        )
-        }
-    </NavDropdown>
-
-}
-
-
-export default Services
+export default Services;

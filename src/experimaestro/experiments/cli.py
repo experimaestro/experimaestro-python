@@ -490,13 +490,15 @@ def experiments_cli(  # noqa: C901
                 if xp_holder is not None:
                     xp_holder["xp"] = xp
 
-                # Start web server if requested
+                # Start web server if requested. wait_for_quit=True keeps the
+                # server (and the experiment context) alive after the jobs
+                # finish, until the user stops it from the UI — mirroring the TUI.
                 if web and run_mode == RunMode.NORMAL:
                     settings = get_settings()
                     xp.scheduler.start_server(
                         settings.server,
                         workspace=xp.workspace,
-                        wait_for_quit=False,
+                        wait_for_quit=True,
                     )
                     logger.info(
                         "Web server started at http://%s:%d",
@@ -536,8 +538,21 @@ def experiments_cli(  # noqa: C901
                 helper.xp = xp
                 helper.run(list(args), xp_configuration)
 
-                # ... and wait
+                # ... and wait for the jobs to finish
                 xp.wait()
+
+                # Keep the web server up until the user stops it (like the TUI),
+                # so results can still be inspected after the jobs complete.
+                # Ctrl+C triggers the signal handler (xp.stop -> scheduler.exitmode),
+                # which the predicate below uses to release the wait.
+                if web and run_mode == RunMode.NORMAL:
+                    logger.info(
+                        "Experiment finished; web server still running. "
+                        "Stop it from the UI or press Ctrl+C to exit."
+                    )
+                    xp.scheduler.wait_for_server_quit(
+                        should_stop=lambda: getattr(xp.scheduler, "exitmode", False)
+                    )
 
         except HandledException as e:
             from experimaestro.scheduler.experiment import FailedExperiment

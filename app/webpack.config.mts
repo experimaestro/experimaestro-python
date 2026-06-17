@@ -95,7 +95,17 @@ const config: Configuration = {
               },
             },
           },
-          "sass-loader",
+          {
+            loader: "sass-loader",
+            options: {
+              // Silence Dart Sass deprecation warnings coming from third-party
+              // dependencies (fontawesome, bootstrap) imported from node_modules.
+              sassOptions: {
+                quietDeps: true,
+                silenceDeprecations: ["import", "global-builtin"],
+              },
+            },
+          },
         ],
       },
 
