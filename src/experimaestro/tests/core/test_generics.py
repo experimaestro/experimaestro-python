@@ -156,6 +156,71 @@ def test_core_generics_nested():
         a.x.x = "a string"
 
 
+# --- Two parameters sharing a type variable: a: A[T], b: B[T] --------------
+
+
+class AGeneric(Config, Generic[T]):
+    a_value: Param[T]
+
+
+class BGeneric(Config, Generic[T]):
+    b_value: Param[T]
+
+
+class OuterAB(Config, Generic[T]):
+    a: Param[AGeneric[T]]
+    b: Param[BGeneric[T]]
+
+
+def test_core_generics_two_params_shared_typevar():
+    """a: A[T] and b: B[T] must agree on T.
+
+    a=A[int] with b=B[int] is fine; a=A[int] with b=B[str] is a conflict.
+    """
+    # Consistent: both bind T to int
+    OuterAB.C(a=AGeneric.C(a_value=1), b=BGeneric.C(b_value=2))
+
+    # Inconsistent: a -> T=int, b -> T=str
+    with pytest.raises(TypeError):
+        OuterAB.C(a=AGeneric.C(a_value=1), b=BGeneric.C(b_value="s"))
+
+
+class ConfigX(Config):
+    pass
+
+
+class ConfigY(Config):
+    pass
+
+
+class ConfigXChild(ConfigX):
+    pass
+
+
+def test_core_generics_two_params_typevar_is_config():
+    """The shared T can itself be a Config class."""
+    # Consistent: both bind T to ConfigX
+    OuterAB.C(a=AGeneric.C(a_value=ConfigX.C()), b=BGeneric.C(b_value=ConfigX.C()))
+
+    # Subtyping is allowed: T escalates to the common ancestor ConfigX
+    OuterAB.C(a=AGeneric.C(a_value=ConfigX.C()), b=BGeneric.C(b_value=ConfigXChild.C()))
+
+    # Unrelated Config classes -> conflict (neither is a subtype of the other)
+    with pytest.raises(TypeError):
+        OuterAB.C(a=AGeneric.C(a_value=ConfigX.C()), b=BGeneric.C(b_value=ConfigY.C()))
+
+
+def test_core_generics_two_params_config_typevar_rebind_fails():
+    """Once T is bound to a Config via one param, a conflicting Config on the
+    other param (or on reassignment) is rejected."""
+    outer = OuterAB.C(
+        a=AGeneric.C(a_value=ConfigX.C()), b=BGeneric.C(b_value=ConfigXChild.C())
+    )
+    # T is bound to ConfigX; an unrelated Config conflicts
+    with pytest.raises(TypeError):
+        outer.a = AGeneric.C(a_value=ConfigY.C())
+
+
 class TreeGenericConfig(Config, Generic[T]):
     x: Param[T]
     left: Optional["TreeGenericConfig[T]"] = None
@@ -441,5 +506,6 @@ def test_core_generics_union_type_arg_rejects_non_member():
     class HFTokenizerAdapter(Config):
         converter: Param[Converter[str, HFTokenizerInput]]
 
-    with pytest.raises(TypeError):
+    # Value validation now raises a pydantic ValidationError (a ValueError)
+    with pytest.raises((TypeError, ValueError)):
         HFTokenizerAdapter.C(converter=IntConverter.C())

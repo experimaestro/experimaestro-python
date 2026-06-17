@@ -58,12 +58,15 @@ def get_optional(typehint):
 
 
 def get_list_component(typehint):
-    """Returns the list component (or None if not a list)"""
-    if isgenericalias(typehint):
-        # Python 3.6, 3.7+ test
-        if typehint.__origin__ in [typing.List, list]:
-            assert len(typehint.__args__) == 1
-            return typehint.__args__[0]
+    """Returns the list component (or None if not a list).
+
+    Uses get_origin so both typing.List[...] and the builtin list[...] alias
+    are detected.
+    """
+    if get_origin(typehint) in (typing.List, list):
+        args = get_args(typehint)
+        if len(args) == 1:
+            return args[0]
     return None
 
 
@@ -74,11 +77,11 @@ get_list = get_list_component
 
 
 def get_set(typehint):
-    """Returns the set component (or None if not a set)"""
-    if isgenericalias(typehint):
-        if typehint.__origin__ in [typing.Set, set]:
-            assert len(typehint.__args__) == 1
-            return typehint.__args__[0]
+    """Returns the set component (or None if not a set)."""
+    if get_origin(typehint) in (typing.Set, set):
+        args = get_args(typehint)
+        if len(args) == 1:
+            return args[0]
     return None
 
 
@@ -99,11 +102,29 @@ def get_type(typehint):
 
 
 def get_dict(typehint):
-    if isgenericalias(typehint):
-        # Python 3.6, 3.7+ test
-        if typehint.__origin__ in [typing.Dict, dict]:
-            assert len(typehint.__args__) == 2
-            return typehint.__args__
+    if get_origin(typehint) in (typing.Dict, dict):
+        args = get_args(typehint)
+        if len(args) == 2:
+            return args
+    return None
+
+
+def get_tuple(typehint):
+    """Returns the tuple component or None if not a tuple.
+
+    Returns a ``(subtypes, variadic)`` pair where:
+    - ``tuple[X, Y]`` -> ``([X, Y], False)`` (fixed, heterogeneous)
+    - ``tuple[X, ...]`` -> ``([X], True)`` (variadic, homogeneous)
+    """
+    # Use get_origin so both typing.Tuple[...] (typing._GenericAlias) and the
+    # builtin tuple[...] (types.GenericAlias) are detected.
+    if get_origin(typehint) in (typing.Tuple, tuple):
+        args = get_args(typehint)
+        if not args:
+            return None
+        if len(args) == 2 and args[1] is Ellipsis:
+            return ([args[0]], True)
+        return (list(args), False)
     return None
 
 
