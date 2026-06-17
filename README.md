@@ -1,5 +1,13 @@
-[![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
-[![RTD](https://readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io)
+<p align="center">
+  <a href="https://experimaestro-python.readthedocs.io/en/latest/">
+    <img src="docs/source/img/xpmLogo.png" width="400" alt="Experimaestro Logo">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://badge.fury.io/py/experimaestro"><img src="https://badge.fury.io/py/experimaestro.svg" alt="PyPI version"></a>
+  <a href="https://experimaestro-python.readthedocs.io"><img src="https://readthedocs.org/projects/experimaestro-python/badge/?version=latest" alt="RTD"></a>
+</p>
 
 Experimaestro helps in designing and managing **complex experimental plans**. It allows for the definition of tasks and their dependencies, ensuring that each step in a workflow is executed in the correct order. Some key aspects of Experimaestro are:
 
@@ -10,7 +18,7 @@ Experimaestro helps in designing and managing **complex experimental plans**. It
 
 The full documentation can be read by going to the following URL: [https://experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io). A tutorial (training a CNN on MNIST) is [available on github](https://github.com/experimaestro/experimaestro-demo).
 
-# Screenshots
+# Jobs monitoring
 
 ## Textual interface (new in v2)
 
