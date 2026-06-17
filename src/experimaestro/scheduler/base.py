@@ -302,13 +302,15 @@ class Scheduler(StateProvider, threading.Thread):
             self.server.stop()
             logger.info("Web server stopped by scheduler")
 
-    def wait_for_server_quit(self):
+    def wait_for_server_quit(self, should_stop=None):
         """Wait for explicit quit from web interface
 
-        Only blocks if server was started with wait_for_quit=True.
+        Only blocks if server was started with wait_for_quit=True. ``should_stop``
+        is an optional predicate that, when it returns True (e.g. the experiment
+        was interrupted with Ctrl+C), releases the wait.
         """
         if self.server is not None:
-            self.server.wait()
+            self.server.wait(should_stop=should_stop)
 
     def run(self):
         """Initialize scheduler using EventLoopThread's event loop.

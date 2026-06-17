@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse, Response
 
 from experimaestro.webui.websocket import WebSocketHandler
 from experimaestro.webui.state_bridge import StateBridge
-from experimaestro.webui.routes import auth, proxy
+from experimaestro.webui.routes import auth, proxy, logs
 
 if TYPE_CHECKING:
     from experimaestro.webui.server import WebUIServer
@@ -61,6 +61,7 @@ def create_app(server: "WebUIServer") -> FastAPI:
     # Include route modules
     app.include_router(auth.router)
     app.include_router(proxy.router)
+    app.include_router(logs.router)
 
     # WebSocket endpoint
     @app.websocket("/ws")
@@ -108,7 +109,20 @@ def create_app(server: "WebUIServer") -> FastAPI:
                 ext = datapath.rsplit(".", 1)[-1]
                 mimetype = MIMETYPES.get(ext, "application/octet-stream")
                 content = resource_file.read_bytes()
-                return Response(content=content, media_type=mimetype)
+                # The entrypoint assets keep a fixed name (index.html/js/css) and
+                # are overwritten on every rebuild, so they must never be served
+                # from a stale browser cache. Hashed assets (fonts/images) are
+                # safe to cache for a long time.
+                base = path.rsplit("/", 1)[-1]
+                if base in ("index.html", "index.js", "index.css", "login.html"):
+                    cache_control = "no-cache, no-store, must-revalidate"
+                else:
+                    cache_control = "public, max-age=31536000, immutable"
+                return Response(
+                    content=content,
+                    media_type=mimetype,
+                    headers={"Cache-Control": cache_control},
+                )
         except (FileNotFoundError, KeyError):
             pass
 
