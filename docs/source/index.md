@@ -82,6 +82,7 @@ experiments/task
 experiments/plan
 experiments/workspace
 experiments/actions
+experiments/grid_search
 experiments/analysis
 experiments
 ```

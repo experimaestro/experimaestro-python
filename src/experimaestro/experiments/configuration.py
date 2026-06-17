@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 import attr
 
 class MissingSentinel:
@@ -94,3 +94,10 @@ class ConfigurationBase:
 
     dirty_git: DirtyGitAction = DirtyGitAction.WARN
     """Action when git repository has uncommitted changes: ignore, warn (default), error"""
+
+    grid_search: Optional[Dict[str, Any]] = None
+    """Optional grid search parameters.
+
+    A dictionary where keys are dot-separated paths to configuration fields,
+    and values are either a list of values or a dictionary with 'values_list' or 'values_range'.
+    """
