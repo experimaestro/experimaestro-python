@@ -491,7 +491,7 @@ class TaskRunner:
                         lock.release()
                         logger.info("Released lock")
                 except Exception:
-                    logger.error("Error while releasing lock %s", lock)
+                    logger.exception("Error while releasing lock %s", lock)
 
             # Note: dynamic dependency locks are released via context manager
             # in the run() method, not here
