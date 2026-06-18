@@ -165,8 +165,11 @@ const jobComparator = (jobs: { [key: string]: Job }) => {
   };
 };
 
+export type ConnectionStatus = "connected" | "connecting" | "disconnected";
+
 export type State = {
   connected: boolean;
+  connectionStatus: ConnectionStatus;
   experiment: string; // Kept for backward compatibility
   currentExperiment: string | null; // Currently selected experiment filter (null = all)
   currentRun: string | null; // Currently selected run (null = current/latest)
@@ -183,6 +186,7 @@ export const slice = createSlice({
   name: "db",
   initialState: {
     connected: false,
+    connectionStatus: "connecting",
     experiment: "",
     currentExperiment: null,
     currentRun: null,
@@ -245,6 +249,11 @@ export const slice = createSlice({
 
     setConnected(draft, action: PayloadAction<boolean>) {
       draft.connected = action.payload;
+    },
+
+    setConnectionStatus(draft, action: PayloadAction<ConnectionStatus>) {
+      draft.connectionStatus = action.payload;
+      draft.connected = action.payload === "connected";
     },
 
     addExperiment(draft, action: PayloadAction<Experiment>) {

@@ -48,12 +48,13 @@ class Client {
     const url = this.getWebSocketUrl();
     console.log("Connecting to WebSocket:", url.replace(/token=[^&]+/, "token=***"));
 
+    store.dispatch(actions.setConnectionStatus("connecting"));
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       console.log("WebSocket connected");
       this.reconnectAttempts = 0;
-      store.dispatch(actions.setConnected(true));
+      store.dispatch(actions.setConnectionStatus("connected"));
 
       // Request initial data
       this.send("experiments");
@@ -63,7 +64,7 @@ class Client {
 
     this.ws.onclose = (event) => {
       console.log("WebSocket closed:", event.code, event.reason);
-      store.dispatch(actions.setConnected(false));
+      store.dispatch(actions.setConnectionStatus("connecting"));
       this.ws = null;
 
       // Handle authentication error
@@ -89,6 +90,7 @@ class Client {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log("Max reconnection attempts reached");
+      store.dispatch(actions.setConnectionStatus("disconnected"));
       return;
     }
 

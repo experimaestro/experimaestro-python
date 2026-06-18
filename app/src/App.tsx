@@ -27,6 +27,7 @@ type View = "experiments" | "tasks" | "graph" | "orphans" | "services" | "action
 export default () => {
   const dispatch = useDispatch();
   const connected = useAppSelector((state) => state.db.connected);
+  const connectionStatus = useAppSelector((state) => state.db.connectionStatus);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
   const [showQuitModal, setShowQuitModal] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -76,6 +77,29 @@ export default () => {
           >
             <i className="fas fa-diagram-project me-2" />
             Experimaestro
+            <span
+              title={
+                connectionStatus === "connected"
+                  ? "Connected"
+                  : connectionStatus === "connecting"
+                    ? "Connecting…"
+                    : "Disconnected"
+              }
+              style={{
+                display: "inline-block",
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                marginLeft: 8,
+                verticalAlign: "middle",
+                background:
+                  connectionStatus === "connected"
+                    ? "#2ecc40"
+                    : connectionStatus === "connecting"
+                      ? "#ffdc00"
+                      : "#ff4136",
+              }}
+            />
           </Navbar.Brand>
           <Navbar.Toggle aria-controls="basic-navbar-nav" />
           <Navbar.Collapse id="basic-navbar-nav">
@@ -127,12 +151,6 @@ export default () => {
                 Stop
               </Button>
             )}
-            <i
-              className={`fab fa-staylinked ws-status ms-2 ${
-                connected ? "ws-link" : "ws-no-link"
-              }`}
-              title={connected ? "Connected" : "Disconnected"}
-            />
           </Navbar.Collapse>
         </Container>
       </Navbar>
