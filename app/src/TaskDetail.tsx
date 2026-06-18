@@ -47,7 +47,7 @@ const useStyles = createUseStyles({
   },
 });
 
-export default ({ job, onHide }: { job: Job; onHide: () => void }) => {
+export const TaskDetailBody = ({ job }: { job: Job }) => {
   const classes = useStyles();
   const { success, error } = useMessages();
   const allJobs = useAppSelector((state) => state.db.jobs);
@@ -65,13 +65,7 @@ export default ({ job, onHide }: { job: Job; onHide: () => void }) => {
   });
 
   return (
-    <Modal show={true} size="xl" onHide={onHide}>
-      <Modal.Header closeButton>
-        <Modal.Title>Job details</Modal.Title>
-      </Modal.Header>
-
-      <Modal.Body>
-        <div className={classes.details}>
+    <div className={classes.details}>
           <span className={classes.what}>Status</span>
           <div>
             {job.status}
@@ -200,7 +194,18 @@ export default ({ job, onHide }: { job: Job; onHide: () => void }) => {
               </div>
             </>
           )}
-        </div>
+    </div>
+  );
+};
+
+export default ({ job, onHide }: { job: Job; onHide: () => void }) => {
+  return (
+    <Modal show={true} size="xl" onHide={onHide}>
+      <Modal.Header closeButton>
+        <Modal.Title>Job details</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <TaskDetailBody job={job} />
       </Modal.Body>
     </Modal>
   );

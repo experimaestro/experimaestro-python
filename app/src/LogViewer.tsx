@@ -96,10 +96,40 @@ const StreamView = ({
   );
 };
 
-export default ({ target, onHide }: { target: LogTarget; onHide: () => void }) => {
+export const LogPanel = ({ target }: { target: LogTarget }) => {
   const [stream, setStream] = useState<Stream>("stdout");
   const [follow, setFollow] = useState(true);
 
+  const singleStream = target.kind === "experimaestro";
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+        <Form.Check
+          type="switch"
+          id="log-follow"
+          label="Follow"
+          checked={follow}
+          onChange={(e) => setFollow(e.target.checked)}
+        />
+      </div>
+      {singleStream ? (
+        <StreamView target={target} stream="stdout" follow={follow} />
+      ) : (
+        <Tabs activeKey={stream} onSelect={(k) => setStream((k as Stream) || "stdout")}>
+          <Tab eventKey="stdout" title="stdout">
+            <StreamView target={target} stream="stdout" follow={follow} />
+          </Tab>
+          <Tab eventKey="stderr" title="stderr">
+            <StreamView target={target} stream="stderr" follow={follow} />
+          </Tab>
+        </Tabs>
+      )}
+    </>
+  );
+};
+
+export default ({ target, onHide }: { target: LogTarget; onHide: () => void }) => {
   const title =
     target.title ||
     (target.kind === "job"
@@ -108,35 +138,13 @@ export default ({ target, onHide }: { target: LogTarget; onHide: () => void }) =
         ? target.serviceId
         : "experimaestro");
 
-  const singleStream = target.kind === "experimaestro";
-
   return (
     <Modal show={true} size="xl" onHide={onHide}>
       <Modal.Header closeButton>
         <Modal.Title>Logs — {title}</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
-          <Form.Check
-            type="switch"
-            id="log-follow"
-            label="Follow"
-            checked={follow}
-            onChange={(e) => setFollow(e.target.checked)}
-          />
-        </div>
-        {singleStream ? (
-          <StreamView target={target} stream="stdout" follow={follow} />
-        ) : (
-          <Tabs activeKey={stream} onSelect={(k) => setStream((k as Stream) || "stdout")}>
-            <Tab eventKey="stdout" title="stdout">
-              <StreamView target={target} stream="stdout" follow={follow} />
-            </Tab>
-            <Tab eventKey="stderr" title="stderr">
-              <StreamView target={target} stream="stderr" follow={follow} />
-            </Tab>
-          </Tabs>
-        )}
+        <LogPanel target={target} />
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide}>

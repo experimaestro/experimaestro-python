@@ -2,8 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Button, Modal, Form, Table } from "react-bootstrap";
 
 import TaskJobs from "./TaskJobs";
-import TaskDetail from "./TaskDetail";
-import LogViewer, { LogTarget } from "./LogViewer";
+import JobModal, { JobTab } from "./JobModal";
 import client from "./client";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
@@ -33,9 +32,8 @@ const statusRank = (status: string): number => {
 export default () => {
   const [tagFilters, setTagFilters] = useState<TagFilter[]>([]);
   const [taskFilter, setTaskFilter] = useState<string>();
-  const [showJob, setShowJob] = useState<string>();
+  const [jobModal, setJobModal] = useState<{ jobId: string; tab: JobTab }>();
   const [confirm, setConfirm] = useState<{ job: Job; kind: "kill" | "delete" }>();
-  const [logTarget, setLogTarget] = useState<LogTarget>();
   const [sortKey, setSortKey] = useState<SortKey>("status");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const { info } = useMessages();
@@ -210,16 +208,12 @@ export default () => {
                 onDelete={() => setConfirm({ job, kind: "delete" })}
                 onShow={() => {
                   client.job_details(job.jobId, job.taskId);
-                  setShowJob(showJob === job.jobId ? undefined : job.jobId);
+                  setJobModal({ jobId: job.jobId, tab: "details" });
                 }}
-                onLogs={() =>
-                  setLogTarget({
-                    kind: "job",
-                    taskId: job.taskId,
-                    jobId: job.jobId,
-                    title: job.taskId,
-                  })
-                }
+                onLogs={() => {
+                  client.job_details(job.jobId, job.taskId);
+                  setJobModal({ jobId: job.jobId, tab: "logs" });
+                }}
               />
             ))}
           </tbody>
@@ -227,11 +221,12 @@ export default () => {
         {filteredJobs.length === 0 && (
           <p className="text-muted">No jobs match the current filter.</p>
         )}
-        {showJob && (
-          <TaskDetail onHide={() => setShowJob("")} job={jobs.byId[showJob]} />
-        )}
-        {logTarget && (
-          <LogViewer target={logTarget} onHide={() => setLogTarget(undefined)} />
+        {jobModal && jobs.byId[jobModal.jobId] && (
+          <JobModal
+            job={jobs.byId[jobModal.jobId]}
+            initialTab={jobModal.tab}
+            onHide={() => setJobModal(undefined)}
+          />
         )}
       </>
     </div>

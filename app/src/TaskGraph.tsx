@@ -14,7 +14,7 @@ import dagre from "@dagrejs/dagre";
 
 import { Job } from "./reducers";
 import { useAppSelector } from "./store";
-import TaskDetail from "./TaskDetail";
+import JobModal from "./JobModal";
 import client from "./client";
 
 const STATUS_COLORS: Array<[string, string]> = [
@@ -207,7 +207,7 @@ export default () => {
         </ReactFlowProvider>
       </div>
       {showJob && jobs.byId[showJob] && (
-        <TaskDetail onHide={() => setShowJob(undefined)} job={jobs.byId[showJob]} />
+        <JobModal onHide={() => setShowJob(undefined)} job={jobs.byId[showJob]} />
       )}
     </div>
   );
