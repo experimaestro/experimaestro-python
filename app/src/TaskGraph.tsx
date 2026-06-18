@@ -30,8 +30,42 @@ const statusColor = (status: string): string => {
   return found ? found[1] : "#616161";
 };
 
-const NODE_W = 190;
-const NODE_H = 40;
+const NODE_W = 200;
+const NODE_BASE_H = 40;
+const TAG_ROW_H = 18;
+
+const nodeLabel = (name: string, tags: Job["tags"]) => (
+  <div style={{ lineHeight: 1.2 }}>
+    <div style={{ fontWeight: 600 }}>{name}</div>
+    {tags.length > 0 && (
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: 3,
+          marginTop: 3,
+        }}
+      >
+        {tags.map((tag) => (
+          <span
+            key={tag[0]}
+            title={`${tag[0]}: ${tag[1]}`}
+            style={{
+              background: "rgba(255,255,255,0.25)",
+              borderRadius: 3,
+              padding: "0 4px",
+              fontSize: 10,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tag[0]}={String(tag[1])}
+          </span>
+        ))}
+      </div>
+    )}
+  </div>
+);
 
 function buildGraph(jobs: Job[]): { nodes: Node[]; edges: Edge[] } {
   const present = new Set(jobs.map((j) => j.jobId));
@@ -40,7 +74,10 @@ function buildGraph(jobs: Job[]): { nodes: Node[]; edges: Edge[] } {
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: "TB", nodesep: 30, ranksep: 70 });
 
-  jobs.forEach((j) => g.setNode(j.jobId, { width: NODE_W, height: NODE_H }));
+  const nodeHeight = (j: Job) =>
+    j.tags.length > 0 ? NODE_BASE_H + TAG_ROW_H : NODE_BASE_H;
+
+  jobs.forEach((j) => g.setNode(j.jobId, { width: NODE_W, height: nodeHeight(j) }));
 
   const edges: Edge[] = [];
   jobs.forEach((j) => {
@@ -61,11 +98,12 @@ function buildGraph(jobs: Job[]): { nodes: Node[]; edges: Edge[] } {
 
   const nodes: Node[] = jobs.map((j) => {
     const pos = g.node(j.jobId);
-    const label = j.taskId.split(".").pop() || j.taskId;
+    const h = nodeHeight(j);
+    const name = j.taskId.split(".").pop() || j.taskId;
     return {
       id: j.jobId,
-      data: { label },
-      position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
+      data: { label: nodeLabel(name, j.tags) },
+      position: { x: pos.x - NODE_W / 2, y: pos.y - h / 2 },
       sourcePosition: Position.Bottom,
       targetPosition: Position.Top,
       style: {
