@@ -1,5 +1,11 @@
 # Experimaestro
 
+```{image} ./img/icon.svg
+:alt: Experimaestro
+:width: 120px
+:align: center
+```
+
 [![GitHub Release](https://img.shields.io/github/v/release/experimaestro/experimaestro-python)](https://github.com/experimaestro/experimaestro-python)
 
 **Experimaestro** is a Python framework designed for researchers and engineers who need to manage complex, large-scale experimental workflows without losing track of reproducibility.

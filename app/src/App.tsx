@@ -75,7 +75,13 @@ export default () => {
             onClick={() => setView("experiments")}
             style={{ cursor: "pointer" }}
           >
-            <i className="fas fa-diagram-project me-2" />
+            <img
+              src="/icon.svg"
+              alt=""
+              height={40}
+              className="me-2 align-middle"
+              style={{ width: "auto" }}
+            />
             Experimaestro
             <span
               title={

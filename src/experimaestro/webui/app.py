@@ -26,6 +26,7 @@ MIMETYPES = {
     "txt": "text/plain",
     "ico": "image/x-icon",
     "png": "image/png",
+    "svg": "image/svg+xml",
     "css": "text/css",
     "js": "application/javascript",
     "json": "application/json",
@@ -114,7 +115,13 @@ def create_app(server: "WebUIServer") -> FastAPI:
                 # from a stale browser cache. Hashed assets (fonts/images) are
                 # safe to cache for a long time.
                 base = path.rsplit("/", 1)[-1]
-                if base in ("index.html", "index.js", "index.css", "login.html"):
+                if base in (
+                    "index.html",
+                    "index.js",
+                    "index.css",
+                    "login.html",
+                    "icon.svg",
+                ):
                     cache_control = "no-cache, no-store, must-revalidate"
                 else:
                     cache_control = "public, max-age=31536000, immutable"
