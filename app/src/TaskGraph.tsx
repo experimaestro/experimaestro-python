@@ -43,23 +43,13 @@ const nodeLabel = (name: string, tags: Job["tags"]) => (
           display: "flex",
           flexWrap: "wrap",
           justifyContent: "center",
-          gap: 3,
           marginTop: 3,
         }}
       >
         {tags.map((tag) => (
-          <span
-            key={tag[0]}
-            title={`${tag[0]}: ${tag[1]}`}
-            style={{
-              background: "rgba(255,255,255,0.25)",
-              borderRadius: 3,
-              padding: "0 4px",
-              fontSize: 10,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {tag[0]}={String(tag[1])}
+          <span key={tag[0]} className="tag" title={`${tag[0]}: ${tag[1]}`}>
+            <span className="name">{tag[0]}</span>
+            <span className="value">{String(tag[1])}</span>
           </span>
         ))}
       </div>
@@ -100,17 +90,18 @@ function buildGraph(jobs: Job[]): { nodes: Node[]; edges: Edge[] } {
     const pos = g.node(j.jobId);
     const h = nodeHeight(j);
     const name = j.taskId.split(".").pop() || j.taskId;
+    const color = statusColor(j.status);
     return {
       id: j.jobId,
-      data: { label: nodeLabel(name, j.tags) },
+      data: { label: nodeLabel(name, j.tags), color },
       position: { x: pos.x - NODE_W / 2, y: pos.y - h / 2 },
       sourcePosition: Position.Bottom,
       targetPosition: Position.Top,
       style: {
         width: NODE_W,
-        background: statusColor(j.status),
-        color: "white",
-        border: "none",
+        background: "white",
+        color: "#222",
+        border: `3px solid ${color}`,
         borderRadius: 6,
         fontSize: 12,
         padding: 4,
@@ -136,10 +127,11 @@ const Legend = () => (
         <span
           style={{
             display: "inline-block",
-            width: 12,
-            height: 12,
+            width: 14,
+            height: 14,
             borderRadius: 3,
-            background: color,
+            background: "white",
+            border: `3px solid ${color}`,
             marginRight: 4,
           }}
         />
@@ -199,7 +191,7 @@ export default () => {
             <Background />
             <Controls />
             <MiniMap
-              nodeColor={(n) => (n.style?.background as string) || "#888"}
+              nodeColor={(n) => (n.data?.color as string) || "#888"}
               pannable
               zoomable
             />
