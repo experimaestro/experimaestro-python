@@ -2,7 +2,6 @@
 
 import logging
 import tempfile
-import threading
 import time
 from pathlib import Path
 
@@ -10,11 +9,6 @@ from experimaestro.carbon.base import BaseCarbonTracker, CarbonMetrics
 from experimaestro.carbon.utils import to_float
 
 logger = logging.getLogger(__name__)
-
-# Upper bound on the online (auto-geolocation) tracker start. The IP lookup can
-# hang on networks with restricted egress (e.g. CI); if it does not complete in
-# time we warn and skip carbon tracking rather than wedge the job.
-ONLINE_START_TIMEOUT_S = 20.0
 
 
 class CodeCarbonTracker(BaseCarbonTracker):
@@ -52,6 +46,8 @@ class CodeCarbonTracker(BaseCarbonTracker):
             return
 
         try:
+            from codecarbon import EmissionsTracker
+
             # Use temp directory if no output dir specified
             if self._output_dir is None:
                 self._temp_dir = tempfile.TemporaryDirectory(
@@ -69,38 +65,13 @@ class CodeCarbonTracker(BaseCarbonTracker):
                 "tracking_mode": "process",  # Track this process
             }
 
-            # When a country is pinned, use the OFFLINE tracker (no IP-based
-            # geolocation lookup); otherwise the online tracker auto-detects it.
             if self._country_iso_code:
-                from codecarbon import OfflineEmissionsTracker
-
                 tracker_kwargs["country_iso_code"] = self._country_iso_code
-                if self._region:
-                    tracker_kwargs["region"] = self._region
+            if self._region:
+                tracker_kwargs["region"] = self._region
 
-                def factory():
-                    return OfflineEmissionsTracker(**tracker_kwargs)
-            else:
-
-                def factory():
-                    from codecarbon import EmissionsTracker
-
-                    return EmissionsTracker(**tracker_kwargs)
-
-            # Create AND start the tracker in a daemon thread, bounded by a
-            # timeout. Two reasons:
-            #  - codecarbon spawns a measurement thread; a thread created by a
-            #    daemon thread inherits daemon status, so it cannot keep the
-            #    finished task process alive (which would wedge the scheduler,
-            #    which waits for the process to exit).
-            #  - the online tracker's geolocation network lookup can hang on
-            #    restricted networks (e.g. CI); the timeout lets us warn and
-            #    skip tracking instead of blocking the job.
-            self._tracker = self._create_and_start(factory)
-            if self._tracker is None:
-                self._running = False
-                return
-
+            self._tracker = EmissionsTracker(**tracker_kwargs)
+            self._tracker.start()
             self._start_time = time.time()
             self._running = True
 
@@ -110,42 +81,6 @@ class CodeCarbonTracker(BaseCarbonTracker):
             logger.error("Failed to start carbon tracking: %s", e)
             self._running = False
             raise
-
-    def _create_and_start(self, factory):
-        """Create and start a codecarbon tracker in a daemon thread.
-
-        Returns the started tracker, or None if it did not complete within
-        ONLINE_START_TIMEOUT_S (a warning is logged). Running in a daemon thread
-        means any thread codecarbon spawns inherits daemon status and will not
-        block the task process from exiting.
-        """
-        result: dict = {}
-
-        def worker():
-            try:
-                tracker = factory()
-                tracker.start()
-                result["tracker"] = tracker
-            except BaseException as exc:  # noqa: BLE001 - reported to caller
-                result["error"] = exc
-
-        thread = threading.Thread(
-            target=worker, daemon=True, name="carbon-tracker-start"
-        )
-        thread.start()
-        thread.join(ONLINE_START_TIMEOUT_S)
-
-        if thread.is_alive():
-            logger.warning(
-                "Carbon tracking did not start within %.0fs (geolocation may be "
-                "blocked); continuing without carbon tracking. Pin a location "
-                "via carbon.country_iso_code to use offline tracking.",
-                ONLINE_START_TIMEOUT_S,
-            )
-            return None
-        if "error" in result:
-            raise result["error"]
-        return result.get("tracker")
 
     def stop(self) -> CarbonMetrics:
         """Stop tracking and return final metrics."""
