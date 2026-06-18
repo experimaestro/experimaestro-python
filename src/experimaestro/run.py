@@ -36,6 +36,27 @@ def parse_commandline(argv=None):
         task.execute()
 
 
+def _warn_lingering_threads():
+    """Warn about non-daemon threads that will delay/block process exit.
+
+    A finished task should exit so the scheduler (which waits for the process)
+    can proceed. A stray non-daemon thread from a library (e.g. a tracker) keeps
+    the interpreter alive at shutdown; surface it instead of hanging silently.
+    """
+    import threading
+
+    lingering = [
+        t.name
+        for t in threading.enumerate()
+        if t is not threading.main_thread() and t.is_alive() and not t.daemon
+    ]
+    if lingering:
+        logger.warning(
+            "Non-daemon threads still alive at task exit (may delay exit): %s",
+            ", ".join(lingering),
+        )
+
+
 def run(parameters: Path):
     with open(parameters, "r") as fp:
         params = json.load(fp)
@@ -731,6 +752,7 @@ class TaskRunner:
                 # Everything went OK
                 logger.info("Task ended successfully")
                 self.cleanup()
+                _warn_lingering_threads()
                 sys.exit(0)
         except GracefulTimeout as e:
             logger.info("Task requested graceful timeout: %s", e.message)
