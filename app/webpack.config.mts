@@ -147,7 +147,7 @@ const config: Configuration = {
               "@babel/preset-react",
               "@babel/preset-typescript",
             ],
-            plugins: ["react-refresh/babel"],
+            plugins: isDevelopment ? ["react-refresh/babel"] : [],
           },
         },
       },
@@ -202,7 +202,7 @@ const config: Configuration = {
     new MiniCssExtractPlugin({
       filename: "[name].css",
     }),
-    new ReactRefresh(),
+    ...(isDevelopment ? [new ReactRefresh()] : []),
   ],
   devtool: isProduction && !sourceMapsInProduction ? false : "source-map",
   stats: {

@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "build": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack",
+    "build": "cross-env NODE_ENV=production TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack",
+    "build:dev": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack",
     "dev": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack serve"
   },
   "devDependencies": {
