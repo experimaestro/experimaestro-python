@@ -86,11 +86,17 @@ async def _aio_wait_polling(pid: int) -> int:
 
     try:
         proc = psutil.Process(pid)
-        while proc.is_running():
+        # A zombie process has already exited but lingers until reaped by its
+        # parent; psutil's is_running() reports it as running, so polling on
+        # is_running() alone loops forever. Check the status explicitly. This
+        # is the common case when the child exits before we start waiting (so
+        # pidfd_open raised ProcessLookupError and we fell back to here).
+        while proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
             await asyncio.sleep(poll_interval)
             poll_interval = min(poll_interval * 1.5, 10.0)
-        return proc.wait()
-    except psutil.NoSuchProcess:
+        # Reap the (possibly zombie) child and return its exit code.
+        return proc.wait(timeout=1)
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
         return -1
 
 
@@ -119,7 +125,10 @@ async def aio_wait_pid(pid: int) -> int:
         try:
             return await _aio_wait_pidfd(pid)
         except OSError:
-            logger.debug("pidfd_open failed for PID %s, falling back to polling", pid)
+            # pidfd_open raises ProcessLookupError if the process already
+            # exited before we started waiting (common for fast tasks); the
+            # polling fallback handles that (including reaping a zombie).
+            logger.debug("pidfd path failed for PID %s, falling back to polling", pid)
     elif _has_kqueue():
         try:
             return await _aio_wait_kqueue(pid)
