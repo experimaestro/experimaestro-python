@@ -8,6 +8,7 @@ import Button from "react-bootstrap/Button";
 import Modal from "react-bootstrap/Modal";
 
 import Tasks from "./Tasks";
+import TaskGraph from "./TaskGraph";
 import Experiments from "./Experiments";
 import Services from "./Services";
 import Warnings from "./Warnings";
@@ -21,7 +22,7 @@ import { useAppSelector } from "./store";
 import { actions } from "./reducers";
 import client from "./client";
 
-type View = "experiments" | "tasks" | "orphans" | "services" | "actions";
+type View = "experiments" | "tasks" | "graph" | "orphans" | "services" | "actions";
 
 export default () => {
   const dispatch = useDispatch();
@@ -85,6 +86,9 @@ export default () => {
               <Nav.Link eventKey="tasks" onClick={() => setView("tasks")}>
                 Tasks
               </Nav.Link>
+              <Nav.Link eventKey="graph" onClick={() => setView("graph")}>
+                Graph
+              </Nav.Link>
               <Nav.Link eventKey="services" onClick={() => setView("services")}>
                 Services
               </Nav.Link>
@@ -96,7 +100,7 @@ export default () => {
               </Nav.Link>
               <Warnings />
             </Nav>
-            {view === "tasks" && (
+            {(view === "tasks" || view === "graph") && (
               <>
                 <ExperimentSelector />
                 <RunSelector />
@@ -147,6 +151,20 @@ export default () => {
               {currentExperiment ? ` / ${currentExperiment}` : " / all"}
             </div>
             <Tasks />
+          </>
+        )}
+        {view === "graph" && (
+          <>
+            <div className="text-muted small mb-1">
+              <span
+                style={{ cursor: "pointer" }}
+                onClick={() => setView("experiments")}
+              >
+                Experiments
+              </span>
+              {currentExperiment ? ` / ${currentExperiment}` : " / all"}
+            </div>
+            <TaskGraph />
           </>
         )}
         {view === "services" && <Services />}

@@ -1,0 +1,176 @@
+import React, { useMemo, useState, useCallback } from "react";
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  Node,
+  Edge,
+  Position,
+  MarkerType,
+  ReactFlowProvider,
+} from "reactflow";
+import "reactflow/dist/style.css";
+import dagre from "@dagrejs/dagre";
+
+import { Job } from "./reducers";
+import { useAppSelector } from "./store";
+import TaskDetail from "./TaskDetail";
+import client from "./client";
+
+const STATUS_COLORS: Array<[string, string]> = [
+  ["done", "#2e7d32"],
+  ["running", "#f9a825"],
+  ["ready", "#1565c0"],
+  ["waiting", "#ef6c00"],
+  ["error", "#c62828"],
+];
+
+const statusColor = (status: string): string => {
+  const found = STATUS_COLORS.find(([s]) => s === status);
+  return found ? found[1] : "#616161";
+};
+
+const NODE_W = 190;
+const NODE_H = 40;
+
+function buildGraph(jobs: Job[]): { nodes: Node[]; edges: Edge[] } {
+  const present = new Set(jobs.map((j) => j.jobId));
+
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: "TB", nodesep: 30, ranksep: 70 });
+
+  jobs.forEach((j) => g.setNode(j.jobId, { width: NODE_W, height: NODE_H }));
+
+  const edges: Edge[] = [];
+  jobs.forEach((j) => {
+    (j.dependsOn || []).forEach((dep) => {
+      if (!present.has(dep)) return;
+      g.setEdge(dep, j.jobId);
+      edges.push({
+        id: `${dep}->${j.jobId}`,
+        source: dep,
+        target: j.jobId,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { stroke: "#888" },
+      });
+    });
+  });
+
+  dagre.layout(g);
+
+  const nodes: Node[] = jobs.map((j) => {
+    const pos = g.node(j.jobId);
+    const label = j.taskId.split(".").pop() || j.taskId;
+    return {
+      id: j.jobId,
+      data: { label },
+      position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
+      sourcePosition: Position.Bottom,
+      targetPosition: Position.Top,
+      style: {
+        width: NODE_W,
+        background: statusColor(j.status),
+        color: "white",
+        border: "none",
+        borderRadius: 6,
+        fontSize: 12,
+        padding: 4,
+      },
+    };
+  });
+
+  return { nodes, edges };
+}
+
+const Legend = () => (
+  <div
+    style={{
+      display: "flex",
+      gap: "0.75rem",
+      flexWrap: "wrap",
+      marginBottom: "0.5rem",
+      fontSize: "0.8rem",
+    }}
+  >
+    {STATUS_COLORS.map(([status, color]) => (
+      <span key={status} style={{ display: "inline-flex", alignItems: "center" }}>
+        <span
+          style={{
+            display: "inline-block",
+            width: 12,
+            height: 12,
+            borderRadius: 3,
+            background: color,
+            marginRight: 4,
+          }}
+        />
+        {status}
+      </span>
+    ))}
+  </div>
+);
+
+export default () => {
+  const jobs = useAppSelector((state) => state.db.jobs);
+  const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
+  const [showJob, setShowJob] = useState<string>();
+
+  const filtered = useMemo(
+    () =>
+      jobs.ids
+        .map((id) => jobs.byId[id])
+        .filter((j) => {
+          if (currentExperiment === null) return true;
+          return !!j.experimentIds && j.experimentIds.includes(currentExperiment);
+        }),
+    [jobs.ids, jobs.byId, currentExperiment],
+  );
+
+  const { nodes, edges } = useMemo(() => buildGraph(filtered), [filtered]);
+
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      const job = jobs.byId[node.id];
+      if (job) {
+        client.job_details(job.jobId, job.taskId);
+        setShowJob(node.id);
+      }
+    },
+    [jobs.byId],
+  );
+
+  if (filtered.length === 0) {
+    return <p className="text-muted">No jobs to display.</p>;
+  }
+
+  return (
+    <div>
+      <Legend />
+      <div style={{ height: "75vh", border: "1px solid #ddd", borderRadius: 6 }}>
+        <ReactFlowProvider>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodeClick={onNodeClick}
+            fitView
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable={true}
+          >
+            <Background />
+            <Controls />
+            <MiniMap
+              nodeColor={(n) => (n.style?.background as string) || "#888"}
+              pannable
+              zoomable
+            />
+          </ReactFlow>
+        </ReactFlowProvider>
+      </div>
+      {showJob && jobs.byId[showJob] && (
+        <TaskDetail onHide={() => setShowJob(undefined)} job={jobs.byId[showJob]} />
+      )}
+    </div>
+  );
+};
