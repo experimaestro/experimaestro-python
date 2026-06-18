@@ -13,6 +13,7 @@ import Services from "./Services";
 import Warnings from "./Warnings";
 import Actions from "./Actions";
 import Orphans from "./Orphans";
+import LogViewer from "./LogViewer";
 import { ExperimentSelector } from "./ExperimentSelector";
 import { RunSelector } from "./RunSelector";
 
@@ -27,6 +28,7 @@ export default () => {
   const connected = useAppSelector((state) => state.db.connected);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
   const [showQuitModal, setShowQuitModal] = useState(false);
+  const [showLog, setShowLog] = useState(false);
   const [view, setView] = useState<View>("experiments");
 
   const handleQuit = () => {
@@ -100,6 +102,16 @@ export default () => {
                 <RunSelector />
               </>
             )}
+            <Button
+              variant="outline-light"
+              size="sm"
+              className="ms-2"
+              title="Experimaestro log"
+              onClick={() => setShowLog(true)}
+            >
+              <i className="fas fa-file-lines me-1" />
+              Log
+            </Button>
             {connected && (
               <Button
                 variant="outline-light"
@@ -141,6 +153,13 @@ export default () => {
         {view === "actions" && <Actions />}
         {view === "orphans" && <Orphans />}
       </Container>
+
+      {showLog && (
+        <LogViewer
+          target={{ kind: "experimaestro", title: "experimaestro" }}
+          onHide={() => setShowLog(false)}
+        />
+      )}
     </>
   );
 };

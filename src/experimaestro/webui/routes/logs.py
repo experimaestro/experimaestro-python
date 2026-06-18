@@ -82,6 +82,25 @@ async def job_logs(request: Request, task_id: str, job_id: str, stream: str):
     return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
 
 
+@router.get("/api/logs/experimaestro")
+async def experimaestro_logs(request: Request):
+    """Return a slice of the experimaestro scheduler log."""
+    if not _check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    server = request.app.state.server
+    state_provider = server.state_provider
+
+    log_path = state_provider.get_scheduler_log_path()
+    if log_path is None:
+        return JSONResponse({"content": "", "offset": 0, "size": 0})
+
+    log_path = _maybe_sync(
+        state_provider, Path(log_path), include=[Path(log_path).name]
+    )
+    return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
+
+
 @router.get("/api/services/{service_id}/logs/{stream}")
 async def service_logs(request: Request, service_id: str, stream: str):
     """Return a slice of a service's stdout/stderr log."""

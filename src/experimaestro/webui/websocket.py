@@ -364,14 +364,14 @@ class WebSocketHandler:
         async with self._lock:
             self.connections.add(websocket)
 
-        logger.info("WebSocket client connected (total: %d)", len(self.connections))
+        logger.debug("WebSocket client connected (total: %d)", len(self.connections))
 
     async def disconnect(self, websocket: WebSocket):
         """Handle WebSocket disconnection"""
         async with self._lock:
             self.connections.discard(websocket)
 
-        logger.info("WebSocket client disconnected (total: %d)", len(self.connections))
+        logger.debug("WebSocket client disconnected (total: %d)", len(self.connections))
 
     async def handle_message(self, websocket: WebSocket, message: Dict[str, Any]):
         """Route incoming message to appropriate handler

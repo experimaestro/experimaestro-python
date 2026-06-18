@@ -5,13 +5,17 @@ type Stream = "stdout" | "stderr";
 
 export type LogTarget =
   | { kind: "job"; taskId: string; jobId: string; title?: string }
-  | { kind: "service"; serviceId: string; title?: string };
+  | { kind: "service"; serviceId: string; title?: string }
+  | { kind: "experimaestro"; title?: string };
 
 function baseUrl(target: LogTarget, stream: Stream): string {
   if (target.kind === "job") {
     return `/api/jobs/${encodeURIComponent(target.taskId)}/${encodeURIComponent(
       target.jobId,
     )}/logs/${stream}`;
+  }
+  if (target.kind === "experimaestro") {
+    return `/api/logs/experimaestro`;
   }
   return `/api/services/${encodeURIComponent(target.serviceId)}/logs/${stream}`;
 }
@@ -98,7 +102,13 @@ export default ({ target, onHide }: { target: LogTarget; onHide: () => void }) =
 
   const title =
     target.title ||
-    (target.kind === "job" ? target.jobId : target.serviceId);
+    (target.kind === "job"
+      ? target.jobId
+      : target.kind === "service"
+        ? target.serviceId
+        : "experimaestro");
+
+  const singleStream = target.kind === "experimaestro";
 
   return (
     <Modal show={true} size="xl" onHide={onHide}>
@@ -115,14 +125,18 @@ export default ({ target, onHide }: { target: LogTarget; onHide: () => void }) =
             onChange={(e) => setFollow(e.target.checked)}
           />
         </div>
-        <Tabs activeKey={stream} onSelect={(k) => setStream((k as Stream) || "stdout")}>
-          <Tab eventKey="stdout" title="stdout">
-            <StreamView target={target} stream="stdout" follow={follow} />
-          </Tab>
-          <Tab eventKey="stderr" title="stderr">
-            <StreamView target={target} stream="stderr" follow={follow} />
-          </Tab>
-        </Tabs>
+        {singleStream ? (
+          <StreamView target={target} stream="stdout" follow={follow} />
+        ) : (
+          <Tabs activeKey={stream} onSelect={(k) => setStream((k as Stream) || "stdout")}>
+            <Tab eventKey="stdout" title="stdout">
+              <StreamView target={target} stream="stdout" follow={follow} />
+            </Tab>
+            <Tab eventKey="stderr" title="stderr">
+              <StreamView target={target} stream="stderr" follow={follow} />
+            </Tab>
+          </Tabs>
+        )}
       </Modal.Body>
       <Modal.Footer>
         <Button variant="secondary" onClick={onHide}>
