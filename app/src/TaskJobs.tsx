@@ -2,7 +2,6 @@ import React from "react";
 import { copyToClibpoard } from "./clipboard";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
-import { useAppSelector } from "./store";
 import { formatShortDate, formatDuration, formatCO2 } from "./format";
 import { StatusBadge } from "./StatusBadge";
 
@@ -21,16 +20,6 @@ export default ({
 }) => {
   const { success, error } = useMessages();
   const progress = job.progress.length > 0 ? job.progress[0].progress : 0;
-  const allJobs = useAppSelector((state) => state.db.jobs);
-
-  const dependencies = (job.dependsOn || []).map((depId) => {
-    const depJob = allJobs.byId[depId];
-    return {
-      jobId: depId,
-      taskId: depJob?.taskId || depId.substring(0, 8),
-      status: depJob?.status || "unknown",
-    };
-  });
 
   return (
     <tr className="job-row">
@@ -62,20 +51,6 @@ export default ({
             {job.jobId.substring(0, 12)}
           </span>
         </div>
-        {dependencies.length > 0 && (
-          <span className="dependencies">
-            <span className="dependencies-label">deps:</span>
-            {dependencies.map((dep) => (
-              <span
-                key={dep.jobId}
-                className={`dependency status-${dep.status}`}
-                title={`${dep.taskId} (${dep.status})`}
-              >
-                {dep.taskId.split(".").pop()}
-              </span>
-            ))}
-          </span>
-        )}
       </td>
 
       <td>
