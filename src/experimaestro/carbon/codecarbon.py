@@ -46,8 +46,6 @@ class CodeCarbonTracker(BaseCarbonTracker):
             return
 
         try:
-            from codecarbon import EmissionsTracker
-
             # Use temp directory if no output dir specified
             if self._output_dir is None:
                 self._temp_dir = tempfile.TemporaryDirectory(
@@ -65,12 +63,22 @@ class CodeCarbonTracker(BaseCarbonTracker):
                 "tracking_mode": "process",  # Track this process
             }
 
+            # When a country is pinned, use the OFFLINE tracker: it skips the
+            # IP-based geolocation lookup entirely. That network call (and the
+            # machinery behind it) can leave a non-daemon thread that keeps the
+            # task process alive after completion — wedging the scheduler, which
+            # waits for the process to exit. Pinning a location avoids it.
             if self._country_iso_code:
-                tracker_kwargs["country_iso_code"] = self._country_iso_code
-            if self._region:
-                tracker_kwargs["region"] = self._region
+                from codecarbon import OfflineEmissionsTracker
 
-            self._tracker = EmissionsTracker(**tracker_kwargs)
+                tracker_kwargs["country_iso_code"] = self._country_iso_code
+                if self._region:
+                    tracker_kwargs["region"] = self._region
+                self._tracker = OfflineEmissionsTracker(**tracker_kwargs)
+            else:
+                from codecarbon import EmissionsTracker
+
+                self._tracker = EmissionsTracker(**tracker_kwargs)
             self._tracker.start()
             self._start_time = time.time()
             self._running = True
