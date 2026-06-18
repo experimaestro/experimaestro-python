@@ -483,10 +483,11 @@ class TaskRunner:
             if not env.slave:
                 self._write_status()
 
-            # Release IPC locks
+            # Release IPC locks. These are raw filelock.FileLock objects
+            # (see create_file_lock), so the held flag is `is_locked`.
             for lock in self.locks:
                 try:
-                    if lock.acquired:
+                    if lock.is_locked:
                         logger.info("Releasing lock")
                         lock.release()
                         logger.info("Released lock")
