@@ -142,7 +142,7 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
         f_type = wrap_type(f_type)
 
         # Suggest the canonical (lowercase) value for near-miss enum strings
-        elif isinstance(f_type, type) and issubclass(f_type, Enum):
+        if isinstance(f_type, type) and issubclass(f_type, Enum):
             f_type = Annotated[f_type, BeforeValidator(partial(_suggest_enum, f_type))]
 
         # Handle default value
