@@ -1563,6 +1563,16 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return runs
 
+    def get_scheduler_log_path(self) -> Optional[Path]:
+        """Return the most recent experimaestro scheduler log in this workspace."""
+        base = self.workspace_path / ".scheduler"
+        if not base.is_dir():
+            return None
+        candidates = list(base.glob("*/experimaestro.log"))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+
     def get_current_run(self, experiment_id: str) -> Optional[str]:
         """Get the current run ID for an experiment"""
         # Check symlink locations (new: experiments/{id}/current,

@@ -15,6 +15,10 @@ class Client {
   private reconnectDelay = 1000;
   private reconnectTimer: number | null = null;
 
+  // Callbacks for the action execution round-trip (set by the Actions UI)
+  onActionPrompt: ((payload: any) => void) | null = null;
+  onActionResult: ((payload: any) => void) | null = null;
+
   constructor() {
     this.connect();
   }
@@ -44,12 +48,13 @@ class Client {
     const url = this.getWebSocketUrl();
     console.log("Connecting to WebSocket:", url.replace(/token=[^&]+/, "token=***"));
 
+    store.dispatch(actions.setConnectionStatus("connecting"));
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       console.log("WebSocket connected");
       this.reconnectAttempts = 0;
-      store.dispatch(actions.setConnected(true));
+      store.dispatch(actions.setConnectionStatus("connected"));
 
       // Request initial data
       this.send("experiments");
@@ -59,7 +64,7 @@ class Client {
 
     this.ws.onclose = (event) => {
       console.log("WebSocket closed:", event.code, event.reason);
-      store.dispatch(actions.setConnected(false));
+      store.dispatch(actions.setConnectionStatus("connecting"));
       this.ws = null;
 
       // Handle authentication error
@@ -85,6 +90,7 @@ class Client {
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log("Max reconnection attempts reached");
+      store.dispatch(actions.setConnectionStatus("disconnected"));
       return;
     }
 
@@ -124,11 +130,38 @@ class Client {
         case "job.update":
           store.dispatch(actions.updateJob(payload));
           break;
+        case "job.removed":
+          store.dispatch(actions.removeJob(payload));
+          break;
         case "service.add":
           store.dispatch(actions.addService(payload));
           break;
         case "service.update":
           store.dispatch(actions.updateService(payload));
+          break;
+        case "experiment.runs":
+          store.dispatch(actions.setRuns(payload?.runs || []));
+          break;
+        case "warning.add":
+          store.dispatch(actions.addWarning(payload));
+          break;
+        case "warning.resolved":
+          store.dispatch(actions.resolveWarning(payload));
+          break;
+        case "action.add":
+          store.dispatch(actions.addAction(payload));
+          break;
+        case "action.prompt":
+          if (this.onActionPrompt) this.onActionPrompt(payload);
+          break;
+        case "action.result":
+          if (this.onActionResult) this.onActionResult(payload);
+          break;
+        case "orphans":
+          store.dispatch(actions.setOrphans(payload?.jobs || []));
+          break;
+        case "orphan.removed":
+          store.dispatch(actions.removeOrphan(payload));
           break;
         case "error":
           console.error("Server error:", payload?.message);
@@ -156,16 +189,72 @@ class Client {
     }
   }
 
-  job_details(jobId: string, experimentId?: string): void {
-    this.send("job.details", { jobId, experimentId });
+  job_details(jobId: string, taskId?: string, experimentId?: string): void {
+    this.send("job.details", { jobId, taskId, experimentId });
   }
 
-  job_kill(jobId: string, experimentId?: string): void {
-    this.send("job.kill", { jobId, experimentId });
+  job_kill(jobId: string, taskId?: string): void {
+    this.send("job.kill", { jobId, taskId });
   }
 
-  refresh(experimentId?: string): void {
-    this.send("refresh", experimentId ? { experimentId } : {});
+  job_delete(jobId: string, taskId?: string): void {
+    this.send("job.delete", { jobId, taskId });
+  }
+
+  refresh(experimentId?: string, runId?: string): void {
+    const payload: any = {};
+    if (experimentId) payload.experimentId = experimentId;
+    if (runId) payload.runId = runId;
+    this.send("refresh", payload);
+  }
+
+  request_runs(experimentId: string): void {
+    this.send("experiment.runs", { experimentId });
+  }
+
+  request_warnings(): void {
+    this.send("warnings");
+  }
+
+  warning_action(
+    warningKey: string,
+    actionKey: string,
+    experimentId?: string,
+    runId?: string,
+  ): void {
+    this.send("warning.action", { warningKey, actionKey, experimentId, runId });
+  }
+
+  request_actions(experimentId?: string): void {
+    this.send("actions", experimentId ? { experimentId } : {});
+  }
+
+  action_execute(
+    actionId: string,
+    experimentId: string,
+    inputs: { [key: string]: string },
+  ): void {
+    this.send("action.execute", { actionId, experimentId, inputs });
+  }
+
+  request_orphans(): void {
+    this.send("orphans");
+  }
+
+  orphan_kill(jobId: string, taskId: string): void {
+    this.send("orphan.kill", { jobId, taskId });
+  }
+
+  orphan_delete(jobId: string, taskId: string): void {
+    this.send("orphan.delete", { jobId, taskId });
+  }
+
+  service_start(id: string): void {
+    this.send("service.start", { id });
+  }
+
+  service_stop(id: string): void {
+    this.send("service.stop", { id });
   }
 
   quit(): void {

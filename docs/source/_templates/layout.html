@@ -1,0 +1,9 @@
+{% extends "!layout.html" %}
+
+{# Persistent "View on GitHub" ribbon in the top-right corner #}
+{% block document %}
+  <a href="https://github.com/experimaestro/experimaestro-python"
+     class="github-ribbon" target="_blank" rel="noopener"
+     aria-label="View source on GitHub">View on GitHub</a>
+  {{ super() }}
+{% endblock %}

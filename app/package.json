@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "build": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack",
+    "build": "cross-env NODE_ENV=production TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack",
+    "build:dev": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack",
     "dev": "cross-env TS_NODE_PROJECT=\"tsconfig.webpack.json\" webpack serve"
   },
   "devDependencies": {
@@ -50,6 +51,7 @@
     "@babel/plugin-transform-typescript": "^7.27.0",
     "@babel/polyfill": "^7.12.1",
     "@babel/preset-react": "^7.26.3",
+    "@dagrejs/dagre": "^3.0.0",
     "@fortawesome/fontawesome-free": "^6.7.2",
     "@reduxjs/toolkit": "^2.6.1",
     "@types/lodash": "^4.17.16",
@@ -68,6 +70,7 @@
     "react-dom": "^18",
     "react-jss": "^10.10.0",
     "react-redux": "^9.2.0",
+    "reactflow": "^11.11.4",
     "sass": "^1.86.3",
     "sirv-cli": "^3.0.1",
     "url": "^0.11.4"

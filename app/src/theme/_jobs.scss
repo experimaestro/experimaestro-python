@@ -1,3 +1,56 @@
+/* Running status badge with a slim progress bar underneath */
+.status-badge-running {
+  display: inline-block;
+  min-width: 90px;
+}
+.status-badge-running .status-badge-progress {
+  height: 4px;
+  margin-top: 2px;
+  border-radius: 2px;
+}
+
+/* Job & experiment tables */
+.jobs-table thead th,
+.experiments-table thead th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #888;
+  font-weight: 600;
+}
+
+.jobs-table td {
+  vertical-align: middle;
+}
+
+.jobs-table .job-id {
+  color: #999;
+  cursor: pointer;
+}
+.jobs-table .job-id:hover {
+  color: #1976d2;
+}
+
+.jobs-table .task-id {
+  cursor: pointer;
+}
+
+.job-actions .action {
+  margin: 0 4px;
+  cursor: pointer;
+  color: #666;
+}
+.job-actions .action:hover {
+  color: #1976d2;
+}
+.job-actions .fa-skull-crossbones:hover {
+  color: #c62828;
+}
+
+.experiments-table tbody tr:hover {
+  background: #f5f8ff;
+}
+
 /* Icons with an action */
 .fa.link {
   padding: 3pt;

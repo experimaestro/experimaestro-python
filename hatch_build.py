@@ -25,8 +25,10 @@ class WebUIBuildHook(BuildHookInterface):
             # if the web UI is not built.
             output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Skip on ReadTheDocs - npm is not available there
-        if os.environ.get("READTHEDOCS"):
+        # Skip on ReadTheDocs (npm unavailable) or when explicitly disabled
+        # via XPM_NO_WEBUI (e.g. CI that installs experimaestro from a git ref
+        # to test the Python side only and does not need the web UI).
+        if os.environ.get("READTHEDOCS") or os.environ.get("XPM_NO_WEBUI"):
             _handle_missing_webui()
             return
 
@@ -40,7 +42,7 @@ class WebUIBuildHook(BuildHookInterface):
             return
 
         if not shutil.which("npm"):
-            print(
+            print(  # noqa: T201
                 "warning: npm not found. Skipping web UI build.",
                 file=sys.stderr,
             )

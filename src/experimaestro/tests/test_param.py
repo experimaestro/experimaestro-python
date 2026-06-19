@@ -290,7 +290,8 @@ def test_default_mismatch():
     class A(Config):
         x: Param[int] = field(default=0.2, ignore_default=True)
 
-    with pytest.raises(TypeError):
+    # Value validation now raises a pydantic ValidationError (a ValueError)
+    with pytest.raises((TypeError, ValueError)):
         A.__getxpmtype__().getArgument("x")
 
 

@@ -1,4 +1,5 @@
 import logging
+from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -24,6 +25,31 @@ from experimaestro.typingutils import (
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def _suggest_enum(enum_cls: Type[Enum], value: Any) -> Any:
+    """Give a helpful error for near-miss enum strings (e.g. ``WARN`` -> ``warn``).
+
+    Valid inputs are passed through to Pydantic's enum validation untouched.
+    A string that does not match a value but matches one case-insensitively
+    (either the value or the member name) raises a message suggesting the
+    canonical (lowercase) value rather than the generic enum error.
+    """
+    if isinstance(value, str):
+        valid_values = {m.value for m in enum_cls}
+        if value not in valid_values:
+            lowered = value.lower()
+            for m in enum_cls:
+                canonical = m.value
+                if (
+                    isinstance(canonical, str)
+                    and canonical.lower() == lowered
+                    or m.name.lower() == lowered
+                ):
+                    raise ValueError(
+                        f"{value!r} is not valid; use the lowercase value {canonical!r}"
+                    )
+    return value
 
 
 def deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,6 +140,10 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
 
         # Recursively handle nested attrs classes and complex types
         f_type = wrap_type(f_type)
+
+        # Suggest the canonical (lowercase) value for near-miss enum strings
+        elif isinstance(f_type, type) and issubclass(f_type, Enum):
+            f_type = Annotated[f_type, BeforeValidator(partial(_suggest_enum, f_type))]
 
         # Handle default value
         if f.default is not attr.NOTHING:

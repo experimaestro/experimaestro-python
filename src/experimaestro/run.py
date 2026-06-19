@@ -483,15 +483,16 @@ class TaskRunner:
             if not env.slave:
                 self._write_status()
 
-            # Release IPC locks
+            # Release IPC locks. These are raw filelock.FileLock objects
+            # (see create_file_lock), so the held flag is `is_locked`.
             for lock in self.locks:
                 try:
-                    if lock.acquired:
+                    if lock.is_locked:
                         logger.info("Releasing lock")
                         lock.release()
                         logger.info("Released lock")
                 except Exception:
-                    logger.error("Error while releasing lock %s", lock)
+                    logger.exception("Error while releasing lock %s", lock)
 
             # Note: dynamic dependency locks are released via context manager
             # in the run() method, not here

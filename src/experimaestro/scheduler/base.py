@@ -171,6 +171,7 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Track which workspaces have logging setup
         self._workspace_logging_setup: set[Path] = set()
+        self._scheduler_log_file: Path | None = None
 
         # Last (scheduler_state, failure_reason) written to each experiment's
         # event file per job. Used to deduplicate ExperimentJobStateEvent
@@ -232,7 +233,14 @@ class Scheduler(StateProvider, threading.Thread):
         xpm_logger = logging.getLogger("xpm")
         xpm_logger.addHandler(file_handler)
 
+        # Remember the most recent log file so it can be exposed (e.g. WebUI)
+        self._scheduler_log_file = log_file
+
         logger.info(f"Logging to {log_file}")
+
+    def get_scheduler_log_path(self) -> Path | None:
+        """Return the experimaestro log file for the active workspace run."""
+        return self._scheduler_log_file
 
     def register_experiment(self, xp: "Experiment"):
         """Register an experiment with the scheduler"""
@@ -302,13 +310,15 @@ class Scheduler(StateProvider, threading.Thread):
             self.server.stop()
             logger.info("Web server stopped by scheduler")
 
-    def wait_for_server_quit(self):
+    def wait_for_server_quit(self, should_stop=None):
         """Wait for explicit quit from web interface
 
-        Only blocks if server was started with wait_for_quit=True.
+        Only blocks if server was started with wait_for_quit=True. ``should_stop``
+        is an optional predicate that, when it returns True (e.g. the experiment
+        was interrupted with Ctrl+C), releases the wait.
         """
         if self.server is not None:
-            self.server.wait()
+            self.server.wait(should_stop=should_stop)
 
     def run(self):
         """Initialize scheduler using EventLoopThread's event loop.

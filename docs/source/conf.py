@@ -78,6 +78,15 @@ html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 
+# Add an "Edit on GitHub" link at the top of every page (sphinx_rtd_theme).
+html_context = {
+    "display_github": True,
+    "github_user": "experimaestro",
+    "github_repo": "experimaestro-python",
+    "github_version": "master",
+    "conf_py_path": "/docs/source/",
+}
+
 # -- Intersphinx configuration -----------------------------------------------
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

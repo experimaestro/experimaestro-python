@@ -1,14 +1,27 @@
 [![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
 [![RTD](https://readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io)
 
-Experimaestro helps in designing and managing **complex experimental plans**. It allows for the definition of tasks and their dependencies, ensuring that each step in a workflow is executed in the correct order. Some key aspects of Experimaestro are:
+<img src="app/public/icon.svg" alt="Experimaestro" width="140" align="left" hspace="15" vspace="8"/>
 
-- **Task Automation**: The tool automates repetitive tasks, making it easier to run large-scale experiments. It's particularly useful in scenarios where experiments need to be repeated with different parameters or datasets.
-- **Resource Management**: It efficiently manages computational resources, which is critical when dealing with data-intensive tasks or when running multiple experiments in parallel.
-- **Reproducibility**: By keeping a detailed record of experiments (the experimental plan in python), including parameters and environments, it aids in ensuring the reproducibility of scientific experiments, which is a fundamental requirement in research.
-- **User Interface**: While primarily a back-end tool, Experimaestro also offers a user interface to help in managing and visualizing workflows (web and text-based).
+**Experimaestro** is a Python framework designed for researchers and engineers who need to manage complex, large-scale experimental workflows without losing track of reproducibility.
 
-The full documentation can be read by going to the following URL: [https://experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io). A tutorial (training a CNN on MNIST) is [available on github](https://github.com/experimaestro/experimaestro-demo).
+Unlike traditional schedulers, Experimaestro focuses on the **experimental logic**: how configurations relate to each other and how results are organized.
+
+## Why Experimaestro?
+
+- **🚀 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
+- **🛡️ Deduplication & Reproducibility:** Every task is assigned a unique identifier based on its parameters. If you try to run the same experiment twice, Experimaestro knows—ensuring you never waste compute time on results you already have.
+- **📁 Organized by Design:** Results are automatically cached in a predictable directory structure derived from task identifiers. No more "results_v2_final_fixed.pt"—your file system stays as clean as your code.
+- **🏗️ Built-in Scalability:** Seamlessly transition from local testing to high-performance clusters. Use **Connectors** (Local, SSH) and **Launchers** (Direct, Slurm) to run the same experimental code across different environments.
+
+## Documentation
+
+The full documentation is at [experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io):
+
+- [Tutorial](https://experimaestro-python.readthedocs.io/en/latest/tutorial.html) — set up your first workspace and run a basic experiment (training a CNN on MNIST).
+- [Configurations](https://experimaestro-python.readthedocs.io/en/latest/experiments/config.html) & [Tasks](https://experimaestro-python.readthedocs.io/en/latest/experiments/task.html) — define parameters, dependencies and execution logic.
+- [Launchers](https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html) & [Connectors](https://experimaestro-python.readthedocs.io/en/latest/connectors/index.html) — control where and how your code runs.
+- [How it differs](https://experimaestro-python.readthedocs.io/en/latest/index.html#difference-with-other-projects) from Slurm, OAR, Comet, Sacred and other experiment managers.
 
 # Screenshots
 

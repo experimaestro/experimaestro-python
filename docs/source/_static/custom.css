@@ -1,0 +1,23 @@
+/* "View on GitHub" corner ribbon */
+.github-ribbon {
+    position: fixed;
+    top: 32px;
+    right: -60px;
+    z-index: 1000;
+    display: block;
+    padding: 6px 60px;
+    background: #2980b9; /* matches the RTD theme accent */
+    color: #fff !important;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    transform: rotate(45deg);
+    transform-origin: 50% 50%;
+}
+
+.github-ribbon:hover {
+    background: #3091d1;
+    color: #fff !important;
+}

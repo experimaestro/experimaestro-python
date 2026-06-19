@@ -16,6 +16,7 @@ from typing import (
 from collections import ChainMap
 from pathlib import Path
 import typing
+from pydantic_core import core_schema, SchemaValidator
 from docstring_parser.parser import parse
 import experimaestro.typingutils as typingutils
 from experimaestro.utils import logger
@@ -85,6 +86,39 @@ class Type:
 
     DEFINED: Dict[type, "Type"] = {}
 
+    def __core_schema__(self):
+        """Return a pydantic-core schema for validating a value of this type.
+
+        Validation is performed entirely by pydantic-core: each concrete Type
+        builds a schema describing how to validate one value, composing its
+        children's schemas for nested generics. The leaf types whose coercion
+        is domain-specific (int/float/bool/path, Config, user generics) use
+        plain/before validator functions so behavior -- especially coercion,
+        which feeds the identifier hash -- is preserved exactly.
+        """
+        raise NotImplementedError(f"__core_schema__ ({self.__class__})")
+
+    @property
+    def _schema_validator(self) -> SchemaValidator:
+        """Cached pydantic-core validator built from ``__core_schema__()``.
+
+        Built once per Type node (Type instances are long-lived / shared via
+        ``DEFINED``), not once per value.
+        """
+        sv = self.__dict__.get("_sv_cache")
+        if sv is None:
+            sv = SchemaValidator(self.__core_schema__())
+            self.__dict__["_sv_cache"] = sv
+        return sv
+
+    def _validate_with_schema(self, value):
+        """Validate through the cached pydantic-core schema.
+
+        Raises ``pydantic_core.ValidationError`` (a ``ValueError`` subclass) on
+        failure, matching the ValueError contract callers already expect.
+        """
+        return self._schema_validator.validate_python(value)
+
     def __init__(self, tn: Union[str, Identifier], description=None):
         if tn is None:
             pass
@@ -110,8 +144,13 @@ class Type:
     def isArray(self):
         return False
 
-    def validate(self):
-        raise NotImplementedError(f"validate ({self.__class__})")
+    def validate(self, value):
+        """Validate (and coerce) a value through this type's pydantic schema.
+
+        Raises ``pydantic_core.ValidationError`` (a ``ValueError`` subclass) on
+        failure.
+        """
+        return self._validate_with_schema(value)
 
     @staticmethod
     def fromType(key):
@@ -121,6 +160,10 @@ class Type:
 
         if key is None:
             return Any
+
+        # NoneType, as it appears in Optional[X] == X | None
+        if key is type(None):
+            return NoneTypeNone
 
         defined = Type.DEFINED.get(key, None)
         if defined:
@@ -153,6 +196,11 @@ class Type:
         t = typingutils.get_dict(key)
         if t:
             return DictType(Type.fromType(t[0]), Type.fromType(t[1]))
+
+        t = typingutils.get_tuple(key)
+        if t is not None:
+            subtypes, variadic = t
+            return TupleType([Type.fromType(st) for st in subtypes], variadic)
 
         if union_t := typingutils.get_union(key):
             return UnionType([Type.fromType(t) for t in union_t])
@@ -625,7 +673,14 @@ class ObjectType(Type):
             if issubclass(tp, Config) and tp not in [Config, Task]:
                 yield tp.__xpmtype__
 
-    def validate(self, value):
+    def __core_schema__(self):
+        # Config values carry domain rules pydantic cannot express (sealed,
+        # submitted task, subtype against value_type), so this is a plain
+        # validator. Keeping Config as a leaf also avoids cyclic schemas and
+        # any interaction with pydantic's metaclass.
+        return core_schema.no_info_plain_validator_function(self._check)
+
+    def _check(self, value):
         """Ensures that the value is compatible with this type"""
         from .objects import Config
 
@@ -671,53 +726,48 @@ def definetype(*types):
     return call
 
 
+def _path_value(value):
+    # Accept str / Path and normalise to Path. The serialized {"type": "path"}
+    # form is resolved to a real Path by the deserializer
+    # (ConfigInformation._objectFromParameters) before it ever reaches here.
+    if not isinstance(value, (str, Path)):
+        raise ValueError(f"value is not a pathlike value ({type(value)})")
+    return Path(value)
+
+
 @definetype(int)
 class IntType(Type):
-    def validate(self, value):
-        if isinstance(value, float):
-            import math
-
-            rest, intvalue = math.modf(value)
-            if rest != 0:
-                raise TypeError(f"Value {value} is not an integer but a float")
-            return int(intvalue)
-
-        if not isinstance(value, int):
-            raise TypeError(f"Value of type {type(value)} is not an integer")
-        return value
+    def __core_schema__(self):
+        # Native lax int: parses numeric strings, normalizes bool -> int,
+        # coerces integral floats, rejects non-integral floats.
+        return core_schema.int_schema()
 
 
 @definetype(str)
 class StrType(Type):
-    def validate(self, value):
-        if not isinstance(value, str):
-            raise TypeError("value is not a string")
-        return str(value)
+    def __core_schema__(self):
+        # strict: only str instances are accepted (no int/bytes coercion)
+        return core_schema.str_schema(strict=True)
 
 
 @definetype(float)
 class FloatType(Type):
-    def validate(self, value):
-        if not isinstance(value, (float, int)):
-            raise TypeError("value is not a float")
-        return float(value)
+    def __core_schema__(self):
+        # Native lax float: parses numeric strings, coerces int/bool.
+        return core_schema.float_schema()
 
 
 @definetype(bool)
 class BoolType(Type):
-    def validate(self, value):
-        return bool(value)
+    def __core_schema__(self):
+        # Native lax bool: "true"/"false"/0/1 etc.; rejects arbitrary objects.
+        return core_schema.bool_schema()
 
 
 @definetype(Path)
 class PathType(Type):
-    def validate(self, value):
-        if isinstance(value, dict) and value.get("$type", None) == "path":
-            return Path(value.get("$value"))
-
-        if not isinstance(value, (str, Path)):
-            raise TypeError(f"value is not a pathlike value ({type(value)})")
-        return Path(value)
+    def __core_schema__(self):
+        return core_schema.no_info_plain_validator_function(_path_value)
 
     @property
     def ignore(self):
@@ -729,8 +779,21 @@ class AnyType(Type):
     def __init__(self):
         super().__init__("any")
 
-    def validate(self, value):
-        return value
+    def __core_schema__(self):
+        return core_schema.any_schema()
+
+
+class NoneTypeType(Type):
+    """The ``None`` type, used as a member of ``Optional[X]`` (i.e. ``X | None``)."""
+
+    def __init__(self):
+        super().__init__("none")
+
+    def name(self):
+        return "None"
+
+    def __core_schema__(self):
+        return core_schema.none_schema()
 
 
 class TypeVarType(Type):
@@ -740,8 +803,8 @@ class TypeVarType(Type):
     def name(self):
         return str(self.typevar)
 
-    def validate(self, value):
-        return value
+    def __core_schema__(self):
+        return core_schema.any_schema()
 
     def __str__(self):
         return f"TypeVar({self.typevar})"
@@ -751,6 +814,7 @@ class TypeVarType(Type):
 
 
 Any = AnyType()
+NoneTypeNone = NoneTypeType()
 
 
 class ArrayType(Type):
@@ -760,17 +824,30 @@ class ArrayType(Type):
     def name(self):
         return f"List[{self.type.name()}]"
 
-    def validate(self, value):
-        if not isinstance(value, List):
-            raise ValueError("value is not a list")
-
-        return [self.type.validate(x) for x in value]
+    def __core_schema__(self):
+        # strict matches legacy (only list instances accepted); element
+        # validation is delegated to the child schema (native recursion).
+        return core_schema.list_schema(self.type.__core_schema__(), strict=True)
 
     def __str__(self):
         return f"Array({self.type})"
 
     def __repr__(self):
         return f"Array({self.type})"
+
+
+def _set_sealed_check(value):
+    """Pinned legacy rule: Config elements of a set must be sealed."""
+    from .objects import Config
+
+    if isinstance(value, set):
+        for x in value:
+            if isinstance(x, Config) and not x.__xpm__._sealed:
+                raise ValueError(
+                    f"Config {x.__class__.__qualname__} in set is not sealed. "
+                    f"Use sealed_set() to create sets of Config objects."
+                )
+    return value
 
 
 class SetType(Type):
@@ -780,20 +857,13 @@ class SetType(Type):
     def name(self):
         return f"Set[{self.type.name()}]"
 
-    def validate(self, value):
-        if not isinstance(value, set):
-            raise ValueError("value is not a set")
-
-        from .objects import Config
-
-        for x in value:
-            if isinstance(x, Config) and not x.__xpm__._sealed:
-                raise TypeError(
-                    f"Config {x.__class__.__qualname__} in set is not sealed. "
-                    f"Use sealed_set() to create sets of Config objects."
-                )
-
-        return {self.type.validate(x) for x in value}
+    def __core_schema__(self):
+        # The sealed-config check runs first (before-validator), then native
+        # set validation with strict=True (only set instances accepted).
+        return core_schema.no_info_before_validator_function(
+            _set_sealed_check,
+            core_schema.set_schema(self.type.__core_schema__(), strict=True),
+        )
 
     def __str__(self):
         return f"Set({self.type})"
@@ -809,9 +879,8 @@ class EnumType(Type):
     def name(self):
         return self.type.__name__
 
-    def validate(self, value):
-        assert isinstance(value, self.type), f"{value} is not of type {self.type}"
-        return value
+    def __core_schema__(self):
+        return core_schema.is_instance_schema(self.type)
 
     def __str__(self):
         return f"Enum({self.type})"
@@ -833,17 +902,50 @@ class UnionType(Type):
     def __repr__(self):
         return str(self)
 
-    def validate(self, value):
-        for subtype in self.types:
-            try:
-                return subtype.validate(value)
-            except ValueError:
-                pass
-            except TypeError:
-                pass
+    def __core_schema__(self):
+        # left_to_right preserves the legacy "first matching member wins"
+        # semantics (it iterated self.types in order), which keeps coercion
+        # deterministic -- important since coerced values feed the identifier.
+        # Native union resolution fixes the legacy bug where a non-matching
+        # dict silently returned None and where member errors were discarded.
+        # left_to_right preserves the legacy "first matching member wins"
+        # semantics, which keeps coercion deterministic (it feeds the identifier).
+        return core_schema.union_schema(
+            [t.__core_schema__() for t in self.types],
+            mode="left_to_right",
+        )
 
-        if not isinstance(value, dict):
-            raise ValueError(f"value is not within the types {self}")
+
+class TupleType(Type):
+    """A tuple type, either fixed ``tuple[X, Y]`` or variadic ``tuple[X, ...]``.
+
+    Previously such annotations fell through to ``GenericType``, which only
+    checked the instance class' declared type arguments and never validated
+    element values or arity.
+    """
+
+    def __init__(self, types: List["Type"], variadic: bool):
+        self.types = types
+        self.variadic = variadic
+
+    def name(self):
+        if self.variadic:
+            return f"Tuple[{self.types[0].name()}, ...]"
+        return "Tuple[" + ", ".join(t.name() for t in self.types) + "]"
+
+    def __str__(self):
+        inner = ", ".join(str(t) for t in self.types)
+        return f"Tuple({inner}{', ...' if self.variadic else ''})"
+
+    def __repr__(self):
+        return str(self)
+
+    def __core_schema__(self):
+        if self.variadic:
+            return core_schema.tuple_schema(
+                [self.types[0].__core_schema__()], variadic_item_index=0
+            )
+        return core_schema.tuple_schema([t.__core_schema__() for t in self.types])
 
 
 class DictType(Type):
@@ -854,14 +956,13 @@ class DictType(Type):
     def name(self):
         return f"Dict[{self.keytype.name()},{self.valuetype.name()}]"
 
-    def validate(self, value):
-        if not isinstance(value, dict):
-            raise ValueError("value is not a dict")
-
-        return {
-            self.keytype.validate(key): self.valuetype.validate(value)
-            for key, value in value.items()
-        }
+    def __core_schema__(self):
+        # strict matches legacy (only dict instances accepted)
+        return core_schema.dict_schema(
+            self.keytype.__core_schema__(),
+            self.valuetype.__core_schema__(),
+            strict=True,
+        )
 
     def __str__(self):
         return f"Dict({self.keytype.name()},{self.valuetype.name()})"
@@ -932,7 +1033,12 @@ class GenericType(Type):
         """Returns the identifier of the type"""
         return Identifier(f"{self.origin}.{self.type}")
 
-    def validate(self, value):
+    def __core_schema__(self):
+        # User generics (Generic[T] / value classes) are validated by MRO logic
+        # pydantic cannot express, so this is a plain validator function.
+        return core_schema.no_info_plain_validator_function(self._check)
+
+    def _check(self, value):
         # Now, let's check generics...
         mros = typingutils.generic_mro(type(value))
         matching = next(
@@ -952,7 +1058,7 @@ class GenericType(Type):
                 if isinstance(expected, TypeVar) or isinstance(actual, TypeVar):
                     continue
                 if not _is_type_arg_compatible(actual, expected):
-                    raise TypeError(
+                    raise ValueError(
                         f"{type(value).__qualname__} has type argument "
                         f"{actual} which is not compatible with "
                         f"expected {expected}"

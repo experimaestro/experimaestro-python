@@ -181,17 +181,22 @@ class WebUIServer:
         self._quit_event.set()
         self.stop()
 
-    def wait(self):
+    def wait(self, should_stop=None):
         """Wait for explicit quit from web interface
 
         Call this after experiment completion when wait_for_quit=True.
-        Blocks until user clicks Quit button in the web UI.
+        Blocks until the user clicks Quit in the web UI, or until ``should_stop``
+        (if given) returns True — e.g. when the experiment is interrupted with
+        Ctrl+C. Polls so the process stays responsive to signals.
         """
         if not self.wait_for_quit:
             return
 
-        logger.info("Waiting for quit from web interface...")
-        self._quit_event.wait()
+        logger.info("Waiting for quit from web interface (Ctrl+C to exit)...")
+        while not self._quit_event.wait(0.5):
+            if should_stop is not None and should_stop():
+                logger.info("Stop requested (interrupted); shutting down server")
+                break
         logger.info("Quit signal received")
 
     @property

@@ -495,6 +495,13 @@ class StateProvider(ABC):
 
     # Optional methods with default implementations
 
+    def get_scheduler_log_path(self) -> Optional[Path]:
+        """Return the path to the experimaestro scheduler log, if available.
+
+        Returns None when the provider cannot locate a scheduler log.
+        """
+        return None
+
     def sync_path(self, path: str) -> Optional[Path]:
         """Sync a specific path from remote (remote providers only)
 

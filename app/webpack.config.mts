@@ -95,7 +95,17 @@ const config: Configuration = {
               },
             },
           },
-          "sass-loader",
+          {
+            loader: "sass-loader",
+            options: {
+              // Silence Dart Sass deprecation warnings coming from third-party
+              // dependencies (fontawesome, bootstrap) imported from node_modules.
+              sassOptions: {
+                quietDeps: true,
+                silenceDeprecations: ["import", "global-builtin"],
+              },
+            },
+          },
         ],
       },
 
@@ -137,7 +147,7 @@ const config: Configuration = {
               "@babel/preset-react",
               "@babel/preset-typescript",
             ],
-            plugins: ["react-refresh/babel"],
+            plugins: isDevelopment ? ["react-refresh/babel"] : [],
           },
         },
       },
@@ -192,7 +202,7 @@ const config: Configuration = {
     new MiniCssExtractPlugin({
       filename: "[name].css",
     }),
-    new ReactRefresh(),
+    ...(isDevelopment ? [new ReactRefresh()] : []),
   ],
   devtool: isProduction && !sourceMapsInProduction ? false : "source-map",
   stats: {
