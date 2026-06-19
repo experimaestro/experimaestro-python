@@ -1,5 +1,40 @@
 # Changelog
 
+## Version 2.6 (2026)
+
+- **Web UI overhaul**: feature parity with the TUI, plus a task dependency graph,
+  a scheduler log viewer, a tabbed job details/logs modal, a connection-status
+  indicator, and a new application logo.
+- **Pydantic-based configuration**: settings moved from OmegaConf to Pydantic,
+  with parameter provenance and `${env:...}` interpolation in `settings.yaml`.
+- Frontend builds are minified by default; set `XPM_NO_WEBUI` to skip them.
+- Fixes for carbon tracking (codecarbon daemon thread, offline tracker) and job
+  execution (zombie reaping, lock release).
+
+---
+
+## Version 2.5 (2026)
+
+- New `Prepare` config for in-memory data preparation, and a new `xpmconfig`
+  attribute.
+- Job directories are kept by default (`keep = True`) and `--run-mode` is
+  case-insensitive.
+- Fixes around local-task signal handling, dry-run isolation, multi-run event
+  routing, and service log directories.
+
+---
+
+## Version 2.4 (2026)
+
+- **Workspace folders (beta)** (#55): archive jobs to auxiliary workspace folders.
+- New `experimaestro experiments copy` command for cross-workspace transfer.
+- Deleted jobs are marked with a `DELETED` status (#210); `params.json` paths are
+  encoded relative to the job or workspace (#228).
+- Improved SSH monitoring (`kill_job`, process info, `--request-timeout`) and
+  several TUI and Windows compatibility fixes.
+
+---
+
 ## Version 2.3.0 (2026)
 
 ### New Features
