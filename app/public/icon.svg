@@ -2,10 +2,10 @@
 <svg
    version="1.1"
    width="634.49164"
-   height="429.45212"
-   viewBox="0 0 634.49164 429.45212"
+   height="430.80017"
+   viewBox="0 0 634.49164 430.80017"
    id="svg44"
-   sodipodi:docname="Logo_xpm_1.svg"
+   sodipodi:docname="icon.svg"
    inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -31,6 +31,17 @@
      inkscape:current-layer="svg44" />
   <defs
      id="defs1" />
+  <text
+     xml:space="preserve"
+     style="font-size:64px;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#003380;fill-opacity:0.504505;stroke-width:1.00157"
+     x="400.26855"
+     y="419.21619"
+     id="text1"><tspan
+       sodipodi:role="line"
+       id="tspan1"
+       x="400.26855"
+       y="419.21619"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:64px;font-family:'Helvetica Neue';-inkscape-font-specification:'Helvetica Neue Bold';fill:#003380;fill-opacity:0.504505">Experimaestro</tspan></text>
   <g
      id="g44"
      transform="translate(-64.508354)">
@@ -367,15 +378,4 @@
          transform="scale(0.74999971)" />
     </g>
   </g>
-  <text
-     xml:space="preserve"
-     style="font-size:53.3333px;text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;fill:#ffffff;stroke-width:1.00157"
-     x="432.24268"
-     y="410.92661"
-     id="text1"><tspan
-       sodipodi:role="line"
-       id="tspan1"
-       x="432.24268"
-       y="410.92661"
-       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:53.3333px;font-family:'Helvetica Neue';-inkscape-font-specification:'Helvetica Neue Bold';fill:#003380;fill-opacity:1">Experimaestro</tspan></text>
 </svg>
