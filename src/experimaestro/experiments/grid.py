@@ -27,7 +27,7 @@ class GenericParams:
     """A class to represent a parameter that can be a single value, a list of values, or a range of values."""
     value: Any = None
     values_list: Optional[List[Any]] = None
-    values_range: Optional[Tuple[int, int]] = None
+    values_range: Optional[Tuple[int, ...]] = None
 
     @property
     def is_grid(self) -> bool:
@@ -39,7 +39,7 @@ class GenericParams:
         if self.values_list:
             return list(self.values_list)
         if self.values_range:
-            return list(range(self.values_range[0], self.values_range[1]))
+            return list(range(*self.values_range))
         if self.value is not None:
             return [self.value]
         return []
@@ -92,11 +92,14 @@ class GenericParams:
             if values_list is not None:
                 values_list = [converter(v) for v in values_list]
 
+            # Support both 'values_range' and 'range'
+            range_val = d.get("values_range") or d.get("range")
+
             return cls(
                 value=value,
                 values_list=values_list,
                 values_range=(
-                    tuple(d.get("values_range")) if "values_range" in d else None
+                    tuple(range_val) if range_val is not None else None
                 ),
             )
 

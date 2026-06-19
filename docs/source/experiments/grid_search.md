@@ -31,13 +31,21 @@ batch_size:
 
 ### Value Ranges
 
-You can also define a range of values using a dictionary:
+You can also define a range of values using a dictionary with `values_range` or its shorthand alias `range`. An optional third argument defines the step size:
 
 ```yaml
 id: my-experiment
+
+# Generates: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 learning_rate:
-  values_range: [0, 10]  # values from 0 to 9
+  values_range: [0, 10]
+
+# Generates: [16, 26, 36, 46, 56] (with a step of 10)
+hidden_dim:
+  range: [16, 64, 10]
 ```
+
+The range lists are expanded using Python's native `range(start, stop, [step])` logic.
 
 ## Explicit Grid Search Block
 

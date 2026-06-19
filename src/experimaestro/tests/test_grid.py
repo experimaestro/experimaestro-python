@@ -30,6 +30,16 @@ def test_generic_params_coercion():
     assert gp.is_grid
     assert gp.as_list() == [0, 1, 2]
 
+    # Range with step
+    gp = GenericParams.from_any({"values_range": [0, 10, 2]})
+    assert gp.is_grid
+    assert gp.as_list() == [0, 2, 4, 6, 8]
+
+    # Range alias support
+    gp = GenericParams.from_any({"range": [16, 64, 10]})
+    assert gp.is_grid
+    assert gp.as_list() == [16, 26, 36, 46, 56]
+
 def test_discover_grid_params():
     cfg = MyConfig(id="test", lr=GenericParams(values_list=[0.1, 0.01]), sub=MySubConfig(param=10))
     grid = discover_grid_params(cfg)
