@@ -76,7 +76,7 @@ export default () => {
             style={{ cursor: "pointer" }}
           >
             <img
-              src="/icon.svg"
+              src="/icon-dark.svg"
               alt=""
               height={40}
               className="me-2 align-middle"
