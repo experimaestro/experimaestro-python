@@ -9,10 +9,11 @@ Unlike traditional schedulers, Experimaestro focuses on the **experimental logic
 
 ## Why Experimaestro?
 
-- **🚀 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
+- **🧩 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
 - **🛡️ Deduplication & Reproducibility:** Every task is assigned a unique identifier based on its parameters. If you try to run the same experiment twice, Experimaestro knows—ensuring you never waste compute time on results you already have.
 - **📁 Organized by Design:** Results are automatically cached in a predictable directory structure derived from task identifiers. No more "results_v2_final_fixed.pt"—your file system stays as clean as your code.
 - **🏗️ Built-in Scalability:** Seamlessly transition from local testing to high-performance clusters. Use **Connectors** (Local, SSH) and **Launchers** (Direct, Slurm) to run the same experimental code across different environments.
+- **📺 Real-time Monitoring:** Track running and completed experiments as they progress, from a textual (terminal) UI or a web UI.
 
 ## Documentation
 

@@ -3,7 +3,7 @@
 ```{image} ./img/icon.svg
 :alt: Experimaestro
 :width: 120px
-:align: center
+:align: left
 ```
 
 [![GitHub Release](https://img.shields.io/github/v/release/experimaestro/experimaestro-python)](https://github.com/experimaestro/experimaestro-python)
@@ -18,13 +18,15 @@ Unlike traditional schedulers, Experimaestro focuses on the **experimental logic
 
 Experimaestro solves common pain points in research workflows by providing:
 
-- **🚀 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
+- **🧩 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
 
 - 🛡️ **Deduplication & Reproducibility**: Every task is assigned a unique identifier based on its parameters. If you try to run the same experiment twice, Experimaestro knows—ensuring you never waste compute time on results you already have.
 
 - 📁 **Organized by Design** Results are automatically cached in a predictable directory structure derived from task identifiers. No more "results_v2_final_fixed.pt"—your file system stays as clean as your code.
 
 - 🏗️ **Built-in Scalability** Seamlessly transition from local testing to high-performance clusters. Use **Connectors** (Local, SSH) and **Launchers** (Direct, Slurm) to run the same experimental code across different environments.
+
+- 📺 **Real-time Monitoring** Track running and completed experiments as they progress, from a textual (terminal) UI or a web UI.
 
 ---
 
@@ -42,6 +44,17 @@ open-source and focuses on single-shot experiments. Sumatra and FGLab, based on
 parameter files, offer less flexibility. Sacred, though open-source and allowing
 for pre-processing steps, doesn't support the construction of complex
 experimental plans like Experimaestro.
+
+A closer relative is [exca](https://github.com/facebookresearch/exca)
+("execute and cache seamlessly in python"), which—like Experimaestro—combines
+configuration, caching, and cluster execution. exca decorates
+[Pydantic](https://docs.pydantic.dev) model methods with `@infra.apply` to cache
+their results and submit jobs through [submitit](https://github.com/facebookincubator/submitit).
+Experimaestro goes further: it computes a unique identifier from the *full*
+configuration for automatic deduplication and reuse across runs, composes tasks
+into explicit dependency graphs and experimental plans, and abstracts execution
+through pluggable launchers (Slurm, OAR) and connectors (local, SSH) with
+built-in monitoring.
 
 Experimaestro's distinct features include:
 
