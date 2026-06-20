@@ -19,10 +19,6 @@ jobs:
         with:
           fetch-depth: 0  # Needed for hatch-vcs to determine version
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -46,16 +42,9 @@ jobs:
         with:
           body_path: release-notes.md
 
-      - name: Build web app
-        working-directory: ./app
-        run: |
-          npm --version
-          npm install --no-save
-          NODE_OPTIONS="--loader ts-node/esm" npm run build
-
       - name: Build python package
         run: |
-          hatch build
+          hatch build  # uses the committed src/experimaestro/webui/data (no Node needed)
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
