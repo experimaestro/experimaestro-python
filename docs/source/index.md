@@ -14,6 +14,8 @@ Unlike traditional schedulers, Experimaestro focuses on the **experimental logic
 
 ![Experimaestro TUI](./img/tui-jobs.png)
 
+![Experimaestro web UI](./img/webui-tasks.png)
+
 ## Why Experimaestro?
 
 Experimaestro solves common pain points in research workflows by providing:

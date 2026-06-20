@@ -54,6 +54,13 @@ The full documentation is at [experimaestro-python.readthedocs.io](https://exper
   <figcaption>Services view: monitor background services and their status</figcaption>
 </figure>
 
+## Web interface
+
+<figure>
+  <img src="docs/source/img/webui-tasks.png" alt="Web UI tasks screen">
+  <figcaption>Tasks view: filter, sort and monitor jobs by status, tags, duration and CO₂, with live progress and per-job logs/actions</figcaption>
+</figure>
+
 # Install
 
 ## With pip
