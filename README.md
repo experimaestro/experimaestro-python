@@ -7,7 +7,6 @@
 
 Unlike traditional schedulers, Experimaestro focuses on the **experimental logic**: how configurations relate to each other and how results are organized.
 
-<br clear="left"/>
 
 ## Why Experimaestro?
 
