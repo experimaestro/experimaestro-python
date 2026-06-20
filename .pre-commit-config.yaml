@@ -6,7 +6,9 @@ repos:
 - hooks:
   - id: check-yaml
   - id: end-of-file-fixer
+    exclude: ^src/experimaestro/webui/data/
   - id: trailing-whitespace
+    exclude: ^src/experimaestro/webui/data/
   repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v6.0.0
 - hooks:
@@ -20,6 +22,12 @@ repos:
     entry: '(FIXME:|TODO:)'
     language: pygrep
     types: [python]
+  - id: webui-build-sync
+    name: WebUI build in sync with app/
+    entry: scripts/check-webui-build.sh
+    language: script
+    pass_filenames: false
+    always_run: true
   repo: local
 - hooks:
   - id: ruff
