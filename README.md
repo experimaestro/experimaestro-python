@@ -1,11 +1,13 @@
 [![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
 [![RTD](https://readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io)
 
-<img src="app/public/icon.svg" alt="Experimaestro" width="140" align="left" hspace="15" vspace="8"/>
+<img src="docs/source/img/icon.svg" alt="Experimaestro" width="240" align="left" hspace="15" vspace="8"/>
 
 **Experimaestro** is a Python framework designed for researchers and engineers who need to manage complex, large-scale experimental workflows without losing track of reproducibility.
 
 Unlike traditional schedulers, Experimaestro focuses on the **experimental logic**: how configurations relate to each other and how results are organized.
+
+<br clear="left"/>
 
 ## Why Experimaestro?
 
