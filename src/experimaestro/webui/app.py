@@ -138,6 +138,7 @@ def create_app(server: "WebUIServer") -> FastAPI:
                     "index.css",
                     "login.html",
                     "icon.svg",
+                    "favicon.svg",
                 ):
                     cache_control = "no-cache, no-store, must-revalidate"
                 else:
