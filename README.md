@@ -175,3 +175,19 @@ if __name__ == "__main__":
 ```
 
 which can be launched with `python test.py /tmp/helloworld-workdir`
+
+# Ecosystem
+
+A number of libraries and tools are built around experimaestro:
+
+**Datasets** — [datamaestro](https://github.com/experimaestro/datamaestro), a companion dataset manager, with plugins [datamaestro_text](https://github.com/experimaestro/datamaestro_text), [datamaestro_image](https://github.com/experimaestro/datamaestro_image), [datamaestro_ml](https://github.com/experimaestro/datamaestro_ml) and [datamaestro_ir](https://github.com/xpmir/datamaestro_ir).
+
+**Domain libraries**
+- [xpm-torch](https://github.com/experimaestro/xpm-torch) — building blocks for PyTorch-based experiments.
+- [experimaestro-ir (xpmir)](https://github.com/experimaestro/experimaestro-ir) — information-retrieval tasks and configurations (built on xpm-torch). Specific experiments are their own projects in the [xpmir organisation](https://github.com/xpmir), e.g. [splade](https://github.com/xpmir/splade), [cosplade](https://github.com/xpmir/cosplade), [cross-encoders](https://github.com/xpmir/cross-encoders) and [mice](https://github.com/xpmir/mice).
+
+**Tools & services** — [xpm-mlboard](https://github.com/experimaestro/xpm-mlboard), lightweight services to monitor ML learning curves (TensorBoard, …).
+
+**Starting points** — [experiment-template](https://github.com/experimaestro/experiment-template) (minimal skeleton) and [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) (fuller MNIST example, also the [tutorial](https://experimaestro-python.readthedocs.io/en/latest/tutorial.html)).
+
+See the [Experimaestro projects guide](https://experimaestro-python.readthedocs.io/en/latest/experiments/projects.html) for how to structure your own project.

@@ -81,6 +81,7 @@ Learn how to define your workflow:
     classes.
   - [Tasks](./experiments/task.md): Define the execution logic and manage dependencies.
   - Experimental [Plans](./experiments/plan.md): Compose tasks into complex matrices and track them using tags.
+  - [Experimaestro projects](./experiments/projects.md): How to lay out a project — the package, the `run(helper, cfg)` entry point, the YAML configuration, and the surrounding ecosystem.
 
 **⚙️ Execution & Infrastructure**
 Control where and how your code runs:
@@ -91,7 +92,7 @@ Control where and how your code runs:
   - [Jupyter Integration](./jupyter.md): Interact with your experiments from notebooks.
   - [API Reference](./api/index.md): Deep dive into the classes and methods.
 
-# Detailed Outline
+## Detailed Outline
 
 ```{toctree}
 ---
@@ -104,6 +105,7 @@ experiments/plan
 experiments/workspace
 experiments/actions
 experiments/analysis
+experiments/projects
 experiments
 ```
 
