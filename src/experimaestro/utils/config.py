@@ -1,9 +1,26 @@
 import logging
 from enum import Enum
 from functools import partial
-from typing import Any, Dict, List, Type, TypeVar, Annotated
+from typing import (
+    Any,
+    Dict,
+    List,
+    Type,
+    TypeVar,
+    Annotated,
+    get_origin,
+    get_args,
+    Set,
+    Union,
+)
 import attr
 from pydantic import create_model, ConfigDict, BeforeValidator
+from experimaestro.typingutils import (
+    get_union,
+    get_list_component,
+    get_dict,
+    get_set,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +82,7 @@ def from_dotlist(dotlist: List[str]) -> Dict[str, Any]:
 
 def validate_attrs(cls: Type[T], data: Any) -> T:
     """Validate data against an attrs class using Pydantic"""
+
     if isinstance(data, cls):
         return data
 
@@ -84,18 +102,47 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
             cls, config={"arbitrary_types_allowed": True}
         ).validate_python(data)
 
+    def wrap_type(t: Any) -> Any:
+        if t is Any:
+            return Any
+
+        # Handle Annotated
+        if get_origin(t) is Annotated:
+            args = get_args(t)
+            return Annotated[(wrap_type(args[0]),) + args[1:]]
+
+        # Handle Optional/Union
+        if union_args := get_union(t):
+            return Union[tuple(wrap_type(arg) for arg in union_args)]
+
+        # Handle List
+        if list_arg := get_list_component(t):
+            return List[wrap_type(list_arg)]
+
+        # Handle Dict
+        if dict_args := get_dict(t):
+            return Dict[wrap_type(dict_args[0]), wrap_type(dict_args[1])]
+
+        # Handle Set
+        if set_arg := get_set(t):
+            return Set[wrap_type(set_arg)]
+
+        if attr.has(t):
+            return Annotated[t, BeforeValidator(partial(validate_attrs, t))]
+
+        return t
+
     fields = attr.fields(cls)
     model_fields = {}
     for f in fields:
         # Get the type, handle missing types as Any
         f_type = f.type if f.type is not None else Any
 
-        # Recursively handle nested attrs classes
-        if attr.has(f_type):
-            f_type = Annotated[f_type, BeforeValidator(partial(validate_attrs, f_type))]
+        # Recursively handle nested attrs classes and complex types
+        f_type = wrap_type(f_type)
 
         # Suggest the canonical (lowercase) value for near-miss enum strings
-        elif isinstance(f_type, type) and issubclass(f_type, Enum):
+        if isinstance(f_type, type) and issubclass(f_type, Enum):
             f_type = Annotated[f_type, BeforeValidator(partial(_suggest_enum, f_type))]
 
         # Handle default value
