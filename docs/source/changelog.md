@@ -2,6 +2,9 @@
 
 ## Version 2.6 (2026)
 
+- **Declarative Grid Search**: Added `GridSearch[T]` type hint and `generate_grid()`
+  for resolving parameter sweeps, supporting inline lists, step-based value ranges,
+  and geometric progression sweeps (`range_mult`).
 - **Web UI overhaul**: feature parity with the TUI, plus a task dependency graph,
   a scheduler log viewer, a tabbed job details/logs modal, a connection-status
   indicator, and a new application logo.

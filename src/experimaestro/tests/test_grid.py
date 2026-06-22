@@ -40,6 +40,11 @@ def test_generic_params_coercion():
     assert gp.is_grid
     assert gp.as_list() == [16, 26, 36, 46, 56]
 
+    # Range multiplier support
+    gp = GenericParams.from_any({"range_mult": [1e-4, 4, 10]})
+    assert gp.is_grid
+    assert gp.as_list() == [1e-4, 1e-3, 1e-2, 1e-1]
+
 def test_discover_grid_params():
     cfg = MyConfig(id="test", lr=GenericParams(values_list=[0.1, 0.01]), sub=MySubConfig(param=10))
     grid = discover_grid_params(cfg)

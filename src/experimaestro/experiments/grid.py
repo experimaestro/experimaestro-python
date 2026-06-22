@@ -28,6 +28,7 @@ class GenericParams:
     value: Any = None
     values_list: Optional[List[Any]] = None
     values_range: Optional[Tuple[int, ...]] = None
+    values_mult: Optional[Tuple[Any, ...]] = None
 
     @property
     def is_grid(self) -> bool:
@@ -40,6 +41,23 @@ class GenericParams:
             return list(self.values_list)
         if self.values_range:
             return list(range(*self.values_range))
+        if self.values_mult:
+            if len(self.values_mult) != 3:
+                raise ValueError("range_mult must have exactly 3 elements: [start, n_iter, multiplier]")
+            start, n_iter, multiplier = self.values_mult
+
+            # Convert strings (e.g. '1e-4') to numbers to prevent python string repetition
+            def to_num(val):
+                if isinstance(val, str):
+                    try:
+                        return float(val) if ("." in val or "e" in val.lower()) else int(val)
+                    except ValueError:
+                        return val
+                return val
+
+            start = to_num(start)
+            multiplier = to_num(multiplier)
+            return [start * (multiplier ** i) for i in range(int(n_iter))]
         if self.value is not None:
             return [self.value]
         return []
@@ -95,11 +113,17 @@ class GenericParams:
             # Support both 'values_range' and 'range'
             range_val = d.get("values_range") or d.get("range")
 
+            # Support both 'values_mult' and 'range_mult'
+            mult_val = d.get("values_mult") or d.get("range_mult")
+
             return cls(
                 value=value,
                 values_list=values_list,
                 values_range=(
                     tuple(range_val) if range_val is not None else None
+                ),
+                values_mult=(
+                    tuple(mult_val) if mult_val is not None else None
                 ),
             )
 

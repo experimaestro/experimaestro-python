@@ -29,7 +29,7 @@ batch_size:
   - 32
 ```
 
-### Value Ranges
+### Value Ranges and Steps
 
 You can also define a range of values using a dictionary with `values_range` or its shorthand alias `range`. An optional third argument defines the step size:
 
@@ -46,6 +46,18 @@ hidden_dim:
 ```
 
 The range lists are expanded using Python's native `range(start, stop, [step])` logic.
+
+### Multiplier-Based Ranges (Geometric Progression)
+
+For sweeps where parameters scale geometrically (like learning rates), you can define a multiplier-based range using `range_mult` (or `values_mult`). It accepts a list of `[start, n_iter, multiplier]`:
+
+```yaml
+id: my-experiment
+
+# Generates: [0.0001, 0.001, 0.01, 0.1]
+learning_rate:
+  range_mult: [1e-4, 4, 10]
+```
 
 ## Explicit Grid Search Block
 
