@@ -2,6 +2,9 @@ default_install_hook_types:
   - pre-commit
   - commit-msg
 
+# The built web UI is committed but generated: never let any hook touch it.
+exclude: ^src/experimaestro/webui/data/
+
 repos:
 - hooks:
   - id: check-yaml
@@ -20,12 +23,17 @@ repos:
     entry: '(FIXME:|TODO:)'
     language: pygrep
     types: [python]
+  - id: webui-build-sync
+    name: WebUI build in sync with app/
+    entry: scripts/check-webui-build.sh
+    language: script
+    pass_filenames: false
+    always_run: true
   repo: local
 - hooks:
   - id: ruff
     args: [--fix]
   - id: ruff-format
-    exclude: ^src/experimaestro/webui/data
   repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.14.10
 - hooks:

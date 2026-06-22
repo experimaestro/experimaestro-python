@@ -54,24 +54,45 @@ class StateBridge:
         """
         self.state_provider = state_provider
         self.ws_handler = ws_handler
-        self._loop: asyncio.AbstractEventLoop = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # Register as listener
         state_provider.add_listener(self._on_state_event)
 
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Record the event loop that serves the WebSocket connections.
+
+        Called from a startup hook running on the uvicorn loop. Broadcasts
+        scheduled from other threads are handed to this loop, which owns the
+        connections and their asyncio primitives.
+        """
+        self._loop = loop
+
     def _on_state_event(self, event: EventBase):
         """Handle state event from provider
 
-        Called from provider's thread, schedules async broadcast.
+        Called from the provider's (scheduler) thread, schedules the async
+        broadcast onto the WebSocket serving loop.
         """
-        # Get or create event loop for async operations
         try:
-            # Try to get running loop (if called from async context)
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._handle_event_async(event))
+            # Already on an event loop (event raised from async code): just
+            # schedule the coroutine there.
+            running = asyncio.get_running_loop()
         except RuntimeError:
-            # No running loop - create new one or use thread-safe call
-            asyncio.run(self._handle_event_async(event))
+            running = None
+
+        if running is not None:
+            running.create_task(self._handle_event_async(event))
+            return
+
+        # Called from another thread: dispatch to the serving loop. Until it is
+        # known (server not started yet) there are no clients to notify, so the
+        # event is simply dropped.
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            logger.debug("No serving event loop; dropping %s", type(event).__name__)
+            return
+        asyncio.run_coroutine_threadsafe(self._handle_event_async(event), loop)
 
     async def _handle_event_async(self, event: EventBase):
         """Handle state event asynchronously"""

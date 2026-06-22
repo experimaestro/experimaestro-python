@@ -1,7 +1,8 @@
 # Experiment Actions
 
-!!! warning "Alpha Feature"
-    Actions are currently in **alpha**. The API may change in future releases.
+:::{warning} Alpha Feature
+Actions are currently in **alpha**. The API may change in future releases.
+:::
 
 Actions are user-defined operations that can be registered during experiment
 submission and executed after completion. They enable post-experiment workflows

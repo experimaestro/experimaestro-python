@@ -1,13 +1,14 @@
 [![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
 [![RTD](https://readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io)
 
-<img src="app/public/icon.svg" alt="Experimaestro" width="140" align="left" hspace="15" vspace="8"/>
+<img src="docs/source/img/icon.svg" alt="Experimaestro" width="240" align="left" hspace="15" vspace="8"/>
 
 **Experimaestro** is a Python framework designed for researchers and engineers who need to manage complex, large-scale experimental workflows without losing track of reproducibility.
 
 Unlike traditional schedulers, Experimaestro focuses on the **experimental logic**: how configurations relate to each other and how results are organized.
 
-## Why Experimaestro?
+
+### Why Experimaestro?
 
 - **🧩 Configuration-as-Code:** Define your experiments using strongly-typed Python objects. Forget about fragile JSON/YAML files; benefit from IDE autocompletion, type checking, and recursive parameter management.
 - **🛡️ Deduplication & Reproducibility:** Every task is assigned a unique identifier based on its parameters. If you try to run the same experiment twice, Experimaestro knows—ensuring you never waste compute time on results you already have.
@@ -51,6 +52,13 @@ The full documentation is at [experimaestro-python.readthedocs.io](https://exper
 <figure>
   <img src="docs/source/img/tui-services.png" alt="Services screen">
   <figcaption>Services view: monitor background services and their status</figcaption>
+</figure>
+
+## Web interface
+
+<figure>
+  <img src="docs/source/img/webui-tasks.png" alt="Web UI tasks screen">
+  <figcaption>Tasks view: filter, sort and monitor jobs by status, tags, duration and CO₂, with live progress and per-job logs/actions</figcaption>
 </figure>
 
 # Install
@@ -167,3 +175,19 @@ if __name__ == "__main__":
 ```
 
 which can be launched with `python test.py /tmp/helloworld-workdir`
+
+# Ecosystem
+
+A number of libraries and tools are built around experimaestro:
+
+**Datasets** — [datamaestro](https://github.com/experimaestro/datamaestro), a companion dataset manager, with plugins [datamaestro_text](https://github.com/experimaestro/datamaestro_text), [datamaestro_image](https://github.com/experimaestro/datamaestro_image), [datamaestro_ml](https://github.com/experimaestro/datamaestro_ml) and [datamaestro_ir](https://github.com/xpmir/datamaestro_ir).
+
+**Domain libraries**
+- [xpm-torch](https://github.com/experimaestro/xpm-torch) — building blocks for PyTorch-based experiments.
+- [experimaestro-ir (xpmir)](https://github.com/experimaestro/experimaestro-ir) — information-retrieval tasks and configurations (built on xpm-torch). Specific experiments are their own projects in the [xpmir organisation](https://github.com/xpmir), e.g. [splade](https://github.com/xpmir/splade), [cosplade](https://github.com/xpmir/cosplade), [cross-encoders](https://github.com/xpmir/cross-encoders) and [mice](https://github.com/xpmir/mice).
+
+**Tools & services** — [xpm-mlboard](https://github.com/experimaestro/xpm-mlboard), lightweight services to monitor ML learning curves (TensorBoard, …).
+
+**Starting points** — [experiment-template](https://github.com/experimaestro/experiment-template) (minimal skeleton) and [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) (fuller MNIST example, also the [tutorial](https://experimaestro-python.readthedocs.io/en/latest/tutorial.html)).
+
+See the [Experimaestro projects guide](https://experimaestro-python.readthedocs.io/en/latest/experiments/projects.html) for how to structure your own project.

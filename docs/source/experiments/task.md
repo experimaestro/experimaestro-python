@@ -475,7 +475,7 @@ class Terms(Config):
         return terms
 ```
 
-# Task directory
+## Task directory
 
 When the task, submitted to the scheduler with `.submit(...)`,  is run,
 

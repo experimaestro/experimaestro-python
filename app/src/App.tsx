@@ -73,15 +73,35 @@ export default () => {
         <Container>
           <Navbar.Brand
             onClick={() => setView("experiments")}
-            style={{ cursor: "pointer" }}
+            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center" }}
           >
-            <img
-              src="/icon-dark.svg"
-              alt=""
-              height={40}
-              className="me-2 align-middle"
-              style={{ width: "auto" }}
-            />
+            {/* Logo sits in a white, dark-bordered disc that straddles the
+                navbar's bottom edge: top half over the dark navbar, bottom half
+                over the white content below. */}
+            <span
+              style={{
+                position: "relative",
+                zIndex: 1031,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 60,
+                height: 60,
+                marginTop: -6,
+                marginBottom: -26,
+                marginRight: 12,
+                borderRadius: "50%",
+                background: "#fff",
+                border: "2px solid #212529",
+                boxShadow: "0 2px 6px rgba(0, 0, 0, 0.35)",
+              }}
+            >
+              <img
+                src="/favicon.svg"
+                alt=""
+                style={{ width: 42, height: "auto" }}
+              />
+            </span>
             Experimaestro
             <span
               title={
@@ -161,7 +181,7 @@ export default () => {
         </Container>
       </Navbar>
 
-      <Container className="mt-2">
+      <Container className="mt-2" style={{ paddingLeft: 80 }}>
         {view === "experiments" && <Experiments onOpen={openExperiment} />}
         {view === "tasks" && (
           <>

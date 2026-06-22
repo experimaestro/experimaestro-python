@@ -15,7 +15,6 @@ build/
 
 # Generated
 src/experimaestro/version.py
-src/experimaestro/webui/data
 CLAUDE.md
 plan.md
 .claude

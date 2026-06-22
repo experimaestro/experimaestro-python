@@ -140,8 +140,9 @@ include = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/experimaestro"]
 
+# webui/data is committed and ships as ordinary package data; it must NOT be
+# force-included as well, or hatchling adds each file twice (build failure).
 [tool.hatch.build.targets.wheel.force-include]
-"src/experimaestro/webui/data" = "experimaestro/webui/data"
 "src/experimaestro/sphinx/static/experimaestro.css" = "experimaestro/sphinx/static/experimaestro.css"
 "src/experimaestro/tui/app.tcss" = "experimaestro/tui/app.tcss"
 
@@ -228,6 +229,10 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Standalone helper scripts are CLIs: printing to stdout is intended.
+"scripts/*" = ["T20"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25

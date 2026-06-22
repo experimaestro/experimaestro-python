@@ -8,6 +8,13 @@ execution or to monitor a workspace after the fact.
 
 The web interface provides a browser-based dashboard for monitoring experiments.
 
+```{figure} img/webui-tasks.png
+:alt: Web UI tasks screen
+
+Tasks view: filter, sort and monitor jobs by status, tags, duration and CO₂,
+with live progress and per-job logs/actions.
+```
+
 ### Starting the Web UI
 
 **During experiment execution:**

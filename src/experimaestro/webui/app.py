@@ -3,7 +3,9 @@
 Creates the FastAPI app with WebSocket endpoint and routes.
 """
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from importlib.resources import files
 from typing import TYPE_CHECKING
 
@@ -46,7 +48,22 @@ def create_app(server: "WebUIServer") -> FastAPI:
     Returns:
         Configured FastAPI app
     """
-    app = FastAPI(title="Experimaestro WebUI", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # The state provider notifies listeners from the scheduler thread, but
+        # the WebSocket connections (and their asyncio locks) live on the loop
+        # uvicorn serves on. Capture that loop here so the bridge can hand
+        # broadcasts to it via run_coroutine_threadsafe.
+        app.state.state_bridge.set_loop(asyncio.get_running_loop())
+        yield
+
+    app = FastAPI(
+        title="Experimaestro WebUI",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
 
     # Create WebSocket handler
     ws_handler = WebSocketHandler(server.state_provider, server.token)
@@ -121,6 +138,7 @@ def create_app(server: "WebUIServer") -> FastAPI:
                     "index.css",
                     "login.html",
                     "icon.svg",
+                    "favicon.svg",
                 ):
                     cache_control = "no-cache, no-store, must-revalidate"
                 else:
