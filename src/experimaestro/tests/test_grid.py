@@ -99,3 +99,22 @@ def test_nested_generate_grid():
     assert configs[1].sub.param == 2
     assert tags[0]["sub.param"] == 1
 
+
+def test_unrecognized_key_error():
+    import pytest
+    with pytest.raises(ValueError, match="Unrecognized keys.*Possible options are"):
+        GenericParams.from_any({"unrecognized_key": 123})
+
+
+
+def test_unique_value_in_tags():
+    cfg = MyConfig(id="test", lr=0.1, batch_size=32)
+    cfg.lr = GenericParams.from_any(cfg.lr)
+    cfg.batch_size = GenericParams.from_any(cfg.batch_size)
+
+    configs, tags = generate_grid(cfg)
+    assert len(configs) == 1
+    assert tags[0]["lr"] == 0.1
+    assert tags[0]["batch_size"] == 32
+
+

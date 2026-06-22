@@ -64,3 +64,39 @@ def test_generate_grid_from_cli_config():
     # Check one permutation
     assert configs[0].lr in [0.1, 0.01]
     assert configs[0].sub.value in [1, 2]
+
+
+def test_unique_value_in_tags_from_validation():
+    from experimaestro.experiments.grid import generate_grid
+
+    data = {
+        "id": "test",
+        "lr": 0.05,
+        "sub": {"value": 10}
+    }
+
+    cfg = validate_attrs(MainConfig, data)
+    configs, tags = generate_grid(cfg)
+
+    assert len(configs) == 1
+    assert tags[0] == {"lr": 0.05, "sub.value": 10}
+
+
+def test_unrecognized_key_in_validation():
+    import pytest
+    from pydantic import ValidationError
+
+    data = {
+        "id": "test",
+        "lr": {"ranges": [0.1, 0.01]},  # "ranges" is unrecognized
+    }
+
+    with pytest.raises(ValidationError) as excinfo:
+        validate_attrs(MainConfig, data)
+
+    err_msg = str(excinfo.value)
+    assert "Unrecognized keys in GridSearch parameter: ranges" in err_msg
+    assert "Possible options are: range, range_mult, value, values_list, values_mult, values_range" in err_msg
+
+
+

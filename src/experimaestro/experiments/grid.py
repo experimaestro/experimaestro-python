@@ -101,6 +101,17 @@ class GenericParams:
         # 4. It's a dict
         if isinstance(obj, dict):
             d = dict(obj)
+
+            # Check for unrecognized keys
+            RECOGNIZED_KEYS = {"value", "values_list", "values_range", "range", "values_mult", "range_mult"}
+            unrecognized = set(d.keys()) - RECOGNIZED_KEYS
+            if unrecognized:
+                options_str = ", ".join(sorted(RECOGNIZED_KEYS))
+                raise ValueError(
+                    f"Unrecognized keys in GridSearch parameter: {', '.join(sorted(unrecognized))}. "
+                    f"Possible options are: {options_str}"
+                )
+
             value = d.get("value")
             values_list = d.get("values_list")
 
@@ -187,7 +198,7 @@ def discover_grid_params(obj: Any, prefix: str = "") -> Dict[str, GenericParams]
         for f in attr.fields(type(obj)):
             val = getattr(obj, f.name)
             path = f"{prefix}.{f.name}" if prefix else f.name
-            if isinstance(val, GenericParams) and val.is_grid:
+            if isinstance(val, GenericParams):
                 found[path] = val
             elif val is not None and not isinstance(val, (str, int, float, bool)):
                 # Avoid recursing into primitives or enums (which are strings/ints)
