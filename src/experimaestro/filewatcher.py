@@ -629,6 +629,8 @@ class DirectoryWatch:
 
     def _handle_file_change(self, path: Path, from_watchdog: bool = False) -> None:
         """Handle a file change (from watchdog or poll)."""
+        if self._closed:
+            return
         with self._lock:
             polled = self._files.get(path)
             if polled:
@@ -737,10 +739,9 @@ class DirectoryWatch:
         self._closed = True
 
         if self._watchdog_watch is not None:
-            try:
-                self._service._observer.unschedule(self._watchdog_watch)
-            except Exception:
-                pass
+            # Deferred to the poll thread to avoid a finalizer deadlock on the
+            # watchdog observer lock (see _defer_unschedule).
+            self._service._defer_unschedule(self._watchdog_watch)
             self._watchdog_watch = None
 
         with self._lock:
@@ -770,7 +771,13 @@ class _DirectoryWatchHandler(FileSystemEventHandler):
         self._watch_ref = weakref.ref(watch)
 
     def _get_watch(self) -> DirectoryWatch | None:
-        return self._watch_ref()
+        watch = self._watch_ref()
+        # Ignore events once the watch is closed: the underlying watchdog
+        # watch is unscheduled asynchronously by the poll thread, so events
+        # may still arrive briefly after close().
+        if watch is None or watch._closed:
+            return None
+        return watch
 
     def on_modified(self, event):
         if event.is_directory:
@@ -841,10 +848,9 @@ class AsyncWatch:
         self._closed = True
 
         self._unregister()
-        try:
-            self._service._observer.unschedule(self._watch)
-        except Exception:
-            pass
+        # Deferred to the poll thread to avoid a finalizer deadlock on the
+        # watchdog observer lock (see _defer_unschedule).
+        self._service._defer_unschedule(self._watch)
 
     def __enter__(self):
         return self
@@ -1054,6 +1060,15 @@ class FileWatcherService:
         self._poll_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
+        # Watchdog watches queued for unscheduling by the poll thread.
+        # See _defer_unschedule for why this indirection exists.
+        self._pending_unschedule: list[ObservedWatch] = []
+        self._pending_lock = threading.Lock()
+
+        # Start the poll thread eagerly so deferred unschedules are always
+        # drained, even when only async_watch()/fswatch() are used.
+        self._ensure_poll_thread()
+
         logger.debug("FileWatcherService started (pid=%d)", self._pid)
 
     def _ensure_poll_thread(self) -> None:
@@ -1066,9 +1081,36 @@ class FileWatcherService:
         )
         self._poll_thread.start()
 
+    def _defer_unschedule(self, watch: ObservedWatch) -> None:
+        """Queue a watchdog watch to be unscheduled by the poll thread.
+
+        Called from close()/__del__ paths. Calling observer.unschedule()
+        inline can deadlock: a cyclic-GC finalizer (e.g. LockState.__del__)
+        may run inside another thread's emitter bootstrap while
+        observer._lock is held by schedule(), and unschedule() blocks on that
+        same lock. Routing all unschedules through the poll thread keeps them
+        out of finalizer contexts and breaks the cycle.
+        """
+        with self._pending_lock:
+            self._pending_unschedule.append(watch)
+
+    def _drain_pending_unschedule(self) -> None:
+        """Unschedule watches queued via _defer_unschedule."""
+        with self._pending_lock:
+            if not self._pending_unschedule:
+                return
+            pending = self._pending_unschedule
+            self._pending_unschedule = []
+        for watch in pending:
+            try:
+                self._observer.unschedule(watch)
+            except Exception:
+                pass
+
     def _poll_loop(self) -> None:
         """Main polling loop."""
         while not self._stop_event.is_set():
+            self._drain_pending_unschedule()
             next_sleep = 1.0
 
             with self._watches_lock:
