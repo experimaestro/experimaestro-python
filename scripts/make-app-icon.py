@@ -30,6 +30,13 @@ Usage::
     uv run python scripts/make-app-icon.py --drop label --drop maestro
     uv run python scripts/make-app-icon.py src.svg out.svg --no-crop --show
 
+With ``--adaptive`` it instead emits a single self-contained SVG (default
+``docs/source/img/icon-adaptive.svg``) that keeps the full artwork and its
+original light colours, plus a ``prefers-color-scheme: dark`` ``<style>`` block
+that lightens every ink for a dark background (used by the README)::
+
+    uv run python scripts/make-app-icon.py --adaptive
+
 Re-run it whenever the master ``icon.svg`` changes.
 """
 
@@ -44,9 +51,13 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Default source (documentation master) / target (single web-app icon).
+# Default source (documentation master) / targets.
 DEFAULT_SRC = Path("docs/source/img/icon.svg")
 DEFAULT_DST = Path("app/public/icon.svg")
+# Adaptive variant: full artwork that recolours itself for a dark background via
+# a ``prefers-color-scheme`` media query (used by the README, which is shown on
+# both light and dark GitHub themes).
+DEFAULT_ADAPTIVE_DST = Path("docs/source/img/icon-adaptive.svg")
 
 SVG_NS = "http://www.w3.org/2000/svg"
 INK_NS = "http://www.inkscape.org/namespaces/inkscape"
@@ -164,6 +175,100 @@ def crop_and_clean(src: Path, dst: Path) -> None:
     )
 
 
+def collect_paint(
+    tree: ET.ElementTree, recolour: DarkRecolour
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return ``(fill_map, stroke_map)`` of original -> dark colour for the drawing.
+
+    Colours living inside ``<defs>`` (mask luminance) are ignored, and colours
+    that the recolour leaves unchanged are dropped, so the resulting maps only
+    contain the inks that actually need a dark-mode override.
+    """
+    root = tree.getroot()
+    protected = {
+        node for defs in root.iter(f"{{{SVG_NS}}}defs") for node in defs.iter()
+    }
+    fill_map: dict[str, str] = {}
+    stroke_map: dict[str, str] = {}
+
+    def record(prop: str, value: str | None) -> None:
+        if value is None or value.strip().lower() == "none":
+            return
+        original = value.strip()
+        dark = recolour(original)
+        if dark is None or dark.lower() == original.lower():
+            return  # non-colour (url(#…), currentColor) or already light enough
+        (fill_map if prop == "fill" else stroke_map)[original] = dark
+
+    for element in root.iter():
+        if element in protected:
+            continue
+        for prop in _PAINT:
+            record(prop, element.get(prop))
+        if style := element.get("style"):
+            for decl in style.split(";"):
+                key, sep, val = decl.partition(":")
+                if sep and key.strip() in _PAINT:
+                    record(key.strip(), val)
+    return fill_map, stroke_map
+
+
+def build_dark_css(fill_map: dict[str, str], stroke_map: dict[str, str]) -> str:
+    """Build a ``prefers-color-scheme: dark`` stylesheet from the colour maps.
+
+    Each original ink is matched both as a presentation attribute (``fill="…"``)
+    and inside an inline ``style`` declaration, and overridden with ``!important``
+    so it wins over the inline value when the dark scheme is active.
+    """
+    lines = ["@media (prefers-color-scheme: dark) {"]
+    for prop, mapping in (("fill", fill_map), ("stroke", stroke_map)):
+        for original, dark in sorted(mapping.items()):
+            lines.append(
+                f'    [{prop}="{original}"], [style*="{prop}:{original}"]'
+                f" {{ {prop}: {dark} !important; }}"
+            )
+    lines.append("  }")
+    return "\n".join(lines)
+
+
+def write_adaptive(src: Path, dst: Path, recolour: DarkRecolour, *, crop: bool) -> int:
+    """Emit a self-contained SVG that recolours itself on a dark background.
+
+    The artwork keeps its original (light) colours inline; a ``<style>`` element
+    holding a ``prefers-color-scheme: dark`` media query flips each ink to its
+    lightened counterpart. The colour map is built from the *cropped/cleaned*
+    output so the selectors match the exact strings Inkscape serialises.
+    """
+    if crop:
+        try:
+            crop_and_clean(src, dst)
+        except FileNotFoundError:
+            sys.stderr.write("inkscape not found on PATH (needed for --crop)\n")
+            return 1
+        tree = ET.parse(dst)
+    else:
+        tree = ET.parse(src)
+
+    fill_map, stroke_map = collect_paint(tree, recolour)
+    css = build_dark_css(fill_map, stroke_map)
+
+    root = tree.getroot()
+    style_el = ET.Element(f"{{{SVG_NS}}}style")
+    style_el.text = "\n    " + css + "\n  "
+    root.insert(0, style_el)
+    # Serialise SVG elements in the default namespace (<svg>, not <svg:svg>) to
+    # match the Inkscape-written icons; _NAMESPACES registers both "" and "svg"
+    # for the same URI, so the last one (svg) would otherwise win.
+    ET.register_namespace("", SVG_NS)
+    tree.write(dst, xml_declaration=True, encoding="UTF-8")
+
+    print(
+        f"Wrote {dst} (adaptive, "
+        f"{len(fill_map) + len(stroke_map)} colour overrides for dark mode)"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -172,13 +277,24 @@ def main() -> int:
         "src", nargs="?", type=Path, default=DEFAULT_SRC, help="master SVG"
     )
     parser.add_argument(
-        "dst", nargs="?", type=Path, default=DEFAULT_DST, help="web-app icon output"
+        "dst",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="output (default: app/public/icon.svg, or the adaptive path with --adaptive)",
+    )
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="emit one self-contained SVG that recolours for dark mode via a "
+        "prefers-color-scheme media query (keeps the word-mark by default)",
     )
     parser.add_argument(
         "--drop",
         action="append",
         metavar="LABEL",
-        help="inkscape:label of a group to remove (repeatable; default: 'label')",
+        help="inkscape:label of a group to remove (repeatable; "
+        "default: 'label', or nothing with --adaptive)",
     )
     parser.add_argument(
         "--saturation",
@@ -215,15 +331,39 @@ def main() -> int:
     if not args.src.exists():
         parser.error(f"source not found: {args.src}")
 
-    drop = set(args.drop or ["label"])
+    dst = args.dst or (DEFAULT_ADAPTIVE_DST if args.adaptive else DEFAULT_DST)
+    if args.drop is not None:
+        drop = set(args.drop)
+    else:
+        drop = set() if args.adaptive else {"label"}
+
+    for prefix, uri in _NAMESPACES.items():
+        ET.register_namespace(prefix, uri)
+
+    if args.adaptive:
+        # Keep the original (light) colours inline and add a dark-mode <style>;
+        # the recolour object computes the lightened counterparts.
+        recolour = DarkRecolour(
+            saturation=args.saturation, min_lightness=args.min_lightness
+        )
+        tree = ET.parse(args.src)
+        transform(tree, drop=drop, recolour=None)  # only drop unwanted groups
+        with tempfile.NamedTemporaryFile("w", suffix=".svg", delete=False) as tmp:
+            tree.write(tmp.name, xml_declaration=True, encoding="UTF-8")
+            tmp_path = Path(tmp.name)
+        try:
+            return write_adaptive(tmp_path, dst, recolour, crop=args.crop)
+        except subprocess.CalledProcessError as exc:
+            sys.stderr.write(exc.stderr or "")
+            parser.error("inkscape failed while cropping the icon")
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     recolour = (
         DarkRecolour(saturation=args.saturation, min_lightness=args.min_lightness)
         if args.recolour
         else None
     )
-
-    for prefix, uri in _NAMESPACES.items():
-        ET.register_namespace(prefix, uri)
 
     tree = ET.parse(args.src)
     transform(tree, drop=drop, recolour=recolour)
@@ -233,7 +373,7 @@ def main() -> int:
             tree.write(tmp.name, xml_declaration=True, encoding="UTF-8")
             tmp_path = Path(tmp.name)
         try:
-            crop_and_clean(tmp_path, args.dst)
+            crop_and_clean(tmp_path, dst)
         except FileNotFoundError:
             parser.error("inkscape not found on PATH (needed for --crop)")
         except subprocess.CalledProcessError as exc:
@@ -242,13 +382,13 @@ def main() -> int:
         finally:
             tmp_path.unlink(missing_ok=True)
     else:
-        tree.write(args.dst, xml_declaration=True, encoding="UTF-8")
+        tree.write(dst, xml_declaration=True, encoding="UTF-8")
 
     if recolour is None:
-        print(f"Wrote {args.dst} (dropped {sorted(drop)}, original colours kept)")
+        print(f"Wrote {dst} (dropped {sorted(drop)}, original colours kept)")
     else:
         print(
-            f"Wrote {args.dst} (dropped {sorted(drop)}, "
+            f"Wrote {dst} (dropped {sorted(drop)}, "
             f"{len(recolour.mapping)} colours remapped for a dark background)"
         )
         if args.show:
