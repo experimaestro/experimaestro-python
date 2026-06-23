@@ -56,7 +56,7 @@ DEFAULT_SRC = Path("docs/source/img/icon.svg")
 DEFAULT_DST = Path("app/public/icon.svg")
 # Adaptive variant: full artwork that recolours itself for a dark background via
 # a ``prefers-color-scheme`` media query (used by the README, which is shown on
-# both light and dark GitHub themes).
+# both light and dark GitHub/RTD themes).
 DEFAULT_ADAPTIVE_DST = Path("docs/source/img/icon-adaptive.svg")
 
 SVG_NS = "http://www.w3.org/2000/svg"

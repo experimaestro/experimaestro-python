@@ -1,6 +1,6 @@
 # Experimaestro
 
-```{image} ./img/icon.svg
+```{image} ./img/icon-adaptative.svg
 :alt: Experimaestro
 :width: 120px
 :align: left
