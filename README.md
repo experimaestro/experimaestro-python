@@ -1,7 +1,7 @@
 
 <div align="center">
 
-<img src="docs/source/img/icon-adaptive.svg" alt="Experimaestro" width="500" align="center" hspace="15" vspace="8"/>
+<img src="docs/source/img/icon-adaptive.svg" alt="Experimaestro" width="400" align="center" hspace="15" vspace="8"/>
 
 ---
 
