@@ -1013,6 +1013,124 @@ def history(workdir: Path, experiment_id: str, as_json: bool):
         print(f"{run['jobs_count']:<6} {tags_str:<20} {started}")
 
 
+# === Services commands ===
+
+
+def _service_state_name(service) -> str:
+    state = getattr(service, "state", None)
+    return state.name if hasattr(state, "name") else str(state)
+
+
+def _as_live_service(service):
+    """Best-effort reconstruction of a live service from a (mock) service."""
+    return service.to_service() if hasattr(service, "to_service") else service
+
+
+def _load_services_by_id(workdir: Path, experiment_id, run_id) -> dict:
+    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+
+    provider = WorkspaceStateProvider.get_instance(workdir)
+    services = provider.get_services(experiment_id, run_id)
+    return {service.id: service for service in services}
+
+
+def _iter_service_rows(services_by_id: dict):
+    """Yield ``(id, description, state, url)`` rows, expanding sub-services.
+
+    A plain service yields a single row addressed by its id; a composite service
+    yields a parent row plus one ``parent/sub`` row per sub-service.
+    """
+    for sid in sorted(services_by_id):
+        live = _as_live_service(services_by_id[sid])
+        subs = live.subservices() if hasattr(live, "subservices") else [live]
+        if subs == [live]:
+            yield (
+                sid,
+                live.description(),
+                _service_state_name(live),
+                getattr(live, "url", None),
+            )
+        else:
+            yield sid, live.description(), _service_state_name(live), None
+            for sub in subs:
+                yield (
+                    f"{sid}/{sub.id}",
+                    sub.description(),
+                    _service_state_name(sub),
+                    getattr(sub, "url", None),
+                )
+
+
+@experiments.group("services")
+def services_group():
+    """Inspect and start experiment services (and their sub-services)."""
+
+
+@services_group.command("list")
+@click.argument("experiment_id", required=False, default=None)
+@click.option("--run", "run_id", default=None, help="Run id (default: current run)")
+@pass_cfg
+def services_list(workdir: Path, experiment_id, run_id):
+    """List services and sub-services with their state."""
+    rows = list(
+        _iter_service_rows(_load_services_by_id(workdir, experiment_id, run_id))
+    )
+    if not rows:
+        cprint("No services found", "yellow")
+        return
+
+    cprint(f"{'SERVICE':<32} {'STATE':<10} {'DESCRIPTION':<28} URL", "white")
+    cprint("-" * 90, "white")
+    for sid, desc, state, url in rows:
+        print(f"{sid:<32} {state:<10} {(desc or ''):<28} {url or ''}")
+
+
+@services_group.command("start")
+@click.argument("service_id")
+@click.argument("experiment_id", required=False, default=None)
+@click.option("--run", "run_id", default=None, help="Run id (default: current run)")
+@pass_cfg
+def services_start(workdir: Path, service_id: str, experiment_id, run_id):
+    """Start a service or sub-service, e.g. ``monitoring/wandb``.
+
+    Blocks while the service runs (Ctrl-C to stop). A service that completes on
+    its own (e.g. a one-shot W&B sync of a finished experiment) returns when done.
+    """
+    import time
+    from experimaestro.scheduler.services import ServiceState
+
+    services_by_id = _load_services_by_id(workdir, experiment_id, run_id)
+    parent_id, _, sub_id = service_id.partition("/")
+    if parent_id not in services_by_id:
+        cprint(f"Service '{parent_id}' not found", "red")
+        sys.exit(1)
+
+    live = _as_live_service(services_by_id[parent_id])
+    try:
+        target = live.get_subservice(sub_id) if sub_id else live
+    except (KeyError, AttributeError):
+        cprint(f"Sub-service '{sub_id}' not found in '{parent_id}'", "red")
+        sys.exit(1)
+
+    if not hasattr(target, "get_url"):
+        cprint(f"Service '{service_id}' cannot be started", "red")
+        sys.exit(1)
+
+    cprint(f"Starting {service_id}...", "cyan")
+    url = target.get_url()
+    if url:
+        cprint(f"  URL: {url}", "green")
+
+    try:
+        while target.state in (ServiceState.STARTING, ServiceState.RUNNING):
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        cprint("\nStopping...", "yellow")
+    finally:
+        if hasattr(target, "stop") and target.state != ServiceState.STOPPED:
+            target.stop()
+
+
 @experiments.command("history-prune")
 @click.argument("experiment_id", type=str)
 @click.option(
