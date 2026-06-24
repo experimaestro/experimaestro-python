@@ -1116,6 +1116,17 @@ def services_start(workdir: Path, service_id: str, experiment_id, run_id):
         cprint(f"Service '{service_id}' cannot be started", "red")
         sys.exit(1)
 
+    # Services normally get their log directory from set_experiment(). When
+    # starting a reconstructed service offline — or one persisted before
+    # log_directory was stored (older experiments) — provide a temporary one so
+    # it can write its stdout/stderr.
+    if getattr(target, "log_directory", None) is None:
+        import tempfile
+
+        target.log_directory = Path(
+            tempfile.mkdtemp(prefix=f"xpm-service-{target.id}-")
+        )
+
     cprint(f"Starting {service_id}...", "cyan")
     url = target.get_url()
     if url:
