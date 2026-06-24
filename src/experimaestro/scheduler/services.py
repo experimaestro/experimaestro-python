@@ -5,7 +5,7 @@ import logging
 import subprocess
 import threading
 from pathlib import Path
-from typing import Callable, Optional, Set, TYPE_CHECKING
+from typing import Callable, List, Mapping, Optional, Set, TYPE_CHECKING
 
 from experimaestro.scheduler.interfaces import BaseService
 
@@ -13,6 +13,30 @@ if TYPE_CHECKING:
     from experimaestro.scheduler.experiment import Experiment
 
 logger = logging.getLogger(__name__)
+
+
+def _subservice_state_dict(service: "Service") -> dict:
+    """Lightweight, non-recursive view of a sub-service for UIs/CLIs."""
+    state = service.state
+    return {
+        "service_id": service.id,
+        "description": service.description(),
+        "state": state.name if hasattr(state, "name") else str(state),
+        "url": getattr(service, "url", None),
+    }
+
+
+def resolve_service(services: Mapping[str, "Service"], composite_id: str) -> "Service":
+    """Resolve a ``"service"`` or ``"service/subservice"`` identifier against a
+    mapping of services (typically ``experiment.services``).
+
+    :raises KeyError: if the service or sub-service does not exist.
+    """
+    parent_id, _, sub_id = composite_id.partition("/")
+    service = services[parent_id]
+    if sub_id:
+        return service.get_subservice(sub_id)
+    return service
 
 
 class ServiceListener:
@@ -73,7 +97,9 @@ class Service(BaseService):
         self.log_directory = (
             self._experiment.workspace.scheduler_services_path / self.id
         )
-        logger.debug(f"DEBUG: Service {self.id} log_directory set to {self.log_directory}")
+        logger.debug(
+            f"DEBUG: Service {self.id} log_directory set to {self.log_directory}"
+        )
 
     @property
     def experiment_id(self) -> str:
@@ -128,16 +154,28 @@ class Service(BaseService):
 
         Overrides BaseService.full_state_dict() to properly serialize Path objects.
         """
-        return {
+        data = {
             "service_id": self.id,
             "description": self.description(),
             "class": f"{self.__class__.__module__}.{self.__class__.__name__}",
             "state_dict": self.serialize_state_dict(self.state_dict()),
             "experiment_id": self.experiment_id,
             "run_id": self.run_id,
-            "state": self.state.name if hasattr(self.state, "name") else str(self.state),
+            "state": self.state.name
+            if hasattr(self.state, "name")
+            else str(self.state),
             "url": getattr(self, "url", None),
         }
+
+        # Composite services expose several startable sub-services. The common
+        # case (a service that is its own single sub-service) is omitted so that
+        # the payload — and clients that do not know about sub-services — are
+        # unchanged.
+        subs = self.subservices()
+        if subs != [self]:
+            data["subservices"] = [_subservice_state_dict(sub) for sub in subs]
+
+        return data
 
     @staticmethod
     def serialize_state_dict(data: dict) -> dict:
@@ -248,6 +286,30 @@ class Service(BaseService):
 
     def description(self):
         return ""
+
+    def subservices(self) -> List["Service"]:
+        """Return the startable sub-services exposed by this service.
+
+        By default a service is its own single sub-service. Composite services
+        (e.g. a monitoring service offering both a TensorBoard viewer and a
+        Weights & Biases sync) override this to expose several independently
+        startable :class:`Service` instances. The returned objects must be
+        stable across calls so that their lifecycle state is preserved.
+
+        Sub-services are addressed as ``<service id>/<sub-service id>``.
+        """
+        return [self]
+
+    def get_subservice(self, sub_id: str) -> "Service":
+        """Return the sub-service identified by ``sub_id`` (see
+        :meth:`subservices`).
+
+        :raises KeyError: if no sub-service has that identifier.
+        """
+        for sub in self.subservices():
+            if sub.id == sub_id:
+                return sub
+        raise KeyError(sub_id)
 
     def setup_logging(
         self,
