@@ -10,6 +10,33 @@ from textual.binding import Binding
 from experimaestro.scheduler.state_provider import StateProvider
 
 
+def expand_services(services: list) -> dict:
+    """Map ``composite id -> (sub)service``, expanding sub-services.
+
+    A service is its own sub-service by default and is kept under its bare id
+    (preserving the original object — e.g. a MockService with its sync/error
+    features); any *extra* sub-services (e.g. a wandb sync) are added as live
+    ``"<service>/<sub>"`` entries. Robust to services that predate the
+    sub-service API (kept as a single entry).
+    """
+    result: dict = {}
+    for service in services:
+        try:
+            live = service.to_service() if hasattr(service, "to_service") else service
+            subs = live.subservices()
+        except Exception:
+            subs = None
+        if not subs:
+            result[service.id] = service
+            continue
+        for sub in subs:
+            if sub is live:
+                result[service.id] = service
+            else:
+                result[f"{service.id}/{sub.id}"] = sub
+    return result
+
+
 class ServicesList(Vertical):
     """Widget displaying services for selected experiment
 
@@ -113,13 +140,10 @@ class ServicesList(Vertical):
 
         logger = logging.getLogger("xpm.tui.services")
 
-        self._services = {}
-        for service in services:
-            self._services[service.id] = service
+        self._services = expand_services(services)
 
         logger.debug(
-            f"refresh_services got {len(services)} services: "
-            f"{[(s.id, getattr(s, 'url', None)) for s in services]}"
+            f"refresh_services got {len(services)} services -> {list(self._services)}"
         )
 
         self._refresh_display()
@@ -133,24 +157,32 @@ class ServicesList(Vertical):
         table.clear()
 
         for service_id, service in self._services.items():
-            state_name = service.state.name if hasattr(service, "state") else "UNKNOWN"
+            state = getattr(service, "state", None)
+            state_name = state.name if hasattr(state, "name") else "UNKNOWN"
             state_icon = self.STATE_ICONS.get(state_name, "?")
             description = (
                 service.description() if hasattr(service, "description") else ""
             )
 
             # Get sync status from service (SSHLocalService provides actual status)
-            sync_status = service.sync_status or "-"
+            sync_status = getattr(service, "sync_status", None) or "-"
 
             # Show error in URL column if there's one, otherwise show URL
-            error = service.error
+            error = getattr(service, "error", None)
             if error:
                 url_or_error = f"⚠ {error}"
             else:
                 url_or_error = getattr(service, "url", None) or "-"
 
+            # Indent sub-service rows ("<service>/<sub>") for readability; the row
+            # key keeps the composite id used to resolve start/stop.
+            if "/" in service_id:
+                display_id = f"  ↳ {service_id.split('/', 1)[1]}"
+            else:
+                display_id = service_id
+
             table.add_row(
-                service_id,
+                display_id,
                 description,
                 f"{state_icon} {state_name}",
                 sync_status,
@@ -187,7 +219,8 @@ class ServicesList(Vertical):
             return
 
         # Set STARTING state immediately and refresh UI
-        service.set_starting()
+        if hasattr(service, "set_starting"):
+            service.set_starting()
         self.notify("Starting service...", severity="information")
         self._refresh_all_services()
 
@@ -208,8 +241,11 @@ class ServicesList(Vertical):
 
         logger = logging.getLogger("xpm.tui.services")
 
-        # Convert MockService to live Service (on-demand, cached)
-        live_service = service.to_service()
+        # Convert MockService to live Service (on-demand, cached); sub-services
+        # are already live and have no to_service().
+        live_service = (
+            service.to_service() if hasattr(service, "to_service") else service
+        )
 
         logger.info(
             f"Starting service {live_service.id} (type={type(live_service).__name__}, "
@@ -245,8 +281,9 @@ class ServicesList(Vertical):
         if not service:
             return
 
-        # Convert MockService to live Service (on-demand, cached)
-        service = service.to_service()
+        # Convert MockService to live Service (on-demand, cached); sub-services
+        # are already live.
+        service = service.to_service() if hasattr(service, "to_service") else service
 
         from experimaestro.scheduler.services import ServiceState
 
@@ -287,8 +324,10 @@ class ServicesList(Vertical):
         if not service:
             return
 
-        # Convert to live service to get log paths
-        live_service = service.to_service()
+        # Convert to live service to get log paths (sub-services are already live)
+        live_service = (
+            service.to_service() if hasattr(service, "to_service") else service
+        )
 
         if not live_service.stdout and not live_service.stderr:
             self.notify("Service logs not available", severity="warning")
