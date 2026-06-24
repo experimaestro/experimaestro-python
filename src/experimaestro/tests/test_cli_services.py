@@ -21,17 +21,30 @@ class _Svc(Service):
         return self._subs if self._subs is not None else [self]
 
 
-def test_iter_service_rows_expands_subservices():
-    tb = _Svc("tb", "TensorBoard", url="http://x")
+def test_iter_service_rows_self_inclusive_subservice():
+    # A service that is its own sub-service plus a wandb sub-service: the bare id
+    # is the service itself; the extra sub gets a "<id>/<sub>" address.
+    tb = _Svc("tensorboard", "TensorBoard", url="http://tb")
+    tb._subs = [tb, _Svc("wandb", "W&B sync")]
+
+    rows = list(_iter_service_rows({"tensorboard": tb}))
+
+    assert rows == [
+        ("tensorboard", "TensorBoard", "STOPPED", "http://tb"),
+        ("tensorboard/wandb", "W&B sync", "STOPPED", None),
+    ]
+
+
+def test_iter_service_rows_pure_composite():
+    # A composite that is not itself a sub-service: only "<id>/<sub>" rows.
     sub_a = _Svc("tensorboard", "TB view", url="http://tb")
     sub_b = _Svc("wandb", "W&B sync")
     mon = _Svc("monitoring", "Monitoring", subs=[sub_a, sub_b])
+    plain = _Svc("tb", "TensorBoard", url="http://x")
 
-    rows = list(_iter_service_rows({"tb": tb, "monitoring": mon}))
+    rows = list(_iter_service_rows({"tb": plain, "monitoring": mon}))
 
-    # sorted by id: composite "monitoring" (+ its subs) before "tb"
     assert rows == [
-        ("monitoring", "Monitoring", "STOPPED", None),
         ("monitoring/tensorboard", "TB view", "STOPPED", "http://tb"),
         ("monitoring/wandb", "W&B sync", "STOPPED", None),
         ("tb", "TensorBoard", "STOPPED", "http://x"),

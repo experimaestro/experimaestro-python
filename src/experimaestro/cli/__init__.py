@@ -1037,28 +1037,23 @@ def _load_services_by_id(workdir: Path, experiment_id, run_id) -> dict:
 def _iter_service_rows(services_by_id: dict):
     """Yield ``(id, description, state, url)`` rows, expanding sub-services.
 
-    A plain service yields a single row addressed by its id; a composite service
-    yields a parent row plus one ``parent/sub`` row per sub-service.
+    Each sub-service is addressed as ``<service>/<subservice>``, except the
+    sub-service that *is* the service itself (a service is its own sub-service by
+    default), which keeps the bare ``<service>`` id. So a plain service yields a
+    single ``<service>`` row, while a composite that also offers, say, a wandb
+    sub-service yields ``<service>`` plus ``<service>/wandb``.
     """
     for sid in sorted(services_by_id):
         live = _as_live_service(services_by_id[sid])
         subs = live.subservices() if hasattr(live, "subservices") else [live]
-        if subs == [live]:
+        for sub in subs:
+            addr = sid if sub is live else f"{sid}/{sub.id}"
             yield (
-                sid,
-                live.description(),
-                _service_state_name(live),
-                getattr(live, "url", None),
+                addr,
+                sub.description(),
+                _service_state_name(sub),
+                getattr(sub, "url", None),
             )
-        else:
-            yield sid, live.description(), _service_state_name(live), None
-            for sub in subs:
-                yield (
-                    f"{sid}/{sub.id}",
-                    sub.description(),
-                    _service_state_name(sub),
-                    getattr(sub, "url", None),
-                )
 
 
 @experiments.group("services")
