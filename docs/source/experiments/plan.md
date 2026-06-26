@@ -82,6 +82,34 @@ Adding a tag can be also be done by using a configuration instance method:
 To retrieve tags, use the {py:meth}`~experimaestro.Config.tags` method.
 In the above example, `model.tags()` will return `{ "epochs": 100 }`
 
+### Stopping tag propagation
+
+By default, tags propagate from a sub-configuration up to the configurations
+that use it. Use {py:func}`~experimaestro.stop_tags` to prevent the tags of a
+sub-configuration (and all of its descendants) from being collected by the
+parent:
+
+```python
+from experimaestro import tag, stop_tags
+
+config = MyConfig.C(x=stop_tags(SubConfig.C(lr=tag(0.001))))
+config.tags()  # does NOT include "lr"
+```
+
+This is useful when a tagged value is meaningful only within a nested
+configuration and should not appear in the parent's tags (for instance, to keep
+{py:func}`~experimaestro.tagspath` paths or experiment logs focused on the
+parameters that actually vary).
+
+`stop_tags` can be combined with {py:func}`~experimaestro.tag` by nesting the
+two wrappers — the value is tagged on the parent while the descendant tags stay
+blocked:
+
+```python
+# "x" is tagged, but the inner "lr" tag is blocked
+config = MyConfig.C(x=stop_tags(tag(SubConfig.C(lr=tag(0.001)))))
+```
+
 ### Paths based on tags
 
 Use {py:func}`~experimaestro.tagspath` to create a unique path where

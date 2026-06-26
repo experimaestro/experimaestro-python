@@ -153,6 +153,12 @@ Type annotations are used to declare parameters in configurations and tasks.
 .. autofunction:: experimaestro.tagspath
 ```
 
+### stop_tags
+
+```{eval-rst}
+.. autofunction:: experimaestro.stop_tags
+```
+
 ## Utilities
 
 ### setmeta
