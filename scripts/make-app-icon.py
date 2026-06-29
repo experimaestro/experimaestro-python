@@ -92,12 +92,17 @@ def _parse_rgb(value: str) -> tuple[float, float, float] | None:
 
 
 class DarkRecolour:
-    """Hue-preserving recolour that makes dark inks read on a dark background."""
+    """Recolour using a fixed mapping to ensure only target colors are used."""
 
-    def __init__(self, *, saturation: float, min_lightness: float) -> None:
-        self.saturation = saturation
-        self.min_lightness = min_lightness
+    def __init__(self, *, saturation: float = 1.0, min_lightness: float = 0.7) -> None:
         self.mapping: dict[str, str] = {}
+        # Fixed color map for the dark-background version:
+        self.color_map = {
+            "#026678": "#61b7c6",
+            "#61b7c6": "#61b7c6",
+            "#58c245": "#aaeb85",
+            "#aaeb85": "#aaeb85",
+        }
 
     def __call__(self, value: str | None) -> str | None:
         if value is None or value.strip().lower() == "none":
@@ -107,15 +112,22 @@ class DarkRecolour:
             return value
 
         r, g, b = rgb
-        h, lightness, s = colorsys.rgb_to_hls(r, g, b)
-        # Lift lightness (dark -> light) so the ink shows on black; keep colours
-        # vivid by scaling saturation up rather than down.
-        new_l = max(self.min_lightness, 1.0 - lightness)
-        new_s = min(1.0, s * self.saturation)
-        nr, ng, nb = colorsys.hls_to_rgb(h, new_l, new_s)
-        out = "#" + "".join(f"{round(c * 255):02x}" for c in (nr, ng, nb))
-        self.mapping[value.strip().lower()] = out
-        return out
+        hex_val = "#" + "".join(f"{round(c * 255):02x}" for c in (r, g, b))
+        hex_key = hex_val.lower()
+
+        # Check in mapping first
+        if hex_key in self.color_map:
+            out = self.color_map[hex_key]
+            self.mapping[value.strip().lower()] = out
+            return out
+
+        # Black or white or generic shapes: leave as-is
+        if hex_key in ("#000000", "#ffffff"):
+            return value
+
+        # Warning/fallback for unexpected colors
+        sys.stderr.write(f"warning: unexpected color {value} in SVG, keeping as-is\n")
+        return hex_val
 
     def style(self, style: str) -> str:
         """Rewrite ``fill``/``stroke`` declarations inside a ``style`` attribute."""
@@ -128,11 +140,39 @@ class DarkRecolour:
         return ";".join(parts)
 
 
+def normalize_style_colors(root: ET.Element) -> None:
+    """Move fill and stroke from style attributes to presentation attributes."""
+    for element in root.iter():
+        if style := element.get("style"):
+            decls = []
+            modified = False
+            for decl in style.split(";"):
+                if not decl.strip():
+                    decls.append(decl)
+                    continue
+                key, sep, val = decl.partition(":")
+                k = key.strip()
+                if sep and k in _PAINT:
+                    v = val.strip()
+                    element.set(k, v)
+                    modified = True
+                else:
+                    decls.append(decl)
+            if modified:
+                new_style = ";".join(decls).strip()
+                new_style = re.sub(r';+', ';', new_style).strip(';')
+                if new_style:
+                    element.set("style", new_style)
+                else:
+                    element.attrib.pop("style", None)
+
+
 def transform(
     tree: ET.ElementTree, *, drop: set[str], recolour: DarkRecolour | None
 ) -> None:
     """Apply the drop + recolour steps to ``tree`` in place."""
     root = tree.getroot()
+    normalize_style_colors(root)
     parents = {child: parent for parent in root.iter() for child in parent}
 
     # Elements living inside <defs> are left untouched: mask luminance relies on
@@ -185,6 +225,7 @@ def collect_paint(
     contain the inks that actually need a dark-mode override.
     """
     root = tree.getroot()
+    normalize_style_colors(root)
     protected = {
         node for defs in root.iter(f"{{{SVG_NS}}}defs") for node in defs.iter()
     }
@@ -194,9 +235,9 @@ def collect_paint(
     def record(prop: str, value: str | None) -> None:
         if value is None or value.strip().lower() == "none":
             return
-        original = value.strip()
+        original = value.strip().lower()
         dark = recolour(original)
-        if dark is None or dark.lower() == original.lower():
+        if dark is None or dark.lower() == original:
             return  # non-colour (url(#…), currentColor) or already light enough
         (fill_map if prop == "fill" else stroke_map)[original] = dark
 
@@ -205,11 +246,6 @@ def collect_paint(
             continue
         for prop in _PAINT:
             record(prop, element.get(prop))
-        if style := element.get("style"):
-            for decl in style.split(";"):
-                key, sep, val = decl.partition(":")
-                if sep and key.strip() in _PAINT:
-                    record(key.strip(), val)
     return fill_map, stroke_map
 
 
@@ -217,14 +253,14 @@ def build_dark_css(fill_map: dict[str, str], stroke_map: dict[str, str]) -> str:
     """Build a ``prefers-color-scheme: dark`` stylesheet from the colour maps.
 
     Each original ink is matched both as a presentation attribute (``fill="…"``)
-    and inside an inline ``style`` declaration, and overridden with ``!important``
-    so it wins over the inline value when the dark scheme is active.
+    case-insensitively, and overridden with ``!important`` so it wins over the
+    inline value when the dark scheme is active.
     """
     lines = ["@media (prefers-color-scheme: dark) {"]
     for prop, mapping in (("fill", fill_map), ("stroke", stroke_map)):
         for original, dark in sorted(mapping.items()):
             lines.append(
-                f'    [{prop}="{original}"], [style*="{prop}:{original}"]'
+                f"    [{prop}='{original}' i]"
                 f" {{ {prop}: {dark} !important; }}"
             )
     lines.append("  }")
@@ -239,20 +275,30 @@ def write_adaptive(src: Path, dst: Path, recolour: DarkRecolour, *, crop: bool) 
     lightened counterpart. The colour map is built from the *cropped/cleaned*
     output so the selectors match the exact strings Inkscape serialises.
     """
+    has_cropped = False
     if crop:
         try:
             crop_and_clean(src, dst)
-        except FileNotFoundError:
-            sys.stderr.write("inkscape not found on PATH (needed for --crop)\n")
-            return 1
-        tree = ET.parse(dst)
-    else:
+            tree = ET.parse(dst)
+            has_cropped = True
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            sys.stderr.write(f"warning: inkscape cropping failed ({e}). Writing uncropped SVG instead.\n")
+
+    if not has_cropped:
         tree = ET.parse(src)
 
+    normalize_style_colors(tree.getroot())
     fill_map, stroke_map = collect_paint(tree, recolour)
     css = build_dark_css(fill_map, stroke_map)
 
     root = tree.getroot()
+
+    # Remove existing <style> tags to avoid duplicates or stale selectors
+    for style_el in list(root.iter(f"{{{SVG_NS}}}style")):
+        for parent in root.iter():
+            if style_el in parent:
+                parent.remove(style_el)
+
     style_el = ET.Element(f"{{{SVG_NS}}}style")
     style_el.text = "\n    " + css + "\n  "
     root.insert(0, style_el)
@@ -368,20 +414,20 @@ def main() -> int:
     tree = ET.parse(args.src)
     transform(tree, drop=drop, recolour=recolour)
 
+    success = False
     if args.crop:
         with tempfile.NamedTemporaryFile("w", suffix=".svg", delete=False) as tmp:
             tree.write(tmp.name, xml_declaration=True, encoding="UTF-8")
             tmp_path = Path(tmp.name)
         try:
             crop_and_clean(tmp_path, dst)
-        except FileNotFoundError:
-            parser.error("inkscape not found on PATH (needed for --crop)")
-        except subprocess.CalledProcessError as exc:
-            sys.stderr.write(exc.stderr or "")
-            parser.error("inkscape failed while cropping the icon")
+            success = True
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            sys.stderr.write(f"warning: inkscape cropping failed ({e}). Writing uncropped SVG instead.\n")
         finally:
             tmp_path.unlink(missing_ok=True)
-    else:
+
+    if not success:
         tree.write(dst, xml_declaration=True, encoding="UTF-8")
 
     if recolour is None:
