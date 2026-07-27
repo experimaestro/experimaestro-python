@@ -319,6 +319,11 @@ from .skill import install_skill as install_skill_cli  # noqa: E402
 
 cli.add_command(install_skill_cli)
 
+# Import and add workspaces commands
+from .workspaces import workspaces as workspaces_cli  # noqa: E402
+
+cli.add_command(workspaces_cli)
+
 
 @cli.group()
 def migrate():

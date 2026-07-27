@@ -365,6 +365,19 @@ This prevents partial copies from leaving broken state.
 
 See also the [Python API](utilities.md#copying-experiments) for programmatic use.
 
+## Workspaces Management
+
+You can list the workspaces configured in your `settings.yaml`:
+
+```bash
+experimaestro workspaces list [OPTIONS]
+```
+
+```
+Options:
+  `-v`, `--verbose`  Output all workspace configuration parameters (e.g. ssh, env, folders) |
+```
+
 ## Cleaning Up Orphans
 
 Check for tasks that are not part of any experimental plan in the given
