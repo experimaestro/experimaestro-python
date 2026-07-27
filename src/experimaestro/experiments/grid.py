@@ -296,8 +296,9 @@ def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
     for combination in grid_combinations:
         cfg_tags = {}
         new_cfg = copy.deepcopy(base_cfg)
-        for path, value in zip(param_paths, combination):
-            cfg_tags[path] = value
+        for i, (path, value) in enumerate(zip(param_paths, combination)):
+            if len(value_options[i]) > 1:
+                cfg_tags[path] = value
             set_nested_attr(new_cfg, path, value)
 
         # Convert any remaining single-value GenericParams to scalars

@@ -79,7 +79,22 @@ def test_unique_value_in_tags_from_validation():
     configs, tags = generate_grid(cfg)
 
     assert len(configs) == 1
-    assert tags[0] == {"lr": 0.05, "sub.value": 10}
+    assert tags[0] == {}
+
+    # Test with multi-value param
+    data_multi = {
+        "id": "test",
+        "lr": [0.05, 0.1],
+        "sub": {"value": 10}
+    }
+
+    cfg_multi = validate_attrs(MainConfig, data_multi)
+    configs_multi, tags_multi = generate_grid(cfg_multi)
+
+    assert len(configs_multi) == 2
+    assert tags_multi[0] == {"lr": 0.05}
+    assert tags_multi[1] == {"lr": 0.1}
+
 
 
 def test_unrecognized_key_in_validation():

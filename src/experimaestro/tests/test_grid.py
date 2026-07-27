@@ -114,7 +114,17 @@ def test_unique_value_in_tags():
 
     configs, tags = generate_grid(cfg)
     assert len(configs) == 1
-    assert tags[0]["lr"] == 0.1
-    assert tags[0]["batch_size"] == 32
+    assert tags[0] == {}
+
+    # Test that multi-value params are tagged while single-value params in the same grid are not
+    cfg_multi = MyConfig(id="test", lr=[0.1, 0.01], batch_size=32)
+    cfg_multi.lr = GenericParams.from_any(cfg_multi.lr)
+    cfg_multi.batch_size = GenericParams.from_any(cfg_multi.batch_size)
+
+    configs_multi, tags_multi = generate_grid(cfg_multi)
+    assert len(configs_multi) == 2
+    assert tags_multi[0] == {"lr": 0.1}
+    assert tags_multi[1] == {"lr": 0.01}
+
 
 
