@@ -75,6 +75,7 @@ class ExperimentsList(Widget):
         super().__init__()
         self.state_provider = state_provider
         self.experiments = []
+        self._runs_counts: dict[str, str] = {}  # Cache for fast in-memory re-sorting
 
     def _get_selected_experiment_id(self) -> Optional[str]:
         """Get the experiment ID from the currently selected row"""
@@ -133,6 +134,14 @@ class ExperimentsList(Widget):
             )
             self.post_message(ShowRunsRequest(exp_id, current_run_id))
 
+    def apply_sort(self) -> None:
+        """Apply current sort settings in-memory immediately if cached data exists"""
+        self._update_column_headers()
+        if self.experiments:
+            self._on_experiments_loaded(self.experiments, self._runs_counts)
+        else:
+            self.refresh_experiments()
+
     def action_sort_by_status(self) -> None:
         """Sort experiments by status"""
         if self._sort_column == "status":
@@ -140,8 +149,7 @@ class ExperimentsList(Widget):
         else:
             self._sort_column = "status"
             self._sort_reverse = False
-        self._update_column_headers()
-        self.refresh_experiments()
+        self.apply_sort()
         order = "desc" if self._sort_reverse else "asc"
         self.notify(f"Sorted by status ({order})", severity="information")
 
@@ -152,8 +160,7 @@ class ExperimentsList(Widget):
         else:
             self._sort_column = "started"
             self._sort_reverse = True  # Default to newest first for date
-        self._update_column_headers()
-        self.refresh_experiments()
+        self.apply_sort()
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
 
@@ -164,8 +171,7 @@ class ExperimentsList(Widget):
         else:
             self._sort_column = "id"
             self._sort_reverse = False
-        self._update_column_headers()
-        self.refresh_experiments()
+        self.apply_sort()
         order = "desc" if self._sort_reverse else "asc"
         self.notify(f"Sorted alphabetically ({order})", severity="information")
 
@@ -259,8 +265,7 @@ class ExperimentsList(Widget):
                 self._sort_column = sort_col
                 # Default to reverse for date (newest first)
                 self._sort_reverse = sort_col == "started"
-            self._update_column_headers()
-            self.refresh_experiments()
+            self.apply_sort()
 
     def compose(self) -> ComposeResult:
         # Collapsed header (hidden initially)
@@ -344,6 +349,7 @@ class ExperimentsList(Widget):
             pass
 
         self.experiments = experiments
+        self._runs_counts = runs_counts
 
         try:
             table = self.query_one("#experiments-table", DataTable)

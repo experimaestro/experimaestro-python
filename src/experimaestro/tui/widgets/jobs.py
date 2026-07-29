@@ -1153,6 +1153,7 @@ class JobsTable(Vertical):
         self.task_id_map: dict[str, str] = {}  # job_id -> task_id
         self.experiment_job_info: dict = {}  # job_id -> ExperimentJobInformation
         self._current_experiment_obj = None  # BaseExperiment object for resolved state
+        self._cached_jobs: Optional[list] = None  # Cache for fast in-memory re-sorting
 
     def compose(self) -> ComposeResult:
         yield Static("", id="past-run-banner", classes="hidden")
@@ -1223,6 +1224,18 @@ class JobsTable(Vertical):
             self.refresh_jobs()
             self.notify("Filter cleared", severity="information")
 
+    def apply_sort(self) -> None:
+        """Apply current sort settings in-memory immediately if cached data exists"""
+        self._needs_rebuild = True
+        self._update_column_headers()
+        if self._cached_jobs is not None:
+            if self._tree_mode:
+                self._update_tree_view()
+            else:
+                self._refresh_jobs_with_data(self._cached_jobs)
+        else:
+            self.refresh_jobs()
+
     def action_sort_by_status(self) -> None:
         """Sort jobs by status"""
         if self._sort_column == "status":
@@ -1230,9 +1243,7 @@ class JobsTable(Vertical):
         else:
             self._sort_column = "status"
             self._sort_reverse = False
-        self._needs_rebuild = True
-        self._update_column_headers()
-        self.refresh_jobs()
+        self.apply_sort()
         order = "desc" if self._sort_reverse else "asc"
         self.notify(f"Sorted by status ({order})", severity="information")
 
@@ -1243,9 +1254,7 @@ class JobsTable(Vertical):
         else:
             self._sort_column = "task"
             self._sort_reverse = False
-        self._needs_rebuild = True
-        self._update_column_headers()
-        self.refresh_jobs()
+        self.apply_sort()
         order = "desc" if self._sort_reverse else "asc"
         self.notify(f"Sorted by task ({order})", severity="information")
 
@@ -1256,9 +1265,7 @@ class JobsTable(Vertical):
         else:
             self._sort_column = "submitted"
             self._sort_reverse = False
-        self._needs_rebuild = True
-        self._update_column_headers()
-        self.refresh_jobs()
+        self.apply_sort()
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
 
@@ -1269,9 +1276,7 @@ class JobsTable(Vertical):
         else:
             self._sort_column = "job_id"
             self._sort_reverse = False
-        self._needs_rebuild = True
-        self._update_column_headers()
-        self.refresh_jobs()
+        self.apply_sort()
         order = "desc" if self._sort_reverse else "asc"
         self.notify(f"Sorted alphabetically ({order})", severity="information")
 
@@ -1504,9 +1509,7 @@ class JobsTable(Vertical):
             else:
                 self._sort_column = sort_col
                 self._sort_reverse = False
-            self._needs_rebuild = True
-            self._update_column_headers()
-            self.refresh_jobs()
+            self.apply_sort()
 
     def set_experiment(
         self,
@@ -1597,6 +1600,7 @@ class JobsTable(Vertical):
         if experiment_job_info is not None:
             self.experiment_job_info = experiment_job_info
         self._current_experiment_obj = experiment_obj
+        self._cached_jobs = jobs
 
         # Refresh display with loaded jobs
         if self._tree_mode:

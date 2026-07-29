@@ -74,3 +74,34 @@ def test_sort_column_mappings_and_bindings():
     job_binding_keys = [b.key for b in JobsTable.BINDINGS]
     assert "O" in job_binding_keys
     assert "S" in job_binding_keys
+
+
+def test_apply_sort_in_memory(monkeypatch):
+    """Verify apply_sort uses cached data when available instead of triggering refresh"""
+    exp_list = ExperimentsList.__new__(ExperimentsList)
+    exp_list.experiments = [DummyExperiment("b"), DummyExperiment("a")]
+    exp_list._runs_counts = {}
+    exp_list._sort_column = "id"
+    exp_list._sort_reverse = False
+
+    refresh_called = False
+
+    def fake_refresh():
+        nonlocal refresh_called
+        refresh_called = True
+
+    exp_list.refresh_experiments = fake_refresh
+    exp_list._update_column_headers = lambda: None
+
+    loaded_exps = []
+
+    def fake_on_loaded(exps, counts):
+        nonlocal loaded_exps
+        loaded_exps = exps
+
+    exp_list._on_experiments_loaded = fake_on_loaded
+
+    exp_list.apply_sort()
+    assert not refresh_called
+    assert loaded_exps == exp_list.experiments
+
