@@ -28,11 +28,12 @@ class ExperimentsList(Widget):
 
     BINDINGS = [
         Binding("d", "show_runs", "Runs"),
-        Binding("f", "copy_path", "Copy Path", show=False),
-        Binding("ctrl+d", "delete_experiment", "Delete", show=False),
-        Binding("ctrl+k", "kill_experiment", "Kill", show=False),
-        Binding("S", "sort_by_status", "Sort ⚑", show=False),
-        Binding("D", "sort_by_date", "Sort Date", show=False),
+        Binding("f", "copy_path", "Copy Path", show=True),
+        Binding("ctrl+d", "delete_experiment", "Delete", show=True),
+        Binding("ctrl+k", "kill_experiment", "Kill", show=True),
+        Binding("S", "sort_by_status", "Sort ⚑", show=True),
+        Binding("D", "sort_by_date", "Sort Date", show=True),
+        Binding("O", "sort_alphabetical", "Sort Name", show=True),
     ]
 
     current_experiment: reactive[Optional[str]] = reactive(None)
@@ -65,6 +66,7 @@ class ExperimentsList(Widget):
 
     # Columns that support sorting (column key -> sort column name)
     SORTABLE_COLUMNS = {
+        "id": "id",
         "status": "status",
         "started": "started",
     }
@@ -154,6 +156,18 @@ class ExperimentsList(Widget):
         self.refresh_experiments()
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
+
+    def action_sort_alphabetical(self) -> None:
+        """Sort experiments alphabetically by ID"""
+        if self._sort_column == "id":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "id"
+            self._sort_reverse = False
+        self._update_column_headers()
+        self.refresh_experiments()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted alphabetically ({order})", severity="information")
 
     @staticmethod
     def _format_experiment_status(exp) -> str:
@@ -351,6 +365,12 @@ class ExperimentsList(Widget):
             # Sort by started time (experiments without start time go to end)
             experiments_sorted.sort(
                 key=lambda e: e.started_at or datetime.min,
+                reverse=self._sort_reverse,
+            )
+        elif self._sort_column == "id":
+            # Sort alphabetically by experiment ID
+            experiments_sorted.sort(
+                key=lambda e: (e.experiment_id or "").lower(),
                 reverse=self._sort_reverse,
             )
         # Default: no sorting, use order from state provider

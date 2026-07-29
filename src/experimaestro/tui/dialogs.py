@@ -133,6 +133,7 @@ class HelpScreen(ModalScreen[None]):
   Ctrl+k    Kill all running jobs
   S         Sort by status
   D         Sort by date
+  O         Sort alphabetically
 
 [bold cyan]Jobs[/bold cyan]
   l         View job logs
@@ -143,6 +144,7 @@ class HelpScreen(ModalScreen[None]):
   S         Sort by status
   T         Sort by task
   D         Sort by date
+  O         Sort alphabetically
   f         Copy folder path
   t         Toggle tree view
   g         Cycle tree grouping (in tree view)

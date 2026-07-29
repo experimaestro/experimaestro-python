@@ -107,6 +107,7 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 | `Ctrl+k` | Kill all running jobs |
 | `S` | Sort by status |
 | `D` | Sort by date |
+| `O` | Sort alphabetically |
 
 **Jobs:**
 
@@ -120,6 +121,7 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 | `S` | Sort by status |
 | `T` | Sort by task |
 | `D` | Sort by date |
+| `O` | Sort alphabetically |
 | `f` | Copy folder path |
 
 **Log Viewer:**

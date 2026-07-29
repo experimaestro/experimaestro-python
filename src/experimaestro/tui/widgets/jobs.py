@@ -1128,6 +1128,7 @@ class JobsTable(Vertical):
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("T", "sort_by_task", "Sort Task", show=False),
         Binding("D", "sort_by_submitted", "Sort Date", show=False),
+        Binding("O", "sort_alphabetical", "Sort Name", show=False),
         Binding("t", "toggle_tree_view", "Tree"),
         Binding("escape", "clear_search", show=False, priority=True),
     ]
@@ -1260,6 +1261,19 @@ class JobsTable(Vertical):
         self.refresh_jobs()
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
+
+    def action_sort_alphabetical(self) -> None:
+        """Sort jobs alphabetically by ID"""
+        if self._sort_column == "job_id":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "job_id"
+            self._sort_reverse = False
+        self._needs_rebuild = True
+        self._update_column_headers()
+        self.refresh_jobs()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted alphabetically ({order})", severity="information")
 
     def action_clear_search(self) -> None:
         """Handle escape: hide search bar if visible, or go back"""
@@ -1445,6 +1459,7 @@ class JobsTable(Vertical):
 
     # Columns that support sorting (column key -> sort column name)
     SORTABLE_COLUMNS = {
+        "job_id": "job_id",
         "status": "status",
         "task": "task",
         "submitted": "submitted",
@@ -1632,6 +1647,12 @@ class JobsTable(Vertical):
             # Sort by task name
             jobs.sort(
                 key=lambda j: j.task_id or "",
+                reverse=self._sort_reverse,
+            )
+        elif self._sort_column == "job_id":
+            # Sort alphabetically by job ID
+            jobs.sort(
+                key=lambda j: (j.identifier or "").lower(),
                 reverse=self._sort_reverse,
             )
         else:
