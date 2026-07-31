@@ -43,7 +43,6 @@ Re-run it whenever the master ``icon.svg`` changes.
 from __future__ import annotations
 
 import argparse
-import colorsys
 import re
 import subprocess
 import sys

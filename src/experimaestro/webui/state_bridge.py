@@ -162,7 +162,13 @@ class StateBridge:
         # Fetch the full job data from state provider
         job = self.state_provider.get_job(event.task_id, event.job_id)
         if job:
-            tags = [(tag.key, tag.value) for tag in event.tags] if event.tags else []
+            tags = [
+                (
+                    tag["key"] if isinstance(tag, dict) else getattr(tag, "key"),
+                    tag["value"] if isinstance(tag, dict) else getattr(tag, "value"),
+                )
+                for tag in event.tags
+            ] if event.tags else []
             payload = serialize_job(
                 job,
                 tags=tags,

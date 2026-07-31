@@ -876,15 +876,22 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         event_type = params.get("event_type")
         data = params.get("data", {})
+        if not event_type:
+            logger.warning("Notification missing event_type: %s", params)
+            return None
+
         event_class = EventBase.get_class(event_type)
         if event_class is None:
             logger.warning("Unknown event type: %s", event_type)
             return None
 
+        event_dict = dict(data)
+        event_dict["event_type"] = event_type
+
         try:
-            return event_class(**data)
-        except TypeError as e:
-            logger.warning("Error deserializing event %s: %s", event_type, e)
+            return EventBase.from_dict(event_dict)
+        except Exception as e:
+            logger.warning("Error deserializing event %s: %s", event_type, e, exc_info=True)
             return None
 
     def _notify_listeners(self, event: EventBase):

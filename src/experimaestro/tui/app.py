@@ -489,9 +489,23 @@ class ExperimaestroUI(App):
             if jobs_table.current_experiment == event_exp_id:
                 # Add the new job's tags to the cache
                 if event.tags:
-                    jobs_table.tags_map[event.job_id] = {
-                        tag.key: tag.value for tag in event.tags
-                    }
+                    event_tags = {}
+                    for tag in event.tags:
+                        k = (
+                            tag.get("key")
+                            if isinstance(tag, dict)
+                            else getattr(tag, "key", None)
+                        )
+                        v = (
+                            tag.get("value")
+                            if isinstance(tag, dict)
+                            else getattr(tag, "value", None)
+                        )
+                        if k is not None:
+                            event_tags[k] = v
+                    jobs_table.tags_map[event.job_id] = event_tags
+                else:
+                    event_tags = {}
                 # Add the new job's dependencies to the cache
                 if event.depends_on:
                     jobs_table.dependencies_map[event.job_id] = event.depends_on
@@ -508,9 +522,7 @@ class ExperimaestroUI(App):
                 jobs_table.experiment_job_info[event.job_id] = ExperimentJobInformation(
                     job_id=event.job_id,
                     task_id=event.task_id,
-                    tags=(
-                        {tag.key: tag.value for tag in event.tags} if event.tags else {}
-                    ),
+                    tags=event_tags,
                     timestamp=timestamp,
                 )
                 # Refresh to show the new job

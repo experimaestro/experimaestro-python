@@ -1753,6 +1753,35 @@ class TestClientEventHandling:
 
         assert event is None
 
+    def test_client_notification_to_event_job_submitted_tags(self, client):
+        """Test client converts notification to JobSubmittedEvent with JobTag objects"""
+        from experimaestro.scheduler.state_status import JobSubmittedEvent, JobTag
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "JobSubmittedEvent",
+                "data": {
+                    "job_id": "job_tags_test",
+                    "task_id": "task123",
+                    "run_id": "run_001",
+                    "tags": [{"key": "model", "value": "bert"}, {"key": "lr", "value": "0.01"}],
+                    "timestamp": 1704067260.0,
+                },
+            },
+        )
+
+        assert isinstance(event, JobSubmittedEvent)
+        assert len(event.tags) == 2
+        assert isinstance(event.tags[0], JobTag)
+        assert event.tags[0].key == "model"
+        assert event.tags[0].value == "bert"
+
+        # Verify _add_submitted_job handles the event without AttributeError
+        client._add_submitted_job(event)
+
+
 
 # =============================================================================
 # Error Handling Tests

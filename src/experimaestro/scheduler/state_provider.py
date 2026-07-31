@@ -1243,7 +1243,20 @@ class OfflineStateProvider(StateProvider):
                 self._job_cache[cache_key] = job
                 logger.debug("Added job %s to cache from event", cache_key)
 
-        tags = {tag.key: tag.value for tag in getattr(event, "tags", [])}
+        tags = {}
+        for tag in getattr(event, "tags", []) or []:
+            if isinstance(tag, dict):
+                k, v = tag.get("key"), tag.get("value")
+            else:
+                k, v = getattr(tag, "key", None), getattr(tag, "value", None)
+            if k is not None:
+                tags[k] = v
+            else:
+                logger.warning(
+                    "Invalid tag element in event %s: %s",
+                    type(event).__name__,
+                    tag,
+                )
         depends_on = list(getattr(event, "depends_on", []))
         job_info = ExperimentJobInformation(
             job_id=event.job_id,
