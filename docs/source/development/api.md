@@ -179,6 +179,28 @@ debugging experimaestro.
 
 ## State Provider
 
+Read queries (`get_experiments`, `get_jobs`, `get_tags_map`, `get_services`, ...)
+are **cached by default** by the offline providers, in a single `QueryCache`
+holding the answers. Events keep those answers up to date rather than dropping
+them whenever they carry enough information to do so: a job state change updates
+the cached job object in place, and a job submission is appended to the cached
+lists and maps it belongs to. A query is only read from storage again when an
+event cannot be applied to it, when a mutation is performed through the provider,
+or when the caller asks for a full re-read:
+
+```python
+jobs = provider.get_jobs(experiment_id)                 # cached
+jobs = provider.get_jobs(experiment_id, refresh=True)   # re-read the state
+```
+
+`refresh=True` is meant for an explicit user action (the `r` key in the TUI, the
+refresh button in the web interface); everything else — including the periodic
+redraws triggered by events — should use the cached form. The live provider
+(`Scheduler`) accepts the argument and ignores it: its state is always current.
+
+Concrete offline providers implement the `_fetch_*` hooks rather than the public
+`get_*` methods, which are provided (and cached) by `OfflineStateProvider`.
+
 ### StateProvider
 
 ```{eval-rst}
@@ -192,6 +214,13 @@ debugging experimaestro.
 .. autoclass:: experimaestro.scheduler.state_provider.OfflineStateProvider
    :members:
    :show-inheritance:
+```
+
+### QueryCache
+
+```{eval-rst}
+.. autoclass:: experimaestro.scheduler.query_cache.QueryCache
+   :members:
 ```
 
 ### CarbonMetricsData

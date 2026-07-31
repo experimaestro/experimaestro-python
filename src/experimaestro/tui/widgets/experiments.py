@@ -314,8 +314,13 @@ class ExperimentsList(Widget):
         self._update_column_headers()
         self.refresh_experiments()
 
-    def refresh_experiments(self) -> None:
-        """Refresh the experiments list from state provider (background)"""
+    def refresh_experiments(self, *, refresh: bool = False) -> None:
+        """Refresh the experiments list from state provider (background)
+
+        Args:
+            refresh: Ask the state provider for a full re-read instead of
+                letting it answer from its cache (explicit user refresh)
+        """
         # Guard: ensure the table is mounted before querying
         try:
             self.query_one("#experiments-table", DataTable)
@@ -326,13 +331,13 @@ class ExperimentsList(Widget):
             self.query_one("#experiments-loading", Static).remove_class("hidden")
         except Exception:
             pass
-        self._load_experiments()
+        self._load_experiments(refresh)
 
     @work(thread=True, exclusive=True, group="experiments_load")
-    def _load_experiments(self) -> None:
+    def _load_experiments(self, refresh: bool = False) -> None:
         """Load experiments in background thread"""
         try:
-            experiments = self.state_provider.get_experiments()
+            experiments = self.state_provider.get_experiments(refresh=refresh)
             self.log.debug(
                 f"Refreshing experiments: found {len(experiments)} experiments"
             )
@@ -348,7 +353,9 @@ class ExperimentsList(Widget):
         if not self.state_provider.is_live:
             for exp in experiments:
                 try:
-                    runs = self.state_provider.get_experiment_runs(exp.experiment_id)
+                    runs = self.state_provider.get_experiment_runs(
+                        exp.experiment_id, refresh=refresh
+                    )
                     runs_counts[exp.experiment_id] = str(len(runs))
                 except Exception as e:
                     self.log.error(f"Error getting runs for {exp.experiment_id}: {e}")

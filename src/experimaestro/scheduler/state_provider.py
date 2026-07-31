@@ -44,6 +44,7 @@ from experimaestro.notifications import (
     ProgressInformation,
     get_progress_information_from_dict,
 )
+from experimaestro.scheduler.query_cache import MISSING, QueryCache, freeze
 from experimaestro.scheduler.state_status import EventBase
 
 logger = logging.getLogger("xpm.state")
@@ -352,18 +353,31 @@ class StateProvider(ABC):
         )
         return self.load_xp_info(experiment_id, run_id).jobs
 
+    # -------------------------------------------------------------------------
+    # Read queries
+    #
+    # Providers may cache the answers to these (see OfflineStateProvider);
+    # ``refresh=True`` asks for a full re-read, bypassing any cache.
+    # -------------------------------------------------------------------------
+
     @abstractmethod
-    def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
+    def get_experiments(
+        self, since: Optional[datetime] = None, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
         """Get list of all experiments"""
         ...
 
     @abstractmethod
-    def get_experiment(self, experiment_id: str) -> Optional[BaseExperiment]:
+    def get_experiment(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[BaseExperiment]:
         """Get a specific experiment by ID"""
         ...
 
     @abstractmethod
-    def get_experiment_runs(self, experiment_id: str) -> List[BaseExperiment]:
+    def get_experiment_runs(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
         """Get all runs for an experiment
 
         Returns:
@@ -373,7 +387,9 @@ class StateProvider(ABC):
         ...
 
     @abstractmethod
-    def get_current_run(self, experiment_id: str) -> Optional[str]:
+    def get_current_run(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[str]:
         """Get the current run ID for an experiment"""
         ...
 
@@ -386,12 +402,16 @@ class StateProvider(ABC):
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
     ) -> List[BaseJob]:
         """Query jobs with optional filters"""
         ...
 
     @abstractmethod
-    def get_job(self, task_id: str, job_id: str) -> Optional[BaseJob]:
+    def get_job(
+        self, task_id: str, job_id: str, *, refresh: bool = False
+    ) -> Optional[BaseJob]:
         """Get a job directly by task_id and job_id
 
         Jobs are stored independently in workspace/jobs/task_id/job_id/,
@@ -400,6 +420,7 @@ class StateProvider(ABC):
         Args:
             task_id: The task identifier
             job_id: The job identifier (hash)
+            refresh: Bypass the cache and re-read the job
 
         Returns:
             The job if found, None otherwise
@@ -412,6 +433,8 @@ class StateProvider(ABC):
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
     ) -> List[BaseJob]:
         """Get all jobs across all experiments"""
         ...
@@ -421,6 +444,8 @@ class StateProvider(ABC):
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> Dict[str, Dict[str, str]]:
         """Get tags map for jobs in an experiment/run
 
@@ -441,6 +466,8 @@ class StateProvider(ABC):
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> Dict[str, List[str]]:
         """Get dependencies map for jobs in an experiment/run
 
@@ -461,6 +488,8 @@ class StateProvider(ABC):
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> Dict[str, ExperimentJobInformation]:
         """Get experiment-level job info (submittime, transient) for jobs
 
@@ -471,7 +500,11 @@ class StateProvider(ABC):
 
     @abstractmethod
     def get_services(
-        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
+        self,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> List[BaseService]:
         """Get services for an experiment"""
         ...
@@ -509,11 +542,11 @@ class StateProvider(ABC):
         """
         return None
 
-    def get_orphan_jobs(self) -> List[BaseJob]:
+    def get_orphan_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
         """Get orphan jobs (jobs not associated with any experiment run)"""
         return []
 
-    def get_stray_jobs(self) -> List[BaseJob]:
+    def get_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
         """Get stray jobs (running jobs not associated with any active experiment)
 
         Stray jobs are a subset of orphan jobs - they are orphan jobs that are
@@ -524,7 +557,11 @@ class StateProvider(ABC):
             List of running/scheduled jobs not in any active experiment
         """
         # Default implementation: filter orphan jobs to running ones
-        return [j for j in self.get_orphan_jobs() if j.state and j.state.running()]
+        return [
+            j
+            for j in self.get_orphan_jobs(refresh=refresh)
+            if j.state and j.state.running()
+        ]
 
     def delete_job_safely(self, job: BaseJob, perform: bool = True) -> Tuple[bool, str]:
         """Safely delete a job and its data
@@ -649,15 +686,325 @@ class OfflineStateProvider(StateProvider):
     Caching strategy:
     - Jobs and experiments are cached by their identifiers
     - Events update cached objects in-place to maintain consistency
-    - get_jobs/get_experiments return cached objects when available
+    - Read queries (get_jobs, get_experiments, get_tags_map, ...) are cached
+      as well: the concrete providers implement the _fetch_* hooks, which are
+      called only on a cache miss, on a forced refresh (``refresh=True``), or
+      after an event invalidated the corresponding entries
+
+    Concrete providers therefore implement ``_fetch_experiments()``,
+    ``_fetch_jobs()``, ... rather than the public ``get_*`` methods.
     """
 
     def __init__(self):
         """Initialize offline state provider with caches and listener management"""
         super().__init__()  # Initialize state listener management
-        self._init_service_cache()
         self._init_job_cache()
         self._init_experiment_cache()
+        self._query_cache = QueryCache()
+
+    # =========================================================================
+    # Cached read queries
+    # =========================================================================
+
+    def _cached_query(
+        self,
+        key: tuple,
+        fetch: Callable[[], Any],
+        *,
+        refresh: bool,
+        experiment_id: Optional[str] = None,
+        copy: Optional[Callable[[Any], Any]] = None,
+    ) -> Any:
+        """Answer a read query from the cache, calling `fetch` when needed
+
+        Args:
+            key: Cache key (query name and its arguments)
+            fetch: Called on a miss to compute the value
+            refresh: When True, discard what is cached and re-read the state
+            experiment_id: Experiment the value derives from, so that events
+                about that experiment invalidate it (None for workspace-wide
+                queries)
+            copy: Applied to the value before returning it — mutable results
+                (lists, dicts) must be copied so that callers sorting or
+                filtering them in place do not corrupt the cache
+        """
+        if refresh:
+            self.invalidate_caches(experiment_id)
+        else:
+            value = self._query_cache.get(key, copy)
+            if value is not MISSING:
+                return value
+
+        value = fetch()
+        self._query_cache.put(key, value, experiment_id=experiment_id)
+        return copy(value) if copy is not None else value
+
+    def invalidate_caches(self, experiment_id: Optional[str] = None) -> None:
+        """Drop cached queries, and the cached objects they are built from
+
+        Called on a forced refresh, and by mutating operations. Subclasses
+        override to drop their own bookkeeping as well.
+
+        Args:
+            experiment_id: Restrict to one experiment (workspace-wide queries
+                are always dropped); None drops everything
+        """
+        if experiment_id is None:
+            # _clear_experiment_cache* also drop the queries built from them
+            self._clear_experiment_cache_all()
+            self._clear_job_cache()
+        else:
+            self._clear_experiment_cache(experiment_id)
+
+    def get_experiments(
+        self, since: Optional[datetime] = None, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
+        return self._cached_query(
+            ("experiments", since),
+            lambda: self._fetch_experiments(since, refresh=refresh),
+            refresh=refresh,
+            copy=list,
+        )
+
+    def get_experiment(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[BaseExperiment]:
+        return self._cached_query(
+            ("experiment", experiment_id),
+            lambda: self._fetch_experiment(experiment_id, refresh=refresh),
+            refresh=refresh,
+            experiment_id=experiment_id,
+        )
+
+    def get_experiment_runs(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
+        return self._cached_query(
+            ("experiment_runs", experiment_id),
+            lambda: self._fetch_experiment_runs(experiment_id, refresh=refresh),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=list,
+        )
+
+    def get_current_run(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[str]:
+        return self._cached_query(
+            ("current_run", experiment_id),
+            lambda: self._fetch_current_run(experiment_id, refresh=refresh),
+            refresh=refresh,
+            experiment_id=experiment_id,
+        )
+
+    def get_jobs(
+        self,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
+    ) -> List[BaseJob]:
+        return self._cached_query(
+            ("jobs", experiment_id, run_id, task_id, state, freeze(tags), since),
+            lambda: self._fetch_jobs(
+                experiment_id, run_id, task_id, state, tags, since, refresh=refresh
+            ),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=list,
+        )
+
+    def get_job(
+        self, task_id: str, job_id: str, *, refresh: bool = False
+    ) -> Optional[BaseJob]:
+        return self._cached_query(
+            ("job", task_id, job_id),
+            lambda: self._fetch_job(task_id, job_id, refresh=refresh),
+            refresh=refresh,
+        )
+
+    def get_all_jobs(
+        self,
+        state: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
+    ) -> List[BaseJob]:
+        return self._cached_query(
+            ("all_jobs", state, freeze(tags), since),
+            lambda: self._fetch_all_jobs(state, tags, since, refresh=refresh),
+            refresh=refresh,
+            copy=list,
+        )
+
+    def get_tags_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
+    ) -> Dict[str, Dict[str, str]]:
+        return self._cached_query(
+            ("tags_map", experiment_id, run_id),
+            lambda: self._fetch_tags_map(experiment_id, run_id, refresh=refresh),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=dict,
+        )
+
+    def get_dependencies_map(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
+    ) -> Dict[str, List[str]]:
+        return self._cached_query(
+            ("dependencies_map", experiment_id, run_id),
+            lambda: self._fetch_dependencies_map(
+                experiment_id, run_id, refresh=refresh
+            ),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=dict,
+        )
+
+    def get_experiment_job_info(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
+    ) -> Dict[str, ExperimentJobInformation]:
+        return self._cached_query(
+            ("experiment_job_info", experiment_id, run_id),
+            lambda: self._fetch_experiment_job_info(
+                experiment_id, run_id, refresh=refresh
+            ),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=dict,
+        )
+
+    def get_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
+        return self._cached_query(
+            ("orphan_jobs", freeze(kwargs)),
+            lambda: self._fetch_orphan_jobs(refresh=refresh, **kwargs),
+            refresh=refresh,
+            copy=list,
+        )
+
+    @abstractmethod
+    def _fetch_experiments(
+        self, since: Optional[datetime], *, refresh: bool = False
+    ) -> List[BaseExperiment]:
+        """Read the experiment list from storage (filesystem or remote)"""
+        ...
+
+    @abstractmethod
+    def _fetch_experiment(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[BaseExperiment]:
+        """Read one experiment from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_experiment_runs(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
+        """Read the runs of an experiment from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_current_run(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[str]:
+        """Read the current run identifier from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_jobs(
+        self,
+        experiment_id: Optional[str],
+        run_id: Optional[str],
+        task_id: Optional[str],
+        state: Optional[str],
+        tags: Optional[Dict[str, str]],
+        since: Optional[datetime],
+        *,
+        refresh: bool = False,
+    ) -> List[BaseJob]:
+        """Read the jobs of an experiment from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_job(
+        self, task_id: str, job_id: str, *, refresh: bool = False
+    ) -> Optional[BaseJob]:
+        """Read one job from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_all_jobs(
+        self,
+        state: Optional[str],
+        tags: Optional[Dict[str, str]],
+        since: Optional[datetime],
+        *,
+        refresh: bool = False,
+    ) -> List[BaseJob]:
+        """Read all the jobs of the workspace from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_tags_map(
+        self, experiment_id: str, run_id: Optional[str], *, refresh: bool = False
+    ) -> Dict[str, Dict[str, str]]:
+        """Read the job tags of an experiment from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_dependencies_map(
+        self, experiment_id: str, run_id: Optional[str], *, refresh: bool = False
+    ) -> Dict[str, List[str]]:
+        """Read the job dependencies of an experiment from storage"""
+        ...
+
+    @abstractmethod
+    def _fetch_experiment_job_info(
+        self, experiment_id: str, run_id: Optional[str], *, refresh: bool = False
+    ) -> Dict[str, ExperimentJobInformation]:
+        """Read the experiment-level job information from storage"""
+        ...
+
+    def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
+        """Read the orphan jobs from storage (providers that support it)"""
+        return []
+
+    def get_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+        return self._cached_query(
+            ("stray_jobs",),
+            lambda: self._fetch_stray_jobs(refresh=refresh),
+            refresh=refresh,
+            copy=list,
+        )
+
+    def _fetch_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+        """Read the stray jobs from storage
+
+        The default derives them from the orphan jobs; providers that can
+        answer directly (e.g. over RPC) override this.
+        """
+        return [
+            j
+            for j in self.get_orphan_jobs(refresh=refresh)
+            if j.state and j.state.running()
+        ]
 
     # =========================================================================
     # Job caching methods
@@ -725,7 +1072,8 @@ class OfflineStateProvider(StateProvider):
         self._experiment_cache_lock = threading.Lock()
 
     def _clear_experiment_cache_all(self) -> None:
-        """Clear the entire experiment cache"""
+        """Clear the entire experiment cache (and the queries built from it)"""
+        self._query_cache.clear()
         with self._experiment_cache_lock:
             self._experiment_cache.clear()
 
@@ -733,8 +1081,10 @@ class OfflineStateProvider(StateProvider):
         """Clear cached experiments for a specific experiment ID
 
         Removes all cache entries where the experiment_id matches,
-        regardless of run_id.
+        regardless of run_id. The queries derived from that experiment are
+        dropped as well.
         """
+        self._query_cache.invalidate(experiment_id)
         with self._experiment_cache_lock:
             keys_to_remove = [
                 k for k in self._experiment_cache if k[0] == experiment_id
@@ -812,6 +1162,10 @@ class OfflineStateProvider(StateProvider):
         - JobSubmittedEvent: Adds new job to cache
         - ExperimentUpdatedEvent: Invalidates experiment cache
 
+        Cached queries are invalidated for the events that change *which*
+        entities exist: state/progress/carbon events update the cached job
+        objects in place, so the query results that contain them stay valid.
+
         Subclasses may override this for additional logic.
         """
         from experimaestro.scheduler.state_status import (
@@ -844,53 +1198,143 @@ class OfflineStateProvider(StateProvider):
         # (supersedes JobSubmittedEvent)
         elif isinstance(event, ExperimentJobStateEvent):
             if event.scheduler_state == "submitted" and event.task_id:
-                from experimaestro.scheduler.state_status import task_id_hash
-
-                cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
-                with self._job_cache_lock:
-                    if cache_key not in self._job_cache:
-                        job = MockJob(
-                            identifier=event.job_id,
-                            task_id=event.task_id,
-                            path=None,
-                            state="scheduled",
-                            starttime=None,
-                            endtime=None,
-                            progress=[],
-                            updated_at="",
-                        )
-                        self._job_cache[cache_key] = job
-                        logger.debug("Added job %s to cache from event", cache_key)
+                self._add_submitted_job(event)
 
         # Legacy: handle old JobSubmittedEvent from event files
         elif isinstance(event, JobSubmittedEvent):
             if event.task_id:
-                from experimaestro.scheduler.state_status import task_id_hash
-
-                cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
-                with self._job_cache_lock:
-                    if cache_key not in self._job_cache:
-                        job = MockJob(
-                            identifier=event.job_id,
-                            task_id=event.task_id,
-                            path=None,
-                            state="scheduled",
-                            starttime=None,
-                            endtime=None,
-                            progress=[],
-                            updated_at="",
-                        )
-                        self._job_cache[cache_key] = job
-                        logger.debug("Added job %s to cache from event", cache_key)
+                self._add_submitted_job(event)
 
         # Handle experiment events - invalidate cache to force refresh
         elif isinstance(event, ExperimentUpdatedEvent):
+            self._query_cache.invalidate(event.experiment_id)
             with self._experiment_cache_lock:
                 keys_to_remove = [
                     k for k in self._experiment_cache if k[0] == event.experiment_id
                 ]
                 for key in keys_to_remove:
                     del self._experiment_cache[key]
+
+    def _add_submitted_job(self, event: "EventBase") -> None:
+        """Register a newly submitted job in the caches
+
+        The event carries everything the affected queries need (task, tags,
+        dependencies, submission time), so the cached job lists and maps are
+        extended in place rather than dropped and read from storage again.
+        Queries that cannot be decided (a `since` filter) are dropped, and
+        those the job cannot belong to are left alone.
+        """
+        from experimaestro.scheduler.state_status import task_id_hash
+
+        cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
+        with self._job_cache_lock:
+            job = self._job_cache.get(cache_key)
+            if job is None:
+                job = MockJob(
+                    identifier=event.job_id,
+                    task_id=event.task_id,
+                    path=None,
+                    state="scheduled",
+                    starttime=None,
+                    endtime=None,
+                    progress=[],
+                    updated_at="",
+                )
+                self._job_cache[cache_key] = job
+                logger.debug("Added job %s to cache from event", cache_key)
+
+        tags = {tag.key: tag.value for tag in getattr(event, "tags", [])}
+        depends_on = list(getattr(event, "depends_on", []))
+        job_info = ExperimentJobInformation(
+            job_id=event.job_id,
+            task_id=event.task_id,
+            tags=tags,
+            timestamp=self._event_timestamp(getattr(event, "submitted_time", None)),
+        )
+        event_run_id = getattr(event, "run_id", "") or None
+
+        def append(jobs: List[BaseJob]) -> None:
+            if not any(j.identifier == job.identifier for j in jobs):
+                jobs.append(job)
+
+        for key, entry in self._query_cache.entries():
+            name = key[0]
+
+            if name in ("jobs", "all_jobs"):
+                if name == "jobs":
+                    _, exp_id, run_id, task_id, state, tags_filter, since = key
+                    if exp_id != event.experiment_id:
+                        continue
+                    if run_id is not None and event_run_id and run_id != event_run_id:
+                        continue
+                else:
+                    _, state, tags_filter, since = key
+                    task_id = None
+
+                belongs = self._job_matches_query(
+                    job, tags, task_id=task_id, state=state, tags_filter=tags_filter
+                )
+                if since is not None or belongs is None:
+                    self._query_cache.drop(key)
+                elif belongs:
+                    self._query_cache.update(key, append)
+
+            elif name in ("tags_map", "dependencies_map", "experiment_job_info"):
+                _, exp_id, run_id = key
+                if exp_id != event.experiment_id:
+                    continue
+                if run_id is not None and event_run_id and run_id != event_run_id:
+                    continue
+
+                value = {
+                    "tags_map": tags,
+                    "dependencies_map": depends_on,
+                    "experiment_job_info": job_info,
+                }[name]
+                self._query_cache.update(
+                    key, lambda mapping, v=value: mapping.setdefault(event.job_id, v)
+                )
+
+            # Experiment queries are unaffected: a new job does not change the
+            # experiment list, and the counts come from the cached experiment
+            # objects, which the event updates in place
+
+    @staticmethod
+    def _event_timestamp(value: Optional[str]) -> Optional[float]:
+        """Convert an ISO timestamp carried by an event to a POSIX timestamp"""
+        if not value:
+            return None
+        dt = deserialize_to_datetime(value)
+        return dt.timestamp() if dt is not None else None
+
+    @staticmethod
+    def _job_matches_query(
+        job: "MockJob",
+        tags: Dict[str, str],
+        *,
+        task_id: Optional[str],
+        state: Optional[str],
+        tags_filter: Optional[tuple],
+    ) -> Optional[bool]:
+        """Whether a newly submitted job belongs to a cached job query
+
+        Returns None when the answer cannot be determined.
+        """
+        if task_id is not None and task_id != job.task_id:
+            return False
+
+        if state is not None:
+            expected = STATE_NAME_TO_JOBSTATE.get(state)
+            if expected is None:
+                return None
+            if expected != job.state:
+                return False
+
+        if tags_filter:
+            if not all(tags.get(k) == v for k, v in tags_filter):
+                return False
+
+        return True
 
     def _apply_event_to_cache(self, event: "EventBase") -> None:
         """Apply an event to cached jobs/experiments
@@ -904,18 +1348,12 @@ class OfflineStateProvider(StateProvider):
     # Service caching methods
     # =========================================================================
 
-    def _init_service_cache(self) -> None:
-        """Initialize service cache - call from subclass __init__"""
-        self._service_cache: Dict[tuple[str, str], Dict[str, "BaseService"]] = {}
-        self._service_cache_lock = threading.Lock()
-
-    def _clear_service_cache(self) -> None:
-        """Clear the service cache"""
-        with self._service_cache_lock:
-            self._service_cache.clear()
-
     def get_services(
-        self, experiment_id: Optional[str] = None, run_id: Optional[str] = None
+        self,
+        experiment_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> List["BaseService"]:
         """Get services for an experiment
 
@@ -928,36 +1366,29 @@ class OfflineStateProvider(StateProvider):
         # Handle "get all services" case
         if experiment_id is None:
             all_services = []
-            for exp in self.get_experiments():
-                exp_services = self.get_services(exp.experiment_id)
+            for exp in self.get_experiments(refresh=refresh):
+                exp_services = self.get_services(exp.experiment_id, refresh=refresh)
                 all_services.extend(exp_services)
             return all_services
 
         # Resolve run_id if needed
         if run_id is None:
-            run_id = self.get_current_run(experiment_id)
+            run_id = self.get_current_run(experiment_id, refresh=refresh)
             if run_id is None:
                 return []
 
-        cache_key = (experiment_id, run_id)
+        # Live services (scheduler, etc.) are always current: never cached
+        live_services = self._get_live_services(experiment_id, run_id)
+        if live_services is not None:
+            return live_services
 
-        with self._service_cache_lock:
-            # Try to get live services (scheduler, etc.) - may return None
-            live_services = self._get_live_services(experiment_id, run_id)
-            if live_services is not None:
-                # Cache and return live services
-                self._service_cache[cache_key] = {s.id: s for s in live_services}
-                return live_services
-
-            # Check cache
-            cached = self._service_cache.get(cache_key)
-            if cached is not None:
-                return list(cached.values())
-
-            # Fetch from persistent storage (filesystem or remote)
-            services = self._fetch_services_from_storage(experiment_id, run_id)
-            self._service_cache[cache_key] = {s.id: s for s in services}
-            return services
+        return self._cached_query(
+            ("services", experiment_id, run_id),
+            lambda: self._fetch_services_from_storage(experiment_id, run_id),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=list,
+        )
 
     def _get_live_services(
         self, experiment_id: Optional[str], run_id: Optional[str]

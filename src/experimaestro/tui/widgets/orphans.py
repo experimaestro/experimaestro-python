@@ -113,10 +113,10 @@ class OrphanJobsScreen(Screen):
                 key=job.identifier,
             )
 
-    def refresh_orphans(self) -> None:
+    def refresh_orphans(self, *, refresh: bool = False) -> None:
         """Refresh the orphan jobs list"""
         # Only include orphan jobs that have an existing folder
-        all_orphans = self.state_provider.get_orphan_jobs()
+        all_orphans = self.state_provider.get_orphan_jobs(refresh=refresh)
         self.orphan_jobs = [j for j in all_orphans if j.path and j.path.exists()]
 
         # Update stats
@@ -354,7 +354,7 @@ class OrphanJobsScreen(Screen):
 
     def action_refresh(self) -> None:
         """Refresh the orphan jobs list"""
-        self.refresh_orphans()
+        self.refresh_orphans(refresh=True)
 
     def action_go_back(self) -> None:
         """Go back to main screen"""

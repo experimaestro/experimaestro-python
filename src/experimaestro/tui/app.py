@@ -656,18 +656,22 @@ class ExperimaestroUI(App):
         jobs_table.focus()
 
     def action_refresh(self) -> None:
-        """Manually refresh the data"""
+        """Manually refresh the data
+
+        This is the explicit refresh: the state provider is asked to re-read
+        the state instead of answering from its cache.
+        """
         experiments_list = self.query_one(ExperimentsList)
         jobs_table = self.query_one(JobsTable)
 
-        experiments_list.refresh_experiments()
-        jobs_table.refresh_jobs()
+        experiments_list.refresh_experiments(refresh=True)
+        jobs_table.refresh_jobs(refresh=True)
 
         # Also refresh job detail if visible
         job_detail_container = self.query_one("#job-detail-container")
         if not job_detail_container.has_class("hidden"):
             job_detail_view = self.query_one(JobDetailView)
-            job_detail_view.refresh_job_detail()
+            job_detail_view.refresh_job_detail(refresh=True)
 
     def action_go_back(self) -> None:
         """Go back one level in the navigation hierarchy"""

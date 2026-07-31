@@ -520,7 +520,9 @@ class TestServerRequestHandling:
 
         assert len(result) == 1
         assert result[0]["experiment_id"] == "exp1"
-        mock_state_provider.get_experiments.assert_called_once_with(since=None)
+        mock_state_provider.get_experiments.assert_called_once_with(
+            since=None, refresh=False
+        )
 
     def test_handle_get_experiment(self, server_with_mock, mock_state_provider):
         """Test handling get_experiment request"""
@@ -538,7 +540,9 @@ class TestServerRequestHandling:
 
         assert result["experiment_id"] == "exp1"
         assert result["run_id"] == "run1"
-        mock_state_provider.get_experiment.assert_called_once_with("exp1")
+        mock_state_provider.get_experiment.assert_called_once_with(
+            "exp1", refresh=False
+        )
 
     def test_handle_get_experiment_not_found(
         self, server_with_mock, mock_state_provider

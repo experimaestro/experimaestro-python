@@ -215,9 +215,15 @@ class WorkspaceStateProvider(OfflineStateProvider):
             self._event_reader = None
 
     def _invalidate_known_experiment_ids(self) -> None:
-        """Invalidate the cached experiment ID set, forcing a directory re-scan"""
+        """Invalidate the cached experiment ID set, forcing a directory re-scan
+
+        The set of experiments changed, so the workspace-wide queries (the
+        experiment list, the orphan/stray scans, ...) have to be answered
+        again — what is cached per experiment stays valid.
+        """
         with self._known_experiment_ids_lock:
             self._known_experiment_ids = None
+        self._query_cache.invalidate_global()
 
     # =========================================================================
     # Crash recovery: Consolidate orphaned events
@@ -1337,7 +1343,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
             self._known_experiment_ids = result
         return result
 
-    def get_experiments(self, since: Optional[datetime] = None) -> List[MockExperiment]:
+    def _fetch_experiments(
+        self, since: Optional[datetime] = None, *, refresh: bool = False
+    ) -> List[MockExperiment]:
         """Get list of all experiments (v2 and v1 layouts)
 
         Uses a cached set of experiment IDs to avoid repeated directory scans.
@@ -1377,7 +1385,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return experiments
 
-    def get_experiment(self, experiment_id: str) -> Optional[MockExperiment]:
+    def _fetch_experiment(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[MockExperiment]:
         """Get a specific experiment by ID (v2 or v1 layout)"""
         # Try v2 layout first
         experiment = self._load_experiment(experiment_id)
@@ -1531,7 +1541,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return jobs
 
-    def get_experiment_runs(self, experiment_id: str) -> List[BaseExperiment]:
+    def _fetch_experiment_runs(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
         """Get all runs for an experiment"""
         runs: List[BaseExperiment] = []
         exp_dir = self.workspace_path / "experiments" / experiment_id
@@ -1573,7 +1585,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return None
         return max(candidates, key=lambda p: p.stat().st_mtime)
 
-    def get_current_run(self, experiment_id: str) -> Optional[str]:
+    def _fetch_current_run(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[str]:
         """Get the current run ID for an experiment"""
         # Check symlink locations (new: experiments/{id}/current,
         # legacy: .events/experiments/{id}/current)
@@ -1611,7 +1625,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Job methods
     # =========================================================================
 
-    def get_jobs(
+    def _fetch_jobs(
         self,
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
@@ -1619,10 +1633,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
     ) -> List[MockJob]:
         """Query jobs with optional filters"""
         if experiment_id is None:
-            return self.get_all_jobs(state=state, tags=tags, since=since)
+            return self.get_all_jobs(
+                state=state, tags=tags, since=since, refresh=refresh
+            )
 
         if run_id is None:
             run_id = self.get_current_run(experiment_id)
@@ -1672,7 +1690,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return jobs
 
-    def get_job(self, task_id: str, job_id: str) -> Optional[MockJob]:
+    def _fetch_job(
+        self, task_id: str, job_id: str, *, refresh: bool = False
+    ) -> Optional[MockJob]:
         """Get a job directly by task_id and job_id"""
         job_path = self.workspace_path / "jobs" / task_id / job_id
         if not job_path.exists():
@@ -1680,11 +1700,13 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return self._get_or_load_job(job_id, task_id)
 
-    def get_all_jobs(
+    def _fetch_all_jobs(
         self,
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
     ) -> List[MockJob]:
         """Get all jobs across all experiments"""
         all_jobs = []
@@ -1697,7 +1719,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 continue
             experiment_id = exp_dir.name
             jobs = self.get_jobs(
-                experiment_id=experiment_id, state=state, tags=tags, since=since
+                experiment_id=experiment_id,
+                state=state,
+                tags=tags,
+                since=since,
+                refresh=refresh,
             )
             all_jobs.extend(jobs)
 
@@ -1738,8 +1764,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Tags and dependencies
     # =========================================================================
 
-    def get_tags_map(
-        self, experiment_id: str, run_id: Optional[str] = None
+    def _fetch_tags_map(
+        self, experiment_id: str, run_id: Optional[str] = None, *, refresh: bool = False
     ) -> Dict[str, Dict[str, str]]:
         """Get tags map for jobs in an experiment/run"""
         if run_id is None:
@@ -1756,8 +1782,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return exp.tags
 
-    def get_dependencies_map(
-        self, experiment_id: str, run_id: Optional[str] = None
+    def _fetch_dependencies_map(
+        self, experiment_id: str, run_id: Optional[str] = None, *, refresh: bool = False
     ) -> Dict[str, List[str]]:
         """Get dependencies map for jobs in an experiment/run"""
         if run_id is None:
@@ -1774,8 +1800,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         return exp.dependencies
 
-    def get_experiment_job_info(
-        self, experiment_id: str, run_id: Optional[str] = None
+    def _fetch_experiment_job_info(
+        self, experiment_id: str, run_id: Optional[str] = None, *, refresh: bool = False
     ) -> Dict[str, ExperimentJobInformation]:
         """Get experiment-level job info for jobs in an experiment/run"""
         if run_id is None:
@@ -1856,9 +1882,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
             if job.path.exists():
                 shutil.rmtree(job.path)
 
-            # Clear job from cache
+            # Clear job from cache — the job disappears from every query
             with self._job_cache_lock:
                 self._job_cache.pop(job.cache_key, None)
+            self._query_cache.invalidate()
 
             # Mark the job as deleted in any cached experiments that
             # reference it, so the UI reflects the deletion instead of the
@@ -1936,7 +1963,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Orphan job detection
     # =========================================================================
 
-    def get_orphan_jobs(self, *, include_folders: bool = True) -> List[MockJob]:
+    def _fetch_orphan_jobs(
+        self, *, refresh: bool = False, include_folders: bool = True
+    ) -> List[MockJob]:
         """Get orphan jobs (jobs not associated with any experiment run).
 
         Scans workspace/jobs/ for all job directories and compares against
@@ -2048,7 +2077,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     rels.add((task_dir.name, job_dir.name))
         return rels
 
-    def get_stray_jobs(self) -> list[MockJob]:
+    def _fetch_stray_jobs(self, *, refresh: bool = False) -> list[MockJob]:
         """Get stray jobs (running jobs not in the latest run of any experiment)
 
         A stray job is a running job that was submitted by a previous run of an
@@ -2368,7 +2397,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Clear caches (inherited from OfflineStateProvider)
         self._clear_job_cache()
         self._clear_experiment_cache_all()
-        self._clear_service_cache()
 
         with self._lock:
             if self.workspace_path in self._instances:

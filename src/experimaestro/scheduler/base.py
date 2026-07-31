@@ -1618,16 +1618,28 @@ class Scheduler(StateProvider, threading.Thread):
     def get_experiments(
         self,
         since: Optional[datetime] = None,  # noqa: ARG002
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> List[BaseExperiment]:
         """Get list of all live experiments"""
         # Note: 'since' filter not applicable for live scheduler
         return list(self.experiments.values())
 
-    def get_experiment(self, experiment_id: str) -> Optional[BaseExperiment]:
+    def get_experiment(
+        self,
+        experiment_id: str,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
+    ) -> Optional[BaseExperiment]:
         """Get a specific experiment by ID"""
         return self.experiments.get(experiment_id)
 
-    def get_experiment_runs(self, experiment_id: str) -> List[BaseExperiment]:
+    def get_experiment_runs(
+        self,
+        experiment_id: str,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
+    ) -> List[BaseExperiment]:
         """Get all runs for an experiment
 
         For a live scheduler, returns the live experiment directly.
@@ -1639,7 +1651,12 @@ class Scheduler(StateProvider, threading.Thread):
         # Return the live experiment (it already implements BaseExperiment)
         return [exp]
 
-    def get_current_run(self, experiment_id: str) -> Optional[str]:
+    def get_current_run(
+        self,
+        experiment_id: str,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
+    ) -> Optional[str]:
         """Get the current run ID for an experiment"""
         exp = self.experiments.get(experiment_id)
         return exp.run_id if exp else None
@@ -1652,6 +1669,8 @@ class Scheduler(StateProvider, threading.Thread):
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,  # noqa: ARG002 - not used in live scheduler
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> List[BaseJob]:
         """Query jobs with optional filters"""
         jobs: List[BaseJob] = list(self.jobs.values())
@@ -1682,6 +1701,8 @@ class Scheduler(StateProvider, threading.Thread):
         self,
         task_id: str,  # noqa: ARG002 - job_id is sufficient in live scheduler
         job_id: str,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> Optional[BaseJob]:
         """Get a specific job"""
         return self.jobs.get(job_id)
@@ -1691,6 +1712,8 @@ class Scheduler(StateProvider, threading.Thread):
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,  # noqa: ARG002 - not used in live scheduler
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> List[BaseJob]:
         """Get all jobs across all experiments"""
         jobs: List[BaseJob] = list(self.jobs.values())
@@ -1707,6 +1730,8 @@ class Scheduler(StateProvider, threading.Thread):
         self,
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> List[BaseService]:
         """Get services for an experiment
 
@@ -1755,6 +1780,8 @@ class Scheduler(StateProvider, threading.Thread):
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> dict[str, dict[str, str]]:
         info = self._get_run_info(experiment_id, run_id)
         return info.tags if info else {}
@@ -1763,6 +1790,8 @@ class Scheduler(StateProvider, threading.Thread):
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> dict[str, list[str]]:
         info = self._get_run_info(experiment_id, run_id)
         return info.dependencies if info else {}
@@ -1771,6 +1800,8 @@ class Scheduler(StateProvider, threading.Thread):
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> dict[str, "ExperimentJobInformation"]:
         info = self._get_run_info(experiment_id, run_id)
         return info.job_infos if info else {}

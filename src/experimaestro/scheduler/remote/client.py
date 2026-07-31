@@ -661,9 +661,6 @@ class SSHStateProviderClient(OfflineStateProvider):
                     future.set_exception(ConnectionError("Disconnected"))
             self._response_handlers.clear()
 
-        # Clear service cache (using base class method)
-        self._clear_service_cache()
-
         # Clear job and experiment caches (using inherited methods)
         self._clear_job_cache()
         self._clear_experiment_cache_all()
@@ -972,34 +969,42 @@ class SSHStateProviderClient(OfflineStateProvider):
         with self._listener_lock:
             self._listeners.discard(listener)
 
-    def get_experiments(self, since: Optional[datetime] = None) -> List[BaseExperiment]:
+    def _fetch_experiments(
+        self, since: Optional[datetime] = None, *, refresh: bool = False
+    ) -> List[BaseExperiment]:
         """Get list of all experiments"""
-        params = {"since": serialize_datetime(since)}
+        params = {"since": serialize_datetime(since), "refresh": refresh}
         result = self._call_sync(RPCMethod.GET_EXPERIMENTS, params)
         return [self._get_or_load_experiment(d) for d in result]
 
-    def get_experiment(self, experiment_id: str) -> Optional[BaseExperiment]:
+    def _fetch_experiment(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[BaseExperiment]:
         """Get a specific experiment by ID"""
-        params = {"experiment_id": experiment_id}
+        params = {"experiment_id": experiment_id, "refresh": refresh}
         result = self._call_sync(RPCMethod.GET_EXPERIMENT, params)
         if result is None:
             return None
         return self._get_or_load_experiment(result)
 
-    def get_experiment_runs(self, experiment_id: str) -> list[BaseExperiment]:
+    def _fetch_experiment_runs(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> list[BaseExperiment]:
         """Get all runs for an experiment"""
-        params = {"experiment_id": experiment_id}
+        params = {"experiment_id": experiment_id, "refresh": refresh}
         result = self._call_sync(RPCMethod.GET_EXPERIMENT_RUNS, params)
         return [self._get_or_load_experiment(d) for d in result]
 
-    def get_current_run(self, experiment_id: str) -> Optional[str]:
+    def _fetch_current_run(
+        self, experiment_id: str, *, refresh: bool = False
+    ) -> Optional[str]:
         """Get the current run ID for an experiment"""
-        exp = self.get_experiment(experiment_id)
+        exp = self.get_experiment(experiment_id, refresh=refresh)
         if exp is None:
             return None
         return exp.run_id
 
-    def get_jobs(
+    def _fetch_jobs(
         self,
         experiment_id: Optional[str] = None,
         run_id: Optional[str] = None,
@@ -1007,6 +1012,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
     ) -> List[BaseJob]:
         """Query jobs with optional filters"""
         params = {
@@ -1016,91 +1023,108 @@ class SSHStateProviderClient(OfflineStateProvider):
             "state": state,
             "tags": tags,
             "since": serialize_datetime(since),
+            "refresh": refresh,
         }
         result = self._call_sync(RPCMethod.GET_JOBS, params)
         return [self._get_or_load_job(d) for d in result]
 
-    def get_job(self, task_id: str, job_id: str) -> Optional[BaseJob]:
+    def _fetch_job(
+        self, task_id: str, job_id: str, *, refresh: bool = False
+    ) -> Optional[BaseJob]:
         """Get a specific job"""
         params = {
             "task_id": task_id,
             "job_id": job_id,
+            "refresh": refresh,
         }
         result = self._call_sync(RPCMethod.GET_JOB, params)
         if result is None:
             return None
         return self._get_or_load_job(result)
 
-    def get_all_jobs(
+    def _fetch_all_jobs(
         self,
         state: Optional[str] = None,
         tags: Optional[Dict[str, str]] = None,
         since: Optional[datetime] = None,
+        *,
+        refresh: bool = False,
     ) -> List[BaseJob]:
         """Get all jobs across all experiments"""
         params = {
             "state": state,
             "tags": tags,
             "since": serialize_datetime(since),
+            "refresh": refresh,
         }
         result = self._call_sync(RPCMethod.GET_ALL_JOBS, params)
         return [self._get_or_load_job(d) for d in result]
 
-    def get_orphan_jobs(self) -> List[BaseJob]:
+    def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
         """Get orphan jobs (not referenced by any experiment)"""
         try:
-            result = self._call_sync(RPCMethod.GET_ORPHAN_JOBS, {})
+            result = self._call_sync(
+                RPCMethod.GET_ORPHAN_JOBS, {"refresh": refresh, **kwargs}
+            )
             return [self._get_or_load_job(d) for d in result]
         except RuntimeError:
             # Server may not support this method (old version)
             return []
 
-    def get_stray_jobs(self) -> List[BaseJob]:
+    def _fetch_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
         """Get stray jobs (running jobs not in latest run)"""
         try:
-            result = self._call_sync(RPCMethod.GET_STRAY_JOBS, {})
+            result = self._call_sync(RPCMethod.GET_STRAY_JOBS, {"refresh": refresh})
             return [self._get_or_load_job(d) for d in result]
         except RuntimeError:
             # Server may not support this method (old version)
             return []
 
-    def get_tags_map(
+    def _fetch_tags_map(
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> Dict[str, Dict[str, str]]:
         """Get tags map for jobs in an experiment/run"""
         params = {
             "experiment_id": experiment_id,
             "run_id": run_id,
+            "refresh": refresh,
         }
         result = self._call_sync(RPCMethod.GET_TAGS_MAP, params)
         return result or {}
 
-    def get_dependencies_map(
+    def _fetch_dependencies_map(
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> dict[str, list[str]]:
         """Get dependencies map for jobs in an experiment/run"""
         params = {
             "experiment_id": experiment_id,
             "run_id": run_id,
+            "refresh": refresh,
         }
         result = self._call_sync(RPCMethod.GET_DEPENDENCIES_MAP, params)
         return result or {}
 
-    def get_experiment_job_info(
+    def _fetch_experiment_job_info(
         self,
         experiment_id: str,
         run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> Dict[str, "ExperimentJobInformation"]:
         """Get experiment-level job info for jobs in an experiment/run
 
         Falls back to parent class cached experiments which contain job_infos.
         """
         # Try to get from cached experiment data
-        experiments = self.get_experiments()
+        experiments = self.get_experiments(refresh=refresh)
         for exp in experiments:
             if exp.experiment_id == experiment_id:
                 return exp.job_infos

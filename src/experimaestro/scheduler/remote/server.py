@@ -284,7 +284,9 @@ class SSHStateProviderServer:
     def _handle_get_experiments(self, params: Dict) -> list:
         """Handle get_experiments request"""
         since = deserialize_datetime(params.get("since"))
-        experiments = self._state_provider.get_experiments(since=since)
+        experiments = self._state_provider.get_experiments(
+            since=since, refresh=bool(params.get("refresh"))
+        )
         return [self._experiment_to_dict(exp) for exp in experiments]
 
     def _handle_get_experiment(self, params: Dict) -> Optional[Dict]:
@@ -293,7 +295,9 @@ class SSHStateProviderServer:
         if not experiment_id:
             raise TypeError("experiment_id is required")
 
-        experiment = self._state_provider.get_experiment(experiment_id)
+        experiment = self._state_provider.get_experiment(
+            experiment_id, refresh=bool(params.get("refresh"))
+        )
         if experiment is None:
             return None
         return self._experiment_to_dict(experiment)
@@ -304,7 +308,9 @@ class SSHStateProviderServer:
         if not experiment_id:
             raise TypeError("experiment_id is required")
 
-        runs = self._state_provider.get_experiment_runs(experiment_id)
+        runs = self._state_provider.get_experiment_runs(
+            experiment_id, refresh=bool(params.get("refresh"))
+        )
         return [self._experiment_to_dict(run) for run in runs]
 
     def _handle_get_jobs(self, params: Dict) -> list:
@@ -317,6 +323,7 @@ class SSHStateProviderServer:
             state=params.get("state"),
             tags=params.get("tags"),
             since=since,
+            refresh=bool(params.get("refresh")),
         )
         return [job.state_dict() for job in jobs]
 
@@ -327,7 +334,9 @@ class SSHStateProviderServer:
         if not task_id or not job_id:
             raise TypeError("task_id and job_id are required")
 
-        job = self._state_provider.get_job(task_id=task_id, job_id=job_id)
+        job = self._state_provider.get_job(
+            task_id=task_id, job_id=job_id, refresh=bool(params.get("refresh"))
+        )
         if job is None:
             return None
         return job.state_dict()
@@ -339,17 +348,18 @@ class SSHStateProviderServer:
             state=params.get("state"),
             tags=params.get("tags"),
             since=since,
+            refresh=bool(params.get("refresh")),
         )
         return [job.state_dict() for job in jobs]
 
     def _handle_get_orphan_jobs(self, params: Dict) -> list:
         """Handle get_orphan_jobs request"""
-        jobs = self._state_provider.get_orphan_jobs()
+        jobs = self._state_provider.get_orphan_jobs(refresh=bool(params.get("refresh")))
         return [job.state_dict() for job in jobs]
 
     def _handle_get_stray_jobs(self, params: Dict) -> list:
         """Handle get_stray_jobs request"""
-        jobs = self._state_provider.get_stray_jobs()
+        jobs = self._state_provider.get_stray_jobs(refresh=bool(params.get("refresh")))
         return [job.state_dict() for job in jobs]
 
     def _handle_get_services(self, params: Dict) -> list:
@@ -360,6 +370,7 @@ class SSHStateProviderServer:
         services = self._state_provider.get_services(
             experiment_id=params.get("experiment_id"),
             run_id=params.get("run_id"),
+            refresh=bool(params.get("refresh")),
         )
         return [svc.full_state_dict() for svc in services]
 
@@ -375,6 +386,7 @@ class SSHStateProviderServer:
         return self._state_provider.get_tags_map(
             experiment_id=experiment_id,
             run_id=params.get("run_id"),
+            refresh=bool(params.get("refresh")),
         )
 
     def _handle_get_dependencies_map(self, params: Dict) -> dict[str, list[str]]:
@@ -389,6 +401,7 @@ class SSHStateProviderServer:
         return self._state_provider.get_dependencies_map(
             experiment_id=experiment_id,
             run_id=params.get("run_id"),
+            refresh=bool(params.get("refresh")),
         )
 
     def _handle_kill_job(self, params: Dict) -> Dict:

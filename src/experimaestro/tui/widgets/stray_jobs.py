@@ -76,13 +76,18 @@ class _JobListPanel(Vertical):
             self.refresh_jobs()
             self.notify("Refreshed", severity="information")
 
-    def _fetch_jobs(self) -> list:
+    def _fetch_jobs(self, *, refresh: bool = False) -> list:
         """Override to fetch the appropriate job list"""
         raise NotImplementedError
 
-    def refresh_jobs(self) -> None:
-        """Refresh the job list"""
-        self.jobs = self._fetch_jobs()
+    def refresh_jobs(self, *, refresh: bool = False) -> None:
+        """Refresh the job list
+
+        Args:
+            refresh: Ask the state provider to re-scan the workspace instead
+                of answering from its cache (explicit user refresh)
+        """
+        self.jobs = self._fetch_jobs(refresh=refresh)
 
         # Only calculate sizes for local paths that exist
         self._pending_jobs = [
@@ -294,8 +299,8 @@ class StrayJobsPanel(_JobListPanel):
     def _extra_buttons(self) -> ComposeResult:
         yield Button("Kill All", id="stray-kill-all-btn", variant="error")
 
-    def _fetch_jobs(self) -> list:
-        return self.state_provider.get_stray_jobs()
+    def _fetch_jobs(self, *, refresh: bool = False) -> list:
+        return self.state_provider.get_stray_jobs(refresh=refresh)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         super().on_button_pressed(event)
@@ -368,8 +373,8 @@ class OrphanJobsPanel(_JobListPanel):
         yield Button("Kill All", id="orphan-kill-all-btn", variant="error")
         yield Button("Delete All", id="orphan-delete-all-btn", variant="warning")
 
-    def _fetch_jobs(self) -> list:
-        return self.state_provider.get_orphan_jobs()
+    def _fetch_jobs(self, *, refresh: bool = False) -> list:
+        return self.state_provider.get_orphan_jobs(refresh=refresh)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         super().on_button_pressed(event)
@@ -525,10 +530,10 @@ class OrphanJobsTab(Vertical):
         """Total count for backwards compat"""
         return self.running_count + self.finished_count
 
-    def refresh_orphan_jobs(self) -> None:
+    def refresh_orphan_jobs(self, *, refresh: bool = False) -> None:
         """Refresh both panels"""
-        self.stray_panel.refresh_jobs()
-        self.orphan_panel.refresh_jobs()
+        self.stray_panel.refresh_jobs(refresh=refresh)
+        self.orphan_panel.refresh_jobs(refresh=refresh)
         self._update_subtab_titles()
 
     def _update_subtab_titles(self) -> None:
@@ -544,7 +549,7 @@ class OrphanJobsTab(Vertical):
             pass
 
     def action_refresh(self) -> None:
-        self.refresh_orphan_jobs()
+        self.refresh_orphan_jobs(refresh=True)
         self.notify("Refreshed", severity="information")
 
     def action_sort_by_task(self) -> None:

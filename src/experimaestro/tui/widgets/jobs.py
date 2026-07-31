@@ -307,18 +307,24 @@ class JobDetailView(Widget):
         self._load_job_detail(job_id, task_id, experiment_id)
 
     @work(thread=True, exclusive=True, group="job_detail_load")
-    def _load_job_detail(self, job_id: str, task_id: str, experiment_id: str) -> None:
+    def _load_job_detail(
+        self, job_id: str, task_id: str, experiment_id: str, refresh: bool = False
+    ) -> None:
         """Load job details in background thread"""
         # Load tags and dependencies if needed
-        tags_map = self.state_provider.get_tags_map(experiment_id)
-        deps_map = self.state_provider.get_dependencies_map(experiment_id)
-        experiment_job_info = self.state_provider.get_experiment_job_info(experiment_id)
+        tags_map = self.state_provider.get_tags_map(experiment_id, refresh=refresh)
+        deps_map = self.state_provider.get_dependencies_map(
+            experiment_id, refresh=refresh
+        )
+        experiment_job_info = self.state_provider.get_experiment_job_info(
+            experiment_id, refresh=refresh
+        )
 
         # Load all jobs for the experiment to build job_id -> task_id mapping
-        jobs = self.state_provider.get_jobs(experiment_id)
+        jobs = self.state_provider.get_jobs(experiment_id, refresh=refresh)
         job_task_map = {j.identifier: j.task_id or "" for j in jobs}
 
-        job = self.state_provider.get_job(task_id, job_id)
+        job = self.state_provider.get_job(task_id, job_id, refresh=refresh)
 
         self.app.call_from_thread(
             self._on_job_loaded,
@@ -351,7 +357,7 @@ class JobDetailView(Widget):
 
         self._update_job_display(job)
 
-    def refresh_job_detail(self) -> None:
+    def refresh_job_detail(self, *, refresh: bool = False) -> None:
         """Refresh job details from state provider (always background)"""
         if not self.current_job_id or not self.current_task_id:
             return
@@ -360,6 +366,7 @@ class JobDetailView(Widget):
             self.current_job_id,
             self.current_task_id,
             self.current_experiment_id or "",
+            refresh,
         )
 
     def _update_job_display(self, job) -> None:
@@ -1290,8 +1297,8 @@ class JobsTable(Vertical):
             self.app.action_go_back()
 
     def action_refresh_live(self) -> None:
-        """Refresh the jobs table"""
-        self.refresh_jobs()
+        """Refresh the jobs table, re-reading the state"""
+        self.refresh_jobs(refresh=True)
         self.notify("Jobs refreshed", severity="information")
 
     def on_filter_changed(self, message: FilterChanged) -> None:
@@ -1544,7 +1551,10 @@ class JobsTable(Vertical):
 
     @work(thread=True, exclusive=True, group="jobs_load")
     def _load_experiment_data(
-        self, experiment_id: Optional[str], run_id: Optional[str]
+        self,
+        experiment_id: Optional[str],
+        run_id: Optional[str],
+        refresh: bool = False,
     ) -> None:
         """Load experiment data in background thread"""
         if not experiment_id:
@@ -1555,17 +1565,23 @@ class JobsTable(Vertical):
             return
 
         # Fetch data (this is the slow part for remote)
-        tags_map = self.state_provider.get_tags_map(experiment_id, run_id)
+        tags_map = self.state_provider.get_tags_map(
+            experiment_id, run_id, refresh=refresh
+        )
         dependencies_map = self.state_provider.get_dependencies_map(
-            experiment_id, run_id
+            experiment_id, run_id, refresh=refresh
         )
         experiment_job_info = self.state_provider.get_experiment_job_info(
-            experiment_id, run_id
+            experiment_id, run_id, refresh=refresh
         )
-        jobs = self.state_provider.get_jobs(experiment_id, run_id=run_id)
+        jobs = self.state_provider.get_jobs(
+            experiment_id, run_id=run_id, refresh=refresh
+        )
 
         # Get the experiment object for resolved state
-        experiment_obj = self.state_provider.get_experiment(experiment_id)
+        experiment_obj = self.state_provider.get_experiment(
+            experiment_id, refresh=refresh
+        )
 
         # Update on main thread
         self.app.call_from_thread(
@@ -1616,12 +1632,19 @@ class JobsTable(Vertical):
         else:
             self._refresh_jobs_with_data(jobs)
 
-    def refresh_jobs(self) -> None:
-        """Refresh the jobs list from state provider (always background)"""
+    def refresh_jobs(self, *, refresh: bool = False) -> None:
+        """Refresh the jobs list from state provider (always background)
+
+        Args:
+            refresh: Ask the state provider for a full re-read instead of
+                letting it answer from its cache (explicit user refresh)
+        """
         if not self.current_experiment:
             return
 
-        self._load_experiment_data(self.current_experiment, self.current_run_id)
+        self._load_experiment_data(
+            self.current_experiment, self.current_run_id, refresh
+        )
 
     def _sort_jobs(self, jobs: list) -> None:
         """Sort jobs in-place according to the selected column"""

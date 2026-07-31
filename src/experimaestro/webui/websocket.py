@@ -437,7 +437,11 @@ class WebSocketHandler:
                 self.connections.discard(ws)
 
     def _serialize_jobs_for_experiment(
-        self, experiment_id: str, run_id: Optional[str] = None
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> List[Dict[str, Any]]:
         """Serialize jobs of an experiment, enriched with tags/deps/submit time.
 
@@ -446,11 +450,24 @@ class WebSocketHandler:
         """
         from experimaestro.scheduler.interfaces import serialize_timestamp
 
-        jobs = self.state_provider.get_jobs(experiment_id, run_id=run_id)
-        tags_map = self.state_provider.get_tags_map(experiment_id, run_id) or {}
-        deps_map = self.state_provider.get_dependencies_map(experiment_id, run_id) or {}
+        jobs = self.state_provider.get_jobs(
+            experiment_id, run_id=run_id, refresh=refresh
+        )
+        tags_map = (
+            self.state_provider.get_tags_map(experiment_id, run_id, refresh=refresh)
+            or {}
+        )
+        deps_map = (
+            self.state_provider.get_dependencies_map(
+                experiment_id, run_id, refresh=refresh
+            )
+            or {}
+        )
         job_info = (
-            self.state_provider.get_experiment_job_info(experiment_id, run_id) or {}
+            self.state_provider.get_experiment_job_info(
+                experiment_id, run_id, refresh=refresh
+            )
+            or {}
         )
 
         payloads = []
@@ -474,14 +491,18 @@ class WebSocketHandler:
         return payloads
 
     async def _handle_refresh(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle refresh request - send all jobs for experiment(s)"""
+        """Handle refresh request - send all jobs for experiment(s)
+
+        This is an explicit client refresh: the state provider re-reads the
+        state instead of answering from its cache.
+        """
         experiment_id = payload.get("experimentId")
         run_id = payload.get("runId")
 
         if experiment_id:
             # Refresh specific experiment (optionally a specific run)
             for job_payload in self._serialize_jobs_for_experiment(
-                experiment_id, run_id
+                experiment_id, run_id, refresh=True
             ):
                 await websocket.send_json({"type": "job.add", "payload": job_payload})
         else:
@@ -494,9 +515,9 @@ class WebSocketHandler:
                     )
             else:
                 # Monitoring mode: get from state provider (MockJob objects)
-                for exp in self.state_provider.get_experiments():
+                for exp in self.state_provider.get_experiments(refresh=True):
                     for job_payload in self._serialize_jobs_for_experiment(
-                        exp.experiment_id
+                        exp.experiment_id, refresh=True
                     ):
                         await websocket.send_json(
                             {"type": "job.add", "payload": job_payload}
