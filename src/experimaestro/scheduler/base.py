@@ -406,16 +406,19 @@ class Scheduler(StateProvider, threading.Thread):
         otherFuture = asyncio.run_coroutine_threadsafe(
             self.aio_registerJob(job), self.loop
         )
-        other = otherFuture.result()
+        other, restart = otherFuture.result()
         logger.debug(
             "Job %s already submitted" if other else "First submission of job %s", job
         )
 
         # Only returns if job was already submitted and doesn't need reprocessing
         if other is not None:
-            # If state is WAITING, it was just reset for resubmission and needs processing
-            # If state is RUNNING or finished (DONE), no need to reprocess
-            if other.scheduler_state != JobState.WAITING:
+            # aio_registerJob is the only one that knows whether the job was
+            # reset for a re-run: the state alone cannot tell a job that was
+            # just reset to WAITING from one that is already in flight and
+            # waiting for its dependencies (re-submitting the latter would
+            # start it a second time).
+            if not restart:
                 return other
             # Use 'other' for resubmission since it has the correct experiments list
             job = other
@@ -448,9 +451,13 @@ class Scheduler(StateProvider, threading.Thread):
         logger.info("Preparing job %s", job.path)
         job.prepare(overwrite=True)
 
-    async def aio_registerJob(self, job: Job):
+    async def aio_registerJob(self, job: Job) -> "tuple[Optional[Job], bool]":
         """Register a job by adding it to the list, and checks
         whether the job has already been submitted
+
+        :return: a tuple ``(other, restart)`` where ``other`` is the already
+            registered job (``None`` for a first submission) and ``restart``
+            tells whether that job was reset and must be processed again
         """
         logger.debug("Registering job %s", job)
 
@@ -513,7 +520,7 @@ class Scheduler(StateProvider, threading.Thread):
                 logger.warning("Job %s already submitted", job.identifier)
 
             # Returns the previous job
-            return other
+            return other, need_restart
 
         # Register this job
         xp = experiment.current()
@@ -555,7 +562,7 @@ class Scheduler(StateProvider, threading.Thread):
             if dependency.origin is not None:
                 dependency.origin.dependents.add(dependency)
 
-        return None
+        return None, True
 
     def _start_job_event_reader(self, workspace_path: Path) -> None:
         """Start watching job events in a workspace

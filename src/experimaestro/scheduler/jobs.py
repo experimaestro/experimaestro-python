@@ -81,6 +81,9 @@ class JobDependency(Dependency):
         origin_job = self.origin
         if (
             origin_job.transient.is_transient
+            # Several dependents may need the same transient job: only the
+            # first one starts it (notstarted() stays true while WAITING)
+            and not origin_job._needed_transient
             and origin_job.scheduler_state.notstarted()
         ):
             # Transient job was skipped but now is needed - start it
