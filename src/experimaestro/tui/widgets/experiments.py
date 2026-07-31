@@ -33,6 +33,7 @@ class ExperimentsList(Widget):
         Binding("ctrl+k", "kill_experiment", "Kill", show=False),
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("D", "sort_by_date", "Sort Date", show=False),
+        Binding("O", "sort_alphabetical", "Sort Name", show=False),
     ]
 
     current_experiment: reactive[Optional[str]] = reactive(None)
@@ -65,6 +66,7 @@ class ExperimentsList(Widget):
 
     # Columns that support sorting (column key -> sort column name)
     SORTABLE_COLUMNS = {
+        "id": "id",
         "status": "status",
         "started": "started",
     }
@@ -154,6 +156,41 @@ class ExperimentsList(Widget):
         self.refresh_experiments()
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
+
+    def action_sort_alphabetical(self) -> None:
+        """Sort experiments alphabetically by ID"""
+        if self._sort_column == "id":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "id"
+            self._sort_reverse = False
+        self._update_column_headers()
+        self.refresh_experiments()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted alphabetically ({order})", severity="information")
+
+    def _sort_experiments(self, experiments: list) -> list:
+        """Return experiments sorted according to the selected column"""
+        experiments_sorted = list(experiments)
+        match self._sort_column:
+            case "status":
+                experiments_sorted.sort(
+                    key=self._get_status_sort_key, reverse=self._sort_reverse
+                )
+            case "started":
+                # Sort by started time (experiments without start time go to end)
+                experiments_sorted.sort(
+                    key=lambda e: e.started_at or datetime.min,
+                    reverse=self._sort_reverse,
+                )
+            case "id":
+                # Sort alphabetically by experiment ID
+                experiments_sorted.sort(
+                    key=lambda e: (e.experiment_id or "").lower(),
+                    reverse=self._sort_reverse,
+                )
+            # Default: no sorting, use order from state provider
+        return experiments_sorted
 
     @staticmethod
     def _format_experiment_status(exp) -> str:
@@ -341,19 +378,7 @@ class ExperimentsList(Widget):
             return
 
         # Sort experiments based on selected column
-        experiments_sorted = list(self.experiments)
-        if self._sort_column == "status":
-            experiments_sorted.sort(
-                key=self._get_status_sort_key,
-                reverse=self._sort_reverse,
-            )
-        elif self._sort_column == "started":
-            # Sort by started time (experiments without start time go to end)
-            experiments_sorted.sort(
-                key=lambda e: e.started_at or datetime.min,
-                reverse=self._sort_reverse,
-            )
-        # Default: no sorting, use order from state provider
+        experiments_sorted = self._sort_experiments(self.experiments)
 
         # Get existing row keys
         existing_keys = set(table.rows.keys())

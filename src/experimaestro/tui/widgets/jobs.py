@@ -1128,6 +1128,7 @@ class JobsTable(Vertical):
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("T", "sort_by_task", "Sort Task", show=False),
         Binding("D", "sort_by_submitted", "Sort Date", show=False),
+        Binding("O", "sort_alphabetical", "Sort Name", show=False),
         Binding("t", "toggle_tree_view", "Tree"),
         Binding("escape", "clear_search", show=False, priority=True),
     ]
@@ -1260,6 +1261,19 @@ class JobsTable(Vertical):
         self.refresh_jobs()
         order = "newest first" if self._sort_reverse else "oldest first"
         self.notify(f"Sorted by date ({order})", severity="information")
+
+    def action_sort_alphabetical(self) -> None:
+        """Sort jobs alphabetically by ID"""
+        if self._sort_column == "job_id":
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_column = "job_id"
+            self._sort_reverse = False
+        self._needs_rebuild = True
+        self._update_column_headers()
+        self.refresh_jobs()
+        order = "desc" if self._sort_reverse else "asc"
+        self.notify(f"Sorted alphabetically ({order})", severity="information")
 
     def action_clear_search(self) -> None:
         """Handle escape: hide search bar if visible, or go back"""
@@ -1445,6 +1459,7 @@ class JobsTable(Vertical):
 
     # Columns that support sorting (column key -> sort column name)
     SORTABLE_COLUMNS = {
+        "job_id": "job_id",
         "status": "status",
         "task": "task",
         "submitted": "submitted",
@@ -1608,6 +1623,32 @@ class JobsTable(Vertical):
 
         self._load_experiment_data(self.current_experiment, self.current_run_id)
 
+    def _sort_jobs(self, jobs: list) -> None:
+        """Sort jobs in-place according to the selected column"""
+        match self._sort_column:
+            case "status":
+                # Sort by status priority, then by failure reason for errors
+                jobs.sort(key=self._get_status_sort_key, reverse=self._sort_reverse)
+            case "task":
+                # Sort by task name
+                jobs.sort(key=lambda j: j.task_id or "", reverse=self._sort_reverse)
+            case "job_id":
+                # Sort alphabetically by job ID
+                jobs.sort(
+                    key=lambda j: (j.identifier or "").lower(),
+                    reverse=self._sort_reverse,
+                )
+            case _:
+                # Default: sort by submission time (oldest first by default)
+                # Use experiment_job_info timestamp for submittime
+                def _get_submittime(j):
+                    info = self.experiment_job_info.get(j.identifier)
+                    if info and info.timestamp:
+                        return datetime.fromtimestamp(info.timestamp)
+                    return datetime.max
+
+                jobs.sort(key=_get_submittime, reverse=self._sort_reverse)
+
     def _refresh_jobs_with_data(self, jobs: list) -> None:  # noqa: C901
         """Refresh the jobs display with provided job data"""
         table = self.query_one("#jobs-table", DataTable)
@@ -1621,32 +1662,7 @@ class JobsTable(Vertical):
             jobs = [j for j in jobs if self.filter_fn(j)]
             self.log.debug(f"After filter: {len(jobs)} jobs")
 
-        # Sort jobs based on selected column
-        if self._sort_column == "status":
-            # Sort by status priority, then by failure reason for errors
-            jobs.sort(
-                key=self._get_status_sort_key,
-                reverse=self._sort_reverse,
-            )
-        elif self._sort_column == "task":
-            # Sort by task name
-            jobs.sort(
-                key=lambda j: j.task_id or "",
-                reverse=self._sort_reverse,
-            )
-        else:
-            # Default: sort by submission time (oldest first by default)
-            # Use experiment_job_info timestamp for submittime
-            def _get_submittime(j):
-                info = self.experiment_job_info.get(j.identifier)
-                if info and info.timestamp:
-                    return datetime.fromtimestamp(info.timestamp)
-                return datetime.max
-
-            jobs.sort(
-                key=_get_submittime,
-                reverse=self._sort_reverse,
-            )
+        self._sort_jobs(jobs)
 
         # Check if we need to rebuild (new/removed jobs, or status changed when sorting by status)
         existing_keys = {str(k.value) for k in table.rows.keys()}
