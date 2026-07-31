@@ -1753,6 +1753,34 @@ class TestClientEventHandling:
 
         assert event is None
 
+    def test_client_notification_rebuilds_nested_tags(self, client):
+        """Tags arrive as plain dicts (server uses asdict) and must become JobTag"""
+        from experimaestro.scheduler.remote.protocol import NotificationMethod
+        from experimaestro.scheduler.state_status import JobSubmittedEvent, JobTag
+
+        event = client._notification_to_event(
+            NotificationMethod.STATE_EVENT.value,
+            {
+                "event_type": "JobSubmittedEvent",
+                "data": {
+                    "job_id": "job_tags_test",
+                    "task_id": "task123",
+                    "run_id": "run_001",
+                    "tags": [
+                        {"key": "model", "value": "bert"},
+                        {"key": "lr", "value": "0.01"},
+                    ],
+                    "timestamp": 1704067260.0,
+                },
+            },
+        )
+
+        assert isinstance(event, JobSubmittedEvent)
+        assert event.tags == [JobTag("model", "bert"), JobTag("lr", "0.01")]
+
+        # Consumers read tag.key/tag.value: this used to raise AttributeError
+        client._add_submitted_job(event)
+
 
 # =============================================================================
 # Error Handling Tests

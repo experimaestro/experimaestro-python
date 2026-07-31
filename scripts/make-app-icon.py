@@ -43,7 +43,6 @@ Re-run it whenever the master ``icon.svg`` changes.
 from __future__ import annotations
 
 import argparse
-import colorsys
 import re
 import subprocess
 import sys
@@ -160,7 +159,7 @@ def normalize_style_colors(root: ET.Element) -> None:
                     decls.append(decl)
             if modified:
                 new_style = ";".join(decls).strip()
-                new_style = re.sub(r';+', ';', new_style).strip(';')
+                new_style = re.sub(r";+", ";", new_style).strip(";")
                 if new_style:
                     element.set("style", new_style)
                 else:
@@ -260,8 +259,7 @@ def build_dark_css(fill_map: dict[str, str], stroke_map: dict[str, str]) -> str:
     for prop, mapping in (("fill", fill_map), ("stroke", stroke_map)):
         for original, dark in sorted(mapping.items()):
             lines.append(
-                f"    [{prop}='{original}' i]"
-                f" {{ {prop}: {dark} !important; }}"
+                f"    [{prop}='{original}' i] {{ {prop}: {dark} !important; }}"
             )
     lines.append("  }")
     return "\n".join(lines)
@@ -282,7 +280,9 @@ def write_adaptive(src: Path, dst: Path, recolour: DarkRecolour, *, crop: bool) 
             tree = ET.parse(dst)
             has_cropped = True
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            sys.stderr.write(f"warning: inkscape cropping failed ({e}). Writing uncropped SVG instead.\n")
+            sys.stderr.write(
+                f"warning: inkscape cropping failed ({e}). Writing uncropped SVG instead.\n"
+            )
 
     if not has_cropped:
         tree = ET.parse(src)
@@ -423,7 +423,9 @@ def main() -> int:
             crop_and_clean(tmp_path, dst)
             success = True
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            sys.stderr.write(f"warning: inkscape cropping failed ({e}). Writing uncropped SVG instead.\n")
+            sys.stderr.write(
+                f"warning: inkscape cropping failed ({e}). Writing uncropped SVG instead.\n"
+            )
         finally:
             tmp_path.unlink(missing_ok=True)
 

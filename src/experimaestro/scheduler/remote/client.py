@@ -876,15 +876,21 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         event_type = params.get("event_type")
         data = params.get("data", {})
-        event_class = EventBase.get_class(event_type)
-        if event_class is None:
+        if not event_type:
+            logger.warning("Notification missing event_type: %s", params)
+            return None
+
+        if EventBase.get_class(event_type) is None:
             logger.warning("Unknown event type: %s", event_type)
             return None
 
+        # Go through from_dict: the server serializes events with asdict(), so
+        # nested dataclasses (JobTag, ProgressLevel) arrive as plain dicts and
+        # must be rebuilt -- a bare event_class(**data) would leave them as dicts
         try:
-            return event_class(**data)
-        except TypeError as e:
-            logger.warning("Error deserializing event %s: %s", event_type, e)
+            return EventBase.from_dict({**data, "event_type": event_type})
+        except Exception:
+            logger.exception("Error deserializing event %s", event_type)
             return None
 
     def _notify_listeners(self, event: EventBase):
