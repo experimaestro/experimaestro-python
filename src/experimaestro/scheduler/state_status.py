@@ -30,7 +30,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from experimaestro.filewatcher import DirectoryWatch, FileWatcherService
+from experimaestro.filewatcher import (
+    DirectoryWatch,
+    FileWatcherService,
+    default_max_open_files,
+)
 
 
 if TYPE_CHECKING:
@@ -1147,15 +1151,26 @@ class EventReader:
     - Entity tracking: on_created callback determines which entities to follow
     """
 
-    def __init__(self, *directories: WatchedDirectory, max_open_files: int = 128):
+    def __init__(
+        self, *directories: WatchedDirectory, max_open_files: int | None = None
+    ):
         """Initialize event reader
 
         Args:
             directories: Directories to watch with their configurations
-            max_open_files: Maximum open FDs for file tailing
+            max_open_files: Maximum open FDs for file tailing. Defaults to half
+                the process descriptor limit (see default_max_open_files).
         """
         self.directories = list(directories)
-        self._max_open_files = max_open_files
+        self._max_open_files = (
+            default_max_open_files() if max_open_files is None else max_open_files
+        )
+        # File changes arrive from two threads -- the change source's own
+        # thread and the shared poll thread -- so delivery must be serialised.
+        # Without this a fast source (kqueue reports in well under a
+        # millisecond) races the poller and both read the same lines before
+        # either advances the tail position, delivering every event twice.
+        self._process_lock = threading.RLock()
         # Initial file positions (staging area, transferred to watches on start)
         self._file_positions: dict[Path, int] = {}
         # File watchers (with tailing support)
@@ -1636,87 +1651,90 @@ class EventReader:
         - If the notified file has a lower number, ignore it (old file).
         - On first encounter, catch up from events_count via the resolver.
         """
-        entity_id = self._extract_entity_id(path)
-        if not entity_id:
-            logger.debug("Could not extract entity_id from %s", path)
-            return
-
-        dir_config = self._find_dir_config(path)
-        if not dir_config:
-            logger.debug("No dir_config found for %s", path)
-            return
-
-        logger.debug("Processing file change for entity %s: %s", entity_id, path)
-
-        # Check if this entity is being followed
-        is_new = entity_id not in self._followed_entities
-
-        # Fast filter: skip entities we don't care about before any file I/O
-        if is_new and dir_config.on_should_follow is not None:
-            if not dir_config.on_should_follow(entity_id):
+        with self._process_lock:
+            entity_id = self._extract_entity_id(path)
+            if not entity_id:
+                logger.debug("Could not extract entity_id from %s", path)
                 return
 
-        file_number = self._extract_file_number(path)
-        current = self._current_file.get(entity_id)
-        current_number = self._extract_file_number(current) if current else None
-
-        if is_new or current is None:
-            # First file for this entity: catch up from events_count
-            min_count = self._get_entity_events_count(entity_id, dir_config)
-
-            # Skip files below the events_count threshold
-            if file_number is not None and file_number < min_count:
+            dir_config = self._find_dir_config(path)
+            if not dir_config:
+                logger.debug("No dir_config found for %s", path)
                 return
 
-            # Collect catch-up events from earlier files
-            collected_events: list[EventBase] = []
-            entity_dir = path.parent
-            prefix = self._extract_file_prefix(path)
+            logger.debug("Processing file change for entity %s: %s", entity_id, path)
 
-            if file_number is not None and prefix:
-                for earlier_num in range(min_count, file_number):
-                    earlier_path = entity_dir / f"{prefix}{earlier_num}.jsonl"
-                    if earlier_path.exists():
-                        collected_events.extend(
-                            self._read_events_from_file(earlier_path)
-                        )
+            # Check if this entity is being followed
+            is_new = entity_id not in self._followed_entities
 
-            # Also read the notified file itself for catch-up
-            collected_events.extend(self._read_events_from_file(path))
-
-            if is_new:
-                if not self._register_entity(entity_id, dir_config, collected_events):
-                    return  # Entity rejected by on_created
-
-                # When on_created is None, events were not delivered to any
-                # callback — fall through to deliver via on_event
-                if dir_config.on_created is not None:
-                    # on_created handled the events
-                    self._current_file[entity_id] = path
+            # Fast filter: skip entities we don't care about before any file I/O
+            if is_new and dir_config.on_should_follow is not None:
+                if not dir_config.on_should_follow(entity_id):
                     return
 
-            # Deliver events via on_event (either already-followed entity
-            # with no current file, or new entity with no on_created)
-            if dir_config.on_event and collected_events:
-                for event in collected_events:
-                    try:
-                        dir_config.on_event(entity_id, event)
-                    except Exception:
-                        logger.exception("Error in on_event callback")
+            file_number = self._extract_file_number(path)
+            current = self._current_file.get(entity_id)
+            current_number = self._extract_file_number(current) if current else None
 
-            # Set current file to the notified file
-            self._current_file[entity_id] = path
-            return  # Already read this file during catch-up
-        elif file_number is not None and current_number is not None:
-            if file_number > current_number:
-                # Rotation: drain current file first, then switch
-                self._process_single_file(current, entity_id, dir_config)
+            if is_new or current is None:
+                # First file for this entity: catch up from events_count
+                min_count = self._get_entity_events_count(entity_id, dir_config)
+
+                # Skip files below the events_count threshold
+                if file_number is not None and file_number < min_count:
+                    return
+
+                # Collect catch-up events from earlier files
+                collected_events: list[EventBase] = []
+                entity_dir = path.parent
+                prefix = self._extract_file_prefix(path)
+
+                if file_number is not None and prefix:
+                    for earlier_num in range(min_count, file_number):
+                        earlier_path = entity_dir / f"{prefix}{earlier_num}.jsonl"
+                        if earlier_path.exists():
+                            collected_events.extend(
+                                self._read_events_from_file(earlier_path)
+                            )
+
+                # Also read the notified file itself for catch-up
+                collected_events.extend(self._read_events_from_file(path))
+
+                if is_new:
+                    if not self._register_entity(
+                        entity_id, dir_config, collected_events
+                    ):
+                        return  # Entity rejected by on_created
+
+                    # When on_created is None, events were not delivered to any
+                    # callback — fall through to deliver via on_event
+                    if dir_config.on_created is not None:
+                        # on_created handled the events
+                        self._current_file[entity_id] = path
+                        return
+
+                # Deliver events via on_event (either already-followed entity
+                # with no current file, or new entity with no on_created)
+                if dir_config.on_event and collected_events:
+                    for event in collected_events:
+                        try:
+                            dir_config.on_event(entity_id, event)
+                        except Exception:
+                            logger.exception("Error in on_event callback")
+
+                # Set current file to the notified file
                 self._current_file[entity_id] = path
-            elif file_number < current_number:
-                return  # Old file, ignore
+                return  # Already read this file during catch-up
+            elif file_number is not None and current_number is not None:
+                if file_number > current_number:
+                    # Rotation: drain current file first, then switch
+                    self._process_single_file(current, entity_id, dir_config)
+                    self._current_file[entity_id] = path
+                elif file_number < current_number:
+                    return  # Old file, ignore
 
-        # Process the current/new file
-        self._process_single_file(path, entity_id, dir_config)
+            # Process the current/new file
+            self._process_single_file(path, entity_id, dir_config)
 
     def _process_single_file(
         self, path: Path, entity_id: str, dir_config: WatchedDirectory

@@ -6,7 +6,6 @@ This module tests the core event system:
 """
 
 import json
-import weakref
 from pathlib import Path
 
 import pytest
@@ -981,10 +980,13 @@ class TestEventReaderFileRotation:
             reader._process_file_change(event_file_9)
             assert len(received_events) == 3
 
-            # Disable watchdog handler to simulate NFS (no on_created fires)
+            # Drop every event source, leaving only the poll backstop: this is
+            # what inotify looks like on NFS/Lustre, where a remote writer's
+            # creations and appends are never reported.
             for watch in reader._all_watchers:
-                if watch._handler:
-                    watch._handler._watch_ref = weakref.ref(type("Dead", (), {})())
+                for source in [s for s in watch._sources if s.is_event_source]:
+                    source.stop()
+                    watch._sources.remove(source)
                 # Enable fast directory polling
                 watch._dir_poller.min_interval = 0.1
                 watch._dir_poller.poll_interval = 0.1
@@ -1047,10 +1049,11 @@ class TestEventReaderFileRotation:
             reader._process_file_change(event_file_0)
             assert len(received_events) == 1
 
-            # Disable watchdog handler to simulate NFS
+            # Drop every event source, leaving only the poll backstop (NFS/Lustre)
             for watch in reader._all_watchers:
-                if watch._handler:
-                    watch._handler._watch_ref = weakref.ref(type("Dead", (), {})())
+                for source in [s for s in watch._sources if s.is_event_source]:
+                    source.stop()
+                    watch._sources.remove(source)
                 watch._dir_poller.min_interval = 0.1
                 watch._dir_poller.poll_interval = 0.1
                 watch._dir_poller.schedule_next()

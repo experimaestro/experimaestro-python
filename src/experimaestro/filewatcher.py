@@ -42,6 +42,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("xpm.filewatcher")
 
+# Upper bound on descriptors any single pool/source will hold. Half of a very
+# large RLIMIT_NOFILE (some systems report ~1M) is not a useful target: past a
+# few thousand the bookkeeping costs more than the descriptors save.
+MAX_OPEN_FILES_CEILING = 8192
+MIN_OPEN_FILES = 64
+
+
+def default_max_open_files() -> int:
+    """Descriptor budget for one pool/source: half the process limit.
+
+    Half, rather than all, because the budget is shared with everything else
+    experimaestro opens -- SSH connectors, RPyC sockets, job log handles.
+    Clamped at both ends: RLIMIT_NOFILE is unbounded on some hosts and as low
+    as 256 on a stock macOS.
+    """
+    try:
+        import resource
+
+        soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (ImportError, OSError, ValueError):
+        return 128
+
+    if soft is None or soft < 0 or soft == getattr(resource, "RLIM_INFINITY", -1):
+        return MAX_OPEN_FILES_CEILING
+    return max(MIN_OPEN_FILES, min(soft // 2, MAX_OPEN_FILES_CEILING))
+
+
 # Type for async event handlers - duck-typed: must have async on_*_async methods
 AsyncEventHandler = Any
 
@@ -127,6 +154,18 @@ class AdaptivePoller:
     min_interval: float = 0.5
     max_interval: float = 30.0
 
+    #: While something changed within `hot_window` seconds, the interval is
+    #: capped at `hot_max_interval`. None disables the cap entirely.
+    #:
+    #: Without it `min_interval` is not really the floor: the interval is
+    #: driven by `estimated_change_interval * 0.5`, which starts at 2.5s and
+    #: grows on every idle poll, so a freshly tracked file is polled seconds
+    #: apart no matter how small `min_interval` is. That is the right
+    #: behaviour for a dormant file and the wrong one for a job actively
+    #: writing progress, which is exactly the case users watch.
+    hot_window: float = 30.0
+    hot_max_interval: float | None = None
+
     # State
     watchdog_reliability: float = 0.5
     estimated_change_interval: float = 5.0
@@ -137,6 +176,11 @@ class AdaptivePoller:
     # Polyak averaging parameters
     _polyak_alpha: float = field(default=0.3, repr=False)
     _reliability_alpha: float = field(default=0.2, repr=False)
+
+    @property
+    def is_hot(self) -> bool:
+        """Whether this file changed recently enough to warrant fast polling."""
+        return (time.time() - self.last_change_time) < self.hot_window
 
     def schedule_next(self) -> None:
         """Schedule the next poll time."""
@@ -156,10 +200,13 @@ class AdaptivePoller:
     def _compute_poll_interval(self) -> None:
         """Compute poll interval based on reliability and change frequency."""
         base = max(self.min_interval, self.estimated_change_interval * 0.5)
-        self.poll_interval = min(
+        interval = min(
             base + (self.max_interval - base) * self.watchdog_reliability,
             self.max_interval,
         )
+        if self.hot_max_interval is not None and self.is_hot:
+            interval = min(interval, self.hot_max_interval)
+        self.poll_interval = interval
 
     def on_poll_detected_change(self) -> None:
         """Called when POLLING detected a change (watchdog missed it)."""
@@ -310,6 +357,11 @@ class PolledFile:
 FileChangeCallback = Callable[[Path], None]
 FileDeletedCallback = Callable[[Path], None]
 FileFilter = Callable[[Path], bool]
+
+#: Builds a ChangeSource for a DirectoryWatch. Passing these explicitly
+#: replaces the default backends, which is how tests substitute simulated
+#: sources (blind, coalescing, flaky) for the real ones.
+ChangeSourceFactory = Callable[["DirectoryWatch"], "ChangeSource"]
 
 
 # =============================================================================
@@ -462,16 +514,482 @@ class AsyncFileSystemEventHandler(FileSystemEventHandler):
 
 
 # =============================================================================
+# ChangeSource — pluggable change-notification backends
+# =============================================================================
+
+
+class ChangeSource:
+    """A backend that tells a DirectoryWatch when watched files change.
+
+    Two kinds coexist:
+
+    * **event sources** (watchdog today) push notifications from the OS. They
+      are fast when they work, but silently blind in some environments -- e.g.
+      inotify reports nothing at all for a file appended to by another host on
+      a shared filesystem, and macOS FSEvents coalesces rapid appends into a
+      single notification delivered only once writing stops.
+    * the **poll source**, which always works and is therefore the backstop.
+
+    DirectoryWatch measures how often each event source actually beats the
+    poller (see AdaptivePoller) and lets the poller back off accordingly. That
+    is why no part of the system needs to know which filesystem it is on: an
+    event source that never fires simply keeps its reliability at zero and the
+    poller keeps doing the work.
+
+    Sources report through the DirectoryWatch._source_* methods, which own all
+    the bookkeeping (reliability, tracking, user callbacks). A source itself
+    only decides *when* to report.
+    """
+
+    #: Identifies the source in logs and reliability bookkeeping.
+    name: str = "source"
+
+    #: False for the polling backstop. Detections through the poller prove
+    #: that push notification *failed*, so they must not raise reliability.
+    is_event_source: bool = True
+
+    def __init__(self, watch: DirectoryWatch):
+        # Weak, so a source (which the watchdog observer keeps alive through
+        # its handler) can never keep its DirectoryWatch from being collected.
+        self._watch_ref = weakref.ref(watch)
+        self._stopped = False
+
+    @property
+    def _watch(self) -> DirectoryWatch | None:
+        """The watch to report to, or None if this source must stay silent.
+
+        Returning None once stopped is what makes stop() take effect
+        immediately. Releasing the underlying OS resource can be asynchronous
+        -- unscheduling a watchdog watch is deferred to the poll thread to
+        avoid a finalizer deadlock -- so events may still arrive afterwards
+        and must be dropped rather than reported.
+        """
+        if self._stopped:
+            return None
+        watch = self._watch_ref()
+        if watch is None or watch._closed:
+            return None
+        return watch
+
+    @classmethod
+    def available(cls, service: FileWatcherService) -> bool:
+        """Whether this source can be used at all on this platform/config."""
+        return True
+
+    def start(self) -> None:
+        """Begin reporting changes."""
+
+    def stop(self) -> None:
+        """Stop reporting and release resources.
+
+        Subclasses must call super().stop(): it is what silences the source.
+        """
+        self._stopped = True
+
+    def add_file(self, path: Path) -> None:
+        """Called when a file becomes tracked. Per-file sources arm here."""
+
+    def remove_file(self, path: Path) -> None:
+        """Called when a file stops being tracked."""
+
+    def tick(self) -> float | None:
+        """Advance a source that needs driving from the poll thread.
+
+        Returns the number of seconds until it wants ticking again, or None if
+        it is purely event-driven and never needs the poll thread.
+        """
+        return None
+
+
+class WatchdogSource(ChangeSource):
+    """Event source backed by the shared watchdog Observer."""
+
+    name = "watchdog"
+
+    def __init__(self, watch: DirectoryWatch):
+        super().__init__(watch)
+        self._handler: _WatchdogSourceHandler | None = None
+        self._observed: ObservedWatch | None = None
+
+    def start(self) -> None:
+        watch = self._watch
+        if watch is None:
+            return
+        self._handler = _WatchdogSourceHandler(self)
+        self._observed = watch._service._observer.schedule(
+            self._handler, str(watch._path.absolute()), recursive=watch._recursive
+        )
+        logger.debug(
+            "WatchdogSource: watching %s (recursive=%s)", watch._path, watch._recursive
+        )
+
+    def stop(self) -> None:
+        super().stop()
+        if self._observed is None:
+            return
+        watch = self._watch_ref()
+        if watch is not None:
+            # Deferred to the poll thread to avoid a finalizer deadlock on the
+            # watchdog observer lock (see _defer_unschedule).
+            watch._service._defer_unschedule(self._observed)
+        self._observed = None
+
+
+class _WatchdogSourceHandler(FileSystemEventHandler):
+    """Internal watchdog handler translating events into source reports."""
+
+    def __init__(self, source: WatchdogSource):
+        super().__init__()
+        self._source = source
+
+    def _resolve(self, event) -> tuple[WatchdogSource, DirectoryWatch, Path] | None:
+        # Ignore events once the watch is closed: the underlying watchdog watch
+        # is unscheduled asynchronously by the poll thread, so events may still
+        # arrive briefly after close().
+        if event.is_directory:
+            return None
+        watch = self._source._watch
+        if watch is None:
+            return None
+        path = Path(event.src_path)
+        if not watch._file_filter(path):
+            return None
+        return self._source, watch, path
+
+    def on_modified(self, event):
+        resolved = self._resolve(event)
+        if resolved is not None:
+            source, watch, path = resolved
+            logger.debug("Watchdog on_modified: %s", path)
+            watch._source_changed(source, path)
+
+    def on_created(self, event):
+        resolved = self._resolve(event)
+        if resolved is not None:
+            source, watch, path = resolved
+            logger.debug("Watchdog on_created: %s", path)
+            watch._source_created(source, path)
+
+    def on_deleted(self, event):
+        resolved = self._resolve(event)
+        if resolved is not None:
+            source, watch, path = resolved
+            watch._source_deleted(source, path)
+
+
+class KqueueSource(ChangeSource):
+    """Event source using BSD/macOS kqueue on the watched files and directory.
+
+    Registers EVFILT_VNODE with NOTE_WRITE|NOTE_EXTEND (plus DELETE/RENAME),
+    which has two properties the alternatives lack on this platform:
+
+    * it does not coalesce. macOS FSEvents merges rapid appends into a single
+      notification delivered only once writing *stops*, which for a job
+      appending progress lines means no notification while it matters.
+    * it cannot be tripped by a local reader. inotify's mask includes IN_OPEN
+      and IN_CLOSE_NOWRITE, so merely reading a file emits events; these flags
+      fire only on modification.
+
+    kqueue needs an open descriptor per watched file, so registration is capped
+    at `max_registered` and evicts the least-recently-changed file. Anything
+    colder simply falls back to the poll backstop, which is why the cap is a
+    performance knob and not a correctness one.
+
+    Descriptors are this source's own rather than borrowed from TailedFilePool:
+    tailing is optional, and the pool evicts on *read* recency, which would let
+    an unrelated component silently deregister a file that is still being
+    written.
+    """
+
+    name = "kqueue"
+
+    def __init__(self, watch: DirectoryWatch, max_registered: int | None = None):
+        super().__init__(watch)
+        self._max_registered = (
+            watch._max_open_files if max_registered is None else max_registered
+        )
+        self._kq = None
+        self._dir_fd: int | None = None
+        self._fds: dict[Path, int] = {}
+        self._paths: dict[int, Path] = {}
+        self._last_active: dict[Path, float] = {}
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @classmethod
+    def available(cls, service: FileWatcherService) -> bool:
+        import select
+
+        return hasattr(select, "kqueue")
+
+    # --- registration ---
+
+    def _vnode_event(self, fd: int):
+        import select
+
+        return select.kevent(
+            fd,
+            filter=select.KQ_FILTER_VNODE,
+            flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+            fflags=(
+                select.KQ_NOTE_WRITE
+                | select.KQ_NOTE_EXTEND
+                | select.KQ_NOTE_DELETE
+                | select.KQ_NOTE_RENAME
+            ),
+        )
+
+    def add_file(self, path: Path) -> None:
+        if self._watch is None or self._kq is None:
+            return
+        with self._lock:
+            if path in self._fds:
+                self._last_active[path] = time.time()
+                return
+            try:
+                fd = os.open(path, os.O_RDONLY)
+            except OSError:
+                return  # not there yet; the directory event will bring it back
+            try:
+                self._kq.control([self._vnode_event(fd)], 0, 0)
+            except OSError:
+                os.close(fd)
+                return
+            self._fds[path] = fd
+            self._paths[fd] = path
+            self._last_active[path] = time.time()
+            self._evict_if_needed()
+
+    def remove_file(self, path: Path) -> None:
+        with self._lock:
+            self._close_locked(path)
+            self._last_active.pop(path, None)
+
+    def _evict_if_needed(self) -> None:
+        """Drop the least-recently-changed registrations. Must hold _lock."""
+        while len(self._fds) > self._max_registered:
+            coldest = min(self._fds, key=lambda p: self._last_active.get(p, 0.0))
+            logger.debug("KqueueSource: evicting %s (budget reached)", coldest)
+            self._close_locked(coldest)
+
+    def _close_locked(self, path: Path) -> None:
+        """Deregistration is implicit: closing the FD removes its kevent."""
+        fd = self._fds.pop(path, None)
+        if fd is None:
+            return
+        self._paths.pop(fd, None)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+    # --- lifecycle ---
+
+    def start(self) -> None:
+        import select
+
+        watch = self._watch
+        if watch is None:
+            return
+        self._kq = select.kqueue()
+        try:
+            self._dir_fd = os.open(watch._path, os.O_RDONLY)
+            # NOTE_WRITE on a directory fires when an entry is added or
+            # removed: this is how rotation to a new file is noticed.
+            self._kq.control([self._vnode_event(self._dir_fd)], 0, 0)
+        except OSError:
+            logger.warning("KqueueSource: cannot watch directory %s", watch._path)
+            self._dir_fd = None
+
+        self._thread = threading.Thread(
+            target=self._loop, name=f"kqueue-{watch._path.name}", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        super().stop()
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3)
+            self._thread = None
+        with self._lock:
+            for path in list(self._fds):
+                self._close_locked(path)
+            self._last_active.clear()
+        if self._dir_fd is not None:
+            try:
+                os.close(self._dir_fd)
+            except OSError:
+                pass
+            self._dir_fd = None
+        if self._kq is not None:
+            try:
+                self._kq.close()
+            except OSError:
+                pass
+            self._kq = None
+
+    def _loop(self) -> None:
+        import select
+
+        while not self._stop_event.is_set():
+            try:
+                events = self._kq.control(None, 16, 0.5)
+            except OSError:
+                break
+            except ValueError:
+                break  # kqueue closed underneath us
+
+            watch = self._watch
+            if watch is None:
+                break
+
+            for event in events:
+                if event.ident == self._dir_fd:
+                    for path in watch._scan_directory():
+                        watch._source_created(self, path)
+                    continue
+
+                with self._lock:
+                    path = self._paths.get(event.ident)
+                if path is None:
+                    continue
+
+                if event.fflags & (select.KQ_NOTE_DELETE | select.KQ_NOTE_RENAME):
+                    watch._source_deleted(self, path)
+                else:
+                    with self._lock:
+                        self._last_active[path] = time.time()
+                    watch._source_changed(self, path)
+
+
+class PollSource(ChangeSource):
+    """The always-available backstop: adaptive stat-based polling.
+
+    Owns the per-file PolledFile state and the directory-scan poller. Both
+    adapt independently, because the two channels fail independently -- macOS
+    FSEvents, for instance, reports file *creation* promptly while coalescing
+    *appends* for seconds.
+    """
+
+    name = "poll"
+    is_event_source = False
+
+    def __init__(self, watch: DirectoryWatch):
+        super().__init__(watch)
+        self.files: dict[Path, PolledFile] = {}
+        self.lock = threading.Lock()
+
+        # Directory scanning poller: detects new files when an event source
+        # misses creations (e.g. NFS, GPFS, Lustre).
+        self.dir_poller = AdaptivePoller(
+            min_interval=watch._min_poll_interval,
+            max_interval=watch._max_poll_interval,
+            hot_window=watch._hot_window,
+            hot_max_interval=watch._hot_poll_interval,
+        )
+        self.dir_poller.schedule_next()
+
+    def add_file(self, path: Path) -> None:
+        watch = self._watch
+        if watch is None:
+            return
+
+        with self.lock:
+            if path in self.files:
+                return
+            try:
+                size = path.stat().st_size if path.exists() else 0
+            except OSError:
+                size = 0
+
+            polled = PolledFile(
+                path=path,
+                last_size=size,
+                poller=AdaptivePoller(
+                    min_interval=watch._min_poll_interval,
+                    max_interval=watch._max_poll_interval,
+                    poll_interval=watch._min_poll_interval,
+                    hot_window=watch._hot_window,
+                    hot_max_interval=watch._hot_poll_interval,
+                ),
+            )
+            polled.schedule_next()
+            self.files[path] = polled
+            logger.debug("DirectoryWatch: tracking %s", path)
+
+    def remove_file(self, path: Path) -> None:
+        with self.lock:
+            self.files.pop(path, None)
+
+    def tick(self) -> float:
+        """Poll all tracked files and scan the directory for new ones."""
+        watch = self._watch
+        if watch is None:
+            return 1.0
+
+        now = time.time()
+        next_wake = now + 1.0
+
+        if self.dir_poller.is_due:
+            self._scan_for_new_files(watch)
+        if self.dir_poller.next_poll < next_wake:
+            next_wake = self.dir_poller.next_poll
+
+        with self.lock:
+            files_snapshot = list(self.files.values())
+
+        for polled in files_snapshot:
+            if polled.poller.is_due:
+                changed = polled.update_size()
+                if changed is None:
+                    # File was deleted — trigger deletion callback
+                    watch._source_deleted(self, polled.path)
+                elif changed:
+                    watch._source_changed(self, polled.path)
+                else:
+                    polled.on_no_activity()
+
+            if polled.next_poll < next_wake:
+                next_wake = polled.next_poll
+
+        return max(0.1, next_wake - time.time())
+
+    def _scan_for_new_files(self, watch: DirectoryWatch) -> None:
+        """Discover files an event source failed to report as created.
+
+        The enumeration itself lives on DirectoryWatch, since kqueue does the
+        same scan when the directory reports a change. Only the adaptive
+        scheduling of it belongs to the poller.
+        """
+        new_files = watch._scan_directory()
+        if not new_files:
+            self.dir_poller.on_no_activity()
+            return
+
+        # Poll discovered new files → the event sources missed them. Recorded
+        # once for the batch, unlike the per-file event-source case.
+        self.dir_poller.on_poll_detected_change()
+        for path in new_files:
+            logger.debug("Directory poll discovered new file: %s", path)
+            watch._source_created(self, path)
+
+
+# =============================================================================
 # DirectoryWatch
 # =============================================================================
 
 
 class DirectoryWatch:
-    """Resource handle for directory watching with watchdog + adaptive polling.
+    """Resource handle for directory watching.
 
-    Provides callbacks for file changes, creations, and deletions within
-    a watched directory. Uses adaptive polling (via PolledFile) as fallback
-    when watchdog misses events.
+    Provides callbacks for file changes, creations, and deletions within a
+    watched directory. The actual detection is delegated to a list of
+    ChangeSource backends: an always-present PollSource backstop plus whatever
+    event sources are available. DirectoryWatch owns the bookkeeping the
+    sources feed -- reliability tracking, file tracking, user callbacks -- so
+    adding a backend does not touch this class.
 
     Use as a context manager or call close() when done.
     """
@@ -488,9 +1006,17 @@ class DirectoryWatch:
         on_deleted: FileDeletedCallback | None = None,
         min_poll_interval: float = 0.5,
         max_poll_interval: float = 30.0,
+        hot_poll_interval: float = 0.2,
+        hot_window: float = 30.0,
         enable_tailing: bool = False,
-        max_open_files: int = 128,
+        max_open_files: int | None = None,
+        source_factories: list[ChangeSourceFactory] | None = None,
     ):
+        # Set first: __del__ -> close() must be safe even if __init__ raises.
+        self._closed = False
+        self._sources: list[ChangeSource] = []
+        self._poll_source: PollSource | None = None
+
         self._service = service
         self._path = path
         self._recursive = recursive
@@ -500,82 +1026,171 @@ class DirectoryWatch:
         self._on_deleted = on_deleted
         self._min_poll_interval = min_poll_interval
         self._max_poll_interval = max_poll_interval
+        self._hot_window = hot_window
+        # A file cannot be considered hot and yet polled slower than the
+        # configured ceiling.
+        self._hot_poll_interval = min(hot_poll_interval, max_poll_interval)
+        self._max_open_files = (
+            default_max_open_files() if max_open_files is None else max_open_files
+        )
 
-        self._files: dict[Path, PolledFile] = {}
-        self._lock = threading.Lock()
-        self._closed = False
-        self._watchdog_watch: ObservedWatch | None = None
-        self._handler: _DirectoryWatchHandler | None = None
+        self._lock = threading.RLock()
+        self._known_files: set[Path] = set()
 
         # Tailed file pool for efficient line reading
         self._tailed_pool: TailedFilePool | None = (
-            TailedFilePool(max_open=max_open_files) if enable_tailing else None
+            TailedFilePool(max_open=self._max_open_files) if enable_tailing else None
         )
 
-        # Directory scanning poller: detects new files when watchdog misses
-        # on_created events (e.g. NFS, GPFS, Lustre)
-        self._dir_poller = AdaptivePoller(
-            min_interval=min_poll_interval,
-            max_interval=max_poll_interval,
-        )
-        self._dir_poller.schedule_next()
-        self._known_files: set[Path] = set()
+        self._poll_source = PollSource(self)
+        self._setup_sources(source_factories)
 
-        # Set up watchdog
-        self._setup_watchdog()
+    def _setup_sources(
+        self, source_factories: list[ChangeSourceFactory] | None
+    ) -> None:
+        """Build and start the change sources.
 
-    def _setup_watchdog(self) -> None:
-        """Register with the service's observer."""
-        self._handler = _DirectoryWatchHandler(self)
+        The PollSource backstop is always first: it is what keeps the watch
+        correct when every event source turns out to be blind.
+        """
+        # The watched directory must exist before any source looks at it, and
+        # that is the watch's concern rather than any one backend's.
         self._path.mkdir(parents=True, exist_ok=True)
-        self._watchdog_watch = self._service._observer.schedule(
-            self._handler, str(self._path.absolute()), recursive=self._recursive
-        )
+
+        sources: list[ChangeSource] = [self._poll_source]
+        if source_factories is None:
+            # kqueue where available, watchdog otherwise. They are not stacked:
+            # on macOS the watchdog backend is FSEvents, whose append channel
+            # kqueue strictly dominates, and running both would double the
+            # callbacks for no gain.
+            if KqueueSource.available(self._service):
+                sources.append(KqueueSource(self))
+            elif WatchdogSource.available(self._service):
+                sources.append(WatchdogSource(self))
+        else:
+            sources.extend(factory(self) for factory in source_factories)
+
+        self._sources = sources
+        for source in sources:
+            source.start()
         logger.debug(
-            "DirectoryWatch: watching %s (recursive=%s)", self._path, self._recursive
+            "DirectoryWatch: watching %s (recursive=%s) via %s",
+            self._path,
+            self._recursive,
+            ", ".join(s.name for s in sources),
         )
+
+    # --- State owned by the poll source, exposed for compatibility ---
+
+    @property
+    def _files(self) -> dict[Path, PolledFile]:
+        return self._poll_source.files
+
+    @property
+    def _dir_poller(self) -> AdaptivePoller:
+        return self._poll_source.dir_poller
+
+    # --- Directory enumeration, shared by every discovering source ---
+
+    def _scan_directory(self) -> list[Path]:
+        """Enumerate the directory, returning matching files not yet known.
+
+        Shared because more than one source discovers creations: the poll
+        backstop scans on an adaptive schedule, while kqueue scans only when
+        the directory itself reports a change. Sorted so that rotated files
+        (``…-1.jsonl``, ``…-2.jsonl``) are always reported in order, which
+        consumers rely on to track the newest file per entity.
+        """
+        try:
+            if self._recursive:
+                current = {p for p in self._path.rglob("*") if p.is_file()}
+            else:
+                current = {p for p in self._path.iterdir() if p.is_file()}
+        except OSError:
+            return []
+
+        current = {p for p in current if self._file_filter(p)}
+        with self._lock:
+            new_files = current - self._known_files
+            self._known_files = current
+        return sorted(new_files)
+
+    # --- Source reporting API ---
+
+    def _source_changed(self, source: ChangeSource, path: Path) -> None:
+        """A source reports that `path` changed."""
+        if self._closed:
+            return
+        polled = self._poll_source.files.get(path)
+        if polled:
+            polled.update_size()
+            if source.is_event_source:
+                polled.on_watchdog_detected_change()
+            else:
+                polled.on_poll_detected_change()
+
+        if self._on_change:
+            try:
+                self._on_change(path)
+            except Exception:
+                logger.exception("Error in change callback for %s", path)
+
+    def _source_created(self, source: ChangeSource, path: Path) -> None:
+        """A source reports that `path` was created."""
+        if self._closed:
+            return
+        if source.is_event_source:
+            # The poll source records its own directory-scan reliability once
+            # per batch, so only event sources credit themselves here.
+            self._poll_source.dir_poller.on_watchdog_detected_change()
+
+        if self._on_created:
+            try:
+                self._on_created(path)
+            except Exception:
+                logger.exception("Error in created callback for %s", path)
+
+        self.add_file(path)
+        self._source_changed(source, path)
+
+    def _source_deleted(self, source: ChangeSource, path: Path) -> None:
+        """A source reports that `path` was deleted."""
+        self.remove_file(path)
+        if self._on_deleted:
+            try:
+                self._on_deleted(path)
+            except Exception:
+                logger.exception("Error in deleted callback for %s", path)
+
+    # --- Public API ---
 
     def add_file(self, path: Path) -> None:
-        """Add a file to be polled."""
+        """Add a file to be watched."""
         if not self._file_filter(path):
             return
-
-        # Track in known files so directory polling doesn't re-discover it
-        self._known_files.add(path)
-
+        # Known, so a directory scan does not re-report it as newly created.
         with self._lock:
-            if path in self._files:
-                return
-            try:
-                size = path.stat().st_size if path.exists() else 0
-            except OSError:
-                size = 0
-
-            polled = PolledFile(
-                path=path,
-                last_size=size,
-                poller=AdaptivePoller(
-                    min_interval=self._min_poll_interval,
-                    max_interval=self._max_poll_interval,
-                    poll_interval=self._min_poll_interval,
-                ),
-            )
-            polled.schedule_next()
-            self._files[path] = polled
-            logger.debug("DirectoryWatch: tracking %s", path)
+            self._known_files.add(path)
+        for source in self._sources:
+            source.add_file(path)
+        self._service.wake()
 
     def remove_file(self, path: Path) -> None:
         """Stop watching a file."""
-        with self._lock:
-            self._files.pop(path, None)
+        for source in self._sources:
+            source.remove_file(path)
         if self._tailed_pool is not None:
             self._tailed_pool.remove(path)
 
     def notify_change(self, path: Path) -> None:
-        """Notify that watchdog detected a change (updates reliability)."""
-        with self._lock:
-            if path in self._files:
-                polled = self._files[path]
+        """Notify that an event source detected a change (updates reliability).
+
+        Does not fire the change callback: this is the low-level reliability
+        hook, for callers driving detection themselves.
+        """
+        with self._poll_source.lock:
+            polled = self._poll_source.files.get(path)
+            if polled is not None:
                 polled.update_size()
                 polled.on_watchdog_detected_change()
 
@@ -589,8 +1204,8 @@ class DirectoryWatch:
             self._min_poll_interval = min_interval
         if max_interval is not None:
             self._max_poll_interval = max_interval
-        with self._lock:
-            for polled in self._files.values():
+        with self._poll_source.lock:
+            for polled in self._poll_source.files.values():
                 polled.MIN_INTERVAL = self._min_poll_interval
                 polled.MAX_INTERVAL = self._max_poll_interval
                 polled._compute_poll_interval()
@@ -627,110 +1242,21 @@ class DirectoryWatch:
         if self._tailed_pool is not None:
             self._tailed_pool.remove(path)
 
-    def _handle_file_change(self, path: Path, from_watchdog: bool = False) -> None:
-        """Handle a file change (from watchdog or poll)."""
-        if self._closed:
-            return
-        with self._lock:
-            polled = self._files.get(path)
-            if polled:
-                polled.update_size()
-                if from_watchdog:
-                    polled.on_watchdog_detected_change()
-                else:
-                    polled.on_poll_detected_change()
-
-        if self._on_change:
-            try:
-                self._on_change(path)
-            except Exception:
-                logger.exception("Error in change callback for %s", path)
-
     def poll(self) -> float:
-        """Poll all tracked files and scan directory for new files.
+        """Drive every source that needs ticking from the poll thread.
 
-        Returns time until next poll.
+        Returns the number of seconds until the next tick is wanted.
         """
-        now = time.time()
-        next_wake = now + 1.0
-
-        # Directory scan: detect new files that watchdog missed
-        if self._dir_poller.is_due:
-            self._scan_for_new_files()
-
-        if self._dir_poller.next_poll < next_wake:
-            next_wake = self._dir_poller.next_poll
-
-        with self._lock:
-            files_snapshot = list(self._files.values())
-
-        for polled in files_snapshot:
-            if polled.poller.is_due:
-                changed = polled.update_size()
-                if changed is None:
-                    # File was deleted — trigger deletion callback
-                    self.remove_file(polled.path)
-                    if self._on_deleted:
-                        try:
-                            self._on_deleted(polled.path)
-                        except Exception:
-                            logger.exception(
-                                "Error in deleted callback for %s", polled.path
-                            )
-                elif changed:
-                    polled.on_poll_detected_change()
-                    if self._on_change:
-                        try:
-                            self._on_change(polled.path)
-                        except Exception:
-                            logger.exception(
-                                "Error in poll callback for %s", polled.path
-                            )
-                else:
-                    polled.on_no_activity()
-
-            if polled.next_poll < next_wake:
-                next_wake = polled.next_poll
-
-        return max(0.1, next_wake - time.time())
-
-    def _scan_for_new_files(self) -> None:
-        """Scan the watched directory for new files not yet tracked.
-
-        Uses the adaptive _dir_poller to adjust scan frequency based on
-        whether watchdog is reliably detecting new file creation.
-        On NFS/network filesystems, watchdog often misses on_created
-        events, so the poller will gradually increase scan frequency.
-        """
-        try:
-            if self._recursive:
-                current_files = set(p for p in self._path.rglob("*") if p.is_file())
-            else:
-                current_files = set(p for p in self._path.iterdir() if p.is_file())
-        except OSError:
-            self._dir_poller.on_no_activity()
-            return
-
-        # Filter to matching files
-        current_files = {p for p in current_files if self._file_filter(p)}
-
-        new_files = current_files - self._known_files
-        self._known_files = current_files
-
-        if new_files:
-            # Poll discovered new files → watchdog missed them
-            self._dir_poller.on_poll_detected_change()
-            for path in sorted(new_files):
-                logger.debug("Directory poll discovered new file: %s", path)
-                if self._on_created:
-                    try:
-                        self._on_created(path)
-                    except Exception:
-                        logger.exception("Error in created callback for %s", path)
-                self.add_file(path)
-                self._handle_file_change(path, from_watchdog=False)
-        else:
-            self._dir_poller.on_no_activity()
+        next_sleep = 1.0
+        for source in list(self._sources):
+            try:
+                wanted = source.tick()
+            except Exception:
+                logger.exception("Error ticking change source %s", source.name)
+                continue
+            if wanted is not None and wanted < next_sleep:
+                next_sleep = wanted
+        return max(0.1, next_sleep)
 
     def close(self) -> None:
         """Stop watching and release resources."""
@@ -738,14 +1264,14 @@ class DirectoryWatch:
             return
         self._closed = True
 
-        if self._watchdog_watch is not None:
-            # Deferred to the poll thread to avoid a finalizer deadlock on the
-            # watchdog observer lock (see _defer_unschedule).
-            self._service._defer_unschedule(self._watchdog_watch)
-            self._watchdog_watch = None
+        for source in self._sources:
+            try:
+                source.stop()
+            except Exception:
+                logger.exception("Error stopping change source %s", source.name)
 
-        with self._lock:
-            self._files.clear()
+        if self._poll_source is not None:
+            self._poll_source.files.clear()
 
         if self._tailed_pool is not None:
             self._tailed_pool.close_all()
@@ -761,61 +1287,6 @@ class DirectoryWatch:
 
     def __del__(self):
         self.close()
-
-
-class _DirectoryWatchHandler(FileSystemEventHandler):
-    """Internal watchdog handler for DirectoryWatch."""
-
-    def __init__(self, watch: DirectoryWatch):
-        super().__init__()
-        self._watch_ref = weakref.ref(watch)
-
-    def _get_watch(self) -> DirectoryWatch | None:
-        watch = self._watch_ref()
-        # Ignore events once the watch is closed: the underlying watchdog
-        # watch is unscheduled asynchronously by the poll thread, so events
-        # may still arrive briefly after close().
-        if watch is None or watch._closed:
-            return None
-        return watch
-
-    def on_modified(self, event):
-        if event.is_directory:
-            return
-        watch = self._get_watch()
-        if watch and watch._file_filter(Path(event.src_path)):
-            logger.debug("Watchdog on_modified: %s", event.src_path)
-            watch._handle_file_change(Path(event.src_path), from_watchdog=True)
-
-    def on_created(self, event):
-        if event.is_directory:
-            return
-        watch = self._get_watch()
-        if watch and watch._file_filter(Path(event.src_path)):
-            path = Path(event.src_path)
-            logger.debug("Watchdog on_created: %s", path)
-            # Watchdog detected creation → increase directory poller reliability
-            watch._dir_poller.on_watchdog_detected_change()
-            if watch._on_created:
-                try:
-                    watch._on_created(path)
-                except Exception:
-                    logger.exception("Error in created callback for %s", path)
-            watch.add_file(path)
-            watch._handle_file_change(path, from_watchdog=True)
-
-    def on_deleted(self, event):
-        if event.is_directory:
-            return
-        watch = self._get_watch()
-        if watch and watch._file_filter(Path(event.src_path)):
-            path = Path(event.src_path)
-            watch.remove_file(path)
-            if watch._on_deleted:
-                try:
-                    watch._on_deleted(path)
-                except Exception:
-                    logger.exception("Error in deleted callback for %s", path)
 
 
 # =============================================================================
@@ -1059,6 +1530,10 @@ class FileWatcherService:
         self._watches_lock = threading.Lock()
         self._poll_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # Interrupts the poll loop's sleep. Without it a watch or file added
+        # while the loop is idling waits out the remaining sleep -- up to a
+        # second -- before it is polled for the first time.
+        self._wake_event = threading.Event()
 
         # Watchdog watches queued for unscheduling by the poll thread.
         # See _defer_unschedule for why this indirection exists.
@@ -1124,7 +1599,8 @@ class FileWatcherService:
                 except Exception:
                     logger.exception("Error in poll loop")
 
-            self._stop_event.wait(timeout=next_sleep)
+            self._wake_event.wait(timeout=next_sleep)
+            self._wake_event.clear()
 
     def _unregister_watch(self, watch: DirectoryWatch) -> None:
         """Remove a DirectoryWatch from the polling list."""
@@ -1134,9 +1610,14 @@ class FileWatcherService:
             except ValueError:
                 pass
 
+    def wake(self) -> None:
+        """Interrupt the poll loop's sleep so new work is picked up at once."""
+        self._wake_event.set()
+
     def _shutdown(self) -> None:
         """Stop observer and polling thread."""
         self._stop_event.set()
+        self._wake_event.set()
         if self._poll_thread is not None:
             self._poll_thread.join(timeout=5)
             self._poll_thread = None
@@ -1169,15 +1650,27 @@ class FileWatcherService:
         on_deleted: FileDeletedCallback | None = None,
         min_poll_interval: float = 0.5,
         max_poll_interval: float = 30.0,
+        hot_poll_interval: float = 0.2,
+        hot_window: float = 30.0,
         enable_tailing: bool = False,
-        max_open_files: int = 128,
+        max_open_files: int | None = None,
+        source_factories: list[ChangeSourceFactory] | None = None,
     ) -> DirectoryWatch:
         """Create a DirectoryWatch for the given path.
 
         Args:
             enable_tailing: If True, enable file tailing via TailedFilePool.
                 Use read_new_lines() to read complete lines from watched files.
-            max_open_files: Maximum open FDs for tailing (only when enable_tailing=True).
+            hot_poll_interval: Ceiling on the poll interval for a file that
+                changed within hot_window seconds. Without it min_poll_interval
+                is not the effective floor -- see AdaptivePoller.hot_window.
+            hot_window: How long after a change a file counts as hot.
+            max_open_files: Maximum open FDs for tailing and for kqueue
+                registration. Defaults to half the process limit.
+            source_factories: Replaces the default change sources. The
+                PollSource backstop is always present regardless; these are the
+                event sources layered on top. Mainly for tests that simulate a
+                blind or coalescing backend.
 
         Returns a DirectoryWatch handle. Call close() or use as context manager
         when done.
@@ -1192,14 +1685,18 @@ class FileWatcherService:
             on_deleted=on_deleted,
             min_poll_interval=min_poll_interval,
             max_poll_interval=max_poll_interval,
+            hot_poll_interval=hot_poll_interval,
+            hot_window=hot_window,
             enable_tailing=enable_tailing,
             max_open_files=max_open_files,
+            source_factories=source_factories,
         )
 
         with self._watches_lock:
             self._directory_watches.append(watch)
 
         self._ensure_poll_thread()
+        self.wake()
         return watch
 
     def follow_file(

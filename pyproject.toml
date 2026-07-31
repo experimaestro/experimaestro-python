@@ -233,6 +233,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Standalone helper scripts are CLIs: printing to stdout is intended.
 "scripts/*" = ["T20"]
+"dev/*" = ["T20"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25

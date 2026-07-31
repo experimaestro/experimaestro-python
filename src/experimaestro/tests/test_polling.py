@@ -238,22 +238,33 @@ class TestDirectoryWatch:
         assert len(watch._files) == 0
 
     def test_adaptive_interval_increases(self, tmp_path):
-        """Test that polling interval increases when no changes"""
+        """Test that polling interval increases when no changes
+
+        Poll-only (source_factories=[]): this is about the poller's own
+        backoff, and an event source reporting the file would reset
+        last_change_time and pin the interval back to the hot ceiling.
+        """
         svc = FileWatcherService.instance()
         watch = svc.watch_directory(
             tmp_path,
             on_change=lambda p: None,
             min_poll_interval=0.1,
             max_poll_interval=1.0,
+            source_factories=[],
         )
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
 
         watch.add_file(test_file)
+        poller = watch._files[test_file].poller
         initial_interval = watch._files[test_file].poll_interval
 
         try:
+            # A recently-changed file has its interval pinned to the hot
+            # ceiling on purpose, so the adaptive backoff is only observable
+            # once it goes cold.
+            poller.last_change_time -= poller.hot_window * 2
             time.sleep(0.5)
             assert watch._files[test_file].poll_interval > initial_interval
         finally:
