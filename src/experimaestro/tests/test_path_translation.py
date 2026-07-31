@@ -1,32 +1,62 @@
-
 from pathlib import Path
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.remote.client import SSHStateProviderClient
 from experimaestro.scheduler.interfaces import BaseJob, BaseExperiment
 
+
 class MockJob(BaseJob):
     def __init__(self, path):
         self.path = path
+
 
 class MockExperiment(BaseExperiment):
     def __init__(self, workdir):
         self.workdir = workdir
 
+
 class MockStateProvider(StateProvider):
-    def clean_job(self, *args, **kwargs): pass
-    def close(self, *args, **kwargs): pass
-    def get_all_jobs(self, *args, **kwargs): return []
-    def get_current_run(self, *args, **kwargs): return None
-    def get_dependencies_map(self, *args, **kwargs): return {}
-    def get_experiment(self, *args, **kwargs): return None
-    def get_experiment_job_info(self, *args, **kwargs): return None
-    def get_experiment_runs(self, *args, **kwargs): return []
-    def get_experiments(self, *args, **kwargs): return []
-    def get_job(self, *args, **kwargs): return None
-    def get_jobs(self, *args, **kwargs): return []
-    def get_services(self, *args, **kwargs): return []
-    def get_tags_map(self, *args, **kwargs): return {}
-    def kill_job(self, *args, **kwargs): pass
+    def clean_job(self, *args, **kwargs):
+        pass
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def get_all_jobs(self, *args, **kwargs):
+        return []
+
+    def get_current_run(self, *args, **kwargs):
+        return None
+
+    def get_dependencies_map(self, *args, **kwargs):
+        return {}
+
+    def get_experiment(self, *args, **kwargs):
+        return None
+
+    def get_experiment_job_info(self, *args, **kwargs):
+        return None
+
+    def get_experiment_runs(self, *args, **kwargs):
+        return []
+
+    def get_experiments(self, *args, **kwargs):
+        return []
+
+    def get_job(self, *args, **kwargs):
+        return None
+
+    def get_jobs(self, *args, **kwargs):
+        return []
+
+    def get_services(self, *args, **kwargs):
+        return []
+
+    def get_tags_map(self, *args, **kwargs):
+        return {}
+
+    def kill_job(self, *args, **kwargs):
+        pass
+
 
 def test_state_provider_translate_path():
     provider = MockStateProvider()
@@ -36,10 +66,10 @@ def test_state_provider_translate_path():
     job = MockJob(path)
     assert provider.get_display_path(job) == str(path)
 
+
 def test_ssh_state_provider_client_translate_path():
     client = SSHStateProviderClient(
-        host="remote-host",
-        remote_workspace="/remote/workspace"
+        host="remote-host", remote_workspace="/remote/workspace"
     )
     # Set local_cache_dir which is normally set during connect/init
     client.local_cache_dir = Path("/tmp/local/cache")

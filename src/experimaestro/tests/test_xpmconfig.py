@@ -1,11 +1,14 @@
 from experimaestro import Config, Param
 import pytest
 
+
 class SubModule(Config):
     y: Param[int]
 
+
 class MainModule(Config):
     sub: Param[SubModule]
+
 
 def test_xpmconfig_recursive():
     """Test that xpmconfig is available recursively on instantiated objects"""
@@ -21,10 +24,12 @@ def test_xpmconfig_recursive():
     assert isinstance(instance.sub.xpmconfig, SubModule.XPMConfig)
     assert instance.sub.xpmconfig.y == 20
 
+
 def test_xpmconfig_on_config():
     """Test that xpmconfig returns the object itself when called on a configuration"""
     config = SubModule.C(y=10)
     assert config.xpmconfig is config
+
 
 def test_xpmconfig_no_keep():
     """Test that xpmconfig raises AttributeError if keep=False was used"""
@@ -33,6 +38,7 @@ def test_xpmconfig_no_keep():
 
     with pytest.raises(AttributeError, match="has no configuration tracked"):
         _ = instance.xpmconfig
+
 
 def test_xpmconfig_default_behavior():
     """Test that xpmconfig is available by default (keep=True is default)"""

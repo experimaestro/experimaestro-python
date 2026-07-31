@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+
 @attr.define()
 class GenericParams:
     """A class to represent a parameter that can be a single value, a list of values, or a range of values."""
+
     value: Any = None
     values_list: Optional[List[Any]] = None
     values_range: Optional[Tuple[int, ...]] = None
@@ -43,21 +45,27 @@ class GenericParams:
             return list(range(*self.values_range))
         if self.values_mult:
             if len(self.values_mult) != 3:
-                raise ValueError("range_mult must have exactly 3 elements: [start, n_iter, multiplier]")
+                raise ValueError(
+                    "range_mult must have exactly 3 elements: [start, n_iter, multiplier]"
+                )
             start, n_iter, multiplier = self.values_mult
 
             # Convert strings (e.g. '1e-4') to numbers to prevent python string repetition
             def to_num(val):
                 if isinstance(val, str):
                     try:
-                        return float(val) if ("." in val or "e" in val.lower()) else int(val)
+                        return (
+                            float(val)
+                            if ("." in val or "e" in val.lower())
+                            else int(val)
+                        )
                     except ValueError:
                         return val
                 return val
 
             start = to_num(start)
             multiplier = to_num(multiplier)
-            return [start * (multiplier ** i) for i in range(int(n_iter))]
+            return [start * (multiplier**i) for i in range(int(n_iter))]
         if self.value is not None:
             return [self.value]
         return []
@@ -65,6 +73,7 @@ class GenericParams:
     @classmethod
     def from_any(cls, obj: Any, target_type: Type = Any) -> "GenericParams":
         """Coerces a value into a GenericParams object."""
+
         def converter(value: Any) -> Any:
             """Attempts to convert a value to the target_type."""
             if target_type is Any:
@@ -103,7 +112,14 @@ class GenericParams:
             d = dict(obj)
 
             # Check for unrecognized keys
-            RECOGNIZED_KEYS = {"value", "values_list", "values_range", "range", "values_mult", "range_mult"}
+            RECOGNIZED_KEYS = {
+                "value",
+                "values_list",
+                "values_range",
+                "range",
+                "values_mult",
+                "range_mult",
+            }
             unrecognized = set(d.keys()) - RECOGNIZED_KEYS
             if unrecognized:
                 options_str = ", ".join(sorted(RECOGNIZED_KEYS))
@@ -130,20 +146,18 @@ class GenericParams:
             return cls(
                 value=value,
                 values_list=values_list,
-                values_range=(
-                    tuple(range_val) if range_val is not None else None
-                ),
-                values_mult=(
-                    tuple(mult_val) if mult_val is not None else None
-                ),
+                values_range=(tuple(range_val) if range_val is not None else None),
+                values_mult=(tuple(mult_val) if mult_val is not None else None),
             )
 
         return cls(value=converter(obj))
+
 
 def _coerce_to_generic_params(v: Any) -> Any:
     if isinstance(v, GenericParams):
         return v
     return GenericParams.from_any(v)
+
 
 GridSearch = Annotated[
     Union[T, GenericParams],
@@ -153,6 +167,7 @@ GridSearch = Annotated[
 Type alias for configuration fields supporting inline grid search.
 """
 
+
 def set_nested_attr(obj: Any, path: str, value: Any):
     """Sets a nested attribute on an object."""
     keys = path.split(".")
@@ -160,6 +175,7 @@ def set_nested_attr(obj: Any, path: str, value: Any):
     for key in keys[:-1]:
         current = getattr(current, key)
     setattr(current, keys[-1], value)
+
 
 def get_nested_attr_type(obj: Any, path: str) -> Any:
     """
@@ -191,6 +207,7 @@ def get_nested_attr_type(obj: Any, path: str) -> Any:
     except Exception:
         return Any
 
+
 def discover_grid_params(obj: Any, prefix: str = "") -> Dict[str, GenericParams]:
     """Recursively find all GenericParams instances in an attrs object"""
     found = {}
@@ -203,9 +220,11 @@ def discover_grid_params(obj: Any, prefix: str = "") -> Dict[str, GenericParams]
             elif val is not None and not isinstance(val, (str, int, float, bool)):
                 # Avoid recursing into primitives or enums (which are strings/ints)
                 from enum import Enum
+
                 if not isinstance(val, Enum):
                     found.update(discover_grid_params(val, path))
     return found
+
 
 def finalize_config(obj: Any):
     """Recursively convert all non-grid GenericParams to scalars"""
@@ -216,8 +235,10 @@ def finalize_config(obj: Any):
                 setattr(obj, f.name, val.value)
             elif val is not None and not isinstance(val, (str, int, float, bool)):
                 from enum import Enum
+
                 if not isinstance(val, Enum):
                     finalize_config(val)
+
 
 def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
     """

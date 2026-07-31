@@ -553,7 +553,8 @@ def _run_monitor_ui(
                 )
             else:
                 cprint(
-                    f"Starting experiment monitor on http://localhost:{settings.port}", "green"
+                    f"Starting experiment monitor on http://localhost:{settings.port}",
+                    "green",
                 )
             cprint("Press Ctrl+C to stop", "yellow")
 
@@ -592,7 +593,10 @@ def _run_monitor_ui(
     help="Hide progress events in events viewer (reduces noise)",
 )
 @click.option(
-    "--port", type=int, default=None, help="Port for web server (default: 12345 or from settings.yaml)"
+    "--port",
+    type=int,
+    default=None,
+    help="Port for web server (default: 12345 or from settings.yaml)",
 )
 @click.option(
     "--watcher",

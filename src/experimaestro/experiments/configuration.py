@@ -2,12 +2,14 @@ from enum import Enum
 from typing import Optional, List, Any, Dict
 import attr
 
+
 class MissingSentinel:
     def __repr__(self):
         return "MISSING"
 
     def __bool__(self):
         return False
+
 
 MISSING: Any = MissingSentinel()
 

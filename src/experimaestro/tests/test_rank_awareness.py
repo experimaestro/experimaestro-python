@@ -4,12 +4,14 @@ from unittest.mock import patch
 from experimaestro.run import TaskRunner
 import experimaestro.taskglobals as taskglobals
 
+
 @pytest.fixture
 def env():
     instance = taskglobals.Env.instance()
     # Reset env
     instance.slave = False
     return instance
+
 
 @patch("experimaestro.run.atexit.register")
 @patch("experimaestro.run.signal.signal")
@@ -31,7 +33,7 @@ def test_task_runner_rank_detection(
     mock_signal,
     mock_atexit,
     env,
-    tmp_path
+    tmp_path,
 ):
     script_path = tmp_path / "test.py"
     script_path.touch()

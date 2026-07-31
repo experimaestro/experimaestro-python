@@ -1,16 +1,24 @@
 from typing import Optional
-from experimaestro.experiments.grid import GenericParams, GridSearch, generate_grid, discover_grid_params
+from experimaestro.experiments.grid import (
+    GenericParams,
+    GridSearch,
+    generate_grid,
+    discover_grid_params,
+)
 from experimaestro.experiments.configuration import ConfigurationBase, configuration
+
 
 @configuration()
 class MySubConfig:
     param: GridSearch[int] = 1
+
 
 @configuration()
 class MyConfig(ConfigurationBase):
     lr: GridSearch[float] = 0.001
     batch_size: GridSearch[int] = 32
     sub: Optional[MySubConfig] = None
+
 
 def test_generic_params_coercion():
     # Scalar
@@ -45,8 +53,11 @@ def test_generic_params_coercion():
     assert gp.is_grid
     assert gp.as_list() == [1e-4, 1e-3, 1e-2, 1e-1]
 
+
 def test_discover_grid_params():
-    cfg = MyConfig(id="test", lr=GenericParams(values_list=[0.1, 0.01]), sub=MySubConfig(param=10))
+    cfg = MyConfig(
+        id="test", lr=GenericParams(values_list=[0.1, 0.01]), sub=MySubConfig(param=10)
+    )
     grid = discover_grid_params(cfg)
     assert "lr" in grid
     assert grid["lr"].values_list == [0.1, 0.01]
@@ -56,6 +67,7 @@ def test_discover_grid_params():
     grid = discover_grid_params(cfg)
     assert "sub.param" in grid
     assert grid["sub.param"].values_list == [1, 2]
+
 
 def test_generate_grid():
     cfg = MyConfig(id="test", lr=[0.1, 0.01], batch_size=32)
@@ -84,12 +96,9 @@ def test_generate_grid():
     assert configs[2].batch_size == 64
     assert tags[0]["batch_size"] == 16
 
+
 def test_nested_generate_grid():
-    cfg = MyConfig(
-        id="test",
-        lr=0.1,
-        sub=MySubConfig(param=[1, 2])
-    )
+    cfg = MyConfig(id="test", lr=0.1, sub=MySubConfig(param=[1, 2]))
     cfg.lr = GenericParams.from_any(cfg.lr)
     cfg.sub.param = GenericParams.from_any(cfg.sub.param)
 
@@ -102,9 +111,9 @@ def test_nested_generate_grid():
 
 def test_unrecognized_key_error():
     import pytest
+
     with pytest.raises(ValueError, match="Unrecognized keys.*Possible options are"):
         GenericParams.from_any({"unrecognized_key": 123})
-
 
 
 def test_unique_value_in_tags():
@@ -125,6 +134,3 @@ def test_unique_value_in_tags():
     assert len(configs_multi) == 2
     assert tags_multi[0] == {"lr": 0.1}
     assert tags_multi[1] == {"lr": 0.01}
-
-
-

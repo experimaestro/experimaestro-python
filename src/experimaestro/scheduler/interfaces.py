@@ -1233,9 +1233,12 @@ class BaseJob:
             if self.state.finished():
                 logger.warning(
                     "Job %s marked as %s in status.json but marker files are missing. Resetting to ERROR.",
-                    self.identifier, self.state
+                    self.identifier,
+                    self.state,
                 )
-                self.set_state(JobStateError(JobFailureStatus.MISSING_OUTPUTS), loading=True)
+                self.set_state(
+                    JobStateError(JobFailureStatus.MISSING_OUTPUTS), loading=True
+                )
 
     def _load_from_status_dict(self, status_dict: Dict[str, Any]) -> None:
         """Load fields from status.json dictionary
