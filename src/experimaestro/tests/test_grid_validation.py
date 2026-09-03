@@ -104,3 +104,67 @@ def test_unrecognized_key_in_validation():
         "Possible options are: range, range_mult, value, values_list, values_mult, values_range"
         in err_msg
     )
+
+
+def test_validate_attrs_with_config_dicts():
+    from experimaestro.experiments.grid import generate_grid
+
+    data = {
+        "id": "test",
+        "lr": 0.01,
+        "grid_search": {
+            "config_dicts": [
+                {"lr": 0.05, "sub.value": 10},
+                {"lr": 0.005, "sub.value": 20},
+            ]
+        },
+        "sub": {"value": 0},
+    }
+
+    cfg = validate_attrs(MainConfig, data)
+    configs, tags = generate_grid(cfg)
+
+    assert len(configs) == 2
+    assert configs[0].lr == 0.05
+    assert configs[0].sub.value == 10
+    assert configs[1].lr == 0.005
+    assert configs[1].sub.value == 20
+
+    assert tags[0] == {"lr": 0.05, "sub.value": 10}
+    assert tags[1] == {"lr": 0.005, "sub.value": 20}
+
+
+def test_validate_attrs_with_grid_search_annotation():
+    import attr
+    from typing import Dict, Any
+    from experimaestro.experiments.grid import generate_grid
+
+    @configuration()
+    class CustomConfig(ConfigurationBase):
+        grid_search: Dict[str, GridSearch[Any]] = attr.field(factory=dict)
+        lr: Optional[float] = 0.01
+        batch_size: Optional[int] = 32
+
+    data = {
+        "id": "test",
+        "grid_search": {
+            "config_dicts": [
+                {"lr": 0.05, "batch_size": 16},
+                {"lr": 0.005, "batch_size": 64},
+            ]
+        },
+    }
+
+    cfg = validate_attrs(CustomConfig, data)
+    configs, tags = generate_grid(cfg)
+
+    assert len(configs) == 2
+    assert configs[0].lr == 0.05
+    assert configs[0].batch_size == 16
+    assert configs[1].lr == 0.005
+    assert configs[1].batch_size == 64
+
+    assert tags[0] == {"lr": 0.05, "batch_size": 16}
+    assert tags[1] == {"lr": 0.005, "batch_size": 64}
+
+

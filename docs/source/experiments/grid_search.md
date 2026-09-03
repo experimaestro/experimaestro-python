@@ -76,6 +76,51 @@ grid_search:
 
 The keys in the `grid_search` block are dot-separated paths to the fields in your configuration.
 
+### Coupled Parameters (`config_dicts`)
+
+When you want to evaluate specific combinations of parameters together rather than computing their full Cartesian product, you can use `config_dicts` inside the `grid_search` block:
+
+```yaml
+id: my-experiment
+
+grid_search:
+  config_dicts:
+    - model: "bert-base-uncased"
+      batch_size: 32
+      lr: 2e-5
+    - model: "bert-large-uncased"
+      batch_size: 16
+      lr: 1e-5
+```
+
+or equivalently in one line:
+```yaml
+id: my-experiment
+
+grid_search:
+  config_dicts:
+    - {model: "bert-base-uncased", batch_size: 32,  lr: 2e-5 }
+    - {model: "bert-large-uncased",  batch_size: 16, lr: 1e-5 }
+```
+
+> [!IMPORTANT]
+> All dictionaries in `config_dicts` must define the exact same set of keys. If any dictionary has missing or extra keys, an error will be raised.
+
+You can also combine `config_dicts` with independent grid search parameters (defined inline or in `grid_search`). Experimaestro will compute the Cartesian product of the coupled parameter sets and the independent grid parameters:
+
+```yaml
+id: my-experiment
+
+grid_search:
+  seed: [42, 43, 44]
+  config_dicts:
+    - model: "bert-base-uncased"
+      batch_size: 32
+    - model: "bert-large-uncased"
+      batch_size: 16
+```
+This generates 3 x 2 = 6 configurations.
+
 ## Generating Permutations
 
 The grid search is managed manually in your `run` function. This gives you full control over how to manage experiment IDs, logging, and task submission.

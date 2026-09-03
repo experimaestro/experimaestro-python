@@ -240,6 +240,108 @@ def finalize_config(obj: Any):
                     finalize_config(val)
 
 
+def _get_type_converter(target_type: Any):
+    """Returns a callable that attempts to convert a value to target_type."""
+    if target_type is Any:
+        return lambda value: value
+
+    if get_origin(target_type) is Annotated:
+        target_type = get_args(target_type)[0]
+
+    types_to_try = [
+        t
+        for t in (
+            get_args(target_type)
+            if get_origin(target_type) is Union
+            else [target_type]
+        )
+        if t is not type(None) and t is not GenericParams
+    ]
+
+    def converter(value: Any) -> Any:
+        if value is None:
+            return None
+        for t in types_to_try:
+            try:
+                return t(value)
+            except (ValueError, TypeError):
+                continue
+        return value
+
+    return converter
+
+
+def _validate_and_convert_config_dicts(
+    cfg: Any,
+    config_dicts: Any,
+    grid_params: Dict[str, GenericParams],
+    explicit_keys: set[str],
+) -> List[Dict[str, Any]]:
+    """
+    Validates config_dicts structure, checks for key consistency across all dictionaries,
+    prevents key collisions with independent grid parameters, and converts values to target types.
+    """
+    if isinstance(config_dicts, GenericParams):
+        config_dicts = config_dicts.values_list
+
+    if not isinstance(config_dicts, list):
+        raise ValueError(
+            f"'config_dicts' in grid_search must be a list of dictionaries, got {type(config_dicts).__name__}"
+        )
+
+    if len(config_dicts) == 0:
+        raise ValueError(
+            "'config_dicts' in grid_search must contain at least one dictionary"
+        )
+
+    for idx, item in enumerate(config_dicts):
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"All elements in 'config_dicts' must be dictionaries, but item at index {idx} is of type {type(item).__name__}"
+            )
+        if len(item) == 0:
+            raise ValueError(
+                f"Dictionary at index {idx} in 'config_dicts' is empty. Dictionaries must contain parameter mappings."
+            )
+
+    expected_keys = set(config_dicts[0].keys())
+    for idx, item in enumerate(config_dicts[1:], start=1):
+        item_keys = set(item.keys())
+        if item_keys != expected_keys:
+            missing = expected_keys - item_keys
+            extra = item_keys - expected_keys
+            err_parts = []
+            if missing:
+                err_parts.append(f"missing keys: {sorted(missing)}")
+            if extra:
+                err_parts.append(f"extra keys: {sorted(extra)}")
+            raise ValueError(
+                f"All dictionaries in 'config_dicts' must have identical keys. "
+                f"Dict at index {idx} has keys {sorted(item_keys)}, expected {sorted(expected_keys)} "
+                f"({', '.join(err_parts)})"
+            )
+
+    active_grid_keys = {k for k, gp in grid_params.items() if gp.is_grid}
+    collisions = expected_keys.intersection(active_grid_keys | explicit_keys)
+    if collisions:
+        raise ValueError(
+            f"Conflicting grid search definition: parameters {sorted(collisions)} "
+            f"are defined both in 'config_dicts' and as independent grid search parameters"
+        )
+
+    converters = {}
+    for key in expected_keys:
+        target_type = get_nested_attr_type(cfg, key)
+        converters[key] = _get_type_converter(target_type)
+
+    converted_config_dicts = []
+    for item in config_dicts:
+        converted_item = {key: converters[key](val) for key, val in item.items()}
+        converted_config_dicts.append(converted_item)
+
+    return converted_config_dicts
+
+
 def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
     """
     Generates a list of configuration permutations for a grid search, based
@@ -253,46 +355,40 @@ def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
     # 1. Discover inline grid parameters
     grid_params = discover_grid_params(cfg)
 
-    # 2. Merge with explicit grid_search block
+    # 2. Extract config_dicts and merge remaining explicit grid_search block
+    raw_config_dicts = None
+    explicit_keys: set[str] = set()
     if hasattr(cfg, "grid_search") and cfg.grid_search:
-        for path, gp in cfg.grid_search.items():
+        explicit_grid = dict(cfg.grid_search)
+        raw_config_dicts = explicit_grid.pop("config_dicts", None)
+        explicit_keys = set(explicit_grid.keys())
+        for path, gp in explicit_grid.items():
             if isinstance(gp, GenericParams):
                 grid_params[path] = gp
             else:
                 grid_params[path] = GenericParams.from_any(gp)
 
-    # If no grid parameters found, just return the original config.
-    if not grid_params:
+    converted_config_dicts = None
+    if raw_config_dicts is not None:
+        converted_config_dicts = _validate_and_convert_config_dicts(
+            cfg, raw_config_dicts, grid_params, explicit_keys
+        )
+        # Remove config_dicts keys from grid_params since their values are provided by config_dicts
+        for key in converted_config_dicts[0].keys():
+            grid_params.pop(key, None)
+
+    # If no grid parameters and no config_dicts found, just return the original config.
+    if not grid_params and not converted_config_dicts:
         logger.info("no params to grid search, returning raw config")
         new_cfg = copy.deepcopy(cfg)
         finalize_config(new_cfg)
         return [new_cfg], [{}]
 
     param_paths = list(grid_params.keys())
-
     value_options = []
     for path in param_paths:
-        # get target type for this parameter from the config class using the path
         target_type = get_nested_attr_type(cfg, path)
-
-        def converter(value: Any) -> Any:
-            if target_type is Any:
-                return value
-            types_to_try = [
-                t
-                for t in (
-                    get_args(target_type)
-                    if get_origin(target_type) is Union
-                    else [target_type]
-                )
-                if t is not type(None)
-            ]
-            for t in types_to_try:
-                try:
-                    return t(value)
-                except (ValueError, TypeError):
-                    continue
-            return value
+        converter = _get_type_converter(target_type)
 
         gp_from_framework = (
             grid_params[path]
@@ -303,8 +399,17 @@ def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
         converted_values = [converter(v) for v in raw_values]
         value_options.append(converted_values)
 
-    # Generate Cartesian product of all parameter values
-    grid_combinations = product(*value_options)
+    # Generate combinations
+    grid_combinations = list(product(*value_options)) if value_options else [()]
+    dict_combinations = converted_config_dicts if converted_config_dicts else [{}]
+
+    # Determine which config_dicts keys vary across items (only tag varying keys)
+    varying_dict_keys = set()
+    if converted_config_dicts and len(converted_config_dicts) > 1:
+        first_dict = converted_config_dicts[0]
+        for key in first_dict.keys():
+            if any(d[key] != first_dict[key] for d in converted_config_dicts[1:]):
+                varying_dict_keys.add(key)
 
     output_configs = []
     tags = []
@@ -314,11 +419,17 @@ def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
         base_cfg.grid_search = {}
 
     logger.info("Building grid search configs")
-    for combination in grid_combinations:
+    for param_combo, cfg_dict in product(grid_combinations, dict_combinations):
         cfg_tags = {}
         new_cfg = copy.deepcopy(base_cfg)
-        for i, (path, value) in enumerate(zip(param_paths, combination)):
+
+        for i, (path, value) in enumerate(zip(param_paths, param_combo)):
             if len(value_options[i]) > 1:
+                cfg_tags[path] = value
+            set_nested_attr(new_cfg, path, value)
+
+        for path, value in cfg_dict.items():
+            if path in varying_dict_keys:
                 cfg_tags[path] = value
             set_nested_attr(new_cfg, path, value)
 

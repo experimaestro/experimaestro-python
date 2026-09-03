@@ -102,4 +102,6 @@ class ConfigurationBase:
 
     A dictionary where keys are dot-separated paths to configuration fields,
     and values are either a list of values or a dictionary with 'values_list' or 'values_range'.
+    Alternatively, can contain a 'config_dicts' key with a list of dictionaries defining
+    coupled parameter combinations (all dictionaries must have identical keys).
     """
