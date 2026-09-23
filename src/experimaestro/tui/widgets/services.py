@@ -69,6 +69,7 @@ class ServicesList(Vertical):
         self.current_experiment: Optional[str] = None
         self.current_run_id: Optional[str] = None
         self._services: dict = {}  # service_id -> Service object
+        self._starting_services: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -218,10 +219,25 @@ class ServicesList(Vertical):
         if not service:
             return
 
+        from experimaestro.scheduler.services import ServiceState
+
+        state = getattr(service, "state", None)
+        state_name = state.name if hasattr(state, "name") else str(state)
+
+        if state_name == "RUNNING":
+            self.notify(f"Service '{service.id}' is already running", severity="information")
+            return
+
+        if state_name == "STARTING" or service.id in self._starting_services:
+            self.notify(f"Service '{service.id}' is already starting...", severity="warning")
+            return
+
+        self._starting_services.add(service.id)
+
         # Set STARTING state immediately and refresh UI
         if hasattr(service, "set_starting"):
             service.set_starting()
-        self.notify("Starting service...", severity="information")
+        self.notify(f"Starting service '{service.id}'...", severity="information")
         self._refresh_all_services()
 
         # Set up callback for sync status changes (for SSH remote services)
@@ -234,25 +250,25 @@ class ServicesList(Vertical):
         # Start service in background thread so UI can update
         self._start_service_worker(service)
 
-    @work(thread=True, exclusive=True, group="service_start")
+    @work(thread=True)
     def _start_service_worker(self, service) -> None:
         """Start service in background thread"""
         import logging
 
         logger = logging.getLogger("xpm.tui.services")
 
-        # Convert MockService to live Service (on-demand, cached); sub-services
-        # are already live and have no to_service().
-        live_service = (
-            service.to_service() if hasattr(service, "to_service") else service
-        )
-
-        logger.info(
-            f"Starting service {live_service.id} (type={type(live_service).__name__}, "
-            f"has_get_url={hasattr(live_service, 'get_url')}, is_live={self.state_provider.is_live})"
-        )
-
         try:
+            # Convert MockService to live Service (on-demand, cached); sub-services
+            # are already live and have no to_service().
+            live_service = (
+                service.to_service() if hasattr(service, "to_service") else service
+            )
+
+            logger.info(
+                f"Starting service {live_service.id} (type={type(live_service).__name__}, "
+                f"has_get_url={hasattr(live_service, 'get_url')}, is_live={self.state_provider.is_live})"
+            )
+
             if hasattr(live_service, "get_url"):
                 url = live_service.get_url()
                 logger.info(
@@ -274,12 +290,16 @@ class ServicesList(Vertical):
             self.app.call_from_thread(
                 self.notify, f"Failed to start service: {e}", severity="error"
             )
+        finally:
+            self._starting_services.discard(service.id)
 
     def action_stop_service(self) -> None:
         """Stop the selected service"""
         service = self._get_selected_service()
         if not service:
             return
+
+        self._starting_services.discard(service.id)
 
         # Convert MockService to live Service (on-demand, cached); sub-services
         # are already live.

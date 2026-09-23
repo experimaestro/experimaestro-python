@@ -123,6 +123,8 @@ class SSHLocalService(BaseService):
         self._remote_paths = remote_paths
         self._synchronizers: List["AdaptiveSynchronizer"] = []
         self._on_status_change = on_status_change
+        self._start_lock = threading.Lock()
+        self._starting = False
 
     @property
     def id(self) -> str:
@@ -138,6 +140,10 @@ class SSHLocalService(BaseService):
 
     @property
     def state(self):
+        from experimaestro.scheduler.services import ServiceState
+
+        if self._starting:
+            return ServiceState.STARTING
         return self._inner.state
 
     @property
@@ -176,44 +182,62 @@ class SSHLocalService(BaseService):
 
     def get_url(self) -> str:
         """Start adaptive sync for service paths, then start the inner service."""
-        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
-
-        # Do initial sync and start adaptive synchronizers for each path
-        include = self.sync_include_patterns
-        for remote_path in self._remote_paths:
-            # Initial sync
-            self._state_provider.sync_path(remote_path, include=include)
-
-            # Start adaptive sync for continuous updates (initial_sync=False to avoid immediate duplicate)
-            sync = AdaptiveSynchronizer(
-                sync_func=self._state_provider.sync_path,
-                remote_path=remote_path,
-                name=f"service:{self._inner.id}",
-                include=include,
-                initial_sync=False,
-                on_sync_start=lambda: self._notify_status_change(),
-                on_sync_complete=lambda _: self._notify_status_change(),
-            )
-            sync.start()
-            self._synchronizers.append(sync)
-
-        # Notify initial status
-        self._notify_status_change()
-
-        # Start the inner service; stop syncs if it fails
-        try:
-            url = self._inner.get_url()
-        except Exception:
-            self._stop_syncs()
-            raise
-
-        # Check if service ended up in error state (e.g. process exited)
         from experimaestro.scheduler.services import ServiceState
 
-        if self._inner.state == ServiceState.ERROR:
-            self._stop_syncs()
+        # Fast path if already running
+        if self._inner.state == ServiceState.RUNNING and getattr(self._inner, "url", None):
+            return self._inner.url
 
-        return url
+        with self._start_lock:
+            # Re-check under lock
+            if self._inner.state == ServiceState.RUNNING and getattr(self._inner, "url", None):
+                return self._inner.url
+
+            self._starting = True
+            if self._on_status_change:
+                self._notify_status_change()
+
+            try:
+                # Do initial sync and start adaptive synchronizers only if not already started
+                if not self._synchronizers:
+                    from experimaestro.scheduler.remote.adaptive_sync import (
+                        AdaptiveSynchronizer,
+                    )
+
+                    include = self.sync_include_patterns
+                    for remote_path in self._remote_paths:
+                        # Initial sync
+                        self._state_provider.sync_path(remote_path, include=include)
+
+                        # Start adaptive sync for continuous updates (initial_sync=False to avoid immediate duplicate)
+                        sync = AdaptiveSynchronizer(
+                            sync_func=self._state_provider.sync_path,
+                            remote_path=remote_path,
+                            name=f"service:{self._inner.id}",
+                            include=include,
+                            initial_sync=False,
+                            on_sync_start=lambda: self._notify_status_change(),
+                            on_sync_complete=lambda _: self._notify_status_change(),
+                        )
+                        sync.start()
+                        self._synchronizers.append(sync)
+
+                    self._notify_status_change()
+
+                # Start the inner service; stop syncs if it fails
+                url = self._inner.get_url()
+
+                # Check if service ended up in error state (e.g. process exited)
+                if self._inner.state == ServiceState.ERROR:
+                    self._stop_syncs()
+
+                return url
+            except Exception:
+                self._stop_syncs()
+                raise
+            finally:
+                self._starting = False
+                self._notify_status_change()
 
     @property
     def sync_status(self) -> Optional[str]:
@@ -246,11 +270,13 @@ class SSHLocalService(BaseService):
 
     def stop(self) -> None:
         """Stop the inner service and stop all syncs."""
-        # Stop the inner service first
-        if hasattr(self._inner, "stop"):
-            self._inner.stop()
+        with self._start_lock:
+            # Stop the inner service first
+            if hasattr(self._inner, "stop"):
+                self._inner.stop()
 
-        self._stop_syncs()
+            self._stop_syncs()
+            self._starting = False
 
 
 class SSHMockService(MockService):
