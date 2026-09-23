@@ -66,9 +66,8 @@ class GenericParams:
             start = to_num(start)
             multiplier = to_num(multiplier)
             return [start * (multiplier**i) for i in range(int(n_iter))]
-        if self.value is not None:
-            return [self.value]
-        return []
+        return [self.value]
+
 
     @classmethod
     def from_any(cls, obj: Any, target_type: Type = Any) -> "GenericParams":
@@ -216,8 +215,10 @@ def discover_grid_params(obj: Any, prefix: str = "") -> Dict[str, GenericParams]
             val = getattr(obj, f.name)
             path = f"{prefix}.{f.name}" if prefix else f.name
             if isinstance(val, GenericParams):
-                found[path] = val
+                if val.is_grid:
+                    found[path] = val
             elif val is not None and not isinstance(val, (str, int, float, bool)):
+
                 # Avoid recursing into primitives or enums (which are strings/ints)
                 from enum import Enum
 
