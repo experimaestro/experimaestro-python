@@ -116,7 +116,6 @@ def test_ssh_local_service_multiple_get_url_does_not_duplicate_synchronizers():
 def test_ssh_local_service_starting_state():
     """Verify that SSHLocalService.state reports STARTING during get_url() execution"""
     import threading
-    import time
     from pathlib import Path
     from unittest.mock import MagicMock
     from experimaestro.scheduler.services import ServiceState
@@ -193,11 +192,15 @@ def test_services_list_double_start_guard():
     # Second call while in _starting_services: should NOT launch another worker
     widget.action_start_service()
     assert widget._start_service_worker.call_count == 1
-    widget.notify.assert_called_with("Service 'tensorboard' is already starting...", severity="warning")
+    widget.notify.assert_called_with(
+        "Service 'tensorboard' is already starting...", severity="warning"
+    )
 
     # If state is RUNNING: should NOT launch another worker
     mock_service.state = ServiceState.RUNNING
     widget._starting_services.clear()
     widget.action_start_service()
     assert widget._start_service_worker.call_count == 1
-    widget.notify.assert_called_with("Service 'tensorboard' is already running", severity="information")
+    widget.notify.assert_called_with(
+        "Service 'tensorboard' is already running", severity="information"
+    )

@@ -219,17 +219,19 @@ class ServicesList(Vertical):
         if not service:
             return
 
-        from experimaestro.scheduler.services import ServiceState
-
         state = getattr(service, "state", None)
         state_name = state.name if hasattr(state, "name") else str(state)
 
         if state_name == "RUNNING":
-            self.notify(f"Service '{service.id}' is already running", severity="information")
+            self.notify(
+                f"Service '{service.id}' is already running", severity="information"
+            )
             return
 
         if state_name == "STARTING" or service.id in self._starting_services:
-            self.notify(f"Service '{service.id}' is already starting...", severity="warning")
+            self.notify(
+                f"Service '{service.id}' is already starting...", severity="warning"
+            )
             return
 
         self._starting_services.add(service.id)

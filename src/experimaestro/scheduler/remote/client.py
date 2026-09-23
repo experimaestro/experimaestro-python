@@ -185,12 +185,16 @@ class SSHLocalService(BaseService):
         from experimaestro.scheduler.services import ServiceState
 
         # Fast path if already running
-        if self._inner.state == ServiceState.RUNNING and getattr(self._inner, "url", None):
+        if self._inner.state == ServiceState.RUNNING and getattr(
+            self._inner, "url", None
+        ):
             return self._inner.url
 
         with self._start_lock:
             # Re-check under lock
-            if self._inner.state == ServiceState.RUNNING and getattr(self._inner, "url", None):
+            if self._inner.state == ServiceState.RUNNING and getattr(
+                self._inner, "url", None
+            ):
                 return self._inner.url
 
             self._starting = True
@@ -1582,7 +1586,9 @@ class SSHStateProviderClient(OfflineStateProvider):
                     ]
                 )
             bwlimit_str = os.environ.get("XPM_SYNC_BWLIMIT")
-            bwlimit = int(bwlimit_str) if bwlimit_str and bwlimit_str.isdigit() else None
+            bwlimit = (
+                int(bwlimit_str) if bwlimit_str and bwlimit_str.isdigit() else None
+            )
             self._synchronizer = RemoteFileSynchronizer(
                 host=self.host,
                 remote_workspace=Path(self.remote_workspace),

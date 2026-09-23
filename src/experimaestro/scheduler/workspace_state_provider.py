@@ -1386,7 +1386,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     try:
                         exp_dir = self.workspace_path / "experiments" / experiment_id
                         experiment.runs_count = sum(
-                            1 for p in exp_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+                            1
+                            for p in exp_dir.iterdir()
+                            if p.is_dir() and not p.name.startswith(".")
                         )
                     except Exception:
                         pass

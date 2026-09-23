@@ -200,14 +200,16 @@ def test_config_dicts_invalid_structure_error():
     # Non-list
     cfg.grid_search = {"config_dicts": "invalid"}
     with pytest.raises(
-        ValueError, match=r"'config_dicts' in grid_search must be a list of dictionaries"
+        ValueError,
+        match=r"'config_dicts' in grid_search must be a list of dictionaries",
     ):
         generate_grid(cfg)
 
     # Empty list
     cfg.grid_search = {"config_dicts": []}
     with pytest.raises(
-        ValueError, match=r"'config_dicts' in grid_search must contain at least one dictionary"
+        ValueError,
+        match=r"'config_dicts' in grid_search must contain at least one dictionary",
     ):
         generate_grid(cfg)
 
@@ -287,9 +289,7 @@ def test_config_dicts_tags_unique_filter():
     cfg_single = MyConfig(id="test", lr=0.1, batch_size=32)
     cfg_single.lr = GenericParams.from_any(cfg_single.lr)
     cfg_single.batch_size = GenericParams.from_any(cfg_single.batch_size)
-    cfg_single.grid_search = {
-        "config_dicts": [{"lr": 0.01, "batch_size": 16}]
-    }
+    cfg_single.grid_search = {"config_dicts": [{"lr": 0.01, "batch_size": 16}]}
     configs_single, tags_single = generate_grid(cfg_single)
     assert len(configs_single) == 1
     assert tags_single[0] == {}
@@ -319,10 +319,12 @@ def test_config_dicts_generic_params_wrapper():
     cfg.batch_size = GenericParams.from_any(cfg.batch_size)
     # config_dicts wrapped in GenericParams (e.g. from Dict[str, GridSearch[Any]])
     cfg.grid_search = {
-        "config_dicts": GenericParams.from_any([
-            {"lr": 0.01, "batch_size": 16},
-            {"lr": None, "batch_size": 32},
-        ])
+        "config_dicts": GenericParams.from_any(
+            [
+                {"lr": 0.01, "batch_size": 16},
+                {"lr": None, "batch_size": 32},
+            ]
+        )
     }
     configs, tags = generate_grid(cfg)
     assert len(configs) == 2
@@ -363,6 +365,3 @@ def test_config_dicts_with_none_scalar_field():
     assert configs[1].lr == 0.001
     assert configs[1].batch_size == 64
     assert configs[1].sub is None
-
-
-

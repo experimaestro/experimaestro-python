@@ -54,7 +54,9 @@ class WarningsTab(Vertical):
     def _load_warnings_worker(self) -> None:
         try:
             warnings = self.state_provider.get_unresolved_warnings()
-            self.log.info(f"WarningsTab._load_warnings_worker: got {len(warnings)} warnings")
+            self.log.info(
+                f"WarningsTab._load_warnings_worker: got {len(warnings)} warnings"
+            )
         except Exception as e:
             logger.warning(f"Failed to refresh warnings: {e}")
             warnings = []
@@ -92,9 +94,7 @@ class WarningsTab(Vertical):
                         f"{experiment_id} ({run_id})" if run_id else experiment_id
                     )
             else:
-                exp_display = (
-                    f"{experiment_id} ({run_id})" if run_id else experiment_id
-                )
+                exp_display = f"{experiment_id} ({run_id})" if run_id else experiment_id
 
             # Extract warning type from context (if available)
             warning_type = warning.context.get("title", "Warning")
