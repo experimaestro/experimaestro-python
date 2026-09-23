@@ -1824,6 +1824,15 @@ class MockExperiment(BaseExperiment):
         self._jobs_jsonl_loaded: bool = True
 
     @property
+    def runs_count(self) -> Optional[int]:
+        """Return number of runs for this experiment if known"""
+        return getattr(self, "_runs_count", None)
+
+    @runs_count.setter
+    def runs_count(self, value: Optional[int]) -> None:
+        self._runs_count = value
+
+    @property
     def experiment_id(self) -> str:
         """Return experiment_id (overriding base class if needed for v1 layout)"""
         if self._experiment_id_override:
@@ -2208,6 +2217,9 @@ class MockExperiment(BaseExperiment):
         actions_data = d.get("actions", {})
         for action_id, action_dict in actions_data.items():
             exp._actions[action_id] = BaseAction.from_dict(action_dict)
+
+        if "runs_count" in d:
+            exp._runs_count = d["runs_count"]
 
         return exp
 

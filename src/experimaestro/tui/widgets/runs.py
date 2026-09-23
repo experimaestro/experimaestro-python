@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Optional
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import DataTable, Static
@@ -69,14 +70,30 @@ class RunsList(Widget):
         self.query_one("#runs-table", DataTable).focus()
 
     def refresh_runs(self) -> None:
-        """Refresh the runs list"""
+        """Refresh the runs list in background"""
         table = self.query_one("#runs-table", DataTable)
         table.clear()
 
         if not self.experiment_id:
             return
 
-        self.runs = self.state_provider.get_experiment_runs(self.experiment_id)
+        self._load_runs_worker(self.experiment_id)
+
+    @work(thread=True, exclusive=True, group="runs_load")
+    def _load_runs_worker(self, experiment_id: str) -> None:
+        try:
+            runs = self.state_provider.get_experiment_runs(experiment_id)
+        except Exception:
+            runs = []
+        self.app.call_from_thread(self._on_runs_loaded, runs)
+
+    def _on_runs_loaded(self, runs: list) -> None:
+        self.runs = runs
+        try:
+            table = self.query_one("#runs-table", DataTable)
+        except Exception:
+            return
+        table.clear()
 
         for run in self.runs:
             match run.status:

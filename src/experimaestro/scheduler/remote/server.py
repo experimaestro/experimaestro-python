@@ -287,7 +287,16 @@ class SSHStateProviderServer:
         experiments = self._state_provider.get_experiments(
             since=since, refresh=bool(params.get("refresh"))
         )
-        return [self._experiment_to_dict(exp) for exp in experiments]
+        results = []
+        for exp in experiments:
+            data = self._experiment_to_dict(exp)
+            try:
+                runs = self._state_provider.get_experiment_runs(exp.experiment_id)
+                data["runs_count"] = len(runs)
+            except Exception:
+                data["runs_count"] = 1
+            results.append(data)
+        return results
 
     def _handle_get_experiment(self, params: Dict) -> Optional[Dict]:
         """Handle get_experiment request"""

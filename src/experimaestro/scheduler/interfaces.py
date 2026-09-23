@@ -1550,6 +1550,11 @@ class BaseExperiment:
         """Carbon impact metrics for this experiment (sum and latest aggregations)"""
         return None  # Default: no carbon metrics
 
+    @property
+    def runs_count(self) -> Optional[int]:
+        """Number of runs in this experiment, if known"""
+        return None
+
     # Run tags - concrete implementation at base level (set for efficient lookup)
     _run_tags: set[str]
 
@@ -1624,6 +1629,8 @@ class BaseExperiment:
             "actions": {k: _action_to_dict(k, v) for k, v in self.actions.items()},
             "run_tags": self.run_tags,
         }
+        if self.runs_count is not None:
+            result["runs_count"] = self.runs_count
         # Include carbon_impact if available
         if self.carbon_impact:
             result["carbon_impact"] = self.carbon_impact.to_dict()
@@ -1999,6 +2006,13 @@ class BaseService(ABC):
     def state_dict(self) -> dict:
         """Return service state for serialization/recreation"""
         return {}
+
+    @property
+    def sync_include_patterns(self) -> Optional[List[str]]:
+        """Optional list of glob patterns to include when syncing files for this service"""
+        if getattr(self, "id", None) == "tensorboard":
+            return ["*events.out.tfevents*"]
+        return None
 
     def full_state_dict(self) -> Dict[str, Any]:
         """Get service state as dictionary for JSON serialization.

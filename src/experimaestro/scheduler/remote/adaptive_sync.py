@@ -42,6 +42,7 @@ class AdaptiveSynchronizer:
         on_give_up: Optional[Callable[[str], None]] = None,
         max_retries: int = 3,
         include: list[str] | None = None,
+        initial_sync: bool = True,
     ):
         """Initialize the synchronizer
 
@@ -55,6 +56,8 @@ class AdaptiveSynchronizer:
             on_give_up: Callback when max retries reached (sync stopped)
             max_retries: Maximum consecutive failures before giving up (0 = never give up)
             include: Optional list of filename patterns to include (e.g., ["*.out", "*.err"])
+            initial_sync: Whether to perform an immediate sync on thread start (default True).
+                         Set to False if an initial sync was already performed before start().
         """
         self.sync_func = sync_func
         self.remote_path = remote_path
@@ -65,6 +68,7 @@ class AdaptiveSynchronizer:
         self.on_give_up = on_give_up
         self.max_retries = max_retries
         self.include = include
+        self._initial_sync = initial_sync
         self._syncing = False
         self._consecutive_failures = 0
         self._gave_up = False
@@ -150,8 +154,9 @@ class AdaptiveSynchronizer:
 
     def _sync_loop(self) -> None:
         """Background sync loop"""
-        # Do initial sync immediately
-        self._do_sync()
+        # Do initial sync immediately if requested
+        if self._initial_sync:
+            self._do_sync()
 
         while self._running:
             # Wait for interval or stop signal

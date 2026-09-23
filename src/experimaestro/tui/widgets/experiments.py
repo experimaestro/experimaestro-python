@@ -352,14 +352,17 @@ class ExperimentsList(Widget):
         runs_counts: dict[str, str] = {}
         if not self.state_provider.is_live:
             for exp in experiments:
-                try:
-                    runs = self.state_provider.get_experiment_runs(
-                        exp.experiment_id, refresh=refresh
-                    )
-                    runs_counts[exp.experiment_id] = str(len(runs))
-                except Exception as e:
-                    self.log.error(f"Error getting runs for {exp.experiment_id}: {e}")
-                    runs_counts[exp.experiment_id] = "-"
+                if exp.runs_count is not None:
+                    runs_counts[exp.experiment_id] = str(exp.runs_count)
+                else:
+                    try:
+                        runs = self.state_provider.get_experiment_runs(
+                            exp.experiment_id, refresh=refresh
+                        )
+                        runs_counts[exp.experiment_id] = str(len(runs))
+                    except Exception as e:
+                        self.log.error(f"Error getting runs for {exp.experiment_id}: {e}")
+                        runs_counts[exp.experiment_id] = "-"
 
         self.app.call_from_thread(self._on_experiments_loaded, experiments, runs_counts)
 

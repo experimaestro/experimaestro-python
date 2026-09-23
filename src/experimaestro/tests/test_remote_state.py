@@ -1229,9 +1229,31 @@ class TestRemoteFileSynchronizer:
         assert "--delete" in cmd
         assert "-L" in cmd
         assert "-a" in cmd
-        assert "-z" in cmd
+        assert "-z" not in cmd  # Disabled by default to prevent CPU bottlenecks
         assert "-v" in cmd
         assert "testhost:/remote/workspace/logs/" in cmd
+
+    @patch("subprocess.run")
+    def test_rsync_command_compression_and_include(self, mock_run, synchronizer):
+        """Test that rsync command includes -z when enabled and preserves directory hierarchy with include"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        synchronizer._rsync(
+            "testhost:/remote/workspace/logs/",
+            str(synchronizer.local_cache / "logs") + "/",
+            include=["*events.out.tfevents*"],
+            compress=True,
+        )
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+
+        assert "-z" in cmd
+        assert "--include" in cmd
+        assert "*/" in cmd
+        assert "*events.out.tfevents*" in cmd
+        assert "--exclude" in cmd
+        assert "--prune-empty-dirs" in cmd
 
 
 # =============================================================================
@@ -1994,3 +2016,93 @@ class TestErrorHandling:
         assert "error" in resp_dict
         assert resp_dict["error"]["code"] == -32600
         assert "result" not in resp_dict
+
+
+class TestAdaptiveSynchronizer:
+    """Test AdaptiveSynchronizer behavior"""
+
+    def test_initial_sync_true_executes_immediately(self):
+        """Test that initial_sync=True (default) triggers sync on start"""
+        import time
+        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
+
+        sync_called = []
+
+        def mock_sync(path, include=None):
+            sync_called.append(path)
+            return Path("/local/path")
+
+        sync = AdaptiveSynchronizer(
+            sync_func=mock_sync,
+            remote_path="/remote/path",
+            initial_sync=True,
+        )
+        sync.start()
+        time.sleep(0.05)
+        sync.stop()
+
+        assert len(sync_called) >= 1
+
+    def test_initial_sync_false_skips_immediate_sync(self):
+        """Test that initial_sync=False waits before first background sync"""
+        import time
+        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
+
+        sync_called = []
+
+        def mock_sync(path, include=None):
+            sync_called.append(path)
+            return Path("/local/path")
+
+        sync = AdaptiveSynchronizer(
+            sync_func=mock_sync,
+            remote_path="/remote/path",
+            initial_sync=False,
+        )
+        sync.start()
+        time.sleep(0.05)
+        sync.stop()
+
+        # Should not have executed immediately
+        assert len(sync_called) == 0
+
+
+class TestRunsCountOptimization:
+    """Test runs_count optimization in MockExperiment and serialization"""
+
+    def test_mock_experiment_runs_count_serialization(self, tmp_path):
+        """Test MockExperiment preserves runs_count in state_dict roundtrip"""
+        from experimaestro.scheduler.state_provider import MockExperiment
+
+        exp = MockExperiment(workdir=tmp_path / "exp1" / "run1", run_id="run1")
+        exp.runs_count = 5
+
+        d = exp.state_dict()
+        assert d["runs_count"] == 5
+
+        restored = MockExperiment.from_state_dict(d, tmp_path)
+        assert restored.runs_count == 5
+
+    def test_base_service_sync_include_patterns(self):
+        """Test sync_include_patterns default behavior for tensorboard"""
+        from experimaestro.scheduler.state_provider import MockService
+
+        tb_service = MockService(
+            service_id="tensorboard",
+            description_text="Tensorboard Service",
+            state_dict_data={},
+            experiment_id="exp1",
+            run_id="run1",
+            state="RUNNING",
+        )
+        assert tb_service.sync_include_patterns == ["*events.out.tfevents*"]
+
+        other_service = MockService(
+            service_id="custom_service",
+            description_text="Custom Service",
+            state_dict_data={},
+            experiment_id="exp1",
+            run_id="run1",
+            state="RUNNING",
+        )
+        assert other_service.sync_include_patterns is None
