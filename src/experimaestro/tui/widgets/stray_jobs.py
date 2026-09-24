@@ -7,6 +7,7 @@ Displays two sub-tabs:
 
 import logging
 from typing import Optional
+from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import DataTable, Static, Button, TabbedContent, TabPane
@@ -81,13 +82,25 @@ class _JobListPanel(Vertical):
         raise NotImplementedError
 
     def refresh_jobs(self, *, refresh: bool = False) -> None:
-        """Refresh the job list
+        """Refresh the job list in background
 
         Args:
             refresh: Ask the state provider to re-scan the workspace instead
                 of answering from its cache (explicit user refresh)
         """
-        self.jobs = self._fetch_jobs(refresh=refresh)
+        self._load_jobs_worker(refresh)
+
+    @work(thread=True, exclusive=True)
+    def _load_jobs_worker(self, refresh: bool = False) -> None:
+        try:
+            jobs = self._fetch_jobs(refresh=refresh)
+        except Exception as e:
+            logger.warning("Failed to fetch %s jobs: %s", self._panel_id, e)
+            jobs = []
+        self.app.call_from_thread(self._on_jobs_loaded, jobs)
+
+    def _on_jobs_loaded(self, jobs: list) -> None:
+        self.jobs = jobs
 
         # Only calculate sizes for local paths that exist
         self._pending_jobs = [

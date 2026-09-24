@@ -1344,6 +1344,25 @@ class ConfigInformation:
 
         if isinstance(value, ConfigMixin):
             value.__xpm__.__get_objects__(objects, context)
+        elif isinstance(value, TaskStub):
+            if id(value) in context.serialized:
+                return
+            context.serialized.add(id(value))
+
+            typename = value.typename
+            module, type_name = (
+                typename.rsplit(".", 1) if "." in typename else ("", typename)
+            )
+            state_dict = {
+                "id": id(value),
+                "module": module,
+                "type": type_name,
+                "typename": typename,
+                "identifier": value.identifier.state_dict(),
+                "fields": {},
+                "stub": True,
+            }
+            objects.append(state_dict)
         elif isinstance(value, (list, tuple, set)):
             for ix, el in enumerate(value):
                 with context.push(str(ix)):
@@ -1676,8 +1695,8 @@ class ConfigInformation:
         for definition in definitions:
             obj_id = definition["id"]
 
-            # Skip objects that are only reachable through task references
-            if obj_id in skipped_ids:
+            # Skip objects that are only reachable through task references or are stubs
+            if obj_id in skipped_ids or definition.get("stub", False):
                 # Create a TaskStub for skipped task objects
                 objects[obj_id] = TaskStub(
                     identifier=Identifier.from_state_dict(definition["identifier"]),
@@ -1725,7 +1744,7 @@ class ConfigInformation:
             obj_id = definition["id"]
 
             # Skip processing skipped objects (they are TaskStubs)
-            if obj_id in skipped_ids:
+            if obj_id in skipped_ids or definition.get("stub", False):
                 continue
 
             o = objects[obj_id]

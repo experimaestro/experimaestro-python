@@ -11,6 +11,7 @@ Usage:
 
 import atexit
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -122,6 +123,8 @@ class SSHLocalService(BaseService):
         self._remote_paths = remote_paths
         self._synchronizers: List["AdaptiveSynchronizer"] = []
         self._on_status_change = on_status_change
+        self._start_lock = threading.Lock()
+        self._starting = False
 
     @property
     def id(self) -> str:
@@ -137,6 +140,10 @@ class SSHLocalService(BaseService):
 
     @property
     def state(self):
+        from experimaestro.scheduler.services import ServiceState
+
+        if self._starting:
+            return ServiceState.STARTING
         return self._inner.state
 
     @property
@@ -161,6 +168,10 @@ class SSHLocalService(BaseService):
     def state_dict(self) -> dict:
         return self._inner.state_dict()
 
+    @property
+    def sync_include_patterns(self) -> Optional[List[str]]:
+        return self._inner.sync_include_patterns
+
     def _notify_status_change(self) -> None:
         """Notify that sync status has changed."""
         if self._on_status_change:
@@ -171,41 +182,66 @@ class SSHLocalService(BaseService):
 
     def get_url(self) -> str:
         """Start adaptive sync for service paths, then start the inner service."""
-        from experimaestro.scheduler.remote.adaptive_sync import AdaptiveSynchronizer
-
-        # Do initial sync and start adaptive synchronizers for each path
-        for remote_path in self._remote_paths:
-            # Initial sync
-            self._state_provider.sync_path(remote_path)
-
-            # Start adaptive sync for continuous updates
-            sync = AdaptiveSynchronizer(
-                sync_func=self._state_provider.sync_path,
-                remote_path=remote_path,
-                name=f"service:{self._inner.id}",
-                on_sync_start=lambda: self._notify_status_change(),
-                on_sync_complete=lambda _: self._notify_status_change(),
-            )
-            sync.start()
-            self._synchronizers.append(sync)
-
-        # Notify initial status
-        self._notify_status_change()
-
-        # Start the inner service; stop syncs if it fails
-        try:
-            url = self._inner.get_url()
-        except Exception:
-            self._stop_syncs()
-            raise
-
-        # Check if service ended up in error state (e.g. process exited)
         from experimaestro.scheduler.services import ServiceState
 
-        if self._inner.state == ServiceState.ERROR:
-            self._stop_syncs()
+        # Fast path if already running
+        if self._inner.state == ServiceState.RUNNING and getattr(
+            self._inner, "url", None
+        ):
+            return self._inner.url
 
-        return url
+        with self._start_lock:
+            # Re-check under lock
+            if self._inner.state == ServiceState.RUNNING and getattr(
+                self._inner, "url", None
+            ):
+                return self._inner.url
+
+            self._starting = True
+            if self._on_status_change:
+                self._notify_status_change()
+
+            try:
+                # Do initial sync and start adaptive synchronizers only if not already started
+                if not self._synchronizers:
+                    from experimaestro.scheduler.remote.adaptive_sync import (
+                        AdaptiveSynchronizer,
+                    )
+
+                    include = self.sync_include_patterns
+                    for remote_path in self._remote_paths:
+                        # Initial sync
+                        self._state_provider.sync_path(remote_path, include=include)
+
+                        # Start adaptive sync for continuous updates (initial_sync=False to avoid immediate duplicate)
+                        sync = AdaptiveSynchronizer(
+                            sync_func=self._state_provider.sync_path,
+                            remote_path=remote_path,
+                            name=f"service:{self._inner.id}",
+                            include=include,
+                            initial_sync=False,
+                            on_sync_start=lambda: self._notify_status_change(),
+                            on_sync_complete=lambda _: self._notify_status_change(),
+                        )
+                        sync.start()
+                        self._synchronizers.append(sync)
+
+                    self._notify_status_change()
+
+                # Start the inner service; stop syncs if it fails
+                url = self._inner.get_url()
+
+                # Check if service ended up in error state (e.g. process exited)
+                if self._inner.state == ServiceState.ERROR:
+                    self._stop_syncs()
+
+                return url
+            except Exception:
+                self._stop_syncs()
+                raise
+            finally:
+                self._starting = False
+                self._notify_status_change()
 
     @property
     def sync_status(self) -> Optional[str]:
@@ -238,11 +274,13 @@ class SSHLocalService(BaseService):
 
     def stop(self) -> None:
         """Stop the inner service and stop all syncs."""
-        # Stop the inner service first
-        if hasattr(self._inner, "stop"):
-            self._inner.stop()
+        with self._start_lock:
+            # Stop the inner service first
+            if hasattr(self._inner, "stop"):
+                self._inner.stop()
 
-        self._stop_syncs()
+            self._stop_syncs()
+            self._starting = False
 
 
 class SSHMockService(MockService):
@@ -329,14 +367,13 @@ class SSHMockService(MockService):
 
         # Create path translator using state provider
         def path_translator(remote_path: str) -> Path:
-            """Translate remote path to local, syncing if needed."""
-            local_path = self._state_provider.sync_path(remote_path)
-            if local_path:
-                return local_path
-            # Fallback: map to local cache without sync
+            """Translate remote path to local cache path without syncing.
+
+            Syncing is handled asynchronously when the service is started in get_url().
+            """
             remote_workspace = self._state_provider.remote_workspace
             local_cache = self._state_provider.local_cache_dir
-            if remote_path.startswith(remote_workspace):
+            if local_cache and remote_path.startswith(remote_workspace):
                 relative = remote_path[len(remote_workspace) :].lstrip("/")
                 return local_cache / relative
             return Path(remote_path)
@@ -1426,6 +1463,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             exp._finished_jobs = d["finished_jobs"]
         if "failed_jobs" in d:
             exp._failed_jobs = d["failed_jobs"]
+        if "runs_count" in d:
+            exp._runs_count = d["runs_count"]
 
         # Update timestamps
         if d.get("started_at"):
@@ -1546,11 +1585,16 @@ class SSHStateProviderClient(OfflineStateProvider):
                         f"ControlPath={self._control_path}",
                     ]
                 )
+            bwlimit_str = os.environ.get("XPM_SYNC_BWLIMIT")
+            bwlimit = (
+                int(bwlimit_str) if bwlimit_str and bwlimit_str.isdigit() else None
+            )
             self._synchronizer = RemoteFileSynchronizer(
                 host=self.host,
                 remote_workspace=Path(self.remote_workspace),
                 local_cache=self.local_cache_dir,
                 ssh_options=sync_ssh_options,
+                bwlimit=bwlimit,
             )
 
         try:

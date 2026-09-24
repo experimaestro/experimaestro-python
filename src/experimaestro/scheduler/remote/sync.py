@@ -26,6 +26,8 @@ class RemoteFileSynchronizer:
         remote_workspace: Path,
         local_cache: Path,
         ssh_options: Optional[List[str]] = None,
+        compress: bool = False,
+        bwlimit: Optional[int] = None,
     ):
         """Initialize the synchronizer
 
@@ -34,19 +36,30 @@ class RemoteFileSynchronizer:
             remote_workspace: Path to workspace on the remote host
             local_cache: Local directory to sync files to
             ssh_options: Additional SSH options (e.g., ["-p", "2222"])
+            compress: Enable gzip compression (-z). Default is False to avoid
+                      CPU bottlenecks on binary event files.
+            bwlimit: Bandwidth limit in KB/s to prevent starving SSH multiplexed sockets.
         """
         self.host = host
         self.remote_workspace = remote_workspace
         self.local_cache = local_cache
         self.ssh_options = ssh_options or []
+        self.compress = compress
+        self.bwlimit = bwlimit
 
-    def sync_path(self, remote_path: str, include: list[str] | None = None) -> Path:
+    def sync_path(
+        self,
+        remote_path: str,
+        include: list[str] | None = None,
+        compress: Optional[bool] = None,
+    ) -> Path:
         """Sync a specific path from remote
 
         Args:
             remote_path: Absolute path on remote or path relative to workspace
             include: Optional list of filename patterns to include (e.g., ["*.out", "*.err"]).
                     If provided, only files matching these patterns will be synced.
+            compress: Override compression setting for this sync.
 
         Returns:
             Local path where the files were synced to
@@ -68,17 +81,25 @@ class RemoteFileSynchronizer:
         local_path.mkdir(parents=True, exist_ok=True)
         dest = f"{local_path}/"
 
-        self._rsync(source, dest, include=include)
+        use_compress = self.compress if compress is None else compress
+        self._rsync(source, dest, include=include, compress=use_compress)
 
         return local_path
 
-    def _rsync(self, source: str, dest: str, include: list[str] | None = None):
+    def _rsync(
+        self,
+        source: str,
+        dest: str,
+        include: list[str] | None = None,
+        compress: bool = False,
+    ):
         """Execute rsync command
 
         Args:
             source: Remote source path (host:path/)
             dest: Local destination path
             include: Optional list of filename patterns to include
+            compress: Whether to enable gzip compression
         """
         cmd = [
             "rsync",
@@ -86,15 +107,23 @@ class RemoteFileSynchronizer:
             "--delete",  # Delete extraneous files from destination
             "-L",  # Transform symlinks into referent file/dir
             "-a",  # Archive mode (preserves permissions, times, etc.)
-            "-z",  # Compress during transfer
             "-v",  # Verbose
         ]
 
+        if compress:
+            cmd.append("-z")
+
+        if self.bwlimit:
+            cmd.append(f"--bwlimit={self.bwlimit}")
+
         # Include/exclude patterns (order matters: includes first, then exclude all)
+        # We include "*/" first so directory hierarchies are traversed to find matching files
         if include:
+            cmd.extend(["--include", "*/"])
             for pattern in include:
-                cmd.extend(["--include", pattern])
-            cmd.extend(["--exclude", "*"])
+                if pattern != "*/":
+                    cmd.extend(["--include", pattern])
+            cmd.extend(["--exclude", "*", "--prune-empty-dirs"])
 
         # SSH options (use shlex.join for proper quoting of paths)
         if self.ssh_options:

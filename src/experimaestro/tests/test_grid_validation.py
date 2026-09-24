@@ -166,5 +166,3 @@ def test_validate_attrs_with_grid_search_annotation():
 
     assert tags[0] == {"lr": 0.05, "batch_size": 16}
     assert tags[1] == {"lr": 0.005, "batch_size": 64}
-
-

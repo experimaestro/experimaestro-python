@@ -2,6 +2,7 @@
 
 import logging
 
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -46,7 +47,22 @@ class WarningsTab(Vertical):
         self.refresh_warnings()
 
     def refresh_warnings(self) -> None:
-        """Refresh the warnings list from state provider"""
+        """Refresh the warnings list from state provider in background"""
+        self._load_warnings_worker()
+
+    @work(thread=True, exclusive=True, group="warnings_load")
+    def _load_warnings_worker(self) -> None:
+        try:
+            warnings = self.state_provider.get_unresolved_warnings()
+            self.log.info(
+                f"WarningsTab._load_warnings_worker: got {len(warnings)} warnings"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to refresh warnings: {e}")
+            warnings = []
+        self.app.call_from_thread(self._on_warnings_loaded, warnings)
+
+    def _on_warnings_loaded(self, warnings: list) -> None:
         try:
             table = self.query_one("#warnings-table", DataTable)
         except Exception:
@@ -57,71 +73,59 @@ class WarningsTab(Vertical):
             return
 
         table.clear()
+        self._warnings.clear()
 
-        try:
-            # Get all unresolved warnings from state provider
-            warnings = self.state_provider.get_unresolved_warnings()
-            self.log.info(f"WarningsTab.refresh_warnings: got {len(warnings)} warnings")
+        for warning in warnings:
+            warning_key = warning.warning_key
+            experiment_id = warning.experiment_id or "-"
+            run_id = warning.run_id
 
-            # Clear warnings dict before repopulating
-            self._warnings.clear()
-
-            for warning in warnings:
-                warning_key = warning.warning_key
-                experiment_id = warning.experiment_id or "-"
-                run_id = warning.run_id
-
-                # Format experiment display
-                if run_id and run_id != "dry-run" and len(run_id) >= 13:
-                    # Parse YYYYMMDD_HHMMSS format
-                    try:
-                        timestamp = (
-                            f"{run_id[0:4]}-{run_id[4:6]}-{run_id[6:8]} "
-                            f"{run_id[9:11]}:{run_id[11:13]}"
-                        )
-                        exp_display = f"{experiment_id} ({timestamp})"
-                    except (IndexError, ValueError):
-                        exp_display = (
-                            f"{experiment_id} ({run_id})" if run_id else experiment_id
-                        )
-                else:
+            # Format experiment display
+            if run_id and run_id != "dry-run" and len(run_id) >= 13:
+                # Parse YYYYMMDD_HHMMSS format
+                try:
+                    timestamp = (
+                        f"{run_id[0:4]}-{run_id[4:6]}-{run_id[6:8]} "
+                        f"{run_id[9:11]}:{run_id[11:13]}"
+                    )
+                    exp_display = f"{experiment_id} ({timestamp})"
+                except (IndexError, ValueError):
                     exp_display = (
                         f"{experiment_id} ({run_id})" if run_id else experiment_id
                     )
+            else:
+                exp_display = f"{experiment_id} ({run_id})" if run_id else experiment_id
 
-                # Extract warning type from context (if available)
-                warning_type = warning.context.get("title", "Warning")
+            # Extract warning type from context (if available)
+            warning_type = warning.context.get("title", "Warning")
 
-                # Truncate description for table display
-                description = warning.description.split("\n")[0]  # First line only
-                if len(description) > 60:
-                    description = description[:57] + "..."
+            # Truncate description for table display
+            description = warning.description.split("\n")[0]  # First line only
+            if len(description) > 60:
+                description = description[:57] + "..."
 
-                # Count available actions
-                action_count = len(warning.actions)
-                actions_display = f"{action_count} action(s)"
+            # Count available actions
+            action_count = len(warning.actions)
+            actions_display = f"{action_count} action(s)"
 
-                # Severity icon
-                severity_icons = {
-                    "info": "ℹ",
-                    "warning": "⚠",
-                    "error": "⛔",
-                }
-                severity_icon = severity_icons.get(warning.severity, "?")
+            # Severity icon
+            severity_icons = {
+                "info": "ℹ",
+                "warning": "⚠",
+                "error": "⛔",
+            }
+            severity_icon = severity_icons.get(warning.severity, "?")
 
-                table.add_row(
-                    exp_display,
-                    f"{severity_icon} {warning_type}",
-                    description,
-                    actions_display,
-                    key=warning_key,
-                )
+            table.add_row(
+                exp_display,
+                f"{severity_icon} {warning_type}",
+                description,
+                actions_display,
+                key=warning_key,
+            )
 
-                # Store warning for quick access
-                self._warnings[warning_key] = warning
-
-        except Exception as e:
-            logger.warning(f"Failed to refresh warnings: {e}")
+            # Store warning for quick access
+            self._warnings[warning_key] = warning
 
         # Update tab title
         self._update_tab_title()
@@ -136,10 +140,7 @@ class WarningsTab(Vertical):
     @property
     def warning_count(self) -> int:
         """Number of unresolved warnings"""
-        try:
-            return len(self.state_provider.get_unresolved_warnings())
-        except Exception:
-            return 0
+        return len(self._warnings)
 
     def _get_selected_warning(self):
         """Get the currently selected WarningEvent object"""

@@ -68,7 +68,6 @@ class GenericParams:
             return [start * (multiplier**i) for i in range(int(n_iter))]
         return [self.value]
 
-
     @classmethod
     def from_any(cls, obj: Any, target_type: Type = Any) -> "GenericParams":
         """Coerces a value into a GenericParams object."""
@@ -218,7 +217,6 @@ def discover_grid_params(obj: Any, prefix: str = "") -> Dict[str, GenericParams]
                 if val.is_grid:
                     found[path] = val
             elif val is not None and not isinstance(val, (str, int, float, bool)):
-
                 # Avoid recursing into primitives or enums (which are strings/ints)
                 from enum import Enum
 
@@ -252,9 +250,7 @@ def _get_type_converter(target_type: Any):
     types_to_try = [
         t
         for t in (
-            get_args(target_type)
-            if get_origin(target_type) is Union
-            else [target_type]
+            get_args(target_type) if get_origin(target_type) is Union else [target_type]
         )
         if t is not type(None) and t is not GenericParams
     ]
