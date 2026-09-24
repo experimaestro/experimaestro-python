@@ -227,6 +227,42 @@ def test_taskstub_config_walk():
     assert result is not None
 
 
+def test_taskstub_serialization_roundtrip():
+    """Test that a config referencing a TaskStub can be serialized and deserialized cleanly"""
+    context = SerializationContext(save_directory=None)
+    task = MyTask.C(value=42)
+    config = ConfigWithTask.C(name="test_roundtrip")
+    config.__xpm__.task = task
+
+    task.__xpm__.seal(context)
+    config.__xpm__.seal(context)
+
+    # First serialize and load with partial_loading=True to get a config with a TaskStub
+    data = state_dict(context, [task, config])
+    [_, loaded_config] = from_state_dict(data, partial_loading=True)
+    assert isinstance(loaded_config.__xpm__.task, TaskStub)
+
+    # Now, serialize this config (which has loaded_config.__xpm__.task as TaskStub)
+    context2 = SerializationContext(save_directory=None)
+    loaded_config.__xpm__.seal(context2)
+    data2 = state_dict(context2, [loaded_config])
+
+    # Verify that data2 contains the TaskStub serialized with stub=True
+    stub_def = next(d for d in data2["objects"] if d.get("stub"))
+    assert stub_def["stub"] is True
+    assert "MyTask" in stub_def["typename"]
+    assert stub_def["id"] == id(loaded_config.__xpm__.task)
+
+    # Deserialize back: even with partial_loading=False, since it has stub: True, it shouldn't try to import or fail
+    [reloaded_config] = from_state_dict(data2, partial_loading=False)
+    assert isinstance(reloaded_config.__xpm__.task, TaskStub)
+    assert (
+        reloaded_config.__xpm__.task.identifier
+        == loaded_config.__xpm__.task.identifier
+    )
+    assert reloaded_config.__xpm__.task.typename == loaded_config.__xpm__.task.typename
+
+
 # --- Tests for DataPath serialization ---
 
 
