@@ -106,7 +106,7 @@ class ConfigWalk:
         return config
 
     def __call__(self, x):
-        from experimaestro.core.objects import Config
+        from experimaestro.core.objects import Config, TaskStub
         from experimaestro.core.objects import ConfigInformation  # noqa: F401
 
         if isinstance(x, Config):
@@ -176,7 +176,7 @@ class ConfigWalk:
                     result[key] = self(value)
             return result
 
-        if isinstance(x, (float, int, str, Path, Enum)):
+        if isinstance(x, (float, int, str, Path, Enum, TaskStub)):
             return x
 
         raise NotImplementedError(f"Cannot handle a value of type {type(x)}")

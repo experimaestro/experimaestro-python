@@ -205,6 +205,28 @@ def test_partial_loading_preserves_shared_configs():
     assert isinstance(task_obj, TaskStub)
 
 
+def test_taskstub_config_walk():
+    """Test that ConfigWalk with recurse_task=True correctly handles TaskStub without error"""
+    from experimaestro.core.objects.config_walk import ConfigWalk
+
+    context = SerializationContext(save_directory=None)
+    task = MyTask.C(value=42)
+    config = ConfigWithTask.C(name="test_walk")
+    config.__xpm__.task = task
+
+    task.__xpm__.seal(context)
+    config.__xpm__.seal(context)
+
+    data = state_dict(context, [task, config])
+    [_, loaded_config] = from_state_dict(data, partial_loading=True)
+    assert isinstance(loaded_config.__xpm__.task, TaskStub)
+
+    # ConfigWalk with recurse_task=True should process loaded_config without error
+    walk = ConfigWalk(recurse_task=True)
+    result = walk(loaded_config)
+    assert result is not None
+
+
 # --- Tests for DataPath serialization ---
 
 
