@@ -1816,6 +1816,10 @@ class ConfigInformation:
                     )
 
             if as_instance:
+                # Parameters added after the object was serialized
+                for name in xpmtype.field_names - definition["fields"].keys():
+                    setattr(o, name, clone(xpmtype.arguments[name].default))
+
                 # Calls post-init
                 o.__post_init__()
 

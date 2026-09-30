@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from experimaestro import Config, Task, Annotated, copyconfig, field
@@ -394,3 +395,47 @@ def test_value_decorator_skip_intermediate():
     assert isinstance(instance, ValueSkipBaseImpl)
     assert instance.compute() == 2  # From ValueSkipBaseImpl
     assert instance.compute_all() == 6  # From ValueSkipDeepImpl
+
+
+class DummyFieldConfig(Config):
+    existing: Param[int] = field(default=10)
+    new_param: Param[Optional[int]] = field(default=None, ignore_default=True)
+    items: Param[list[str]] = field(default_factory=list)
+
+
+def test_field_names_and_load_objects_missing_defaults():
+    """Test that newly added fields with defaults are set when deserializing older instances"""
+    from experimaestro.core.objects import ConfigInformation
+    from experimaestro.core.context import SerializationContext
+    from experimaestro.core.serialization import state_dict
+
+    xpmtype = DummyFieldConfig.__getxpmtype__()
+    assert "new_param" in xpmtype.field_names
+    assert "items" in xpmtype.field_names
+    assert "existing" in xpmtype.field_names
+
+    # Create and serialize an instance
+    cfg = DummyFieldConfig.C(existing=42, new_param=99, items=["old"])
+    context = SerializationContext()
+    data = state_dict(context, [cfg])
+    definitions = data["objects"]
+
+    # Simulate an older checkpoint by removing newly added parameters from fields
+    definition = definitions[0]
+    definition["fields"].pop("new_param", None)
+    definition["fields"].pop("items", None)
+
+    # Load as instance
+    objects = ConfigInformation.load_objects([definition], as_instance=True)
+    inst = objects[definition["id"]]
+
+    # Existing parameter restored
+    assert inst.existing == 42
+    # Missing parameters initialized to cloned defaults
+    assert inst.new_param is None
+    assert inst.items == []
+
+    # In-place mutations on default containers work as expected
+    inst.items.append("test")
+    assert inst.items == ["test"]
+

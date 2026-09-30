@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import cached_property
 import inspect
 import sys
 from typing import (
@@ -574,6 +575,17 @@ class ObjectType(Type):
     def arguments(self) -> Dict[str, Argument]:
         self.__initialize__()
         return self._arguments
+
+    @cached_property
+    def field_names(self) -> frozenset[str]:
+        """Names of arguments declared with field() on the value class"""
+        from experimaestro.core.arguments import field
+
+        return frozenset(
+            name
+            for name in self.arguments
+            if isinstance(getattr(self.value_type, name, None), field)
+        )
 
     def addArgument(self, argument: Argument):
         # Check if this argument overrides a parent argument
