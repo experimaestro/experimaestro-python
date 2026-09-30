@@ -170,6 +170,9 @@ class _FakeClassProxy:
         object.__setattr__(self, "__qualname__", parts[-1])
         object.__setattr__(self, "__name__", parts[-1])
         object.__setattr__(self, "__module__", parts[0] if len(parts) > 1 else path)
+        # Provide __bases__ so that issubclass(obj_type, fake_class) (e.g. issubclass(X, torch.Tensor)
+        # in datasets.utils._dill) treats this proxy as a duck-typed class rather than raising TypeError.
+        object.__setattr__(self, "__bases__", ())
 
     def __repr__(self):
         return object.__getattribute__(self, "_path")
