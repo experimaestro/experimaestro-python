@@ -58,6 +58,12 @@ class PsutilProcess(Process):
             return ProcessState.RUNNING
         return ProcessState.FINISHED
 
+    def tospec(self):
+        return {"type": "local", "pid": self._process.pid}
+
+    def kill(self):
+        self._process.kill()
+
     def __repr__(self):
         return f"PsUtil({self._process})"
 
