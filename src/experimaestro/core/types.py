@@ -60,6 +60,12 @@ class Identifier:
     def __eq__(self, other):
         return other.name.__eq__(self.name)
 
+    def __getstate__(self):
+        return self.name
+
+    def __setstate__(self, state):
+        self.name = state
+
     def __getattr__(self, key):
         return self(key)
 
