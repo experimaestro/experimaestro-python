@@ -166,3 +166,16 @@ def test_validate_attrs_with_grid_search_annotation():
 
     assert tags[0] == {"lr": 0.05, "batch_size": 16}
     assert tags[1] == {"lr": 0.005, "batch_size": 64}
+
+
+def test_validate_attrs_warns_on_unrecognized_keys(caplog):
+    data = {
+        "id": "test",
+        "lr": 0.05,
+        "unexpected_key_xyz": 123,
+    }
+
+    cfg = validate_attrs(MainConfig, data)
+    assert cfg.id == "test"
+    assert any("WARNING: Unrecognized configuration keys" in record.message for record in caplog.records)
+    assert any("unexpected_key_xyz" in record.message for record in caplog.records)
