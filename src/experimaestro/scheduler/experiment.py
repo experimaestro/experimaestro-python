@@ -160,6 +160,7 @@ class experiment(BaseExperiment):
         launcher=None,
         register_signals: bool = True,
         project_paths: Optional[list[Path]] = None,
+        python_path: Optional[list[Union[Path, str]]] = None,
         wait_for_quit: bool = False,
         dirty_git: DirtyGitAction = DirtyGitAction.WARN,
         no_db: bool = False,
@@ -186,6 +187,13 @@ class experiment(BaseExperiment):
 
         :param project_paths: Paths to the project files (for git info). If not
             provided, will be inferred from the caller's location.
+
+        :param python_path: Extra import paths prepended to ``sys.path`` of task
+            workers. Task workers reconstruct the task module by file path and do
+            NOT inherit the launching interpreter's ``sys.path``; pass the roots
+            of any packages your tasks import *by name* at run time (plugins,
+            factories, sibling packages) here. Equivalent to exporting
+            ``PYTHONPATH`` before submitting.
 
         :param wait_for_quit: Deprecated, no longer used. Web server is no longer
             started automatically.
@@ -247,6 +255,14 @@ class experiment(BaseExperiment):
         # Creates the workspace
         run_mode = run_mode or RunMode.NORMAL
         self.workspace = Workspace(settings, env, launcher=launcher, run_mode=run_mode)
+
+        # Import paths made available to task workers (prepended to their
+        # sys.path by the script builder). Workers load the task module by file
+        # path and otherwise do not see the launcher's sys.path.
+        if python_path:
+            self.workspace.python_path.extend(
+                str(Path(p).resolve()) for p in python_path
+            )
 
         # Store experiment name for ID references
         self.name = name
