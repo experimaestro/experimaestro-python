@@ -1,24 +1,18 @@
-import sys
 import types
 import typing
 from typing import Generic, Protocol
 
-if sys.version_info.major == 3:
-    if sys.version_info.minor < 11:
-        from typing import _collect_type_vars as _collect_parameters
-    else:
+from typing import _AnnotatedAlias as AnnotatedAlias, get_args, get_origin
 
-        def _collect_parameters(bases):
-            """Collect type parameters from generic bases"""
-            parameters = []
-            for base in bases:
-                if hasattr(base, "__parameters__"):
-                    parameters.extend(base.__parameters__)
-            return tuple(parameters)
 
-        # from typing import _collect_parameters
+def _collect_parameters(bases):
+    """Collect type parameters from generic bases"""
+    parameters = []
+    for base in bases:
+        if hasattr(base, "__parameters__"):
+            parameters.extend(base.__parameters__)
+    return tuple(parameters)
 
-    from typing import _AnnotatedAlias as AnnotatedAlias, get_args, get_origin
 
 GenericAlias = typing._GenericAlias
 
