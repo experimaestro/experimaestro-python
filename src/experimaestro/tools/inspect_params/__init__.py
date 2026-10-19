@@ -13,6 +13,7 @@ from experimaestro.tools.inspect_params.app import (
     NodeDetailPane,
     NodeKind,
     ParamsInspectorApp,
+    ParamsInspectorScreen,
     ParamsTree,
 )
 from experimaestro.tools.inspect_params.discovery import (
@@ -43,6 +44,7 @@ __all__ = [
     "ObjectNode",
     "ParamsGraph",
     "ParamsInspectorApp",
+    "ParamsInspectorScreen",
     "ParamsTree",
     "ResolvedPath",
     "clean_job_target",

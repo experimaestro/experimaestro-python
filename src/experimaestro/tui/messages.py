@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Optional
 from textual.message import Message
 
 if TYPE_CHECKING:
-    from experimaestro.scheduler.interfaces import JobState
+    from experimaestro.scheduler.interfaces import BaseJob, JobState
 
 
 class ExperimentSelected(Message):
@@ -52,6 +52,24 @@ class ViewJobLogs(Message):
 
 class ViewJobLogsRequest(Message):
     """Message sent when user requests to view logs from jobs table"""
+
+    def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
+        super().__init__()
+        self.job_id = job_id
+        self.task_id = task_id
+        self.experiment_id = experiment_id
+
+
+class InspectJobParams(Message):
+    """Message sent when user wants to inspect job parameters"""
+
+    def __init__(self, job: "BaseJob") -> None:
+        super().__init__()
+        self.job = job
+
+
+class InspectJobParamsRequest(Message):
+    """Message sent when user requests to inspect parameters from jobs table or tree"""
 
     def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
         super().__init__()

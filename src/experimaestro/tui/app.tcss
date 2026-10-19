@@ -541,3 +541,95 @@ StrayJobsPanel Static,
 OrphanJobsPanel Static {
     height: auto;
 }
+
+/* Parameters Inspector styles */
+ParamsInspectorScreen {
+    background: $surface;
+    color: $text;
+}
+
+#mode-bar {
+    height: auto;
+    background: $boost;
+    padding: 0 1;
+    border-bottom: solid $primary;
+}
+
+.title-badge {
+    padding: 0 1;
+    background: $primary;
+    color: $text;
+    text-style: bold;
+}
+
+#mode-hints {
+    color: $text-muted;
+    text-style: italic;
+    padding-left: 2;
+}
+
+#search-bar-container {
+    height: auto;
+    background: $boost;
+    padding: 0 1;
+    align: left middle;
+}
+
+#search-status {
+    padding: 0 1;
+    width: auto;
+    height: 100%;
+    content-align: center middle;
+}
+
+#search-status.error {
+    color: $error;
+    text-style: bold;
+}
+
+#search-status.valid {
+    color: $success;
+    text-style: bold;
+}
+
+#split-container {
+    width: 100%;
+    height: 1fr;
+}
+
+#tree-container {
+    width: 60%;
+    height: 100%;
+    border-right: solid $primary;
+}
+
+ParamsTree {
+    width: 100%;
+    height: 100%;
+    background: $surface;
+}
+
+#detail-pane {
+    width: 40%;
+    height: 100%;
+    padding: 1;
+    background: $surface;
+}
+
+#detail-content {
+    width: 100%;
+    height: auto;
+}
+
+.loading-message {
+    content-align: center middle;
+    height: 100%;
+    text-style: italic;
+    color: $text-muted;
+}
+
+.error-message {
+    content-align: center middle;
+    height: 100%;
+    color: $error;
+}

@@ -137,6 +137,7 @@ class HelpScreen(ModalScreen[None]):
 
 [bold cyan]Jobs[/bold cyan]
   l         View job logs
+  i         Inspect job parameters
   Ctrl+d    Delete job
   Ctrl+k    Kill running job
   /         Open search filter

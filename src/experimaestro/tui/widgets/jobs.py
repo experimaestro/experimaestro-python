@@ -23,6 +23,8 @@ from experimaestro.tui.messages import (
     JobHighlighted,
     ViewJobLogs,
     ViewJobLogsRequest,
+    InspectJobParams,
+    InspectJobParamsRequest,
     DeleteJobRequest,
     KillJobRequest,
     FilterChanged,
@@ -178,6 +180,7 @@ class JobDetailView(Widget):
 
     BINDINGS = [
         Binding("l", "view_logs", "View Logs", priority=True),
+        Binding("i", "inspect_params", "Inspect Params", priority=True),
     ]
 
     def __init__(self, state_provider: StateProvider) -> None:
@@ -225,6 +228,11 @@ class JobDetailView(Widget):
                     str(self.job_data.path), self.job_data.task_id, self.job_data.state
                 )
             )
+
+    def action_inspect_params(self) -> None:
+        """Inspect job parameters with TUI inspector"""
+        if self.job_data:
+            self.post_message(InspectJobParams(self.job_data))
 
     def _get_process_info(self, job) -> str:
         """Get process information for a job using the state provider"""
@@ -503,21 +511,29 @@ class JobDetailView(Widget):
             progress_text = "-"
         self.query_one("#job-progress-label", Label).update(progress_text)
 
-        # Log files hint - log files are named after the last part of the task ID
+        # Actions hint (logs and parameters)
         job_path = job.path
         task_id = job.task_id
         if job_path and task_id:
-            # Extract the last component of the task ID (e.g., "evaluate" from "mnist_xp.learn.evaluate")
-            task_name = task_id.split(".")[-1]
-            stdout_path = job_path / f"{task_name}.out"
-            stderr_path = job_path / f"{task_name}.err"
-            logs_exist = stdout_path.exists() or stderr_path.exists()
-            if logs_exist:
-                self.query_one("#job-logs-hint", Label).update(
-                    "[bold cyan]Press 'l' to view logs[/bold cyan]"
-                )
+            if self.state_provider.is_remote:
+                logs_exist = bool(job.state and job.state != JobState.SCHEDULED)
+                params_exist = self.state_provider.has_job_params(job)
             else:
-                self.query_one("#job-logs-hint", Label).update("(no log files found)")
+                task_name = task_id.split(".")[-1]
+                stdout_path = job_path / f"{task_name}.out"
+                stderr_path = job_path / f"{task_name}.err"
+                logs_exist = stdout_path.exists() or stderr_path.exists()
+                params_exist = self.state_provider.has_job_params(job)
+
+            if logs_exist and params_exist:
+                hint = "[bold cyan]Press 'l' to view logs, 'i' to inspect params[/bold cyan]"
+            elif params_exist:
+                hint = "[bold cyan]Press 'i' to inspect params[/bold cyan] [dim](no logs yet)[/dim]"
+            elif logs_exist:
+                hint = "[bold cyan]Press 'l' to view logs[/bold cyan]"
+            else:
+                hint = "(no log or param files found)"
+            self.query_one("#job-logs-hint", Label).update(hint)
         else:
             self.query_one("#job-logs-hint", Label).update("")
 
@@ -572,6 +588,7 @@ class JobsTreeView(Widget):
         Binding("E", "collapse_all", "Collapse All", show=False),
         Binding("enter", "select_node", "Select", show=False),
         Binding("l", "view_logs", "Logs", key_display="l"),
+        Binding("i", "inspect_params", "Inspect", key_display="i"),
         Binding("ctrl+d", "delete_job", "Delete", show=False),
         Binding("ctrl+k", "kill_job", "Kill", show=False),
     ]
@@ -1098,6 +1115,15 @@ class JobsTreeView(Widget):
                 ViewJobLogsRequest(data.job_id, data.task_id, self.current_experiment)
             )
 
+    def action_inspect_params(self) -> None:
+        data = self._get_selected_job_data()
+        if data and self.current_experiment:
+            self.post_message(
+                InspectJobParamsRequest(
+                    data.job_id, data.task_id, self.current_experiment
+                )
+            )
+
     def action_delete_job(self) -> None:
         data = self._get_selected_job_data()
         if data and self.current_experiment:
@@ -1128,6 +1154,7 @@ class JobsTable(Vertical):
         Binding("ctrl+d", "delete_job", "Delete", show=False),
         Binding("ctrl+k", "kill_job", "Kill", show=False),
         Binding("l", "view_logs", "Logs", key_display="l"),
+        Binding("i", "inspect_params", "Inspect", key_display="i"),
         Binding("f", "copy_path", "Copy Path", show=False),
         Binding("/", "toggle_search", "Search"),
         Binding("c", "clear_filter", "Clear", show=False),
@@ -1358,6 +1385,18 @@ class JobsTable(Vertical):
         if task_id:
             self.post_message(
                 ViewJobLogsRequest(job_id, task_id, self.current_experiment)
+            )
+
+    def action_inspect_params(self) -> None:
+        """Request to inspect params for the selected job"""
+        selected = self._get_selected_job_info()
+        if selected is None:
+            return
+
+        job_id, task_id = selected
+        if task_id:
+            self.post_message(
+                InspectJobParamsRequest(job_id, task_id, self.current_experiment)
             )
 
     def _get_selected_job_info(self) -> tuple[str, str] | None:

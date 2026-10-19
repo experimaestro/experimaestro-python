@@ -535,11 +535,48 @@ class StateProvider(ABC):
         """
         return None
 
-    def sync_path(self, path: str) -> Optional[Path]:
+    def sync_path(self, path: str, include: list[str] | None = None) -> Optional[Path]:
         """Sync a specific path from remote (remote providers only)
 
         Returns None for local providers or if sync fails.
         """
+        return None
+
+    def has_job_params(self, job: BaseJob) -> bool:
+        """Check if parameter definitions exist for a job."""
+        if not job or not job.path:
+            return False
+        if self.is_remote:
+            return True
+        return (job.path / "params.json").is_file() or (
+            job.path / "experimaestro.json"
+        ).is_file()
+
+    def get_job_params_file(self, job: BaseJob) -> Optional[Path]:
+        """Get the local path to a job's parameters file (params.json or experimaestro.json).
+
+        For local providers, checks the job directory on disk.
+        For remote providers, synchronizes params.json or experimaestro.json to the local
+        cache directory using sync_path and returns the local Path.
+        """
+        if not job or not job.path:
+            return None
+
+        if self.is_remote:
+            local_dir = self.sync_path(
+                str(job.path), include=["params.json", "experimaestro.json"]
+            )
+            if local_dir:
+                for filename in ("params.json", "experimaestro.json"):
+                    cand = local_dir / filename
+                    if cand.is_file():
+                        return cand
+            return None
+
+        for filename in ("params.json", "experimaestro.json"):
+            cand = job.path / filename
+            if cand.is_file():
+                return cand
         return None
 
     def get_orphan_jobs(self, *, refresh: bool = False) -> List[BaseJob]:

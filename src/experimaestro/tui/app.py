@@ -40,6 +40,8 @@ from experimaestro.tui.messages import (
     JobHighlighted,
     ViewJobLogs,
     ViewJobLogsRequest,
+    InspectJobParams,
+    InspectJobParamsRequest,
     DeleteJobRequest,
     DeleteExperimentRequest,
     KillJobRequest,
@@ -82,6 +84,7 @@ class ExperimaestroUI(App):
         Binding("?", "show_help", "Help"),
         Binding("escape", "go_back", "Back", show=False),
         Binding("l", "view_logs", "Logs", show=False),
+        Binding("i", "inspect_params", "Inspect Params", show=False),
         Binding("w", "view_workspace_log", "Workspace Log", show=False),
         Binding("j", "focus_jobs", "Jobs", show=False),
         Binding("s", "focus_services", "Services", show=False),
@@ -697,6 +700,13 @@ class ExperimaestroUI(App):
             job_detail_view = self.query_one(JobDetailView)
             job_detail_view.action_view_logs()
 
+    def action_inspect_params(self) -> None:
+        """Inspect parameters for the current job (if job detail is visible)"""
+        job_detail_container = self.query_one("#job-detail-container")
+        if not job_detail_container.has_class("hidden"):
+            job_detail_view = self.query_one(JobDetailView)
+            job_detail_view.action_inspect_params()
+
     def action_view_workspace_log(self) -> None:
         """View workspace-level experimaestro log for current run"""
         if not self.state_provider:
@@ -786,6 +796,43 @@ class ExperimaestroUI(App):
             self.notify("Cannot find job logs", severity="warning")
             return
         self.post_message(ViewJobLogs(str(job.path), job.task_id, job.state))
+
+    def on_inspect_job_params_request(self, message: InspectJobParamsRequest) -> None:
+        """Handle params inspection request from jobs table or tree"""
+        job = self.state_provider.get_job(message.task_id, message.job_id)
+        if not job:
+            self.notify("Cannot find job", severity="warning")
+            return
+        self.post_message(InspectJobParams(job))
+
+    def on_inspect_job_params(self, message: InspectJobParams) -> None:
+        """Handle request to inspect job parameters - push ParamsInspectorScreen"""
+        from experimaestro.tools.inspect_params import ParamsInspectorScreen
+
+        job = message.job
+        if not self.state_provider.is_remote:
+            params_file = self.state_provider.get_job_params_file(job)
+            if not params_file or not params_file.is_file():
+                self.notify(
+                    f"Parameters file not found for {job.identifier[:8]}",
+                    severity="warning",
+                )
+                return
+            self.push_screen(
+                ParamsInspectorScreen(
+                    params_target=params_file,
+                    title=f"Job {job.identifier[:8]}",
+                )
+            )
+        else:
+            self.push_screen(
+                ParamsInspectorScreen(
+                    params_target=None,
+                    job=job,
+                    state_provider=self.state_provider,
+                    title=f"Job {job.identifier[:8]}",
+                )
+            )
 
     def on_delete_job_request(self, message: DeleteJobRequest) -> None:
         """Handle job deletion request"""

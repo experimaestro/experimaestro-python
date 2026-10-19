@@ -8,7 +8,7 @@ from enum import Enum
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 import pyperclip  # type: ignore[import-untyped]
 from rich.console import Group
@@ -20,13 +20,20 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import Screen
+from textual import work
 from textual.widgets import Footer, Header, Input, Static, Tree
 from textual.widgets.tree import TreeNode
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.interfaces import BaseJob
+    from experimaestro.scheduler.state_provider import StateProvider
 
 from experimaestro.tools.inspect_params.models import (
     ParamsGraph,
     ResolvedPath,
 )
+from experimaestro.tui import APP_TCSS_PATH
 
 logger = logging.getLogger("experimaestro")
 
@@ -133,7 +140,7 @@ class ParamsTree(Tree[NodeData]):
         if self.filter_query:
             text.highlight_words(
                 [self.filter_query],
-                style="bold black on #f9e2af",
+                style="bold black on yellow",
                 case_sensitive=False,
             )
 
@@ -790,32 +797,20 @@ class NodeDetailPane(VerticalScroll):
 # ---------------------------------------------------------------------------
 
 
-class ParamsInspectorApp(App):
-    """Standalone Textual App for inspecting experimaestro params.json.
+# ---------------------------------------------------------------------------
+# Inspector Screen & App
+# ---------------------------------------------------------------------------
 
-    Features interactive tree navigation, categorization, path resolution,
-    fuzzy search filtering, Python snippet copying, and raw JSON inspection.
+
+class ParamsInspectorScreen(Screen, inherit_bindings=False):
+    """Textual Screen for inspecting experimaestro parameters.
+
+    Supports both standalone CLI usage and embedding within ExperimaestroUI.
+    Can load parameters from a local file, pre-parsed ParamsGraph, or
+    on-demand via StateProvider (for remote clusters).
     """
 
-    TITLE = "Experimaestro Parameters Inspector"
-    CSS = """
-    Screen { background: #1e1e2e; color: #cdd6f4; }
-    #mode-bar { height: auto; background: #181825; padding: 0 1; border-bottom: solid #313244; }
-    .title-badge { padding: 0 1; background: #89b4fa; color: #11111b; text-style: bold; }
-    #mode-hints { color: #a6adc8; padding-left: 2; }
-    #search-bar-container { height: auto; background: #313244; padding: 0 1; align: left middle; }
-    #search-bar-container.hidden { display: none; }
-    #search-input { width: 1fr; }
-    #search-input.not-found { color: #f38ba8; border: tall #f38ba8; }
-    #search-status { padding: 0 1; width: auto; height: 100%; content-align: center middle; }
-    #search-status.not-found { color: #f38ba8; text-style: bold; }
-    #search-status.matched { color: #a6e3a1; text-style: bold; }
-    #split-container { width: 100%; height: 1fr; }
-    #tree-container { width: 60%; height: 100%; border-right: solid #313244; }
-    ParamsTree { width: 100%; height: 100%; background: #1e1e2e; }
-    #detail-pane { width: 40%; height: 100%; padding: 1; background: #181825; }
-    #detail-content { width: 100%; height: auto; }
-    """
+    CSS_PATH = APP_TCSS_PATH
 
     BINDINGS = [
         Binding("g", "toggle_grouping", "Group Fields", show=True),
@@ -827,67 +822,169 @@ class ParamsInspectorApp(App):
         Binding("y", "copy_python", "Copy Python", show=True),
         Binding("J", "toggle_raw_json", "Raw JSON", key_display="J", show=True),
         Binding("j", "jump_primary", "Jump", show=True),
-        Binding("escape", "dismiss_or_quit", "Back/Quit", show=True),
-        Binding("q", "quit", "Quit", show=False),
+        Binding("escape", "dismiss_or_quit", "Back", show=True, priority=True),
+        Binding("q", "dismiss_or_quit", "Back", show=False, priority=True),
     ]
 
-    def __init__(self, params_path: Path):
-        """Initialize the parameters inspector application.
+    def __init__(
+        self,
+        params_target: Path | str | ParamsGraph | None = None,
+        job: Optional["BaseJob"] = None,
+        state_provider: Optional["StateProvider"] = None,
+        title: Optional[str] = None,
+    ):
+        """Initialize the parameters inspector screen.
 
         Args:
-            params_path: Filesystem path to the parameters JSON file.
+            params_target: Filesystem path or already-parsed ParamsGraph.
+            job: BaseJob instance for StateProvider retrieval.
+            state_provider: StateProvider for fetching parameters.
+            title: Custom title for the screen header.
         """
         super().__init__()
-        self.params_path = Path(params_path).resolve()
-        self.graph = ParamsGraph.from_file(self.params_path)
-        jname = self.graph.job_path.name if self.graph.job_path else "job"
-        self.sub_title = f"{jname} ({self.params_path.parent.parent.name if self.graph.job_path else ''})"
+        self.job = job
+        self.state_provider = state_provider
+        self.custom_title = title
+        self.params_path: Optional[Path] = None
+        self.graph: Optional[ParamsGraph] = None
+        self._loading = False
+
+        if isinstance(params_target, ParamsGraph):
+            self.graph = params_target
+            if self.graph.job_path:
+                self.params_path = self.graph.job_path
+        elif params_target is not None:
+            self.params_path = Path(params_target).resolve()
+            self.graph = ParamsGraph.from_file(self.params_path)
+        elif self.job is not None and self.state_provider is not None:
+            if not self.state_provider.is_remote:
+                p = self.state_provider.get_job_params_file(self.job)
+                if p:
+                    self.params_path = p
+                    self.graph = ParamsGraph.from_file(p)
+                else:
+                    self._loading = True
+            else:
+                self._loading = True
+        else:
+            raise ValueError(
+                "Either params_target or (job and state_provider) must be provided"
+            )
+
+        if self.custom_title:
+            self.title = self.custom_title
+        elif self.params_path and self.graph:
+            jname = self.graph.job_path.name if self.graph.job_path else "job"
+            self.sub_title = f"{jname} ({self.params_path.parent.parent.name if self.graph.job_path else ''})"
 
     def compose(self) -> ComposeResult:
-        """Compose top-level layout of the application."""
+        """Compose top-level layout of the screen."""
         yield Header()
-        with Horizontal(id="mode-bar"):
-            yield Static(" ⚙️ Config Tree ", id="view-title", classes="title-badge")
+        if self._loading:
             yield Static(
-                " [g] Group  ·  [p] Paths  ·  [J] Raw JSON  ·  [/] Search",
-                id="mode-hints",
+                "Syncing parameters from remote...",
+                id="loading",
+                classes="loading-message",
             )
-        with Horizontal(id="search-bar-container", classes="hidden"):
-            yield Input(placeholder="Filter parameters...", id="search-input")
-            yield Static("", id="search-status")
-        with Horizontal(id="split-container"):
-            with Vertical(id="tree-container"):
-                yield ParamsTree(self.graph)
-            yield NodeDetailPane(self.graph)
+        else:
+            with Horizontal(id="mode-bar"):
+                yield Static(" ⚙️ Config Tree ", id="view-title", classes="title-badge")
+                yield Static(
+                    " [g] Group  ·  [p] Paths  ·  [J] Raw JSON  ·  [/] Search",
+                    id="mode-hints",
+                )
+            with Horizontal(id="search-bar-container", classes="hidden"):
+                yield Input(placeholder="Filter parameters...", id="search-input")
+                yield Static("", id="search-status")
+            with Horizontal(id="split-container"):
+                with Vertical(id="tree-container"):
+                    yield ParamsTree(self.graph)
+                yield NodeDetailPane(self.graph)
         yield Footer()
 
     def on_mount(self) -> None:
-        """Set initial focus to the parameters tree on mount."""
-        self.query_one(ParamsTree).focus()
+        """Set initial focus or start remote sync on mount."""
+        if self._loading:
+            self._start_remote_sync()
+        else:
+            self.query_one(ParamsTree).focus()
+
+    @work(thread=True)
+    def _start_remote_sync(self) -> None:
+        """Fetch parameters file via StateProvider in background thread."""
+        try:
+            if self.state_provider and self.job:
+                p = self.state_provider.get_job_params_file(self.job)
+                if p and p.is_file():
+                    self.params_path = p
+                    self.graph = ParamsGraph.from_file(p)
+                    self.app.call_from_thread(self._on_sync_success)
+                    return
+            self.app.call_from_thread(
+                self._on_sync_failure, "Parameters file not found"
+            )
+        except Exception as e:
+            self.app.call_from_thread(self._on_sync_failure, str(e))
+
+    def _on_sync_success(self) -> None:
+        """Mount inspector widgets once remote parameters have been retrieved."""
+        self._loading = False
+        try:
+            loading = self.query_one("#loading", Static)
+            loading.remove()
+        except Exception:
+            pass
+
+        footer = self.query_one(Footer)
+        mode_bar = Horizontal(
+            Static(" ⚙️ Config Tree ", id="view-title", classes="title-badge"),
+            Static(
+                " [g] Group  ·  [p] Paths  ·  [J] Raw JSON  ·  [/] Search",
+                id="mode-hints",
+            ),
+            id="mode-bar",
+        )
+        search_bar = Horizontal(
+            Input(placeholder="Filter parameters...", id="search-input"),
+            Static("", id="search-status"),
+            id="search-bar-container",
+            classes="hidden",
+        )
+        split = Horizontal(
+            Vertical(ParamsTree(self.graph), id="tree-container"),
+            NodeDetailPane(self.graph),
+            id="split-container",
+        )
+        self.mount(mode_bar, before=footer)
+        self.mount(search_bar, before=footer)
+        self.mount(split, before=footer)
+
+        if not self.custom_title and self.params_path and self.graph:
+            jname = self.graph.job_path.name if self.graph.job_path else "job"
+            self.sub_title = f"{jname} ({self.params_path.parent.parent.name if self.graph.job_path else ''})"
+
+        tree = self.query_one(ParamsTree)
+        tree.focus()
+
+    def _on_sync_failure(self, error_msg: str) -> None:
+        """Display error message when sync fails."""
+        try:
+            loading = self.query_one("#loading", Static)
+            loading.update(f"⚠️ {error_msg}\n\nPress Esc or 'q' to go back.")
+        except Exception:
+            pass
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        """Update detail inspector pane when cursor moves over a node.
-
-        Args:
-            event: Textual NodeHighlighted event.
-        """
+        """Update detail inspector pane when cursor moves over a node."""
         self.query_one(NodeDetailPane).update_detail(event.node.data)
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        """Activate selected node, jumping to primary definition if shared.
-
-        Args:
-            event: Textual NodeSelected event.
-        """
+        """Activate selected node, jumping to primary definition if shared."""
         if event.node.data and event.node.data.target_object_id:
             self.action_jump_primary()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Filter tree view as query string changes.
-
-        Args:
-            event: Textual Input.Changed event.
-        """
+        """Filter tree view as query string changes."""
         tree = self.query_one(ParamsTree)
         tree.set_filter(event.value)
         inp = self.query_one("#search-input", Input)
@@ -897,34 +994,33 @@ class ParamsInspectorApp(App):
         q = event.value.strip()
         if q:
             if tree.match_count == 0:
-                inp.add_class("not-found")
-                status.remove_class("matched")
-                status.add_class("not-found")
+                inp.add_class("error")
+                inp.remove_class("valid")
+                status.remove_class("valid")
+                status.add_class("error")
                 status.update(" (not found)")
                 hints.update(
                     f" [g] Group  ·  [p] Paths  ·  [/] Search: '{q}' [bold red](not found)[/bold red]"
                 )
             else:
-                inp.remove_class("not-found")
-                status.remove_class("not-found")
-                status.add_class("matched")
+                inp.remove_class("error")
+                inp.add_class("valid")
+                status.remove_class("error")
+                status.add_class("valid")
                 status.update(f" ({tree.match_count} matched)")
                 hints.update(
                     f" [g] Group  ·  [p] Paths  ·  [/] Search: '{q}' [green]({tree.match_count} matched)[/green]"
                 )
         else:
-            inp.remove_class("not-found")
-            status.remove_class("not-found")
-            status.remove_class("matched")
+            inp.remove_class("error")
+            inp.remove_class("valid")
+            status.remove_class("error")
+            status.remove_class("valid")
             status.update("")
             hints.update(" [g] Group  ·  [p] Paths  ·  [J] Raw JSON  ·  [/] Search")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Hide search bar and return focus to tree upon query submission.
-
-        Args:
-            event: Textual Input.Submitted event.
-        """
+        """Hide search bar and return focus to tree upon query submission."""
         self.query_one("#search-bar-container").add_class("hidden")
         self.query_one(ParamsTree).focus()
 
@@ -1042,22 +1138,97 @@ class ParamsInspectorApp(App):
             self.notify(f"Jumped to primary definition #{tid}")
 
     def action_dismiss_or_quit(self) -> None:
-        """Dismiss the search bar if visible, or exit the application."""
-        box = self.query_one("#search-bar-container")
-        if "hidden" not in box.classes:
-            box.add_class("hidden")
-            inp = self.query_one("#search-input", Input)
-            inp.value = ""
-            inp.remove_class("not-found")
-            status = self.query_one("#search-status", Static)
-            status.remove_class("not-found")
-            status.remove_class("matched")
-            status.update("")
-            self.query_one("#mode-hints", Static).update(
-                " [g] Group  ·  [p] Paths  ·  [J] Raw JSON  ·  [/] Search"
-            )
-            tree = self.query_one(ParamsTree)
-            tree.set_filter("")
-            tree.focus()
-            return
-        self.exit()
+        """Dismiss the search bar if visible, or exit the application/screen."""
+        if not self._loading:
+            try:
+                box = self.query_one("#search-bar-container")
+                if "hidden" not in box.classes:
+                    box.add_class("hidden")
+                    inp = self.query_one("#search-input", Input)
+                    inp.value = ""
+                    inp.remove_class("error")
+                    inp.remove_class("valid")
+                    status = self.query_one("#search-status", Static)
+                    status.remove_class("error")
+                    status.remove_class("valid")
+                    status.update("")
+                    self.query_one("#mode-hints", Static).update(
+                        " [g] Group  ·  [p] Paths  ·  [J] Raw JSON  ·  [/] Search"
+                    )
+                    tree = self.query_one(ParamsTree)
+                    tree.set_filter("")
+                    tree.focus()
+                    return
+            except Exception:
+                pass
+
+        if len(self.app.screen_stack) > 1:
+            self.dismiss()
+        else:
+            self.app.exit()
+
+
+class ParamsInspectorApp(App):
+    """Standalone Textual App for inspecting experimaestro params.json.
+
+    Features interactive tree navigation, categorization, path resolution,
+    fuzzy search filtering, Python snippet copying, and raw JSON inspection.
+    """
+
+    TITLE = "Experimaestro Parameters Inspector"
+    CSS_PATH = APP_TCSS_PATH
+
+    def __init__(self, params_path: Path):
+        """Initialize the parameters inspector application.
+
+        Args:
+            params_path: Filesystem path to the parameters JSON file.
+        """
+        super().__init__()
+        self.params_path = Path(params_path).resolve()
+        self.inspector_screen = ParamsInspectorScreen(self.params_path)
+
+    def get_default_screen(self) -> Screen:
+        """Return the inspector screen as the default screen."""
+        return self.inspector_screen
+
+    @property
+    def graph(self) -> Optional[ParamsGraph]:
+        """Accessor for the underlying ParamsGraph."""
+        return self.inspector_screen.graph
+
+    def action_expand_all(self) -> None:
+        """Forward expand_all to inspector screen."""
+        self.inspector_screen.action_expand_all()
+
+    def action_collapse_all(self) -> None:
+        """Forward collapse_all to inspector screen."""
+        self.inspector_screen.action_collapse_all()
+
+    def action_toggle_grouping(self) -> None:
+        """Forward toggle_grouping to inspector screen."""
+        self.inspector_screen.action_toggle_grouping()
+
+    def action_toggle_paths(self) -> None:
+        """Forward toggle_paths to inspector screen."""
+        self.inspector_screen.action_toggle_paths()
+
+    def action_toggle_raw_json(self) -> None:
+        """Forward toggle_raw_json to inspector screen."""
+        self.inspector_screen.action_toggle_raw_json()
+
+    def action_toggle_search(self) -> None:
+        """Forward toggle_search to inspector screen."""
+        self.inspector_screen.action_toggle_search()
+
+    def action_copy_value(self) -> None:
+        """Forward copy_value to inspector screen."""
+        self.inspector_screen.action_copy_value()
+
+    def action_copy_python(self) -> None:
+        """Forward copy_python to inspector screen."""
+        self.inspector_screen.action_copy_python()
+
+    def action_jump_primary(self) -> None:
+        """Forward jump_primary to inspector screen."""
+        self.inspector_screen.action_jump_primary()
