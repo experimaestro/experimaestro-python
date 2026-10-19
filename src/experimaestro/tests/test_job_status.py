@@ -108,3 +108,9 @@ def test_experiment_carbon_summary(tmp_path):
         tmp_path, "run", carbon_impact=CarbonImpactData(sum=total)
     )
     assert experiment.carbon_summary is total
+
+
+def test_failure_reasons_are_distinct():
+    """No failure reason is an alias of another (deleted ≠ missing outputs)"""
+    assert len(JobFailureStatus.__members__) == len(list(JobFailureStatus))
+    assert JobFailureStatus["DELETED"] is not JobFailureStatus.MISSING_OUTPUTS

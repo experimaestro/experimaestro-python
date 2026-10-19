@@ -405,7 +405,7 @@ class JobFailureStatus(enum.Enum):
     REJECTED_OTHER = 6
 
     #: Job data was deleted by the user
-    DELETED = 7
+    DELETED = 8
 
 
 class ExperimentStatus(enum.Enum):
