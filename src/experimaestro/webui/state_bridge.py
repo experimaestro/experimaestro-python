@@ -16,6 +16,7 @@ from experimaestro.scheduler.state_status import (
     ExperimentUpdatedEvent,
     ExperimentJobStateEvent,
     JobStateChangedEvent,
+    JobEventBase,
     JobProgressEvent,
     CarbonMetricsEvent,
     JobSubmittedEvent,
@@ -131,29 +132,37 @@ class StateBridge:
 
     async def _handle_job_state_changed(self, event: JobStateChangedEvent):
         """Handle job execution state change - broadcast job.update"""
-        await self._broadcast_job_update(event.job_id)
+        await self._broadcast_job_update(event)
 
     async def _handle_experiment_job_state(self, event: ExperimentJobStateEvent):
         """Handle scheduler lifecycle state change - broadcast job.update"""
-        await self._broadcast_job_update(event.job_id)
+        await self._broadcast_job_update(event)
 
     async def _handle_job_progress(self, event: JobProgressEvent):
         """Handle progress update - broadcast job.update"""
-        await self._broadcast_job_update(event.job_id)
+        await self._broadcast_job_update(event)
 
     async def _handle_carbon_metrics(self, event: CarbonMetricsEvent):
         """Handle carbon metrics update - broadcast job.update (carries carbon)"""
-        await self._broadcast_job_update(event.job_id)
+        await self._broadcast_job_update(event)
 
-    async def _broadcast_job_update(self, job_id: str):
-        """Broadcast job.update for a given job_id"""
-        from experimaestro.webui.websocket import serialize_job
+    async def _broadcast_job_update(self, event: JobEventBase):
+        """Broadcast the execution state of the job an event is about"""
+        from experimaestro.webui.websocket import serialize_job_update
 
-        # Fetch job from state provider
-        jobs = self.state_provider.get_all_jobs()
-        job = next((j for j in jobs if j.identifier == job_id), None)
+        if event.task_id:
+            job = self.state_provider.get_job(event.task_id, event.job_id)
+        else:
+            job = next(
+                (
+                    j
+                    for j in self.state_provider.get_all_jobs()
+                    if j.identifier == event.job_id
+                ),
+                None,
+            )
         if job:
-            await self.ws_handler.broadcast("job.update", serialize_job(job))
+            await self.ws_handler.broadcast("job.update", serialize_job_update(job))
 
     async def _handle_job_submitted(self, event: JobSubmittedEvent):
         """Handle job added to experiment - broadcast job.add"""

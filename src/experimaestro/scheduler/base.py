@@ -1859,8 +1859,17 @@ class Scheduler(StateProvider, threading.Thread):
         if actual_job is None:
             raise RuntimeError("Job not found in scheduler")
 
-        # Try to kill the process via the _process attribute
-        process = actual_job._process
+        # The process handle, or the one recorded in the PID file (job
+        # re-attached from an earlier run)
+        try:
+            in_loop = asyncio.get_running_loop() is self.loop
+        except RuntimeError:
+            in_loop = False
+        if in_loop:
+            raise RuntimeError("kill_job cannot be called from the scheduler loop")
+        process = asyncio.run_coroutine_threadsafe(
+            actual_job.aio_process(), self.loop
+        ).result()
         if process is None:
             raise RuntimeError("No process found for job")
 

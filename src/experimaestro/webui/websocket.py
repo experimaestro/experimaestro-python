@@ -158,6 +158,23 @@ def serialize_job(
     return _job_dict_to_frontend(d)
 
 
+#: Frontend job fields that depend on the experiment, not on the job execution
+_EXPERIMENT_JOB_FIELDS = ("tags", "dependsOn", "experimentIds", "submitted")
+
+
+def serialize_job_update(job: BaseJob, process_info: Any = None) -> Dict[str, Any]:
+    """Serialize the execution state of a job, for ``job.update`` messages
+
+    Experiment-specific fields (tags, dependencies, experiments, submit time)
+    are left out: the client merges updates into the job it received with
+    ``job.add``, and empty values would overwrite the ones it has.
+    """
+    payload = serialize_job(job, process_info=process_info)
+    for name in _EXPERIMENT_JOB_FIELDS:
+        del payload[name]
+    return payload
+
+
 def serialize_live_job(job: Job) -> Dict[str, Any]:
     """Serialize a live Job from scheduler with full metadata"""
     # Get experiment IDs (must match serialize_experiment's experiment_id, which
@@ -577,7 +594,9 @@ class WebSocketHandler:
                     await websocket.send_json(
                         {
                             "type": "job.update",
-                            "payload": serialize_job(job, process_info=process_info),
+                            "payload": serialize_job_update(
+                                job, process_info=process_info
+                            ),
                         }
                     )
 

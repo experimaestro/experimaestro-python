@@ -474,7 +474,7 @@ def stray(
         # Delete non-running jobs if requested
         if delete and (not job.state or not job.state.running()):
             if perform:
-                success, msg = provider.delete_job_safely(job, cascade_orphans=False)
+                success, msg = provider.delete_job_safely(job, perform=True)
                 if success:
                     cprint("  DELETED", "light_red")
                     deleted_count += 1
