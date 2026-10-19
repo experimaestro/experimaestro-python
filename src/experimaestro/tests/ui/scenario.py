@@ -69,6 +69,8 @@ OLD_LEARN = "a0oldlearn"
 LEARN_RUNNING = "b1learnrunning"
 EVAL_WAITING = "b2evalwaiting"
 LEARN_STUCK = "b3learnstuck"
+ABLATION_DONE = "d1ablationdone"
+ABLATION_NOT_RUN = "d2ablationnotrun"
 ORPHAN_DONE = "c1orphandone"
 STRAY_RUNNING = "c2strayrunning"
 
@@ -127,6 +129,27 @@ EXPERIMENTS = [
                     ),
                     JobSpec(
                         LEARN_STUCK, "pkg.Learn", "running", {"model": "dense"}, [], 2
+                    ),
+                ],
+            )
+        ],
+    ),
+    # Stopped (e.g. interrupted) before all its jobs could run
+    ExperimentSpec(
+        "ablation",
+        [
+            RunSpec(
+                "20260104_080000",
+                ExperimentStatus.FAILED,
+                [
+                    JobSpec(ABLATION_DONE, "pkg.Learn", "done", {"model": "tiny"}),
+                    JobSpec(
+                        ABLATION_NOT_RUN,
+                        "pkg.Evaluate",
+                        "unscheduled",
+                        {"model": "tiny"},
+                        [ABLATION_DONE],
+                        1,
                     ),
                 ],
             )

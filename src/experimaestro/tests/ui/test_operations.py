@@ -86,7 +86,7 @@ async def test_delete_experiment(ui, provider):
     assert await ui.delete_experiment("baseline") == Notification(
         "info", "Experiment baseline deleted"
     )
-    assert await ui.experiments() == {"sweep"}
+    assert set(await ui.experiments()) == {"sweep", "ablation"}
     # Job directories are kept
     assert LEARN_DONE in provider.jobs
 
@@ -96,7 +96,7 @@ async def test_delete_experiment_refuses_running_one(ui, provider):
         await ui.delete_experiment("sweep"),
         "Cannot delete: experiment is still running",
     )
-    assert await ui.experiments() == {"baseline", "sweep"}
+    assert set(await ui.experiments()) == {"baseline", "sweep", "ablation"}
 
 
 # --- Orphans

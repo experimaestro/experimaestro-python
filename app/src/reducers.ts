@@ -12,6 +12,8 @@ export type Experiment = {
   workdir?: string;
   current_run_id?: string | null;
   status?: string | null;
+  // Displayed status, shared with the TUI: failed, running, done, stopped or empty
+  statusCategory: string;
   hostname?: string | null;
   started_at?: string | null;
   ended_at?: string | null;

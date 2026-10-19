@@ -70,7 +70,7 @@ class UIDriver(Protocol):
     name: str
 
     async def experiments(self) -> dict[str, str]:
-        """Experiments shown, with their (lowercase) status"""
+        """Experiments shown, with their status (``BaseExperiment.status_category``)"""
         ...
 
     async def runs(self, experiment_id: str) -> list[str]:

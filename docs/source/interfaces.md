@@ -39,8 +39,9 @@ Then open `http://localhost:12345` in your browser.
 
 ### Features
 
-- **Experiments List**: Status, job counts, host, duration and CO₂ per
-  experiment, with buttons to **kill** all the running jobs of an experiment
+- **Experiments List**: Status (failed, running, done, *stopped* — no longer
+  running but with unfinished jobs — or empty, as in the TUI), job counts,
+  host, duration and CO₂ per experiment, with buttons to **kill** all the running jobs of an experiment
   or **delete** it (both ask for confirmation; deleting keeps the job
   directories, and is refused while the experiment is running)
 - **Job List**: View all jobs with their status (pending, running, done, error),

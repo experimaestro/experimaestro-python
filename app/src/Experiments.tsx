@@ -7,11 +7,18 @@ import { formatShortDate, formatDuration, formatCO2 } from "./format";
 import client from "./client";
 import { useMessages } from "./ui/messages";
 
+// Status computed by the server, shared with the TUI (status_category)
+const STATUS_INFO: { [key: string]: { icon: string; color: string } } = {
+  failed: { icon: "❌", color: "danger" },
+  running: { icon: "🏃", color: "primary" },
+  done: { icon: "✓", color: "success" },
+  stopped: { icon: "⏹", color: "secondary" },
+  empty: { icon: "∅", color: "secondary" },
+};
+
 function statusInfo(exp: Experiment): { icon: string; color: string; label: string } {
-  if (exp.failed_jobs > 0) return { icon: "❌", color: "danger", label: "failed" };
-  if (exp.status === "running" || exp.finished_jobs < exp.total_jobs)
-    return { icon: "🏃", color: "primary", label: "running" };
-  return { icon: "✓", color: "success", label: "done" };
+  const label = exp.statusCategory;
+  return { ...(STATUS_INFO[label] ?? STATUS_INFO.empty), label };
 }
 
 type Confirm = { experimentId: string; kind: "kill" | "delete" };
@@ -97,6 +104,7 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
               <tr
                 key={id}
                 data-experiment-id={id}
+                data-status={exp.statusCategory}
                 style={{ cursor: "pointer" }}
                 onClick={() => onOpen(id)}
                 title="Open jobs"

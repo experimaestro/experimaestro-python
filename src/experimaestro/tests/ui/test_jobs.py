@@ -18,7 +18,17 @@ pytestmark = pytest.mark.anyio
 
 
 async def test_experiments_are_listed(ui):
-    assert await ui.experiments() == {"baseline", "sweep"}
+    assert set(await ui.experiments()) == {"baseline", "sweep", "ablation"}
+
+
+async def test_experiment_status(ui):
+    """Same status in both interfaces (BaseExperiment.status_category)"""
+    assert await ui.experiments() == {
+        "baseline": "failed",
+        "sweep": "running",
+        # Stopped before all its jobs finished
+        "ablation": "stopped",
+    }
 
 
 async def test_jobs_of_current_run(ui):

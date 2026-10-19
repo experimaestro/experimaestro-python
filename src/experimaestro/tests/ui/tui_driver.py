@@ -34,6 +34,16 @@ from experimaestro.tui.widgets.stray_jobs import (
 from .drivers import SEVERITIES, JobDetail, Notification, OrphanRow
 
 
+#: Experiment status category, from the first word of the TUI status column
+_EXPERIMENT_STATUS = {
+    "❌": "failed",
+    "🏃": "running",
+    "✓": "done",
+    "⏹": "stopped",
+    "Empty": "empty",
+}
+
+
 class RecordingUI(ExperimaestroUI):
     """The TUI, recording the notifications it shows"""
 
@@ -114,9 +124,15 @@ class TuiDriver:
 
     # --- Experiments
 
-    async def experiments(self) -> set[str]:
+    async def experiments(self) -> dict[str, str]:
         await self._show_experiments()
-        return {str(key.value) for key in self._table("#experiments-table").rows}
+        table = self._table("#experiments-table")
+        return {
+            str(key.value): _EXPERIMENT_STATUS[
+                str(table.get_cell(key, "status")).split()[0]
+            ]
+            for key in table.rows
+        }
 
     async def runs(self, experiment_id: str) -> list[str]:
         await self._show_experiments()

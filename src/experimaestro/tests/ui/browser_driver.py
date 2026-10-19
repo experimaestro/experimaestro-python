@@ -155,11 +155,14 @@ class BrowserDriver:
     def _experiment_row(self, experiment_id: str) -> Locator:
         return self.page.locator(f"tr[data-experiment-id='{experiment_id}']")
 
-    async def experiments(self) -> set[str]:
+    async def experiments(self) -> dict[str, str]:
         await self._show_experiments()
         rows = self.page.locator("tr[data-experiment-id]")
         return {
-            await row.get_attribute("data-experiment-id") for row in await rows.all()
+            await row.get_attribute("data-experiment-id"): await row.get_attribute(
+                "data-status"
+            )
+            for row in await rows.all()
         }
 
     async def runs(self, experiment_id: str) -> list[str]:

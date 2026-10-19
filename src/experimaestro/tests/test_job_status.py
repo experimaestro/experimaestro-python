@@ -1,6 +1,10 @@
-"""Tests for the job status order shared by the TUI and the web UI"""
+"""Tests for the job and experiment statuses shared by the TUI and the web UI"""
 
+import pytest
+
+from experimaestro.carbon.base import CarbonAggregateData, CarbonImpactData
 from experimaestro.scheduler.interfaces import (
+    ExperimentStatus,
     JobFailureStatus,
     JobState,
     JobStateError,
@@ -61,3 +65,46 @@ def test_display_state_uses_experiment(tmp_path):
 
     experiment = MockExperiment(tmp_path, "run", job_states={"j1": JobState.RUNNING})
     assert display_state(job, experiment).name == "running"
+
+
+@pytest.mark.parametrize(
+    "status,total,finished,failed,expected",
+    [
+        (ExperimentStatus.DONE, 2, 1, 1, "failed"),
+        (ExperimentStatus.RUNNING, 2, 1, 0, "running"),
+        (ExperimentStatus.DONE, 2, 2, 0, "done"),
+        # Not running any more, but some jobs never finished
+        (ExperimentStatus.FAILED, 2, 1, 0, "stopped"),
+        (ExperimentStatus.DONE, 0, 0, 0, "empty"),
+    ],
+)
+def test_experiment_status_category(
+    tmp_path, status, total, finished, failed, expected
+):
+    experiment = MockExperiment(
+        tmp_path,
+        "run",
+        status=status,
+        total_jobs=total,
+        finished_jobs=finished,
+        failed_jobs=failed,
+    )
+    assert experiment.status_category == expected
+
+
+def test_experiment_carbon_summary(tmp_path):
+    """The latest run of each job is preferred over all the runs"""
+    latest = CarbonAggregateData(co2_kg=1.0)
+    total = CarbonAggregateData(co2_kg=3.0)
+    experiment = MockExperiment(tmp_path, "run")
+    assert experiment.carbon_summary is None
+
+    experiment = MockExperiment(
+        tmp_path, "run", carbon_impact=CarbonImpactData(sum=total, latest=latest)
+    )
+    assert experiment.carbon_summary is latest
+
+    experiment = MockExperiment(
+        tmp_path, "run", carbon_impact=CarbonImpactData(sum=total)
+    )
+    assert experiment.carbon_summary is total

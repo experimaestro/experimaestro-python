@@ -229,13 +229,11 @@ def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
         except Exception:
             return 0
 
-    # Flatten the experiment carbon impact ({sum, latest} aggregates) to the same
-    # shape the frontend uses for jobs; prefer the per-job "latest" aggregate.
-    carbon = None
-    impact = d.get("carbon_impact") or {}
-    agg = impact.get("latest") or impact.get("sum")
-    if agg:
-        carbon = {"co2kg": agg.get("co2_kg"), "energyKwh": agg.get("energy_kwh")}
+    # Same carbon impact as the TUI, in the shape the frontend uses for jobs
+    summary = exp.carbon_summary
+    carbon = (
+        {"co2kg": summary.co2_kg, "energyKwh": summary.energy_kwh} if summary else None
+    )
 
     workdir = getattr(exp, "workdir", None)
     return {
@@ -243,6 +241,8 @@ def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
         "workdir": str(workdir) if workdir else None,
         "current_run_id": d.get("run_id"),
         "status": d.get("status"),
+        # Displayed status, shared with the TUI (BaseExperiment.status_category)
+        "statusCategory": exp.status_category,
         "hostname": d.get("hostname"),
         "started_at": d.get("started_at"),
         "ended_at": d.get("ended_at"),

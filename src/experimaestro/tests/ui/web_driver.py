@@ -120,9 +120,12 @@ class WebDriver:
 
     # --- Experiments
 
-    async def experiments(self) -> set[str]:
+    async def experiments(self) -> dict[str, str]:
         await self._request("experiments")
-        return set(self.experiment_list)
+        return {
+            xp_id: payload["statusCategory"]
+            for xp_id, payload in self.experiment_list.items()
+        }
 
     async def runs(self, experiment_id: str) -> list[str]:
         await self._request("experiment.runs", experimentId=experiment_id)
