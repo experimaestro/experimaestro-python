@@ -65,6 +65,11 @@ TUI and the `experimaestro jobs` commands: the same operations are refused
 job also removes the [partial directories](cli.md#cleanup-partial-directories)
 it leaves orphaned.
 
+Both interfaces also show the same job status — the execution state resolved
+against the state the experiment tracks — and sort it in the same order:
+running, scheduled, ready, waiting, error (timeouts and memory errors first),
+done, unscheduled and transient.
+
 ### Remote Access
 
 If your jobs run on remote machines (e.g., SLURM cluster), use the `--host` option

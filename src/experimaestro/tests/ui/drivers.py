@@ -91,8 +91,8 @@ class UIDriver(Protocol):
         """Identifiers of the listed jobs, in display order"""
         ...
 
-    async def sort_by(self, column: Literal["task"]) -> None:
-        """Sort the job list by a column, in ascending order"""
+    async def sort_by(self, column: Literal["task", "status"]) -> None:
+        """Sort the job list by a column (tasks by name, statuses by rank)"""
         ...
 
     async def group_by(self, key: Literal["status", "task"]) -> dict[str, set[str]]:

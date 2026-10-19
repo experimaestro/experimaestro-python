@@ -18,19 +18,16 @@ const FILTER_SYNTAX_HINT =
 // Delay before sending the filter expression to the server
 const FILTER_DEBOUNCE_MS = 300;
 
-const statusRank = (status: string): number => {
-  switch (status) {
-    case "running":
-      return 5;
-    case "error":
-    case "waiting":
-      return 2;
-    case "ready":
-      return 1;
-    default:
-      return 0;
+// Rank of a status, from the server-side order shared with the TUI
+// (scheduler/job_status.py): the best rank among the jobs having it
+function statusRanks(jobs: Job[]): Map<string, number> {
+  const ranks = new Map<string, number>();
+  for (const job of jobs) {
+    const rank = ranks.get(job.status);
+    if (rank === undefined || job.statusRank < rank) ranks.set(job.status, job.statusRank);
   }
-};
+  return ranks;
+}
 
 type JobGroup = {
   key: string;
@@ -64,9 +61,10 @@ function groupJobs(jobs: Job[], groupBy: GroupKey, tagKey: string): JobGroup[] {
     label: key === "" ? `(no ${tagKey})` : key,
     jobs,
   }));
+  const ranks = statusRanks(jobs);
   result.sort((a, b) => {
     if (groupBy === "status") {
-      const z = statusRank(b.key) - statusRank(a.key);
+      const z = (ranks.get(a.key) ?? 0) - (ranks.get(b.key) ?? 0);
       if (z !== 0) return z;
     }
     // Jobs without the tag go last
@@ -79,8 +77,9 @@ function groupJobs(jobs: Job[], groupBy: GroupKey, tagKey: string): JobGroup[] {
 function statusCounts(jobs: Job[]): Array<[string, number]> {
   const counts = new Map<string, number>();
   for (const job of jobs) counts.set(job.status, (counts.get(job.status) || 0) + 1);
+  const ranks = statusRanks(jobs);
   return Array.from(counts.entries()).sort(
-    (a, b) => statusRank(b[0]) - statusRank(a[0]) || a[0].localeCompare(b[0]),
+    (a, b) => (ranks.get(a[0]) ?? 0) - (ranks.get(b[0]) ?? 0) || a[0].localeCompare(b[0]),
   );
 }
 
@@ -169,7 +168,8 @@ export default () => {
       let z = 0;
       switch (sortKey) {
         case "status":
-          z = statusRank(a.status) - statusRank(b.status);
+          // Lower ranks come first in the default (descending) order
+          z = b.statusRank - a.statusRank;
           if (z === 0) z = a.jobId.localeCompare(b.jobId);
           break;
         case "task":

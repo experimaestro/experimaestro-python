@@ -162,7 +162,15 @@ class StateBridge:
                 None,
             )
         if job:
-            await self.ws_handler.broadcast("job.update", serialize_job_update(job))
+            # Scheduler state events say which experiment the state comes from
+            experiment = (
+                self.state_provider.get_experiment(event.experiment_id)
+                if isinstance(event, ExperimentJobStateEvent) and event.experiment_id
+                else None
+            )
+            await self.ws_handler.broadcast(
+                "job.update", serialize_job_update(job, experiment=experiment)
+            )
 
     async def _handle_job_submitted(self, event: JobSubmittedEvent):
         """Handle job added to experiment - broadcast job.add"""
@@ -178,6 +186,11 @@ class StateBridge:
                 depends_on=event.depends_on or [],
                 experiment_ids=[event.experiment_id] if event.experiment_id else None,
                 submitted=event.submitted_time,
+                experiment=(
+                    self.state_provider.get_experiment(event.experiment_id)
+                    if event.experiment_id
+                    else None
+                ),
             )
             await self.ws_handler.broadcast("job.add", payload)
 

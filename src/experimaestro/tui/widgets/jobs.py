@@ -17,6 +17,7 @@ from rich.text import Text
 
 from experimaestro.cli.filter import FILTER_SYNTAX_HINT, FilterContext, createFilter
 from experimaestro.scheduler.interfaces import JobState
+from experimaestro.scheduler.job_status import status_rank
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import (
@@ -1460,51 +1461,12 @@ class JobsTable(Vertical):
         else:
             self.notify("Cannot find task ID for this job", severity="warning")
 
-    # Status sort order (for sorting by status)
-    STATUS_ORDER = {
-        "running": 0,
-        "scheduled": 1,
-        "done": 2,
-        "error": 3,
-        "waiting": 4,
-        "unscheduled": 5,
-        "transient": 6,
-        "phantom": 7,
-    }
-
-    # Failure reason sort order (within error status)
-    # More actionable failures first
-    FAILURE_ORDER = {
-        "TIMEOUT": 0,  # Might just need retry
-        "MEMORY": 1,  # Might need resource adjustment
-        "REJECTED_TIMELIMIT": 2,  # Time limit exceeded partition max
-        "REJECTED_OTHER": 3,  # Other rejection reason
-        "DEPENDENCY": 4,  # Need to fix upstream job first
-        "FAILED": 5,  # Generic failure
-    }
-
-    def _get_status_sort_key(self, job):
-        """Get sort key for a job based on resolved status and failure reason.
-
-        Returns tuple (status_order, failure_order) for proper sorting.
-        """
+    def _get_status_sort_key(self, job) -> int:
+        """Sort key of a job: rank of its resolved status (see job_status.py)"""
         resolved_state, _ = StateProvider.get_resolved_state(
             job, self._current_experiment_obj
         )
-        state_name = resolved_state.name if resolved_state else "unknown"
-        status_order = self.STATUS_ORDER.get(state_name, 99)
-
-        # For error jobs, also sort by failure reason
-        if state_name == "error":
-            failure_reason = resolved_state.failure_reason if resolved_state else None
-            if failure_reason:
-                failure_order = self.FAILURE_ORDER.get(failure_reason.name, 99)
-            else:
-                failure_order = 99  # Unknown failure at end
-        else:
-            failure_order = 0
-
-        return (status_order, failure_order)
+        return status_rank(resolved_state)
 
     # Column key to display name mapping
     COLUMN_LABELS = {

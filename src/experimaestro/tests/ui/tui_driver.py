@@ -182,9 +182,9 @@ class TuiDriver:
         await self.settle()
         return [str(key.value) for key in self._table("#jobs-table").rows]
 
-    async def sort_by(self, column: Literal["task"]) -> None:
+    async def sort_by(self, column: Literal["task", "status"]) -> None:
         await self._show_jobs()
-        key = {"task": "T"}[column]
+        key = {"task": "T", "status": "S"}[column]
         await self.pilot.press(key)
         await self.settle()
         if self.app.query_one(JobsTable)._sort_reverse:

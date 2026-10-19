@@ -223,11 +223,13 @@ class BrowserDriver:
         rows = self.page.locator("tr.job-row[data-job-id]")
         return [await row.get_attribute("data-job-id") for row in await rows.all()]
 
-    async def sort_by(self, column: Literal["task"]) -> None:
+    async def sort_by(self, column: Literal["task", "status"]) -> None:
         await self._close_modals()
         await self.page.locator("#sortkey").select_option(column)
         direction = self.page.locator("button[title='Toggle sort direction']")
-        if await direction.locator(".fa-arrow-down").count():
+        # Statuses are listed by rank in the default (descending) direction
+        wanted = "down" if column == "status" else "up"
+        if not await direction.locator(f".fa-arrow-{wanted}").count():
             await direction.click()
         await self.settle()
 

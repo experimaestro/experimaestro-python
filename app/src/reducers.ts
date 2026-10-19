@@ -70,6 +70,8 @@ export type Job = {
 
   locator: string;
   status: JobStatus;
+  // Sort rank of the status, lower first (scheduler/job_status.py)
+  statusRank: number;
   schedulerState?: string | null;
 
   start: string;

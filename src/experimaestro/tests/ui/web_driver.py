@@ -164,7 +164,7 @@ class WebDriver:
     async def job_order(self) -> list[str]:
         raise NotImplementedError("job order is set by the browser client")
 
-    async def sort_by(self, column: Literal["task"]) -> None:
+    async def sort_by(self, column: Literal["task", "status"]) -> None:
         raise NotImplementedError("sorting is done by the browser client")
 
     async def group_by(self, key: Literal["status", "task"]) -> dict[str, set[str]]:

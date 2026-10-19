@@ -17,6 +17,7 @@ from fastapi import WebSocket
 
 from experimaestro.scheduler import job_operations
 from experimaestro.scheduler.job_operations import Outcome
+from experimaestro.scheduler.job_status import display_state, status_rank
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.base import Scheduler, Job
 from experimaestro.scheduler.jobs import JobDependency
@@ -129,6 +130,7 @@ def serialize_job(
     experiment_ids: List = None,
     submitted: str = None,
     process_info: Any = None,
+    experiment: BaseExperiment | None = None,
 ) -> Dict[str, Any]:
     """Serialize a job using ``state_dict()`` and transform to frontend format.
 
@@ -140,8 +142,14 @@ def serialize_job(
         submitted: Optional submit-time ISO string (from ExperimentJobInformation)
         process_info: Optional live ProcessInfo (from get_process_info) used to
             enrich the static process dict with cpu/memory/threads
+        experiment: Optional experiment the status is resolved against (see
+            :func:`~experimaestro.scheduler.job_status.display_state`)
     """
     d = job.state_dict()
+    # Show the same (resolved) status as the TUI, with its shared sort rank
+    state = display_state(job, experiment)
+    d["state"] = state.name
+    d["failure_reason"] = state.failure_reason.name if state.failure_reason else None
 
     if tags is not None:
         d["tags"] = tags
@@ -161,21 +169,27 @@ def serialize_job(
             "num_threads": process_info.num_threads,
         }
 
-    return _job_dict_to_frontend(d)
+    payload = _job_dict_to_frontend(d)
+    payload["statusRank"] = status_rank(state)
+    return payload
 
 
 #: Frontend job fields that depend on the experiment, not on the job execution
 _EXPERIMENT_JOB_FIELDS = ("tags", "dependsOn", "experimentIds", "submitted")
 
 
-def serialize_job_update(job: BaseJob, process_info: Any = None) -> Dict[str, Any]:
+def serialize_job_update(
+    job: BaseJob,
+    process_info: Any = None,
+    experiment: BaseExperiment | None = None,
+) -> Dict[str, Any]:
     """Serialize the execution state of a job, for ``job.update`` messages
 
     Experiment-specific fields (tags, dependencies, experiments, submit time)
     are left out: the client merges updates into the job it received with
     ``job.add``, and empty values would overwrite the ones it has.
     """
-    payload = serialize_job(job, process_info=process_info)
+    payload = serialize_job(job, process_info=process_info, experiment=experiment)
     for name in _EXPERIMENT_JOB_FIELDS:
         del payload[name]
     return payload
@@ -491,6 +505,7 @@ class WebSocketHandler:
             or {}
         )
 
+        experiment = self.state_provider.get_experiment(experiment_id)
         payloads = []
         for job in jobs:
             jid = job.identifier
@@ -507,6 +522,7 @@ class WebSocketHandler:
                     depends_on=deps_map.get(jid, []),
                     experiment_ids=[experiment_id],
                     submitted=submitted,
+                    experiment=experiment,
                 )
             )
         return payloads
