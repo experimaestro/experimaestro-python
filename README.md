@@ -82,6 +82,9 @@ Checkout the git directory, then
 pip install -e .
 ```
 
+Contributors must install the pre-commit hooks (`pre-commit install`) — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development guidelines.
+
 # Coding assistant skill
 
 Experimaestro ships an [agent skill](https://www.anthropic.com/news/skills) that
