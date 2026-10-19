@@ -280,6 +280,27 @@ export const slice = createSlice({
       }
     },
 
+    removeExperiment(draft, { payload }: PayloadAction<{ experimentId: string }>) {
+      const id = payload.experimentId;
+      delete draft.experiments.byId[id];
+      draft.experiments.ids = draft.experiments.ids.filter((e) => e !== id);
+      if (draft.currentExperiment === id) {
+        draft.currentExperiment = null;
+        draft.experiment = "";
+        draft.currentRun = null;
+        draft.runs = [];
+      }
+      // Jobs are kept on disk, but drop those that only belonged to it
+      draft.jobs.ids = draft.jobs.ids.filter((jobId) => {
+        const xps = draft.jobs.byId[jobId].experimentIds || [];
+        if (xps.length === 1 && xps[0] === id) {
+          delete draft.jobs.byId[jobId];
+          return false;
+        }
+        return true;
+      });
+    },
+
     selectExperiment(draft, action: PayloadAction<string | null>) {
       draft.currentExperiment = action.payload;
       // Update backward compatibility field

@@ -614,6 +614,39 @@ class StateProvider(ABC):
         """
         return False, "Not implemented"
 
+    # Experiment-level operations shared by the TUI and the web UI
+
+    def is_experiment_running(self, experiment_id: str) -> bool:
+        """Whether the current run of an experiment is still running"""
+        exp = self.get_experiment(experiment_id)
+        if exp is None:
+            return False
+        try:
+            return exp.status == ExperimentStatus.RUNNING
+        except (NotImplementedError, AttributeError):
+            return False
+
+    def get_running_jobs(self, experiment_id: str) -> List[BaseJob]:
+        """Jobs of an experiment that are currently running"""
+        return [
+            job
+            for job in self.get_jobs(experiment_id)
+            if job.state and job.state.running()
+        ]
+
+    def kill_jobs(self, jobs: List[BaseJob]) -> Tuple[int, int]:
+        """Kill a list of jobs, returning ``(killed, failed)`` counts"""
+        killed = 0
+        failed = 0
+        for job in jobs:
+            try:
+                self.kill_job(job, perform=True)
+                killed += 1
+            except Exception as e:
+                logger.warning("Failed to kill job %s: %s", job.identifier, e)
+                failed += 1
+        return killed, failed
+
     def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
         """Clean up orphan partial directories"""
         return []

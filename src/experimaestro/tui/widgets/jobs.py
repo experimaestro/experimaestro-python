@@ -15,6 +15,7 @@ from textual.reactive import reactive
 from textual.binding import Binding
 from rich.text import Text
 
+from experimaestro.cli.filter import FILTER_SYNTAX_HINT, FilterContext, createFilter
 from experimaestro.scheduler.interfaces import JobState
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
@@ -64,10 +65,13 @@ class SearchBar(Widget):
     _keep_filter: bool = False  # Flag to keep filter when hiding
     _query_valid: bool = False  # Track if current query is valid
 
-    def __init__(self) -> None:
+    def __init__(self, filter_ctx: FilterContext | None = None) -> None:
         super().__init__()
         self.filter_fn = None
         self.active_query = ""  # Store the active query text
+        # Shared with the owning JobsTable, which keeps its tags map up to date
+        # so that tag conditions match the jobs of the displayed experiment
+        self.filter_ctx = filter_ctx if filter_ctx is not None else FilterContext()
 
     def compose(self) -> ComposeResult:
         # Active filter indicator (shown when filter active but bar hidden)
@@ -78,10 +82,7 @@ class SearchBar(Widget):
                 placeholder="Filter: @state = 'done', @name ~ 'pattern', tag = 'value'",
                 id="search-input",
             )
-            yield Static(
-                "Syntax: @state = 'done' | @name ~ 'regex' | tag = 'value' | and/or",
-                id="search-hints",
-            )
+            yield Static(FILTER_SYNTAX_HINT, id="search-hints")
             yield Static("", id="search-error")
 
     def on_mount(self) -> None:
@@ -144,9 +145,7 @@ class SearchBar(Widget):
             return
 
         try:
-            from experimaestro.cli.filter import createFilter
-
-            self.filter_fn = createFilter(query)
+            self.filter_fn = createFilter(query, self.filter_ctx)
             self._query_valid = True
             self.active_query = query
             self.post_message(FilterChanged(self.filter_fn))
@@ -173,6 +172,66 @@ class SearchBar(Widget):
         # If invalid, do nothing (keep input focused for correction)
 
 
+def escape_markup(text: str) -> str:
+    """Escape every opening bracket (``textual.markup.escape`` misses some)"""
+    return text.replace("\\", "\\\\").replace("[", "\\[")
+
+
+class DependencyList(Static):
+    """Dependencies of a job, each one clickable to open its details"""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__("", **kwargs)
+        self.experiment_id: str = ""
+        self.task_ids: dict[str, str] = {}  # dependency job_id -> task_id
+
+    def set_dependencies(
+        self,
+        experiment_id: str,
+        depends_on: list[str],
+        jobs_info: dict[str, tuple[str, JobState | None]],
+    ) -> None:
+        """Display the dependencies with their state
+
+        Args:
+            experiment_id: Experiment of the displayed job
+            depends_on: Identifiers of the jobs the displayed job depends on
+            jobs_info: Maps job identifiers to (task_id, state) for the jobs
+                of the experiment
+        """
+        self.experiment_id = experiment_id
+        self.task_ids = {}
+        if not depends_on:
+            self.update("(no dependencies)")
+            return
+
+        lines = []
+        for dep_job_id in depends_on:
+            dep_task_id, dep_state = jobs_info.get(dep_job_id, ("", None))
+            short_id = f"{dep_job_id[:8]}..."
+            if dep_state is not None:
+                state_text = f"{dep_state.icon} {dep_state.name.lower():<8}"
+            else:
+                state_text = f"❓ {'unknown':<8}"
+            if dep_task_id:
+                self.task_ids[dep_job_id] = dep_task_id
+                task_name = escape_markup(dep_task_id.split(".")[-1])
+                lines.append(
+                    f"{state_text} [@click=select_dependency('{dep_job_id}')]"
+                    f"[bold]{task_name}[/bold] ({short_id})[/] "
+                    f"[dim]{escape_markup(dep_task_id)}[/dim]"
+                )
+            else:
+                lines.append(f"{state_text} {short_id}")
+        self.update("\n".join(lines))
+
+    def action_select_dependency(self, job_id: str) -> None:
+        """Open the detail view of a dependency"""
+        task_id = self.task_ids.get(job_id)
+        if task_id:
+            self.post_message(JobSelected(job_id, task_id, self.experiment_id))
+
+
 class JobDetailView(Widget):
     """Widget displaying detailed job information"""
 
@@ -191,8 +250,9 @@ class JobDetailView(Widget):
         self.dependencies_map: dict[
             str, list[str]
         ] = {}  # job_id -> [depends_on_job_ids]
-        # Mapping from job_id to task_id for dependencies lookup
-        self.job_task_id_map: dict[str, str] = {}
+        # Mapping from job_id to (task_id, state) for dependencies lookup
+        self.jobs_info: dict[str, tuple[str, JobState | None]] = {}
+        self.experiment_job_info: dict = {}  # job_id -> ExperimentJobInformation
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
@@ -212,7 +272,7 @@ class JobDetailView(Widget):
             yield Label("Tags:", classes="subsection-title")
             yield Label("", id="job-tags-label")
             yield Label("Dependencies:", classes="subsection-title")
-            yield Label("", id="job-dependencies-label")
+            yield DependencyList(id="job-dependencies-label")
             yield Label("Progress:", classes="subsection-title")
             yield Label("", id="job-progress-label")
             yield Label("", id="job-logs-hint")
@@ -320,9 +380,10 @@ class JobDetailView(Widget):
             experiment_id, refresh=refresh
         )
 
-        # Load all jobs for the experiment to build job_id -> task_id mapping
+        # Load all jobs for the experiment to build the job_id -> (task_id,
+        # state) mapping used to display dependencies
         jobs = self.state_provider.get_jobs(experiment_id, refresh=refresh)
-        job_task_map = {j.identifier: j.task_id or "" for j in jobs}
+        jobs_info = {j.identifier: (j.task_id or "", j.state) for j in jobs}
 
         job = self.state_provider.get_job(task_id, job_id, refresh=refresh)
 
@@ -331,7 +392,7 @@ class JobDetailView(Widget):
             job,
             tags_map,
             deps_map,
-            job_task_map,
+            jobs_info,
             experiment_job_info,
         )
 
@@ -340,14 +401,14 @@ class JobDetailView(Widget):
         job,
         tags_map: dict,
         deps_map: dict,
-        job_task_map: dict,
+        jobs_info: dict,
         experiment_job_info: dict = None,
     ) -> None:
         """Handle loaded job on main thread"""
         self.query_one("#job-detail-loading", Static).add_class("hidden")
         self.tags_map = tags_map
         self.dependencies_map = deps_map
-        self.job_task_id_map = job_task_map
+        self.jobs_info = jobs_info
         if experiment_job_info is not None:
             self.experiment_job_info = experiment_job_info
 
@@ -398,7 +459,7 @@ class JobDetailView(Widget):
             return "-"
 
         # Get submittime from experiment job info
-        job_info = getattr(self, "experiment_job_info", {}).get(job.identifier)
+        job_info = self.experiment_job_info.get(job.identifier)
         submittime_dt = (
             datetime.fromtimestamp(job_info.timestamp)
             if job_info and job_info.timestamp
@@ -449,21 +510,11 @@ class JobDetailView(Widget):
         self.query_one("#job-tags-label", Label).update(tags_text)
 
         # Dependencies are stored in JobDependenciesModel, accessed via dependencies_map
-        depends_on = self.dependencies_map.get(job.identifier, [])
-        if depends_on:
-            # Try to get task IDs for the dependency jobs from our mapping
-            dep_texts = []
-            for dep_job_id in depends_on:
-                dep_task_id = self.job_task_id_map.get(dep_job_id, "")
-                if dep_task_id:
-                    dep_task_name = dep_task_id.split(".")[-1]
-                    dep_texts.append(f"{dep_task_name} ({dep_job_id[:8]}...)")
-                else:
-                    dep_texts.append(f"{dep_job_id[:8]}...")
-            dependencies_text = ", ".join(dep_texts)
-        else:
-            dependencies_text = "(no dependencies)"
-        self.query_one("#job-dependencies-label", Label).update(dependencies_text)
+        self.query_one(DependencyList).set_dependencies(
+            self.current_experiment_id or "",
+            self.dependencies_map.get(job.identifier, []),
+            self.jobs_info,
+        )
 
         # Progress
         progress_list = job.progress or []
@@ -1150,6 +1201,8 @@ class JobsTable(Vertical):
         super().__init__()
         self.state_provider = state_provider
         self.filter_fn = None
+        # Filter context shared with the search bar (tags of the current run)
+        self.filter_ctx = FilterContext()
         self.current_experiment: Optional[str] = None
         self.current_run_id: Optional[str] = None
         self.is_past_run: bool = False
@@ -1164,7 +1217,7 @@ class JobsTable(Vertical):
     def compose(self) -> ComposeResult:
         yield Static("", id="past-run-banner", classes="hidden")
         yield Static("Loading jobs...", id="jobs-loading", classes="hidden")
-        yield SearchBar()
+        yield SearchBar(self.filter_ctx)
         yield DataTable(id="jobs-table", cursor_type="row")
         tree_view = JobsTreeView()
         tree_view.display = False
@@ -1613,6 +1666,7 @@ class JobsTable(Vertical):
         if experiment_job_info is not None:
             self.experiment_job_info = experiment_job_info
         self._current_experiment_obj = experiment_obj
+        self.filter_ctx.tags_map = self.tags_map
 
         # Refresh display with loaded jobs
         if self._tree_mode:

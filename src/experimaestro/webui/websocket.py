@@ -310,6 +310,10 @@ class WebSocketHandler:
             {"type": "services"}
             {"type": "job.details", "payload": {"jobId": "...", "experimentId": "..."}}
             {"type": "job.kill", "payload": {"jobId": "...", "experimentId": "..."}}
+            {"type": "jobs.filter", "payload": {"query": "...", "experimentId": "...",
+                                               "runId": "...", "requestId": 1}}
+            {"type": "experiment.kill", "payload": {"experimentId": "..."}}
+            {"type": "experiment.delete", "payload": {"experimentId": "..."}}
             {"type": "quit"}
 
         Server -> Client:
@@ -318,6 +322,10 @@ class WebSocketHandler:
             {"type": "experiment.add", "payload": {...}}
             {"type": "service.add", "payload": {...}}
             {"type": "service.update", "payload": {...}}
+            {"type": "jobs.filter", "payload": {"requestId": 1, "query": "...",
+                                               "jobIds": [...], "error": null}}
+            {"type": "experiment.removed", "payload": {"experimentId": "..."}}
+            {"type": "notify", "payload": {"severity": "...", "message": "..."}}
             {"type": "error", "payload": {"message": "..."}}
     """
 
@@ -393,6 +401,9 @@ class WebSocketHandler:
             "job.details": self._handle_job_details,
             "job.kill": self._handle_job_kill,
             "job.delete": self._handle_job_delete,
+            "jobs.filter": self._handle_jobs_filter,
+            "experiment.kill": self._handle_experiment_kill,
+            "experiment.delete": self._handle_experiment_delete,
             "warnings": self._handle_warnings,
             "warning.action": self._handle_warning_action,
             "actions": self._handle_actions,
@@ -619,6 +630,121 @@ class WebSocketHandler:
         except Exception as e:
             logger.warning("Failed to delete job %s: %s", payload.get("jobId"), e)
             await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+
+    def _filter_job_ids(
+        self, query: str, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> List[str]:
+        """Identifiers of the jobs matching a filter expression
+
+        Uses the same filter DSL (and the same per-run tags) as the TUI search
+        bar, so that both interfaces select the same jobs. Without an
+        experiment, a job matches if it matches within any experiment (tags are
+        experiment-specific). Answers come from the provider's query cache.
+
+        Raises:
+            pyparsing.ParseException: if the query is invalid
+        """
+        from experimaestro.cli.filter import FilterContext, createFilter
+
+        ctx = FilterContext()
+        filter_fn = createFilter(query, ctx)
+
+        if experiment_id:
+            scopes = [(experiment_id, run_id)]
+        else:
+            scopes = [
+                (exp.experiment_id, None)
+                for exp in self.state_provider.get_experiments()
+            ]
+
+        matched: List[str] = []
+        seen: Set[str] = set()
+        for exp_id, scope_run_id in scopes:
+            ctx.tags_map = self.state_provider.get_tags_map(exp_id, scope_run_id) or {}
+            for job in self.state_provider.get_jobs(exp_id, run_id=scope_run_id):
+                if job.identifier not in seen and filter_fn(job):
+                    seen.add(job.identifier)
+                    matched.append(job.identifier)
+        return matched
+
+    async def _handle_jobs_filter(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Evaluate a job filter expression server-side (shared DSL with the TUI)"""
+        query = (payload.get("query") or "").strip()
+        response: Dict[str, Any] = {
+            "requestId": payload.get("requestId"),
+            "query": query,
+            "jobIds": None,
+            "error": None,
+        }
+        if query:
+            loop = asyncio.get_running_loop()
+            try:
+                response["jobIds"] = await loop.run_in_executor(
+                    None,
+                    self._filter_job_ids,
+                    query,
+                    payload.get("experimentId"),
+                    payload.get("runId"),
+                )
+            except Exception as e:
+                response["error"] = f"Invalid query: {e}"
+        await websocket.send_json({"type": "jobs.filter", "payload": response})
+
+    async def _notify(self, websocket: WebSocket, severity: str, message: str):
+        """Send a user-facing notification (shown as a toast)"""
+        await websocket.send_json(
+            {"type": "notify", "payload": {"severity": severity, "message": message}}
+        )
+
+    async def _handle_experiment_kill(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Kill all the running jobs of an experiment"""
+        experiment_id = payload.get("experimentId")
+        if not experiment_id:
+            return
+        loop = asyncio.get_running_loop()
+
+        def kill():
+            jobs = self.state_provider.get_running_jobs(experiment_id)
+            return len(jobs), self.state_provider.kill_jobs(jobs)
+
+        total, (killed, failed) = await loop.run_in_executor(None, kill)
+        if total == 0:
+            await self._notify(websocket, "warning", "No running jobs in experiment")
+        elif failed:
+            await self._notify(
+                websocket,
+                "warning",
+                f"Killed {killed} of {total} jobs ({failed} failed)",
+            )
+        else:
+            await self._notify(
+                websocket, "success", f"Killed {killed} of {total} running jobs"
+            )
+
+    async def _handle_experiment_delete(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Delete an experiment (its job directories are kept)"""
+        experiment_id = payload.get("experimentId")
+        if not experiment_id:
+            return
+        loop = asyncio.get_running_loop()
+
+        def delete():
+            if self.state_provider.is_experiment_running(experiment_id):
+                return False, "Cannot delete: experiment is still running"
+            return self.state_provider.delete_experiment(
+                experiment_id, delete_jobs=False
+            )
+
+        ok, message = await loop.run_in_executor(None, delete)
+        if ok:
+            await self.broadcast("experiment.removed", {"experimentId": experiment_id})
+            await self._notify(websocket, "success", message)
+        else:
+            await self._notify(websocket, "danger", message)
 
     async def _handle_experiment_runs(
         self, websocket: WebSocket, payload: Dict[str, Any]

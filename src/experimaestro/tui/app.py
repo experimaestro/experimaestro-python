@@ -825,20 +825,12 @@ class ExperimaestroUI(App):
 
     def on_delete_experiment_request(self, message: DeleteExperimentRequest) -> None:
         """Handle experiment deletion request"""
-        # Check if the experiment is currently running
-        experiments = self.state_provider.get_experiments()
-        exp = next(
-            (e for e in experiments if e.experiment_id == message.experiment_id), None
-        )
-        if exp is not None:
-            from experimaestro.scheduler.interfaces import ExperimentStatus
-
-            if exp.status == ExperimentStatus.RUNNING:
-                self.notify(
-                    "Cannot delete: experiment is still running",
-                    severity="warning",
-                )
-                return
+        if self.state_provider.is_experiment_running(message.experiment_id):
+            self.notify(
+                "Cannot delete: experiment is still running",
+                severity="warning",
+            )
+            return
 
         jobs = self.state_provider.get_jobs(message.experiment_id)
         warning = (
@@ -892,8 +884,7 @@ class ExperimaestroUI(App):
 
     def on_kill_experiment_request(self, message: KillExperimentRequest) -> None:
         """Handle experiment kill request (kill all running jobs)"""
-        jobs = self.state_provider.get_jobs(message.experiment_id)
-        running_jobs = [j for j in jobs if j.state.running()]
+        running_jobs = self.state_provider.get_running_jobs(message.experiment_id)
 
         if not running_jobs:
             self.notify("No running jobs in experiment", severity="warning")
@@ -901,14 +892,7 @@ class ExperimaestroUI(App):
 
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
-                killed = 0
-                failed = 0
-                for job in running_jobs:
-                    try:
-                        self.state_provider.kill_job(job, perform=True)
-                        killed += 1
-                    except Exception:
-                        failed += 1
+                killed, failed = self.state_provider.kill_jobs(running_jobs)
                 if failed:
                     self.notify(
                         f"Killed {killed} of {len(running_jobs)} jobs ({failed} failed)",

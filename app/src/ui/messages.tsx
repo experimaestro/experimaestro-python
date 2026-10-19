@@ -46,7 +46,7 @@ export const messageSlice = createSlice({
 
 type MessageDispatchType = SliceDispatchType<typeof messageSlice>;
 
-function showMessage(message: MessageInput) {
+export function showMessage(message: MessageInput) {
   return (dispatch: MessageDispatchType) => {
     const ownMessageId = messageId;
     dispatch(messageSlice.actions.addMessage(message));
