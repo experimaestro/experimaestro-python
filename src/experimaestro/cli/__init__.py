@@ -324,6 +324,11 @@ from .workspaces import workspaces as workspaces_cli  # noqa: E402
 
 cli.add_command(workspaces_cli)
 
+# Import and add dag command
+from .dag import dag as dag_cli  # noqa: E402
+
+cli.add_command(dag_cli)
+
 
 @cli.group()
 def migrate():
@@ -449,6 +454,9 @@ def experiments(ctx, workdir, workspace):
         ctx.obj = path
     except (SystemExit, Exception):
         ctx.obj = None
+
+
+experiments.add_command(dag_cli, "dag")
 
 
 @experiments.command("list")

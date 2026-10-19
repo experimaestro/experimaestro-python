@@ -37,6 +37,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+import types
 import networkx as nx
 
 from experimaestro import tags
@@ -89,6 +90,7 @@ __all__ = [
     "print_robust_tree",
     "resolve_run_dir",
     "resolve_target_config",
+    "run_dag",
     "serve_dag_web",
 ]
 
@@ -123,12 +125,20 @@ def print_robust_tree(
     for idx, jid in enumerate(sorted_job_ids):
         is_last_node = is_last and (idx == len(sorted_job_ids) - 1)
         config = info_jobs.get(jid)
-        job_type = type(config).__name__.replace(".XPMConfig", "") if config else "Unknown"
+        job_type = (
+            type(config).__name__.replace(".XPMConfig", "") if config else "Unknown"
+        )
         depth = depths.get(jid, 0)
         y_coord = pos.get(jid, (0, 0))[1]
 
         # Use tags from jobs.jsonl, fallback to tags(config)
-        jtags = job_tags_dict.get(jid) or (tags(config) if config else {})
+        jtags = job_tags_dict.get(jid)
+        if not jtags and config:
+            try:
+                jtags = tags(config)
+            except Exception:
+                jtags = {}
+        jtags = jtags or {}
         tag_str = ", ".join(f"{k}={v}" for k, v in jtags.items())
         label = f"{job_type} [{jid[:8]}] (depth {depth}, y {y_coord:.1f})"
         if tag_str:
@@ -186,10 +196,18 @@ def plot_dag(
         show_plot: Whether to display the plot interactively.
         save_path: Optional path to save the figure image.
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import FancyBboxPatch
-    from matplotlib.lines import Line2D
-    from experimaestro import Task, Action, tags
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import FancyBboxPatch
+    except ImportError:
+        logging.error(
+            "matplotlib is required for graphical plotting. "
+            "Please install it using: pip install matplotlib"
+        )
+        return
+
+    from experimaestro import Action, Task, tags
 
     node_info = {}
     for jid, config in full_jobs.items():
@@ -197,11 +215,19 @@ def plot_dag(
         ntype = (
             "action"
             if isinstance(config, Action)
-            else "task" if isinstance(config, Task) else "config"
+            else "task"
+            if isinstance(config, Task)
+            else "config"
         )
 
         # Get tags and create label
-        jtags = job_tags_dict.get(jid) or (tags(config) if config else {})
+        jtags = job_tags_dict.get(jid)
+        if not jtags and config:
+            try:
+                jtags = tags(config)
+            except Exception:
+                jtags = {}
+        jtags = jtags or {}
         tag_str = ", ".join(f"{k}={v}" for k, v in jtags.items())
 
         node_info[jid] = {
@@ -346,23 +372,236 @@ def plot_dag(
     plt.close()
 
 
+def run_dag(
+    *,
+    experiment_id: str | None = None,
+    run_id: str | None = None,
+    workspace: str | None = None,
+    web: bool | None = None,
+    port: int = 0,
+    no_open: bool = False,
+    tree: bool = False,
+    plot: bool = False,
+    save_as: Path | None = None,
+    html: Path | None = None,
+    json_out: str | None = None,
+    tasks_only: bool = False,
+    list_configs: bool = False,
+    single_config: bool = False,
+    config_index: int | None = None,
+    filter_tags: str | None = None,
+    include_actions: bool = False,
+    layout: str = "dagre",
+) -> int:
+    """Execute the experiment DAG visualization/export pipeline with given options."""
+    save_plot_path = None
+    if save_as:
+        ext = save_as.suffix.lower()
+        if ext in (".html", ".htm"):
+            html = save_as
+            web = False
+        elif ext == ".json":
+            json_out = str(save_as)
+            web = False
+        elif ext in (".png", ".pdf", ".svg", ".jpg", ".jpeg"):
+            save_plot_path = save_as
+            plot = False
+            web = False
+        else:
+            logging.error(
+                "Unsupported file extension '%s' for --save-as. "
+                "Supported extensions: .html, .htm, .json, .png, .pdf, .svg, .jpg",
+                ext,
+            )
+            return 1
+
+    # Resolve default web behavior: enabled by default unless --tree, --plot, or file export is active
+    if web is None:
+        web = not (
+            plot or tree or save_as or html or json_out is not None or list_configs
+        )
+
+    run_info = resolve_run_dir(workspace, experiment_id, run_id)
+    if run_info is None:
+        return 1
+    run_id, run_dir = run_info
+    exp_id = run_dir.parent.name
+
+    if list_configs:
+        configs = get_experiment_configs(run_dir)
+        if not configs:
+            print(f"No configuration tags found for experiment '{exp_id}' ({run_id}).")  # noqa: T201
+            return 0
+        print(f"Available configurations in experiment '{exp_id}' (run {run_id}):")  # noqa: T201
+        for idx, cfg_dict in enumerate(configs):
+            cfg_str = ", ".join(f"{k}={v}" for k, v in sorted(cfg_dict.items()))
+            print(f"  [{idx}] {cfg_str}")  # noqa: T201
+        return 0
+
+    graph_data = load_run_graph(run_dir)
+    if graph_data is None:
+        return 1
+    full_jobs, dependencies, job_tags_dict = graph_data
+
+    title_suffix = ""
+    if single_config or config_index is not None or filter_tags:
+        configs = get_experiment_configs(run_dir)
+        filter_args = types.SimpleNamespace(
+            config_index=config_index,
+            filter=filter_tags,
+            single_config=single_config,
+        )
+        target_tags, title_suffix = resolve_target_config(filter_args, configs)
+        if target_tags is None:
+            return 1
+        full_jobs, dependencies = filter_subgraph_by_config(
+            full_jobs,
+            dependencies,
+            job_tags_dict,
+            target_tags,
+            include_actions=include_actions,
+        )
+
+    if tasks_only:
+        full_jobs, dependencies = filter_tasks_only(full_jobs, dependencies)
+
+    workspace_path = str(run_dir.parents[2]) if len(run_dir.parents) >= 3 else ""
+
+    # Export JSON if requested
+    if json_out is not None:
+        dag_json = build_dag_json(
+            full_jobs,
+            dependencies,
+            job_tags_dict,
+            run_dir=run_dir,
+            experiment_id=exp_id,
+            run_id=run_id,
+            workspace=workspace_path,
+        )
+        json_str = json.dumps(dag_json, indent=2)
+        if json_out:  # Target file provided
+            out_path = Path(json_out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json_str)
+            print(f"Saved DAG JSON to {out_path}")  # noqa: T201
+        else:
+            print(json_str)  # noqa: T201
+        return 0
+
+    # Export standalone HTML page if requested
+    if html is not None:
+        dag_json = build_dag_json(
+            full_jobs,
+            dependencies,
+            job_tags_dict,
+            run_dir=run_dir,
+            experiment_id=exp_id,
+            run_id=run_id,
+            workspace=workspace_path,
+        )
+        html_str = generate_dag_html(
+            dag_json,
+            title=f"Experimaestro DAG - {exp_id}",
+            default_layout=layout,
+        )
+        html.parent.mkdir(parents=True, exist_ok=True)
+        html.write_text(html_str)
+        print(f"Saved interactive DAG HTML to {html}")  # noqa: T201
+        return 0
+
+    # Optional terminal text tree visualization
+    if tree:
+        dependents: dict[str, list[str]] = {}
+        for jid, deps in dependencies.items():
+            for d in deps:
+                dependents.setdefault(d, []).append(jid)
+
+        depths, pos, _ = compute_dag_layout(full_jobs, dependencies, dependents)
+
+        tree_roots = [jid for jid in full_jobs if not dependencies.get(jid)]
+        print_robust_tree(
+            tree_roots,
+            dependents,
+            dependencies,
+            full_jobs,
+            job_tags_dict,
+            set(),
+            depths,
+            pos,
+        )
+        if not (web or plot or save_plot_path):
+            return 0
+
+    # Launch interactive web server (default mode)
+    if web:
+        dag_json = build_dag_json(
+            full_jobs,
+            dependencies,
+            job_tags_dict,
+            run_dir=run_dir,
+            experiment_id=exp_id,
+            run_id=run_id,
+            workspace=workspace_path,
+        )
+        serve_dag_web(
+            dag_json,
+            port=port,
+            open_browser=not no_open,
+            default_layout=layout,
+        )
+        return 0
+
+    # Optional Matplotlib & graphical plot visualization (requires matplotlib)
+    if plot or save_plot_path:
+        dependents = {}
+        for jid, deps in dependencies.items():
+            for d in deps:
+                dependents.setdefault(d, []).append(jid)
+
+        depths, pos, reduced_dag = compute_dag_layout(
+            full_jobs, dependencies, dependents
+        )
+
+        plot_dag(
+            full_jobs,
+            job_tags_dict,
+            pos,
+            reduced_dag,
+            title_suffix=title_suffix,
+            show_plot=plot,
+            save_path=save_plot_path,
+        )
+        return 0
+
+    return 0
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "experiment",
+        nargs="?",
+        default=None,
+        help="Experiment identifier (optional positional).",
+    )
+    parser.add_argument(
         "--workspace",
+        "-w",
         type=str,
         default=None,
         help="Workspace ID or directory path (default: auto-detected via find_workspace).",
     )
     parser.add_argument(
         "--experiment-id",
-        default="MNIST_train_advanced",
-        help="Experiment identifier (default: %(default)s).",
+        "-e",
+        default=None,
+        help="Experiment identifier.",
     )
     parser.add_argument(
         "--run-id",
+        "-r",
         default=None,
         help="Specific run timestamp ID (default: most recent run).",
     )
@@ -373,8 +612,39 @@ def main() -> None:
     )
     parser.add_argument(
         "--web",
+        "-W",
         action="store_true",
-        help="Launch interactive DAG web viewer and open in browser.",
+        default=None,
+        help="Launch interactive DAG web viewer in browser (default).",
+    )
+    parser.add_argument(
+        "--no-web",
+        action="store_false",
+        dest="web",
+        help="Do not launch interactive DAG web viewer.",
+    )
+    parser.add_argument(
+        "--tree",
+        "-t",
+        action="store_true",
+        help="Print text tree representation of the DAG to terminal.",
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        default=False,
+        help="Display matplotlib interactive plot window (requires matplotlib).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Port for web server (default: random available port).",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not automatically open browser when launching web viewer.",
     )
     parser.add_argument(
         "--html",
@@ -388,13 +658,6 @@ def main() -> None:
         const="",
         default=None,
         help="Export DAG as JSON to stdout or file (compatible with Experimaestro web CLI).",
-    )
-    parser.add_argument(
-        "--no-plot",
-        action="store_false",
-        dest="plot",
-        default=True,
-        help="Skip the matplotlib interactive plot and only output the text tree.",
     )
     parser.add_argument(
         "--list-configs",
@@ -438,153 +701,28 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    save_plot_path = None
-    if args.save_as:
-        ext = args.save_as.suffix.lower()
-        if ext in (".html", ".htm"):
-            args.html = args.save_as
-            args.web = False
-        elif ext == ".json":
-            args.json = str(args.save_as)
-            args.web = False
-        elif ext in (".png", ".pdf", ".svg", ".jpg", ".jpeg"):
-            save_plot_path = args.save_as
-            args.plot = False
-            args.web = False
-        else:
-            logging.error(
-                "Unsupported file extension '%s' for --save-as. "
-                "Supported extensions: .html, .htm, .json, .png, .pdf, .svg, .jpg",
-                ext,
-            )
-            return
+    exp_id = args.experiment or args.experiment_id
 
-    run_info = resolve_run_dir(args.workspace, args.experiment_id, args.run_id)
-    if run_info is None:
-        return
-    run_id, run_dir = run_info
-
-    if args.list_configs:
-        configs = get_experiment_configs(run_dir)
-        if not configs:
-            print(f"No configuration tags found for experiment '{args.experiment_id}' ({run_id}).")  # noqa: T201
-            return
-        print(f"Available configurations in experiment '{args.experiment_id}' (run {run_id}):")  # noqa: T201
-        for idx, cfg_dict in enumerate(configs):
-            cfg_str = ", ".join(f"{k}={v}" for k, v in sorted(cfg_dict.items()))
-            print(f"  [{idx}] {cfg_str}")  # noqa: T201
-        return
-
-    graph_data = load_run_graph(run_dir)
-    if graph_data is None:
-        return
-    full_jobs, dependencies, job_tags_dict = graph_data
-
-    title_suffix = ""
-    if args.single_config or args.config_index is not None or args.filter:
-        configs = get_experiment_configs(run_dir)
-        target_tags, title_suffix = resolve_target_config(args, configs)
-        if target_tags is None:
-            return
-        full_jobs, dependencies = filter_subgraph_by_config(
-            full_jobs,
-            dependencies,
-            job_tags_dict,
-            target_tags,
-            include_actions=args.include_actions,
-        )
-
-    if args.tasks_only:
-        full_jobs, dependencies = filter_tasks_only(full_jobs, dependencies)
-
-    workspace_path = str(run_dir.parents[2]) if len(run_dir.parents) >= 3 else ""
-
-    # Export JSON if requested
-    if args.json is not None:
-        dag_json = build_dag_json(
-            full_jobs,
-            dependencies,
-            job_tags_dict,
-            run_dir=run_dir,
-            experiment_id=args.experiment_id,
-            run_id=run_id,
-            workspace=workspace_path,
-        )
-        json_str = json.dumps(dag_json, indent=2)
-        if args.json:  # Target file provided
-            out_path = Path(args.json)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(json_str)
-            print(f"Saved DAG JSON to {out_path}")  # noqa: T201
-        else:
-            print(json_str)  # noqa: T201
-        return
-
-    # Export standalone HTML page if requested
-    if args.html is not None:
-        dag_json = build_dag_json(
-            full_jobs,
-            dependencies,
-            job_tags_dict,
-            run_dir=run_dir,
-            experiment_id=args.experiment_id,
-            run_id=run_id,
-            workspace=workspace_path,
-        )
-        html_str = generate_dag_html(
-            dag_json,
-            title=f"Experimaestro DAG - {args.experiment_id}",
-            default_layout=args.layout,
-        )
-        args.html.parent.mkdir(parents=True, exist_ok=True)
-        args.html.write_text(html_str)
-        print(f"Saved interactive DAG HTML to {args.html}")  # noqa: T201
-        return
-
-    # Launch interactive web server if requested
-    if args.web:
-        dag_json = build_dag_json(
-            full_jobs,
-            dependencies,
-            job_tags_dict,
-            run_dir=run_dir,
-            experiment_id=args.experiment_id,
-            run_id=run_id,
-            workspace=workspace_path,
-        )
-        serve_dag_web(dag_json, default_layout=args.layout)
-        return
-
-    # Default / Matplotlib & Text Tree visualization
-    dependents: dict[str, list[str]] = {}
-    for jid, deps in dependencies.items():
-        for d in deps:
-            dependents.setdefault(d, []).append(jid)
-
-    depths, pos, reduced_dag = compute_dag_layout(full_jobs, dependencies, dependents)
-
-    tree_roots = [jid for jid in full_jobs if not dependencies.get(jid)]
-    print_robust_tree(
-        tree_roots,
-        dependents,
-        dependencies,
-        full_jobs,
-        job_tags_dict,
-        set(),
-        depths,
-        pos,
+    run_dag(
+        experiment_id=exp_id,
+        run_id=args.run_id,
+        workspace=args.workspace,
+        web=args.web,
+        port=args.port,
+        no_open=args.no_open,
+        tree=args.tree,
+        plot=args.plot,
+        save_as=args.save_as,
+        html=args.html,
+        json_out=args.json,
+        tasks_only=args.tasks_only,
+        list_configs=args.list_configs,
+        single_config=args.single_config,
+        config_index=args.config_index,
+        filter_tags=args.filter,
+        include_actions=args.include_actions,
+        layout=args.layout,
     )
-
-    if args.plot or save_plot_path:
-        plot_dag(
-            full_jobs,
-            job_tags_dict,
-            pos,
-            reduced_dag,
-            title_suffix=title_suffix,
-            show_plot=args.plot,
-            save_path=save_plot_path,
-        )
 
 
 if __name__ == "__main__":

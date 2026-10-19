@@ -181,7 +181,9 @@ def test_draw_dag_cli_save_as(tmp_path, monkeypatch):
     draw_dag.main()
     assert html_out.exists()
     assert "<!DOCTYPE html>" in html_out.read_text()
-    assert len(server_called) == 0, "Server should not be launched when --save-as ends in .html"
+    assert len(server_called) == 0, (
+        "Server should not be launched when --save-as ends in .html"
+    )
 
     # 2. Test --save-as with .json
     json_out = tmp_path / "subfolder" / "dag.json"
@@ -210,3 +212,198 @@ def test_web_dag_template_loading():
     assert "__DEFAULT_LAYOUT__" in loaded
     assert "__GRAPH_DATA__" in loaded
 
+
+def test_cli_dag_help():
+    """Verify experimaestro dag --help and experimaestro experiments dag --help."""
+    from click.testing import CliRunner
+    from experimaestro.cli import cli
+
+    runner = CliRunner()
+    res1 = runner.invoke(cli, ["dag", "--help"])
+    assert res1.exit_code == 0
+    assert "Visualize and export experiment dependency DAGs" in res1.output
+    assert "--web" in res1.output
+    assert "--save-as" in res1.output
+    assert "--list-configs" in res1.output
+
+    res2 = runner.invoke(cli, ["experiments", "dag", "--help"])
+    assert res2.exit_code == 0
+    assert "Visualize and export experiment dependency DAGs" in res2.output
+
+
+def test_cli_dag_save_as_and_json(tmp_path, monkeypatch):
+    """Verify experimaestro dag --save-as and --json via Click CLI."""
+    from click.testing import CliRunner
+    from experimaestro.cli import cli
+    from experimaestro.tools.xpm_dag import draw_dag
+
+    full_jobs = {"j_root": DummyTask(), "j_train": DummyTask()}
+    dependencies = {"j_train": ["j_root"]}
+    job_tags_dict = {"j_train": {"lr": 0.001}}
+
+    run_dir = tmp_path / "experiments" / "test_exp" / "20260101_120000"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        draw_dag,
+        "resolve_run_dir",
+        lambda ws, exp_id, run_id: ("20260101_120000", run_dir),
+    )
+    monkeypatch.setattr(
+        draw_dag,
+        "load_run_graph",
+        lambda r_dir: (full_jobs, dependencies, job_tags_dict),
+    )
+
+    runner = CliRunner()
+
+    # 1. Test --save-as html
+    html_out = tmp_path / "cli_out.html"
+    res_html = runner.invoke(cli, ["dag", "test_exp", "--save-as", str(html_out)])
+    assert res_html.exit_code == 0
+    assert html_out.exists()
+    assert "<!DOCTYPE html>" in html_out.read_text()
+
+    # 2. Test --json stdout
+    res_json = runner.invoke(cli, ["dag", "test_exp", "--json"])
+    assert res_json.exit_code == 0
+    parsed = json.loads(res_json.output)
+    assert "nodes" in parsed
+    assert any(n["id"] == "j_train" for n in parsed["nodes"])
+
+
+def test_resolve_run_dir_auto_detect(tmp_path):
+    """Verify resolve_run_dir auto-selects when a single experiment exists."""
+    from experimaestro.tools.xpm_dag.xpm_dag import resolve_run_dir
+
+    ws_dir = tmp_path / "workspace"
+    exp_dir = ws_dir / "experiments" / "single_experiment" / "20260101_120000"
+    exp_dir.mkdir(parents=True)
+
+    # 1. Single experiment exists: auto-selects without passing experiment_id
+    res = resolve_run_dir(workspace_arg=str(ws_dir), experiment_id=None)
+    assert res is not None
+    run_id, resolved_dir = res
+    assert run_id == "20260101_120000"
+    assert resolved_dir == exp_dir
+
+    # 2. Multiple experiments exist: returns None when experiment_id is omitted
+    exp2_dir = ws_dir / "experiments" / "another_experiment" / "20260101_130000"
+    exp2_dir.mkdir(parents=True)
+    res_multi = resolve_run_dir(workspace_arg=str(ws_dir), experiment_id=None)
+    assert res_multi is None
+
+
+def test_cli_dag_defaults_to_web(tmp_path, monkeypatch):
+    """Verify experimaestro dag defaults to launching the web viewer."""
+    from click.testing import CliRunner
+    from experimaestro.cli import cli
+    from experimaestro.tools.xpm_dag import draw_dag
+
+    full_jobs = {"j_root": DummyTask(), "j_train": DummyTask()}
+    dependencies = {"j_train": ["j_root"]}
+    job_tags_dict = {"j_train": {"lr": 0.001}}
+
+    run_dir = tmp_path / "experiments" / "test_exp" / "20260101_120000"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        draw_dag,
+        "resolve_run_dir",
+        lambda ws, exp_id, run_id: ("20260101_120000", run_dir),
+    )
+    monkeypatch.setattr(
+        draw_dag,
+        "load_run_graph",
+        lambda r_dir: (full_jobs, dependencies, job_tags_dict),
+    )
+
+    server_called = []
+    monkeypatch.setattr(
+        draw_dag,
+        "serve_dag_web",
+        lambda *args, **kwargs: server_called.append(True),
+    )
+
+    runner = CliRunner()
+    # Calling dag with NO flags: should default to web view
+    res = runner.invoke(cli, ["dag", "test_exp"])
+    assert res.exit_code == 0
+    assert len(server_called) == 1, "Web server should be launched by default"
+
+
+def test_cli_dag_optional_tree(tmp_path, monkeypatch):
+    """Verify experimaestro dag --tree prints text tree and does NOT launch server."""
+    from click.testing import CliRunner
+    from experimaestro.cli import cli
+    from experimaestro.tools.xpm_dag import draw_dag
+
+    full_jobs = {"j_root": DummyTask(), "j_train": DummyTask()}
+    dependencies = {"j_train": ["j_root"]}
+    job_tags_dict = {"j_train": {"lr": 0.001}}
+
+    run_dir = tmp_path / "experiments" / "test_exp" / "20260101_120000"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        draw_dag,
+        "resolve_run_dir",
+        lambda ws, exp_id, run_id: ("20260101_120000", run_dir),
+    )
+    monkeypatch.setattr(
+        draw_dag,
+        "load_run_graph",
+        lambda r_dir: (full_jobs, dependencies, job_tags_dict),
+    )
+
+    server_called = []
+    monkeypatch.setattr(
+        draw_dag,
+        "serve_dag_web",
+        lambda *args, **kwargs: server_called.append(True),
+    )
+
+    runner = CliRunner()
+    res = runner.invoke(cli, ["dag", "test_exp", "--tree"])
+    assert res.exit_code == 0
+    assert len(server_called) == 0, (
+        "Web server should not be launched when --tree is given"
+    )
+    assert "DummyTask" in res.output
+    assert "j_root" in res.output
+
+
+def test_matplotlib_lazy_import(tmp_path, monkeypatch):
+    """Verify that running web view or --tree does not import matplotlib."""
+    import sys
+    from click.testing import CliRunner
+    from experimaestro.cli import cli
+    from experimaestro.tools.xpm_dag import draw_dag
+
+    full_jobs = {"j_root": DummyTask()}
+    dependencies = {}
+    job_tags_dict = {}
+
+    run_dir = tmp_path / "experiments" / "test_exp" / "20260101_120000"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        draw_dag,
+        "resolve_run_dir",
+        lambda ws, exp_id, run_id: ("20260101_120000", run_dir),
+    )
+    monkeypatch.setattr(
+        draw_dag,
+        "load_run_graph",
+        lambda r_dir: (full_jobs, dependencies, job_tags_dict),
+    )
+
+    # Ensure matplotlib is not in sys.modules
+    sys.modules.pop("matplotlib", None)
+    sys.modules.pop("matplotlib.pyplot", None)
+
+    runner = CliRunner()
+    res = runner.invoke(cli, ["dag", "test_exp", "--tree"])
+    assert res.exit_code == 0
+    assert "matplotlib" not in sys.modules
+    assert "matplotlib.pyplot" not in sys.modules

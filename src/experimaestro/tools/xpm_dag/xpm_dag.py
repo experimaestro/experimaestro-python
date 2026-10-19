@@ -30,7 +30,9 @@ MARGIN_Y = 0.55  # Gap between boxes vertically
 
 
 def resolve_run_dir(
-    workspace_arg: str | Path | None, experiment_id: str, run_id: str | None
+    workspace_arg: str | Path | None,
+    experiment_id: str | None = None,
+    run_id: str | None = None,
 ) -> tuple[str, Path] | None:
     """Find and return (run_id, run_dir) from the workspace.
 
@@ -55,11 +57,37 @@ def resolve_run_dir(
         return None
 
     available_xps = sorted(
-        [p.name for p in experiments_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
+        [
+            p.name
+            for p in experiments_dir.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        ]
     )
+    if not experiment_id:
+        if len(available_xps) == 1:
+            experiment_id = available_xps[0]
+            logging.info(
+                "Auto-selected single experiment '%s' in workspace '%s'.",
+                experiment_id,
+                workspace,
+            )
+        elif len(available_xps) > 1:
+            xps_str = ", ".join(f"'{x}'" for x in available_xps)
+            logging.error(
+                "No experiment specified. Please specify an experiment ID. Available experiments in workspace '%s': %s",
+                workspace,
+                xps_str,
+            )
+            return None
+        else:
+            logging.error("No experiments found in workspace '%s'.", workspace)
+            return None
+
     exp_dir = experiments_dir / experiment_id
     if not exp_dir.exists():
-        xps_str = ", ".join(f"'{x}'" for x in available_xps) if available_xps else "(none)"
+        xps_str = (
+            ", ".join(f"'{x}'" for x in available_xps) if available_xps else "(none)"
+        )
         logging.error(
             "Experiment '%s' not found in workspace '%s'. Available experiments: %s",
             experiment_id,
@@ -339,7 +367,9 @@ def filter_subgraph_by_config(
         from experimaestro import Action
 
         for jid, config in full_jobs.items():
-            if isinstance(config, Action) or type(config).__name__.startswith("EvaluatedModel"):
+            if isinstance(config, Action) or type(config).__name__.startswith(
+                "EvaluatedModel"
+            ):
                 deps = dependencies.get(jid, [])
                 if any(m in deps for m in matching):
                     selected_nodes.add(jid)
@@ -415,8 +445,7 @@ def compute_dag_depths(
             nodes_t = [
                 n
                 for n in dag.nodes
-                if n in full_jobs
-                and type(full_jobs[n]).__name__.split(".")[0] == tname
+                if n in full_jobs and type(full_jobs[n]).__name__.split(".")[0] == tname
             ]
             if nodes_t:
                 max_d = max(depths[n] for n in nodes_t)
@@ -497,14 +526,18 @@ def resolve_target_config(
             )
             return None, ""
         target_tags = configs[args.config_index]
-        return target_tags, ", ".join(f"{k}={v}" for k, v in sorted(target_tags.items()))
+        return target_tags, ", ".join(
+            f"{k}={v}" for k, v in sorted(target_tags.items())
+        )
 
     if args.filter:
         filter_tags = parse_filter_arg(args.filter)
         if args.single_config:
             for cfg_cand in configs:
                 if all(cfg_cand.get(k) == v for k, v in filter_tags.items()):
-                    return cfg_cand, ", ".join(f"{k}={v}" for k, v in sorted(cfg_cand.items()))
+                    return cfg_cand, ", ".join(
+                        f"{k}={v}" for k, v in sorted(cfg_cand.items())
+                    )
             logging.error("No configuration matched filter: %s", args.filter)
             return None, ""
         return filter_tags, f"Filter: {args.filter}"

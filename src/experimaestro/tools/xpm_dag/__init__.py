@@ -4,6 +4,7 @@ from .draw_dag import (
     main,
     plot_dag,
     print_robust_tree,
+    run_dag,
 )
 from .xpm_dag import (
     BOX_H,
@@ -53,5 +54,6 @@ __all__ = [
     "print_robust_tree",
     "resolve_run_dir",
     "resolve_target_config",
+    "run_dag",
     "serve_dag_web",
 ]

@@ -377,3 +377,20 @@ This is needed when:
 - Jobs were created before the database was introduced
 - Jobs were created by external processes
 - The database is out of sync with the filesystem
+
+## Experiment DAG Visualization
+
+Experimaestro provides an interactive web-based DAG viewer via `experimaestro dag` to explore task dependency graphs, configuration nodes, and trial hyperparameters.
+
+```{figure} img/DAG_example.png
+:alt: Experimaestro DAG Web Viewer
+
+Interactive DAG viewer: inspect task dependencies, parameters, execution states, and filter by hyperparameter configuration.
+```
+
+```bash
+# Launch interactive web viewer
+experimaestro dag my_experiment
+```
+
+See [Experiment DAG Visualization](cli.md#experiment-dag-visualization-experimaestro-dag) in the CLI reference for details and options.
