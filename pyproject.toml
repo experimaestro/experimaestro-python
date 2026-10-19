@@ -191,9 +191,14 @@ markers = [
     "deprecation: DeprecatedAttribute, migration tests",
     "carbon: Carbon tracking tests (optional feature)",
     "slow: Long-running tests",
+    "ui(*interfaces): UI feature test restricted to these interfaces (tui, web)",
+    "ui_gap(*interfaces, reason): known defect of these interfaces (strict xfail)",
 ]
 
 [dependency-groups]
+browser = [
+    "playwright>=1.50",
+]
 dev = [
     "ruff>=0.8",
     "mkdocs>=1.6.1",

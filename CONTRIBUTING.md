@@ -68,6 +68,45 @@ uv run pytest src/experimaestro/tests/test_identifier.py   # one file
 Add tests for bug fixes and new features. Test data must not contain personal
 information (real names, emails, …): use made-up values.
 
+### UI feature tests
+
+Features of the monitoring interfaces (TUI and web UI) are tested once, for
+both, in `src/experimaestro/tests/ui/`. Each test drives a
+[`UIDriver`](src/experimaestro/tests/ui/drivers.py) — what a user does (open an
+experiment, type a filter, kill a job) and what the interface shows — and runs
+with every driver:
+
+| Driver | What it runs |
+|---|---|
+| `tui` | the Textual app, under `App.run_test()` |
+| `web` | the web server, through its WebSocket protocol |
+| `browser` | the web UI in headless Chromium (Playwright), opt-in |
+
+All of them read the same made-up workspace
+([`scenario.py`](src/experimaestro/tests/ui/scenario.py)). When you add or
+change a UI feature:
+
+1. add the operation to `UIDriver` and implement it in every driver;
+2. write the test once, against the `ui` fixture;
+3. if an interface does not have the feature, mark the test
+   `@pytest.mark.ui("tui")`; if it has a known defect, mark it
+   `@pytest.mark.ui_gap("web", reason="...")` (a strict xfail: it fails once
+   the defect is fixed, so that the marker gets removed).
+
+Logic shared by the interfaces belongs outside of them (e.g.
+`scheduler/job_operations.py` for kill/delete, `cli/filter.py` for the filter
+language), so that the tests check the same behaviour everywhere.
+
+The browser tests use the committed frontend build
+(`src/experimaestro/webui/data/`, rebuild it after changing `app/`), and need
+the `browser` dependency group and Chromium; they run in a dedicated CI job:
+
+```bash
+uv sync --all-extras --group browser
+uv run playwright install chromium
+XPM_TEST_BROWSER=1 uv run pytest src/experimaestro/tests/ui
+```
+
 ## Pull requests
 
 - Keep each pull request focused on one change.
