@@ -310,12 +310,12 @@ class Client {
     this.send("orphans.delete");
   }
 
-  service_start(id: string): void {
-    this.send("service.start", { id });
+  service_start(experimentId: string, id: string): void {
+    this.send("service.start", { experimentId, id });
   }
 
-  service_stop(id: string): void {
-    this.send("service.stop", { id });
+  service_stop(experimentId: string, id: string): void {
+    this.send("service.stop", { experimentId, id });
   }
 
   quit(): void {

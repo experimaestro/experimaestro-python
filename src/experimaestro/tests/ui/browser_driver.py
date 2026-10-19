@@ -369,9 +369,33 @@ class BrowserDriver:
         await self.open_experiment(experiment_id)
         await self._nav("Services")
         services = {}
-        for row in await self.page.locator("tbody tr").all():
-            cells = row.locator("td")
-            services[(await cells.nth(1).inner_text()).strip()] = (
-                (await cells.nth(0).inner_text()).strip().lower()
+        rows = self.page.locator(f"tr[data-experiment-id='{experiment_id}']")
+        for row in await rows.all():
+            services[await row.get_attribute("data-service-id")] = (
+                (await row.locator("td").nth(0).inner_text()).strip().lower()
             )
         return services
+
+    async def _service_action(
+        self, experiment_id: str, service_id: str, label: str
+    ) -> Notification | None:
+        await self.services(experiment_id)
+        row = self.page.locator(
+            f"tr[data-experiment-id='{experiment_id}'][data-service-id='{service_id}']"
+        )
+        button = row.get_by_role("button", name=label, exact=True)
+        if not await button.count():
+            return None
+        start = await self.page.locator(".toast").count()
+        await button.click()
+        return await self._expect_toast(start, None)
+
+    async def start_service(
+        self, experiment_id: str, service_id: str
+    ) -> Notification | None:
+        return await self._service_action(experiment_id, service_id, "Start")
+
+    async def stop_service(
+        self, experiment_id: str, service_id: str
+    ) -> Notification | None:
+        return await self._service_action(experiment_id, service_id, "Stop")

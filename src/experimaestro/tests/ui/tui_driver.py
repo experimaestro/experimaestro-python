@@ -381,3 +381,18 @@ class TuiDriver:
             service_id: service.state.name.lower()
             for service_id, service in services._services.items()
         }
+
+    async def _service_action(
+        self, experiment_id: str, service_id: str, key: str
+    ) -> Notification:
+        await self.services(experiment_id)
+        await self._select_row(self._table("#services-table"), service_id)
+        start = len(self.app.notifications)
+        await self.pilot.press(key)
+        return await self._expect_notification(start, None)
+
+    async def start_service(self, experiment_id: str, service_id: str) -> Notification:
+        return await self._service_action(experiment_id, service_id, "ctrl+s")
+
+    async def stop_service(self, experiment_id: str, service_id: str) -> Notification:
+        return await self._service_action(experiment_id, service_id, "ctrl+k")

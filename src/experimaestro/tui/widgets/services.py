@@ -7,7 +7,10 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Static
 from textual.binding import Binding
 
+from experimaestro.scheduler import service_operations
+from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.state_provider import StateProvider
+from experimaestro.tui.utils import notify_outcome
 
 
 def expand_services(services: list) -> dict:
@@ -219,26 +222,17 @@ class ServicesList(Vertical):
         if not service:
             return
 
-        state = getattr(service, "state", None)
-        state_name = state.name if hasattr(state, "name") else str(state)
-
-        if state_name == "RUNNING":
-            self.notify(
-                f"Service '{service.id}' is already running", severity="information"
-            )
-            return
-
-        if state_name == "STARTING" or service.id in self._starting_services:
-            self.notify(
-                f"Service '{service.id}' is already starting...", severity="warning"
-            )
+        refusal = service_operations.check_start_service(service)
+        if refusal is None and service.id in self._starting_services:
+            refusal = Outcome("warning", f"Service '{service.id}' is already starting")
+        if refusal:
+            notify_outcome(self, refusal)
             return
 
         self._starting_services.add(service.id)
 
         # Set STARTING state immediately and refresh UI
-        if hasattr(service, "set_starting"):
-            service.set_starting()
+        service.set_starting()
         self.notify(f"Starting service '{service.id}'...", severity="information")
         self._refresh_all_services()
 
@@ -255,45 +249,12 @@ class ServicesList(Vertical):
     @work(thread=True)
     def _start_service_worker(self, service) -> None:
         """Start service in background thread"""
-        import logging
-
-        logger = logging.getLogger("xpm.tui.services")
-
         try:
-            # Convert MockService to live Service (on-demand, cached); sub-services
-            # are already live and have no to_service().
-            live_service = (
-                service.to_service() if hasattr(service, "to_service") else service
-            )
-
-            logger.info(
-                f"Starting service {live_service.id} (type={type(live_service).__name__}, "
-                f"has_get_url={hasattr(live_service, 'get_url')}, is_live={self.state_provider.is_live})"
-            )
-
-            if hasattr(live_service, "get_url"):
-                url = live_service.get_url()
-                logger.info(
-                    f"Service started, url={url}, service.url={live_service.url}"
-                )
-                self.app.call_from_thread(
-                    self.notify, f"Service started: {url}", severity="information"
-                )
-            else:
-                # Service recreation failed - error was set by to_service()
-                error_msg = service.error or "Service cannot be started"
-                self.app.call_from_thread(self.notify, error_msg, severity="warning")
-            self.app.call_from_thread(self._refresh_all_services)
-        except Exception as e:
-            # Set error on service so it shows in URL column
-            error_msg = str(e)
-            service.set_error(error_msg)
-            self.app.call_from_thread(self._refresh_all_services)
-            self.app.call_from_thread(
-                self.notify, f"Failed to start service: {e}", severity="error"
-            )
+            outcome = service_operations.start_service(service)
         finally:
             self._starting_services.discard(service.id)
+        self.app.call_from_thread(notify_outcome, self, outcome)
+        self.app.call_from_thread(self._refresh_all_services)
 
     def action_stop_service(self) -> None:
         """Stop the selected service"""
@@ -302,26 +263,8 @@ class ServicesList(Vertical):
             return
 
         self._starting_services.discard(service.id)
-
-        # Convert MockService to live Service (on-demand, cached); sub-services
-        # are already live.
-        service = service.to_service() if hasattr(service, "to_service") else service
-
-        from experimaestro.scheduler.services import ServiceState
-
-        if service.state == ServiceState.STOPPED:
-            self.notify("Service is not running", severity="warning")
-            return
-
-        try:
-            if hasattr(service, "stop"):
-                service.stop()
-                self.notify(f"Service stopped: {service.id}", severity="information")
-            else:
-                self.notify("Service does not support stopping", severity="warning")
-            self._refresh_all_services()
-        except Exception as e:
-            self.notify(f"Failed to stop service: {e}", severity="error")
+        notify_outcome(self, service_operations.stop_service(service))
+        self._refresh_all_services()
 
     def action_copy_url(self) -> None:
         """Copy the service URL to clipboard"""

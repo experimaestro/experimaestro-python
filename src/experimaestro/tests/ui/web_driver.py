@@ -40,7 +40,8 @@ class WebDriver:
         self.experiment_list: dict[str, dict[str, Any]] = {}
         self.jobs: dict[str, dict[str, Any]] = {}
         self.orphan_jobs: dict[str, dict[str, Any]] = {}
-        self.services_by_id: dict[str, dict[str, Any]] = {}
+        #: Services by key ("<experiment>/<service>")
+        self.services_by_key: dict[str, dict[str, Any]] = {}
         self.notifications: list[Notification] = []
         self._runs: dict[str, list[dict[str, Any]]] = {}
         self._filter: list[str] | None = None
@@ -81,7 +82,7 @@ class WebDriver:
             case "orphan.removed":
                 self.orphan_jobs.pop(payload["jobId"], None)
             case "service.add" | "service.update":
-                self.services_by_id.setdefault(payload["id"], {}).update(payload)
+                self.services_by_key.setdefault(payload["key"], {}).update(payload)
             case "notify":
                 self.notifications.append(
                     Notification(SEVERITIES[payload["severity"]], payload["message"])
@@ -249,9 +250,20 @@ class WebDriver:
     # --- Services
 
     async def services(self, experiment_id: str) -> dict[str, str]:
-        self.services_by_id.clear()
+        self.services_by_key.clear()
         await self._request("services", experimentId=experiment_id)
         return {
-            service_id: service["state"].lower()
-            for service_id, service in self.services_by_id.items()
+            service["id"]: service["state"].lower()
+            for service in self.services_by_key.values()
+            if service["experimentId"] == experiment_id
         }
+
+    async def start_service(self, experiment_id: str, service_id: str) -> Notification:
+        return await self._notification(
+            "service.start", experimentId=experiment_id, id=service_id
+        )
+
+    async def stop_service(self, experiment_id: str, service_id: str) -> Notification:
+        return await self._notification(
+            "service.stop", experimentId=experiment_id, id=service_id
+        )

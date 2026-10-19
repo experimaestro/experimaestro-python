@@ -59,9 +59,13 @@ Then open `http://localhost:12345` in your browser.
 - **Log Viewing**: View stdout/stderr logs directly in the browser
 - **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
   usage; kill or delete them one by one, or all at once (with confirmation)
+- **Services**: The services of the selected experiment (of all experiments by
+  default), also when the experiment is not running; start, stop and open
+  them (through `/services/<experiment>/<service>/`), or view their logs
 
-Killing and deleting jobs or experiments behave the same in the web UI, the
-TUI and the `experimaestro jobs` commands: the same operations are refused
+Killing and deleting jobs or experiments, and starting and stopping services,
+behave the same in the web UI, the TUI and (for jobs) the `experimaestro jobs`
+commands: the same operations are refused
 (e.g. deleting a running job) and reported with the same messages. Deleting a
 job also removes the [partial directories](cli.md#cleanup-partial-directories)
 it leaves orphaned.
@@ -168,8 +172,9 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 
 | Key | Action |
 |-----|--------|
-| `s` | Start service |
-| `x` | Stop service |
+| `Ctrl+S` | Start service |
+| `Ctrl+K` | Stop service |
+| `l` | View logs |
 | `u` | Copy URL |
 
 **Orphan Jobs:**

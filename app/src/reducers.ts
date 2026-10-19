@@ -113,6 +113,10 @@ export type OrphanJob = Job & {
 type ServiceStatus = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING" | "ERROR";
 
 export type ServiceInformation = {
+  // Unique key ("<experiment>/<service>"): service ids are only unique within
+  // an experiment
+  key: string;
+  experimentId: string;
   id: string;
   description: string;
   state: ServiceStatus;
@@ -237,16 +241,16 @@ export const slice = createSlice({
     },
 
     addService(draft, { payload }: PayloadAction<ServiceInformation>) {
-      draft.services.byId[payload.id] = payload;
+      draft.services.byId[payload.key] = payload;
       draft.services.ids = Object.keys(draft.services.byId);
     },
 
     updateService(draft, { payload }: PayloadAction<Partial<ServiceInformation>>) {
-      if (!payload.id) {
+      if (!payload.key) {
         return;
       }
-      draft.services.byId[payload.id] = {
-        ...draft.services.byId[payload.id],
+      draft.services.byId[payload.key] = {
+        ...draft.services.byId[payload.key],
         ...payload,
       };
     },

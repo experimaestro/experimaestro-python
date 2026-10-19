@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from fastapi import WebSocket
 
-from experimaestro.scheduler import job_operations
+from experimaestro.scheduler import job_operations, service_operations
 from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import display_state, status_rank
 from experimaestro.scheduler.state_provider import StateProvider
@@ -257,6 +257,9 @@ def serialize_service(service: BaseService) -> Dict[str, Any]:
     """Serialize a service using ``full_state_dict()`` to frontend format."""
     d = service.full_state_dict()
     return {
+        # Service ids are only unique within an experiment
+        "key": f"{service.experiment_id}/{service.id}",
+        "experimentId": service.experiment_id,
         "id": d.get("service_id"),
         "description": d.get("description"),
         "state": d.get("state"),
@@ -569,14 +572,16 @@ class WebSocketHandler:
             )
 
     async def _handle_services(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle services request - send all services"""
-        if self._scheduler:
-            # Get services from scheduler's experiments
-            for xp in self._scheduler.experiments.values():
-                for service in xp.services.values():
-                    await websocket.send_json(
-                        {"type": "service.add", "payload": serialize_service(service)}
-                    )
+        """Send the services of an experiment (all experiments by default)
+
+        Read through the state provider, as the TUI does, so that services are
+        listed (and can be started) without a running experiment.
+        """
+        services = self.state_provider.get_services(payload.get("experimentId"))
+        for service in services:
+            await websocket.send_json(
+                {"type": "service.add", "payload": serialize_service(service)}
+            )
 
     async def _handle_job_details(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle job details request"""
@@ -752,71 +757,47 @@ class WebSocketHandler:
             }
         )
 
-    def _find_live_service(self, service_id: str):
-        """Find a live service across the scheduler's experiments."""
-        if self._scheduler:
-            for xp in self._scheduler.experiments.values():
-                svc = xp.services.get(service_id)
-                if svc is not None:
-                    return svc
-        return None
-
     async def _handle_service_start(
         self, websocket: WebSocket, payload: Dict[str, Any]
     ):
-        """Start a service (active experiment only)."""
-        await self._service_control(websocket, payload, stop=False)
+        """Start a service (see scheduler/service_operations.py)"""
+        service = await self._lookup_service(websocket, payload)
+        if service is None:
+            return
+        if refusal := service_operations.check_start_service(service):
+            await self._notify(
+                websocket, _TOAST_SEVERITY[refusal.severity], refusal.message
+            )
+            return
+        service.set_starting()
+        await self.broadcast("service.update", serialize_service(service))
+        await self._notify_outcome(
+            websocket, lambda: service_operations.start_service(service)
+        )
+        await self.broadcast("service.update", serialize_service(service))
 
     async def _handle_service_stop(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Stop a service (active experiment only)."""
-        await self._service_control(websocket, payload, stop=True)
-
-    async def _service_control(
-        self, websocket: WebSocket, payload: Dict[str, Any], *, stop: bool
-    ):
-        service_id = payload.get("id")
-        if self._scheduler is None:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "payload": {
-                        "message": "Service control requires an active experiment"
-                    },
-                }
-            )
-            return
-
-        service = self._find_live_service(service_id)
+        """Stop a service (see scheduler/service_operations.py)"""
+        service = await self._lookup_service(websocket, payload)
         if service is None:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "payload": {"message": f"Service {service_id} not found"},
-                }
-            )
             return
+        await self._notify_outcome(
+            websocket, lambda: service_operations.stop_service(service)
+        )
+        await self.broadcast("service.update", serialize_service(service))
 
-        loop = asyncio.get_running_loop()
-
-        def control():
-            live = service.to_service()
-            if stop:
-                if hasattr(live, "stop"):
-                    live.stop()
-            elif hasattr(live, "get_url"):
-                # Services start lazily on first URL request
-                live.get_url()
-            return live
-
-        try:
-            live = await loop.run_in_executor(None, control)
-            await self.broadcast("service.update", serialize_service(live))
-        except Exception as e:
-            logger.warning("Service %s control failed: %s", service_id, e)
-            if hasattr(service, "set_error"):
-                service.set_error(str(e))
-            await self.broadcast("service.update", serialize_service(service))
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+    async def _lookup_service(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ) -> BaseService | None:
+        """Service designated by a request (``experimentId`` and ``id``)"""
+        service = service_operations.find_service(
+            self.state_provider, payload.get("experimentId"), payload.get("id")
+        )
+        if service is None:
+            await self._notify(
+                websocket, "danger", f"Service {payload.get('id')} not found"
+            )
+        return service
 
     async def _handle_warnings(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Send all unresolved warnings."""

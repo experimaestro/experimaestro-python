@@ -47,7 +47,12 @@ def anyio_backend():
 
 @pytest.fixture
 def provider(tmp_path):
-    return ScenarioProvider(tmp_path / "workspace")
+    provider = ScenarioProvider(tmp_path / "workspace")
+    yield provider
+    # Stop the services a test started
+    for services in provider.services.values():
+        for service in services:
+            service.to_service().stop()
 
 
 @pytest.fixture(params=[*sorted(DRIVERS), "browser"])

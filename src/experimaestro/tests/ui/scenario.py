@@ -11,6 +11,8 @@ directory, so that deleting a job, reading its logs or measuring a folder go
 through the real code.
 """
 
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +22,7 @@ from experimaestro.scheduler.interfaces import (
     ExperimentStatus,
     JobState,
 )
-from experimaestro.scheduler.services import Service
+from experimaestro.scheduler.services import WebService
 from experimaestro.scheduler.state_provider import (
     MockExperiment,
     MockJob,
@@ -163,8 +165,9 @@ ORPHANS = [
 ]
 
 
-class DemoService(Service):
-    """A service the interfaces can recreate from its stored state"""
+class DemoService(WebService):
+    """A web service the interfaces can recreate from its stored state, and
+    start and stop (it serves nothing)"""
 
     def __init__(self, id: str, title: str):
         super().__init__()
@@ -174,9 +177,19 @@ class DemoService(Service):
     def description(self):
         return self.title
 
+    def _serve(self, running: threading.Event):
+        self.url = f"http://localhost:1/{self.id}"
+        running.set()
+        while not self.should_stop():
+            time.sleep(0.01)
+
 
 #: Services, by experiment
-SERVICES = {"sweep": [("tensorboard", "TensorBoard")]}
+#: (the same service id in two experiments: services are told apart by experiment)
+SERVICES = {
+    "sweep": [("tensorboard", "TensorBoard")],
+    "baseline": [("tensorboard", "TensorBoard (baseline)")],
+}
 
 
 def stdout_text(job_id: str) -> str:

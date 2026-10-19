@@ -146,3 +146,15 @@ class UIDriver(Protocol):
     async def services(self, experiment_id: str) -> dict[str, str]:
         """Services of an experiment, with their (lowercase) state"""
         ...
+
+    async def start_service(
+        self, experiment_id: str, service_id: str
+    ) -> Notification | None:
+        """Start a service (None if not offered)"""
+        ...
+
+    async def stop_service(
+        self, experiment_id: str, service_id: str
+    ) -> Notification | None:
+        """Stop a service (None if not offered)"""
+        ...
