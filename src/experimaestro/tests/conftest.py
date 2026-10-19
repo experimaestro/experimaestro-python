@@ -83,6 +83,30 @@ def _hang_watchdog():
         faulthandler.cancel_dump_traceback_later()
 
 
+@pytest.fixture(autouse=True)
+def _close_watchers():
+    """Stop the file watchers a test leaves behind
+
+    The scheduler keeps one job event reader per workspace for its lifetime
+    and tests often leave state providers open; as each test uses its own
+    workspace, their watcher threads and polled directories would otherwise
+    accumulate over the session and slow the following tests down.
+    """
+    yield
+    from experimaestro.filewatcher import FileWatcherService
+    from experimaestro.scheduler.base import Scheduler
+
+    # The scheduler's job event readers (one per workspace, restarted when an
+    # experiment uses the workspace again)
+    if Scheduler.has_instance():
+        Scheduler.instance()._stop_job_event_reader()
+    service = FileWatcherService.instance()
+    with service._watches_lock:
+        watches = list(service._directory_watches)
+    for watch in watches:
+        watch.close()
+
+
 @pytest.fixture(scope="session")
 def xpmdirectory(tmp_path_factory):
     """Sets a temporary main directory"""
