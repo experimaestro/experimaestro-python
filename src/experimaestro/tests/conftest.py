@@ -54,23 +54,29 @@ Process.HANDLERS["mock"] = MockProcess
 
 # --- Hang watchdog --------------------------------------------------------
 #
-# When a test hangs in CI, pytest-timeout fires at 300s and kills it, but
-# we get no information about which threads were stuck where. We arm
-# faulthandler.dump_traceback_later so that every thread's stack is
-# dumped to stderr after XPM_TEST_THREAD_DUMP_AFTER seconds per test.
-# Tuned aggressively (10s default) so it fires well before pytest-timeout
-# and we capture state on the hanging test, not the next one. ``repeat``
-# is off so legitimately-slow tests don't spam the log.
+# Opt-in (XPM_TEST_THREAD_DUMP_AFTER=<seconds>): arms
+# faulthandler.dump_traceback_later so that every thread's stack is dumped
+# after that delay per test. Off by default: faulthandler reads the frames of
+# the other threads while they run, which can crash (segfault) or hang the
+# process — it did so in CI on slow tests. pytest-timeout (300s) already dumps
+# every thread's stack, safely, when a test hangs. ``repeat`` is off so
+# legitimately-slow tests don't spam the log.
 
-_THREAD_DUMP_AFTER = float(os.environ.get("XPM_TEST_THREAD_DUMP_AFTER", "10"))
+_THREAD_DUMP_AFTER = float(os.environ.get("XPM_TEST_THREAD_DUMP_AFTER", "0"))
 
 
 @pytest.fixture(autouse=True)
 def _hang_watchdog():
-    """Dump every thread's stack to stderr if the test hangs."""
+    """Dump every thread's stack if the test hangs (when enabled)"""
+    if _THREAD_DUMP_AFTER <= 0:
+        yield
+        return
     # faulthandler.dump_traceback_later replaces any previous timer, so
-    # arming it per-test is safe.
-    faulthandler.dump_traceback_later(_THREAD_DUMP_AFTER, repeat=False, file=sys.stderr)
+    # arming it per-test is safe. Writes to the real stderr: sys.stderr is
+    # pytest's capture, lost if the process dies.
+    faulthandler.dump_traceback_later(
+        _THREAD_DUMP_AFTER, repeat=False, file=sys.__stderr__
+    )
     try:
         yield
     finally:
