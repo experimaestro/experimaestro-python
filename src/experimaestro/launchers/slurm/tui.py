@@ -2238,7 +2238,20 @@ class SlurmConfigApp(App):
 
     def action_generate(self) -> None:
         """Generate launchers.py."""
-        self.set_status("Generate not yet implemented")
+        if not self.config:
+            self.set_status("No configuration to generate from")
+            return
+        try:
+            from .cli import _generate_slurm_launchers_py
+
+            self.config.save_to_yaml(self.config_path)
+            output_path = self.config_path.parent / "launchers.py"
+            content = _generate_slurm_launchers_py(self.config, self.config_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(content)
+            self.set_status(f"Generated {output_path}")
+        except Exception as e:
+            self.set_status(f"Generate error: {e}")
 
     def action_save(self) -> None:
         """Save configuration to YAML."""

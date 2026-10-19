@@ -466,3 +466,50 @@ class TestUnifiedMemory:
         # Request 30G CPU + 20G GPU - should pass (separate memory pools)
         req = cuda_gpu(mem="20G") & cpu(mem="30G")
         assert req.match(cuda_host) is not None
+
+
+class TestLauncherFallbackAndErrors:
+    """Test missing launchers.py warning fallback and LauncherNotFoundError message"""
+
+    def test_missing_launchers_py_warns_and_falls_back(self, tmp_path, caplog):
+        """Missing launchers.py should log a warning with setup tips and return DirectLauncher"""
+        import logging
+        from experimaestro.launchers.direct import DirectLauncher
+
+        registry = LauncherRegistry(tmp_path)
+        with caplog.at_level(logging.WARNING):
+            launcher = registry.find("duration=1h & gpu(mem=4G)*1")
+
+        assert isinstance(launcher, DirectLauncher)
+        assert str(tmp_path / "launchers.py") in caplog.text
+        assert "experimaestro launchers direct generate" in caplog.text
+        assert (
+            "https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html"
+            in caplog.text
+        )
+
+    def test_unmatched_launcher_raises_helpful_error(self, tmp_path, monkeypatch):
+        """When launchers.py returns None, find_launcher raises LauncherNotFoundError with tips"""
+        from experimaestro.launcherfinder import LauncherNotFoundError, find_launcher
+
+        launchers_py = tmp_path / "launchers.py"
+        launchers_py.write_text(
+            "def find_launcher(requirements, tags=set()):\n    return None\n"
+        )
+
+        monkeypatch.setattr(LauncherRegistry, "CURRENT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(LauncherRegistry, "INSTANCES", {})
+
+        with pytest.raises(LauncherNotFoundError) as exc_info:
+            find_launcher("duration=1h & cuda(mem=80G)*8")
+
+        msg = str(exc_info.value)
+        assert str(launchers_py) in msg
+        assert "experimaestro launchers direct generate" in msg
+        assert "experimaestro launchers slurm generate" in msg
+        assert "experimaestro find-launchers" in msg
+        assert (
+            "https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html"
+            in msg
+        )
+

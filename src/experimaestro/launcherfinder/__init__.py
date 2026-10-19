@@ -15,5 +15,5 @@ from .specs import (
     HostRequirement,
     MatchRequirement,
 )
-from .registry import find_launcher, LauncherRegistry
+from .registry import find_launcher, LauncherRegistry, LauncherNotFoundError
 from .parser import parse

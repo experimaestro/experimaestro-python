@@ -920,3 +920,279 @@ def configure(cache_file: Path | None, use_cache: bool, config_path: Path | None
         use_cache=use_cache,
         config_path=config_path,
     )
+
+
+_KNOWN_GPU_MEMORY_GB: list[tuple[str, int]] = [
+    ("h200", 141),
+    ("b200", 192),
+    ("h100", 80),
+    ("a100_80", 80),
+    ("a100-80", 80),
+    ("a100", 40),
+    ("l40", 48),
+    ("a40", 48),
+    ("a6000", 48),
+    ("rtx6000", 48),
+    ("v100_32", 32),
+    ("v100-32", 32),
+    ("v100", 16),
+    ("a10g", 24),
+    ("a10", 24),
+    ("4090", 24),
+    ("3090", 24),
+    ("rtx8000", 48),
+    ("t4", 16),
+    ("p100", 16),
+    ("a30", 24),
+]
+
+
+def _infer_gpu_memory_gb(
+    gpu_type: str | None, default_gb: int = 16
+) -> tuple[int, bool]:
+    """Infer GPU memory in GB from GPU type string when not explicitly configured.
+
+    Returns:
+        Tuple of (memory_gb, matched_known_type)
+    """
+    if gpu_type:
+        lower = gpu_type.lower()
+        # Check for explicit size suffix like "80g" or "40gb"
+        m = re.search(r"(\d+)\s*gb?\b", lower)
+        if m:
+            return int(m.group(1)), True
+        for prefix, mem_gb in _KNOWN_GPU_MEMORY_GB:
+            if prefix in lower:
+                return mem_gb, True
+    return default_gb, False
+
+
+def _generate_slurm_launchers_py(
+    config: "SlurmConfig",
+    config_path: Path,
+    default_gpu_memory_gb: int = 16,
+) -> str:
+    """Render SLURM launchers.py from a SlurmConfig using Jinja2 template."""
+    import logging
+    import jinja2
+
+    logger = logging.getLogger("xpm.slurm")
+    template_env = jinja2.Environment(
+        loader=jinja2.PackageLoader("experimaestro.launchers.slurm", "templates"),
+        keep_trailing_newline=True,
+    )
+    template = template_env.get_template("launchers.py.j2")
+
+    # Sort enabled partitions by priority descending, then name
+    enabled = sorted(
+        config.enabled_partitions.values(),
+        key=lambda p: (-p.priority.value, p.name),
+    )
+
+    partitions_ctx = []
+    for p in enabled:
+        mem_bytes = (
+            p.effective_memory_gb * (1024**3)
+            if (p.memory_gb.is_overridden or p.memory_is_inferred)
+            else p.memory_bytes
+        )
+        gpu_mem_gb = p.effective_gpu_memory_gb
+        if p.gpus_per_node > 0 and gpu_mem_gb <= 0:
+            gpu_mem_gb, matched = _infer_gpu_memory_gb(
+                p.effective_gpu_type, default_gb=default_gpu_memory_gb
+            )
+            source_desc = (
+                f"inferred from GPU type '{p.effective_gpu_type}'"
+                if matched
+                else "fallback default"
+            )
+            logger.warning(
+                "Partition '%s' has %d GPU(s) without explicit GPU memory in %s; "
+                "using %d GB (%s). Set 'gpu_memory_gb' in %s to override.",
+                p.name,
+                p.gpus_per_node,
+                config_path,
+                gpu_mem_gb,
+                source_desc,
+                config_path,
+            )
+
+        allowed_qos = p.effective_qos
+        qos = allowed_qos[0] if allowed_qos else None
+
+        partitions_ctx.append(
+            {
+                "name": p.name,
+                "priority": p.priority.value,
+                "cpus": p.effective_cores,
+                "memory_bytes": mem_bytes,
+                "gpus": p.gpus_per_node,
+                "gpu_type": p.effective_gpu_type,
+                "gpu_memory_bytes": gpu_mem_gb * (1024**3) if p.gpus_per_node > 0 else 0,
+                "time_limit_seconds": p.time_limit_seconds,
+                "qos": qos,
+            }
+        )
+
+    return template.render(
+        cluster_name=config.cluster_name,
+        config_file=str(config_path),
+        default_account=config.default_account.value,
+        consider_priority=config.consider_priority.value,
+        partitions=partitions_ctx,
+    )
+
+
+@cli.command("generate")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output path for launchers.py (default: ~/.config/experimaestro/launchers.py)",
+)
+@click.option(
+    "--config",
+    "-c",
+    "config_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to SLURM configuration YAML (default: ~/.config/experimaestro/slurm.yaml)",
+)
+@click.option(
+    "--cache-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="JSON file for cached SLURM command outputs",
+)
+@click.option(
+    "--use-cache",
+    is_flag=True,
+    help="Use cached SLURM outputs instead of running commands",
+)
+@click.option(
+    "--default-gpu-memory",
+    type=int,
+    default=16,
+    help="Fallback GPU memory in GB when not reported by SLURM or slurm.yaml (default: 16)",
+)
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Overwrite existing launchers.py without prompting",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Non-interactive mode: accept defaults without prompting",
+)
+def generate(
+    output: Path | None,
+    config_path: Path | None,
+    cache_file: Path | None,
+    use_cache: bool,
+    default_gpu_memory: int,
+    force: bool,
+    yes: bool,
+):
+    """Generate a launchers.py file from SLURM cluster information and slurm.yaml.
+
+    Detects SLURM partitions (or reads from cache), merges any overrides from
+    slurm.yaml, saves slurm.yaml if not present, and writes launchers.py.
+    Use `-y / --yes` for non-interactive generation.
+
+    Examples:
+        experimaestro launchers slurm generate -y
+        experimaestro launchers slurm generate -o ./launchers.py -y
+    """
+    from rich.console import Console
+    from rich.prompt import Confirm
+    from rich.table import Table
+    from .models import SlurmConfig
+
+    console = Console()
+    non_interactive = yes or not sys.stdin.isatty()
+
+    if config_path is None:
+        config_path = Path("~/.config/experimaestro/slurm.yaml").expanduser()
+    else:
+        config_path = config_path.expanduser()
+
+    if output is None:
+        output = config_path.parent / "launchers.py"
+    else:
+        output = output.expanduser()
+
+    if cache_file is not None:
+        cache_file = cache_file.expanduser()
+
+    if output.exists() and not (force or yes):
+        console.print(f"\n[yellow]File already exists:[/yellow] {output}")
+        if non_interactive:
+            raise click.ClickException(
+                f"File already exists: {output}. Pass --force (-f) or --yes (-y) to overwrite."
+            )
+        if not Confirm.ask("Overwrite?", default=False):
+            console.print("[yellow]Aborted.[/yellow]")
+            return
+
+    console.print("[cyan]Detecting SLURM cluster configuration...[/cyan]")
+    cache = SlurmCommandCache(
+        cache_file=cache_file or get_default_cache_file(),
+        use_cache=use_cache,
+    )
+    cluster_data = detect_cluster_info(cache)
+    config = SlurmConfig.from_cluster_and_file(cluster_data, config_path)
+
+    if not config.enabled_partitions:
+        raise click.ClickException(
+            f"No enabled SLURM partitions found for cluster '{config.cluster_name}'. "
+            "Make sure SLURM commands (sinfo, scontrol) are available or provide --cache-file / --use-cache."
+        )
+
+    table = Table(
+        title=f"SLURM Partitions ({config.cluster_name})", border_style="blue"
+    )
+    table.add_column("Partition", style="cyan")
+    table.add_column("Priority", style="green")
+    table.add_column("CPUs", style="green")
+    table.add_column("Memory (GB)", style="green")
+    table.add_column("GPUs", style="green")
+
+    for p in sorted(
+        config.enabled_partitions.values(), key=lambda x: (-x.priority.value, x.name)
+    ):
+        gpu_str = (
+            f"{p.gpus_per_node}x {p.effective_gpu_type or 'GPU'}"
+            if p.gpus_per_node > 0
+            else "-"
+        )
+        table.add_row(
+            p.name,
+            str(p.priority.value),
+            str(p.effective_cores),
+            str(p.effective_memory_gb),
+            gpu_str,
+        )
+
+    console.print()
+    console.print(table)
+    console.print()
+
+    if not non_interactive and not Confirm.ask("Generate configuration?", default=True):
+        console.print("[yellow]Aborted.[/yellow]")
+        return
+
+    if not config_path.exists():
+        config.save_to_yaml(config_path)
+        console.print(f"[green]✓[/green] Saved cluster config to [bold]{config_path}[/bold]")
+
+    content = _generate_slurm_launchers_py(
+        config, config_path, default_gpu_memory_gb=default_gpu_memory
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(content)
+    console.print(f"[green]✓[/green] Generated [bold]{output}[/bold]")
+
