@@ -171,9 +171,11 @@ var.setParseAction(VarExpr)
 regexExpr = var + tilde + quotedString
 regexExpr.setParseAction(RegexExpr)
 
-varQuotedString = quotedString
+# A copy is needed: setting the parse action on ``quotedString`` itself would
+# turn every quoted string (regexes, ``in`` lists) into a ConstantString
+varQuotedString = quotedString.copy()
 varQuotedString.setParseAction(ConstantString)
-eqExpr = var + eq + (var | quotedString)
+eqExpr = var + eq + (var | varQuotedString)
 eqExpr.setParseAction(EqExpr)
 
 stringList = quotedString + pp.ZeroOrMore(comma + quotedString)
@@ -202,7 +204,7 @@ def createFilter(query: str, ctx: FilterContext = None) -> Callable[["MockJob"],
     """Returns a filter function given a query string
 
     Args:
-        query: Filter expression (e.g., '@state = "DONE" and model = "bm25"')
+        query: Filter expression (e.g., '@state = "done" and model = "bm25"')
         ctx: FilterContext containing tags map and other experiment-scoped data.
              If None, an empty context is used.
 
