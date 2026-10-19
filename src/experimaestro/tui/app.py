@@ -14,6 +14,7 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 
+from experimaestro.scheduler import job_operations
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
     EventBase,
@@ -31,7 +32,11 @@ from experimaestro.scheduler.state_status import (
     ErrorEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
-from experimaestro.tui.utils import format_duration, get_status_icon  # noqa: F401
+from experimaestro.tui.utils import (  # noqa: F401
+    format_duration,
+    get_status_icon,
+    notify_outcome,
+)
 from experimaestro.tui.messages import (
     ExperimentSelected,
     ExperimentDeselected,
@@ -794,8 +799,8 @@ class ExperimaestroUI(App):
             self.notify("Job not found", severity="error")
             return
 
-        if job.state.running():
-            self.notify("Cannot delete a running job", severity="warning")
+        if refusal := job_operations.check_delete_job(job):
+            notify_outcome(self, refusal)
             return
 
         # Save cursor position to restore after delete
@@ -804,19 +809,18 @@ class ExperimaestroUI(App):
         cursor_row = table.cursor_row
 
         def handle_delete_response(confirmed: bool) -> None:
-            if confirmed:
-                success, msg = self.state_provider.delete_job_safely(job)
-                if success:
-                    self.notify(msg, severity="information")
-                    self.action_refresh()
-                    # Move cursor to previous row (or first if was at top)
-                    if cursor_row is not None and table.row_count > 0:
-                        new_row = min(cursor_row, table.row_count - 1)
-                        if new_row > 0 and cursor_row > 0:
-                            new_row = cursor_row - 1
-                        table.move_cursor(row=new_row)
-                else:
-                    self.notify(msg, severity="error")
+            if not confirmed:
+                return
+            outcome = job_operations.delete_job(self.state_provider, job)
+            notify_outcome(self, outcome)
+            if outcome.ok:
+                self.action_refresh()
+                # Move cursor to previous row (or first if was at top)
+                if cursor_row is not None and table.row_count > 0:
+                    new_row = min(cursor_row, table.row_count - 1)
+                    if new_row > 0 and cursor_row > 0:
+                        new_row = cursor_row - 1
+                    table.move_cursor(row=new_row)
 
         self.push_screen(
             DeleteConfirmScreen("job", job.identifier),
@@ -825,43 +829,34 @@ class ExperimaestroUI(App):
 
     def on_delete_experiment_request(self, message: DeleteExperimentRequest) -> None:
         """Handle experiment deletion request"""
-        # Check if the experiment is currently running
-        experiments = self.state_provider.get_experiments()
-        exp = next(
-            (e for e in experiments if e.experiment_id == message.experiment_id), None
-        )
-        if exp is not None:
-            from experimaestro.scheduler.interfaces import ExperimentStatus
+        experiment_id = message.experiment_id
+        if refusal := job_operations.check_delete_experiment(
+            self.state_provider, experiment_id
+        ):
+            notify_outcome(self, refusal)
+            return
 
-            if exp.status == ExperimentStatus.RUNNING:
-                self.notify(
-                    "Cannot delete: experiment is still running",
-                    severity="warning",
-                )
-                return
-
-        jobs = self.state_provider.get_jobs(message.experiment_id)
+        jobs = self.state_provider.get_jobs(experiment_id)
         warning = (
             f"{len(jobs)} jobs will remain (not deleted by default)" if jobs else None
         )
 
         def handle_delete_response(confirmed: bool) -> None:
-            if confirmed:
-                success, msg = self.state_provider.delete_experiment(
-                    message.experiment_id, delete_jobs=False
-                )
-                if success:
-                    self.notify(msg, severity="information")
-                    # Go back to experiments list
-                    experiments_list = self.query_one(ExperimentsList)
-                    experiments_list.expand_experiments()
-                    self.post_message(ExperimentDeselected())
-                    self.action_refresh()
-                else:
-                    self.notify(msg, severity="error")
+            if not confirmed:
+                return
+            outcome = job_operations.delete_experiment(
+                self.state_provider, experiment_id
+            )
+            notify_outcome(self, outcome)
+            if outcome.ok:
+                # Go back to experiments list
+                experiments_list = self.query_one(ExperimentsList)
+                experiments_list.expand_experiments()
+                self.post_message(ExperimentDeselected())
+                self.action_refresh()
 
         self.push_screen(
-            DeleteConfirmScreen("experiment", message.experiment_id, warning),
+            DeleteConfirmScreen("experiment", experiment_id, warning),
             handle_delete_response,
         )
 
@@ -872,18 +867,14 @@ class ExperimaestroUI(App):
             self.notify("Job not found", severity="error")
             return
 
-        if not job.state.running():
-            self.notify("Job is not running", severity="warning")
+        if refusal := job_operations.check_kill_job(job):
+            notify_outcome(self, refusal)
             return
 
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
-                try:
-                    self.state_provider.kill_job(job, perform=True)
-                    self.notify(f"Job {job.identifier} killed", severity="information")
-                    self.action_refresh()
-                except Exception as e:
-                    self.notify(f"Failed to kill job: {e}", severity="error")
+                notify_outcome(self, job_operations.kill_job(self.state_provider, job))
+                self.action_refresh()
 
         self.push_screen(
             KillConfirmScreen("job", job.identifier),
@@ -892,33 +883,20 @@ class ExperimaestroUI(App):
 
     def on_kill_experiment_request(self, message: KillExperimentRequest) -> None:
         """Handle experiment kill request (kill all running jobs)"""
-        jobs = self.state_provider.get_jobs(message.experiment_id)
-        running_jobs = [j for j in jobs if j.state.running()]
-
-        if not running_jobs:
-            self.notify("No running jobs in experiment", severity="warning")
+        experiment_id = message.experiment_id
+        if refusal := job_operations.check_kill_experiment(
+            self.state_provider, experiment_id
+        ):
+            notify_outcome(self, refusal)
             return
+        running_jobs = self.state_provider.get_running_jobs(experiment_id)
 
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
-                killed = 0
-                failed = 0
-                for job in running_jobs:
-                    try:
-                        self.state_provider.kill_job(job, perform=True)
-                        killed += 1
-                    except Exception:
-                        failed += 1
-                if failed:
-                    self.notify(
-                        f"Killed {killed} of {len(running_jobs)} jobs ({failed} failed)",
-                        severity="warning",
-                    )
-                else:
-                    self.notify(
-                        f"Killed {killed} of {len(running_jobs)} running jobs",
-                        severity="information",
-                    )
+                notify_outcome(
+                    self,
+                    job_operations.kill_experiment(self.state_provider, experiment_id),
+                )
                 self.action_refresh()
 
         self.push_screen(

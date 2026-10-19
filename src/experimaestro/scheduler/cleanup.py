@@ -18,6 +18,8 @@ import socket
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from experimaestro.scheduler import job_operations
+
 if TYPE_CHECKING:
     from experimaestro.scheduler.state_provider import MockJob
     from experimaestro.scheduler.state_status import WarningEvent
@@ -854,17 +856,8 @@ def _check_stray_jobs(
     # Create callbacks
     def kill_stray_jobs():
         """Kill all stray jobs"""
-        killed_count = 0
-        for job in stray_jobs:
-            try:
-                provider.kill_job(job, perform=True)
-                killed_count += 1
-                logger.info(f"Killed stray job: {job.task_id}/{job.identifier}")
-            except Exception as e:
-                logger.warning(
-                    f"Failed to kill job {job.task_id}/{job.identifier}: {e}"
-                )
-        logger.info(f"Killed {killed_count}/{len(stray_jobs)} stray jobs")
+        outcome = job_operations.kill_jobs(provider, stray_jobs)
+        logger.info("Stray jobs: %s", outcome.message)
 
     actions = {
         "kill": "Kill All Stray Jobs",
@@ -952,26 +945,9 @@ def _check_orphan_jobs(
 
     # Create callbacks
     def delete_orphan_jobs():
-        """Delete all orphan jobs"""
-        deleted_count = 0
-        for job in orphan_jobs:
-            try:
-                success, msg = provider.delete_job_safely(job, perform=True)
-                if success:
-                    deleted_count += 1
-                    logger.info(f"Deleted orphan job: {job.task_id}/{job.identifier}")
-                else:
-                    logger.warning(
-                        f"Failed to delete job {job.task_id}/{job.identifier}: {msg}"
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to delete job {job.task_id}/{job.identifier}: {e}"
-                )
-        logger.info(f"Deleted {deleted_count}/{len(orphan_jobs)} orphan jobs")
-
-        # Clean up orphan partials after deleting jobs
-        provider.cleanup_orphan_partials(perform=True)
+        """Delete all orphan jobs (and the partials they leave orphaned)"""
+        outcome = job_operations.delete_jobs(provider, orphan_jobs)
+        logger.info("Orphan jobs: %s", outcome.message)
 
     actions = {
         "delete": "Delete All Orphan Jobs",

@@ -614,6 +614,26 @@ class StateProvider(ABC):
         """
         return False, "Not implemented"
 
+    # Experiment-level queries (see also scheduler/job_operations.py)
+
+    def is_experiment_running(self, experiment_id: str) -> bool:
+        """Whether the current run of an experiment is still running"""
+        exp = self.get_experiment(experiment_id)
+        if exp is None:
+            return False
+        try:
+            return exp.status == ExperimentStatus.RUNNING
+        except (NotImplementedError, AttributeError):
+            return False
+
+    def get_running_jobs(self, experiment_id: str) -> List[BaseJob]:
+        """Jobs of an experiment that are currently running"""
+        return [
+            job
+            for job in self.get_jobs(experiment_id)
+            if job.state and job.state.running()
+        ]
+
     def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
         """Clean up orphan partial directories"""
         return []

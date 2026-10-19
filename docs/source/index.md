@@ -152,6 +152,7 @@ faq
 maxdepth: 1
 caption: "Development"
 ---
+development/contributing
 development/experiment
 development/api
 ```

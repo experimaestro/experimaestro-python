@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
 
     steps:
       - uses: actions/checkout@v4
@@ -53,3 +53,35 @@ jobs:
           XPM_TEST_TIMEOUT_MULTIPLIER: "10"
         run: |
           uv run pytest
+
+  # UI feature tests in a real browser (the other jobs run them with the TUI
+  # and WebSocket drivers only). Uses the committed frontend build.
+  ui-browser:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for hatch-vcs to determine version
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras --group browser
+          uv run --group browser playwright install --with-deps chromium
+
+      - name: Test the UIs in a browser
+        timeout-minutes: 15
+        env:
+          XPM_TEST_BROWSER: "1"
+        run: |
+          uv run --group browser pytest src/experimaestro/tests/ui

@@ -1,0 +1,5 @@
+# Generated files: one line in `git diff` (use `git diff --text` to see the
+# content) and collapsed in GitHub pull requests
+src/experimaestro/webui/data/** -diff linguist-generated=true
+uv.lock -diff linguist-generated=true
+app/package-lock.json -diff linguist-generated=true

@@ -14,7 +14,9 @@ from textual.widgets import DataTable, Static, Button, TabbedContent, TabPane
 from textual.binding import Binding
 
 from experimaestro.scheduler.state_provider import StateProvider
-from experimaestro.tui.utils import get_status_icon
+from experimaestro.scheduler import job_operations
+from experimaestro.tui.utils import get_status_icon, notify_outcome
+from experimaestro.utils.disk_usage import folder_size, format_size
 from experimaestro.tui.dialogs import DeleteConfirmScreen, KillConfirmScreen
 from experimaestro.tui.messages import SizeCalculated
 
@@ -164,11 +166,13 @@ class _JobListPanel(Vertical):
             return
         job = self._pending_jobs.pop(0)
         self._update_size_cell(job.identifier, "calc...")
-        self.run_worker(self._calc_size_worker(job.identifier, job.path), thread=True)
+        self.run_worker(
+            lambda: self._calc_size_worker(job.identifier, job.path), thread=True
+        )
 
-    async def _calc_size_worker(self, job_id: str, path):
-        size_bytes = await self._get_folder_size_async(path)
-        size_str = self._format_size(size_bytes)
+    def _calc_size_worker(self, job_id: str, path) -> None:
+        size_bytes = folder_size(path)
+        size_str = format_size(size_bytes)
         self._size_cache[job_id] = size_str
         self._size_bytes_cache[job_id] = size_bytes
         self.post_message(SizeCalculated(job_id, size_str, size_bytes))
@@ -177,60 +181,6 @@ class _JobListPanel(Vertical):
         self._size_bytes_cache[message.job_id] = message.size_bytes
         self._update_size_cell(message.job_id, message.size)
         self._calculate_next_size()
-
-    @staticmethod
-    async def _get_folder_size_async(path) -> int:
-        import asyncio
-        import shutil
-        import sys
-
-        if shutil.which("du"):
-            try:
-                if sys.platform == "darwin":
-                    proc = await asyncio.create_subprocess_exec(
-                        "du",
-                        "-sk",
-                        str(path),
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.DEVNULL,
-                    )
-                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-                    if proc.returncode == 0 and stdout:
-                        return int(stdout.decode().split()[0]) * 1024
-                else:
-                    proc = await asyncio.create_subprocess_exec(
-                        "du",
-                        "-sb",
-                        str(path),
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.DEVNULL,
-                    )
-                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-                    if proc.returncode == 0 and stdout:
-                        return int(stdout.decode().split()[0])
-            except (asyncio.TimeoutError, ValueError, IndexError, OSError):
-                pass
-
-        return _JobListPanel._get_folder_size_sync(path)
-
-    @staticmethod
-    def _get_folder_size_sync(path) -> int:
-        total = 0
-        try:
-            for entry in path.rglob("*"):
-                if entry.is_file():
-                    total += entry.stat().st_size
-        except (OSError, PermissionError):
-            pass
-        return total
-
-    @staticmethod
-    def _format_size(size: int) -> str:
-        for unit in ["B", "KB", "MB", "GB"]:
-            if size < 1024:
-                return f"{size:.1f}{unit}" if unit != "B" else f"{size}{unit}"
-            size /= 1024
-        return f"{size:.1f}TB"
 
     def _update_size_cell(self, job_id: str, value: str = None) -> None:
         try:
@@ -284,6 +234,35 @@ class _JobListPanel(Vertical):
         else:
             self.notify("Failed to copy path", severity="error")
 
+    def _kill_job(self, job) -> None:
+        if refusal := job_operations.check_kill_job(job):
+            notify_outcome(self, refusal)
+            return
+
+        def handle_kill(confirmed: bool) -> None:
+            if confirmed:
+                notify_outcome(self, job_operations.kill_job(self.state_provider, job))
+                self.refresh_jobs()
+
+        self.app.push_screen(KillConfirmScreen("job", job.identifier), handle_kill)
+
+    def _kill_all(self, title: str, nothing: str) -> None:
+        running = [j for j in self.jobs if job_operations.check_kill_job(j) is None]
+        if not running:
+            self.notify(nothing, severity="warning")
+            return
+
+        def handle_kill_all(confirmed: bool) -> None:
+            if confirmed:
+                notify_outcome(
+                    self, job_operations.kill_jobs(self.state_provider, running)
+                )
+                self.refresh_jobs()
+
+        self.app.push_screen(
+            KillConfirmScreen(title, f"{len(running)} jobs"), handle_kill_all
+        )
+
     def _get_selected_job(self):
         table = self.query_one(f"#{self.table_id}", DataTable)
         if table.cursor_row is None:
@@ -322,52 +301,11 @@ class StrayJobsPanel(_JobListPanel):
 
     def action_kill_selected(self) -> None:
         job = self._get_selected_job()
-        if not job:
-            return
-        if not job.state or not job.state.running():
-            self.notify("Job is not running", severity="warning")
-            return
-        self._kill_job(job)
-
-    def _kill_job(self, job) -> None:
-        def handle_kill(confirmed: bool) -> None:
-            if confirmed:
-                try:
-                    self.state_provider.kill_job(job, perform=True)
-                    self.notify(f"Job {job.identifier} killed", severity="information")
-                    self.refresh_jobs()
-                except Exception as e:
-                    self.notify(f"Failed to kill job: {e}", severity="error")
-
-        self.app.push_screen(
-            KillConfirmScreen("stray job", job.identifier), handle_kill
-        )
+        if job:
+            self._kill_job(job)
 
     def _action_kill_all(self) -> None:
-        running_jobs = [j for j in self.jobs if j.state and j.state.running()]
-        if not running_jobs:
-            self.notify("No stray jobs to kill", severity="warning")
-            return
-
-        def handle_kill_all(confirmed: bool) -> None:
-            if confirmed:
-                killed = failed = 0
-                for job in running_jobs:
-                    try:
-                        self.state_provider.kill_job(job, perform=True)
-                        killed += 1
-                    except Exception:
-                        failed += 1
-                msg = f"Killed {killed}/{len(running_jobs)} jobs"
-                if failed:
-                    msg += f" ({failed} failed)"
-                self.notify(msg, severity="information" if not failed else "warning")
-                self.refresh_jobs()
-
-        self.app.push_screen(
-            KillConfirmScreen("all stray jobs", f"{len(running_jobs)} jobs"),
-            handle_kill_all,
-        )
+        self._kill_all("all stray jobs", "No stray jobs to kill")
 
 
 class OrphanJobsPanel(_JobListPanel):
@@ -400,94 +338,40 @@ class OrphanJobsPanel(_JobListPanel):
         job = self._get_selected_job()
         if not job:
             return
-        if job.state and job.state.running():
-            self.notify(
-                "Cannot delete a running job - kill it first (ctrl+k)",
-                severity="warning",
-            )
+        if refusal := job_operations.check_delete_job(job):
+            notify_outcome(self, refusal)
             return
-        self._delete_job(job)
 
-    def action_kill_selected(self) -> None:
-        job = self._get_selected_job()
-        if not job:
-            return
-        if not job.state or not job.state.running():
-            self.notify("Job is not running", severity="warning")
-            return
-        self._kill_job(job)
-
-    def _delete_job(self, job) -> None:
         def handle_delete(confirmed: bool) -> None:
             if confirmed:
-                try:
-                    success, msg = self.state_provider.delete_job_safely(job)
-                    if success:
-                        self.notify(msg, severity="information")
-                        self.refresh_jobs()
-                    else:
-                        self.notify(msg, severity="error")
-                except Exception as e:
-                    self.notify(f"Delete failed: {e}", severity="error")
+                notify_outcome(
+                    self, job_operations.delete_job(self.state_provider, job)
+                )
+                self.refresh_jobs()
 
         self.app.push_screen(
             DeleteConfirmScreen("orphan job", job.identifier), handle_delete
         )
 
-    def _kill_job(self, job) -> None:
-        def handle_kill(confirmed: bool) -> None:
-            if confirmed:
-                try:
-                    self.state_provider.kill_job(job, perform=True)
-                    self.notify(f"Job {job.identifier} killed", severity="information")
-                    self.refresh_jobs()
-                except Exception as e:
-                    self.notify(f"Failed to kill job: {e}", severity="error")
-
-        self.app.push_screen(
-            KillConfirmScreen("orphan job", job.identifier), handle_kill
-        )
+    def action_kill_selected(self) -> None:
+        job = self._get_selected_job()
+        if job:
+            self._kill_job(job)
 
     def _action_kill_all(self) -> None:
-        running_jobs = [j for j in self.jobs if j.state and j.state.running()]
-        if not running_jobs:
-            self.notify("No running orphan jobs to kill", severity="warning")
-            return
-
-        def handle_kill_all(confirmed: bool) -> None:
-            if confirmed:
-                killed = failed = 0
-                for job in running_jobs:
-                    try:
-                        self.state_provider.kill_job(job, perform=True)
-                        killed += 1
-                    except Exception:
-                        failed += 1
-                msg = f"Killed {killed}/{len(running_jobs)} jobs"
-                if failed:
-                    msg += f" ({failed} failed)"
-                self.notify(msg, severity="information" if not failed else "warning")
-                self.refresh_jobs()
-
-        self.app.push_screen(
-            KillConfirmScreen("all running orphan jobs", f"{len(running_jobs)} jobs"),
-            handle_kill_all,
-        )
+        self._kill_all("all running orphan jobs", "No running orphan jobs to kill")
 
     def _action_delete_all(self) -> None:
-        deletable = [j for j in self.jobs if not j.state or not j.state.running()]
+        deletable = [j for j in self.jobs if job_operations.check_delete_job(j) is None]
         if not deletable:
             self.notify("No deletable orphan jobs", severity="warning")
             return
 
         def handle_delete_all(confirmed: bool) -> None:
             if confirmed:
-                deleted = 0
-                for job in deletable:
-                    success, _ = self.state_provider.delete_job_safely(job)
-                    if success:
-                        deleted += 1
-                self.notify(f"Deleted {deleted} orphan jobs", severity="information")
+                notify_outcome(
+                    self, job_operations.delete_jobs(self.state_provider, deletable)
+                )
                 self.refresh_jobs()
 
         self.app.push_screen(

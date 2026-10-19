@@ -6,7 +6,7 @@ tags, and other attributes.
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Dict, TYPE_CHECKING
+from typing import Callable, Dict, Iterable, TYPE_CHECKING
 import pyparsing as pp
 
 if TYPE_CHECKING:
@@ -171,9 +171,11 @@ var.setParseAction(VarExpr)
 regexExpr = var + tilde + quotedString
 regexExpr.setParseAction(RegexExpr)
 
-varQuotedString = quotedString
+# A copy is needed: setting the parse action on ``quotedString`` itself would
+# turn every quoted string (regexes, ``in`` lists) into a ConstantString
+varQuotedString = quotedString.copy()
 varQuotedString.setParseAction(ConstantString)
-eqExpr = var + eq + (var | quotedString)
+eqExpr = var + eq + (var | varQuotedString)
 eqExpr.setParseAction(EqExpr)
 
 stringList = quotedString + pp.ZeroOrMore(comma + quotedString)
@@ -202,7 +204,7 @@ def createFilter(query: str, ctx: FilterContext = None) -> Callable[["MockJob"],
     """Returns a filter function given a query string
 
     Args:
-        query: Filter expression (e.g., '@state = "DONE" and model = "bm25"')
+        query: Filter expression (e.g., '@state = "done" and model = "bm25"')
         ctx: FilterContext containing tags map and other experiment-scoped data.
              If None, an empty context is used.
 
@@ -217,3 +219,27 @@ def createFilter(query: str, ctx: FilterContext = None) -> Callable[["MockJob"],
         return r.filter(job, ctx)
 
     return filter_fn
+
+
+#: Short syntax reminder shown by the TUI and the web UI next to the search box
+FILTER_SYNTAX_HINT = (
+    "Syntax: @state = 'done' | @name ~ 'regex' | tag = 'value' | and/or"
+)
+
+
+def filter_jobs(
+    query: str, jobs: Iterable["MockJob"], tags_map: TagsMap | None = None
+) -> list["MockJob"]:
+    """Return the jobs matching a filter expression
+
+    Args:
+        query: Filter expression (see :func:`createFilter`)
+        jobs: Jobs to filter
+        tags_map: Tags of the jobs (job identifier -> tags) for the
+            experiment/run the jobs belong to
+
+    Raises:
+        pyparsing.ParseException: if the query is not a valid expression
+    """
+    filter_fn = createFilter(query, FilterContext(tags_map=tags_map or {}))
+    return [job for job in jobs if filter_fn(job)]
