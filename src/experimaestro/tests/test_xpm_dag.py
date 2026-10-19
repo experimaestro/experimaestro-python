@@ -407,3 +407,154 @@ def test_matplotlib_lazy_import(tmp_path, monkeypatch):
     assert res.exit_code == 0
     assert "matplotlib" not in sys.modules
     assert "matplotlib.pyplot" not in sys.modules
+
+
+def test_draw_dag_depths_alignment_and_deep_deps():
+    """Verify that compute_dag_depths aligns same-stage tasks and pushes deeper dependencies."""
+    import networkx as nx
+    from experimaestro.tools.xpm_dag.draw_dag import compute_dag_depths
+
+    def make_node(name: str):
+        return type(name, (), {})()
+
+    full_jobs = {
+        "dataset": make_node("MNISTLabelledImages"),
+        "extra_prep": make_node("PreprocessTask"),
+        "deep_step": make_node("DeepHelperTask"),
+        "learn_shallow": make_node("Learn"),
+        "learn_deep": make_node("Learn"),
+        "eval_shallow": make_node("Evaluate"),
+        "eval_deep": make_node("Evaluate"),
+    }
+
+    dag = nx.DiGraph()
+    for jid in full_jobs:
+        dag.add_node(jid)
+
+    # Shallow pipeline: dataset -> learn_shallow -> eval_shallow
+    dag.add_edge("dataset", "learn_shallow")
+    dag.add_edge("learn_shallow", "eval_shallow")
+
+    # Deep pipeline: dataset -> extra_prep -> deep_step -> learn_deep -> eval_deep
+    dag.add_edge("dataset", "extra_prep")
+    dag.add_edge("extra_prep", "deep_step")
+    dag.add_edge("deep_step", "learn_deep")
+    dag.add_edge("learn_deep", "eval_deep")
+
+    depths = compute_dag_depths(
+        dag,
+        full_jobs,
+        align_types=True,
+        aligned_class_names={"Learn", "Evaluate"},
+    )
+
+    assert depths["learn_shallow"] == depths["learn_deep"] == 3
+    assert depths["eval_shallow"] >= 4
+    assert depths["eval_deep"] >= 4
+
+    for u, v in dag.edges():
+        assert depths[v] > depths[u], f"Edge {u} -> {v} violated monotonicity"
+
+
+def test_draw_dag_filter_helpers(tmp_path):
+    """Verify tag parsing, config listing, and subgraph extraction."""
+    from experimaestro.tools.xpm_dag.draw_dag import (
+        filter_subgraph_by_config,
+        parse_filter_arg,
+    )
+
+    # 1. Test parse_filter_arg
+    parsed = parse_filter_arg("lr=0.001,kernel_size=3,name=cnn,flag=true")
+    assert parsed == {"lr": 0.001, "kernel_size": 3, "name": "cnn", "flag": "true"}
+
+    # 2. Test filter_subgraph_by_config
+    class MockObj:
+        pass
+
+    full_jobs = {"root": MockObj(), "j1": MockObj(), "j2": MockObj(), "j3": MockObj()}
+    dependencies = {
+        "j1": ["root"],
+        "j2": ["root", "j1"],
+        "j3": ["root"],
+    }
+    job_tags_dict = {
+        "j1": {"lr": 0.01, "layers": 2},
+        "j2": {"lr": 0.01, "layers": 2},
+        "j3": {"lr": 0.001, "layers": 3},
+    }
+
+    filtered_jobs, filtered_deps = filter_subgraph_by_config(
+        full_jobs,
+        dependencies,
+        job_tags_dict,
+        target_tags={"lr": 0.01, "layers": 2},
+    )
+
+    assert set(filtered_jobs.keys()) == {"root", "j1", "j2"}
+    assert "j3" not in filtered_jobs
+    assert filtered_deps["j1"] == ["root"]
+    assert filtered_deps["j2"] == ["root", "j1"]
+
+
+def test_resolve_run_dir_error_reporting(tmp_path, caplog):
+    """Verify that resolve_run_dir provides helpful error messages listing available experiments and runs."""
+    from experimaestro.tools.xpm_dag.xpm_dag import resolve_run_dir
+
+    ws_dir = tmp_path / "test_ws"
+    exp_dir = ws_dir / "experiments"
+    (exp_dir / "exp_alpha" / "20260101_120000").mkdir(parents=True)
+    (exp_dir / "exp_beta" / "20260102_150000").mkdir(parents=True)
+
+    with caplog.at_level(logging.ERROR):
+        # 1. Non-existent experiment
+        res = resolve_run_dir(str(ws_dir), "exp_gamma", None)
+        assert res is None
+        assert "Experiment 'exp_gamma' not found" in caplog.text
+        assert "'exp_alpha'" in caplog.text and "'exp_beta'" in caplog.text
+
+        caplog.clear()
+
+        # 2. Non-existent run
+        res = resolve_run_dir(str(ws_dir), "exp_alpha", "wrong_run_id")
+        assert res is None
+        assert "Run 'wrong_run_id' not found" in caplog.text
+        assert "'20260101_120000'" in caplog.text
+
+
+def test_resolve_run_dir_remote_ssh(monkeypatch, tmp_path):
+    """Verify that resolve_run_dir delegates to remote SSH fetcher when workspace is remote."""
+    from pathlib import Path
+    from experimaestro.settings import SSHSettings, WorkspaceSettings
+    from experimaestro.tools.xpm_dag.xpm_dag import resolve_run_dir
+
+    ssh = SSHSettings(host="cluster.example.org")
+    ws = WorkspaceSettings(
+        id="cluster_ws",
+        path=Path("/remote/workspace"),
+        ssh=ssh,
+    )
+
+    fake_run_dir = tmp_path / "cached_run"
+    fake_run_dir.mkdir()
+
+    called = []
+
+    def mock_fetch(remote_ws, exp_id, r_id):
+        called.append((remote_ws.id, exp_id, r_id))
+        return "20260101_120000", fake_run_dir
+
+    monkeypatch.setattr(
+        "experimaestro.tools.xpm_dag.xpm_dag.find_workspace",
+        lambda **kwargs: ws,
+    )
+    monkeypatch.setattr(
+        "experimaestro.utils.remote.find_remote_workspace_experiment_run",
+        mock_fetch,
+    )
+
+    resolved_id, run_d = resolve_run_dir(
+        "cluster_ws", "my_remote_exp", "20260101_120000"
+    )
+    assert resolved_id == "20260101_120000"
+    assert run_d == fake_run_dir
+    assert called == [("cluster_ws", "my_remote_exp", "20260101_120000")]

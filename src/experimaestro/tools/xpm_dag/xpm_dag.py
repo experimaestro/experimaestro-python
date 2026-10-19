@@ -50,6 +50,15 @@ def resolve_run_dir(
     else:
         ws_env = find_workspace(experiment_id=experiment_id)
 
+    if getattr(ws_env, "is_remote", False):
+        from experimaestro.utils.remote import find_remote_workspace_experiment_run
+
+        try:
+            return find_remote_workspace_experiment_run(ws_env, experiment_id, run_id)
+        except Exception as e:
+            logging.error("Failed to resolve remote experiment run: %s", e)
+            return None
+
     workspace = ws_env.path
     experiments_dir = workspace / "experiments"
     if not experiments_dir.exists():

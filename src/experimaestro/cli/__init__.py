@@ -329,6 +329,11 @@ from .dag import dag as dag_cli  # noqa: E402
 
 cli.add_command(dag_cli)
 
+# Import and add inspect command
+from .inspect import inspect_command  # noqa: E402
+
+cli.add_command(inspect_command, "inspect")
+
 
 @cli.group()
 def migrate():

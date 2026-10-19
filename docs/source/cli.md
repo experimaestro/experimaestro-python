@@ -131,6 +131,9 @@ experimaestro jobs log -f mymodule.MyTask/abc123def
 
 # Get job directory path
 experimaestro jobs path mymodule.MyTask/abc123def
+
+# Inspect job parameters in interactive TUI
+experimaestro inspect mymodule.MyTask/abc123def
 ```
 
 ## Filter Expressions
@@ -539,4 +542,44 @@ experimaestro dag my_experiment --json
 | `--filter` | Filter DAG by tag values (e.g. `lr=0.001,kernel_size=3`) |
 | `--include-actions` | Include downstream Action and EvaluatedModel nodes when filtering configs |
 | `--layout` | Web viewer layout algorithm: `dagre` (default) or `aligned` |
+
+## Job Parameters Inspector (`experimaestro inspect`)
+
+Experimaestro provides an interactive terminal-based (TUI) parameters inspector built with Textual. It visualizes the hierarchical configuration graph of jobs, with support for cycle detection, relative path resolution, Python code synthesis, and remote workspace job inspection via SSH.
+
+```bash
+# Inspect current directory / job
+experimaestro inspect
+
+# Inspect a specific job by task name or hash prefix
+experimaestro inspect mymodule.MyTask/1822b2b
+
+# Inspect a specific params.json directly
+experimaestro inspect /path/to/params.json
+
+# Inspect a job in a remote SSH workspace
+experimaestro inspect -w my_cluster mymodule.MyTask/1822b2b
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `TARGET` | Job ID or hash prefix, path to `params.json` / `experimaestro.json`, or job directory (default: `.`) |
+| `-w, --workspace` | Workspace ID or directory path (defaults to current Experimaestro workspace; supports remote SSH workspaces) |
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| `q` / `Esc` | Quit / close active search or modal |
+| `/` | Focus search bar to filter nodes by parameter name or value |
+| `g` | Toggle parameter grouping (alphabetical vs categorized) |
+| `p` | Toggle path display (relative vs absolute) |
+| `c` | Copy synthesized Python code snippet to clipboard |
+| `s` | Copy selected parameter value or resolved path to clipboard |
+| `J` | Toggle raw JSON view |
+| `e` | Expand all nodes |
+| `c` (on parent) | Collapse all child nodes |
+| `?` | Show interactive keyboard shortcuts and help |
 
