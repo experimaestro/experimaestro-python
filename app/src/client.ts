@@ -300,6 +300,16 @@ class Client {
     this.send("orphan.delete", { jobId, taskId });
   }
 
+  /** Kill every stray (running orphan) job */
+  orphans_kill(): void {
+    this.send("orphans.kill");
+  }
+
+  /** Delete every finished orphan job */
+  orphans_delete(): void {
+    this.send("orphans.delete");
+  }
+
   service_start(id: string): void {
     this.send("service.start", { id });
   }

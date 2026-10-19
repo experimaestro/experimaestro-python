@@ -96,6 +96,7 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
             return (
               <tr
                 key={id}
+                data-experiment-id={id}
                 style={{ cursor: "pointer" }}
                 onClick={() => onOpen(id)}
                 title="Open jobs"

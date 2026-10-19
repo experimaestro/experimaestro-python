@@ -56,6 +56,14 @@ Then open `http://localhost:12345` in your browser.
   dependencies with their status
 - **Experiment Filtering**: Filter jobs by experiment ID and run
 - **Log Viewing**: View stdout/stderr logs directly in the browser
+- **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
+  usage; kill or delete them one by one, or all at once (with confirmation)
+
+Killing and deleting jobs or experiments behave the same in the web UI, the
+TUI and the `experimaestro jobs` commands: the same operations are refused
+(e.g. deleting a running job) and reported with the same messages. Deleting a
+job also removes the [partial directories](cli.md#cleanup-partial-directories)
+it leaves orphaned.
 
 ### Remote Access
 

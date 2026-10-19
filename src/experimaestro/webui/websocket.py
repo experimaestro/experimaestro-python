@@ -320,6 +320,8 @@ class WebSocketHandler:
                                                "runId": "...", "requestId": 1}}
             {"type": "experiment.kill", "payload": {"experimentId": "..."}}
             {"type": "experiment.delete", "payload": {"experimentId": "..."}}
+            {"type": "orphans.kill"}  (all stray jobs)
+            {"type": "orphans.delete"}  (all finished orphan jobs)
             {"type": "quit"}
 
         Server -> Client:
@@ -417,6 +419,8 @@ class WebSocketHandler:
             "orphans": self._handle_orphans,
             "orphan.kill": self._handle_orphan_kill,
             "orphan.delete": self._handle_orphan_delete,
+            "orphans.kill": self._handle_orphans_kill,
+            "orphans.delete": self._handle_orphans_delete,
             "quit": self._handle_quit,
         }
 
@@ -935,6 +939,32 @@ class WebSocketHandler:
             await websocket.send_json(
                 {"type": "orphan.removed", "payload": {"jobId": job.identifier}}
             )
+
+    async def _handle_orphans_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Kill every stray (running orphan) job, then send the updated list"""
+        await self._notify_outcome(
+            websocket,
+            lambda: job_operations.kill_jobs(
+                self.state_provider,
+                self.state_provider.get_stray_jobs(),
+                nothing="No stray jobs to kill",
+            ),
+        )
+        await self._handle_orphans(websocket, payload)
+
+    async def _handle_orphans_delete(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Delete every finished orphan job, then send the updated list"""
+        await self._notify_outcome(
+            websocket,
+            lambda: job_operations.delete_jobs(
+                self.state_provider,
+                self.state_provider.get_orphan_jobs(),
+                nothing="No deletable orphan jobs",
+            ),
+        )
+        await self._handle_orphans(websocket, payload)
 
     def _lookup_job(self, payload: Dict[str, Any]):
         task_id = payload.get("taskId")
