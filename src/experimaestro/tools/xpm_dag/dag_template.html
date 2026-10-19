@@ -1,0 +1,1501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>__TITLE__</title>
+  <!-- Load Dagre and D3 from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+
+      /* Status colors */
+      --status-done: #10b981;
+      --status-done-bg: #ecfdf5;
+      --status-running: #f59e0b;
+      --status-running-bg: #fffbeb;
+      --status-error: #ef4444;
+      --status-error-bg: #fef2f2;
+      --status-ready: #3b82f6;
+      --status-ready-bg: #eff6ff;
+      --status-waiting: #64748b;
+      --status-waiting-bg: #f8fafc;
+      --status-config: #059669;
+      --status-config-bg: #f0fdfa;
+      --status-action: #e11d48;
+      --status-action-bg: #fff1f2;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Toolbar Header */
+    header.toolbar {
+      height: 54px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      z-index: 20;
+      gap: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand .run-badge {
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background: #f1f5f9;
+      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    .controls-center {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      max-width: 520px;
+    }
+
+    .config-select {
+      width: 100%;
+      height: 32px;
+      padding: 0 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      font-size: 12.5px;
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .config-select:focus {
+      border-color: var(--primary);
+      background: #fff;
+    }
+
+    .controls-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      height: 32px;
+      padding: 0 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+    .btn.active {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: var(--primary);
+    }
+
+    .layout-toggle-group {
+      display: inline-flex;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 2px;
+      gap: 2px;
+    }
+    .layout-toggle-group .btn {
+      border: none;
+      background: transparent;
+      padding: 3px 8px;
+      font-size: 11px;
+      border-radius: 4px;
+      box-shadow: none;
+      color: #64748b;
+    }
+    .layout-toggle-group .btn.active {
+      background: #ffffff;
+      color: var(--primary);
+      font-weight: 700;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    }
+
+    .toggle-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      margin-right: 4px;
+    }
+
+    /* Graph Canvas */
+    #canvas-container {
+      flex: 1;
+      position: relative;
+      background-color: var(--bg);
+      background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+      background-size: 20px 20px;
+      overflow: hidden;
+    }
+
+    svg#dag-svg {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+    svg#dag-svg:active {
+      cursor: grabbing;
+    }
+
+    /* Edge Styles */
+    .edge-path {
+      fill: none;
+      stroke: #0f172a;
+      stroke-width: 1.5px;
+      transition: stroke 0.2s, stroke-width 0.2s, opacity 0.2s;
+    }
+    .edge-path.highlight-upstream {
+      stroke: #2563eb !important;
+      stroke-width: 2.5px !important;
+      opacity: 1.0 !important;
+    }
+    .edge-path.highlight-downstream {
+      stroke: #d97706 !important;
+      stroke-width: 2.5px !important;
+      opacity: 1.0 !important;
+    }
+    .edge-path.dimmed {
+      opacity: 0.12;
+    }
+
+    /* Node Card Styles */
+    .node-card {
+      width: 240px;
+      height: 100%;
+      background: #ffffff;
+      border-radius: 8px;
+      border: 1.5px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      padding: 6px 9px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 12px;
+      position: relative;
+      user-select: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 3px;
+      overflow: hidden;
+    }
+    .node-card:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      transform: translateY(-1px);
+    }
+    .node-card.selected {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+    .node-card.highlight-upstream {
+      outline: 2.5px solid #2563eb;
+      outline-offset: 2px;
+      opacity: 1 !important;
+    }
+    .node-card.highlight-downstream {
+      outline: 2.5px solid #d97706;
+      outline-offset: 2px;
+      opacity: 1 !important;
+    }
+    .node-card.dimmed {
+      opacity: 0.12;
+    }
+
+    .node-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+    .node-name {
+      font-weight: 700;
+      font-size: 12.5px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+      min-width: 0;
+    }
+    .node-status-badge {
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 1.5px 5px;
+      border-radius: 4px;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* 1. Configs in Neutral Gray */
+    .node-card.type-config {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      border-left: 4px solid #94a3b8;
+    }
+    .node-card.type-config .node-name {
+      color: #334155;
+    }
+    .node-card.type-config .node-status-badge {
+      background: #e2e8f0;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+    }
+
+    /* 2. Tasks & Actions by Status */
+    .node-card.type-task.status-done, .node-card.type-action.status-done {
+      background: #f0fdf4;
+      border-color: #86efac;
+      border-left: 4px solid #16a34a;
+    }
+    .node-card.type-task.status-done .node-status-badge, .node-card.type-action.status-done .node-status-badge {
+      background: #dcfce7;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+
+    .node-card.type-task.status-running, .node-card.type-action.status-running {
+      background: #fffbeb;
+      border-color: #fcd34d;
+      border-left: 4px solid #f59e0b;
+    }
+    .node-card.type-task.status-running .node-status-badge, .node-card.type-action.status-running .node-status-badge {
+      background: #fef3c7;
+      color: #b45309;
+      border: 1px solid #fde68a;
+    }
+
+    .node-card.type-task.status-error, .node-card.type-action.status-error {
+      background: #fef2f2;
+      border-color: #fca5a5;
+      border-left: 4px solid #dc2626;
+    }
+    .node-card.type-task.status-error .node-status-badge, .node-card.type-action.status-error .node-status-badge {
+      background: #fee2e2;
+      color: #b91c1c;
+      border: 1px solid #fca5a5;
+    }
+
+    .node-card.type-task.status-waiting, .node-card.type-action.status-waiting {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      border-left: 4px solid #64748b;
+    }
+    .node-card.type-task.status-waiting .node-status-badge, .node-card.type-action.status-waiting .node-status-badge {
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+    }
+
+    .node-card.type-task.status-ready, .node-card.type-action.status-ready {
+      background: #eff6ff;
+      border-color: #93c5fd;
+      border-left: 4px solid #2563eb;
+    }
+    .node-card.type-task.status-ready .node-status-badge, .node-card.type-action.status-ready .node-status-badge {
+      background: #dbeafe;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+    }
+
+    .node-subline {
+      display: flex;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 3px;
+    }
+    .node-hash {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: #64748b;
+      cursor: copy;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .node-hash:hover {
+      color: var(--primary);
+    }
+
+    .node-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      overflow: hidden;
+      margin-top: auto;
+    }
+    .tag-pill {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: #e2e8f0;
+      color: #1e293b;
+      font-weight: 500;
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.3;
+    }
+    .tag-pill.tag-more {
+      background: #cbd5e1;
+      color: #0f172a;
+      font-weight: 700;
+      cursor: help;
+    }
+
+    /* Side Inspector Drawer */
+    #drawer {
+      position: fixed;
+      right: 0;
+      top: 54px;
+      bottom: 0;
+      width: 360px;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.05);
+      transform: translateX(100%);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+    }
+    #drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .drawer-title {
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .drawer-close {
+      background: none;
+      border: none;
+      font-size: 18px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .drawer-close:hover {
+      background: #f1f5f9;
+      color: var(--text);
+    }
+
+    .drawer-body {
+      padding: 16px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .drawer-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .drawer-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .drawer-table td {
+      padding: 5px 0;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: top;
+    }
+    .drawer-table td.key {
+      color: var(--text-muted);
+      width: 35%;
+      font-weight: 500;
+    }
+    .drawer-table td.val {
+      color: var(--text);
+      word-break: break-all;
+    }
+
+    .lineage-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .lineage-item {
+      padding: 6px 8px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 11.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.15s;
+    }
+    .lineage-item:hover {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: var(--primary);
+    }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #1e293b;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      transition: transform 0.25s ease;
+      z-index: 100;
+      pointer-events: none;
+    }
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header Toolbar -->
+  <header class="toolbar">
+    <div class="brand">
+      <h1>__TITLE__</h1>
+      <span class="run-badge" id="run-badge">__RUN_ID__</span>
+    </div>
+
+    <div class="controls-center">
+      <select id="config-select" class="config-select" title="Filter by configuration">
+        <option value="all">All Configurations</option>
+      </select>
+    </div>
+
+    <div class="controls-right">
+      <div class="layout-toggle-group">
+        <button id="btn-layout-dagre" class="btn active" title="Dagre Hierarchical Layout">Dagre</button>
+        <button id="btn-layout-aligned" class="btn" title="Aligned Grid Stages Layout">Aligned</button>
+      </div>
+      <label class="toggle-label" title="Show Configurations and Parameters">
+        <input type="checkbox" id="show-configs-toggle"> Show Configs
+      </label>
+      <button id="btn-orientation" class="btn" title="Toggle Layout Direction (Left-to-Right / Top-to-Bottom)">
+        <span id="orientation-label">LR ➔</span>
+      </button>
+      <button id="btn-fit" class="btn" title="Fit Entire Graph to View">⛶ Fit</button>
+      <button id="btn-zoom-in" class="btn" title="Zoom In">+</button>
+      <button id="btn-zoom-out" class="btn" title="Zoom Out">-</button>
+    </div>
+  </header>
+
+  <!-- Graph Canvas -->
+  <div id="canvas-container">
+    <svg id="dag-svg">
+      <defs>
+        <marker id="arrow-default" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#0f172a"/>
+        </marker>
+        <marker id="arrow-upstream" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#2563eb"/>
+        </marker>
+        <marker id="arrow-downstream" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#d97706"/>
+        </marker>
+      </defs>
+      <g id="viewport">
+        <g id="edges-layer"></g>
+        <g id="nodes-layer"></g>
+      </g>
+    </svg>
+  </div>
+
+  <!-- Side Inspector Drawer -->
+  <div id="drawer">
+    <div class="drawer-header">
+      <div class="drawer-title" id="drawer-title">Task Inspector</div>
+      <button class="drawer-close" id="drawer-close" title="Close Inspector">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-body">
+      <!-- Populated dynamically -->
+    </div>
+  </div>
+
+  <div id="toast">Copied to clipboard</div>
+
+  <script>
+    // Embedded Experiment Graph JSON Data
+    const RAW_GRAPH = __GRAPH_DATA__;
+
+    // State
+    let currentLayout = "__DEFAULT_LAYOUT__"; // "dagre" or "aligned"
+    let currentOrientation = "LR"; // "LR" or "TB"
+    let currentConfigIdx = (RAW_GRAPH.configs && RAW_GRAPH.configs.length > 0) ? "0" : "all";
+    let showConfigs = false;
+    let selectedNodeId = null;
+
+    // Node sizing constants matching flat plot aspect ratio
+    const CARD_W = 240;
+    const MIN_CARD_H = 76;
+    const LIMIT_HEIGHT = 140;
+    const GAP_X = 80;
+    const GAP_Y = 24;
+    const MARGIN = 40;
+
+    // Precompute configuration options in the dropdown
+    const configSelect = document.getElementById("config-select");
+    if (RAW_GRAPH.configs && RAW_GRAPH.configs.length > 0) {
+      RAW_GRAPH.configs.forEach((cfg, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx.toString();
+        const tagPairs = Object.entries(cfg).map(([k, v]) => `${k}=${v}`).join(", ");
+        opt.textContent = `Config #${idx}: ${tagPairs}`;
+        configSelect.appendChild(opt);
+      });
+      configSelect.options[0].textContent = `All Configurations (${RAW_GRAPH.configs.length} configs)`;
+      configSelect.value = currentConfigIdx;
+    }
+
+    // Set up D3 Zoom & Pan
+    const svg = d3.select("#dag-svg");
+    const viewport = d3.select("#viewport");
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 3.0])
+      .on("zoom", (event) => {
+        viewport.attr("transform", event.transform);
+      });
+    svg.call(zoom).on("dblclick.zoom", null);
+
+    // Canvas click clears selection and drawer
+    svg.on("click", (event) => {
+      if (event.target.tagName === "svg" || event.target.id === "viewport" || event.target.id === "canvas-container") {
+        clearSelection();
+      }
+    });
+
+    function showToast(msg) {
+      const toast = document.getElementById("toast");
+      toast.textContent = msg;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2000);
+    }
+
+    function copyText(text, label) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(`Copied ${label || "text"} to clipboard`);
+      });
+    }
+
+    // Compute dynamic card dimensions and tag overflow truncation
+    function computeCardDimensions(node) {
+      const tagEntries = Object.entries(node.tags || {});
+      if (tagEntries.length === 0) {
+        return { w: CARD_W, h: MIN_CARD_H, visibleTags: [], hiddenCount: 0, allTags: [] };
+      }
+
+      // Max rows allowed before exceeding LIMIT_HEIGHT (140px)
+      // Header + subline + padding ~ 56px; each tag row is ~22px
+      // 1 row -> 78px, 2 rows -> 100px, 3 rows -> 122px (all <= LIMIT_HEIGHT)
+      const MAX_TAG_ROWS = 3;
+      let rows = 1;
+      let curRowWidth = 0;
+      const visibleTags = [];
+      let hiddenCount = 0;
+
+      for (let i = 0; i < tagEntries.length; i++) {
+        const [k, v] = tagEntries[i];
+        const pillText = `${k}:${v}`;
+        const pillW = Math.max(40, pillText.length * 6.5 + 16);
+        if (curRowWidth + pillW > 218) {
+          if (rows >= MAX_TAG_ROWS) {
+            hiddenCount = tagEntries.length - i;
+            break;
+          }
+          rows++;
+          curRowWidth = pillW + 4;
+        } else {
+          curRowWidth += pillW + 4;
+        }
+        visibleTags.push([k, v]);
+      }
+
+      // If we truncated and the last row cannot fit the "+N more" pill (~52px), pop one tag
+      if (hiddenCount > 0 && curRowWidth + 52 > 218 && visibleTags.length > 1) {
+        visibleTags.pop();
+        hiddenCount++;
+      }
+
+      const h = Math.min(LIMIT_HEIGHT, Math.max(MIN_CARD_H, 56 + rows * 22));
+      return { w: CARD_W, h, visibleTags, hiddenCount, allTags: tagEntries };
+    }
+
+    // Compute Transitive Reduction on an active node subset
+    function computeTransitiveReduction(nodes, activeNodeIds) {
+      const succs = new Map();
+      nodes.forEach(n => succs.set(n.id, []));
+      const directEdges = [];
+
+      nodes.forEach(n => {
+        const q = [...(n.depends_on || [])];
+        const visited = new Set();
+        const activePreds = new Set();
+        while (q.length > 0) {
+          const curr = q.pop();
+          if (visited.has(curr)) continue;
+          visited.add(curr);
+          if (activeNodeIds.has(curr)) {
+            activePreds.add(curr);
+          } else {
+            const rawNode = RAW_GRAPH.nodes.find(rn => rn.id === curr);
+            if (rawNode && rawNode.depends_on) {
+              q.push(...rawNode.depends_on);
+            }
+          }
+        }
+        activePreds.forEach(pId => {
+          directEdges.push({ source: pId, target: n.id });
+          if (!succs.has(pId)) succs.set(pId, []);
+          succs.get(pId).push(n.id);
+        });
+      });
+
+      // Remove transitive shortcuts
+      const reducedEdges = [];
+      directEdges.forEach(e => {
+        let hasAlternative = false;
+        const q = (succs.get(e.source) || []).filter(c => c !== e.target);
+        const seen = new Set(q);
+        while (q.length > 0) {
+          const curr = q.pop();
+          if (curr === e.target) {
+            hasAlternative = true;
+            break;
+          }
+          for (const next of (succs.get(curr) || [])) {
+            if (!seen.has(next)) {
+              seen.add(next);
+              q.push(next);
+            }
+          }
+        }
+        if (!hasAlternative) {
+          reducedEdges.push(e);
+        }
+      });
+      return reducedEdges;
+    }
+
+    // Filter nodes and edges based on active filters
+    function getFilteredData() {
+      let nodes = [...RAW_GRAPH.nodes];
+      const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+      // 1. Filter by Single Configuration
+      if (currentConfigIdx !== "all") {
+        const targetConfig = RAW_GRAPH.configs[parseInt(currentConfigIdx, 10)];
+        if (targetConfig) {
+          // Find matching job nodes (tasks matching targetConfig, or configs whose tags match a subset of targetConfig)
+          const matching = nodes.filter(n => {
+            const tags = n.tags || {};
+            const tagKeys = Object.keys(tags);
+            if (tagKeys.length === 0) return false;
+            return tagKeys.every(k => targetConfig[k] == tags[k]);
+          });
+          const selected = new Set(matching.map(n => n.id));
+          const stack = [...matching.map(n => n.id)];
+
+          // Traverse upstream dependencies
+          while (stack.length > 0) {
+            const currId = stack.pop();
+            const currNode = nodeMap.get(currId);
+            if (currNode && currNode.depends_on) {
+              for (const parentId of currNode.depends_on) {
+                if (nodeMap.has(parentId) && !selected.has(parentId)) {
+                  selected.add(parentId);
+                  stack.push(parentId);
+                }
+              }
+            }
+          }
+
+          // Include downstream Action and EvaluatedModel nodes
+          nodes.filter(n => n.type === "action" || (n.name && n.name.includes("EvaluatedModel"))).forEach(act => {
+            if ((act.depends_on || []).some(dep => selected.has(dep))) {
+              selected.add(act.id);
+            }
+          });
+
+          nodes = nodes.filter(n => selected.has(n.id));
+        }
+      }
+
+      // 2. Filter by Show Configs (default: hide static configs)
+      if (!showConfigs) {
+        nodes = nodes.filter(n => n.type === "task" || n.type === "action");
+      }
+
+      const activeNodeIds = new Set(nodes.map(n => n.id));
+
+      // Build edges: use precomputed transitive reduction if unfiltered, or compute on filtered subset
+      let edges;
+      if (currentConfigIdx === "all" && showConfigs) {
+        edges = (RAW_GRAPH.edges || []).filter(e => activeNodeIds.has(e.source) && activeNodeIds.has(e.target));
+      } else {
+        edges = computeTransitiveReduction(nodes, activeNodeIds);
+      }
+
+      return { nodes, edges };
+    }
+
+    // Grid Stages Layout Engine matching flat plot compute_dag_layout
+    function computeGridStages(nodes, edges) {
+      // 1. Build Adjacency
+      const preds = new Map();
+      const succs = new Map();
+      nodes.forEach(n => {
+        preds.set(n.id, []);
+        succs.set(n.id, []);
+      });
+      edges.forEach(e => {
+        if (preds.has(e.target)) preds.get(e.target).push(e.source);
+        if (succs.has(e.source)) succs.get(e.source).push(e.target);
+      });
+
+      // 2. Topological sort (Kahn's algorithm)
+      const inDeg = new Map();
+      nodes.forEach(n => inDeg.set(n.id, (preds.get(n.id) || []).length));
+      const q = nodes.filter(n => inDeg.get(n.id) === 0).map(n => n.id);
+      const topo = [];
+      while (q.length > 0) {
+        const u = q.shift();
+        topo.push(u);
+        for (const v of (succs.get(u) || [])) {
+          inDeg.set(v, inDeg.get(v) - 1);
+          if (inDeg.get(v) === 0) q.push(v);
+        }
+      }
+      nodes.forEach(n => {
+        if (!topo.includes(n.id)) topo.push(n.id);
+      });
+
+      // Pass 1: Base Forward Topological Leveling
+      const depths = new Map();
+      topo.forEach(nId => {
+        const pList = preds.get(nId) || [];
+        if (pList.length === 0) {
+          depths.set(nId, 0);
+        } else {
+          depths.set(nId, Math.max(...pList.map(p => depths.get(p) ?? 0)) + 1);
+        }
+      });
+
+      // Pass 2: Grid Stage Alignment for key task stages
+      const alignedTypes = ["Learn", "ParameterLoader", "Evaluate"];
+      alignedTypes.forEach(tname => {
+        const matched = nodes.filter(n => (n.name || "").split(".")[0] === tname);
+        if (matched.length > 0) {
+          const maxD = Math.max(...matched.map(n => depths.get(n.id) ?? 0));
+          matched.forEach(n => depths.set(n.id, maxD));
+        }
+      });
+
+      // Pass 3: Deep Dependency Forward Push
+      topo.forEach(nId => {
+        const curD = depths.get(nId) ?? 0;
+        for (const succ of (succs.get(nId) || [])) {
+          if ((depths.get(succ) ?? 0) <= curD) {
+            depths.set(succ, curD + 1);
+          }
+        }
+      });
+
+      // Pass 4: Parent-averaging row sort
+      const uniqueDepths = Array.from(new Set(depths.values())).sort((a, b) => a - b);
+      const layout = new Map();
+      const nodesPerType = new Map();
+
+      uniqueDepths.forEach(d => {
+        const nodesAtD = nodes.filter(n => depths.get(n.id) === d);
+        const desiredRow = new Map();
+
+        nodesAtD.forEach(n => {
+          const pRows = (preds.get(n.id) || [])
+            .filter(p => layout.has(p))
+            .map(p => layout.get(p).row);
+          const tname = (n.name || "").split(".")[0];
+          const sibRows = (nodesPerType.get(tname) || [])
+            .filter(s => layout.has(s))
+            .map(s => layout.get(s).row);
+          const allRows = [...pRows, ...sibRows];
+          const avgRow = allRows.length > 0 ? allRows.reduce((a, b) => a + b, 0) / allRows.length : 0;
+          desiredRow.set(n.id, avgRow);
+        });
+
+        nodesAtD.sort((a, b) => {
+          const diff = desiredRow.get(a.id) - desiredRow.get(b.id);
+          if (Math.abs(diff) > 1e-5) return diff;
+          const nameDiff = (a.name || "").localeCompare(b.name || "");
+          if (nameDiff !== 0) return nameDiff;
+          return a.id.localeCompare(b.id);
+        });
+
+        nodesAtD.forEach((n, i) => {
+          layout.set(n.id, { col: d, row: i });
+          const tname = (n.name || "").split(".")[0];
+          if (!nodesPerType.has(tname)) nodesPerType.set(tname, []);
+          nodesPerType.get(tname).push(n.id);
+        });
+      });
+
+      return layout;
+    }
+
+    // Dagre Layout Engine
+    function computeDagreLayout(nodes, edges, orientation) {
+      const g = new dagre.graphlib.Graph();
+      const rankdir = orientation === "LR" ? "LR" : "TB";
+      g.setGraph({
+        rankdir: rankdir,
+        nodesep: 30,
+        ranksep: 50,
+        marginx: MARGIN,
+        marginy: MARGIN,
+      });
+      g.setDefaultEdgeLabel(() => ({}));
+
+      nodes.forEach(n => {
+        const dims = computeCardDimensions(n);
+        g.setNode(n.id, {
+          width: dims.w,
+          height: dims.h,
+          label: n.name,
+        });
+      });
+
+      edges.forEach(e => {
+        g.setEdge(e.source, e.target);
+      });
+
+      dagre.layout(g);
+
+      const nodeCoords = new Map();
+      nodes.forEach(n => {
+        const nodeInfo = g.node(n.id);
+        const dims = computeCardDimensions(n);
+        if (nodeInfo) {
+          nodeCoords.set(n.id, {
+            x: nodeInfo.x - dims.w / 2,
+            y: nodeInfo.y - dims.h / 2,
+            w: dims.w,
+            h: dims.h,
+          });
+        } else {
+          nodeCoords.set(n.id, { x: MARGIN, y: MARGIN, w: dims.w, h: dims.h });
+        }
+      });
+
+      const edgePaths = new Map();
+      edges.forEach(e => {
+        const edgeInfo = g.edge(e.source, e.target);
+        if (edgeInfo && edgeInfo.points && edgeInfo.points.length > 0) {
+          edgePaths.set(`${e.source}->${e.target}`, edgeInfo.points);
+        }
+      });
+
+      return { nodeCoords, edgePaths };
+    }
+
+    // Aligned Stages Layout Engine with dynamic heights & collinear straight edges
+    function computeAlignedLayout(nodes, edges, orientation) {
+      let gridPos;
+      if (currentConfigIdx === "all" && showConfigs && nodes.every(n => n.col !== undefined && n.row !== undefined)) {
+        gridPos = new Map();
+        nodes.forEach(n => gridPos.set(n.id, { col: n.col, row: n.row }));
+      } else {
+        gridPos = computeGridStages(nodes, edges);
+      }
+
+      const nodeDims = new Map();
+      nodes.forEach(n => nodeDims.set(n.id, computeCardDimensions(n)));
+
+      let maxCol = 0;
+      let maxRow = 0;
+      gridPos.forEach(p => {
+        if (p.col > maxCol) maxCol = p.col;
+        if (p.row > maxRow) maxRow = p.row;
+      });
+
+      const nodeCoords = new Map();
+
+      if (orientation === "LR") {
+        const rowHeights = [];
+        for (let r = 0; r <= maxRow; r++) {
+          let maxH = MIN_CARD_H;
+          nodes.forEach(n => {
+            const p = gridPos.get(n.id);
+            if (p && p.row === r) {
+              const d = nodeDims.get(n.id);
+              if (d && d.h > maxH) maxH = d.h;
+            }
+          });
+          rowHeights.push(maxH);
+        }
+
+        const rowY = [];
+        let curY = MARGIN;
+        for (let r = 0; r <= maxRow; r++) {
+          rowY.push(curY);
+          curY += rowHeights[r] + GAP_Y;
+        }
+
+        nodes.forEach(n => {
+          const p = gridPos.get(n.id) || { col: 0, row: 0 };
+          const dims = nodeDims.get(n.id) || { w: CARD_W, h: MIN_CARD_H };
+          const x = p.col * (CARD_W + GAP_X) + MARGIN;
+          const rH = rowHeights[p.row] || MIN_CARD_H;
+          const y = (rowY[p.row] || MARGIN) + (rH - dims.h) / 2;
+          nodeCoords.set(n.id, { x, y, w: dims.w, h: dims.h });
+        });
+      } else {
+        const colHeights = [];
+        for (let c = 0; c <= maxCol; c++) {
+          let maxH = MIN_CARD_H;
+          nodes.forEach(n => {
+            const p = gridPos.get(n.id);
+            if (p && p.col === c) {
+              const d = nodeDims.get(n.id);
+              if (d && d.h > maxH) maxH = d.h;
+            }
+          });
+          colHeights.push(maxH);
+        }
+
+        const colY = [];
+        let curY = MARGIN;
+        for (let c = 0; c <= maxCol; c++) {
+          colY.push(curY);
+          curY += colHeights[c] + GAP_Y;
+        }
+
+        nodes.forEach(n => {
+          const p = gridPos.get(n.id) || { col: 0, row: 0 };
+          const dims = nodeDims.get(n.id) || { w: CARD_W, h: MIN_CARD_H };
+          const x = p.row * (CARD_W + GAP_X) + MARGIN;
+          const cH = colHeights[p.col] || MIN_CARD_H;
+          const y = (colY[p.col] || MARGIN) + (cH - dims.h) / 2;
+          nodeCoords.set(n.id, { x, y, w: dims.w, h: dims.h });
+        });
+      }
+
+      return { nodeCoords, edgePaths: null };
+    }
+
+    // Render smooth SVG path for Dagre control points
+    function renderDagreEdge(points) {
+      if (!points || points.length === 0) return "";
+      if (points.length === 2) {
+        return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+      }
+      if (points.length === 3) {
+        return `M ${points[0].x} ${points[0].y} Q ${points[1].x} ${points[1].y} ${points[2].x} ${points[2].y}`;
+      }
+      const lineGen = d3.line()
+        .x(d => d.x)
+        .y(d => d.y)
+        .curve(d3.curveBasis);
+      return lineGen([points[0], ...points, points[points.length - 1]]);
+    }
+
+    // Compute Lineage (Ancestors and Descendants)
+    function computeLineage(targetId, edges) {
+      const upstream = new Set();
+      const downstream = new Set();
+      const upEdges = new Set();
+      const downEdges = new Set();
+
+      const parents = new Map();
+      const children = new Map();
+      edges.forEach(e => {
+        if (!parents.has(e.target)) parents.set(e.target, []);
+        parents.get(e.target).push(e.source);
+        if (!children.has(e.source)) children.set(e.source, []);
+        children.get(e.source).push(e.target);
+      });
+
+      // Upstream BFS
+      let q = [targetId];
+      while (q.length > 0) {
+        const curr = q.pop();
+        for (const p of (parents.get(curr) || [])) {
+          upEdges.add(`${p}->${curr}`);
+          if (!upstream.has(p)) {
+            upstream.add(p);
+            q.push(p);
+          }
+        }
+      }
+
+      // Downstream BFS
+      q = [targetId];
+      while (q.length > 0) {
+        const curr = q.pop();
+        for (const c of (children.get(curr) || [])) {
+          downEdges.add(`${curr}->${c}`);
+          if (!downstream.has(c)) {
+            downstream.add(c);
+            q.push(c);
+          }
+        }
+      }
+
+      return { upstream, downstream, upEdges, downEdges };
+    }
+
+    // Render Graph with Dual Layout Support (Dagre or Aligned)
+    function renderGraph() {
+      const { nodes, edges } = getFilteredData();
+      if (nodes.length === 0) {
+        d3.select("#nodes-layer").html("");
+        d3.select("#edges-layer").html("");
+        return;
+      }
+
+      // Fall back to Aligned layout if Dagre library is unavailable
+      let layoutRes;
+      if (currentLayout === "dagre" && typeof dagre !== "undefined") {
+        layoutRes = computeDagreLayout(nodes, edges, currentOrientation);
+      } else {
+        layoutRes = computeAlignedLayout(nodes, edges, currentOrientation);
+      }
+      const nodeCoords = layoutRes.nodeCoords;
+      const dagreEdgePaths = layoutRes.edgePaths;
+
+      // Render Edges
+      const edgesLayer = d3.select("#edges-layer");
+      edgesLayer.selectAll("*").remove();
+
+      edgesLayer.selectAll(".edge-path")
+        .data(edges, d => `${d.source}->${d.target}`)
+        .enter()
+        .append("path")
+        .attr("class", "edge-path")
+        .attr("id", d => `edge-${d.source}-${d.target}`)
+        .attr("marker-end", "url(#arrow-default)")
+        .attr("d", d => {
+          const key = `${d.source}->${d.target}`;
+          if (dagreEdgePaths && dagreEdgePaths.has(key)) {
+            return renderDagreEdge(dagreEdgePaths.get(key));
+          }
+
+          const src = nodeCoords.get(d.source);
+          const tgt = nodeCoords.get(d.target);
+          if (!src || !tgt) return "";
+
+          if (currentOrientation === "LR") {
+            const sx = src.x + src.w;
+            const sy = src.y + src.h / 2;
+            const tx = tgt.x;
+            const ty = tgt.y + tgt.h / 2;
+
+            if (Math.abs(sy - ty) < 1.0) {
+              return `M ${sx} ${sy} L ${tx} ${ty}`;
+            }
+            const dx = Math.max(30, (tx - sx) * 0.5);
+            return `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+          } else {
+            const sx = src.x + src.w / 2;
+            const sy = src.y + src.h;
+            const tx = tgt.x + tgt.w / 2;
+            const ty = tgt.y;
+
+            if (Math.abs(sx - tx) < 1.0) {
+              return `M ${sx} ${sy} L ${tx} ${ty}`;
+            }
+            const dy = Math.max(30, (ty - sy) * 0.5);
+            return `M ${sx} ${sy} C ${sx} ${sy + dy}, ${tx} ${ty - dy}, ${tx} ${ty}`;
+          }
+        });
+
+      // Render Nodes
+      const nodesLayer = d3.select("#nodes-layer");
+      nodesLayer.selectAll("*").remove();
+
+      const nodeGroups = nodesLayer.selectAll(".node-group")
+        .data(nodes, d => d.id)
+        .enter()
+        .append("g")
+        .attr("class", "node-group")
+        .attr("transform", d => {
+          const coords = nodeCoords.get(d.id);
+          return coords ? `translate(${coords.x}, ${coords.y})` : `translate(0, 0)`;
+        });
+
+      nodeGroups.each(function(d) {
+        const coords = nodeCoords.get(d.id) || { w: CARD_W, h: MIN_CARD_H };
+        const fo = d3.select(this)
+          .append("foreignObject")
+          .attr("width", coords.w)
+          .attr("height", coords.h);
+
+        const card = fo.append("xhtml:div")
+          .attr("class", `node-card type-${d.type} status-${d.status}`)
+          .attr("id", `card-${d.id}`);
+
+        // Header
+        const header = card.append("div").attr("class", "node-header");
+        header.append("div")
+          .attr("class", "node-name")
+          .attr("title", d.task_id || d.name)
+          .text(d.name);
+        header.append("div")
+          .attr("class", "node-status-badge")
+          .text(d.status);
+
+        // Subline (Line 2: Job hash only)
+        const subline = card.append("div").attr("class", "node-subline");
+        const hashSpan = subline.append("span")
+          .attr("class", "node-hash")
+          .attr("title", "Click to copy full ID")
+          .text(`[${d.id.substring(0, 8)}]`);
+        hashSpan.on("click", (e) => {
+          e.stopPropagation();
+          copyText(d.id, "job ID");
+        });
+
+        // Tags
+        const tagsContainer = card.append("div").attr("class", "node-tags");
+        const dims = computeCardDimensions(d);
+        if (dims.visibleTags && dims.visibleTags.length > 0) {
+          dims.visibleTags.forEach(([k, v]) => {
+            tagsContainer.append("span")
+              .attr("class", "tag-pill")
+              .attr("title", `${k}=${v}`)
+              .text(`${k}:${v}`);
+          });
+          if (dims.hiddenCount > 0) {
+            const hiddenSummary = (dims.allTags || []).slice(-dims.hiddenCount).map(([k, v]) => `${k}=${v}`).join(", ");
+            tagsContainer.append("span")
+              .attr("class", "tag-pill tag-more")
+              .attr("title", hiddenSummary)
+              .text(`+${dims.hiddenCount} more`);
+          }
+        }
+
+        // Interactivity
+        card.on("mouseenter", () => highlightLineage(d.id, edges));
+        card.on("mouseleave", () => {
+          if (!selectedNodeId) clearHighlight();
+          else highlightLineage(selectedNodeId, edges);
+        });
+        card.on("click", (e) => {
+          e.stopPropagation();
+          selectNode(d.id, edges);
+        });
+      });
+
+      fitView();
+    }
+
+    // Lineage Highlighting
+    function highlightLineage(nodeId, edges) {
+      const { upstream, downstream, upEdges, downEdges } = computeLineage(nodeId, edges);
+
+      d3.selectAll(".node-card").each(function(d) {
+        const el = d3.select(this);
+        const isTarget = d.id === nodeId;
+        const isUp = upstream.has(d.id);
+        const isDown = downstream.has(d.id);
+
+        el.classed("highlight-upstream", isUp);
+        el.classed("highlight-downstream", isDown);
+        el.classed("dimmed", !isTarget && !isUp && !isDown);
+      });
+
+      d3.selectAll(".edge-path").each(function(d) {
+        const el = d3.select(this);
+        const key = `${d.source}->${d.target}`;
+        const isUp = upEdges.has(key);
+        const isDown = downEdges.has(key);
+
+        el.classed("highlight-upstream", isUp);
+        el.classed("highlight-downstream", isDown);
+        el.classed("dimmed", !isUp && !isDown);
+
+        if (isUp) el.attr("marker-end", "url(#arrow-upstream)");
+        else if (isDown) el.attr("marker-end", "url(#arrow-downstream)");
+        else el.attr("marker-end", "url(#arrow-default)");
+      });
+    }
+
+    function clearHighlight() {
+      d3.selectAll(".node-card")
+        .classed("highlight-upstream", false)
+        .classed("highlight-downstream", false)
+        .classed("dimmed", false);
+      d3.selectAll(".edge-path")
+        .classed("highlight-upstream", false)
+        .classed("highlight-downstream", false)
+        .classed("dimmed", false)
+        .attr("marker-end", "url(#arrow-default)");
+    }
+
+    function selectNode(nodeId, edges) {
+      selectedNodeId = nodeId;
+      d3.selectAll(".node-card").classed("selected", d => d.id === nodeId);
+      highlightLineage(nodeId, edges);
+      openDrawer(nodeId);
+    }
+
+    function clearSelection() {
+      selectedNodeId = null;
+      d3.selectAll(".node-card").classed("selected", false);
+      clearHighlight();
+      closeDrawer();
+    }
+
+    // Side Inspector Drawer
+    function openDrawer(nodeId) {
+      const node = RAW_GRAPH.nodes.find(n => n.id === nodeId);
+      if (!node) return;
+
+      const drawer = document.getElementById("drawer");
+      const title = document.getElementById("drawer-title");
+      const body = document.getElementById("drawer-body");
+
+      title.innerHTML = `<span>${node.name}</span> <span class="node-status-badge" style="font-size:10px;">${node.status}</span>`;
+
+      let tagsRows = "";
+      for (const [k, v] of Object.entries(node.tags || {})) {
+        tagsRows += `<tr><td class="key">${k}</td><td class="val"><strong>${v}</strong></td></tr>`;
+      }
+      if (!tagsRows) tagsRows = `<tr><td colspan="2" style="color:#94a3b8;font-style:italic;">None</td></tr>`;
+
+      // Parents / Dependencies
+      let depsHtml = "";
+      (node.depends_on || []).forEach(depId => {
+        const pNode = RAW_GRAPH.nodes.find(n => n.id === depId);
+        const pName = pNode ? pNode.name : depId.substring(0, 8);
+        depsHtml += `<div class="lineage-item" onclick="focusNode('${depId}')"><span>${pName}</span> <span style="font-family:monospace;color:#94a3b8;">${depId.substring(0, 8)}</span></div>`;
+      });
+      if (!depsHtml) depsHtml = `<div style="color:#94a3b8;font-style:italic;font-size:12px;">No dependencies (Root)</div>`;
+
+      // Children / Dependents
+      let succHtml = "";
+      RAW_GRAPH.nodes.filter(n => (n.depends_on || []).includes(node.id)).forEach(child => {
+        succHtml += `<div class="lineage-item" onclick="focusNode('${child.id}')"><span>${child.name}</span> <span style="font-family:monospace;color:#94a3b8;">${child.id.substring(0, 8)}</span></div>`;
+      });
+      if (!succHtml) succHtml = `<div style="color:#94a3b8;font-style:italic;font-size:12px;">No downstream dependents</div>`;
+
+      const jobPath = node.path || node.locator || "";
+      const displayPath = node.display_path || (jobPath ? '.../' + (node.task_id || node.name) + '/' + node.id.substring(0, 20) + '...' : '');
+
+      body.innerHTML = `
+        <div>
+          <div class="drawer-section-title">Overview</div>
+          <table class="drawer-table">
+            <tr><td class="key">Job ID</td><td class="val"><span class="node-hash" onclick="copyText('${node.id}', 'job ID')">${node.id.substring(0, 16)}… 📋</span></td></tr>
+            <tr><td class="key">Task ID</td><td class="val">${node.task_id || "—"}</td></tr>
+            <tr><td class="key">Type</td><td class="val">${node.type}</td></tr>
+            <tr><td class="key">Status</td><td class="val"><strong>${node.status}</strong></td></tr>
+            ${jobPath ? `<tr><td class="key">Path</td><td class="val"><span class="node-hash" title="${jobPath}" onclick="copyText('${jobPath.replace(/'/g, "\'")}', 'path')">${displayPath} 📋</span></td></tr>` : ''}
+          </table>
+        </div>
+
+        <div>
+          <div class="drawer-section-title">Hyperparameters & Tags</div>
+          <table class="drawer-table">
+            ${tagsRows}
+          </table>
+        </div>
+
+        <div>
+          <div class="drawer-section-title">Upstream Dependencies (${(node.depends_on || []).length})</div>
+          <div class="lineage-list">${depsHtml}</div>
+        </div>
+
+        <div>
+          <div class="drawer-section-title">Downstream Dependents</div>
+          <div class="lineage-list">${succHtml}</div>
+        </div>
+      `;
+
+      drawer.classList.add("open");
+    }
+
+    function closeDrawer() {
+      document.getElementById("drawer").classList.remove("open");
+    }
+    document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+
+    function focusNode(nodeId) {
+      const { edges } = getFilteredData();
+      selectNode(nodeId, edges);
+    }
+
+    // Zoom and Fit View
+    function fitView() {
+      const bounds = viewport.node().getBBox();
+      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
+
+      const container = document.getElementById("canvas-container");
+      const fullWidth = container.clientWidth;
+      const fullHeight = container.clientHeight;
+
+      const width = bounds.width;
+      const height = bounds.height;
+      const midX = bounds.x + width / 2;
+      const midY = bounds.y + height / 2;
+
+      const scale = Math.min(0.9, Math.min(fullWidth / (width + 80), fullHeight / (height + 80)));
+      const transform = d3.zoomIdentity
+        .translate(fullWidth / 2 - scale * midX, fullHeight / 2 - scale * midY)
+        .scale(scale);
+
+      svg.transition().duration(500).call(zoom.transform, transform);
+    }
+
+    function updateLayoutButtons() {
+      const btnDagre = document.getElementById("btn-layout-dagre");
+      const btnAligned = document.getElementById("btn-layout-aligned");
+      if (btnDagre && btnAligned) {
+        btnDagre.classList.toggle("active", currentLayout === "dagre");
+        btnAligned.classList.toggle("active", currentLayout === "aligned");
+      }
+    }
+
+    // Event Listeners
+    document.getElementById("btn-layout-dagre").addEventListener("click", () => {
+      if (currentLayout !== "dagre") {
+        currentLayout = "dagre";
+        updateLayoutButtons();
+        renderGraph();
+      }
+    });
+
+    document.getElementById("btn-layout-aligned").addEventListener("click", () => {
+      if (currentLayout !== "aligned") {
+        currentLayout = "aligned";
+        updateLayoutButtons();
+        renderGraph();
+      }
+    });
+
+    document.getElementById("btn-fit").addEventListener("click", fitView);
+    document.getElementById("btn-zoom-in").addEventListener("click", () => {
+      svg.transition().duration(250).call(zoom.scaleBy, 1.3);
+    });
+    document.getElementById("btn-zoom-out").addEventListener("click", () => {
+      svg.transition().duration(250).call(zoom.scaleBy, 0.77);
+    });
+
+    document.getElementById("config-select").addEventListener("change", (e) => {
+      currentConfigIdx = e.target.value;
+      renderGraph();
+    });
+
+    const showConfigsToggle = document.getElementById("show-configs-toggle");
+    showConfigsToggle.checked = showConfigs;
+    showConfigsToggle.addEventListener("change", (e) => {
+      showConfigs = e.target.checked;
+      renderGraph();
+    });
+
+    document.getElementById("btn-orientation").addEventListener("click", () => {
+      currentOrientation = currentOrientation === "LR" ? "TB" : "LR";
+      document.getElementById("orientation-label").textContent = currentOrientation === "LR" ? "LR ➔" : "TB ⬇";
+      renderGraph();
+    });
+
+    // Initialize layout button active states
+    updateLayoutButtons();
+
+    // Initial render
+    renderGraph();
+  </script>
+</body>
+</html>
