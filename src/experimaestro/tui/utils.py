@@ -58,3 +58,12 @@ def get_status_icon(status: str, failure_reason=None):
     else:
         # phantom, unscheduled or unknown
         return "👻"
+
+
+#: Textual severity of each operation outcome severity
+_OUTCOME_SEVERITY = {"info": "information", "warning": "warning", "error": "error"}
+
+
+def notify_outcome(widget, outcome) -> None:
+    """Show the outcome of a job operation (see ``scheduler/job_operations.py``)"""
+    widget.notify(outcome.message, severity=_OUTCOME_SEVERITY[outcome.severity])

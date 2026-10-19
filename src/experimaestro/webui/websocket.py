@@ -15,12 +15,18 @@ from typing import Any, Dict, List, Optional, Set
 
 from fastapi import WebSocket
 
+from experimaestro.scheduler import job_operations
+from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.base import Scheduler, Job
 from experimaestro.scheduler.jobs import JobDependency
 from experimaestro.scheduler.interfaces import BaseJob, BaseExperiment, BaseService
+from experimaestro.utils.disk_usage import folder_size
 
 logger = logging.getLogger("xpm.webui.websocket")
+
+#: Toast (Bootstrap) severity of each job operation outcome
+_TOAST_SEVERITY = {"info": "success", "warning": "warning", "error": "danger"}
 
 
 # =============================================================================
@@ -287,28 +293,11 @@ def serialize_run(run: BaseExperiment, current_run_id: Optional[str]) -> Dict[st
     return payload
 
 
-def _dir_size(path) -> int:
-    """Best-effort recursive size of a directory in bytes."""
-    import os
-
-    total = 0
-    try:
-        for root, _dirs, filenames in os.walk(path):
-            for name in filenames:
-                try:
-                    total += os.path.getsize(os.path.join(root, name))
-                except OSError:
-                    pass
-    except OSError:
-        pass
-    return total
-
-
 def serialize_orphan_job(job: BaseJob, is_stray: bool) -> Dict[str, Any]:
     """Serialize an orphan/stray job with its on-disk size."""
     payload = serialize_job(job)
     payload["isStray"] = is_stray
-    payload["sizeBytes"] = _dir_size(job.path) if job.path else 0
+    payload["sizeBytes"] = folder_size(job.path) if job.path else 0
     return payload
 
 
@@ -600,55 +589,36 @@ class WebSocketHandler:
                         }
                     )
 
+    async def _notify_outcome(self, websocket: WebSocket, operation) -> Outcome:
+        """Run a job operation (blocking) and show its outcome as a toast"""
+        loop = asyncio.get_running_loop()
+        outcome = await loop.run_in_executor(None, operation)
+        await self._notify(
+            websocket, _TOAST_SEVERITY[outcome.severity], outcome.message
+        )
+        return outcome
+
     async def _handle_job_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle job kill request"""
-        job_id = payload.get("jobId")
-        task_id = payload.get("taskId")
-
-        if self._scheduler and job_id in self._scheduler.jobs:
-            # Kill via scheduler
-            job = self._scheduler.jobs[job_id]
-            future = asyncio.run_coroutine_threadsafe(
-                job.aio_process(), self._scheduler.loop
-            )
-            process = future.result()
-            if process is not None:
-                process.kill()
-                logger.info("Killed job %s", job_id)
-        else:
-            # Offline provider: kill_job expects a BaseJob instance
-            try:
-                job = self.state_provider.get_job(task_id, job_id) if task_id else None
-                if job is None:
-                    raise ValueError(f"Unknown job {task_id}:{job_id}")
-                self.state_provider.kill_job(job, perform=True)
-            except NotImplementedError:
-                logger.warning("kill_job not supported for this state provider")
-            except Exception as e:
-                logger.warning("Failed to kill job %s: %s", job_id, e)
-                await websocket.send_json(
-                    {"type": "error", "payload": {"message": str(e)}}
-                )
-
-    async def _handle_job_delete(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle job delete request (removes the job directory from disk)."""
+        """Kill a job"""
         job = self._lookup_job(payload)
         if job is None:
-            await websocket.send_json(
-                {"type": "error", "payload": {"message": "Job not found"}}
-            )
+            await self._notify(websocket, "danger", "Job not found")
             return
-        try:
-            ok, message = self.state_provider.delete_job_safely(job, perform=True)
-            if ok:
-                await self.broadcast("job.removed", {"jobId": payload.get("jobId")})
-            else:
-                await websocket.send_json(
-                    {"type": "error", "payload": {"message": message}}
-                )
-        except Exception as e:
-            logger.warning("Failed to delete job %s: %s", payload.get("jobId"), e)
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+        await self._notify_outcome(
+            websocket, lambda: job_operations.kill_job(self.state_provider, job)
+        )
+
+    async def _handle_job_delete(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Delete a job (removes the job directory from disk)"""
+        job = self._lookup_job(payload)
+        if job is None:
+            await self._notify(websocket, "danger", "Job not found")
+            return
+        outcome = await self._notify_outcome(
+            websocket, lambda: job_operations.delete_job(self.state_provider, job)
+        )
+        if outcome.ok:
+            await self.broadcast("job.removed", {"jobId": job.identifier})
 
     def _filter_job_ids(
         self, query: str, experiment_id: Optional[str], run_id: Optional[str]
@@ -722,25 +692,10 @@ class WebSocketHandler:
         experiment_id = payload.get("experimentId")
         if not experiment_id:
             return
-        loop = asyncio.get_running_loop()
-
-        def kill():
-            jobs = self.state_provider.get_running_jobs(experiment_id)
-            return len(jobs), self.state_provider.kill_jobs(jobs)
-
-        total, (killed, failed) = await loop.run_in_executor(None, kill)
-        if total == 0:
-            await self._notify(websocket, "warning", "No running jobs in experiment")
-        elif failed:
-            await self._notify(
-                websocket,
-                "warning",
-                f"Killed {killed} of {total} jobs ({failed} failed)",
-            )
-        else:
-            await self._notify(
-                websocket, "success", f"Killed {killed} of {total} running jobs"
-            )
+        await self._notify_outcome(
+            websocket,
+            lambda: job_operations.kill_experiment(self.state_provider, experiment_id),
+        )
 
     async def _handle_experiment_delete(
         self, websocket: WebSocket, payload: Dict[str, Any]
@@ -749,21 +704,14 @@ class WebSocketHandler:
         experiment_id = payload.get("experimentId")
         if not experiment_id:
             return
-        loop = asyncio.get_running_loop()
-
-        def delete():
-            if self.state_provider.is_experiment_running(experiment_id):
-                return False, "Cannot delete: experiment is still running"
-            return self.state_provider.delete_experiment(
-                experiment_id, delete_jobs=False
-            )
-
-        ok, message = await loop.run_in_executor(None, delete)
-        if ok:
+        outcome = await self._notify_outcome(
+            websocket,
+            lambda: job_operations.delete_experiment(
+                self.state_provider, experiment_id
+            ),
+        )
+        if outcome.ok:
             await self.broadcast("experiment.removed", {"experimentId": experiment_id})
-            await self._notify(websocket, "success", message)
-        else:
-            await self._notify(websocket, "danger", message)
 
     async def _handle_experiment_runs(
         self, websocket: WebSocket, payload: Dict[str, Any]
@@ -969,37 +917,24 @@ class WebSocketHandler:
         await websocket.send_json({"type": "orphans", "payload": {"jobs": jobs}})
 
     async def _handle_orphan_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Kill an orphan/stray job."""
-        job = self._lookup_job(payload)
-        if job is None:
-            return
-        try:
-            self.state_provider.kill_job(job, perform=True)
-        except Exception as e:
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+        """Kill an orphan/stray job"""
+        await self._handle_job_kill(websocket, payload)
 
     async def _handle_orphan_delete(
         self, websocket: WebSocket, payload: Dict[str, Any]
     ):
-        """Delete an orphan job from disk."""
+        """Delete an orphan job from disk"""
         job = self._lookup_job(payload)
         if job is None:
+            await self._notify(websocket, "danger", "Job not found")
             return
-        try:
-            ok, message = self.state_provider.delete_job_safely(job, perform=True)
-            if ok:
-                await websocket.send_json(
-                    {
-                        "type": "orphan.removed",
-                        "payload": {"jobId": payload.get("jobId")},
-                    }
-                )
-            else:
-                await websocket.send_json(
-                    {"type": "error", "payload": {"message": message}}
-                )
-        except Exception as e:
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+        outcome = await self._notify_outcome(
+            websocket, lambda: job_operations.delete_job(self.state_provider, job)
+        )
+        if outcome.ok:
+            await websocket.send_json(
+                {"type": "orphan.removed", "payload": {"jobId": job.identifier}}
+            )
 
     def _lookup_job(self, payload: Dict[str, Any]):
         task_id = payload.get("taskId")

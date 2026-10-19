@@ -313,37 +313,9 @@ KillConfirmScreen {
     margin: 0 1;
 }
 
-/* Orphan Jobs Screen */
-OrphanJobsScreen {
-    background: $surface;
-}
-
-#orphan-container {
-    height: 100%;
-    width: 100%;
-    padding: 1;
-}
-
-#orphan-title {
-    text-align: center;
-    text-style: bold;
-    margin-bottom: 1;
-    color: $warning;
-}
-
-#orphan-stats {
-    margin-bottom: 1;
-}
-
+/* Orphan jobs panel (stray_jobs.py) */
 #orphan-table {
     height: 1fr;
-}
-
-#orphan-job-info {
-    height: auto;
-    margin-top: 1;
-    padding: 0 1;
-    color: $text-muted;
 }
 
 /* Help Screen */

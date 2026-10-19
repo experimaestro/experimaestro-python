@@ -1,11 +1,15 @@
-"""Tests for the WebUI WebSocket request handlers (filter, experiment actions)"""
+"""Tests for the WebUI job filter request (beyond the shared UI tests)
+
+Kill/delete and the in-experiment filters are covered, for both interfaces,
+by ``tests/ui/``.
+"""
 
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
 from experimaestro.scheduler.interfaces import ExperimentStatus
-from experimaestro.scheduler.state_provider import MockJob, StateProvider
+from experimaestro.scheduler.state_provider import MockJob
 from experimaestro.webui.websocket import WebSocketHandler
 
 
@@ -31,11 +35,6 @@ class FakeExperiment:
 class FakeProvider:
     """Minimal state provider: two experiments sharing one job"""
 
-    # Shared experiment-level logic under test (same code as the TUI uses)
-    is_experiment_running = StateProvider.is_experiment_running
-    get_running_jobs = StateProvider.get_running_jobs
-    kill_jobs = StateProvider.kill_jobs
-
     def __init__(self):
         shared = _job("j3", "pkg.Evaluate", "running")
         self.experiments = {
@@ -54,8 +53,6 @@ class FakeProvider:
             "xp-a": {"j1": {"model": "bm25"}, "j2": {"model": "splade"}},
             "xp-b": {"j3": {"model": "bm25"}, "j4": {"model": "bm25"}},
         }
-        self.killed: list[str] = []
-        self.deleted: list[str] = []
 
     def get_experiments(self, refresh=False):
         return list(self.experiments.values())
@@ -68,17 +65,6 @@ class FakeProvider:
 
     def get_tags_map(self, experiment_id, run_id=None, refresh=False):
         return self.tags.get(experiment_id, {})
-
-    def kill_job(self, job, perform=False):
-        if job.identifier == "j3":
-            raise RuntimeError("No process found for job")
-        self.killed.append(job.identifier)
-        return True
-
-    def delete_experiment(self, experiment_id, delete_jobs=False, perform=True):
-        assert not delete_jobs
-        self.deleted.append(experiment_id)
-        return True, f"Experiment {experiment_id} deleted"
 
 
 class FakeWebSocket:
@@ -137,46 +123,3 @@ def test_jobs_filter_empty_query():
     response = _filter(FakeProvider(), "  ", experimentId="xp-a")
     assert response["jobIds"] is None
     assert response["error"] is None
-
-
-def test_experiment_kill_reports_counts():
-    provider = FakeProvider()
-    ws = _send(
-        provider, {"type": "experiment.kill", "payload": {"experimentId": "xp-a"}}
-    )
-    assert provider.killed == ["j2"]
-    (notification,) = ws.of_type("notify")
-    assert notification["severity"] == "warning"
-    assert notification["message"] == "Killed 1 of 2 jobs (1 failed)"
-
-
-def test_experiment_kill_without_running_jobs():
-    provider = FakeProvider()
-    provider.jobs["xp-a"] = [_job("j1", "pkg.Learn", "done")]
-    ws = _send(
-        provider, {"type": "experiment.kill", "payload": {"experimentId": "xp-a"}}
-    )
-    assert provider.killed == []
-    assert ws.of_type("notify")[0]["message"] == "No running jobs in experiment"
-
-
-def test_experiment_delete():
-    provider = FakeProvider()
-    ws = _send(
-        provider, {"type": "experiment.delete", "payload": {"experimentId": "xp-a"}}
-    )
-    assert provider.deleted == ["xp-a"]
-    assert ws.of_type("experiment.removed") == [{"experimentId": "xp-a"}]
-    assert ws.of_type("notify")[0]["severity"] == "success"
-
-
-def test_experiment_delete_refuses_running_experiment():
-    provider = FakeProvider()
-    ws = _send(
-        provider, {"type": "experiment.delete", "payload": {"experimentId": "xp-b"}}
-    )
-    assert provider.deleted == []
-    assert ws.of_type("experiment.removed") == []
-    (notification,) = ws.of_type("notify")
-    assert notification["severity"] == "danger"
-    assert "still running" in notification["message"]

@@ -1,4 +1,8 @@
-"""Tests for job operations from the CLI and the live scheduler"""
+"""Tests for the shared job operations, beyond the UI feature tests
+
+The UI feature tests (``tests/ui/``) cover the operations as the TUI and the
+web UI use them; these cover the CLI and the live scheduler.
+"""
 
 import asyncio
 import threading
@@ -10,6 +14,7 @@ from experimaestro.cli import cli
 from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.interfaces import JobState
 from experimaestro.tests.test_workspace_state_provider import create_orphan_job
+from experimaestro.utils.disk_usage import folder_size, format_size
 
 
 def test_cli_stray_delete(tmp_path):
@@ -66,3 +71,17 @@ def test_scheduler_kill_uses_pid_file_process():
         loop.call_soon_threadsafe(loop.stop)
         thread.join()
         loop.close()
+
+
+def test_folder_size(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "data").write_bytes(b"x" * 10_000)
+    # Disk usage: at least the data, rounded up to whole blocks
+    assert folder_size(tmp_path) >= 10_000
+    assert folder_size(tmp_path / "missing") == 0
+
+
+def test_format_size():
+    assert format_size(512) == "512B"
+    assert format_size(1536) == "1.5KB"
+    assert format_size(3 * 1024**3) == "3.0GB"

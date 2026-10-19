@@ -614,7 +614,7 @@ class StateProvider(ABC):
         """
         return False, "Not implemented"
 
-    # Experiment-level operations shared by the TUI and the web UI
+    # Experiment-level queries (see also scheduler/job_operations.py)
 
     def is_experiment_running(self, experiment_id: str) -> bool:
         """Whether the current run of an experiment is still running"""
@@ -633,19 +633,6 @@ class StateProvider(ABC):
             for job in self.get_jobs(experiment_id)
             if job.state and job.state.running()
         ]
-
-    def kill_jobs(self, jobs: List[BaseJob]) -> Tuple[int, int]:
-        """Kill a list of jobs, returning ``(killed, failed)`` counts"""
-        killed = 0
-        failed = 0
-        for job in jobs:
-            try:
-                self.kill_job(job, perform=True)
-                killed += 1
-            except Exception as e:
-                logger.warning("Failed to kill job %s: %s", job.identifier, e)
-                failed += 1
-        return killed, failed
 
     def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
         """Clean up orphan partial directories"""
