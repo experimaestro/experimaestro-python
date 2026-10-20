@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 from .config_walk import ConfigWalk, ConfigWalkContext
 from .config_utils import (
     getqualattr,
-    add_to_path,
+    load_definition_module,
     ConfigWrapper,
     ObjectStore,
     classproperty,
@@ -1681,6 +1681,8 @@ class ConfigInformation:
         """
         o = None
         objects = {}
+        # Modules loaded from their source file (indexed by path)
+        file_modules = {}
         import experimaestro.taskglobals as taskglobals
         from ..identifier import Identifier
 
@@ -1711,12 +1713,9 @@ class ConfigInformation:
                 module_name = "_main_"
 
             if "file" in definition:
-                path = definition["file"]
-                with add_to_path(str(Path(path).parent)):
-                    spec = importlib.util.spec_from_file_location(module_name, path)
-                    mod = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = mod
-                    spec.loader.exec_module(mod)
+                mod = load_definition_module(
+                    module_name, definition["type"], definition["file"], file_modules
+                )
             else:
                 try:
                     logger.debug("Importing module %s", definition["module"])
