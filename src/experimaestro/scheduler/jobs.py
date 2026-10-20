@@ -4,8 +4,9 @@ from datetime import datetime
 from functools import cached_property
 import itertools
 import json
+import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, List, Optional, Set
+from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Set
 
 import concurrent
 
@@ -221,6 +222,37 @@ class Job(BaseJob, Resource):
         #: have run (see :meth:`begin_run`); experiments wait on it to exit
         self.settled: asyncio.Future | None = None
 
+        # on_completed callbacks, with the experiment they were registered in
+        self._on_completed: list[tuple["experiment | None", Callable[[], None]]] = []
+        # Set once the callbacks have been taken: later ones are called directly
+        self._on_completed_fired = False
+        self._on_completed_lock = threading.Lock()
+
+    def on_completed(
+        self, callback: Callable[[], None], xp: "experiment | None" = None
+    ):
+        """Call ``callback`` once the job has completed successfully
+
+        If it already has, ``callback`` is called right away.
+
+        :param xp: the experiment whose callback executor runs the callback
+            (defaults to the current one)
+        """
+        from experimaestro.scheduler.experiment import experiment
+
+        with self._on_completed_lock:
+            if not self._on_completed_fired:
+                self._on_completed.append((xp or experiment.CURRENT, callback))
+                return
+        callback()
+
+    def take_on_completed(self) -> list[tuple["experiment | None", Callable[[], None]]]:
+        """Take the on_completed callbacks (called once the job is done)"""
+        with self._on_completed_lock:
+            self._on_completed_fired = True
+            callbacks, self._on_completed = self._on_completed, []
+        return callbacks
+
     def begin_run(self):
         """Start a new run: a fresh :attr:`settled` future, tracked by every
         experiment of the job
@@ -231,10 +263,15 @@ class Job(BaseJob, Resource):
         for xp in self.experiments:
             xp.track(self.settled)
 
-    def settle(self):
-        """Mark the current run as settled (no-op if it already is)"""
-        if self.settled is not None and not self.settled.done():
-            self.settled.set_result(self.scheduler_state)
+    def settle(self, settled: asyncio.Future | None = None):
+        """Mark a run as settled (no-op if it already is)
+
+        :param settled: the :attr:`settled` future of the run (defaults to the
+            current one); a new run may have started since that one ended
+        """
+        settled = settled or self.settled
+        if settled is not None and not settled.done():
+            settled.set_result(self.scheduler_state)
 
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
@@ -242,19 +279,6 @@ class Job(BaseJob, Resource):
         :param watched: A description of the watched output
         """
         self.watched_outputs.append(watched)
-
-    def register_watched_outputs(self):
-        """Register all watched outputs with the scheduler.
-
-        This should be called after the job is submitted and has a scheduler.
-        """
-        from experimaestro.scheduler.experiment import experiment
-
-        xp = experiment.current()
-        for watched in self.watched_outputs:
-            # Set the job reference so the watcher knows where to look
-            watched.job = self
-            xp.watch_output(watched)
 
     async def aio_drain_task_outputs(self):
         """Wait until the dynamic outputs of the job have been processed

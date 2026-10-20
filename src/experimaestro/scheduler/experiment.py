@@ -1084,16 +1084,6 @@ class experiment(BaseExperiment):
             # Wait for all pending notifications to be processed
             # before removing listeners
             self.scheduler.wait_for_notifications()
-
-            # Drain pending folder archives BEFORE transient cleanup
-            # so archives finish copying their source dirs before any
-            # cleanup can remove them.
-            try:
-                from experimaestro.scheduler.folders import wait_for_pending
-
-                wait_for_pending()
-            except Exception:
-                logger.exception("Folder archive drain failed")
         finally:
             if self._register_signals:
                 SIGNAL_HANDLER.remove(self)

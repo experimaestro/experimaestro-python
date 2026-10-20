@@ -15,6 +15,7 @@ thread so the scheduler is never blocked on filesystem I/O.
 from __future__ import annotations
 
 import atexit
+import concurrent.futures
 import json
 import logging
 import os
@@ -62,6 +63,8 @@ class _Job:
 class _Request:
     job: _Job
     folder: FolderSettings
+    #: Resolved once the request has been processed
+    future: concurrent.futures.Future
 
 
 def _should_copy(entry: os.DirEntry) -> bool:
@@ -265,7 +268,7 @@ class _FolderWorker:
         self._queue: "queue.Queue[Optional[_Request]]" = queue.Queue()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
-        self._pending: set[tuple[Path, Path]] = set()
+        self._pending: dict[tuple[Path, Path], concurrent.futures.Future] = {}
 
     def _ensure_running(self) -> None:
         with self._lock:
@@ -287,17 +290,24 @@ class _FolderWorker:
                 logger.exception("Archive worker caught an exception")
             finally:
                 with self._lock:
-                    self._pending.discard((request.job.src, request.folder.path))
+                    self._pending.pop((request.job.src, request.folder.path), None)
+                request.future.set_result(None)
                 self._queue.task_done()
 
-    def submit(self, job: _Job, folder: FolderSettings) -> None:
+    def submit(self, job: _Job, folder: FolderSettings) -> concurrent.futures.Future:
+        """Queue an archive request
+
+        :return: a future resolved once the request has been processed (the
+            one of the pending request, if the same archive is already queued)
+        """
         key = (job.src, folder.path)
         with self._lock:
-            if key in self._pending:
-                return
-            self._pending.add(key)
+            if future := self._pending.get(key):
+                return future
+            future = self._pending[key] = concurrent.futures.Future()
         self._ensure_running()
-        self._queue.put(_Request(job=job, folder=folder))
+        self._queue.put(_Request(job=job, folder=folder, future=future))
+        return future
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         """Block until all queued requests are processed (test helper)."""
@@ -340,24 +350,25 @@ def _drain_on_exit() -> None:
 atexit.register(_drain_on_exit)
 
 
-def archive_job_async(job: "Job", folders: list[FolderSettings]) -> None:
+def archive_job_async(
+    job: "Job", folders: list[FolderSettings]
+) -> list[concurrent.futures.Future]:
     """Queue an archive operation for each eligible folder.
 
     Folders with mode=USE are ignored (read-only).
+
+    :return: one future per queued operation, resolved once it is processed
     """
-    if not folders:
-        return
     eligible = [f for f in folders if f.mode != FolderMode.USE]
     if not eligible:
-        return
+        return []
 
     reduced = _Job(
         src=job.path,
         rel=Path(job.relpath),
         name=job.name,
     )
-    for folder in eligible:
-        _WORKER.submit(reduced, folder)
+    return [_WORKER.submit(reduced, folder) for folder in eligible]
 
 
 def wait_for_pending(timeout: Optional[float] = None) -> bool:
