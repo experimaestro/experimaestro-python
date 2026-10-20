@@ -157,24 +157,12 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
     # Create a dynamic Pydantic model
     PydanticModel = create_model(
         cls.__name__,
-        __config__=ConfigDict(extra="allow", arbitrary_types_allowed=True),
+        __config__=ConfigDict(extra="forbid", arbitrary_types_allowed=True),
         **model_fields,
     )
 
-    # Validate
+    # Validate - will raise ValidationError if invalid keys or types are present
     validated_model = PydanticModel(**data)
-
-    # Warn if unknown keys are passed
-    expected_field_names = {f.name for f in fields}
-    extra_keys = set(data.keys()) - expected_field_names
-    if extra_keys:
-        logger.warning(
-            "\n" + "=" * 80 + "\n"
-            f"⚠️  WARNING: Unrecognized configuration keys for {cls.__name__}:\n"
-            f"   Unknown keys: {sorted(list(extra_keys))}\n"
-            f"   Valid keys are: {sorted(list(expected_field_names))}\n"
-            + "=" * 80 + "\n"
-        )
 
     # Extract only the fields that the attrs class expects
     attrs_data = {}
@@ -194,4 +182,3 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
             attrs_data[f.name] = val
 
     return cls(**attrs_data)
-

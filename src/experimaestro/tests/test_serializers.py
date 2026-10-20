@@ -257,8 +257,7 @@ def test_taskstub_serialization_roundtrip():
     [reloaded_config] = from_state_dict(data2, partial_loading=False)
     assert isinstance(reloaded_config.__xpm__.task, TaskStub)
     assert (
-        reloaded_config.__xpm__.task.identifier
-        == loaded_config.__xpm__.task.identifier
+        reloaded_config.__xpm__.task.identifier == loaded_config.__xpm__.task.identifier
     )
     assert reloaded_config.__xpm__.task.typename == loaded_config.__xpm__.task.typename
 
