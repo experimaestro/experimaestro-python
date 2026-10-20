@@ -149,15 +149,14 @@ def test_state_provider_job_params_remote(tmp_path: Path):
 def test_job_detail_view_hints_and_actions(tmp_path: Path):
     """Verify JobDetailView updates the hint and posts InspectJobParams."""
     sp = DummyLocalStateProvider()
-    view = JobDetailView.__new__(JobDetailView)
-    view.state_provider = sp
-    view.tags_map = {}
-    view.dependencies_map = {}
-    view.job_task_id_map = {}
+    view = JobDetailView(sp)
 
     labels: dict[str, str] = {}
 
     def mock_query_one(selector, expected_type=None):
+        if not isinstance(selector, str):
+            # A widget queried by type (e.g. the dependency list)
+            return MagicMock(spec=selector)
         mock_label = MagicMock(spec=Label)
         mock_label.update = lambda text: labels.__setitem__(selector, str(text))
         return mock_label

@@ -1,12 +1,24 @@
 """Automated tests for the standalone Params Inspector tool."""
 
+from dataclasses import dataclass
 from pathlib import Path
 import json
+from unittest.mock import patch
+
 import pytest
 
-# Ensure demo directory is on sys.path
-
-from experimaestro.settings import SSHSettings, WorkspaceSettings
+from experimaestro import (
+    Config,
+    LightweightTask,
+    Meta,
+    Param,
+    PathGenerator,
+    Task,
+    field,
+)
+from experimaestro.scheduler.workspace import RunMode
+from experimaestro.settings import Settings, SSHSettings, WorkspaceSettings
+from experimaestro.tests.utils import TemporaryExperiment
 from experimaestro.tools.inspect_params import (
     NodeKind,
     NodeDetailPane,
@@ -23,30 +35,110 @@ from experimaestro.tools.inspect_params import (
     resolve_workspace,
 )
 
-MNIST_PARAMS_PATH = Path(
-    "/Users/victor/code/experiments/cross_encoders/jobs/mnist_xp.learn.learn/1822b2bdcb83480cfe41b9dafcc66ceb6d32aef20ca2d64ed703da906da1d028/params.json"
-)
+# --- A sample workspace: a learner and its evaluations
 
-EVALUATE_PARAMS_PATH = Path(
-    "/Users/victor/code/experiments/cross_encoders/jobs/mnist_xp.learn.evaluate/4379be85e1b9430d4e72a52546903d83095711707b8fd05e05024325809c23be/params.json"
-)
+
+class Dataset(Config):
+    name: Param[str]
+
+
+class CNN(Config):
+    hidden_dim: Param[int]
+    kernel_size: Param[int]
+
+
+class Learn(Task):
+    data: Param[Dataset]
+    model: Param[CNN]
+    batch_size: Param[int]
+    lr: Param[float]
+    run_path: Meta[Path] = field(default_factory=PathGenerator("runs"))
+
+    def execute(self):
+        pass
+
+
+class ParameterLoader(LightweightTask):
+    model: Param[CNN]
+    path: Param[Path]
+
+    def execute(self):
+        pass
+
+
+class Evaluate(Task):
+    model: Param[CNN]
+    data: Param[Dataset]
+
+    def execute(self):
+        pass
+
+
+@dataclass
+class SampleWorkspace:
+    path: Path
+    learn_id: str
+    evaluate_id: str
+
+    @property
+    def learn_params(self) -> Path:
+        return self.path / "jobs" / f"{__name__}.learn" / self.learn_id / "params.json"
+
+    @property
+    def evaluate_params(self) -> Path:
+        return (
+            self.path
+            / "jobs"
+            / f"{__name__}.evaluate"
+            / self.evaluate_id
+            / "params.json"
+        )
+
+
+@pytest.fixture(scope="module")
+def sample_workspace(tmp_path_factory) -> SampleWorkspace:
+    """Workspace whose params.json files are generated (jobs are not run)"""
+    workdir = tmp_path_factory.mktemp("workspace").resolve()
+    with TemporaryExperiment("inspect", workdir=workdir):
+        cnn = CNN.C(hidden_dim=2, kernel_size=3)
+        learn = Learn.C(
+            data=Dataset.C(name="train"), model=cnn, batch_size=64, lr=0.001
+        ).submit(run_mode=RunMode.GENERATE_ONLY)
+        evaluate = Evaluate.C(model=cnn, data=Dataset.C(name="test")).submit(
+            init_tasks=[ParameterLoader.C(model=cnn, path=learn.run_path)],
+            run_mode=RunMode.GENERATE_ONLY,
+        )
+        # More than 16 jobs: at least two share their first hexadecimal digit
+        for ix in range(16):
+            Evaluate.C(model=cnn, data=Dataset.C(name=f"test-{ix}")).submit(
+                run_mode=RunMode.GENERATE_ONLY
+            )
+
+    ws = SampleWorkspace(
+        workdir,
+        learn.__xpm__.identifier.all.hex(),
+        evaluate.__xpm__.identifier.all.hex(),
+    )
+    (ws.learn_params.parent / "runs").mkdir()
+    return ws
 
 
 @pytest.fixture(autouse=True)
-def setup_test_workspaces():
-    from experimaestro.settings import get_settings, WorkspaceSettings
+def setup_test_workspaces(sample_workspace):
+    """Settings with the sample workspace only"""
+    settings = Settings()
+    settings.workspaces.append(
+        WorkspaceSettings(id="sample", path=sample_workspace.path)
+    )
+    with patch("experimaestro.settings.get_settings", return_value=settings):
+        yield
 
-    settings = get_settings()
-    ws_path = Path("/Users/victor/code/experiments/cross_encoders")
-    if not any(w.id == "cross_encoders" for w in settings.workspaces):
-        settings.workspaces.append(WorkspaceSettings(id="cross_encoders", path=ws_path))
-    yield
 
-
-def test_mnist_params_graph_parsing():
-    """Verify parsing and reference graph construction on MNIST learn job."""
-    assert MNIST_PARAMS_PATH.exists(), f"Test fixture not found: {MNIST_PARAMS_PATH}"
-    graph = ParamsGraph.from_file(MNIST_PARAMS_PATH)
+def test_learn_params_graph_parsing(sample_workspace):
+    """Verify parsing and reference graph construction on the learn job."""
+    params_path = sample_workspace.learn_params
+    assert params_path.exists(), f"Test fixture not found: {params_path}"
+    graph = ParamsGraph.from_file(params_path)
 
     assert graph.version == 3
     assert len(graph.objects) == 3
@@ -57,10 +149,7 @@ def test_mnist_params_graph_parsing():
     assert root.type_name == "Learn"
     assert root.is_root_task is True
     assert root.is_task is True
-    assert (
-        root.identifier
-        == "1822b2bdcb83480cfe41b9dafcc66ceb6d32aef20ca2d64ed703da906da1d028"
-    )
+    assert root.identifier == sample_workspace.learn_id
 
     # Outgoing references
     out_map = dict(root.outgoing_refs)
@@ -80,7 +169,7 @@ def test_mnist_params_graph_parsing():
     assert isinstance(run_path_res, ResolvedPath)
     assert run_path_res.base == "job"
     assert run_path_res.raw_value == "runs"
-    assert run_path_res.resolved == MNIST_PARAMS_PATH.parent / "runs"
+    assert run_path_res.resolved == params_path.parent / "runs"
     assert run_path_res.exists is True
     assert run_path_res.is_dir is True
 
@@ -92,12 +181,11 @@ def test_mnist_params_graph_parsing():
     assert "lr=0.001" in py_code
 
 
-def test_evaluate_params_with_init_tasks_and_shared_nodes():
+def test_evaluate_params_with_init_tasks_and_shared_nodes(sample_workspace):
     """Verify parsing on evaluate job with init-tasks and shared CNN config."""
-    assert EVALUATE_PARAMS_PATH.exists(), (
-        f"Test fixture not found: {EVALUATE_PARAMS_PATH}"
-    )
-    graph = ParamsGraph.from_file(EVALUATE_PARAMS_PATH)
+    params_path = sample_workspace.evaluate_params
+    assert params_path.exists(), f"Test fixture not found: {params_path}"
+    graph = ParamsGraph.from_file(params_path)
 
     assert graph.root_task_id is not None
     root = graph.objects[graph.root_task_id]
@@ -178,9 +266,9 @@ def test_cycle_detection():
 
 
 @pytest.mark.anyio
-async def test_app_pilot_smoke_test():
+async def test_app_pilot_smoke_test(sample_workspace):
     """Headless pilot test of ParamsInspectorApp."""
-    app = ParamsInspectorApp(MNIST_PARAMS_PATH)
+    app = ParamsInspectorApp(sample_workspace.learn_params)
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -230,9 +318,9 @@ async def test_app_pilot_smoke_test():
 
 
 @pytest.mark.anyio
-async def test_app_pilot_jump_unfolds_config():
+async def test_app_pilot_jump_unfolds_config(sample_workspace):
     """Verify that jumping to primary definition with 'j' unfolds folded ancestors and config."""
-    app = ParamsInspectorApp(EVALUATE_PARAMS_PATH)
+    app = ParamsInspectorApp(sample_workspace.evaluate_params)
     async with app.run_test() as pilot:
         await pilot.pause()
         tree = app.query_one(ParamsTree)
@@ -293,19 +381,18 @@ async def test_app_pilot_jump_unfolds_config():
         assert primary.is_expanded is True
 
 
-def test_find_params_file_absolute_path():
+def test_find_params_file_absolute_path(sample_workspace):
     """Verify that absolute paths resolve directly to file or directory."""
+    params = sample_workspace.learn_params
+
     # Absolute path to params.json
-    res1 = find_params_file(str(MNIST_PARAMS_PATH))
-    assert res1 == MNIST_PARAMS_PATH
+    assert find_params_file(str(params)) == params
 
     # Absolute path with explicit local workspace specified must NOT load from workspace
-    res1_ws = find_params_file(str(MNIST_PARAMS_PATH), workspace="cross_encoders")
-    assert res1_ws == MNIST_PARAMS_PATH
+    assert find_params_file(str(params), workspace="sample") == params
 
     # Absolute path to parent job directory
-    res2 = find_params_file(str(MNIST_PARAMS_PATH.parent))
-    assert res2 == MNIST_PARAMS_PATH
+    assert find_params_file(str(params.parent)) == params
 
     # Non-existent absolute path
     with pytest.raises(
@@ -314,43 +401,48 @@ def test_find_params_file_absolute_path():
         find_params_file("/tmp/nonexistent_dir_12345/params.json")
 
 
-def test_find_params_file_job_id_default_workspace(caplog):
+def test_find_params_file_job_id_default_workspace(
+    sample_workspace, caplog, monkeypatch
+):
     """Verify that job ID prefix resolves via default workspace discovery and logs it."""
     import logging
 
-    with caplog.at_level(logging.INFO):
-        ws = resolve_workspace()
-        assert ws.exists()
-        res = find_params_file("1822b2b")
-        assert res == MNIST_PARAMS_PATH
+    monkeypatch.setenv("EXPERIMAESTRO_WORKSPACE", str(sample_workspace.path))
+    with (
+        patch("experimaestro.settings.get_settings", return_value=Settings()),
+        caplog.at_level(logging.INFO),
+    ):
+        assert resolve_workspace() == sample_workspace.path
+        res = find_params_file(sample_workspace.learn_id[:7])
+        assert res == sample_workspace.learn_params
         assert "Using default workspace" in caplog.text
 
 
-def test_find_params_file_explicit_workspace(caplog):
+def test_find_params_file_explicit_workspace(sample_workspace, caplog):
     """Verify resolving job via explicit workspace name/path and logging it."""
     import logging
 
+    prefix = sample_workspace.evaluate_id[:7]
+
     # By workspace name
-    with caplog.at_level(logging.INFO):
-        res1 = find_params_file("4379be8", workspace="cross_encoders")
-        assert res1 == EVALUATE_PARAMS_PATH
-        assert "Using workspace cross_encoders" in caplog.text
+    res1 = find_params_file(prefix, workspace="sample")
+    assert res1 == sample_workspace.evaluate_params
 
     # By workspace path
     with caplog.at_level(logging.INFO):
-        res2 = find_params_file(
-            "4379be8", workspace="/Users/victor/code/experiments/cross_encoders"
-        )
-        assert res2 == EVALUATE_PARAMS_PATH
-        assert (
-            "Using workspace /Users/victor/code/experiments/cross_encoders"
-            in caplog.text
-        )
+        res2 = find_params_file(prefix, workspace=str(sample_workspace.path))
+        assert res2 == sample_workspace.evaluate_params
+        assert f"Using workspace {sample_workspace.path}" in caplog.text
 
 
-def test_find_params_file_multiple_matches_warning(capsys):
+def test_find_params_file_multiple_matches_warning(sample_workspace, capsys):
     """Verify warning when multiple jobs match a short prefix."""
-    res = find_params_file("1", workspace="cross_encoders")
+    first_digits = [
+        p.parent.name[0] for p in sample_workspace.path.glob("jobs/*/*/params.json")
+    ]
+    prefix = next(c for c in first_digits if first_digits.count(c) > 1)
+
+    res = find_params_file(prefix, workspace="sample")
     captured = capsys.readouterr()
     assert "Warning: Multiple jobs" in captured.err
     assert "Using the first match:" in captured.err
@@ -363,7 +455,7 @@ def test_find_params_file_not_found():
     with pytest.raises(
         FileNotFoundError, match="No job matching 'nonexistent_job_prefix_xyz' found"
     ):
-        find_params_file("nonexistent_job_prefix_xyz", workspace="cross_encoders")
+        find_params_file("nonexistent_job_prefix_xyz", workspace="sample")
 
 
 def make_mock_remote_workspace() -> WorkspaceSettings:
