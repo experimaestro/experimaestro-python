@@ -558,3 +558,150 @@ def test_resolve_run_dir_remote_ssh(monkeypatch, tmp_path):
     assert resolved_id == "20260101_120000"
     assert run_d == fake_run_dir
     assert called == [("cluster_ws", "my_remote_exp", "20260101_120000")]
+
+
+def test_load_run_graph_without_importing_remote_modules(tmp_path):
+    """Verify load_run_graph builds the DAG from JSONL without importing remote modules or files."""
+    from experimaestro import Action, Config, Task
+    from experimaestro.tools.xpm_dag.xpm_dag import load_run_graph
+
+    run_dir = tmp_path / "remote_run"
+    run_dir.mkdir()
+
+    cfg_id = "a" * 64
+    task_id = "b" * 64
+    out_cfg_id = "c" * 64
+    eval_task_id = "d" * 64
+    action_id = "e" * 64
+
+    objects_data = [
+        {
+            "id": 1,
+            "module": "non_existent_remote_pkg.models",
+            "type": "RemoteEncoderConfig",
+            "typename": "non_existent_remote_pkg.models.RemoteEncoderConfig",
+            "identifier": cfg_id,
+            "file": "/lustre/fsn1/projects/rech/cdt/uqo57sk/code/cross-encoders/src/tests.py",
+            "fields": {
+                "hidden_dim": 768,
+                "lr": 0.0001,
+                "mode": {
+                    "type": "enum",
+                    "module": "non_existent_remote_pkg.enums",
+                    "enum": "Mode",
+                    "value": "FAST",
+                },
+                "data_path": {
+                    "type": "path",
+                    "base": "workspace",
+                    "value": "data/corpus",
+                },
+                "generated_listener_path": {
+                    "type": "path",
+                    "value": f"/lustre/ws/jobs/non_existent_remote_pkg.tasks.learn/{task_id}/out/listener",
+                },
+            },
+        },
+        {
+            "id": 2,
+            "module": "non_existent_remote_pkg.tasks",
+            "type": "Learn",
+            "typename": "non_existent_remote_pkg.tasks.Learn",
+            "identifier": task_id,
+            "file": "/lustre/fsn1/projects/rech/cdt/uqo57sk/code/cross-encoders/src/training_utils.py",
+            "fields": {
+                "encoder": {"type": "python", "value": 1},
+            },
+        },
+        {
+            "id": 3,
+            "module": "non_existent_remote_pkg.models",
+            "type": "ParameterLoader",
+            "typename": "non_existent_remote_pkg.models.ParameterLoader",
+            "identifier": out_cfg_id,
+            "task": 2,
+            "fields": {},
+        },
+        {
+            "id": 4,
+            "module": "tests",
+            "type": "Evaluate",
+            "typename": "tests.Evaluate",
+            "identifier": eval_task_id,
+            "file": "/lustre/fsn1/projects/rech/cdt/uqo57sk/code/cross-encoders/src/tests.py",
+            "init-tasks": [3],
+            "fields": {
+                "model": {"type": "python", "value": 1},
+            },
+        },
+        {
+            "id": 5,
+            "module": "non_existent_remote_pkg.actions",
+            "type": "ExportHuggingFace",
+            "typename": "non_existent_remote_pkg.actions.ExportHuggingFace",
+            "identifier": action_id,
+            "fields": {
+                "task": {"type": "python", "value": 2},
+            },
+        },
+    ]
+
+    with (run_dir / "objects.jsonl").open("w") as f:
+        for obj in objects_data:
+            f.write(json.dumps(obj) + "\n")
+
+    jobs_data = [
+        {
+            "job_id": task_id,
+            "task_id": "non_existent_remote_pkg.tasks.learn",
+            "tags": {"lr": 0.0001, "hidden_dim": 768},
+        },
+        {
+            "job_id": eval_task_id,
+            "task_id": "tests.evaluate",
+            "tags": {"lr": 0.0001, "hidden_dim": 768},
+        },
+    ]
+    with (run_dir / "jobs.jsonl").open("w") as f:
+        for j in jobs_data:
+            f.write(json.dumps(j) + "\n")
+
+    status_data = {
+        "job_states": {task_id: "done", eval_task_id: "running"},
+        "actions": {action_id: {"description": "Export model"}},
+    }
+    (run_dir / "status.json").write_text(json.dumps(status_data))
+
+    res = load_run_graph(run_dir)
+    assert res is not None
+    full_jobs, dependencies, job_tags_dict = res
+
+    assert set(full_jobs.keys()) == {
+        cfg_id,
+        task_id,
+        out_cfg_id,
+        eval_task_id,
+        action_id,
+    }
+    assert isinstance(full_jobs[cfg_id], Config)
+    assert not isinstance(full_jobs[cfg_id], (Task, Action))
+    assert isinstance(full_jobs[task_id], Task)
+    assert isinstance(full_jobs[eval_task_id], Task)
+    assert isinstance(full_jobs[action_id], Action)
+
+    assert type(full_jobs[cfg_id]).__name__ == "RemoteEncoderConfig"
+    assert type(full_jobs[task_id]).__name__ == "Learn"
+    assert type(full_jobs[action_id]).__name__ == "ExportHuggingFace"
+
+    assert cfg_id in dependencies[task_id]
+    assert task_id not in dependencies.get(cfg_id, [])
+    assert task_id in dependencies[out_cfg_id]
+    assert out_cfg_id in dependencies[eval_task_id]
+    assert cfg_id in dependencies[eval_task_id]
+    assert task_id in dependencies[action_id]
+
+    assert job_tags_dict[cfg_id] == {"hidden_dim": 768, "lr": 0.0001}
+    assert job_tags_dict[task_id] == {"hidden_dim": 768, "lr": 0.0001}
+
+    dag_json = build_dag_json(full_jobs, dependencies, job_tags_dict, run_dir=run_dir)
+    assert len(dag_json["nodes"]) == 5

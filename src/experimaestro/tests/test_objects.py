@@ -438,4 +438,3 @@ def test_field_names_and_load_objects_missing_defaults():
     # In-place mutations on default containers work as expected
     inst.items.append("test")
     assert inst.items == ["test"]
-

@@ -12,9 +12,53 @@ import importlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+
+from experimaestro.core.identifier import Identifier
 
 logger = logging.getLogger("experimaestro")
+
+
+def normalize_identifier(raw_ident: Any) -> str:
+    """Normalize a serialized identifier (string hash or Identifier state dict)."""
+    if isinstance(raw_ident, dict):
+        return str(Identifier.from_state_dict(raw_ident))
+    return str(raw_ident) if raw_ident is not None else ""
+
+
+def resolve_serialized_value(value: Any, objects: Mapping[int, Any]) -> Any:
+    """Resolve a serialized JSON field value against a mapping of loaded objects."""
+    if isinstance(value, list):
+        return [resolve_serialized_value(x, objects) for x in value]
+
+    if isinstance(value, dict):
+        if "type" not in value:
+            return {k: resolve_serialized_value(v, objects) for k, v in value.items()}
+
+        vtype = value["type"]
+        if vtype == "python":
+            ref_id = int(value["value"])
+            if ref_id not in objects:
+                logger.warning(
+                    "Referenced object id %s not found in loaded objects", ref_id
+                )
+                return None
+            return objects[ref_id]
+
+        if vtype in ("path", "path.serialized"):
+            return Path(value["value"])
+
+        if vtype == "set":
+            return [
+                resolve_serialized_value(x, objects) for x in value.get("items", [])
+            ]
+
+        if vtype == "enum":
+            return value.get("value")
+
+        return value.get("value")
+
+    return value
 
 
 @dataclass
@@ -104,19 +148,59 @@ class ObjectNode:
     incoming_refs: List[Tuple[int, str]] = field(default_factory=list)
     outgoing_refs: List[Tuple[str, int]] = field(default_factory=list)
     docstring: Optional[str] = None
+    task_id: Optional[int] = None
+
+    @classmethod
+    def from_definition(
+        cls, o: Dict[str, Any], *, load_docstring: bool = True
+    ) -> ObjectNode:
+        """Create an ObjectNode from a raw serialized definition dictionary."""
+        oid = int(o["id"])
+        mod, typ = o.get("module", ""), o.get("type", "")
+        qname = o.get("typename") or f"{mod}.{typ}" if mod else typ or str(oid)
+        ident = normalize_identifier(o.get("identifier", ""))
+        inits = [int(x) for x in o.get("init-tasks", [])]
+        t_ptr = o.get("task")
+        task_id = int(t_ptr) if t_ptr is not None else None
+        is_task = (task_id is not None and task_id == oid) or bool(inits)
+
+        doc = None
+        if load_docstring and mod and typ:
+            try:
+                cls_obj = getattr(importlib.import_module(mod), typ, None)
+                doc = cls_obj.__doc__.strip() if cls_obj and cls_obj.__doc__ else None
+            except Exception:
+                pass
+
+        raw_fields = o.get("fields", {})
+        return cls(
+            oid,
+            mod,
+            typ,
+            qname,
+            ident,
+            is_task,
+            False,
+            inits,
+            raw_fields if isinstance(raw_fields, dict) else {},
+            docstring=doc,
+            task_id=task_id,
+        )
 
 
 class ParamsGraph:
     """Parses, indexes, and queries the object dependency graph of an Experimaestro job.
 
-    Supports both single-job dictionaries (`params.json`) and multi-task list
-    payloads (such as Hugging Face Hub `experimaestro.json` exports).
+    Supports single-job dictionaries (`params.json`), multi-task list payloads
+    (such as Hugging Face Hub `experimaestro.json` exports), and streaming
+    experiment records (`objects.jsonl`).
 
     Attributes:
         raw_data: Original deserialized JSON data.
         job_path: Path to the directory containing the parameters file.
         workspace_path: Resolved path to the enclosing workspace directory.
         objects: Mapping of numeric object IDs to ObjectNode instances.
+        task_object_ids: Set of object IDs referenced via `task` or `init-tasks`.
         root_task_id: Object ID of the primary root task, if determined.
         version: Schema version number.
         experimaestro_version: Experimaestro version string.
@@ -130,13 +214,16 @@ class ParamsGraph:
         data: Union[Dict[str, Any], List[Dict[str, Any]]],
         job_path: Optional[Path] = None,
         workspace_path: Optional[Path] = None,
+        *,
+        load_docstrings: bool = True,
     ):
         """Initialize the graph from a dictionary or list of raw object specifications.
 
         Args:
-            data: Deserialized params.json dict or experimaestro.json list.
+            data: Deserialized params.json dict or experimaestro.json / objects.jsonl list.
             job_path: Optional filesystem path to the enclosing job directory.
             workspace_path: Optional workspace path (auto-discovered if omitted).
+            load_docstrings: Whether to import modules to extract class docstrings.
         """
         self.raw_data = data
         self.job_path = job_path.resolve() if job_path else None
@@ -161,8 +248,9 @@ class ParamsGraph:
             else self._find_ws(self.job_path)
         )
         self.objects: Dict[int, ObjectNode] = {}
+        self.task_object_ids: Set[int] = set()
         self.root_task_id: Optional[int] = None
-        self._parse(raw_objs)
+        self._parse(raw_objs, load_docstrings=load_docstrings)
 
     @staticmethod
     def _find_ws(path: Optional[Path]) -> Optional[Path]:
@@ -175,11 +263,11 @@ class ParamsGraph:
         return None
 
     @classmethod
-    def from_file(cls, path: Path) -> ParamsGraph:
+    def from_file(cls, path: Path, *, load_docstrings: bool = True) -> ParamsGraph:
         """Load a parameter graph from a file or directory.
 
-        Accepts direct paths to `params.json` or `experimaestro.json`, or a directory
-        containing either file.
+        Accepts direct paths to `params.json`, `experimaestro.json`, or `objects.jsonl`,
+        or a directory containing any of these files.
         """
         p = path.resolve()
         if p.is_dir():
@@ -187,53 +275,44 @@ class ParamsGraph:
                 f = p / "params.json"
             elif (p / "experimaestro.json").is_file():
                 f = p / "experimaestro.json"
+            elif (p / "objects.jsonl").is_file():
+                f = p / "objects.jsonl"
             else:
                 f = p / "params.json"
         else:
             f = p
         if not f.exists():
             raise FileNotFoundError(f"params.json not found at: {f}")
-        return cls(json.loads(f.read_text(encoding="utf-8")), job_path=f.parent)
 
-    def _parse(self, raw_objs: List[Dict[str, Any]]) -> None:
+        text = f.read_text(encoding="utf-8")
+        if f.suffix == ".jsonl" or f.name == "objects.jsonl":
+            payload: Union[Dict[str, Any], List[Dict[str, Any]]] = [
+                json.loads(line) for line in text.splitlines() if line.strip()
+            ]
+        else:
+            payload = json.loads(text)
+        return cls(payload, job_path=f.parent, load_docstrings=load_docstrings)
+
+    def _parse(
+        self, raw_objs: List[Dict[str, Any]], *, load_docstrings: bool = True
+    ) -> None:
         """Construct ObjectNode instances and resolve reference graphs."""
         target_hash = self.job_path.name if self.job_path else None
         cand_root = None
 
         for o in raw_objs:
-            oid = int(o["id"])
-            mod, typ = o.get("module", ""), o.get("type", "")
-            qname = o.get("typename") or f"{mod}.{typ}" if mod else typ or str(oid)
-            ident = o.get("identifier", "")
-            inits = [int(x) for x in o.get("init-tasks", [])]
-            t_ptr = o.get("task")
-            is_task = (t_ptr is not None and int(t_ptr) == oid) or bool(inits)
+            node = ObjectNode.from_definition(o, load_docstring=load_docstrings)
+            self.objects[node.id] = node
+            if node.task_id is not None:
+                self.task_object_ids.add(node.task_id)
+            for it in node.init_tasks:
+                self.task_object_ids.add(it)
+            if target_hash and node.identifier == target_hash:
+                cand_root = node.id
 
-            doc = None
-            if mod and typ:
-                try:
-                    cls_obj = getattr(importlib.import_module(mod), typ, None)
-                    doc = (
-                        cls_obj.__doc__.strip() if cls_obj and cls_obj.__doc__ else None
-                    )
-                except Exception:
-                    pass
-
-            node = ObjectNode(
-                oid,
-                mod,
-                typ,
-                qname,
-                ident,
-                is_task,
-                False,
-                inits,
-                o.get("fields", {}),
-                docstring=doc,
-            )
-            self.objects[oid] = node
-            if target_hash and ident == target_hash:
-                cand_root = oid
+        for tid in self.task_object_ids:
+            if tid in self.objects:
+                self.objects[tid].is_task = True
 
         self.root_task_id = (
             cand_root if cand_root else (int(raw_objs[-1]["id"]) if raw_objs else None)

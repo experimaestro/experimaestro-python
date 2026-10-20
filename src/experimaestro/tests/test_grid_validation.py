@@ -177,5 +177,8 @@ def test_validate_attrs_warns_on_unrecognized_keys(caplog):
 
     cfg = validate_attrs(MainConfig, data)
     assert cfg.id == "test"
-    assert any("WARNING: Unrecognized configuration keys" in record.message for record in caplog.records)
+    assert any(
+        "WARNING: Unrecognized configuration keys" in record.message
+        for record in caplog.records
+    )
     assert any("unexpected_key_xyz" in record.message for record in caplog.records)

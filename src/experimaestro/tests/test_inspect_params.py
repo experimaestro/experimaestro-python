@@ -872,3 +872,59 @@ def test_cli_inspect_help():
     assert res.exit_code == 0
     assert "Interactive TUI Parameters Inspector" in res.output
     assert "--workspace" in res.output
+
+
+def test_params_graph_objects_jsonl_and_value_resolution(tmp_path):
+    """Verify ParamsGraph and find_params_file support objects.jsonl and resolve_serialized_value."""
+    from experimaestro.tools.inspect_params import resolve_serialized_value
+
+    objs = [
+        {
+            "id": 10,
+            "module": "pkg.models",
+            "type": "Encoder",
+            "identifier": "enc_hash",
+            "fields": {
+                "dim": 512,
+                "mode": {"type": "enum", "enum": "Mode", "value": "TRAIN"},
+                "tags_set": {"type": "set", "items": ["a", "b"]},
+            },
+        },
+        {
+            "id": 20,
+            "module": "pkg.tasks",
+            "type": "LearnTask",
+            "identifier": "learn_hash",
+            "fields": {"model": {"type": "python", "value": 10}},
+        },
+        {
+            "id": 30,
+            "module": "pkg.models",
+            "type": "CheckpointLoader",
+            "identifier": "ckpt_hash",
+            "task": 20,
+            "fields": {"path": {"type": "path", "value": "/tmp/ckpt"}},
+        },
+    ]
+
+    jsonl_path = tmp_path / "objects.jsonl"
+    jsonl_path.write_text(
+        "\n".join(json.dumps(o) for o in objs) + "\n", encoding="utf-8"
+    )
+
+    assert find_params_file(str(tmp_path)) == jsonl_path
+    graph = ParamsGraph.from_file(tmp_path, load_docstrings=False)
+
+    assert len(graph.objects) == 3
+    assert 20 in graph.task_object_ids
+    assert graph.objects[20].is_task is True
+    assert graph.objects[30].task_id == 20
+
+    resolved_fields = resolve_serialized_value(graph.objects[10].fields, graph.objects)
+    assert resolved_fields["dim"] == 512
+    assert resolved_fields["mode"] == "TRAIN"
+    assert resolved_fields["tags_set"] == ["a", "b"]
+    assert (
+        resolve_serialized_value(graph.objects[20].fields["model"], graph.objects)
+        == graph.objects[10]
+    )

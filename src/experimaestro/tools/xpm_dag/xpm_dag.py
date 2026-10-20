@@ -14,13 +14,17 @@ import json
 import logging
 from pathlib import Path
 import re
+import sys
 from typing import Any
 import networkx as nx
 
-from experimaestro import tags
-from experimaestro.core.objects.config import ConfigInformation
+from experimaestro import Action, Config, Task, tags
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from experimaestro.settings import find_workspace, get_workspace
+from experimaestro.tools.inspect_params.models import (
+    ParamsGraph,
+    resolve_serialized_value,
+)
 
 # Default layout sizing constants
 BOX_W = 25.0
@@ -172,6 +176,102 @@ def extract_config_tags(
     return raw_params
 
 
+class _LightweightParam:
+    """Minimal parameter descriptor carrying the argument name."""
+
+    __slots__ = ("name",)
+
+    def __init__(self, name: str):
+        self.name = name
+
+
+class _LightweightXPMInfo:
+    """Lightweight metadata container matching ConfigInformation's DAG interface."""
+
+    __slots__ = ("identifier", "task", "init_tasks", "dependencies", "values")
+
+    def __init__(self, identifier: str):
+        self.identifier = identifier
+        self.task: Any = None
+        self.init_tasks: list[Any] = []
+        self.dependencies: list[Any] = []
+        self.values: dict[str, Any] = {}
+
+    def xpmvalues(self):
+        for k, v in self.values.items():
+            yield _LightweightParam(k), v
+
+    def tags(self) -> dict[str, Any]:
+        return {}
+
+
+def _load_lightweight_objects(
+    graph: ParamsGraph,
+    job_ids: set[str],
+    action_ids: set[str],
+) -> dict[int, Any]:
+    """Construct lightweight Config, Task, and Action nodes from an indexed ParamsGraph.
+
+    Avoids importing external Python modules or executing remote file paths while
+    preserving class names, isinstance(node, (Task, Action, Config)) semantics,
+    and __xpm__ dependency/parameter traversal.
+    """
+    cls_cache: dict[tuple[type, str, str], type] = {}
+    objects: dict[int, Any] = {}
+
+    for obj_id, obj_node in graph.objects.items():
+        ident = obj_node.identifier
+        module_name = obj_node.module or "_xpm_dag_"
+        type_name = obj_node.type_name or "Unknown"
+
+        if ident and ident in action_ids:
+            base_cls: type = Action
+        elif (ident and ident in job_ids) or obj_node.is_task:
+            base_cls = Task
+        else:
+            base_cls = Config
+            # Fallback to already-imported module in sys.modules if present
+            loaded_mod = sys.modules.get(module_name)
+            if loaded_mod is not None:
+                real_cls = getattr(loaded_mod, type_name, None)
+                if isinstance(real_cls, type):
+                    if issubclass(real_cls, Action):
+                        base_cls = Action
+                    elif issubclass(real_cls, Task):
+                        base_cls = Task
+
+        cls_key = (base_cls, module_name, type_name)
+        cls = cls_cache.get(cls_key)
+        if cls is None:
+            cls = type(type_name, (base_cls,), {"__module__": module_name})
+            cls_cache[cls_key] = cls
+
+        node = object.__new__(cls)
+        object.__setattr__(node, "__xpm__", _LightweightXPMInfo(ident))
+        objects[obj_id] = node
+
+    for obj_id, obj_node in graph.objects.items():
+        node = objects[obj_id]
+        xpm: _LightweightXPMInfo = node.__xpm__
+
+        if (
+            obj_node.task_id is not None
+            and obj_node.task_id in objects
+            and obj_node.task_id != obj_id
+        ):
+            xpm.task = objects[obj_node.task_id]
+
+        if obj_node.init_tasks:
+            xpm.init_tasks = [
+                objects[tid] for tid in obj_node.init_tasks if tid in objects
+            ]
+
+        for fname, fval in obj_node.fields.items():
+            xpm.values[fname] = resolve_serialized_value(fval, objects)
+
+    return objects
+
+
 def load_run_graph(
     run_dir: Path,
 ) -> tuple[dict, dict[str, list[str]], dict[str, dict]] | None:
@@ -181,30 +281,10 @@ def load_run_graph(
         logging.error("Objects record not found: %s", objects_file)
         return None
 
-    with objects_file.open() as f:
-        all_definitions = [json.loads(line) for line in f if line.strip()]
-    all_configs_dict = ConfigInformation.load_objects(
-        all_definitions, as_instance=False
-    )
+    graph = ParamsGraph.from_file(objects_file, load_docstrings=False)
 
-    full_jobs = {}
-    for defn in all_definitions:
-        if "identifier" in defn:
-            jid = defn["identifier"]
-            config = all_configs_dict[defn["id"]]
-            full_jobs[jid] = config
-            if "init-tasks" in defn:
-                config.__xpm__.init_tasks = [
-                    all_configs_dict[tid] for tid in defn["init-tasks"]
-                ]
-
-    dependencies = {
-        jid: get_all_dependencies(config, full_jobs)
-        for jid, config in full_jobs.items()
-    }
-    dependencies = {k: v for k, v in dependencies.items() if v}
-
-    job_tags_dict = {}
+    job_tags_dict: dict[str, dict] = {}
+    job_ids: set[str] = set()
     grid_keys: set[str] = set()
     jobs_jsonl = run_dir / "jobs.jsonl"
     if jobs_jsonl.exists():
@@ -212,11 +292,38 @@ def load_run_graph(
             for line in f:
                 if line.strip():
                     job_data = json.loads(line)
-                    if "job_id" in job_data and "tags" in job_data:
-                        jtags = job_data["tags"] or {}
-                        job_tags_dict[job_data["job_id"]] = jtags
-                        if jtags:
-                            grid_keys.update(jtags.keys())
+                    jid = job_data.get("job_id")
+                    if jid:
+                        job_ids.add(jid)
+                        if "tags" in job_data:
+                            jtags = job_data["tags"] or {}
+                            job_tags_dict[jid] = jtags
+                            if jtags:
+                                grid_keys.update(jtags.keys())
+
+    status_data = load_run_status(run_dir)
+    action_ids: set[str] = set(status_data.get("actions", {}).keys())
+
+    all_configs_dict = _load_lightweight_objects(
+        graph, job_ids=job_ids, action_ids=action_ids
+    )
+
+    full_jobs = {
+        obj_node.identifier: all_configs_dict[obj_id]
+        for obj_id, obj_node in graph.objects.items()
+        if obj_node.identifier
+    }
+
+    dependencies = {
+        jid: get_all_dependencies(config, full_jobs)
+        for jid, config in full_jobs.items()
+    }
+    # Remove PathGenerator back-edges where a Config's generated path points to
+    # the job directory of the enclosing Task that depends on that Config.
+    for jid, deps in list(dependencies.items()):
+        if not isinstance(full_jobs.get(jid), (Task, Action)):
+            dependencies[jid] = [d for d in deps if jid not in dependencies.get(d, ())]
+    dependencies = {k: v for k, v in dependencies.items() if v}
 
     # Populate tags for Config nodes (e.g. CNN architecture params)
     for jid, config in full_jobs.items():

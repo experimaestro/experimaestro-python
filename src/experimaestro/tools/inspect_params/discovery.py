@@ -184,11 +184,15 @@ def _find_params_in_path(p: Path) -> Optional[Path]:
     if p.is_file():
         return p.resolve()
     if p.is_dir():
-        for name in ("params.json", "experimaestro.json"):
+        for name in ("params.json", "experimaestro.json", "objects.jsonl"):
             cand = p / name
             if cand.is_file():
                 return cand.resolve()
-        m = list(p.glob("**/params.json")) + list(p.glob("**/experimaestro.json"))
+        m = (
+            list(p.glob("**/params.json"))
+            + list(p.glob("**/experimaestro.json"))
+            + list(p.glob("**/objects.jsonl"))
+        )
         if m:
             return m[0].resolve()
     return None
