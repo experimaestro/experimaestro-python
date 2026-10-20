@@ -35,6 +35,7 @@ def _open_provider(workspace: str | None, experiment_id: str | None) -> StatePro
             remote_shell_init=ws.ssh.shell_init,
             uv_offline=ws.ssh.uv_offline,
             remote_python=ws.ssh.python,
+            remote_log_levels=ws.ssh.log_levels,
         )
         provider.connect()
         return provider

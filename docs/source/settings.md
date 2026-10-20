@@ -257,6 +257,7 @@ workspaces:
 | `python` | Python interpreter for `uv tool run --python` |
 | `xpm_path` | Path to experimaestro on remote host (bypasses `uv tool run` entirely) |
 | `options` | Additional SSH options (e.g., `["-p", "2222"]`) |
+| `log_levels` | Logging levels of the remote server, shown locally (e.g., `xpm.remote.trace=DEBUG`) |
 
 ### Using Workspace SSH Settings
 
@@ -271,4 +272,4 @@ experimaestro experiments ssh-monitor --workspace my-cluster --uv-offline
 ```
 
 All SSH settings can be overridden by CLI flags (`--remote-shell-init`, `--uv-offline`,
-`--remote-python`, `--remote-xpm`, `-o`).
+`--remote-python`, `--remote-xpm`, `-o`, `--remote-logging`).

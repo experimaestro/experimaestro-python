@@ -157,6 +157,10 @@ class SSHSettings:
     options: List[str] = field(default_factory=list)
     """Additional SSH options (e.g., ['-p', '2222'])"""
 
+    log_levels: Optional[str] = None
+    """Logging levels of the remote server, shown locally (as ``--logging``,
+    e.g. ``xpm.remote.trace=DEBUG`` to trace the requests)"""
+
 
 @dataclass
 class WorkspaceSettings:

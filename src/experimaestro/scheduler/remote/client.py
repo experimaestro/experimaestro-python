@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from datetime import datetime
 from importlib.metadata import version as get_package_version
@@ -49,6 +50,10 @@ from experimaestro.scheduler.remote.protocol import (
     create_request,
     serialize_datetime,
     PROTOCOL_VERSION,
+    format_size,
+    notification_kind,
+    trace,
+    trace_payload,
 )
 
 # Type for SSH output callback
@@ -437,6 +442,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         remote_python: Optional[str] = None,
         force_version: bool = False,
         request_timeout: float = DEFAULT_TIMEOUT,
+        remote_log_levels: Optional[str] = None,
     ):
         """Initialize the client
 
@@ -454,6 +460,9 @@ class SSHStateProviderClient(OfflineStateProvider):
             uv_offline: Pass --offline to uv tool run (use cached packages, no network)
             remote_python: Python interpreter for uv tool run --python
             force_version: Pin exact version (==X.Y.Z) instead of minor (>=X.Y.0)
+            remote_log_levels: Logging levels of the remote server, as the
+                ``--logging`` option (e.g. ``xpm.remote.trace=DEBUG``); its
+                logs are shown locally
         """
         # Initialize base class (includes service cache)
         super().__init__()
@@ -468,6 +477,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         self.remote_python = remote_python
         self.force_version = force_version
         self.request_timeout = request_timeout
+        self.remote_log_levels = remote_log_levels
 
         # Session-specific temporary cache directory (created on connect)
         self._temp_dir: Optional[str] = None
@@ -483,6 +493,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._listener_lock = threading.Lock()
 
         self._response_handlers: Dict[int, Future] = {}
+        #: Method and start time of the pending requests (for the trace)
+        self._pending_calls: Dict[int, tuple[RPCMethod, float]] = {}
         self._response_lock = threading.Lock()
         self._request_id = 0
 
@@ -577,6 +589,8 @@ class SSHStateProviderClient(OfflineStateProvider):
                 remote_cmd_parts.append("experimaestro")
 
         # Add the subcommand arguments
+        if self.remote_log_levels:
+            remote_cmd_parts.extend(["--logging", self.remote_log_levels])
         remote_cmd_parts.extend(
             ["experiments", "--workdir", self.remote_workspace, "monitor-server"]
         )
@@ -658,9 +672,11 @@ class SSHStateProviderClient(OfflineStateProvider):
             self.remote_version = sync_info.get("version")
 
             logger.info(
-                "Connected to remote workspace: %s (protocol v%s)",
+                "Connected to remote workspace: %s (protocol v%s, experimaestro %s)",
                 self.remote_workspace,
                 server_version,
+                # Servers that do not send their version also lack some methods
+                self.remote_version or "unknown: an older release, lacking features",
             )
         except ConnectionError:
             # Re-raise ConnectionError (includes version mismatch)
@@ -818,6 +834,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
     def _process_message(self, line: str):
         """Process a single message from the server"""
+        trace_payload.debug("received %s", line)
         try:
             msg = parse_message(line)
         except ValueError as e:
@@ -827,6 +844,11 @@ class SSHStateProviderClient(OfflineStateProvider):
         if isinstance(msg, RPCResponse):
             self._handle_response(msg)
         elif isinstance(msg, RPCNotification):
+            trace.debug(
+                "notification %s: %s",
+                notification_kind(msg.method, msg.params or {}),
+                format_size(len(line)),
+            )
             self._handle_notification(msg)
         else:
             logger.debug("Unexpected message type: %s", type(msg).__name__)
@@ -835,6 +857,17 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Handle a response from the server"""
         with self._response_lock:
             future = self._response_handlers.pop(response.id, None)
+            call = self._pending_calls.pop(response.id, None)
+
+        if call is not None:
+            method, start = call
+            trace.debug(
+                "%s #%s: %.3fs round trip%s",
+                method.value,
+                response.id,
+                time.perf_counter() - start,
+                " (error)" if response.error else "",
+            )
 
         if future is None:
             logger.warning("Received response for unknown request ID: %s", response.id)
@@ -977,6 +1010,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             request_id = self._request_id
             future = Future()
             self._response_handlers[request_id] = future
+            self._pending_calls[request_id] = (method, time.perf_counter())
 
         request_json = create_request(method, params, request_id)
         try:
@@ -985,6 +1019,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         except Exception as e:
             with self._response_lock:
                 self._response_handlers.pop(request_id, None)
+                self._pending_calls.pop(request_id, None)
             future.set_exception(e)
 
         return future

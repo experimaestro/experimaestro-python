@@ -10,6 +10,7 @@ Usage:
 import logging
 import sys
 import threading
+import time
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import IO, Callable, Dict, Optional
@@ -33,6 +34,10 @@ from experimaestro.scheduler.remote.protocol import (
     INTERNAL_ERROR,
     WORKSPACE_NOT_FOUND,
     PROTOCOL_VERSION,
+    format_size,
+    notification_kind,
+    trace,
+    trace_payload,
 )
 
 logger = logging.getLogger("xpm.remote.server")
@@ -197,30 +202,33 @@ class SSHStateProviderServer:
             return
 
         # Dispatch to handler
+        start = time.perf_counter()
         handler = self._handlers.get(method)
         if handler is None:
-            self._send_response(
-                create_error_response(
-                    request_id, METHOD_NOT_FOUND, f"Unknown method: {method}"
-                )
+            response = create_error_response(
+                request_id, METHOD_NOT_FOUND, f"Unknown method: {method}"
             )
-            return
-
-        try:
-            result = handler(params)
-            self._send_response(create_success_response(request_id, result))
-        except TypeError as e:
-            self._send_response(
-                create_error_response(request_id, INVALID_PARAMS, str(e))
-            )
-        except Exception as e:
-            logger.exception("Error handling %s", method)
-            self._send_response(
-                create_error_response(request_id, INTERNAL_ERROR, str(e))
-            )
+        else:
+            try:
+                response = create_success_response(request_id, handler(params))
+            except TypeError as e:
+                response = create_error_response(request_id, INVALID_PARAMS, str(e))
+            except Exception as e:
+                logger.exception("Error handling %s", method)
+                response = create_error_response(request_id, INTERNAL_ERROR, str(e))
+        self._send_response(response)
+        trace.debug(
+            "%s #%s %s: %.3fs, %s",
+            method,
+            request_id,
+            params,
+            time.perf_counter() - start,
+            format_size(len(response)),
+        )
 
     def _send_response(self, response: str):
         """Send a JSON-RPC response (thread-safe)"""
+        trace_payload.debug("sent %s", response)
         with self._write_lock:
             self.stdout.write((response + "\n").encode("utf-8"))
             self.stdout.flush()
@@ -228,6 +236,11 @@ class SSHStateProviderServer:
     def _send_notification(self, method: NotificationMethod, params: Dict):
         """Send a JSON-RPC notification (thread-safe)"""
         notification = create_notification(method, params)
+        trace.debug(
+            "notification %s: %s",
+            notification_kind(method.value, params),
+            format_size(len(notification)),
+        )
         self._send_response(notification)
 
     def _send_error_and_exit(self, code: int, message: str):
@@ -273,11 +286,16 @@ class SSHStateProviderServer:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def _experiment_to_dict(exp) -> Dict:
-        """Serialize experiment with job_infos for RPC transmission"""
+    def _experiment_to_dict(exp, job_infos: bool = True) -> Dict:
+        """Serialize experiment with job_infos for RPC transmission
+
+        Without job_infos (a summary, much smaller), the number of jobs (which
+        can be derived from them) is sent instead.
+        """
         data = exp.state_dict()
+        data["total_jobs"] = exp.total_jobs
         # Include job_infos (stored in jobs.jsonl, not in state_dict)
-        if hasattr(exp, "job_infos"):
+        if job_infos and hasattr(exp, "job_infos"):
             data["job_infos"] = {
                 job_id: info.to_dict() for job_id, info in exp.job_infos.items()
             }

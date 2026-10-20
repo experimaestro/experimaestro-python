@@ -292,6 +292,7 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 | `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
 | `--remote-python NAME` | Python interpreter for `uv tool run --python` |
 | `--request-timeout SECS` | Timeout for remote RPC requests (default: 60) |
+| `--remote-logging LEVELS` | Logging levels of the remote server, shown locally (e.g. `xpm.remote.trace=DEBUG`) |
 
 Examples:
 

@@ -16,6 +16,26 @@ from typing import Any, Dict, Optional, Union
 
 logger = logging.getLogger("xpm.remote.protocol")
 
+#: One line per request (with its time and answer size) and notification, on
+#: both sides — enable with ``--logging xpm.remote.trace=DEBUG`` (and with
+#: ``--remote-logging`` for the remote side)
+trace = logging.getLogger("xpm.remote.trace")
+#: The messages themselves (very verbose)
+trace_payload = logging.getLogger("xpm.remote.payload")
+
+
+def format_size(size: int) -> str:
+    """Message size, for the trace"""
+    return f"{size} B" if size < 1024 else f"{size / 1024:.1f} kB"
+
+
+def notification_kind(method: str, params: dict) -> str:
+    """Notification method, with the event type of state events (for the trace)"""
+    method = method.removeprefix("notification.")
+    event_type = params.get("event_type")
+    return f"{method} {event_type}" if event_type else method
+
+
 # JSON-RPC 2.0 version
 JSONRPC_VERSION = "2.0"
 

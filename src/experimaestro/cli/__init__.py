@@ -754,6 +754,14 @@ def monitor(
     default=60.0,
     help="Timeout in seconds for remote RPC requests (default: 60)",
 )
+@click.option(
+    "--remote-logging",
+    "remote_log_levels",
+    type=str,
+    default=None,
+    help="Logging levels of the remote server, shown locally (as --logging, "
+    "e.g. xpm.remote.trace=DEBUG to trace the requests)",
+)
 def ssh_monitor(
     host: str | None,
     remote_workdir: str | None,
@@ -772,6 +780,7 @@ def ssh_monitor(
     remote_python: str | None,
     force_version: bool,
     request_timeout: float,
+    remote_log_levels: str | None,
 ):
     """Monitor experiments on a remote server via SSH
 
@@ -825,6 +834,8 @@ def ssh_monitor(
             effective_python = ws_ssh.python
         if not effective_ssh_options and ws_ssh.options:
             effective_ssh_options = ws_ssh.options
+        if not remote_log_levels and ws_ssh.log_levels:
+            remote_log_levels = ws_ssh.log_levels
 
     # Validate required arguments
     if not effective_host:
@@ -862,6 +873,7 @@ def ssh_monitor(
         remote_python=effective_python,
         force_version=force_version,
         request_timeout=request_timeout,
+        remote_log_levels=remote_log_levels,
     )
     try:
         state_provider.connect()

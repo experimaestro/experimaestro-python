@@ -396,6 +396,18 @@ connection issues or see remote server activity.
 
 ### Troubleshooting
 
+**Slow or stuck interface:** trace the requests on both sides. Each one is
+logged with its time and answer size: on the remote side, the time spent
+answering it; on the local side, the round trip (which includes the wait in
+the queue — requests are answered one at a time).
+
+```bash
+experimaestro --logging xpm.remote.trace=DEBUG experiments ssh-monitor \
+    --workspace my-cluster --remote-logging xpm.remote.trace=DEBUG
+```
+
+The `xpm.remote.payload` logger shows the messages themselves (very verbose).
+
 **`uv tool run` hangs (no output):**
 - The remote host likely has no outbound HTTPS access to PyPI
 - Use `uv_offline: true` in workspace SSH settings or `--uv-offline` CLI flag
