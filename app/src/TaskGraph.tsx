@@ -1,10 +1,13 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppSelector } from "./store";
 import JobModal from "./JobModal";
 import client, { ExperimentGraphResult } from "./client";
 import DagView from "./dag/DagView";
 import { ViewParams } from "./dag/types";
+
+// Delay (ms) without new jobs before the graph is requested again
+const GRAPH_UPDATE_DELAY = 1000;
 
 // Dependency graph of the selected experiment run: the graph and its views
 // are computed by the server, the job statuses come from the store
@@ -20,23 +23,57 @@ export default () => {
   const [result, setResult] = useState<ExperimentGraphResult | null>(null);
   const [showJob, setShowJob] = useState<string>();
   const requestId = useRef(0);
+  // First request for the displayed experiment, run and view: the answers to
+  // later requests are shown as they arrive (the latest may take a while)
+  const firstRequest = useRef(1);
+  const shownRequest = useRef(0);
 
   useEffect(() => {
     client.onExperimentGraph = (payload) => {
-      if (payload.requestId === requestId.current) setResult(payload);
+      if (payload.requestId < firstRequest.current) return;
+      if (payload.requestId <= shownRequest.current) return;
+      shownRequest.current = payload.requestId;
+      setResult(payload);
     };
     return () => {
       client.onExperimentGraph = null;
     };
   }, []);
 
-  // The graph only changes when jobs are submitted, not when their state does
-  const jobCount = jobs.ids.length;
-  useEffect(() => {
+  // The graph only changes when jobs are submitted to the displayed
+  // experiment, not when their state does
+  const jobCount = useMemo(
+    () =>
+      jobs.ids.filter((id) =>
+        jobs.byId[id].experimentIds?.includes(currentExperiment ?? ""),
+      ).length,
+    [jobs, currentExperiment],
+  );
+
+  // Read by the delayed request, which must use the current values
+  const latest = useRef({ currentExperiment, currentRun, params, jobCount });
+  latest.current = { currentExperiment, currentRun, params, jobCount };
+  const requestedCount = useRef(-1);
+  const request = () => {
+    const { currentExperiment, currentRun, params, jobCount } = latest.current;
     if (currentExperiment === null) return;
     requestId.current += 1;
+    requestedCount.current = jobCount;
     client.experiment_graph(requestId.current, currentExperiment, currentRun, params);
-  }, [currentExperiment, currentRun, params, jobCount]);
+  };
+
+  // Another experiment, run or view: request it right away
+  useEffect(() => {
+    firstRequest.current = requestId.current + 1;
+    request();
+  }, [currentExperiment, currentRun, params]);
+
+  // Jobs submitted: request once they stop arriving (they come in bursts)
+  useEffect(() => {
+    if (jobCount === requestedCount.current) return;
+    const timer = window.setTimeout(request, GRAPH_UPDATE_DELAY);
+    return () => window.clearTimeout(timer);
+  }, [jobCount]);
 
   // Start afresh when switching experiment
   useEffect(() => setResult(null), [currentExperiment, currentRun]);

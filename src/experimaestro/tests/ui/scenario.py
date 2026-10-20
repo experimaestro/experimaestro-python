@@ -23,6 +23,7 @@ from experimaestro.scheduler.interfaces import (
     JobState,
 )
 from experimaestro.scheduler.services import WebService
+from experimaestro.scheduler.state_status import JobSubmittedEvent
 from experimaestro.scheduler.state_provider import (
     MockExperiment,
     MockJob,
@@ -299,6 +300,20 @@ class ScenarioProvider(OfflineStateProvider):
             )
         )
         self.run_jobs[(experiment_id, run.run_id)] = [s.identifier for s in run.jobs]
+
+    def submit(self, experiment_id: str, spec: JobSpec) -> None:
+        """Submit a job to the current run of an experiment (as it runs)"""
+        self._add_job(spec)
+        run = self.runs[experiment_id][-1]
+        self.run_jobs[(experiment_id, run.run_id)].append(spec.identifier)
+        self._notify_state_listeners(
+            JobSubmittedEvent(
+                job_id=spec.identifier,
+                task_id=spec.task_id,
+                experiment_id=experiment_id,
+                run_id=run.run_id,
+            )
+        )
 
     def _run(self, experiment_id: str, run_id: str | None) -> MockExperiment | None:
         runs = self.runs.get(experiment_id)

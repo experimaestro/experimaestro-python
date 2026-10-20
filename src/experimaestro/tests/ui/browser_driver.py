@@ -16,13 +16,14 @@ Playwright's async API is used: its sync API relies on greenlet, which crashes
 on free-threaded Python.
 """
 
+import json
 import threading
 import time
 from types import SimpleNamespace
 from typing import Literal
 
 import uvicorn
-from playwright.async_api import Locator, Page, async_playwright
+from playwright.async_api import Locator, Page, WebSocket, async_playwright
 
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.webui.app import create_app
@@ -80,6 +81,8 @@ class BrowserDriver:
         self.provider = provider
         self.server = _Server(provider)
         self.page: Page
+        #: Messages the page sent over the WebSocket
+        self.sent: list[dict] = []
 
     async def __aenter__(self) -> "BrowserDriver":
         url = self.server.start()
@@ -92,6 +95,7 @@ class BrowserDriver:
             [{"name": "experimaestro_token", "value": TOKEN, "url": url}]
         )
         self.page = await context.new_page()
+        self.page.on("websocket", self._record)
         await self.page.goto(f"{url}/index.html")
         await self.page.locator("tr[data-experiment-id]").first.wait_for()
         await self.settle()
@@ -103,6 +107,13 @@ class BrowserDriver:
         self.server.stop()
 
     # --- Helpers
+
+    def _record(self, websocket: WebSocket) -> None:
+        websocket.on("framesent", lambda frame: self.sent.append(json.loads(frame)))
+
+    def requests(self, msg_type: str) -> list[dict]:
+        """Payloads of the requests of a type the page sent so far"""
+        return [m.get("payload", {}) for m in self.sent if m["type"] == msg_type]
 
     async def settle(self, quiet: int = 150) -> None:
         """Wait until the page stops changing"""
