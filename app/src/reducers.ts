@@ -182,6 +182,7 @@ export type State = {
   currentExperiment: string | null; // Currently selected experiment filter (null = all)
   currentRun: string | null; // Currently selected run (null = current/latest)
   experiments: Experiments; // All experiments
+  experimentsLoaded: boolean; // The server answered the experiments request
   jobs: Jobs;
   services: Services;
   warnings: { byKey: { [key: string]: Warning }; keys: string[] };
@@ -199,6 +200,7 @@ export const slice = createSlice({
     currentExperiment: null,
     currentRun: null,
     experiments: { byId: {}, ids: [] },
+    experimentsLoaded: false,
     jobs: { byId: {}, ids: [] },
     services: { byId: {}, ids: [] },
     warnings: { byKey: {}, keys: [] },
@@ -276,6 +278,10 @@ export const slice = createSlice({
         draft.currentExperiment = exp.experiment_id;
         draft.experiment = exp.experiment_id; // Backward compatibility
       }
+    },
+
+    setExperimentsLoaded(draft) {
+      draft.experimentsLoaded = true;
     },
 
     updateExperiment(

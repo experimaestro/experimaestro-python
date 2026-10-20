@@ -143,6 +143,9 @@ class Client {
         case "experiment.add":
           store.dispatch(actions.addExperiment(payload));
           break;
+        case "experiments.loaded":
+          store.dispatch(actions.setExperimentsLoaded());
+          break;
         case "experiment.update":
           store.dispatch(actions.updateExperiment(payload));
           break;

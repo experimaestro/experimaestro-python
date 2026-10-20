@@ -345,6 +345,7 @@ class WebSocketHandler:
             {"type": "job.add", "payload": {...}}
             {"type": "job.update", "payload": {...}}
             {"type": "experiment.add", "payload": {...}}
+            {"type": "experiments.loaded"}  (end of the experiments answer)
             {"type": "service.add", "payload": {...}}
             {"type": "service.update", "payload": {...}}
             {"type": "jobs.filter", "payload": {"requestId": 1, "query": "...",
@@ -565,12 +566,17 @@ class WebSocketHandler:
                         )
 
     async def _handle_experiments(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle experiments request - send all experiments"""
+        """Handle experiments request - send all experiments
+
+        The list ends with ``experiments.loaded``, so that the client can tell
+        an empty workspace from a list still loading (slow over SSH).
+        """
         experiments = self.state_provider.get_experiments()
         for exp in experiments:
             await websocket.send_json(
                 {"type": "experiment.add", "payload": serialize_experiment(exp)}
             )
+        await websocket.send_json({"type": "experiments.loaded"})
 
     async def _handle_services(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Send the services of an experiment (all experiments by default)

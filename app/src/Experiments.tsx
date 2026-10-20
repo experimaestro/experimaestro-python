@@ -25,11 +25,16 @@ type Confirm = { experimentId: string; kind: "kill" | "delete" };
 
 export default ({ onOpen }: { onOpen: (id: string) => void }) => {
   const experiments = useAppSelector((s) => s.db.experiments);
+  const loaded = useAppSelector((s) => s.db.experimentsLoaded);
   const [confirm, setConfirm] = useState<Confirm>();
   const { info } = useMessages();
 
   if (experiments.ids.length === 0) {
-    return <p className="text-muted mt-3">No experiments yet.</p>;
+    return (
+      <p className="text-muted mt-3">
+        {loaded ? "No experiments yet." : "Loading the list of experiments…"}
+      </p>
+    );
   }
 
   function cancelConfirm() {
