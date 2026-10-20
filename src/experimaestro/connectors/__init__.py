@@ -10,6 +10,7 @@ This module contains :
 
 import enum
 import logging
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, Mapping, Type, Union, Optional, TYPE_CHECKING
@@ -59,6 +60,39 @@ class Redirect:
 
 Redirect._NONE = Redirect(RedirectType.NONE)
 Redirect._INHERIT = Redirect(RedirectType.INHERIT)
+
+
+class OutputCaptureHandler:
+    """Capture the full output of a file stream
+
+    To be used with :meth:`Redirect.pipe`; the captured bytes are available
+    through :attr:`output` (which waits for the reader thread to finish).
+    """
+
+    def __init__(self, threaded=True):
+        self._output = b""
+        self.thread = None
+        self.threaded = threaded
+
+    def __call__(self, fp):
+        if self.threaded:
+            self.thread = threading.Thread(target=self.read, args=(fp,))
+            self.thread.start()
+        else:
+            self.read(fp)
+
+    @property
+    def output(self):
+        if self.thread:
+            self.thread.join()
+        return self._output
+
+    def read(self, fp):
+        while True:
+            data = fp.read()
+            if data == b"":
+                break
+            self._output += data
 
 
 class ProcessState(enum.Enum):

@@ -22,7 +22,7 @@ export default ({
   const progress = job.progress.length > 0 ? job.progress[0].progress : 0;
 
   return (
-    <tr className="job-row">
+    <tr className="job-row" data-job-id={job.jobId}>
       <td className="job-status-cell">
         <StatusBadge status={job.status} progress={progress} />
       </td>

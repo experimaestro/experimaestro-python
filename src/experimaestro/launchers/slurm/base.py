@@ -21,12 +21,12 @@ from experimaestro.launcherfinder.registry import (
     LauncherRegistry,
 )
 from experimaestro.utils import ThreadingCondition
-from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from functools import cached_property
 from experimaestro.launchers import Launcher
 from experimaestro.scriptbuilder import PythonScriptBuilder
 from experimaestro.connectors import (
     Connector,
+    OutputCaptureHandler,
     ProcessBuilder,
     Process,
     ProcessState,

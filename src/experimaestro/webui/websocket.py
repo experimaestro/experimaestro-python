@@ -15,12 +15,19 @@ from typing import Any, Dict, List, Optional, Set
 
 from fastapi import WebSocket
 
+from experimaestro.scheduler import job_operations, service_operations
+from experimaestro.scheduler.job_operations import Outcome
+from experimaestro.scheduler.job_status import display_state, status_rank
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.base import Scheduler, Job
 from experimaestro.scheduler.jobs import JobDependency
 from experimaestro.scheduler.interfaces import BaseJob, BaseExperiment, BaseService
+from experimaestro.utils.disk_usage import folder_size
 
 logger = logging.getLogger("xpm.webui.websocket")
+
+#: Toast (Bootstrap) severity of each job operation outcome
+_TOAST_SEVERITY = {"info": "success", "warning": "warning", "error": "danger"}
 
 
 # =============================================================================
@@ -123,6 +130,7 @@ def serialize_job(
     experiment_ids: List = None,
     submitted: str = None,
     process_info: Any = None,
+    experiment: BaseExperiment | None = None,
 ) -> Dict[str, Any]:
     """Serialize a job using ``state_dict()`` and transform to frontend format.
 
@@ -134,8 +142,14 @@ def serialize_job(
         submitted: Optional submit-time ISO string (from ExperimentJobInformation)
         process_info: Optional live ProcessInfo (from get_process_info) used to
             enrich the static process dict with cpu/memory/threads
+        experiment: Optional experiment the status is resolved against (see
+            :func:`~experimaestro.scheduler.job_status.display_state`)
     """
     d = job.state_dict()
+    # Show the same (resolved) status as the TUI, with its shared sort rank
+    state = display_state(job, experiment)
+    d["state"] = state.name
+    d["failure_reason"] = state.failure_reason.name if state.failure_reason else None
 
     if tags is not None:
         d["tags"] = tags
@@ -155,7 +169,30 @@ def serialize_job(
             "num_threads": process_info.num_threads,
         }
 
-    return _job_dict_to_frontend(d)
+    payload = _job_dict_to_frontend(d)
+    payload["statusRank"] = status_rank(state)
+    return payload
+
+
+#: Frontend job fields that depend on the experiment, not on the job execution
+_EXPERIMENT_JOB_FIELDS = ("tags", "dependsOn", "experimentIds", "submitted")
+
+
+def serialize_job_update(
+    job: BaseJob,
+    process_info: Any = None,
+    experiment: BaseExperiment | None = None,
+) -> Dict[str, Any]:
+    """Serialize the execution state of a job, for ``job.update`` messages
+
+    Experiment-specific fields (tags, dependencies, experiments, submit time)
+    are left out: the client merges updates into the job it received with
+    ``job.add``, and empty values would overwrite the ones it has.
+    """
+    payload = serialize_job(job, process_info=process_info, experiment=experiment)
+    for name in _EXPERIMENT_JOB_FIELDS:
+        del payload[name]
+    return payload
 
 
 def serialize_live_job(job: Job) -> Dict[str, Any]:
@@ -192,13 +229,11 @@ def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
         except Exception:
             return 0
 
-    # Flatten the experiment carbon impact ({sum, latest} aggregates) to the same
-    # shape the frontend uses for jobs; prefer the per-job "latest" aggregate.
-    carbon = None
-    impact = d.get("carbon_impact") or {}
-    agg = impact.get("latest") or impact.get("sum")
-    if agg:
-        carbon = {"co2kg": agg.get("co2_kg"), "energyKwh": agg.get("energy_kwh")}
+    # Same carbon impact as the TUI, in the shape the frontend uses for jobs
+    summary = exp.carbon_summary
+    carbon = (
+        {"co2kg": summary.co2_kg, "energyKwh": summary.energy_kwh} if summary else None
+    )
 
     workdir = getattr(exp, "workdir", None)
     return {
@@ -206,6 +241,8 @@ def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
         "workdir": str(workdir) if workdir else None,
         "current_run_id": d.get("run_id"),
         "status": d.get("status"),
+        # Displayed status, shared with the TUI (BaseExperiment.status_category)
+        "statusCategory": exp.status_category,
         "hostname": d.get("hostname"),
         "started_at": d.get("started_at"),
         "ended_at": d.get("ended_at"),
@@ -220,6 +257,9 @@ def serialize_service(service: BaseService) -> Dict[str, Any]:
     """Serialize a service using ``full_state_dict()`` to frontend format."""
     d = service.full_state_dict()
     return {
+        # Service ids are only unique within an experiment
+        "key": f"{service.experiment_id}/{service.id}",
+        "experimentId": service.experiment_id,
         "id": d.get("service_id"),
         "description": d.get("description"),
         "state": d.get("state"),
@@ -270,28 +310,11 @@ def serialize_run(run: BaseExperiment, current_run_id: Optional[str]) -> Dict[st
     return payload
 
 
-def _dir_size(path) -> int:
-    """Best-effort recursive size of a directory in bytes."""
-    import os
-
-    total = 0
-    try:
-        for root, _dirs, filenames in os.walk(path):
-            for name in filenames:
-                try:
-                    total += os.path.getsize(os.path.join(root, name))
-                except OSError:
-                    pass
-    except OSError:
-        pass
-    return total
-
-
 def serialize_orphan_job(job: BaseJob, is_stray: bool) -> Dict[str, Any]:
     """Serialize an orphan/stray job with its on-disk size."""
     payload = serialize_job(job)
     payload["isStray"] = is_stray
-    payload["sizeBytes"] = _dir_size(job.path) if job.path else 0
+    payload["sizeBytes"] = folder_size(job.path) if job.path else 0
     return payload
 
 
@@ -310,6 +333,12 @@ class WebSocketHandler:
             {"type": "services"}
             {"type": "job.details", "payload": {"jobId": "...", "experimentId": "..."}}
             {"type": "job.kill", "payload": {"jobId": "...", "experimentId": "..."}}
+            {"type": "jobs.filter", "payload": {"query": "...", "experimentId": "...",
+                                               "runId": "...", "requestId": 1}}
+            {"type": "experiment.kill", "payload": {"experimentId": "..."}}
+            {"type": "experiment.delete", "payload": {"experimentId": "..."}}
+            {"type": "orphans.kill"}  (all stray jobs)
+            {"type": "orphans.delete"}  (all finished orphan jobs)
             {"type": "quit"}
 
         Server -> Client:
@@ -318,6 +347,10 @@ class WebSocketHandler:
             {"type": "experiment.add", "payload": {...}}
             {"type": "service.add", "payload": {...}}
             {"type": "service.update", "payload": {...}}
+            {"type": "jobs.filter", "payload": {"requestId": 1, "query": "...",
+                                               "jobIds": [...], "error": null}}
+            {"type": "experiment.removed", "payload": {"experimentId": "..."}}
+            {"type": "notify", "payload": {"severity": "...", "message": "..."}}
             {"type": "error", "payload": {"message": "..."}}
     """
 
@@ -393,6 +426,9 @@ class WebSocketHandler:
             "job.details": self._handle_job_details,
             "job.kill": self._handle_job_kill,
             "job.delete": self._handle_job_delete,
+            "jobs.filter": self._handle_jobs_filter,
+            "experiment.kill": self._handle_experiment_kill,
+            "experiment.delete": self._handle_experiment_delete,
             "warnings": self._handle_warnings,
             "warning.action": self._handle_warning_action,
             "actions": self._handle_actions,
@@ -400,6 +436,8 @@ class WebSocketHandler:
             "orphans": self._handle_orphans,
             "orphan.kill": self._handle_orphan_kill,
             "orphan.delete": self._handle_orphan_delete,
+            "orphans.kill": self._handle_orphans_kill,
+            "orphans.delete": self._handle_orphans_delete,
             "quit": self._handle_quit,
         }
 
@@ -470,6 +508,7 @@ class WebSocketHandler:
             or {}
         )
 
+        experiment = self.state_provider.get_experiment(experiment_id)
         payloads = []
         for job in jobs:
             jid = job.identifier
@@ -486,6 +525,7 @@ class WebSocketHandler:
                     depends_on=deps_map.get(jid, []),
                     experiment_ids=[experiment_id],
                     submitted=submitted,
+                    experiment=experiment,
                 )
             )
         return payloads
@@ -532,14 +572,16 @@ class WebSocketHandler:
             )
 
     async def _handle_services(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle services request - send all services"""
-        if self._scheduler:
-            # Get services from scheduler's experiments
-            for xp in self._scheduler.experiments.values():
-                for service in xp.services.values():
-                    await websocket.send_json(
-                        {"type": "service.add", "payload": serialize_service(service)}
-                    )
+        """Send the services of an experiment (all experiments by default)
+
+        Read through the state provider, as the TUI does, so that services are
+        listed (and can be started) without a running experiment.
+        """
+        services = self.state_provider.get_services(payload.get("experimentId"))
+        for service in services:
+            await websocket.send_json(
+                {"type": "service.add", "payload": serialize_service(service)}
+            )
 
     async def _handle_job_details(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle job details request"""
@@ -566,59 +608,135 @@ class WebSocketHandler:
                     await websocket.send_json(
                         {
                             "type": "job.update",
-                            "payload": serialize_job(job, process_info=process_info),
+                            "payload": serialize_job_update(
+                                job, process_info=process_info
+                            ),
                         }
                     )
 
+    async def _notify_outcome(self, websocket: WebSocket, operation) -> Outcome:
+        """Run a job operation (blocking) and show its outcome as a toast"""
+        loop = asyncio.get_running_loop()
+        outcome = await loop.run_in_executor(None, operation)
+        await self._notify(
+            websocket, _TOAST_SEVERITY[outcome.severity], outcome.message
+        )
+        return outcome
+
     async def _handle_job_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle job kill request"""
-        job_id = payload.get("jobId")
-        task_id = payload.get("taskId")
-
-        if self._scheduler and job_id in self._scheduler.jobs:
-            # Kill via scheduler
-            job = self._scheduler.jobs[job_id]
-            future = asyncio.run_coroutine_threadsafe(
-                job.aio_process(), self._scheduler.loop
-            )
-            process = future.result()
-            if process is not None:
-                process.kill()
-                logger.info("Killed job %s", job_id)
-        else:
-            # Offline provider: kill_job expects a BaseJob instance
-            try:
-                job = self.state_provider.get_job(task_id, job_id) if task_id else None
-                if job is None:
-                    raise ValueError(f"Unknown job {task_id}:{job_id}")
-                self.state_provider.kill_job(job, perform=True)
-            except NotImplementedError:
-                logger.warning("kill_job not supported for this state provider")
-            except Exception as e:
-                logger.warning("Failed to kill job %s: %s", job_id, e)
-                await websocket.send_json(
-                    {"type": "error", "payload": {"message": str(e)}}
-                )
-
-    async def _handle_job_delete(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Handle job delete request (removes the job directory from disk)."""
+        """Kill a job"""
         job = self._lookup_job(payload)
         if job is None:
-            await websocket.send_json(
-                {"type": "error", "payload": {"message": "Job not found"}}
-            )
+            await self._notify(websocket, "danger", "Job not found")
             return
-        try:
-            ok, message = self.state_provider.delete_job_safely(job, perform=True)
-            if ok:
-                await self.broadcast("job.removed", {"jobId": payload.get("jobId")})
-            else:
-                await websocket.send_json(
-                    {"type": "error", "payload": {"message": message}}
+        await self._notify_outcome(
+            websocket, lambda: job_operations.kill_job(self.state_provider, job)
+        )
+
+    async def _handle_job_delete(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Delete a job (removes the job directory from disk)"""
+        job = self._lookup_job(payload)
+        if job is None:
+            await self._notify(websocket, "danger", "Job not found")
+            return
+        outcome = await self._notify_outcome(
+            websocket, lambda: job_operations.delete_job(self.state_provider, job)
+        )
+        if outcome.ok:
+            await self.broadcast("job.removed", {"jobId": job.identifier})
+
+    def _filter_job_ids(
+        self, query: str, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> List[str]:
+        """Identifiers of the jobs matching a filter expression
+
+        Uses the same filter DSL (and the same per-run tags) as the TUI search
+        bar, so that both interfaces select the same jobs. Without an
+        experiment, a job matches if it matches within any experiment (tags are
+        experiment-specific). Answers come from the provider's query cache.
+
+        Raises:
+            pyparsing.ParseException: if the query is invalid
+        """
+        from experimaestro.cli.filter import FilterContext, createFilter
+
+        ctx = FilterContext()
+        filter_fn = createFilter(query, ctx)
+
+        if experiment_id:
+            scopes = [(experiment_id, run_id)]
+        else:
+            scopes = [
+                (exp.experiment_id, None)
+                for exp in self.state_provider.get_experiments()
+            ]
+
+        matched: List[str] = []
+        seen: Set[str] = set()
+        for exp_id, scope_run_id in scopes:
+            ctx.tags_map = self.state_provider.get_tags_map(exp_id, scope_run_id) or {}
+            for job in self.state_provider.get_jobs(exp_id, run_id=scope_run_id):
+                if job.identifier not in seen and filter_fn(job):
+                    seen.add(job.identifier)
+                    matched.append(job.identifier)
+        return matched
+
+    async def _handle_jobs_filter(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Evaluate a job filter expression server-side (shared DSL with the TUI)"""
+        query = (payload.get("query") or "").strip()
+        response: Dict[str, Any] = {
+            "requestId": payload.get("requestId"),
+            "query": query,
+            "jobIds": None,
+            "error": None,
+        }
+        if query:
+            loop = asyncio.get_running_loop()
+            try:
+                response["jobIds"] = await loop.run_in_executor(
+                    None,
+                    self._filter_job_ids,
+                    query,
+                    payload.get("experimentId"),
+                    payload.get("runId"),
                 )
-        except Exception as e:
-            logger.warning("Failed to delete job %s: %s", payload.get("jobId"), e)
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+            except Exception as e:
+                response["error"] = f"Invalid query: {e}"
+        await websocket.send_json({"type": "jobs.filter", "payload": response})
+
+    async def _notify(self, websocket: WebSocket, severity: str, message: str):
+        """Send a user-facing notification (shown as a toast)"""
+        await websocket.send_json(
+            {"type": "notify", "payload": {"severity": severity, "message": message}}
+        )
+
+    async def _handle_experiment_kill(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Kill all the running jobs of an experiment"""
+        experiment_id = payload.get("experimentId")
+        if not experiment_id:
+            return
+        await self._notify_outcome(
+            websocket,
+            lambda: job_operations.kill_experiment(self.state_provider, experiment_id),
+        )
+
+    async def _handle_experiment_delete(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Delete an experiment (its job directories are kept)"""
+        experiment_id = payload.get("experimentId")
+        if not experiment_id:
+            return
+        outcome = await self._notify_outcome(
+            websocket,
+            lambda: job_operations.delete_experiment(
+                self.state_provider, experiment_id
+            ),
+        )
+        if outcome.ok:
+            await self.broadcast("experiment.removed", {"experimentId": experiment_id})
 
     async def _handle_experiment_runs(
         self, websocket: WebSocket, payload: Dict[str, Any]
@@ -639,71 +757,47 @@ class WebSocketHandler:
             }
         )
 
-    def _find_live_service(self, service_id: str):
-        """Find a live service across the scheduler's experiments."""
-        if self._scheduler:
-            for xp in self._scheduler.experiments.values():
-                svc = xp.services.get(service_id)
-                if svc is not None:
-                    return svc
-        return None
-
     async def _handle_service_start(
         self, websocket: WebSocket, payload: Dict[str, Any]
     ):
-        """Start a service (active experiment only)."""
-        await self._service_control(websocket, payload, stop=False)
+        """Start a service (see scheduler/service_operations.py)"""
+        service = await self._lookup_service(websocket, payload)
+        if service is None:
+            return
+        if refusal := service_operations.check_start_service(service):
+            await self._notify(
+                websocket, _TOAST_SEVERITY[refusal.severity], refusal.message
+            )
+            return
+        service.set_starting()
+        await self.broadcast("service.update", serialize_service(service))
+        await self._notify_outcome(
+            websocket, lambda: service_operations.start_service(service)
+        )
+        await self.broadcast("service.update", serialize_service(service))
 
     async def _handle_service_stop(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Stop a service (active experiment only)."""
-        await self._service_control(websocket, payload, stop=True)
-
-    async def _service_control(
-        self, websocket: WebSocket, payload: Dict[str, Any], *, stop: bool
-    ):
-        service_id = payload.get("id")
-        if self._scheduler is None:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "payload": {
-                        "message": "Service control requires an active experiment"
-                    },
-                }
-            )
-            return
-
-        service = self._find_live_service(service_id)
+        """Stop a service (see scheduler/service_operations.py)"""
+        service = await self._lookup_service(websocket, payload)
         if service is None:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "payload": {"message": f"Service {service_id} not found"},
-                }
-            )
             return
+        await self._notify_outcome(
+            websocket, lambda: service_operations.stop_service(service)
+        )
+        await self.broadcast("service.update", serialize_service(service))
 
-        loop = asyncio.get_running_loop()
-
-        def control():
-            live = service.to_service()
-            if stop:
-                if hasattr(live, "stop"):
-                    live.stop()
-            elif hasattr(live, "get_url"):
-                # Services start lazily on first URL request
-                live.get_url()
-            return live
-
-        try:
-            live = await loop.run_in_executor(None, control)
-            await self.broadcast("service.update", serialize_service(live))
-        except Exception as e:
-            logger.warning("Service %s control failed: %s", service_id, e)
-            if hasattr(service, "set_error"):
-                service.set_error(str(e))
-            await self.broadcast("service.update", serialize_service(service))
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+    async def _lookup_service(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ) -> BaseService | None:
+        """Service designated by a request (``experimentId`` and ``id``)"""
+        service = service_operations.find_service(
+            self.state_provider, payload.get("experimentId"), payload.get("id")
+        )
+        if service is None:
+            await self._notify(
+                websocket, "danger", f"Service {payload.get('id')} not found"
+            )
+        return service
 
     async def _handle_warnings(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Send all unresolved warnings."""
@@ -824,37 +918,50 @@ class WebSocketHandler:
         await websocket.send_json({"type": "orphans", "payload": {"jobs": jobs}})
 
     async def _handle_orphan_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Kill an orphan/stray job."""
-        job = self._lookup_job(payload)
-        if job is None:
-            return
-        try:
-            self.state_provider.kill_job(job, perform=True)
-        except Exception as e:
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+        """Kill an orphan/stray job"""
+        await self._handle_job_kill(websocket, payload)
 
     async def _handle_orphan_delete(
         self, websocket: WebSocket, payload: Dict[str, Any]
     ):
-        """Delete an orphan job from disk."""
+        """Delete an orphan job from disk"""
         job = self._lookup_job(payload)
         if job is None:
+            await self._notify(websocket, "danger", "Job not found")
             return
-        try:
-            ok, message = self.state_provider.delete_job_safely(job, perform=True)
-            if ok:
-                await websocket.send_json(
-                    {
-                        "type": "orphan.removed",
-                        "payload": {"jobId": payload.get("jobId")},
-                    }
-                )
-            else:
-                await websocket.send_json(
-                    {"type": "error", "payload": {"message": message}}
-                )
-        except Exception as e:
-            await websocket.send_json({"type": "error", "payload": {"message": str(e)}})
+        outcome = await self._notify_outcome(
+            websocket, lambda: job_operations.delete_job(self.state_provider, job)
+        )
+        if outcome.ok:
+            await websocket.send_json(
+                {"type": "orphan.removed", "payload": {"jobId": job.identifier}}
+            )
+
+    async def _handle_orphans_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Kill every stray (running orphan) job, then send the updated list"""
+        await self._notify_outcome(
+            websocket,
+            lambda: job_operations.kill_jobs(
+                self.state_provider,
+                self.state_provider.get_stray_jobs(),
+                nothing="No stray jobs to kill",
+            ),
+        )
+        await self._handle_orphans(websocket, payload)
+
+    async def _handle_orphans_delete(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Delete every finished orphan job, then send the updated list"""
+        await self._notify_outcome(
+            websocket,
+            lambda: job_operations.delete_jobs(
+                self.state_provider,
+                self.state_provider.get_orphan_jobs(),
+                nothing="No deletable orphan jobs",
+            ),
+        )
+        await self._handle_orphans(websocket, payload)
 
     def _lookup_job(self, payload: Dict[str, Any]):
         task_id = payload.get("taskId")

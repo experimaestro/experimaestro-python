@@ -10,7 +10,6 @@ from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
 
-from experimaestro.scheduler.interfaces import ExperimentStatus
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import (
@@ -47,8 +46,9 @@ class ExperimentsList(Widget):
     STATUS_ORDER = {
         "running": 0,  # Running experiments first
         "failed": 1,  # Failed experiments (need attention)
-        "done": 2,  # Completed experiments
-        "empty": 3,  # Empty experiments last
+        "stopped": 2,  # Stopped before all their jobs finished
+        "done": 3,  # Completed experiments
+        "empty": 4,  # Empty experiments last
     }
 
     # Column key to display name mapping
@@ -194,53 +194,19 @@ class ExperimentsList(Widget):
 
     @staticmethod
     def _format_experiment_status(exp) -> str:
-        """Format experiment status for display.
-
-        Uses exp.status (ExperimentStatus enum) to determine whether the
-        experiment is truly running, rather than inferring from job counts.
-        """
-        failed = exp.failed_jobs
-        total = exp.total_jobs
-        finished = exp.finished_jobs
-
-        if failed > 0:
-            return f"❌ {failed} failed"
-        if total == 0:
-            return "Empty"
-
-        try:
-            exp_status = exp.status
-        except (NotImplementedError, AttributeError):
-            exp_status = None
-
-        if exp_status == ExperimentStatus.RUNNING:
-            return f"🏃 {finished}/{total}"
-        # Experiment is not running (done/failed status)
-        if finished == total:
-            return "✓ Done"
-        return f"⏹ {finished}/{total}"
-
-    def _get_status_category(self, exp) -> str:
-        """Get status category for an experiment (for sorting)"""
-        failed = exp.failed_jobs
-        total = exp.total_jobs
-        finished = exp.finished_jobs
-
-        try:
-            exp_status = exp.status
-        except (NotImplementedError, AttributeError):
-            exp_status = None
-
-        if failed > 0:
-            return "failed"
-        elif exp_status == ExperimentStatus.RUNNING:
-            return "running"
-        elif finished == total and total > 0:
-            return "done"
-        elif total > 0:
-            return "done"  # Not running, has jobs, but not all finished
-        else:
-            return "empty"
+        """Format the experiment status (see BaseExperiment.status_category)"""
+        finished, total = exp.finished_jobs, exp.total_jobs
+        match exp.status_category:
+            case "failed":
+                return f"❌ {exp.failed_jobs} failed"
+            case "running":
+                return f"🏃 {finished}/{total}"
+            case "done":
+                return "✓ Done"
+            case "stopped":
+                return f"⏹ {finished}/{total}"
+            case _:
+                return "Empty"
 
     def _get_status_sort_key(self, exp):
         """Get sort key for an experiment based on status
@@ -248,8 +214,7 @@ class ExperimentsList(Widget):
         Primary: status order (running, failed, done, empty)
         Secondary: started_at descending (newest first)
         """
-        status_category = self._get_status_category(exp)
-        status_order = self.STATUS_ORDER.get(status_category, 99)
+        status_order = self.STATUS_ORDER.get(exp.status_category, 99)
         # Secondary sort by start time (newest first via negative timestamp)
         started = exp.started_at
         started_ts = started.timestamp() if started else 0
@@ -435,19 +400,11 @@ class ExperimentsList(Widget):
             # Get runs count (already fetched in background)
             runs_count = runs_counts.get(exp_id, "-")
 
-            # Get CO2 impact (use 'latest' aggregation if available)
-            co2_text = "-"
-            carbon_impact = getattr(exp, "carbon_impact", None)
-            if carbon_impact:
-                # Handle both CarbonImpactData object and dict
-                if hasattr(carbon_impact, "latest"):
-                    latest = carbon_impact.latest
-                    co2_kg = latest.co2_kg if latest else 0
-                else:
-                    latest = carbon_impact.get("latest", {})
-                    co2_kg = latest.get("co2_kg", 0) if latest else 0
-                if co2_kg > 0:
-                    co2_text = format_co2_kg(co2_kg)
+            # CO2 impact (latest run of each job if known)
+            carbon = exp.carbon_summary
+            co2_text = (
+                format_co2_kg(carbon.co2_kg) if carbon and carbon.co2_kg > 0 else "-"
+            )
 
             rows_data[exp_id] = (
                 exp_id,

@@ -64,6 +64,11 @@ async def _aio_wait_kqueue(pid: int) -> int:
             loop.remove_reader(kq.fileno())
 
         events = kq.control([], 1, 0)
+        # Reap the child (kqueue only reports its exit), or it stays a zombie
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass  # Not our child (e.g. a re-attached job)
         if events:
             # With NOTE_EXITSTATUS, data contains the raw wait status
             raw_status = events[0].data

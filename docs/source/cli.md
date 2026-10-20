@@ -92,7 +92,7 @@ The `list` command has additional options:
 experimaestro jobs list -c 10
 
 # Show the 5 most recent running jobs
-experimaestro jobs list --filter '@state = "RUNNING"' -c 5
+experimaestro jobs list --filter '@state = "running"' -c 5
 ```
 
 ### Kill and Clean Commands
@@ -101,18 +101,18 @@ The `kill` and `clean` commands require `--perform` to actually execute:
 
 ```bash
 # Dry run - shows what would be killed
-experimaestro jobs kill --filter '@state="RUNNING"'
+experimaestro jobs kill --filter '@state = "running"'
 
 # Actually kill the jobs
-experimaestro jobs kill --filter '@state="RUNNING"' --perform
+experimaestro jobs kill --filter '@state = "running"' --perform
 ```
 
 ```bash
 # Dry run - shows what would be cleaned
-experimaestro jobs clean --filter '@state="DONE"'
+experimaestro jobs clean --filter '@state = "done"'
 
 # Actually clean the jobs (deletes directories and database entries)
-experimaestro jobs clean --filter '@state="DONE"' --perform
+experimaestro jobs clean --filter '@state = "done"' --perform
 ```
 
 ### Log and Path Commands
@@ -142,7 +142,7 @@ The job filter is a boolean expression that allows filtering jobs by state, name
 
 ### Special Variables
 
-- `@state`: Job state (values: `UNSCHEDULED`, `WAITING`, `READY`, `RUNNING`, `DONE`, `ERROR`)
+- `@state`: Job state (values: `unscheduled`, `waiting`, `ready`, `scheduled`, `running`, `done`, `error`)
 - `@name`: Task identifier (e.g., `mymodule.MyTask`)
 
 ### Operators
@@ -159,13 +159,13 @@ The job filter is a boolean expression that allows filtering jobs by state, name
 Filter by state:
 ```bash
 # List only running jobs
-experimaestro jobs list --filter '@state = "RUNNING"'
+experimaestro jobs list --filter '@state = "running"'
 
 # List completed jobs
-experimaestro jobs list --filter '@state = "DONE"'
+experimaestro jobs list --filter '@state = "done"'
 
 # List failed jobs
-experimaestro jobs list --filter '@state = "ERROR"'
+experimaestro jobs list --filter '@state = "error"'
 ```
 
 Filter by tag:
@@ -180,7 +180,7 @@ experimaestro jobs list --filter 'model = "bm25" and dataset = "msmarco"'
 Complex filters:
 ```bash
 # Running or waiting jobs
-experimaestro jobs list --filter '@state = "RUNNING" or @state = "WAITING"'
+experimaestro jobs list --filter '@state = "running" or @state = "waiting"'
 
 # Jobs with model in a list
 experimaestro jobs list --filter 'model in ["bm25", "splade"]'
@@ -189,7 +189,7 @@ experimaestro jobs list --filter 'model in ["bm25", "splade"]'
 experimaestro jobs list --filter 'mode not in ["debug", "test"]'
 
 # Combine state and tag filters
-experimaestro jobs list --filter '@state = "ERROR" and model = "bm25"'
+experimaestro jobs list --filter '@state = "error" and model = "bm25"'
 ```
 
 ## Tags

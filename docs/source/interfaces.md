@@ -39,11 +39,41 @@ Then open `http://localhost:12345` in your browser.
 
 ### Features
 
-- **Job List**: View all jobs with their status (pending, running, done, error)
+- **Experiments List**: Status (failed, running, done, *stopped* — no longer
+  running but with unfinished jobs — or empty, as in the TUI), job counts,
+  host, duration and CO₂ per experiment, with buttons to **kill** all the running jobs of an experiment
+  or **delete** it (both ask for confirmation; deleting keeps the job
+  directories, and is refused while the experiment is running)
+- **Job List**: View all jobs with their status (pending, running, done, error),
+  sortable by status, task or submission date
+- **Job Filter**: The same [filter expressions](#job-filter-expressions) as the
+  TUI search bar, evaluated by the server so that both interfaces select the
+  same jobs; invalid expressions are reported below the input
+- **Grouped View**: *Group by* status, task or tag value, with collapsible
+  groups showing job counts (and a status breakdown); the flat list is the
+  default
 - **Real-time Updates**: WebSocket-based updates as job states change
-- **Job Details**: Click on a job to view parameters, logs, and output paths
-- **Experiment Filtering**: Filter jobs by experiment ID
+- **Job Details**: Click on a job to view parameters, logs, output paths and its
+  dependencies with their status
+- **Experiment Filtering**: Filter jobs by experiment ID and run
 - **Log Viewing**: View stdout/stderr logs directly in the browser
+- **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
+  usage; kill or delete them one by one, or all at once (with confirmation)
+- **Services**: The services of the selected experiment (of all experiments by
+  default), also when the experiment is not running; start, stop and open
+  them (through `/services/<experiment>/<service>/`), or view their logs
+
+Killing and deleting jobs or experiments, and starting and stopping services,
+behave the same in the web UI, the TUI and (for jobs) the `experimaestro jobs`
+commands: the same operations are refused
+(e.g. deleting a running job) and reported with the same messages. Deleting a
+job also removes the [partial directories](cli.md#cleanup-partial-directories)
+it leaves orphaned.
+
+Both interfaces also show the same job status — the execution state resolved
+against the state the experiment tracks — and sort it in the same order:
+running, scheduled, ready, waiting, error (timeouts and memory errors first),
+done, unscheduled and transient.
 
 ### Remote Access
 
@@ -77,7 +107,11 @@ experimaestro experiments monitor --workdir /path/to/workspace --console
 ### Features
 
 - **Experiments Table**: Lists experiments with ID, hostname, jobs count, status, and duration
-- **Job Table**: Scrollable list of jobs with status indicators
+- **Job Table**: Scrollable list of jobs with status indicators, filtered with
+  [filter expressions](#job-filter-expressions) (`/`)
+- **Tree View**: Jobs grouped by status, task and/or tag (`t`)
+- **Job Details**: Process, carbon, tags, progress and the job dependencies with
+  their status (click a dependency to open its details)
 - **Live Logs**: Real-time log output panel
 - **Keyboard Navigation**: Navigate and interact using keyboard shortcuts
 - **Status Bar**: Shows experiment status and connection info
@@ -138,8 +172,9 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 
 | Key | Action |
 |-----|--------|
-| `s` | Start service |
-| `x` | Stop service |
+| `Ctrl+S` | Start service |
+| `Ctrl+K` | Stop service |
+| `l` | View logs |
 | `u` | Copy URL |
 
 **Orphan Jobs:**
@@ -196,6 +231,22 @@ tui = ExperimentTUI(
 )
 tui.run()
 ```
+
+## Job Filter Expressions
+
+The TUI search bar (`/`) and the web *Filter* input accept the same expressions
+(also used by `experimaestro jobs --filter`, see [CLI](cli.md)):
+
+| Expression | Meaning |
+|------------|---------|
+| `@state = 'done'` | Job state (`unscheduled`, `waiting`, `ready`, `scheduled`, `running`, `done`, `error`) |
+| `@name ~ 'pkg\.Learn'` | Task identifier matches a regular expression (anchored at the start) |
+| `model = 'bm25'` | Tag value of the job in the displayed experiment run |
+| `@state in ['running', 'waiting']` | Value in a list (`not in` for the converse) |
+| `... and ...`, `... or ...` | Combine conditions |
+
+For example, `@state = 'error' and model = 'bm25'` selects the failed jobs whose
+`model` tag is `bm25`.
 
 ## Choosing Between Web and TUI
 

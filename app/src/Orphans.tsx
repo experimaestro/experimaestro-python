@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { Button, Table } from "react-bootstrap";
+import React, { useEffect, useState } from "react";
+import { Button, Modal, Table } from "react-bootstrap";
 
 import { useAppSelector } from "./store";
 import { OrphanJob } from "./reducers";
@@ -26,29 +26,56 @@ const Orphans: React.FC = () => {
   }, []);
 
   const strays = orphans.filter((j) => j.isStray);
+  const finished = orphans.length - strays.length;
+  // Bulk operation waiting for confirmation
+  const [confirm, setConfirm] = useState<"kill" | "delete">();
 
-  const killAll = () => {
-    strays.forEach((j) => client.orphan_kill(j.jobId, j.taskId));
-  };
-  const deleteAll = () => {
-    orphans
-      .filter((j) => !j.isStray)
-      .forEach((j) => client.orphan_delete(j.jobId, j.taskId));
-  };
+  function runConfirm() {
+    if (confirm === "kill") client.orphans_kill();
+    else client.orphans_delete();
+    setConfirm(undefined);
+  }
 
   return (
     <div>
+      {confirm && (
+        <Modal show={true} onHide={() => setConfirm(undefined)}>
+          <Modal.Header closeButton>
+            <Modal.Title>Are you sure?</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            {confirm === "kill" ? (
+              <>Kill all {strays.length} running stray jobs?</>
+            ) : (
+              <>
+                Delete all {finished} finished orphan jobs?
+                <div className="text-danger small mt-2">
+                  This action cannot be undone.
+                </div>
+              </>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="secondary" onClick={() => setConfirm(undefined)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={runConfirm}>
+              {confirm === "kill" ? "Kill" : "Delete"}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+      )}
       <div className="d-flex align-items-center mb-2" style={{ gap: "0.5rem" }}>
         <h5 className="mb-0">Orphan &amp; stray jobs</h5>
         <Button size="sm" variant="outline-secondary" onClick={() => client.request_orphans()}>
           <i className="fas fa-rotate-right" /> Refresh
         </Button>
         {strays.length > 0 && (
-          <Button size="sm" variant="outline-danger" onClick={killAll}>
+          <Button size="sm" variant="outline-danger" onClick={() => setConfirm("kill")}>
             Kill all running ({strays.length})
           </Button>
         )}
-        <Button size="sm" variant="outline-danger" onClick={deleteAll}>
+        <Button size="sm" variant="outline-danger" onClick={() => setConfirm("delete")}>
           Delete all finished
         </Button>
       </div>
@@ -68,7 +95,12 @@ const Orphans: React.FC = () => {
           </thead>
           <tbody>
             {orphans.map((job: OrphanJob) => (
-              <tr key={job.jobId}>
+              <tr
+                key={job.jobId}
+                data-job-id={job.jobId}
+                data-stray={job.isStray}
+                data-size={job.sizeBytes}
+              >
                 <td>
                   <StatusBadge status={job.status} />
                 </td>

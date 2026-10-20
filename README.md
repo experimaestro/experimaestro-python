@@ -6,7 +6,7 @@
 ---
 
 [![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
-[![RTD](https://readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io)
+[![RTD](https://app.readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io/en/latest/)
 </div>
 
 
@@ -81,6 +81,9 @@ Checkout the git directory, then
 ```
 pip install -e .
 ```
+
+Contributors must install the pre-commit hooks (`pre-commit install`) — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development guidelines.
 
 # Coding assistant skill
 

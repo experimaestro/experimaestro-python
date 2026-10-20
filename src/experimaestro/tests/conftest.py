@@ -54,27 +54,57 @@ Process.HANDLERS["mock"] = MockProcess
 
 # --- Hang watchdog --------------------------------------------------------
 #
-# When a test hangs in CI, pytest-timeout fires at 300s and kills it, but
-# we get no information about which threads were stuck where. We arm
-# faulthandler.dump_traceback_later so that every thread's stack is
-# dumped to stderr after XPM_TEST_THREAD_DUMP_AFTER seconds per test.
-# Tuned aggressively (10s default) so it fires well before pytest-timeout
-# and we capture state on the hanging test, not the next one. ``repeat``
-# is off so legitimately-slow tests don't spam the log.
+# Opt-in (XPM_TEST_THREAD_DUMP_AFTER=<seconds>): arms
+# faulthandler.dump_traceback_later so that every thread's stack is dumped
+# after that delay per test. Off by default: faulthandler reads the frames of
+# the other threads while they run, which can crash (segfault) or hang the
+# process — it did so in CI on slow tests. pytest-timeout (300s) already dumps
+# every thread's stack, safely, when a test hangs. ``repeat`` is off so
+# legitimately-slow tests don't spam the log.
 
-_THREAD_DUMP_AFTER = float(os.environ.get("XPM_TEST_THREAD_DUMP_AFTER", "10"))
+_THREAD_DUMP_AFTER = float(os.environ.get("XPM_TEST_THREAD_DUMP_AFTER", "0"))
 
 
 @pytest.fixture(autouse=True)
 def _hang_watchdog():
-    """Dump every thread's stack to stderr if the test hangs."""
+    """Dump every thread's stack if the test hangs (when enabled)"""
+    if _THREAD_DUMP_AFTER <= 0:
+        yield
+        return
     # faulthandler.dump_traceback_later replaces any previous timer, so
-    # arming it per-test is safe.
-    faulthandler.dump_traceback_later(_THREAD_DUMP_AFTER, repeat=False, file=sys.stderr)
+    # arming it per-test is safe. Writes to the real stderr: sys.stderr is
+    # pytest's capture, lost if the process dies.
+    faulthandler.dump_traceback_later(
+        _THREAD_DUMP_AFTER, repeat=False, file=sys.__stderr__
+    )
     try:
         yield
     finally:
         faulthandler.cancel_dump_traceback_later()
+
+
+@pytest.fixture(autouse=True)
+def _close_watchers():
+    """Stop the file watchers a test leaves behind
+
+    The scheduler keeps one job event reader per workspace for its lifetime
+    and tests often leave state providers open; as each test uses its own
+    workspace, their watcher threads and polled directories would otherwise
+    accumulate over the session and slow the following tests down.
+    """
+    yield
+    from experimaestro.filewatcher import FileWatcherService
+    from experimaestro.scheduler.base import Scheduler
+
+    # The scheduler's job event readers (one per workspace, restarted when an
+    # experiment uses the workspace again)
+    if Scheduler.has_instance():
+        Scheduler.instance()._stop_job_event_reader()
+    service = FileWatcherService.instance()
+    with service._watches_lock:
+        watches = list(service._directory_watches)
+    for watch in watches:
+        watch.close()
 
 
 @pytest.fixture(scope="session")

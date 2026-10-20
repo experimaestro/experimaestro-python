@@ -3,9 +3,8 @@ import sys
 
 import pytest
 
-from experimaestro.connectors import Redirect
+from experimaestro.connectors import OutputCaptureHandler, Redirect
 from experimaestro.connectors.local import LocalProcessBuilder
-from experimaestro.tests.connectors.utils import OutputCaptureHandler
 from experimaestro.tests.utils import TemporaryDirectory
 
 # Mark all tests in this module as connector tests
