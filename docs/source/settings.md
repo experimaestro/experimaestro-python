@@ -261,7 +261,7 @@ workspaces:
 
 ### Using Workspace SSH Settings
 
-Once configured, use `--workspace` with `ssh-monitor` to avoid repeating host/options:
+Once configured, select the workspace (`-w`) when monitoring to avoid repeating host/options:
 
 ```bash
 # All settings come from the workspace configuration

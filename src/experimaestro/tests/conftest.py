@@ -223,9 +223,6 @@ def pytest_configure(config):
     # Note: sys._called_from_test is set at module level (top of file)
     # to ensure it's set before any imports that check for it
 
-    # Disable peewee logging by default (too verbose)
-    logging.getLogger("peewee").setLevel(logging.WARNING)
-
     # Enable testing mode with polling for reliable file watching in tests
     from experimaestro.filewatcher import FileWatcherService
 

@@ -1,7 +1,6 @@
 """Filesystem-based state tracking for experiments
 
-This module provides event and status file handling for tracking experiment state
-without using a database. It replaces the SQLite/peewee-based state tracking.
+This module provides event and status file handling for tracking experiment state.
 
 Key components:
 - Event dataclasses: Serializable events for JSONL event files

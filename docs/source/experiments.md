@@ -174,10 +174,10 @@ application) that the monitoring interfaces start, stop, and display. See
 
 ## Experiment metadata
 
-Each run records the host it was launched from, in the workspace database and
-in `xp/{experiment_id}/informations.json`. It is preserved by database resyncs
-and displayed by the interfaces — useful when experiments of the same workspace
-are launched from several machines:
+Each run records the host it was launched from in
+`experiments/{experiment_id}/{run_id}/environment.json`. It is displayed by the
+interfaces — useful when experiments of the same workspace are launched from
+several machines:
 
 ```bash
 # Shown in brackets after the experiment ID

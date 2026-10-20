@@ -135,7 +135,7 @@ experimaestro jobs kill --filter '@state = "running"' --perform
 # Dry run - shows what would be cleaned
 experimaestro jobs clean --filter '@state = "done"'
 
-# Actually clean the jobs (deletes directories and database entries)
+# Actually clean the jobs (deletes the job directories)
 experimaestro jobs clean --filter '@state = "done"' --perform
 ```
 

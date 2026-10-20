@@ -289,8 +289,8 @@ For example, `@state = 'error' and model = 'bm25'` selects the failed jobs whose
 ## Remote Monitoring via SSH
 
 When experiments run on remote servers (e.g., HPC clusters, cloud instances),
-you can monitor them from your local machine using SSH tunneling. The `ssh-monitor`
-command establishes an SSH connection, starts a monitoring server on the remote
+you can monitor them from your local machine using SSH tunneling. `monitor --ssh`
+establishes an SSH connection, starts a monitoring server on the remote
 host, and communicates via JSON-RPC over the SSH channel.
 
 ### Basic Usage
@@ -342,7 +342,7 @@ experimaestro monitor --web --ssh myserver:/workspace --remote-xpm /opt/conda/bi
 
 ### Shared Workspaces
 
-Like the other monitors, `ssh-monitor` runs the workspace cleanup, so that
+Like local monitoring, `monitor --ssh` runs the workspace cleanup, so that
 crashed jobs are recovered without waiting for the next experiment. This is safe
 in a workspace shared with other users: a job whose process cannot be checked
 from the monitoring machine (its PID belongs to another host, or its launcher is
@@ -429,8 +429,8 @@ answering it; on the local side, the round trip (which includes the wait in
 the queue — requests are answered one at a time).
 
 ```bash
-experimaestro --logging xpm.remote.trace=DEBUG experiments ssh-monitor \
-    --workspace my-cluster --remote-logging xpm.remote.trace=DEBUG
+experimaestro --logging xpm.remote.trace=DEBUG -w my-cluster monitor \
+    --remote-logging xpm.remote.trace=DEBUG
 ```
 
 The `xpm.remote.payload` logger shows the messages themselves (very verbose).
@@ -449,30 +449,10 @@ The `xpm.remote.payload` logger shows the messages themselves (very verbose).
 - Check if the remote workspace exists
 - Ensure experimaestro is accessible on the remote host
 
-**Jobs not appearing:**
-- The remote database may need synchronization:
-  ```bash
-  ssh user@host "experimaestro experiments sync --workdir /path/to/workspace"
-  ```
-
 **Services not working (e.g., TensorBoard):**
 - Services are recreated locally from saved state
 - Some services may require file synchronization; this happens automatically
 - Check that rsync is available on both machines
-
-## Database Synchronization
-
-Both interfaces read job information from the workspace database. If jobs
-are not appearing, synchronize the database:
-
-```bash
-experimaestro experiments sync --workdir /path/to/workspace
-```
-
-This is needed when:
-- Jobs were created before the database was introduced
-- Jobs were created by external processes
-- The database is out of sync with the filesystem
 
 ## Experiment DAG Visualization
 
