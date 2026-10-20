@@ -3,8 +3,10 @@ from collections import ChainMap
 from datetime import datetime
 from functools import cached_property
 import itertools
+import json
+import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, List, Optional, Set
+from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Set
 
 import concurrent
 
@@ -98,6 +100,7 @@ class JobDependency(Dependency):
             # Mark as WAITING and start the job via aio_submit
             # Use aio_submit (not aio_start) to properly handle all job lifecycle
             origin_job.set_scheduler_state(JobState.WAITING)
+            origin_job.begin_run()
             if origin_job.scheduler is not None:
                 # Create a new future for the job so aio_lock can wait on it
                 origin_job._future = asyncio.ensure_future(
@@ -215,6 +218,61 @@ class Job(BaseJob, Resource):
             config.__xpm__.watched_outputs
         )
 
+        #: Resolved once the current run of the job is over *and* its hooks
+        #: have run (see :meth:`begin_run`); experiments wait on it to exit
+        self.settled: asyncio.Future | None = None
+
+        # on_completed callbacks, with the experiment they were registered in
+        self._on_completed: list[tuple["experiment | None", Callable[[], None]]] = []
+        # Set once the callbacks have been taken: later ones are called directly
+        self._on_completed_fired = False
+        self._on_completed_lock = threading.Lock()
+
+    def on_completed(
+        self, callback: Callable[[], None], xp: "experiment | None" = None
+    ):
+        """Call ``callback`` once the job has completed successfully
+
+        If it already has, ``callback`` is called right away.
+
+        :param xp: the experiment whose callback executor runs the callback
+            (defaults to the current one)
+        """
+        from experimaestro.scheduler.experiment import experiment
+
+        with self._on_completed_lock:
+            if not self._on_completed_fired:
+                self._on_completed.append((xp or experiment.CURRENT, callback))
+                return
+        callback()
+
+    def take_on_completed(self) -> list[tuple["experiment | None", Callable[[], None]]]:
+        """Take the on_completed callbacks (called once the job is done)"""
+        with self._on_completed_lock:
+            self._on_completed_fired = True
+            callbacks, self._on_completed = self._on_completed, []
+        return callbacks
+
+    def begin_run(self):
+        """Start a new run: a fresh :attr:`settled` future, tracked by every
+        experiment of the job
+
+        Called on the scheduler loop each time the job is (re)submitted.
+        """
+        self.settled = asyncio.get_running_loop().create_future()
+        for xp in self.experiments:
+            xp.track(self.settled)
+
+    def settle(self, settled: asyncio.Future | None = None):
+        """Mark a run as settled (no-op if it already is)
+
+        :param settled: the :attr:`settled` future of the run (defaults to the
+            current one); a new run may have started since that one ended
+        """
+        settled = settled or self.settled
+        if settled is not None and not settled.done():
+            settled.set_result(self.scheduler_state)
+
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
 
@@ -222,33 +280,36 @@ class Job(BaseJob, Resource):
         """
         self.watched_outputs.append(watched)
 
-    def register_watched_outputs(self):
-        """Register all watched outputs with the scheduler.
+    async def aio_drain_task_outputs(self):
+        """Wait until the dynamic outputs of the job have been processed
 
-        This should be called after the job is submitted and has a scheduler.
+        Called by: Scheduler.aio_final_state(), once the process is over
+
+        Reads the outputs file to its end (the watcher may lag behind) and
+        waits for the callbacks of every experiment watching it.
         """
-        from experimaestro.scheduler.experiment import experiment
-
-        xp = experiment.current()
-        for watched in self.watched_outputs:
-            # Set the job reference so the watcher knows where to look
-            watched.job = self
-            xp.watch_output(watched)
-
-    async def aio_done_handler(self):
-        """Process remaining task outputs after job completion.
-
-        Called by: Scheduler.aio_final_state()
-
-        Ensures all remaining task output events are queued for processing
-        by explicitly reading the task outputs file. The callbacks will
-        complete asynchronously and decrement task_output_count when done.
-        """
-        if not self.watched_outputs:
-            return
-
+        expected = self.task_outputs_count() if self.state == JobState.DONE else None
         for xp in self.experiments:
-            await xp.taskOutputsWorker.aio_process_job_outputs(self)
+            if reader := xp.task_outputs_reader(self):
+                await reader.drain(expected)
+
+    def task_outputs_count(self) -> int | None:
+        """Number of dynamic outputs the task wrote, as recorded in ``.done``
+
+        Returns None if unknown (no or empty ``.done``, as written by older
+        versions or by :meth:`mark_done`).
+        """
+        try:
+            content = self.donepath.read_text()
+        except OSError:
+            return None
+        if not content.strip():
+            return None
+        try:
+            return json.loads(content)["task_outputs"]
+        except (ValueError, KeyError, TypeError):
+            logger.warning("Unexpected content in %s", self.donepath)
+            return None
 
     def __str__(self):
         return "Job[{}/{}]".format(self.task_id, self.identifier[:8])
@@ -282,35 +343,8 @@ class Job(BaseJob, Resource):
 
         self._scheduler_state = new_state
 
-        # Helper to determine if a state should be "counted" in unfinishedJobs
-        # A job is counted from UNSCHEDULED (registered) until finished or TRANSIENT.
-        # UNSCHEDULED is counted because add_job increments unfinishedJobs at
-        # registration time, before aio_submit processes the job asynchronously.
-        def is_counted(state):
-            return not state.finished() and state != JobState.TRANSIENT
-
         # Update experiment statistics based on state transition
         for xp in self.experiments:
-            # Handle transitions in/out of "counted" state
-            if is_counted(new_state) and not is_counted(old_state):
-                # Job is now being tracked (new submission or resubmit)
-                xp.unfinishedJobs += 1
-                logger.debug(
-                    "Job %s submitted, unfinished jobs for %s: %d",
-                    self.identifier[:8],
-                    xp.name,
-                    xp.unfinishedJobs,
-                )
-            elif not is_counted(new_state) and is_counted(old_state):
-                # Job is no longer being tracked (finished)
-                xp.unfinishedJobs -= 1
-                logger.debug(
-                    "Job %s finished, unfinished jobs for %s: %d",
-                    self.identifier[:8],
-                    xp.name,
-                    xp.unfinishedJobs,
-                )
-
             # Handle error state
             if new_state.is_error() and not old_state.is_error():
                 xp.failedJobs[self.identifier] = self

@@ -108,10 +108,17 @@ debugging experimaestro.
 
 ## Dynamic Outputs
 
-### TaskOutputsWorker
+### TaskOutputsReader
 
 ```{eval-rst}
-.. autoclass:: experimaestro.scheduler.dynamic_outputs.TaskOutputsWorker
+.. autoclass:: experimaestro.scheduler.dynamic_outputs.TaskOutputsReader
+   :members:
+```
+
+## Job Hooks
+
+```{eval-rst}
+.. automodule:: experimaestro.scheduler.hooks
    :members:
 ```
 

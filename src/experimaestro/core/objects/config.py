@@ -37,7 +37,6 @@ from experimaestro.core.types import DeprecatedAttribute, ObjectType, TypeVarTyp
 from ..context import SerializationContext, SerializedPath, SerializedPathLoader
 
 if TYPE_CHECKING:
-    from ..callbacks import TaskEventListener
     from ..identifier import Identifier
     from ..partial import Partial
     from experimaestro.scheduler.base import Job
@@ -317,7 +316,9 @@ class ConfigInformation:
 
         # State information
         self.job = None
-        self._job_listener: "TaskEventListener" | None = None
+
+        #: on_completed callbacks registered before the submission
+        self.on_completed_callbacks: list[Callable[[], None]] = []
 
         #: True when this configuration was loaded from disk
         self.loaded = False
@@ -852,11 +853,12 @@ class ConfigInformation:
     def on_completed(self, callback: Callable[[], None]):
         """Call a method when the task is completed successfully
 
-        :param callback: _description_
+        :param callback: called without arguments
         """
-        from ..callbacks import TaskEventListener
-
-        TaskEventListener.on_completed(self, callback)
+        if self.job is not None:
+            self.job.on_completed(callback)
+        else:
+            self.on_completed_callbacks.append(callback)
 
     def set_init_tasks(self, init_tasks: List["LightweightTask"]):
         """Set the initialization tasks, unwrapping :class:`ConfigWrapper`
@@ -894,7 +896,6 @@ class ConfigInformation:
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
         from experimaestro.scheduler.transient import TransientMode
-        from ..callbacks import TaskEventListener
 
         # --- Prepare the object
 
@@ -994,7 +995,6 @@ class ConfigInformation:
             self.job.dependencies.add(resource.dependency())
 
         if run_mode == RunMode.NORMAL:
-            TaskEventListener.connect(experiment.CURRENT)
             other = experiment.CURRENT.submit(self.job)
             if other:
                 # Our job = previously submitted job

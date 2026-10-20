@@ -433,6 +433,22 @@ class TaskRunner:
         except Exception as e:
             logger.warning("Failed to write status.json: %s", e)
 
+    def write_done(self):
+        """Write the ``.done`` marker, with the number of dynamic outputs
+
+        The scheduler uses the count to know when it has read all of them,
+        even if the file system shows it the end of the outputs file late.
+        Written atomically so that the marker never appears empty.
+        """
+        from experimaestro.scheduler.dynamic_outputs import count_task_outputs
+
+        outputs_path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
+        tmp_path = self.donepath.with_suffix(".done.tmp")
+        tmp_path.write_text(
+            json.dumps({"task_outputs": count_task_outputs(outputs_path)})
+        )
+        os.replace(tmp_path, self.donepath)
+
     def cleanup(self):
         if not self.cleaned:
             self.cleaned = True
@@ -752,8 +768,8 @@ class TaskRunner:
             env = taskglobals.Env.instance()
             if e.code == 0:
                 if not env.slave:
-                    # Normal exit, just create the ".done" file
-                    self.donepath.touch()
+                    # Normal exit, create the ".done" file
+                    self.write_done()
 
                 # ... and finish the exit process
                 raise

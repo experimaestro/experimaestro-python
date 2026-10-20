@@ -109,6 +109,19 @@ def test_on_completed_slow_callback_blocks_exit():
         )
 
 
+def test_on_completed_duplicate_submission():
+    """Callbacks of every submission of the same job are called"""
+    flags = [FlagHandler(), FlagHandler()]
+
+    with TemporaryExperiment("test-callback-duplicate"):
+        for flag in flags:
+            task = SlowCallbackTask.C(x=42)
+            task.on_completed(flag.set)
+            task.submit()
+
+    assert all(flag.is_set() for flag in flags)
+
+
 # === Tests for cleanup_experiment_history ===
 
 

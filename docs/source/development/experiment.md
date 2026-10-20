@@ -56,13 +56,13 @@ When entering the context:
 5. **Dirty git check**: Optionally warns or errors on uncommitted changes (raises {py:class}`~experimaestro.DirtyGitError`)
 6. **Scheduler registration**: Registers with the singleton {py:class}`~experimaestro.scheduler.base.Scheduler`
 7. **Event writer initialization**: Starts {py:class}`~experimaestro.scheduler.state_status.EventWriter` for state changes
-8. **TaskOutputsWorker start**: Begins processing dynamic task outputs via {py:class}`~experimaestro.scheduler.dynamic_outputs.TaskOutputsWorker`
+8. **Callback executor**: Creates the single-thread executor that runs user callbacks (dynamic outputs, `on_completed`)
 
 ### Exit (`__exit__`)
 
 When exiting the context:
 
-1. **Wait for jobs**: Unless exception or {py:class}`~experimaestro.scheduler.experiment.GracefulExperimentExit`, waits for all jobs to complete
+1. **Wait for pending work**: Unless exception or {py:class}`~experimaestro.scheduler.experiment.GracefulExperimentExit`, waits for all the work the experiment tracks (see [Job hooks and exit](#job-hooks-and-exit))
 2. **Stop services**: Stops any registered services
 3. **Finalize run**: Writes final status and archives events
 4. **Cleanup transient jobs**: Removes transient job directories if clean exit
@@ -96,7 +96,7 @@ It manages job lifecycle across all active experiments.
 | `jobs` | Dict of all {py:class}`~experimaestro.scheduler.jobs.Job` instances (by identifier) |
 | `waitingjobs` | Set of jobs awaiting execution |
 | `loop` | The asyncio event loop |
-| `exitCondition` | Condition for signaling completions |
+| `hooks` | {py:class}`~experimaestro.scheduler.hooks.JobHook` instances run on each job |
 | `dependencyLock` | Lock for acquiring dynamic dependencies |
 
 ### Singleton Pattern
@@ -240,7 +240,7 @@ All state changes go through the {py:meth}`~experimaestro.scheduler.jobs.Job.set
    - `RUNNING`: sets `starttime`
    - `DONE`/`ERROR`: sets `endtime`
 
-2. **Experiment statistics**: Updates `unfinishedJobs` and `failedJobs` counters
+2. **Experiment statistics**: Updates the `failedJobs` of the job's experiments
 
 3. **Listener notifications**: Notifies registered {py:class}`~experimaestro.scheduler.base.Listener` of state changes
 
@@ -368,11 +368,38 @@ training.watch_output(validation.checkpoint, on_checkpoint)
 training.submit()
 ```
 
-The {py:class}`~experimaestro.scheduler.dynamic_outputs.TaskOutputsWorker` processes these in a separate thread:
-- Queues callbacks for execution
-- Updates `taskOutputQueueSize` via scheduler
-- Waits for all outputs before experiment completes
-- Events stored in `.experimaestro/task-outputs.jsonl` for replay on restart
+The task appends one line per output to `.experimaestro/task-outputs.jsonl`
+(kept for replay on restart), and writes the number of outputs into `.done`
+when it succeeds. In the experiment process, a
+{py:class}`~experimaestro.scheduler.dynamic_outputs.TaskOutputsReader` (one per
+job, owned by the experiment):
+- reads new lines on the scheduler loop (watchdog only pokes it);
+- runs the output methods and the callbacks in the experiment's callback
+  executor, one at a time, and tracks each run;
+- when the job is over, {py:meth}`~experimaestro.scheduler.dynamic_outputs.TaskOutputsReader.drain`
+  reads the file to its end (waiting, if needed, for the number of outputs
+  given in `.done`, e.g. on NFS) and waits for the callbacks it produced.
+
+## Job Hooks and Exit
+
+A job run goes through: process exited → state recorded → **hooks run** →
+**settled**. The scheduler records the state (status file, listeners), so
+that dependents can start, then runs the `on_finished` method of each
+{py:class}`~experimaestro.scheduler.hooks.JobHook` and resolves
+{py:attr}`~experimaestro.scheduler.jobs.Job.settled`:
+
+| Hook | `on_submitted` | `on_finished` |
+|------|----------------|---------------|
+| {py:class}`~experimaestro.scheduler.hooks.TaskOutputsHook` | watches the outputs | drains them |
+| {py:class}`~experimaestro.scheduler.hooks.OnCompletedHook` | registers the callbacks | runs them if the job is done |
+| {py:class}`~experimaestro.scheduler.hooks.ArchiveHook` | | queues the archive (tracked, not awaited) |
+
+The experiment does not count anything: any work that must finish before it
+exits is an awaitable it tracks ({py:meth}`~experimaestro.scheduler.experiment.experiment.track`),
+and `wait()` waits until there is none left. It tracks the settled future of
+each run of its jobs, each callback run, and each archive. Since a callback's
+`submit()` registers the new job (and tracks its run) before the callback
+returns, the experiment cannot exit between the two.
 
 ## Event System
 
@@ -424,7 +451,8 @@ Notifications run in a thread pool to avoid blocking the scheduler.
 | {py:class}`~experimaestro.scheduler.experiment.experiment` | `experiment.py` | Context manager for experiment setup |
 | {py:class}`~experimaestro.scheduler.jobs.Job` | `jobs.py` | Job state machine with dependencies |
 | {py:class}`~experimaestro.scheduler.interfaces.BaseJob` | `interfaces.py` | Base class with state property and timestamps |
-| {py:class}`~experimaestro.scheduler.dynamic_outputs.TaskOutputsWorker` | `dynamic_outputs.py` | Processes dynamic task outputs |
+| {py:class}`~experimaestro.scheduler.dynamic_outputs.TaskOutputsReader` | `dynamic_outputs.py` | Reads dynamic task outputs and runs their callbacks |
+| {py:class}`~experimaestro.scheduler.hooks.JobHook` | `hooks.py` | Work tied to job submission and run completion |
 | {py:class}`~experimaestro.scheduler.workspace.Workspace` | `workspace.py` | Working directory and run mode management |
 | {py:class}`~experimaestro.scheduler.experiment.StateListener` | `experiment.py` | Writes state changes to event files |
 
