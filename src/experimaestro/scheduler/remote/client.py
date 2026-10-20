@@ -1228,14 +1228,15 @@ class SSHStateProviderClient(OfflineStateProvider):
     ) -> Dict[str, "ExperimentJobInformation"]:
         """Get experiment-level job info for jobs in an experiment/run
 
-        Falls back to parent class cached experiments which contain job_infos.
+        Read from the run (experiments are sent with their job_infos) — not from
+        the list of all experiments, which is much larger.
         """
-        # Try to get from cached experiment data
-        experiments = self.get_experiments(refresh=refresh)
-        for exp in experiments:
-            if exp.experiment_id == experiment_id:
-                return exp.job_infos
-        return {}
+        if run_id is None:
+            exp = self.get_experiment(experiment_id, refresh=refresh)
+        else:
+            runs = self.get_experiment_runs(experiment_id, refresh=refresh)
+            exp = next((run for run in runs if run.run_id == run_id), None)
+        return exp.job_infos if exp is not None else {}
 
     def _fetch_services_from_storage(
         self, experiment_id: Optional[str], run_id: Optional[str]

@@ -206,3 +206,15 @@ def test_trace(remote_workspace, fake_ssh, caplog):
         "get_experiments #" in r.message and "round trip" in r.message
         for r in caplog.records
     )
+
+
+def test_job_info_reads_one_experiment(ssh_provider, remote_workspace, caplog):
+    """The job information of an experiment is not read through the list of all
+    experiments (which is large: it holds the job information of every run)"""
+    with caplog.at_level(logging.DEBUG, logger="xpm.remote.trace"):
+        current = ssh_provider.get_experiment_job_info("greetings", refresh=True)
+        run_id = ssh_provider.get_current_run("greetings")
+        by_run = ssh_provider.get_experiment_job_info("greetings", run_id, refresh=True)
+    assert set(current) == set(by_run) == set(remote_workspace.jobs.values())
+    methods = {r.message.split(" #")[0] for r in caplog.records}
+    assert "get_experiments" not in methods
