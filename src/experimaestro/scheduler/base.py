@@ -514,6 +514,7 @@ class Scheduler(StateProvider, threading.Thread):
                     other.pidpath.unlink()
                 # Use set_state to handle experiment statistics updates
                 other.set_scheduler_state(JobState.WAITING)
+                other.begin_run()
                 self.notify_job_state(other)  # Notify listeners of re-submit
                 # The calling aio_submit will continue with this job and start it
             else:
@@ -525,6 +526,7 @@ class Scheduler(StateProvider, threading.Thread):
         # Register this job
         xp = experiment.current()
         self.jobs[job.identifier] = job
+        job.begin_run()
         xp.add_job(job)
 
         # Get tags from config (tags are experiment-specific, not stored on Job)
@@ -1027,24 +1029,28 @@ class Scheduler(StateProvider, threading.Thread):
         # Now, notify that the job has been submitted
         self.notify_job_submitted(job)
 
-        # Run the job and handle retries
-        while True:
-            try:
-                await self.aio_submit_inner(job)
-                break
-            except GracefulTimeout:
-                # If timeout we just start again the loop to start the job again
-                # if needed
-                logger.info(
-                    "GracefulTimeout caught for job %s, restarting",
-                    job.identifier[:8],
-                )
-                pass
+        try:
+            # Run the job and handle retries
+            while True:
+                try:
+                    await self.aio_submit_inner(job)
+                    break
+                except GracefulTimeout:
+                    # If timeout we just start again the loop to start the job
+                    # again if needed
+                    logger.info(
+                        "GracefulTimeout caught for job %s, restarting",
+                        job.identifier[:8],
+                    )
+                    pass
 
-        logger.debug("Current job scheduler_state is %s", job.scheduler_state)
+            logger.debug("Current job scheduler_state is %s", job.scheduler_state)
 
-        # Process job completion: task outputs, final status write, cleanup
-        return await self.aio_final_state(job)
+            # Process job completion: task outputs, final status write, cleanup
+            return await self.aio_final_state(job)
+        finally:
+            # Whatever happened, this run is over
+            job.settle()
 
     async def aio_submit_inner(self, job: Job) -> None:
         """Inner job submission logic: load state, check for running process, start if needed.

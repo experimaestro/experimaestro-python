@@ -593,6 +593,10 @@ class experiment(BaseExperiment):
         # Track which experiments this job belongs to
         job.experiments.append(self)
 
+        # The experiment waits for the job's current run, if any
+        if job.settled is not None:
+            self.track(job.settled)
+
         # Count this job as unfinished if it hasn't reached a terminal state.
         # This includes UNSCHEDULED jobs (about to be submitted via aio_submit)
         # to prevent wait() from returning before submissions are processed.
@@ -804,6 +808,13 @@ class experiment(BaseExperiment):
                         self.taskOutputQueueSize,
                     )
                     if self.unfinishedJobs == 0 and self.taskOutputQueueSize == 0:
+                        if self._pending:
+                            # Expected for now: a job's state is final before
+                            # its run is settled (the tracker is stricter)
+                            logger.debug(
+                                "Counters say done but %d tracked items are pending",
+                                len(self._pending),
+                            )
                         break
 
                     # Wait for more news...
@@ -1029,6 +1040,9 @@ class experiment(BaseExperiment):
         self.unfinishedJobs = 0
         self.taskOutputQueueSize = 0
 
+        # Work that must finish before the experiment exits (see track())
+        self._pending: set[asyncio.Future] = set()
+
         # List of failed jobs
         self.failedJobs: Dict[str, Job] = {}
 
@@ -1167,6 +1181,21 @@ class experiment(BaseExperiment):
         # Suppress GracefulExperimentExit exception
         if exc_type is GracefulExperimentExit:
             return True
+
+    def track(self, aw) -> asyncio.Future:
+        """Make the experiment wait for ``aw`` before exiting
+
+        Must be called on the scheduler loop. The future is forgotten once
+        done, so tracking a done future is a no-op.
+
+        :param aw: an awaitable (future, task or coroutine)
+        :return: the tracked future
+        """
+        future = asyncio.ensure_future(aw)
+        if not future.done():
+            self._pending.add(future)
+            future.add_done_callback(self._pending.discard)
+        return future
 
     async def update_task_output_count(self, delta: int) -> int:
         """Change in the number of task outputs to process"""

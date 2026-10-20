@@ -98,6 +98,7 @@ class JobDependency(Dependency):
             # Mark as WAITING and start the job via aio_submit
             # Use aio_submit (not aio_start) to properly handle all job lifecycle
             origin_job.set_scheduler_state(JobState.WAITING)
+            origin_job.begin_run()
             if origin_job.scheduler is not None:
                 # Create a new future for the job so aio_lock can wait on it
                 origin_job._future = asyncio.ensure_future(
@@ -214,6 +215,25 @@ class Job(BaseJob, Resource):
         self.watched_outputs: List["WatchedOutput"] = list(
             config.__xpm__.watched_outputs
         )
+
+        #: Resolved once the current run of the job is over *and* its hooks
+        #: have run (see :meth:`begin_run`); experiments wait on it to exit
+        self.settled: asyncio.Future | None = None
+
+    def begin_run(self):
+        """Start a new run: a fresh :attr:`settled` future, tracked by every
+        experiment of the job
+
+        Called on the scheduler loop each time the job is (re)submitted.
+        """
+        self.settled = asyncio.get_running_loop().create_future()
+        for xp in self.experiments:
+            xp.track(self.settled)
+
+    def settle(self):
+        """Mark the current run as settled (no-op if it already is)"""
+        if self.settled is not None and not self.settled.done():
+            self.settled.set_result(self.scheduler_state)
 
     def watch_output(self, watched: "WatchedOutput"):
         """Add a watched output to this job.
