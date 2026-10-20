@@ -140,15 +140,15 @@ class MyConfig(ConfigurationBase):
 def run(helper: ExperimentHelper, cfg: MyConfig):
     # Generate all permutations and their corresponding tags
     configurations, all_tags = generate_grid(cfg)
-    
+
     for config, tags in zip(configurations, all_tags):
         # Each permutation is a finalized MyConfig object
         # 'tags' contains the specific values used (e.g., {'learning_rate': 0.1})
-        
+
         # Use tags to create a descriptive experiment ID
         tag_suffix = ".".join(f"{k}={v}" for k, v in tags.items())
         sub_id = f"{config.id}.{tag_suffix}" if tag_suffix else config.id
-        
+
         # Run your experiment logic for this config
         ...
 ```

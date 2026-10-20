@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 import click
 
-from experimaestro.tools.xpm_dag.draw_dag import run_dag
-
 
 @click.command(
     name="dag",
@@ -172,6 +170,8 @@ def dag(
     """
     exp = experiment_id or experiment_opt
     json_out = str(json_file) if json_file else ("" if as_json else None)
+
+    from experimaestro.tools.xpm_dag.draw_dag import run_dag
 
     exit_code = run_dag(
         experiment_id=exp,

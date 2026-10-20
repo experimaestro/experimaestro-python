@@ -582,4 +582,3 @@ experimaestro inspect -w my_cluster mymodule.MyTask/1822b2b
 | `e` | Expand all nodes |
 | `c` (on parent) | Collapse all child nodes |
 | `?` | Show interactive keyboard shortcuts and help |
-

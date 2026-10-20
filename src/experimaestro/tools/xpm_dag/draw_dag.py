@@ -427,6 +427,140 @@ def plot_dag(
     plt.close()
 
 
+def _resolve_save_as_destination(
+    save_as: Path,
+    html: Path | None,
+    json_out: str | None,
+    plot: bool,
+    web: bool | None,
+) -> tuple[Path | None, str | None, Path | None, bool, bool | None] | None:
+    """Resolve file formats and destination paths for --save-as."""
+    ext = save_as.suffix.lower()
+    save_plot_path = None
+    if ext in (".html", ".htm"):
+        html = save_as
+        web = False
+    elif ext == ".json":
+        json_out = str(save_as)
+        web = False
+    elif ext in (".png", ".pdf", ".svg", ".jpg", ".jpeg"):
+        save_plot_path = save_as
+        plot = False
+        web = False
+    else:
+        logging.error(
+            "Unsupported file extension '%s' for --save-as. "
+            "Supported extensions: .html, .htm, .json, .png, .pdf, .svg, .jpg",
+            ext,
+        )
+        return None
+    return html, json_out, save_plot_path, plot, web
+
+
+def _display_experiment_configs(run_dir: Path, exp_id: str, run_id: str) -> int:
+    """Display available configuration parameter combinations for an experiment run."""
+    configs = get_experiment_configs(run_dir)
+    if not configs:
+        print(f"No configuration tags found for experiment '{exp_id}' ({run_id}).")  # noqa: T201
+        return 0
+    print(f"Available configurations in experiment '{exp_id}' (run {run_id}):")  # noqa: T201
+    for idx, cfg_dict in enumerate(configs):
+        cfg_str = ", ".join(f"{k}={v}" for k, v in sorted(cfg_dict.items()))
+        print(f"  [{idx}] {cfg_str}")  # noqa: T201
+    return 0
+
+
+def _export_dag_json(json_out: str, dag_json: dict) -> None:
+    """Export DAG structure as formatted JSON."""
+    json_str = json.dumps(dag_json, indent=2)
+    if json_out:
+        out_path = Path(json_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json_str)
+        print(f"Saved DAG JSON to {out_path}")  # noqa: T201
+    else:
+        print(json_str)  # noqa: T201
+
+
+def _export_dag_html(html: Path, dag_json: dict, exp_id: str, layout: str) -> None:
+    """Export standalone interactive HTML visualization page."""
+    html_str = generate_dag_html(
+        dag_json,
+        title=f"Experimaestro DAG - {exp_id}",
+        default_layout=layout,
+    )
+    html.parent.mkdir(parents=True, exist_ok=True)
+    html.write_text(html_str)
+    print(f"Saved interactive DAG HTML to {html}")  # noqa: T201
+
+
+def _display_dag_tree(
+    full_jobs: dict,
+    dependencies: dict[str, list[str]],
+    job_tags_dict: dict[str, dict],
+    stack: bool,
+) -> None:
+    """Render terminal text tree visualization."""
+    t_jobs, t_deps, t_tags = full_jobs, dependencies, job_tags_dict
+    stack_members = None
+    if stack:
+        t_jobs, t_deps, t_tags, stack_members = stack_dag_nodes(
+            full_jobs, dependencies, job_tags_dict
+        )
+    dependents: dict[str, list[str]] = {}
+    for jid, deps in t_deps.items():
+        for d in deps:
+            dependents.setdefault(d, []).append(jid)
+
+    depths, pos, _ = compute_dag_layout(t_jobs, t_deps, dependents)
+    tree_roots = [jid for jid in t_jobs if not t_deps.get(jid)]
+    print_robust_tree(
+        tree_roots,
+        dependents,
+        t_deps,
+        t_jobs,
+        t_tags,
+        set(),
+        depths,
+        pos,
+        stack_members=stack_members,
+    )
+
+
+def _display_or_save_dag_plot(
+    full_jobs: dict,
+    dependencies: dict[str, list[str]],
+    job_tags_dict: dict[str, dict],
+    title_suffix: str,
+    plot: bool,
+    save_plot_path: Path | None,
+    stack: bool,
+) -> None:
+    """Render graphical matplotlib DAG plot or save it to image/vector file."""
+    p_jobs, p_deps, p_tags = full_jobs, dependencies, job_tags_dict
+    stack_members = None
+    if stack:
+        p_jobs, p_deps, p_tags, stack_members = stack_dag_nodes(
+            full_jobs, dependencies, job_tags_dict
+        )
+    dependents: dict[str, list[str]] = {}
+    for jid, deps in p_deps.items():
+        for d in deps:
+            dependents.setdefault(d, []).append(jid)
+
+    depths, pos, reduced_dag = compute_dag_layout(p_jobs, p_deps, dependents)
+    plot_dag(
+        p_jobs,
+        p_tags,
+        pos,
+        reduced_dag,
+        title_suffix=title_suffix,
+        show_plot=plot,
+        save_path=save_plot_path,
+        stack_members=stack_members,
+    )
+
+
 def run_dag(
     *,
     experiment_id: str | None = None,
@@ -452,24 +586,10 @@ def run_dag(
     """Execute the experiment DAG visualization/export pipeline with given options."""
     save_plot_path = None
     if save_as:
-        ext = save_as.suffix.lower()
-        if ext in (".html", ".htm"):
-            html = save_as
-            web = False
-        elif ext == ".json":
-            json_out = str(save_as)
-            web = False
-        elif ext in (".png", ".pdf", ".svg", ".jpg", ".jpeg"):
-            save_plot_path = save_as
-            plot = False
-            web = False
-        else:
-            logging.error(
-                "Unsupported file extension '%s' for --save-as. "
-                "Supported extensions: .html, .htm, .json, .png, .pdf, .svg, .jpg",
-                ext,
-            )
+        resolved = _resolve_save_as_destination(save_as, html, json_out, plot, web)
+        if resolved is None:
             return 1
+        html, json_out, save_plot_path, plot, web = resolved
 
     # Resolve default web behavior: enabled by default unless --tree, --plot, or file export is active
     if web is None:
@@ -484,15 +604,7 @@ def run_dag(
     exp_id = run_dir.parent.name
 
     if list_configs:
-        configs = get_experiment_configs(run_dir)
-        if not configs:
-            print(f"No configuration tags found for experiment '{exp_id}' ({run_id}).")  # noqa: T201
-            return 0
-        print(f"Available configurations in experiment '{exp_id}' (run {run_id}):")  # noqa: T201
-        for idx, cfg_dict in enumerate(configs):
-            cfg_str = ", ".join(f"{k}={v}" for k, v in sorted(cfg_dict.items()))
-            print(f"  [{idx}] {cfg_str}")  # noqa: T201
-        return 0
+        return _display_experiment_configs(run_dir, exp_id, run_id)
 
     graph_data = load_run_graph(run_dir)
     if graph_data is None:
@@ -534,14 +646,7 @@ def run_dag(
             run_id=run_id,
             workspace=workspace_path,
         )
-        json_str = json.dumps(dag_json, indent=2)
-        if json_out:  # Target file provided
-            out_path = Path(json_out)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(json_str)
-            print(f"Saved DAG JSON to {out_path}")  # noqa: T201
-        else:
-            print(json_str)  # noqa: T201
+        _export_dag_json(json_out, dag_json)
         return 0
 
     # Export standalone HTML page if requested
@@ -555,43 +660,12 @@ def run_dag(
             run_id=run_id,
             workspace=workspace_path,
         )
-        html_str = generate_dag_html(
-            dag_json,
-            title=f"Experimaestro DAG - {exp_id}",
-            default_layout=layout,
-        )
-        html.parent.mkdir(parents=True, exist_ok=True)
-        html.write_text(html_str)
-        print(f"Saved interactive DAG HTML to {html}")  # noqa: T201
+        _export_dag_html(html, dag_json, exp_id, layout)
         return 0
 
     # Optional terminal text tree visualization
     if tree:
-        t_jobs, t_deps, t_tags = full_jobs, dependencies, job_tags_dict
-        stack_members = None
-        if stack:
-            t_jobs, t_deps, t_tags, stack_members = stack_dag_nodes(
-                full_jobs, dependencies, job_tags_dict
-            )
-        dependents: dict[str, list[str]] = {}
-        for jid, deps in t_deps.items():
-            for d in deps:
-                dependents.setdefault(d, []).append(jid)
-
-        depths, pos, _ = compute_dag_layout(t_jobs, t_deps, dependents)
-
-        tree_roots = [jid for jid in t_jobs if not t_deps.get(jid)]
-        print_robust_tree(
-            tree_roots,
-            dependents,
-            t_deps,
-            t_jobs,
-            t_tags,
-            set(),
-            depths,
-            pos,
-            stack_members=stack_members,
-        )
+        _display_dag_tree(full_jobs, dependencies, job_tags_dict, stack)
         if not (web or plot or save_plot_path):
             return 0
 
@@ -616,30 +690,14 @@ def run_dag(
 
     # Optional Matplotlib & graphical plot visualization (requires matplotlib)
     if plot or save_plot_path:
-        p_jobs, p_deps, p_tags = full_jobs, dependencies, job_tags_dict
-        stack_members = None
-        if stack:
-            p_jobs, p_deps, p_tags, stack_members = stack_dag_nodes(
-                full_jobs, dependencies, job_tags_dict
-            )
-        dependents = {}
-        for jid, deps in p_deps.items():
-            for d in deps:
-                dependents.setdefault(d, []).append(jid)
-
-        depths, pos, reduced_dag = compute_dag_layout(
-            p_jobs, p_deps, dependents
-        )
-
-        plot_dag(
-            p_jobs,
-            p_tags,
-            pos,
-            reduced_dag,
-            title_suffix=title_suffix,
-            show_plot=plot,
-            save_path=save_plot_path,
-            stack_members=stack_members,
+        _display_or_save_dag_plot(
+            full_jobs,
+            dependencies,
+            job_tags_dict,
+            title_suffix,
+            plot,
+            save_plot_path,
+            stack,
         )
         return 0
 

@@ -515,12 +515,10 @@ def _detect_bottleneck_configs(
                     continue
                 uniq_b = {tuple(sorted(d.items())) for d in by_schema[s_b]}
                 proj_a = {
-                    tuple(sorted((k, d[k]) for k in inter))
-                    for d in by_schema[s_a]
+                    tuple(sorted((k, d[k]) for k in inter)) for d in by_schema[s_a]
                 }
                 proj_b = {
-                    tuple(sorted((k, d[k]) for k in inter))
-                    for d in by_schema[s_b]
+                    tuple(sorted((k, d[k]) for k in inter)) for d in by_schema[s_b]
                 }
                 shared_proj = proj_a & proj_b
                 union_proj = proj_a | proj_b
@@ -625,9 +623,7 @@ def filter_subgraph_by_config(
     from experimaestro import Action
 
     selected_nodes = set(matching)
-    matched_tasks = [
-        jid for jid in matching if isinstance(full_jobs.get(jid), Task)
-    ]
+    matched_tasks = [jid for jid in matching if isinstance(full_jobs.get(jid), Task)]
     matched_task_set = set(matched_tasks)
     has_multi_stage_match = any(
         any(d in matched_task_set for d in dependencies.get(jid, []))
@@ -714,6 +710,167 @@ def filter_tasks_only(
     return filtered_jobs, task_deps
 
 
+def _build_reduced_dag(
+    full_jobs: dict,
+    dependencies: dict[str, list[str]],
+) -> nx.DiGraph:
+    """Build a directed graph from jobs and dependencies, applying transitive reduction if acyclic."""
+    dag = nx.DiGraph()
+    for jid in full_jobs:
+        dag.add_node(jid)
+    for jid, deps in dependencies.items():
+        if jid in dag:
+            for d in deps:
+                if d in dag and d != jid:
+                    dag.add_edge(d, jid)
+    return nx.transitive_reduction(dag) if nx.is_directed_acyclic_graph(dag) else dag
+
+
+def _infer_bottleneck_grid_keys(
+    full_jobs: dict,
+    job_tags_dict: dict[str, dict],
+) -> set[str] | None:
+    """Infer distinguishing bottleneck grid keys if multiple schemas are present."""
+    mock_records = [
+        {
+            "job_id": jid,
+            "task_id": type(c).__name__,
+            "tags": job_tags_dict.get(jid) or {},
+        }
+        for jid, c in full_jobs.items()
+        if isinstance(c, Task) and job_tags_dict.get(jid)
+    ]
+    detected = _detect_bottleneck_configs(mock_records)
+    if detected:
+        all_keys = set().union(*(r["tags"].keys() for r in mock_records))
+        det_keys = set().union(*(c.keys() for c in detected))
+        if det_keys < all_keys:
+            return det_keys
+    return None
+
+
+def _compute_node_base_signature(
+    config: Any,
+    tags: dict,
+    grid_keys: set[str] | None,
+) -> tuple:
+    """Compute base structural signature for a single job config."""
+    cname = type(config).__name__.replace(".XPMConfig", "")
+    ntype = (
+        "action"
+        if isinstance(config, Action)
+        else "task"
+        if isinstance(config, Task)
+        else "init"
+        if is_init_task_node(config)
+        else "config"
+    )
+    if grid_keys:
+        gtag_sig = tuple(sorted((k, str(v)) for k, v in tags.items() if k in grid_keys))
+    else:
+        gtag_sig = ()
+    return (cname, ntype, gtag_sig)
+
+
+def _refine_bisimulation_colors(
+    full_jobs: dict,
+    reduced_dag: nx.DiGraph,
+    base_sig: dict[str, tuple],
+) -> dict[str, int]:
+    """Iterative Weisfeiler-Lehman refinement on (base_sig, set(parent_colors), set(child_colors))."""
+    uniq_init = {v: i for i, v in enumerate(sorted(set(base_sig.values()), key=str))}
+    color: dict[str, int] = {jid: uniq_init[base_sig[jid]] for jid in full_jobs}
+
+    for _ in range(len(full_jobs) + 1):
+        new_sig: dict[str, tuple] = {}
+        for jid in full_jobs:
+            p_cols = tuple(sorted({color[p] for p in reduced_dag.predecessors(jid)}))
+            c_cols = tuple(sorted({color[c] for c in reduced_dag.successors(jid)}))
+            new_sig[jid] = (base_sig[jid], p_cols, c_cols)
+        uniq_map = {v: i for i, v in enumerate(sorted(set(new_sig.values()), key=str))}
+        new_color = {jid: uniq_map[new_sig[jid]] for jid in full_jobs}
+        if new_color == color:
+            break
+        color = new_color
+    return color
+
+
+def _merge_member_tags(
+    members: list[str],
+    job_tags_dict: dict[str, dict],
+) -> dict[str, Any]:
+    """Merge tags across stacked member nodes, noting multi-value variations."""
+    all_tkeys: list[str] = []
+    for m in members:
+        for k in (job_tags_dict.get(m) or {}).keys():
+            if k not in all_tkeys:
+                all_tkeys.append(k)
+    merged_tags: dict[str, Any] = {}
+    for k in all_tkeys:
+        vals = [
+            (job_tags_dict.get(m) or {}).get(k)
+            for m in members
+            if k in (job_tags_dict.get(m) or {})
+        ]
+        uniq_vals = {str(v) for v in vals}
+        if len(uniq_vals) == 1 and len(vals) == len(members):
+            merged_tags[k] = vals[0]
+        else:
+            merged_tags[k] = f"<{len(uniq_vals)} values>"
+    return merged_tags
+
+
+def _build_stacked_node_groups(
+    groups: dict[int, list[str]],
+    full_jobs: dict,
+    job_tags_dict: dict[str, dict],
+) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, dict], dict[str, str]]:
+    """Build representative nodes, member mappings, and merged tags for each color group."""
+    member_to_rep: dict[str, str] = {}
+    stacked_jobs: dict[str, Any] = {}
+    stack_members: dict[str, list[str]] = {}
+    stacked_tags_dict: dict[str, dict] = {}
+
+    for members in groups.values():
+        rep_id = members[0]
+        stacked_jobs[rep_id] = full_jobs[rep_id]
+        stack_members[rep_id] = members
+        for m in members:
+            member_to_rep[m] = rep_id
+
+        if len(members) == 1:
+            if rep_id in job_tags_dict:
+                stacked_tags_dict[rep_id] = dict(job_tags_dict[rep_id])
+        else:
+            merged = _merge_member_tags(members, job_tags_dict)
+            if merged:
+                stacked_tags_dict[rep_id] = merged
+
+    return stacked_jobs, stack_members, stacked_tags_dict, member_to_rep
+
+
+def _remap_stacked_dependencies(
+    stack_members: dict[str, list[str]],
+    dependencies: dict[str, list[str]],
+    member_to_rep: dict[str, str],
+) -> dict[str, list[str]]:
+    """Remap dependencies using the representative node IDs and eliminate duplicates."""
+    stacked_dependencies: dict[str, list[str]] = {}
+    for rep_id, members in stack_members.items():
+        rep_deps: list[str] = []
+        seen_deps: set[str] = {rep_id}
+        for m in members:
+            for d in dependencies.get(m, []):
+                if d in member_to_rep:
+                    d_rep = member_to_rep[d]
+                    if d_rep not in seen_deps:
+                        seen_deps.add(d_rep)
+                        rep_deps.append(d_rep)
+        if rep_deps:
+            stacked_dependencies[rep_id] = rep_deps
+    return stacked_dependencies
+
+
 def stack_dag_nodes(
     full_jobs: dict,
     dependencies: dict[str, list[str]],
@@ -732,130 +889,29 @@ def stack_dag_nodes(
     if not full_jobs:
         return {}, {}, {}, {}
 
-    dag = nx.DiGraph()
-    for jid in full_jobs:
-        dag.add_node(jid)
-    for jid, deps in dependencies.items():
-        if jid in dag:
-            for d in deps:
-                if d in dag and d != jid:
-                    dag.add_edge(d, jid)
+    reduced_dag = _build_reduced_dag(full_jobs, dependencies)
 
-    reduced_dag = (
-        nx.transitive_reduction(dag)
-        if nx.is_directed_acyclic_graph(dag)
-        else dag
-    )
-
-    # Infer bottleneck grid_keys if not explicitly supplied
     if grid_keys is None:
-        mock_records = [
-            {
-                "job_id": jid,
-                "task_id": type(c).__name__,
-                "tags": job_tags_dict.get(jid) or {},
-            }
-            for jid, c in full_jobs.items()
-            if isinstance(c, Task) and job_tags_dict.get(jid)
-        ]
-        detected = _detect_bottleneck_configs(mock_records)
-        if detected:
-            # Only treat as distinguishing grid_keys if there are multiple schemas
-            all_keys = set().union(*(r["tags"].keys() for r in mock_records))
-            det_keys = set().union(*(c.keys() for c in detected))
-            if det_keys < all_keys:
-                grid_keys = det_keys
+        grid_keys = _infer_bottleneck_grid_keys(full_jobs, job_tags_dict)
 
-    base_sig: dict[str, tuple] = {}
-    for jid, config in full_jobs.items():
-        cname = type(config).__name__.replace(".XPMConfig", "")
-        ntype = (
-            "action"
-            if isinstance(config, Action)
-            else "task"
-            if isinstance(config, Task)
-            else "init"
-            if is_init_task_node(config)
-            else "config"
+    base_sig = {
+        jid: _compute_node_base_signature(
+            config, job_tags_dict.get(jid) or {}, grid_keys
         )
-        jtags = job_tags_dict.get(jid) or {}
-        if grid_keys:
-            gtag_sig = tuple(
-                sorted((k, str(v)) for k, v in jtags.items() if k in grid_keys)
-            )
-        else:
-            gtag_sig = ()
-        base_sig[jid] = (cname, ntype, gtag_sig)
-
-    # Iterative Weisfeiler-Lehman refinement on (base_sig, set(parent_colors), set(child_colors))
-    uniq_init = {v: i for i, v in enumerate(sorted(set(base_sig.values()), key=str))}
-    color: dict[str, int] = {jid: uniq_init[base_sig[jid]] for jid in full_jobs}
-
-    for _ in range(len(full_jobs) + 1):
-        new_sig: dict[str, tuple] = {}
-        for jid in full_jobs:
-            p_cols = tuple(sorted({color[p] for p in reduced_dag.predecessors(jid)}))
-            c_cols = tuple(sorted({color[c] for c in reduced_dag.successors(jid)}))
-            new_sig[jid] = (base_sig[jid], p_cols, c_cols)
-        uniq_map = {v: i for i, v in enumerate(sorted(set(new_sig.values()), key=str))}
-        new_color = {jid: uniq_map[new_sig[jid]] for jid in full_jobs}
-        if new_color == color:
-            break
-        color = new_color
+        for jid, config in full_jobs.items()
+    }
+    color = _refine_bisimulation_colors(full_jobs, reduced_dag, base_sig)
 
     groups: dict[int, list[str]] = {}
     for jid in sorted(full_jobs.keys()):
         groups.setdefault(color[jid], []).append(jid)
 
-    member_to_rep: dict[str, str] = {}
-    stacked_jobs: dict[str, Any] = {}
-    stack_members: dict[str, list[str]] = {}
-    stacked_tags_dict: dict[str, dict] = {}
-
-    for _, members in groups.items():
-        rep_id = members[0]
-        stacked_jobs[rep_id] = full_jobs[rep_id]
-        stack_members[rep_id] = members
-        for m in members:
-            member_to_rep[m] = rep_id
-
-        if len(members) == 1:
-            if rep_id in job_tags_dict:
-                stacked_tags_dict[rep_id] = dict(job_tags_dict[rep_id])
-        else:
-            all_tkeys: list[str] = []
-            for m in members:
-                for k in (job_tags_dict.get(m) or {}).keys():
-                    if k not in all_tkeys:
-                        all_tkeys.append(k)
-            merged_tags: dict[str, Any] = {}
-            for k in all_tkeys:
-                vals = [
-                    (job_tags_dict.get(m) or {}).get(k)
-                    for m in members
-                    if k in (job_tags_dict.get(m) or {})
-                ]
-                uniq_vals = {str(v) for v in vals}
-                if len(uniq_vals) == 1 and len(vals) == len(members):
-                    merged_tags[k] = vals[0]
-                else:
-                    merged_tags[k] = f"<{len(uniq_vals)} values>"
-            if merged_tags:
-                stacked_tags_dict[rep_id] = merged_tags
-
-    stacked_dependencies: dict[str, list[str]] = {}
-    for rep_id, members in stack_members.items():
-        rep_deps: list[str] = []
-        seen_deps: set[str] = {rep_id}
-        for m in members:
-            for d in dependencies.get(m, []):
-                if d in member_to_rep:
-                    d_rep = member_to_rep[d]
-                    if d_rep not in seen_deps:
-                        seen_deps.add(d_rep)
-                        rep_deps.append(d_rep)
-        if rep_deps:
-            stacked_dependencies[rep_id] = rep_deps
+    stacked_jobs, stack_members, stacked_tags_dict, member_to_rep = (
+        _build_stacked_node_groups(groups, full_jobs, job_tags_dict)
+    )
+    stacked_dependencies = _remap_stacked_dependencies(
+        stack_members, dependencies, member_to_rep
+    )
 
     return stacked_jobs, stacked_dependencies, stacked_tags_dict, stack_members
 

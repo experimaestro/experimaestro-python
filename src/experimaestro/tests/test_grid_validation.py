@@ -4,6 +4,7 @@ from experimaestro.experiments.configuration import ConfigurationBase, configura
 from experimaestro.utils.config import validate_attrs
 import pytest
 
+
 @configuration()
 class SubConfig:
     value: GridSearch[int] = 1
