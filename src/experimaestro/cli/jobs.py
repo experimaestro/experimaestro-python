@@ -5,7 +5,9 @@ import click
 from pathlib import Path
 from termcolor import colored, cprint
 
+from experimaestro.scheduler import job_operations
 from experimaestro.settings import find_workspace
+from experimaestro.utils.disk_usage import folder_size, format_size
 from . import check_xp_path, cli
 
 
@@ -125,11 +127,11 @@ def process(
         elif job.state.running():
             if kill:
                 if perform:
-                    try:
-                        provider.kill_job(job, perform=True)
+                    outcome = job_operations.kill_job(provider, job)
+                    if outcome.ok:
                         cprint(f"KILLED  {job_str}", "light_red")
-                    except Exception as e:
-                        cprint(f"KILL FAILED {job_str}: {e}", "red")
+                    else:
+                        cprint(f"KILL FAILED {job_str}: {outcome.message}", "red")
                 else:
                     cprint(f"KILLING {job_str} (dry run)", "yellow")
             else:
@@ -444,42 +446,32 @@ def stray(
 
         # Show size if requested
         if size and job.path and job.path.exists():
-            try:
-                result = subprocess.run(
-                    ["du", "-hs", str(job.path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode == 0:
-                    size_str = result.stdout.strip().split()[0]
-                    print(f"  [{size_str}]", end="")
-            except (subprocess.TimeoutExpired, Exception):
-                print("  [?]", end="")
+            print(f"  [{format_size(folder_size(job.path))}]", end="")
 
         print()
 
         # Kill running jobs if requested
-        if kill and job.state and job.state.running():
+        if kill and job_operations.check_kill_job(job) is None:
             if perform:
-                try:
-                    provider.kill_job(job, perform=True)
+                outcome = job_operations.kill_job(provider, job)
+                if outcome.ok:
                     cprint("  KILLED", "light_red")
                     killed_count += 1
-                except Exception as e:
-                    cprint(f"  KILL FAILED: {e}", "red")
+                else:
+                    cprint(f"  KILL FAILED: {outcome.message}", "red")
             else:
                 cprint("  Would kill (dry run)", "yellow")
 
-        # Delete non-running jobs if requested
-        if delete and (not job.state or not job.state.running()):
+        # Delete finished jobs if requested (orphan partials are cleaned once,
+        # at the end)
+        if delete and job_operations.check_delete_job(job) is None:
             if perform:
-                success, msg = provider.delete_job_safely(job, cascade_orphans=False)
-                if success:
+                outcome = job_operations.delete_job(provider, job, cleanup=False)
+                if outcome.ok:
                     cprint("  DELETED", "light_red")
                     deleted_count += 1
                 else:
-                    cprint(f"  DELETE FAILED: {msg}", "red")
+                    cprint(f"  DELETE FAILED: {outcome.message}", "red")
             else:
                 cprint("  Would delete (dry run)", "yellow")
 

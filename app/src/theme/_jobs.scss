@@ -51,6 +51,29 @@
   background: #f5f8ff;
 }
 
+.experiments-table .experiment-actions .action {
+  margin: 0 4px;
+  cursor: pointer;
+  color: #666;
+}
+.experiments-table .experiment-actions .action:hover {
+  color: #c62828;
+}
+.experiments-table .experiment-actions .action.disabled {
+  cursor: not-allowed;
+  color: #ccc;
+}
+
+/* Group header rows of the grouped job view */
+.jobs-table .job-group-row td {
+  background: #f1f3f5;
+  cursor: pointer;
+  user-select: none;
+}
+.jobs-table .job-group-row:hover td {
+  background: #e7eaee;
+}
+
 /* Icons with an action */
 .fa.link {
   padding: 3pt;

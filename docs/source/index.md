@@ -55,7 +55,7 @@ their results and submit jobs through [submitit](https://github.com/facebookincu
 Experimaestro goes further: it computes a unique identifier from the *full*
 configuration for automatic deduplication and reuse across runs, composes tasks
 into explicit dependency graphs and experimental plans, and abstracts execution
-through pluggable launchers (Slurm, OAR) and connectors (local, SSH) with
+through pluggable launchers (direct, Slurm) and connectors (local, SSH) with
 built-in monitoring.
 
 Experimaestro's distinct features include:
@@ -152,6 +152,7 @@ faq
 maxdepth: 1
 caption: "Development"
 ---
+development/contributing
 development/experiment
 development/api
 ```

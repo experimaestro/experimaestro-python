@@ -193,7 +193,7 @@ def test_services_list_double_start_guard():
     widget.action_start_service()
     assert widget._start_service_worker.call_count == 1
     widget.notify.assert_called_with(
-        "Service 'tensorboard' is already starting...", severity="warning"
+        "Service 'tensorboard' is already starting", severity="warning"
     )
 
     # If state is RUNNING: should NOT launch another worker
@@ -202,5 +202,5 @@ def test_services_list_double_start_guard():
     widget.action_start_service()
     assert widget._start_service_worker.call_count == 1
     widget.notify.assert_called_with(
-        "Service 'tensorboard' is already running", severity="information"
+        "Service 'tensorboard' is already running", severity="warning"
     )

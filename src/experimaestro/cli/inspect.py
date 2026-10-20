@@ -1,0 +1,58 @@
+"""Click CLI command for Experimaestro Parameters Inspector (`experimaestro inspect`)."""
+
+from __future__ import annotations
+
+import sys
+from typing import Optional
+
+import click
+
+
+@click.command(name="inspect")
+@click.argument("target", required=False, default=".")
+@click.option(
+    "-w",
+    "--workspace",
+    default=None,
+    help="Workspace ID or directory path (defaults to current Experimaestro workspace; supports remote SSH workspaces).",
+)
+def inspect_command(target: str, workspace: Optional[str]) -> None:
+    """Interactive TUI Parameters Inspector for Experimaestro jobs.
+
+    TARGET can be a Job ID or hash prefix (e.g., `mymodule.MyTask/1822b2b`),
+    a path to a `params.json` or `experimaestro.json` file, or a job directory.
+    Defaults to `.` (current directory or default workspace).
+
+    Examples:
+
+    \b
+        # Inspect current directory / job
+        experimaestro inspect
+
+    \b
+        # Inspect a specific job by task name or hash prefix
+        experimaestro inspect [mymodule.MyTask/]1822b2b
+
+    \b
+        # Inspect a specific params.json directly
+        experimaestro inspect /path/to/params.json
+
+    \b
+        # Inspect a job in a specific workspace (workspace can be local or remote)
+        experimaestro inspect -w my_(remote)_workspace [mymodule.MyTask/]1822b2b
+    """
+    from experimaestro.tools.inspect_params import (
+        ParamsInspectorApp,
+        find_params_file,
+    )
+
+    try:
+        params_path = find_params_file(target, workspace)
+        app = ParamsInspectorApp(params_path)
+        app.run()
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error running parameters inspector: {e}", err=True)
+        sys.exit(1)

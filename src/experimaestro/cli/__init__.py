@@ -9,7 +9,6 @@ if TYPE_CHECKING:
 import logging
 from functools import cached_property, update_wrapper
 from pathlib import Path
-import subprocess
 from termcolor import cprint
 from importlib.metadata import entry_points
 
@@ -206,17 +205,12 @@ def orphans(path: Path, clean: bool, size: bool, include_folders: bool):
     Uses the same orphan detection as the TUI (WorkspaceStateProvider.get_orphan_jobs).
     """
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+    from experimaestro.utils.disk_usage import folder_size, format_size
 
     def show(job, prefix=""):
         key = f"{job.task_id}/{job.identifier}"
         if size:
-            print(
-                prefix,
-                subprocess.check_output(["du", "-hs", str(job.path)])
-                .decode("utf-8")
-                .strip(),
-                sep=None,
-            )
+            print(prefix, f"{format_size(folder_size(job.path))}\t{job.path}", sep=None)
         else:
             print(prefix, key, sep=None)
 
@@ -323,6 +317,16 @@ cli.add_command(install_skill_cli)
 from .workspaces import workspaces as workspaces_cli  # noqa: E402
 
 cli.add_command(workspaces_cli)
+
+# Import and add dag command
+from .dag import dag as dag_cli  # noqa: E402
+
+cli.add_command(dag_cli)
+
+# Import and add inspect command
+from .inspect import inspect_command  # noqa: E402
+
+cli.add_command(inspect_command, "inspect")
 
 
 @cli.group()
@@ -449,6 +453,9 @@ def experiments(ctx, workdir, workspace):
         ctx.obj = path
     except (SystemExit, Exception):
         ctx.obj = None
+
+
+experiments.add_command(dag_cli, "dag")
 
 
 @experiments.command("list")

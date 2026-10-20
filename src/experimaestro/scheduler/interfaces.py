@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from experimaestro.connectors import Process
     from experimaestro.scheduler.state_provider import CarbonMetricsData
     from experimaestro.scheduler.state_status import EventBase, JobStateChangedEvent
-    from experimaestro.carbon.base import CarbonImpactData
+    from experimaestro.carbon.base import CarbonAggregateData, CarbonImpactData
 
 logger = logging.getLogger("xpm.interfaces")
 
@@ -405,7 +405,7 @@ class JobFailureStatus(enum.Enum):
     REJECTED_OTHER = 6
 
     #: Job data was deleted by the user
-    DELETED = 7
+    DELETED = 8
 
 
 class ExperimentStatus(enum.Enum):
@@ -1579,6 +1579,32 @@ class BaseExperiment:
     def failed_jobs(self) -> int:
         """Number of failed jobs"""
         return sum(1 for j in self.jobs.values() if j.state.is_error())
+
+    @property
+    def status_category(self) -> str:
+        """Status shown by the TUI and the web UI
+
+        One of ``failed`` (some job failed), ``running``, ``done`` (all jobs
+        done), ``stopped`` (not running, with unfinished jobs) or ``empty``.
+        """
+        if self.failed_jobs > 0:
+            return "failed"
+        if self.status == ExperimentStatus.RUNNING:
+            return "running"
+        if self.total_jobs == 0:
+            return "empty"
+        if self.finished_jobs == self.total_jobs:
+            return "done"
+        return "stopped"
+
+    @property
+    def carbon_summary(self) -> "CarbonAggregateData | None":
+        """Carbon impact shown by the UIs: the latest run of each job if known,
+        otherwise all the runs"""
+        impact = self.carbon_impact
+        if impact is None:
+            return None
+        return impact.latest or impact.sum
 
     def get_job_state(self, job_id: str) -> "JobState | None":
         """Get experiment/scheduler state for a job.

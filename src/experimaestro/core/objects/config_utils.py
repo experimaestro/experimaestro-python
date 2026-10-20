@@ -1,4 +1,8 @@
 from contextlib import contextmanager
+import importlib.util
+from pathlib import Path
+import sys
+from types import ModuleType
 from typing import Any, Dict, Set
 
 
@@ -8,6 +12,63 @@ def getqualattr(module, qualname):
     for part in qualname.split("."):
         cls = getattr(cls, part)
     return cls
+
+
+def has_qualattr(module, qualname) -> bool:
+    """Returns whether a qualified attribute exists"""
+    try:
+        getqualattr(module, qualname)
+    except AttributeError:
+        return False
+    return True
+
+
+def load_definition_module(
+    module_name: str, qualname: str, path: str, file_modules: dict[str, ModuleType]
+) -> ModuleType:
+    """Load the module of an object definition that has a source file
+
+    The source file is only a fallback: a module that can be imported by name
+    is preferred (the file path is host-specific). A module loaded from its
+    file is executed only once, and cached in ``file_modules``.
+
+    :param module_name: The module name
+    :param qualname: The qualified name of the type, used to check that a
+        module imported by name is the right one
+    :param path: The path of the module source file
+    :param file_modules: Modules already loaded, indexed by file path
+    """
+    if mod := file_modules.get(path):
+        return mod
+
+    if module_name != "_main_":
+        mod = sys.modules.get(module_name)
+        if mod is None:
+            try:
+                mod = importlib.import_module(module_name)
+            except ModuleNotFoundError as e:
+                # Do not hide import errors raised within the module
+                if e.name != module_name:
+                    raise
+        if mod is not None and has_qualattr(mod, qualname):
+            file_modules[path] = mod
+            return mod
+
+    if not Path(path).is_file():
+        raise ModuleNotFoundError(
+            f"Module {module_name} cannot be imported, and its source file "
+            f"{path} does not exist",
+            name=module_name,
+        )
+
+    with add_to_path(str(Path(path).parent)):
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+
+    file_modules[path] = mod
+    return mod
 
 
 @contextmanager

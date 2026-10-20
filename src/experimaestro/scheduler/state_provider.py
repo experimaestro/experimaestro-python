@@ -63,7 +63,7 @@ class ProcessInfo:
     """Process ID"""
 
     type: str
-    """Process type (e.g., 'local', 'slurm', 'oar')"""
+    """Process type (e.g., 'local', 'slurm')"""
 
     running: bool = False
     """Whether the process is currently running"""
@@ -314,6 +314,30 @@ class StateProvider(ABC):
         # Conflict: resolve() returned None
         return exec_state, exp_state
 
+    def get_run_objects(
+        self,
+        experiment_id: str,
+        run_id: str | None = None,
+        *,
+        refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Serialized objects (configurations, tasks, actions) of a run
+
+        These are the records of the run's objects.jsonl, read as they are:
+        unlike :meth:`load_xp_info`, the experiment code is not imported.
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier (None = current run)
+
+        Raises:
+            FileNotFoundError: If the run or its objects.jsonl does not exist
+            NotImplementedError: If the provider doesn't support this
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support get_run_objects"
+        )
+
     def load_xp_info(
         self, experiment_id: str, run_id: str | None = None
     ) -> "ExperimentInfo":
@@ -535,11 +559,48 @@ class StateProvider(ABC):
         """
         return None
 
-    def sync_path(self, path: str) -> Optional[Path]:
+    def sync_path(self, path: str, include: list[str] | None = None) -> Optional[Path]:
         """Sync a specific path from remote (remote providers only)
 
         Returns None for local providers or if sync fails.
         """
+        return None
+
+    def has_job_params(self, job: BaseJob) -> bool:
+        """Check if parameter definitions exist for a job."""
+        if not job or not job.path:
+            return False
+        if self.is_remote:
+            return True
+        return (job.path / "params.json").is_file() or (
+            job.path / "experimaestro.json"
+        ).is_file()
+
+    def get_job_params_file(self, job: BaseJob) -> Optional[Path]:
+        """Get the local path to a job's parameters file (params.json or experimaestro.json).
+
+        For local providers, checks the job directory on disk.
+        For remote providers, synchronizes params.json or experimaestro.json to the local
+        cache directory using sync_path and returns the local Path.
+        """
+        if not job or not job.path:
+            return None
+
+        if self.is_remote:
+            local_dir = self.sync_path(
+                str(job.path), include=["params.json", "experimaestro.json"]
+            )
+            if local_dir:
+                for filename in ("params.json", "experimaestro.json"):
+                    cand = local_dir / filename
+                    if cand.is_file():
+                        return cand
+            return None
+
+        for filename in ("params.json", "experimaestro.json"):
+            cand = job.path / filename
+            if cand.is_file():
+                return cand
         return None
 
     def get_orphan_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
@@ -613,6 +674,26 @@ class StateProvider(ABC):
             Tuple of (success, message)
         """
         return False, "Not implemented"
+
+    # Experiment-level queries (see also scheduler/job_operations.py)
+
+    def is_experiment_running(self, experiment_id: str) -> bool:
+        """Whether the current run of an experiment is still running"""
+        exp = self.get_experiment(experiment_id)
+        if exp is None:
+            return False
+        try:
+            return exp.status == ExperimentStatus.RUNNING
+        except (NotImplementedError, AttributeError):
+            return False
+
+    def get_running_jobs(self, experiment_id: str) -> List[BaseJob]:
+        """Jobs of an experiment that are currently running"""
+        return [
+            job
+            for job in self.get_jobs(experiment_id)
+            if job.state and job.state.running()
+        ]
 
     def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
         """Clean up orphan partial directories"""
@@ -891,6 +972,21 @@ class OfflineStateProvider(StateProvider):
             copy=dict,
         )
 
+    def get_run_objects(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        return self._cached_query(
+            ("run_objects", experiment_id, run_id),
+            lambda: self._fetch_run_objects(experiment_id, run_id),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=list,
+        )
+
     def get_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
         return self._cached_query(
             ("orphan_jobs", freeze(kwargs)),
@@ -981,6 +1077,14 @@ class OfflineStateProvider(StateProvider):
     ) -> Dict[str, ExperimentJobInformation]:
         """Read the experiment-level job information from storage"""
         ...
+
+    def _fetch_run_objects(
+        self, experiment_id: str, run_id: Optional[str]
+    ) -> list[dict[str, Any]]:
+        """Read the serialized objects of a run (providers that support it)"""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support get_run_objects"
+        )
 
     def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
         """Read the orphan jobs from storage (providers that support it)"""
@@ -1294,6 +1398,14 @@ class OfflineStateProvider(StateProvider):
                 self._query_cache.update(
                     key, lambda mapping, v=value: mapping.setdefault(event.job_id, v)
                 )
+
+            elif name == "run_objects":
+                # The objects of the new job are only in objects.jsonl
+                _, exp_id, run_id = key
+                if exp_id == event.experiment_id and (
+                    run_id is None or not event_run_id or run_id == event_run_id
+                ):
+                    self._query_cache.drop(key)
 
             # Experiment queries are unaffected: a new job does not change the
             # experiment list, and the counts come from the cached experiment

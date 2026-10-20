@@ -21,4 +21,3 @@ $(ICON_LIGHT_BG): $(ICON_MASTER) scripts/make-app-icon.py
 
 $(ICON_ADAPTIVE): $(ICON_MASTER) scripts/make-app-icon.py
 	uv run python scripts/make-app-icon.py --adaptive $(ICON_MASTER) $@
-

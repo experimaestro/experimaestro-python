@@ -12,6 +12,8 @@ export type Experiment = {
   workdir?: string;
   current_run_id?: string | null;
   status?: string | null;
+  // Displayed status, shared with the TUI: failed, running, done, stopped or empty
+  statusCategory: string;
   hostname?: string | null;
   started_at?: string | null;
   ended_at?: string | null;
@@ -70,6 +72,8 @@ export type Job = {
 
   locator: string;
   status: JobStatus;
+  // Sort rank of the status, lower first (scheduler/job_status.py)
+  statusRank: number;
   schedulerState?: string | null;
 
   start: string;
@@ -109,6 +113,10 @@ export type OrphanJob = Job & {
 type ServiceStatus = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING" | "ERROR";
 
 export type ServiceInformation = {
+  // Unique key ("<experiment>/<service>"): service ids are only unique within
+  // an experiment
+  key: string;
+  experimentId: string;
   id: string;
   description: string;
   state: ServiceStatus;
@@ -233,16 +241,16 @@ export const slice = createSlice({
     },
 
     addService(draft, { payload }: PayloadAction<ServiceInformation>) {
-      draft.services.byId[payload.id] = payload;
+      draft.services.byId[payload.key] = payload;
       draft.services.ids = Object.keys(draft.services.byId);
     },
 
     updateService(draft, { payload }: PayloadAction<Partial<ServiceInformation>>) {
-      if (!payload.id) {
+      if (!payload.key) {
         return;
       }
-      draft.services.byId[payload.id] = {
-        ...draft.services.byId[payload.id],
+      draft.services.byId[payload.key] = {
+        ...draft.services.byId[payload.key],
         ...payload,
       };
     },
@@ -278,6 +286,27 @@ export const slice = createSlice({
       if (draft.experiments.byId[exp.experiment_id] !== undefined) {
         _.merge(draft.experiments.byId[exp.experiment_id], exp);
       }
+    },
+
+    removeExperiment(draft, { payload }: PayloadAction<{ experimentId: string }>) {
+      const id = payload.experimentId;
+      delete draft.experiments.byId[id];
+      draft.experiments.ids = draft.experiments.ids.filter((e) => e !== id);
+      if (draft.currentExperiment === id) {
+        draft.currentExperiment = null;
+        draft.experiment = "";
+        draft.currentRun = null;
+        draft.runs = [];
+      }
+      // Jobs are kept on disk, but drop those that only belonged to it
+      draft.jobs.ids = draft.jobs.ids.filter((jobId) => {
+        const xps = draft.jobs.byId[jobId].experimentIds || [];
+        if (xps.length === 1 && xps[0] === id) {
+          delete draft.jobs.byId[jobId];
+          return false;
+        }
+        return true;
+      });
     },
 
     selectExperiment(draft, action: PayloadAction<string | null>) {

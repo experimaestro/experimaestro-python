@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from experimaestro.scheduler.service_operations import find_service
 from experimaestro.scheduler.logs import read_log_slice
 
 logger = logging.getLogger("xpm.webui.logs")
@@ -101,8 +102,10 @@ async def experimaestro_logs(request: Request):
     return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
 
 
-@router.get("/api/services/{service_id}/logs/{stream}")
-async def service_logs(request: Request, service_id: str, stream: str):
+@router.get("/api/services/{experiment_id}/{service_id}/logs/{stream}")
+async def service_logs(
+    request: Request, experiment_id: str, service_id: str, stream: str
+):
     """Return a slice of a service's stdout/stderr log."""
     if not _check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -113,13 +116,7 @@ async def service_logs(request: Request, service_id: str, stream: str):
     server = request.app.state.server
     state_provider = server.state_provider
 
-    # Locate the service across experiments/runs.
-    service = None
-    for svc in state_provider.get_services():
-        if svc.id == service_id:
-            service = svc
-            break
-
+    service = find_service(state_provider, experiment_id, service_id)
     if service is None:
         return JSONResponse({"error": "service not found"}, status_code=404)
 

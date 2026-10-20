@@ -716,6 +716,8 @@ class KqueueSource(ChangeSource):
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # Pipe written by stop() to wake the loop out of kqueue.control()
+        self._wake_fds: tuple[int, int] | None = None
 
     @classmethod
     def available(cls, service: FileWatcherService) -> bool:
@@ -802,6 +804,19 @@ class KqueueSource(ChangeSource):
             logger.warning("KqueueSource: cannot watch directory %s", watch._path)
             self._dir_fd = None
 
+        self._wake_fds = os.pipe()
+        self._kq.control(
+            [
+                select.kevent(
+                    self._wake_fds[0],
+                    filter=select.KQ_FILTER_READ,
+                    flags=select.KQ_EV_ADD,
+                )
+            ],
+            0,
+            0,
+        )
+
         self._thread = threading.Thread(
             target=self._loop, name=f"kqueue-{watch._path.name}", daemon=True
         )
@@ -810,9 +825,15 @@ class KqueueSource(ChangeSource):
     def stop(self) -> None:
         super().stop()
         self._stop_event.set()
+        if self._wake_fds is not None:
+            os.write(self._wake_fds[1], b"x")
         if self._thread is not None:
             self._thread.join(timeout=3)
             self._thread = None
+        if self._wake_fds is not None:
+            for fd in self._wake_fds:
+                os.close(fd)
+            self._wake_fds = None
         with self._lock:
             for path in list(self._fds):
                 self._close_locked(path)
@@ -846,6 +867,8 @@ class KqueueSource(ChangeSource):
                 break
 
             for event in events:
+                if self._wake_fds is not None and event.ident == self._wake_fds[0]:
+                    continue  # stop() wakes us up; the loop condition exits
                 if event.ident == self._dir_fd:
                     for path in watch._scan_directory():
                         watch._source_created(self, path)

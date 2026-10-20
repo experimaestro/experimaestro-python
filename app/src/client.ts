@@ -1,12 +1,30 @@
 // Native WebSocket client for experimaestro WebUI
 import store from "./store"
 import { actions } from "./reducers"
+import { showMessage } from "./ui/messages"
+import { ExperimentGraph, GraphView, ViewParams } from "./dag/types"
 
 // Message types for JSON protocol
 interface Message {
   type: string;
   payload?: any;
 }
+
+// Answer to a "jobs.filter" request (filter DSL evaluated server-side)
+export type JobsFilterResult = {
+  requestId: number;
+  query: string;
+  jobIds: string[] | null;
+  error: string | null;
+};
+
+// Answer to an "experiment.graph" request (see experimaestro.ui.graph)
+export type ExperimentGraphResult = {
+  requestId: number;
+  graph?: ExperimentGraph;
+  view?: GraphView;
+  error?: string;
+};
 
 class Client {
   private ws: WebSocket | null = null;
@@ -18,6 +36,10 @@ class Client {
   // Callbacks for the action execution round-trip (set by the Actions UI)
   onActionPrompt: ((payload: any) => void) | null = null;
   onActionResult: ((payload: any) => void) | null = null;
+  // Callback for server-side job filter results (set by the Tasks view)
+  onJobsFilter: ((payload: JobsFilterResult) => void) | null = null;
+  // Callback for experiment graph results (set by the graph view)
+  onExperimentGraph: ((payload: ExperimentGraphResult) => void) | null = null;
 
   constructor() {
     this.connect();
@@ -157,6 +179,27 @@ class Client {
         case "action.result":
           if (this.onActionResult) this.onActionResult(payload);
           break;
+        case "jobs.filter":
+          if (this.onJobsFilter) this.onJobsFilter(payload);
+          break;
+        case "experiment.graph":
+          if (this.onExperimentGraph) this.onExperimentGraph(payload);
+          break;
+        case "experiment.removed":
+          store.dispatch(actions.removeExperiment(payload));
+          break;
+        case "notify": {
+          const severity: string = payload?.severity || "info";
+          store.dispatch(
+            showMessage({
+              severity,
+              message: payload?.message || "",
+              title: severity === "danger" ? "Error" : "Information",
+              delay: severity === "danger" ? undefined : 5,
+            }) as any,
+          );
+          break;
+        }
         case "orphans":
           store.dispatch(actions.setOrphans(payload?.jobs || []));
           break;
@@ -199,6 +242,42 @@ class Client {
 
   job_delete(jobId: string, taskId?: string): void {
     this.send("job.delete", { jobId, taskId });
+  }
+
+  jobs_filter(
+    query: string,
+    requestId: number,
+    experimentId?: string | null,
+    runId?: string | null,
+  ): void {
+    this.send("jobs.filter", {
+      query,
+      requestId,
+      experimentId: experimentId || undefined,
+      runId: runId || undefined,
+    });
+  }
+
+  experiment_graph(
+    requestId: number,
+    experimentId: string,
+    runId: string | null,
+    params: ViewParams,
+  ): void {
+    this.send("experiment.graph", {
+      requestId,
+      experimentId,
+      runId: runId || undefined,
+      ...params,
+    });
+  }
+
+  experiment_kill(experimentId: string): void {
+    this.send("experiment.kill", { experimentId });
+  }
+
+  experiment_delete(experimentId: string): void {
+    this.send("experiment.delete", { experimentId });
   }
 
   refresh(experimentId?: string, runId?: string): void {
@@ -249,12 +328,22 @@ class Client {
     this.send("orphan.delete", { jobId, taskId });
   }
 
-  service_start(id: string): void {
-    this.send("service.start", { id });
+  /** Kill every stray (running orphan) job */
+  orphans_kill(): void {
+    this.send("orphans.kill");
   }
 
-  service_stop(id: string): void {
-    this.send("service.stop", { id });
+  /** Delete every finished orphan job */
+  orphans_delete(): void {
+    this.send("orphans.delete");
+  }
+
+  service_start(experimentId: string, id: string): void {
+    this.send("service.start", { experimentId, id });
+  }
+
+  service_stop(experimentId: string, id: string): void {
+    this.send("service.stop", { experimentId, id });
   }
 
   quit(): void {

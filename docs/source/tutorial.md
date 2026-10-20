@@ -32,6 +32,6 @@ These features extend the demo and are worth knowing once the basic flow above i
 
 - [Configurations](experiments/config.md) — deep dive into configuration objects
 - [Tasks](experiments/task.md) — task definition, ResumableTask, dynamic outputs
-- [Launchers](launchers/index.md) — direct, SLURM, OAR launchers and the requirement DSL
+- [Launchers](launchers/index.md) — direct and SLURM launchers and the requirement DSL
 - [Settings](settings.md) — workspaces, triggers, imports, folders
 - [CLI](cli.md) — command-line interface reference

@@ -5,7 +5,7 @@ type Stream = "stdout" | "stderr";
 
 export type LogTarget =
   | { kind: "job"; taskId: string; jobId: string; title?: string }
-  | { kind: "service"; serviceId: string; title?: string }
+  | { kind: "service"; experimentId: string; serviceId: string; title?: string }
   | { kind: "experimaestro"; title?: string };
 
 function baseUrl(target: LogTarget, stream: Stream): string {
@@ -17,7 +17,9 @@ function baseUrl(target: LogTarget, stream: Stream): string {
   if (target.kind === "experimaestro") {
     return `/api/logs/experimaestro`;
   }
-  return `/api/services/${encodeURIComponent(target.serviceId)}/logs/${stream}`;
+  return `/api/services/${encodeURIComponent(target.experimentId)}/${encodeURIComponent(
+    target.serviceId,
+  )}/logs/${stream}`;
 }
 
 const POLL_MS = 1500;

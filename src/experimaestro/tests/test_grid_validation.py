@@ -2,6 +2,7 @@ from typing import List, Optional
 from experimaestro.experiments.grid import GridSearch, GenericParams
 from experimaestro.experiments.configuration import ConfigurationBase, configuration
 from experimaestro.utils.config import validate_attrs
+import pytest
 
 
 @configuration()
@@ -168,14 +169,12 @@ def test_validate_attrs_with_grid_search_annotation():
     assert tags[1] == {"lr": 0.005, "batch_size": 64}
 
 
-def test_validate_attrs_warns_on_unrecognized_keys(caplog):
+def test_error_attrs_raises_on_unrecognized_keys():
     data = {
         "id": "test",
         "lr": 0.05,
         "unexpected_key_xyz": 123,
     }
 
-    cfg = validate_attrs(MainConfig, data)
-    assert cfg.id == "test"
-    assert any("WARNING: Unrecognized configuration keys" in record.message for record in caplog.records)
-    assert any("unexpected_key_xyz" in record.message for record in caplog.records)
+    with pytest.raises(ValueError, match="unexpected_key_xyz"):
+        validate_attrs(MainConfig, data)

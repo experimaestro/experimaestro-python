@@ -67,7 +67,7 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
   return (
     <div className={classes.details}>
           <span className={classes.what}>Status</span>
-          <div>
+          <div className="job-detail-status" data-status={job.status}>
             {job.status}
             {job.failureReason ? ` (${job.failureReason})` : ""}
             {job.schedulerState && job.schedulerState !== job.status
@@ -148,7 +148,7 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
           )}
 
           <span className={classes.what}>Tags</span>
-          <div>
+          <div className="job-detail-tags">
             {job.tags.map((tag) => (
               <span key={tag[0]} className="tag">
                 <span className="name">{tag[0]}</span>
@@ -164,6 +164,8 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
                 {dependencies.map((dep) => (
                   <span
                     key={dep.jobId}
+                    data-job-id={dep.jobId}
+                    data-status={dep.status}
                     className={`dependency status-${dep.status}`}
                     title={`${dep.taskId} (${dep.status})`}
                   >

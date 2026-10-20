@@ -14,6 +14,7 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 
+from experimaestro.scheduler import job_operations
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
     EventBase,
@@ -31,7 +32,11 @@ from experimaestro.scheduler.state_status import (
     ErrorEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
-from experimaestro.tui.utils import format_duration, get_status_icon  # noqa: F401
+from experimaestro.tui.utils import (  # noqa: F401
+    format_duration,
+    get_status_icon,
+    notify_outcome,
+)
 from experimaestro.tui.messages import (
     ExperimentSelected,
     ExperimentDeselected,
@@ -40,6 +45,8 @@ from experimaestro.tui.messages import (
     JobHighlighted,
     ViewJobLogs,
     ViewJobLogsRequest,
+    InspectJobParams,
+    InspectJobParamsRequest,
     DeleteJobRequest,
     DeleteExperimentRequest,
     KillJobRequest,
@@ -82,6 +89,7 @@ class ExperimaestroUI(App):
         Binding("?", "show_help", "Help"),
         Binding("escape", "go_back", "Back", show=False),
         Binding("l", "view_logs", "Logs", show=False),
+        Binding("i", "inspect_params", "Inspect Params", show=False),
         Binding("w", "view_workspace_log", "Workspace Log", show=False),
         Binding("j", "focus_jobs", "Jobs", show=False),
         Binding("s", "focus_services", "Services", show=False),
@@ -697,6 +705,13 @@ class ExperimaestroUI(App):
             job_detail_view = self.query_one(JobDetailView)
             job_detail_view.action_view_logs()
 
+    def action_inspect_params(self) -> None:
+        """Inspect parameters for the current job (if job detail is visible)"""
+        job_detail_container = self.query_one("#job-detail-container")
+        if not job_detail_container.has_class("hidden"):
+            job_detail_view = self.query_one(JobDetailView)
+            job_detail_view.action_inspect_params()
+
     def action_view_workspace_log(self) -> None:
         """View workspace-level experimaestro log for current run"""
         if not self.state_provider:
@@ -787,6 +802,43 @@ class ExperimaestroUI(App):
             return
         self.post_message(ViewJobLogs(str(job.path), job.task_id, job.state))
 
+    def on_inspect_job_params_request(self, message: InspectJobParamsRequest) -> None:
+        """Handle params inspection request from jobs table or tree"""
+        job = self.state_provider.get_job(message.task_id, message.job_id)
+        if not job:
+            self.notify("Cannot find job", severity="warning")
+            return
+        self.post_message(InspectJobParams(job))
+
+    def on_inspect_job_params(self, message: InspectJobParams) -> None:
+        """Handle request to inspect job parameters - push ParamsInspectorScreen"""
+        from experimaestro.tools.inspect_params import ParamsInspectorScreen
+
+        job = message.job
+        if not self.state_provider.is_remote:
+            params_file = self.state_provider.get_job_params_file(job)
+            if not params_file or not params_file.is_file():
+                self.notify(
+                    f"Parameters file not found for {job.identifier[:8]}",
+                    severity="warning",
+                )
+                return
+            self.push_screen(
+                ParamsInspectorScreen(
+                    params_target=params_file,
+                    title=f"Job {job.identifier[:8]}",
+                )
+            )
+        else:
+            self.push_screen(
+                ParamsInspectorScreen(
+                    params_target=None,
+                    job=job,
+                    state_provider=self.state_provider,
+                    title=f"Job {job.identifier[:8]}",
+                )
+            )
+
     def on_delete_job_request(self, message: DeleteJobRequest) -> None:
         """Handle job deletion request"""
         job = self.state_provider.get_job(message.task_id, message.job_id)
@@ -794,8 +846,8 @@ class ExperimaestroUI(App):
             self.notify("Job not found", severity="error")
             return
 
-        if job.state.running():
-            self.notify("Cannot delete a running job", severity="warning")
+        if refusal := job_operations.check_delete_job(job):
+            notify_outcome(self, refusal)
             return
 
         # Save cursor position to restore after delete
@@ -804,19 +856,18 @@ class ExperimaestroUI(App):
         cursor_row = table.cursor_row
 
         def handle_delete_response(confirmed: bool) -> None:
-            if confirmed:
-                success, msg = self.state_provider.delete_job_safely(job)
-                if success:
-                    self.notify(msg, severity="information")
-                    self.action_refresh()
-                    # Move cursor to previous row (or first if was at top)
-                    if cursor_row is not None and table.row_count > 0:
-                        new_row = min(cursor_row, table.row_count - 1)
-                        if new_row > 0 and cursor_row > 0:
-                            new_row = cursor_row - 1
-                        table.move_cursor(row=new_row)
-                else:
-                    self.notify(msg, severity="error")
+            if not confirmed:
+                return
+            outcome = job_operations.delete_job(self.state_provider, job)
+            notify_outcome(self, outcome)
+            if outcome.ok:
+                self.action_refresh()
+                # Move cursor to previous row (or first if was at top)
+                if cursor_row is not None and table.row_count > 0:
+                    new_row = min(cursor_row, table.row_count - 1)
+                    if new_row > 0 and cursor_row > 0:
+                        new_row = cursor_row - 1
+                    table.move_cursor(row=new_row)
 
         self.push_screen(
             DeleteConfirmScreen("job", job.identifier),
@@ -825,43 +876,34 @@ class ExperimaestroUI(App):
 
     def on_delete_experiment_request(self, message: DeleteExperimentRequest) -> None:
         """Handle experiment deletion request"""
-        # Check if the experiment is currently running
-        experiments = self.state_provider.get_experiments()
-        exp = next(
-            (e for e in experiments if e.experiment_id == message.experiment_id), None
-        )
-        if exp is not None:
-            from experimaestro.scheduler.interfaces import ExperimentStatus
+        experiment_id = message.experiment_id
+        if refusal := job_operations.check_delete_experiment(
+            self.state_provider, experiment_id
+        ):
+            notify_outcome(self, refusal)
+            return
 
-            if exp.status == ExperimentStatus.RUNNING:
-                self.notify(
-                    "Cannot delete: experiment is still running",
-                    severity="warning",
-                )
-                return
-
-        jobs = self.state_provider.get_jobs(message.experiment_id)
+        jobs = self.state_provider.get_jobs(experiment_id)
         warning = (
             f"{len(jobs)} jobs will remain (not deleted by default)" if jobs else None
         )
 
         def handle_delete_response(confirmed: bool) -> None:
-            if confirmed:
-                success, msg = self.state_provider.delete_experiment(
-                    message.experiment_id, delete_jobs=False
-                )
-                if success:
-                    self.notify(msg, severity="information")
-                    # Go back to experiments list
-                    experiments_list = self.query_one(ExperimentsList)
-                    experiments_list.expand_experiments()
-                    self.post_message(ExperimentDeselected())
-                    self.action_refresh()
-                else:
-                    self.notify(msg, severity="error")
+            if not confirmed:
+                return
+            outcome = job_operations.delete_experiment(
+                self.state_provider, experiment_id
+            )
+            notify_outcome(self, outcome)
+            if outcome.ok:
+                # Go back to experiments list
+                experiments_list = self.query_one(ExperimentsList)
+                experiments_list.expand_experiments()
+                self.post_message(ExperimentDeselected())
+                self.action_refresh()
 
         self.push_screen(
-            DeleteConfirmScreen("experiment", message.experiment_id, warning),
+            DeleteConfirmScreen("experiment", experiment_id, warning),
             handle_delete_response,
         )
 
@@ -872,18 +914,14 @@ class ExperimaestroUI(App):
             self.notify("Job not found", severity="error")
             return
 
-        if not job.state.running():
-            self.notify("Job is not running", severity="warning")
+        if refusal := job_operations.check_kill_job(job):
+            notify_outcome(self, refusal)
             return
 
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
-                try:
-                    self.state_provider.kill_job(job, perform=True)
-                    self.notify(f"Job {job.identifier} killed", severity="information")
-                    self.action_refresh()
-                except Exception as e:
-                    self.notify(f"Failed to kill job: {e}", severity="error")
+                notify_outcome(self, job_operations.kill_job(self.state_provider, job))
+                self.action_refresh()
 
         self.push_screen(
             KillConfirmScreen("job", job.identifier),
@@ -892,33 +930,20 @@ class ExperimaestroUI(App):
 
     def on_kill_experiment_request(self, message: KillExperimentRequest) -> None:
         """Handle experiment kill request (kill all running jobs)"""
-        jobs = self.state_provider.get_jobs(message.experiment_id)
-        running_jobs = [j for j in jobs if j.state.running()]
-
-        if not running_jobs:
-            self.notify("No running jobs in experiment", severity="warning")
+        experiment_id = message.experiment_id
+        if refusal := job_operations.check_kill_experiment(
+            self.state_provider, experiment_id
+        ):
+            notify_outcome(self, refusal)
             return
+        running_jobs = self.state_provider.get_running_jobs(experiment_id)
 
         def handle_kill_response(confirmed: bool) -> None:
             if confirmed:
-                killed = 0
-                failed = 0
-                for job in running_jobs:
-                    try:
-                        self.state_provider.kill_job(job, perform=True)
-                        killed += 1
-                    except Exception:
-                        failed += 1
-                if failed:
-                    self.notify(
-                        f"Killed {killed} of {len(running_jobs)} jobs ({failed} failed)",
-                        severity="warning",
-                    )
-                else:
-                    self.notify(
-                        f"Killed {killed} of {len(running_jobs)} running jobs",
-                        severity="information",
-                    )
+                notify_outcome(
+                    self,
+                    job_operations.kill_experiment(self.state_provider, experiment_id),
+                )
                 self.action_refresh()
 
         self.push_screen(

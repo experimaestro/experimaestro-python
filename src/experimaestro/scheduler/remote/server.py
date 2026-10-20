@@ -81,6 +81,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_SERVICES.value: self._handle_get_services,
             RPCMethod.GET_TAGS_MAP.value: self._handle_get_tags_map,
             RPCMethod.GET_DEPENDENCIES_MAP.value: self._handle_get_dependencies_map,
+            RPCMethod.GET_RUN_OBJECTS.value: self._handle_get_run_objects,
             RPCMethod.KILL_JOB.value: self._handle_kill_job,
             RPCMethod.CLEAN_JOB.value: self._handle_clean_job,
             RPCMethod.DELETE_JOB_SAFELY.value: self._handle_delete_job_safely,
@@ -408,6 +409,18 @@ class SSHStateProviderServer:
             raise TypeError("experiment_id is required")
 
         return self._state_provider.get_dependencies_map(
+            experiment_id=experiment_id,
+            run_id=params.get("run_id"),
+            refresh=bool(params.get("refresh")),
+        )
+
+    def _handle_get_run_objects(self, params: Dict) -> list[dict]:
+        """Handle get_run_objects request (serialized objects of a run)"""
+        experiment_id = params.get("experiment_id")
+        if not experiment_id:
+            raise TypeError("experiment_id is required")
+
+        return self._state_provider.get_run_objects(
             experiment_id=experiment_id,
             run_id=params.get("run_id"),
             refresh=bool(params.get("refresh")),

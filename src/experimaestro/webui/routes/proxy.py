@@ -5,48 +5,40 @@ import logging
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import RedirectResponse
 
+from experimaestro.scheduler.service_operations import find_service
+
 logger = logging.getLogger("xpm.webui.proxy")
 
 router = APIRouter()
 
 
 @router.api_route(
-    "/services/{service_id}/{path:path}",
+    "/services/{experiment_id}/{service_id}/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
 )
-async def proxy_service(request: Request, service_id: str, path: str = ""):
+async def proxy_service(
+    request: Request, experiment_id: str, service_id: str, path: str = ""
+):
     """Proxy requests to a service
 
-    Routes /services/{service_id}/{path} to the service's URL.
+    Routes /services/{experiment_id}/{service_id}/{path} to the service's URL.
     """
     server = request.app.state.server
-
-    # Get service from scheduler (only works in active mode)
-    from experimaestro.scheduler.base import Scheduler
-
-    if not isinstance(server.state_provider, Scheduler):
-        return Response(
-            content="Service proxy only available in active mode",
-            status_code=503,
-        )
-
-    scheduler: Scheduler = server.state_provider
-
-    # Find service in experiments
-    service = None
-    for xp in scheduler.experiments.values():
-        service = xp.services.get(service_id)
-        if service:
-            break
-
+    service = find_service(server.state_provider, experiment_id, service_id)
     if service is None:
         return Response(
             content=f"Service {service_id} not found",
             status_code=404,
         )
 
-    # Get service URL
-    base_url = service.get_url()
+    # Only proxy started services (get_url() would start a stopped one)
+    live = service.to_service()
+    if live.state.name != "RUNNING":
+        return Response(
+            content=f"Service {service_id} is not running",
+            status_code=503,
+        )
+    base_url = live.get_url()
     if not base_url:
         return Response(
             content=f"Service {service_id} has no URL",
@@ -108,10 +100,10 @@ async def proxy_service(request: Request, service_id: str, path: str = ""):
         )
 
 
-@router.get("/services/{service_id}")
-async def redirect_service(service_id: str):
+@router.get("/services/{experiment_id}/{service_id}")
+async def redirect_service(experiment_id: str, service_id: str):
     """Redirect to service with trailing slash"""
     return RedirectResponse(
-        url=f"/services/{service_id}/",
+        url=f"/services/{experiment_id}/{service_id}/",
         status_code=308,  # Permanent redirect, preserves method
     )

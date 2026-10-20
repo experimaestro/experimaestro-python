@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import inspect
 import json
 import logging
@@ -7,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 from shutil import rmtree
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, TypeVar, Union
 
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
@@ -26,6 +27,7 @@ from experimaestro.settings import WorkspaceSettings, get_settings, HistorySetti
 from experimaestro.experiments.configuration import DirtyGitAction
 
 if TYPE_CHECKING:
+    from experimaestro.scheduler.dynamic_outputs import TaskOutputsReader
     from experimaestro.scheduler.interfaces import ExperimentStatus
     from experimaestro.scheduler.state_status import ExperimentEventWriter, EventBase
     from experimaestro.carbon.base import CarbonImpactData
@@ -580,10 +582,8 @@ class experiment(BaseExperiment):
     def add_job(self, job: "Job"):
         """Register a job and its tags to jobs.jsonl file and database
 
-        Note: For NEW jobs, the unfinishedJobs counter is updated by
-        job.set_scheduler_state() when the state transitions from UNSCHEDULED.
-        For jobs already running, we increment here since no state
-        transition will occur.
+        The experiment then waits for the job's current run, if any (see
+        :meth:`Job.begin_run`).
         """
 
         if self in job.experiments:
@@ -593,21 +593,9 @@ class experiment(BaseExperiment):
         # Track which experiments this job belongs to
         job.experiments.append(self)
 
-        # Count this job as unfinished if it hasn't reached a terminal state.
-        # This includes UNSCHEDULED jobs (about to be submitted via aio_submit)
-        # to prevent wait() from returning before submissions are processed.
-        if (
-            not job.scheduler_state.finished()
-            and job.scheduler_state != JobState.TRANSIENT
-        ):
-            self.unfinishedJobs += 1
-            logging.debug(
-                "Job %s tracked (state=%s), unfinished jobs for %s: %d",
-                job.identifier[:8],
-                job.scheduler_state.name,
-                self.name,
-                self.unfinishedJobs,
-            )
+        # The experiment waits for the job's current run, if any
+        if job.settled is not None:
+            self.track(job.settled)
 
         # Get tags from config (tags are experiment-specific, not stored on Job)
         job_tags = dict(job.config.tags().items()) if job.config.tags() else {}
@@ -777,11 +765,10 @@ class experiment(BaseExperiment):
 
         async def doStop():
             assert self.scheduler is not None
-            async with self.scheduler.exitCondition:
-                self.exitMode = True
-                self.scheduler.exitmode = True
-                logging.debug("Setting exit mode to true")
-                self.scheduler.exitCondition.notify_all()
+            self.exitMode = True
+            self.scheduler.exitmode = True
+            logging.debug("Setting exit mode to true")
+            self._stop_event.set()
 
         assert self.scheduler is not None and self.scheduler.loop is not None
         asyncio.run_coroutine_threadsafe(doStop(), self.scheduler.loop)
@@ -792,49 +779,45 @@ class experiment(BaseExperiment):
         async def awaitcompletion():
             assert self.scheduler is not None, "No scheduler defined"
             logger.debug("Waiting to exit scheduler...")
-            async with self.scheduler.exitCondition:
-                while True:
-                    if self.exitMode:
-                        break
 
-                    # If we have still unfinished jobs or possible new tasks, wait
-                    logger.debug(
-                        "Checking exit condition: unfinished jobs=%d, task output queue size=%d",
-                        self.unfinishedJobs,
-                        self.taskOutputQueueSize,
+            # Wait for the tracked work (job runs, callbacks, archives...),
+            # which can grow while we wait (e.g. callbacks submit jobs)
+            stop = asyncio.ensure_future(self._stop_event.wait())
+            try:
+                while self._pending and not self.exitMode:
+                    logger.debug("Waiting for %d pending items", len(self._pending))
+                    await asyncio.wait(
+                        [*self._pending, stop], return_when=asyncio.FIRST_COMPLETED
                     )
-                    if self.unfinishedJobs == 0 and self.taskOutputQueueSize == 0:
-                        break
+            finally:
+                stop.cancel()
 
-                    # Wait for more news...
-                    await self.scheduler.exitCondition.wait()
+            if self.failedJobs:
+                # Show some more information
+                from experimaestro.scheduler.jobs import (
+                    JobFailureStatus,
+                )
 
-                if self.failedJobs:
-                    # Show some more information
-                    from experimaestro.scheduler.jobs import (
-                        JobFailureStatus,
-                    )
-
-                    count = 0
-                    for job in self.failedJobs.values():
-                        # Skip dependency failures - only log direct failures
-                        if job.state.is_error():
-                            if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
-                                count += 1
-                                logger.error(
-                                    "Job %s failed, check the log file %s",
-                                    job.relpath,
-                                    job.stderr,
-                                )
-                        else:
-                            # Should not happen, but count it anyway
+                count = 0
+                for job in self.failedJobs.values():
+                    # Skip dependency failures - only log direct failures
+                    if job.state.is_error():
+                        if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
                             count += 1
                             logger.error(
                                 "Job %s failed, check the log file %s",
                                 job.relpath,
                                 job.stderr,
                             )
-                    logger.error("Experiment Failed: %d failed jobs", count)
+                    else:
+                        # Should not happen, but count it anyway
+                        count += 1
+                        logger.error(
+                            "Job %s failed, check the log file %s",
+                            job.relpath,
+                            job.stderr,
+                        )
+                logger.error("Experiment Failed: %d failed jobs", count)
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         future.result()
@@ -857,7 +840,6 @@ class experiment(BaseExperiment):
         return self.workspace.connector.createtoken(name, count)
 
     def __enter__(self):
-        from .dynamic_outputs import TaskOutputsWorker
         from experimaestro.utils.environment import (
             ExperimentEnvironment,
             ExperimentRunInfo,
@@ -1025,19 +1007,24 @@ class experiment(BaseExperiment):
 
             self._objects_writer = ObjectsWriter(self.workdir / "objects.jsonl")
 
-        # Number of unfinished jobs
-        self.unfinishedJobs = 0
-        self.taskOutputQueueSize = 0
+        # Work that must finish before the experiment exits (see track())
+        self._pending: set[asyncio.Future] = set()
+        # Set by stop() to stop waiting for it
+        self._stop_event = asyncio.Event()
+
+        # Runs user callbacks (dynamic outputs), one at a time
+        self._callback_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="xp-callbacks"
+        )
+
+        # Dynamic output readers, by job outputs path
+        self._task_outputs: dict[Path, "TaskOutputsReader"] = {}
 
         # List of failed jobs
         self.failedJobs: Dict[str, Job] = {}
 
         # Exit mode when catching signals
         self.exitMode = False
-
-        # Note: scheduler is already running as singleton
-        self.taskOutputsWorker = TaskOutputsWorker(self)
-        self.taskOutputsWorker.start()
 
         if self._register_signals:
             SIGNAL_HANDLER.add(self)
@@ -1073,16 +1060,6 @@ class experiment(BaseExperiment):
             # Wait for all pending notifications to be processed
             # before removing listeners
             self.scheduler.wait_for_notifications()
-
-            # Drain pending folder archives BEFORE transient cleanup
-            # so archives finish copying their source dirs before any
-            # cleanup can remove them.
-            try:
-                from experimaestro.scheduler.folders import wait_for_pending
-
-                wait_for_pending()
-            except Exception:
-                logger.exception("Folder archive drain failed")
         finally:
             if self._register_signals:
                 SIGNAL_HANDLER.remove(self)
@@ -1122,9 +1099,11 @@ class experiment(BaseExperiment):
 
             # Note: Don't stop scheduler - it's shared!
 
-            if self.taskOutputsWorker is not None:
-                logger.info("Stopping tasks outputs worker")
-                self.taskOutputsWorker.queue.put(None)
+            for reader in self._task_outputs.values():
+                reader.close()
+            self._task_outputs.clear()
+            # Only callbacks of an experiment that did not wait can be left
+            self._callback_executor.shutdown(wait=False, cancel_futures=True)
 
             self.workspace.__exit__(exc_type, exc_value, traceback)
             if self.xplock:
@@ -1168,31 +1147,58 @@ class experiment(BaseExperiment):
         if exc_type is GracefulExperimentExit:
             return True
 
-    async def update_task_output_count(self, delta: int) -> int:
-        """Change in the number of task outputs to process"""
-        async with self.scheduler.exitCondition:
-            self.taskOutputQueueSize += delta
-            logger.warning(
-                "Updating queue size with %d => %d", delta, self.taskOutputQueueSize
-            )
-            assert self.taskOutputQueueSize >= 0, (
-                "Task output queue size should always be >= 0"
-            )
-            if self.taskOutputQueueSize == 0:
-                # Route through notification executor so wait() only wakes
-                # up after all pending notifications have been processed
-                self.scheduler._notification_executor.submit(
-                    self.scheduler._notify_exit_condition
-                )
-            return self.taskOutputQueueSize
+    def track(self, aw) -> asyncio.Future:
+        """Make the experiment wait for ``aw`` before exiting
+
+        Must be called on the scheduler loop. The future is forgotten once
+        done, so tracking a done future is a no-op.
+
+        :param aw: an awaitable (future, task or coroutine)
+        :return: the tracked future
+        """
+        future = asyncio.ensure_future(aw)
+        if not future.done():
+            self._pending.add(future)
+            future.add_done_callback(self._pending.discard)
+        return future
+
+    def run_callback(self, fn: Callable, *args) -> asyncio.Future:
+        """Run user code in the callback executor, and track it
+
+        Must be called on the scheduler loop. Callbacks run one at a time, in
+        the order they were queued; they may submit jobs. Exceptions are
+        logged.
+        """
+
+        def run():
+            try:
+                fn(*args)
+            except Exception:
+                logger.exception("Error in callback %s", fn)
+
+        return self.track(
+            self.scheduler.loop.run_in_executor(self._callback_executor, run)
+        )
 
     def watch_output(self, watched: "WatchedOutput"):
         """Watch an output
 
+        Must be called on the scheduler loop.
+
         :param watched: The watched output specification
         """
+        from .dynamic_outputs import TaskOutputsReader
 
-        self.taskOutputsWorker.watch_output(watched)
+        job = watched.job
+        reader = self._task_outputs.get(job.task_outputs_path)
+        if reader is None:
+            reader = TaskOutputsReader(self, job)
+            self._task_outputs[job.task_outputs_path] = reader
+        reader.add_watcher(watched)
+
+    def task_outputs_reader(self, job: "Job") -> "TaskOutputsReader | None":
+        """The dynamic outputs reader of a job, if any output is watched"""
+        return self._task_outputs.get(job.task_outputs_path)
 
     def add_service(self, service: ServiceClass) -> ServiceClass:
         """Adds a service (e.g. tensorboard viewer) to the experiment

@@ -1786,6 +1786,19 @@ class WorkspaceStateProvider(OfflineStateProvider):
         run_dir = self.workspace_path / "experiments" / experiment_id / run_id
         return load_xp_info(run_dir)
 
+    def _fetch_run_objects(
+        self, experiment_id: str, run_id: Optional[str]
+    ) -> list[dict]:
+        from experimaestro.scheduler.objects_writer import read_objects
+
+        if run_id is None:
+            run_id = self.get_current_run(experiment_id)
+            if run_id is None:
+                raise FileNotFoundError(f"No runs found for experiment {experiment_id}")
+
+        run_dir = self.workspace_path / "experiments" / experiment_id / run_id
+        return read_objects(run_dir / "objects.jsonl")
+
     # =========================================================================
     # Tags and dependencies
     # =========================================================================

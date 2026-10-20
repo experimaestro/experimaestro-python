@@ -156,6 +156,14 @@ class Scheduler(StateProvider, threading.Thread):
         self._listeners: Set[Listener] = set()
         self._listeners_lock = threading.Lock()
 
+        # Hooks run on each job (see scheduler/hooks.py)
+        from experimaestro.scheduler.hooks import JobHook, default_hooks
+
+        self.hooks: list[JobHook] = default_hooks()
+
+        # Tasks running hooks (the loop only keeps weak references to tasks)
+        self._settling: set[asyncio.Task] = set()
+
         # Notification thread pool (single worker to serialize notifications)
         self._notification_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="NotificationWorker"
@@ -338,7 +346,6 @@ class Scheduler(StateProvider, threading.Thread):
         init_done = threading.Event()
 
         def init_loop_vars():
-            self.exitCondition = asyncio.Condition()
             self.dependencyLock = asyncio.Lock()
             init_done.set()
 
@@ -485,10 +492,6 @@ class Scheduler(StateProvider, threading.Thread):
                 if was_transient and not other.transient.is_transient:
                     other._needed_transient = True
 
-            # Copy watched outputs from new job to existing job
-            # This ensures new callbacks are registered even for resubmitted jobs
-            other.watched_outputs.extend(job.watched_outputs)
-
             # Update max_retries if the new job has a higher value
             # This allows restarting failed jobs by increasing max_retries
             if job.max_retries > other.max_retries:
@@ -514,10 +517,15 @@ class Scheduler(StateProvider, threading.Thread):
                     other.pidpath.unlink()
                 # Use set_state to handle experiment statistics updates
                 other.set_scheduler_state(JobState.WAITING)
+                other.begin_run()
                 self.notify_job_state(other)  # Notify listeners of re-submit
                 # The calling aio_submit will continue with this job and start it
             else:
                 logger.warning("Job %s already submitted", job.identifier)
+
+            # Watched outputs, callbacks... of this submission
+            for hook in self.hooks:
+                hook.on_submitted(other, xp, job)
 
             # Returns the previous job
             return other, need_restart
@@ -525,6 +533,7 @@ class Scheduler(StateProvider, threading.Thread):
         # Register this job
         xp = experiment.current()
         self.jobs[job.identifier] = job
+        job.begin_run()
         xp.add_job(job)
 
         # Get tags from config (tags are experiment-specific, not stored on Job)
@@ -561,6 +570,9 @@ class Scheduler(StateProvider, threading.Thread):
             # Some dependencies (like PartialDependency) don't have an origin resource
             if dependency.origin is not None:
                 dependency.origin.dependents.add(dependency)
+
+        for hook in self.hooks:
+            hook.on_submitted(job, xp, job)
 
         return None, True
 
@@ -699,7 +711,7 @@ class Scheduler(StateProvider, threading.Thread):
             # NOTE: Only update execution state (_state), NOT scheduler_state.
             # scheduler_state is managed by the scheduler itself (aio_start/finalize).
             # Calling set_scheduler_state here from the FileWatcher thread would race
-            # with finalize_status and corrupt experiment stats (unfinishedJobs count).
+            # with finalize_status and corrupt experiment stats.
             new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
             if new_state is not None:
                 job.set_state(new_state, loading=True)
@@ -1012,9 +1024,6 @@ class Scheduler(StateProvider, threading.Thread):
         job.scheduler = self
         self.waitingjobs.add(job)
 
-        # Register watched outputs now that the job has a scheduler
-        job.register_watched_outputs()
-
         # Note: Job metadata will be written after directory is created in aio_start
 
         # Creates a link into the experiment folder
@@ -1027,24 +1036,29 @@ class Scheduler(StateProvider, threading.Thread):
         # Now, notify that the job has been submitted
         self.notify_job_submitted(job)
 
-        # Run the job and handle retries
-        while True:
-            try:
-                await self.aio_submit_inner(job)
-                break
-            except GracefulTimeout:
-                # If timeout we just start again the loop to start the job again
-                # if needed
-                logger.info(
-                    "GracefulTimeout caught for job %s, restarting",
-                    job.identifier[:8],
-                )
-                pass
+        try:
+            # Run the job and handle retries
+            while True:
+                try:
+                    await self.aio_submit_inner(job)
+                    break
+                except GracefulTimeout:
+                    # If timeout we just start again the loop to start the job
+                    # again if needed
+                    logger.info(
+                        "GracefulTimeout caught for job %s, restarting",
+                        job.identifier[:8],
+                    )
+                    pass
 
-        logger.debug("Current job scheduler_state is %s", job.scheduler_state)
+            logger.debug("Current job scheduler_state is %s", job.scheduler_state)
 
-        # Process job completion: task outputs, final status write, cleanup
-        return await self.aio_final_state(job)
+            # Process job completion: final status write, then hooks
+            return await self.aio_final_state(job)
+        except BaseException:
+            # Whatever happened, this run is over
+            job.settle()
+            raise
 
     async def aio_submit_inner(self, job: Job) -> None:
         """Inner job submission logic: load state, check for running process, start if needed.
@@ -1179,14 +1193,14 @@ class Scheduler(StateProvider, threading.Thread):
                     raise
 
     async def aio_final_state(self, job: Job) -> JobState:
-        """Process job completion and return final state.
+        """Record the final state of a job run, and start settling it
 
         This method handles:
         1. Skip processing for UNSCHEDULED jobs (transient jobs not needed)
         2. Write final status file (if different from disk)
-        3. Process task outputs (with completion signaling)
-        4. Remove job from waiting jobs
-        5. Notify exit condition
+        3. Remove job from waiting jobs, and notify listeners
+        4. Run the hooks in the background (see :meth:`aio_settle`): the
+           state is recorded, so dependents need not wait for them
 
         Args:
             job: The job that has completed
@@ -1197,7 +1211,8 @@ class Scheduler(StateProvider, threading.Thread):
         logger.debug("Processing final state for job %s", job.identifier[:8])
 
         # Skip processing for UNSCHEDULED jobs (transient jobs that weren't needed)
-        if job.scheduler_state.is_unscheduled():
+        unscheduled = job.scheduler_state.is_unscheduled()
+        if unscheduled:
             logger.debug(
                 "Skipping final state for unscheduled job %s", job.identifier[:8]
             )
@@ -1213,52 +1228,42 @@ class Scheduler(StateProvider, threading.Thread):
 
             await job.finalize_status(callback=preserve_state_callback)
 
-            # Process task outputs (queues remaining events for processing)
-            await job.aio_done_handler()
-
-            # Archive to attached folders (beta). Only on successful
-            # completion, and only if the per-job opt-out wasn't set.
-            # Skip transient jobs whose source dir will be deleted at
-            # experiment exit — archiving them would be wasted work
-            # (or worse, a race with the cleanup pass).
-            if (
-                job.scheduler_state == JobState.DONE
-                and job.backup
-                and job.workspace is not None
-                and not job.transient.should_remove
-            ):
-                from experimaestro.scheduler.folders import archive_job_async
-
-                try:
-                    archive_job_async(job, job.workspace.folders)
-                except Exception:
-                    logger.exception("Failed to schedule folder archive for %s", job)
-
         # Remove from waiting jobs
         self.waitingjobs.discard(job)
 
         # Notify with final state
         self.notify_job_state(job)
 
-        # Notify exitCondition AFTER all queued notifications have been
-        # processed (including on_completed callbacks). This is done by
-        # submitting the notification to the executor queue, so it runs
-        # after all pending _do_notify tasks.
-        self._notification_executor.submit(self._notify_exit_condition)
+        if unscheduled:
+            job.settle()
+        else:
+            task = asyncio.create_task(self.aio_settle(job, job.settled))
+            self._settling.add(task)
+            task.add_done_callback(self._settling.discard)
 
         return job.scheduler_state
 
-    def _notify_exit_condition(self):
-        """Notify exitCondition from the notification thread.
+    async def aio_settle(self, job: Job, settled: asyncio.Future | None):
+        """Run the hooks of a finished job run, then mark it as settled
 
-        Scheduled via the notification executor so it runs after all
-        pending listener notifications (including on_completed callbacks).
+        :param settled: the settled future of the run (the job may be
+            resubmitted, and get a new one, while the hooks run)
         """
-        asyncio.run_coroutine_threadsafe(self._async_notify_exit(), self.loop)
-
-    async def _async_notify_exit(self):
-        async with self.exitCondition:
-            self.exitCondition.notify_all()
+        try:
+            results = await asyncio.gather(
+                *(hook.on_finished(job) for hook in self.hooks),
+                return_exceptions=True,
+            )
+            for hook, result in zip(self.hooks, results):
+                if isinstance(result, BaseException):
+                    logger.error(
+                        "Error in hook %s for job %s",
+                        hook,
+                        job,
+                        exc_info=result,
+                    )
+        finally:
+            job.settle(settled)
 
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.
@@ -1837,6 +1842,21 @@ class Scheduler(StateProvider, threading.Thread):
         info = self._get_run_info(experiment_id, run_id)
         return info.job_infos if info else {}
 
+    def get_run_objects(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
+    ) -> list[dict]:
+        from experimaestro.scheduler.objects_writer import read_objects
+
+        # objects.jsonl is written as jobs are submitted
+        exp = self.experiments.get(experiment_id)
+        if exp is None or exp.workdir is None or run_id not in (None, exp.run_id):
+            raise FileNotFoundError(f"No live run {run_id} for {experiment_id}")
+        return read_objects(exp.workdir / "objects.jsonl")
+
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
         """Kill a running or scheduled job.
 
@@ -1859,8 +1879,17 @@ class Scheduler(StateProvider, threading.Thread):
         if actual_job is None:
             raise RuntimeError("Job not found in scheduler")
 
-        # Try to kill the process via the _process attribute
-        process = actual_job._process
+        # The process handle, or the one recorded in the PID file (job
+        # re-attached from an earlier run)
+        try:
+            in_loop = asyncio.get_running_loop() is self.loop
+        except RuntimeError:
+            in_loop = False
+        if in_loop:
+            raise RuntimeError("kill_job cannot be called from the scheduler loop")
+        process = asyncio.run_coroutine_threadsafe(
+            actual_job.aio_process(), self.loop
+        ).result()
         if process is None:
             raise RuntimeError("No process found for job")
 
