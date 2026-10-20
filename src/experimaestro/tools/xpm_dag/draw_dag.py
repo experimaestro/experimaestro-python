@@ -56,12 +56,14 @@ from .xpm_dag import (
     filter_tasks_only,
     get_all_dependencies,
     get_experiment_configs,
+    is_init_task_node,
     load_dag_from_json,
     load_run_graph,
     load_run_status,
     parse_filter_arg,
     resolve_run_dir,
     resolve_target_config,
+    stack_dag_nodes,
 )
 from .xpm_web_dag import (
     generate_dag_html,
@@ -82,6 +84,7 @@ __all__ = [
     "generate_dag_html",
     "get_all_dependencies",
     "get_experiment_configs",
+    "is_init_task_node",
     "load_dag_from_json",
     "load_run_graph",
     "load_run_status",
@@ -92,6 +95,7 @@ __all__ = [
     "resolve_target_config",
     "run_dag",
     "serve_dag_web",
+    "stack_dag_nodes",
 ]
 
 
@@ -106,6 +110,7 @@ def print_robust_tree(
     pos: dict[str, tuple[float, float]],
     prefix: str = "",
     is_last: bool = True,
+    stack_members: dict[str, list[str]] | None = None,
 ) -> None:
     """Recursively print the dependency tree with individual nodes, depth and Y info."""
     if not job_ids:
@@ -130,6 +135,10 @@ def print_robust_tree(
         )
         depth = depths.get(jid, 0)
         y_coord = pos.get(jid, (0, 0))[1]
+        is_init = is_init_task_node(config)
+        members = (stack_members or {}).get(jid, [jid])
+        stack_suffix = f" x {len(members)}" if len(members) > 1 else ""
+        init_badge = " [INIT]" if is_init else ""
 
         # Use tags from jobs.jsonl, fallback to tags(config)
         jtags = job_tags_dict.get(jid)
@@ -140,7 +149,10 @@ def print_robust_tree(
                 jtags = {}
         jtags = jtags or {}
         tag_str = ", ".join(f"{k}={v}" for k, v in jtags.items())
-        label = f"{job_type} [{jid[:8]}] (depth {depth}, y {y_coord:.1f})"
+        label = (
+            f"{job_type}{init_badge}{stack_suffix} [{jid[:8]}] "
+            f"(depth {depth}, y {y_coord:.1f})"
+        )
         if tag_str:
             label += f" ({tag_str})"
 
@@ -169,6 +181,7 @@ def print_robust_tree(
                 pos,
                 child_prefix,
                 True,
+                stack_members=stack_members,
             )
 
 
@@ -182,6 +195,7 @@ def plot_dag(
     title_suffix: str = "",
     show_plot: bool = True,
     save_path: Path | None = None,
+    stack_members: dict[str, list[str]] | None = None,
 ) -> None:
     """Plot the DAG hierarchically using pre-computed layout and reduced graph.
 
@@ -195,6 +209,7 @@ def plot_dag(
         title_suffix: Optional suffix appended to figure title (e.g. config details).
         show_plot: Whether to display the plot interactively.
         save_path: Optional path to save the figure image.
+        stack_members: Optional mapping of representative job ID to stacked member IDs.
     """
     try:
         import matplotlib.pyplot as plt
@@ -217,6 +232,8 @@ def plot_dag(
             if isinstance(config, Action)
             else "task"
             if isinstance(config, Task)
+            else "init"
+            if is_init_task_node(config)
             else "config"
         )
 
@@ -229,12 +246,14 @@ def plot_dag(
                 jtags = {}
         jtags = jtags or {}
         tag_str = ", ".join(f"{k}={v}" for k, v in jtags.items())
+        members = (stack_members or {}).get(jid, [jid])
 
         node_info[jid] = {
-            "name": name,
+            "name": f"{name} [INIT]" if ntype == "init" else name,
             "hash": f"[{jid[:8]}]",
             "tags": tag_str if tag_str else None,
             "type": ntype,
+            "stack_count": len(members),
         }
 
     # Calculate dynamic figure size based on the layout
@@ -272,9 +291,45 @@ def plot_dag(
             ),
         )
 
-    styles = {"config": "#e6ffed", "task": "#e6f4ff", "action": "#fff1f0"}
+    styles = {
+        "config": "#e6ffed",
+        "task": "#e6f4ff",
+        "init": "#f3e8ff",
+        "action": "#fff1f0",
+    }
     for jid, (x, y) in pos.items():
         info = node_info[jid]
+        scount = info["stack_count"]
+        if scount > 1:
+            n_frames = 3 if scount > 5 else 2
+            for layer in range(n_frames, 0, -1):
+                dx = layer * 0.35
+                dy = -layer * 0.08
+                ax.add_patch(
+                    FancyBboxPatch(
+                        (x - box_w / 2 + dx, y - box_h / 2 + dy),
+                        box_w,
+                        box_h,
+                        boxstyle="round,pad=0.03,rounding_size=0.2",
+                        facecolor=styles[info["type"]],
+                        edgecolor="#888888",
+                        linewidth=1.4,
+                        alpha=0.85,
+                        zorder=1.5,
+                    )
+                )
+            plt.text(
+                x + box_w / 2 + (n_frames * 0.35) + 0.3,
+                y + box_h / 2 - 0.1,
+                f"x {scount}",
+                ha="left",
+                va="center",
+                fontsize=9.5,
+                fontweight="bold",
+                color="#334155",
+                zorder=4,
+            )
+
         ax.add_patch(
             FancyBboxPatch(
                 (x - box_w / 2, y - box_h / 2),
@@ -282,7 +337,7 @@ def plot_dag(
                 box_h,
                 boxstyle="round,pad=0.03,rounding_size=0.2",
                 facecolor=styles[info["type"]],
-                edgecolor="#666666",
+                edgecolor="#7c3aed" if info["type"] == "init" else "#666666",
                 linewidth=2.0,
                 zorder=2,
             )
@@ -392,6 +447,7 @@ def run_dag(
     filter_tags: str | None = None,
     include_actions: bool = False,
     layout: str = "dagre",
+    stack: bool = True,
 ) -> int:
     """Execute the experiment DAG visualization/export pipeline with given options."""
     save_plot_path = None
@@ -511,23 +567,30 @@ def run_dag(
 
     # Optional terminal text tree visualization
     if tree:
+        t_jobs, t_deps, t_tags = full_jobs, dependencies, job_tags_dict
+        stack_members = None
+        if stack:
+            t_jobs, t_deps, t_tags, stack_members = stack_dag_nodes(
+                full_jobs, dependencies, job_tags_dict
+            )
         dependents: dict[str, list[str]] = {}
-        for jid, deps in dependencies.items():
+        for jid, deps in t_deps.items():
             for d in deps:
                 dependents.setdefault(d, []).append(jid)
 
-        depths, pos, _ = compute_dag_layout(full_jobs, dependencies, dependents)
+        depths, pos, _ = compute_dag_layout(t_jobs, t_deps, dependents)
 
-        tree_roots = [jid for jid in full_jobs if not dependencies.get(jid)]
+        tree_roots = [jid for jid in t_jobs if not t_deps.get(jid)]
         print_robust_tree(
             tree_roots,
             dependents,
-            dependencies,
-            full_jobs,
-            job_tags_dict,
+            t_deps,
+            t_jobs,
+            t_tags,
             set(),
             depths,
             pos,
+            stack_members=stack_members,
         )
         if not (web or plot or save_plot_path):
             return 0
@@ -553,23 +616,30 @@ def run_dag(
 
     # Optional Matplotlib & graphical plot visualization (requires matplotlib)
     if plot or save_plot_path:
+        p_jobs, p_deps, p_tags = full_jobs, dependencies, job_tags_dict
+        stack_members = None
+        if stack:
+            p_jobs, p_deps, p_tags, stack_members = stack_dag_nodes(
+                full_jobs, dependencies, job_tags_dict
+            )
         dependents = {}
-        for jid, deps in dependencies.items():
+        for jid, deps in p_deps.items():
             for d in deps:
                 dependents.setdefault(d, []).append(jid)
 
         depths, pos, reduced_dag = compute_dag_layout(
-            full_jobs, dependencies, dependents
+            p_jobs, p_deps, dependents
         )
 
         plot_dag(
-            full_jobs,
-            job_tags_dict,
+            p_jobs,
+            p_tags,
             pos,
             reduced_dag,
             title_suffix=title_suffix,
             show_plot=plot,
             save_path=save_plot_path,
+            stack_members=stack_members,
         )
         return 0
 
@@ -693,6 +763,13 @@ def main() -> None:
         help="Layout algorithm for interactive web view: 'dagre' (default) or 'aligned' (stage-aligned flow).",
     )
     parser.add_argument(
+        "--no-stack",
+        action="store_false",
+        dest="stack",
+        default=True,
+        help="Disable stacking of structurally equivalent nodes.",
+    )
+    parser.add_argument(
         "--save-as",
         type=Path,
         default=None,
@@ -722,6 +799,7 @@ def main() -> None:
         filter_tags=args.filter,
         include_actions=args.include_actions,
         layout=args.layout,
+        stack=args.stack,
     )
 
 

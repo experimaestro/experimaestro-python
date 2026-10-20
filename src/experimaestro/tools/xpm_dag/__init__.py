@@ -19,12 +19,14 @@ from .xpm_dag import (
     filter_tasks_only,
     get_all_dependencies,
     get_experiment_configs,
+    is_init_task_node,
     load_dag_from_json,
     load_run_graph,
     load_run_status,
     parse_filter_arg,
     resolve_run_dir,
     resolve_target_config,
+    stack_dag_nodes,
 )
 from .xpm_web_dag import (
     generate_dag_html,
@@ -45,6 +47,7 @@ __all__ = [
     "generate_dag_html",
     "get_all_dependencies",
     "get_experiment_configs",
+    "is_init_task_node",
     "load_dag_from_json",
     "load_run_graph",
     "load_run_status",
@@ -56,4 +59,5 @@ __all__ = [
     "resolve_target_config",
     "run_dag",
     "serve_dag_web",
+    "stack_dag_nodes",
 ]

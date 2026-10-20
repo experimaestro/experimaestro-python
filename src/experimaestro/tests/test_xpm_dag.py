@@ -705,3 +705,359 @@ def test_load_run_graph_without_importing_remote_modules(tmp_path):
 
     dag_json = build_dag_json(full_jobs, dependencies, job_tags_dict, run_dir=run_dir)
     assert len(dag_json["nodes"]) == 5
+    nodes_by_id = {n["id"]: n for n in dag_json["nodes"]}
+    assert nodes_by_id[out_cfg_id]["type"] == "init"
+    assert nodes_by_id[out_cfg_id]["status"] == "init"
+    assert nodes_by_id[out_cfg_id]["init"] is True
+
+
+def test_init_task_node_type_and_filtering(tmp_path):
+    """Verify init_task nodes are typed as LightweightTask ('init') and kept by filter_tasks_only."""
+    from experimaestro import LightweightTask
+    from experimaestro.tools.xpm_dag import (
+        filter_tasks_only,
+        is_init_task_node,
+        load_run_graph,
+    )
+
+    run_dir = tmp_path / "init_run"
+    run_dir.mkdir(parents=True)
+
+    init_id = "1" * 64
+    cfg_id = "2" * 64
+    task_id = "3" * 64
+
+    objects_data = [
+        {
+            "id": 1,
+            "module": "pkg",
+            "type": "HFModelInitFromID",
+            "identifier": init_id,
+            "fields": {},
+        },
+        {
+            "id": 2,
+            "module": "pkg",
+            "type": "StaticConfig",
+            "identifier": cfg_id,
+            "fields": {},
+        },
+        {
+            "id": 3,
+            "module": "pkg",
+            "type": "Evaluate",
+            "identifier": task_id,
+            "task": 3,
+            "init-tasks": [1],
+            "fields": {"cfg": {"type": "python", "value": 2}},
+        },
+    ]
+    with (run_dir / "objects.jsonl").open("w") as f:
+        for obj in objects_data:
+            f.write(json.dumps(obj) + "\n")
+    with (run_dir / "jobs.jsonl").open("w") as f:
+        f.write(
+            json.dumps({"job_id": task_id, "task_id": "pkg.evaluate", "tags": {}})
+            + "\n"
+        )
+
+    full_jobs, dependencies, job_tags_dict = load_run_graph(run_dir)
+    assert isinstance(full_jobs[init_id], LightweightTask)
+    assert is_init_task_node(full_jobs[init_id]) is True
+    assert is_init_task_node(full_jobs[cfg_id]) is False
+    assert is_init_task_node(full_jobs[task_id]) is False
+
+    filtered_jobs, filtered_deps = filter_tasks_only(full_jobs, dependencies)
+    assert set(filtered_jobs.keys()) == {init_id, task_id}
+    assert init_id in filtered_deps[task_id]
+
+
+def test_bottleneck_grid_config_detection(tmp_path):
+    """Verify get_experiment_configs detects core bottleneck grid configs when dataset fan-outs exist."""
+    run_dir = tmp_path / "bottleneck_run"
+    run_dir.mkdir(parents=True)
+
+    records = [
+        # Upstream index builders (dataset/index fan-out)
+        {
+            "job_id": "idx1",
+            "task_id": "xpmir.index.sparse.sparseretrieverindexbuilder",
+            "tags": {"index_documents": "doc_a"},
+        },
+        {
+            "job_id": "idx2",
+            "task_id": "xpmir.index.sparse.sparseretrieverindexbuilder",
+            "tags": {"index_documents": "doc_b"},
+        },
+        # 1st-stage evaluations
+        {
+            "job_id": "eval1_a",
+            "task_id": "xpmir.evaluation.evaluate",
+            "tags": {"dataset": "ds_a", "first_stage": "splade"},
+        },
+        {
+            "job_id": "eval1_b",
+            "task_id": "xpmir.evaluation.evaluate",
+            "tags": {"dataset": "ds_b", "first_stage": "splade"},
+        },
+        # Core Learner grid-search jobs (2 configs)
+        {
+            "job_id": "learn1",
+            "task_id": "xpm_torch.learner.learner",
+            "tags": {"base": "ettin", "lr": 1e-5, "seed": 1},
+        },
+        {
+            "job_id": "learn2",
+            "task_id": "xpm_torch.learner.learner",
+            "tags": {"base": "ettin", "lr": 7e-6, "seed": 2},
+        },
+        # 2nd-stage evaluations (Cartesian product: 2 learners x 2 datasets = 4 jobs)
+        {
+            "job_id": "eval2_1a",
+            "task_id": "xpmir.evaluation.evaluate",
+            "tags": {
+                "base": "ettin",
+                "lr": 1e-5,
+                "seed": 1,
+                "dataset": "ds_a",
+                "first_stage": "splade",
+                "checkpoint": "last",
+            },
+        },
+        {
+            "job_id": "eval2_1b",
+            "task_id": "xpmir.evaluation.evaluate",
+            "tags": {
+                "base": "ettin",
+                "lr": 1e-5,
+                "seed": 1,
+                "dataset": "ds_b",
+                "first_stage": "splade",
+                "checkpoint": "last",
+            },
+        },
+        {
+            "job_id": "eval2_2a",
+            "task_id": "xpmir.evaluation.evaluate",
+            "tags": {
+                "base": "ettin",
+                "lr": 7e-6,
+                "seed": 2,
+                "dataset": "ds_a",
+                "first_stage": "splade",
+                "checkpoint": "last",
+            },
+        },
+        {
+            "job_id": "eval2_2b",
+            "task_id": "xpmir.evaluation.evaluate",
+            "tags": {
+                "base": "ettin",
+                "lr": 7e-6,
+                "seed": 2,
+                "dataset": "ds_b",
+                "first_stage": "splade",
+                "checkpoint": "last",
+            },
+        },
+    ]
+
+    with (run_dir / "jobs.jsonl").open("w") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+
+    configs = get_experiment_configs(run_dir)
+    assert configs == [
+        {"base": "ettin", "lr": 1e-5, "seed": 1},
+        {"base": "ettin", "lr": 7e-6, "seed": 2},
+    ]
+
+
+def test_stack_dag_nodes_parallel_chains():
+    """Verify stack_dag_nodes collapses parallel dataset chains while preserving Learner branches."""
+    from experimaestro import LightweightTask
+    from experimaestro.tools.xpm_dag import stack_dag_nodes
+
+    InitCls = type("HFModelInitFromID", (LightweightTask,), {})
+    IdxCls = type("SparseRetrieverIndexBuilder", (Task,), {})
+    EvalCls = type("Evaluate", (Task,), {})
+    LearnCls = type("Learner", (Task,), {})
+    LoaderCls = type("SimpleModuleLoader", (LightweightTask,), {})
+
+    full_jobs = {
+        "init_hf": InitCls(),
+        "idx_1": IdxCls(),
+        "idx_2": IdxCls(),
+        "idx_3": IdxCls(),
+        "eval1_1": EvalCls(),
+        "eval1_2": EvalCls(),
+        "eval1_3": EvalCls(),
+        "learn_a": LearnCls(),
+        "learn_b": LearnCls(),
+        "loader_a": LoaderCls(),
+        "loader_b": LoaderCls(),
+        "eval2_a1": EvalCls(),
+        "eval2_a2": EvalCls(),
+        "eval2_a3": EvalCls(),
+        "eval2_b1": EvalCls(),
+        "eval2_b2": EvalCls(),
+        "eval2_b3": EvalCls(),
+    }
+    dependencies = {
+        "idx_1": ["init_hf"],
+        "idx_2": ["init_hf"],
+        "idx_3": ["init_hf"],
+        "eval1_1": ["idx_1", "init_hf"],
+        "eval1_2": ["idx_2", "init_hf"],
+        "eval1_3": ["idx_3", "init_hf"],
+        "loader_a": ["learn_a"],
+        "loader_b": ["learn_b"],
+        "eval2_a1": ["loader_a", "eval1_1"],
+        "eval2_a2": ["loader_a", "eval1_2"],
+        "eval2_a3": ["loader_a", "eval1_3"],
+        "eval2_b1": ["loader_b", "eval1_1"],
+        "eval2_b2": ["loader_b", "eval1_2"],
+        "eval2_b3": ["loader_b", "eval1_3"],
+    }
+    job_tags_dict = {
+        "idx_1": {"index_documents": "d1"},
+        "idx_2": {"index_documents": "d2"},
+        "idx_3": {"index_documents": "d3"},
+        "eval1_1": {"dataset": "d1", "first_stage": "splade"},
+        "eval1_2": {"dataset": "d2", "first_stage": "splade"},
+        "eval1_3": {"dataset": "d3", "first_stage": "splade"},
+        "learn_a": {"lr": 1e-5, "seed": 1},
+        "learn_b": {"lr": 7e-6, "seed": 2},
+        "eval2_a1": {"lr": 1e-5, "seed": 1, "dataset": "d1", "first_stage": "splade"},
+        "eval2_a2": {"lr": 1e-5, "seed": 1, "dataset": "d2", "first_stage": "splade"},
+        "eval2_a3": {"lr": 1e-5, "seed": 1, "dataset": "d3", "first_stage": "splade"},
+        "eval2_b1": {"lr": 7e-6, "seed": 2, "dataset": "d1", "first_stage": "splade"},
+        "eval2_b2": {"lr": 7e-6, "seed": 2, "dataset": "d2", "first_stage": "splade"},
+        "eval2_b3": {"lr": 7e-6, "seed": 2, "dataset": "d3", "first_stage": "splade"},
+    }
+
+    s_jobs, s_deps, s_tags, s_members = stack_dag_nodes(
+        full_jobs, dependencies, job_tags_dict
+    )
+    # 17 nodes collapse into 9:
+    # init_hf (1), idx (x3), eval1 (x3), learn_a (1), learn_b (1), loader_a (1), loader_b (1), eval2_a (x3), eval2_b (x3)
+    assert len(s_jobs) == 9
+    assert "learn_a" in s_jobs and "learn_b" in s_jobs
+    assert len(s_members["idx_1"]) == 3
+    assert len(s_members["eval1_1"]) == 3
+    assert len(s_members["eval2_a1"]) == 3
+    assert len(s_members["eval2_b1"]) == 3
+    assert s_tags["eval2_a1"] == {
+        "lr": 1e-5,
+        "seed": 1,
+        "dataset": "<3 values>",
+        "first_stage": "splade",
+    }
+
+    dag_json = build_dag_json(full_jobs, dependencies, job_tags_dict)
+    html = generate_dag_html(dag_json)
+    assert 'id="btn-stack"' in html
+    assert "stack-backframe" in html
+    assert "stack-exterior-badge" in html
+    assert "type-init" in html
+
+
+def test_bottleneck_configs_non_subset_intersection_and_upstream_filter(tmp_path):
+    """Verify cross-stage schema intersection config discovery (e.g. PlaidIndexBuilder -> Evaluate)
+    and downstream inclusion when filtering by an upstream-only tag."""
+    from experimaestro.tools.xpm_dag.xpm_dag import (
+        filter_subgraph_by_config,
+        get_experiment_configs,
+        stack_dag_nodes,
+    )
+
+    run_dir = tmp_path / "plaid_run"
+    run_dir.mkdir()
+    jobs_file = run_dir / "jobs.jsonl"
+
+    models = ["lightonai/LateOn", "VictorMorand/Colbert-LateOn-Pearson"]
+    docs = ["doc_a", "doc_b", "doc_c"]
+    records = []
+    full_jobs = {}
+    dependencies = {}
+    job_tags_dict = {}
+
+    PlaidCls = type("PlaidIndexBuilder", (DummyTask,), {})
+    EvalCls = type("Evaluate", (DummyTask,), {})
+
+    for m in models:
+        for d in docs:
+            idx_id = f"idx_{m}_{d}"
+            ev_id = f"eval_{m}_{d}"
+            idx_tags = {
+                "scorer": m,
+                "scorer_id": m,
+                "scorer_type": "stMultiVectorEncoder",
+                "index_documents": d,
+            }
+            ev_tags = {
+                "scorer": m,
+                "scorer_id": m,
+                "scorer_type": "stMultiVectorEncoder",
+                "dataset": f"ds_{d}",
+                "first_stage": "plaid",
+            }
+            records.append(
+                {
+                    "job_id": idx_id,
+                    "task_id": "xpmir.index.plaid.plaidindexbuilder",
+                    "tags": idx_tags,
+                }
+            )
+            records.append(
+                {
+                    "job_id": ev_id,
+                    "task_id": "xpmir.evaluation.evaluate",
+                    "tags": ev_tags,
+                }
+            )
+            full_jobs[idx_id] = PlaidCls()
+            full_jobs[ev_id] = EvalCls()
+            dependencies[ev_id] = [idx_id]
+            job_tags_dict[idx_id] = idx_tags
+            job_tags_dict[ev_id] = ev_tags
+
+    with jobs_file.open("w") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+
+    # 1. Cross-stage intersection S_1 ∩ S_2 detects the 2 model configurations (not 12)
+    configs = get_experiment_configs(run_dir)
+    assert len(configs) == 2
+    assert configs[0] == {
+        "scorer": "lightonai/LateOn",
+        "scorer_id": "lightonai/LateOn",
+        "scorer_type": "stMultiVectorEncoder",
+    }
+    assert configs[1] == {
+        "scorer": "VictorMorand/Colbert-LateOn-Pearson",
+        "scorer_id": "VictorMorand/Colbert-LateOn-Pearson",
+        "scorer_type": "stMultiVectorEncoder",
+    }
+
+    # 2. Stacking with bottleneck grid_keys collapses 12 nodes into 4 (2 PlaidIndexBuilder x3 + 2 Evaluate x3)
+    grid_keys = set().union(*(c.keys() for c in configs))
+    s_jobs, s_deps, s_tags, s_members = stack_dag_nodes(
+        full_jobs, dependencies, job_tags_dict, grid_keys=grid_keys
+    )
+    assert len(s_jobs) == 4
+    for rep_id, members in s_members.items():
+        assert len(members) == 3
+
+    # 3. Filtering by an upstream-only tag (index_documents=doc_a) also includes downstream Evaluate
+    f_jobs, f_deps = filter_subgraph_by_config(
+        full_jobs,
+        dependencies,
+        job_tags_dict,
+        target_tags={"scorer": "lightonai/LateOn", "index_documents": "doc_a"},
+    )
+    assert set(f_jobs.keys()) == {
+        "idx_lightonai/LateOn_doc_a",
+        "eval_lightonai/LateOn_doc_a",
+    }
+    assert f_deps["eval_lightonai/LateOn_doc_a"] == ["idx_lightonai/LateOn_doc_a"]

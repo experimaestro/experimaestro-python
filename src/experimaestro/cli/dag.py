@@ -128,6 +128,12 @@ from experimaestro.tools.xpm_dag.draw_dag import run_dag
     default="dagre",
     help="Layout algorithm for interactive web view: 'dagre' (default) or 'aligned'.",
 )
+@click.option(
+    "--stack/--no-stack",
+    "stack",
+    default=True,
+    help="Stack structurally equivalent nodes sharing class, parents, and children (default: enabled).",
+)
 def dag(
     experiment_id: str | None,
     experiment_opt: str | None,
@@ -149,6 +155,7 @@ def dag(
     filter_tags: str | None,
     include_actions: bool,
     layout: str,
+    stack: bool,
 ) -> None:
     """Visualize and export experiment dependency DAGs.
 
@@ -185,6 +192,7 @@ def dag(
         filter_tags=filter_tags,
         include_actions=include_actions,
         layout=layout,
+        stack=stack,
     )
     if exit_code != 0:
         raise click.exceptions.Exit(exit_code)

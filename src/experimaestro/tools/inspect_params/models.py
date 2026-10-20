@@ -149,6 +149,7 @@ class ObjectNode:
     outgoing_refs: List[Tuple[str, int]] = field(default_factory=list)
     docstring: Optional[str] = None
     task_id: Optional[int] = None
+    is_init_task: bool = False
 
     @classmethod
     def from_definition(
@@ -249,6 +250,7 @@ class ParamsGraph:
         )
         self.objects: Dict[int, ObjectNode] = {}
         self.task_object_ids: Set[int] = set()
+        self.init_task_object_ids: Set[int] = set()
         self.root_task_id: Optional[int] = None
         self._parse(raw_objs, load_docstrings=load_docstrings)
 
@@ -306,13 +308,17 @@ class ParamsGraph:
             if node.task_id is not None:
                 self.task_object_ids.add(node.task_id)
             for it in node.init_tasks:
-                self.task_object_ids.add(it)
+                self.init_task_object_ids.add(it)
             if target_hash and node.identifier == target_hash:
                 cand_root = node.id
 
         for tid in self.task_object_ids:
             if tid in self.objects:
                 self.objects[tid].is_task = True
+
+        for it_id in self.init_task_object_ids:
+            if it_id in self.objects and not self.objects[it_id].is_task:
+                self.objects[it_id].is_init_task = True
 
         self.root_task_id = (
             cand_root if cand_root else (int(raw_objs[-1]["id"]) if raw_objs else None)

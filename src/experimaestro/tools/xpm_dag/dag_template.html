@@ -307,6 +307,77 @@
       border: 1px solid #cbd5e1;
     }
 
+    /* 1b. Init Tasks (LightweightTask) in Violet / Indigo */
+    .node-card.type-init {
+      background: #f5f3ff;
+      border-color: #c4b5fd;
+      border-left: 4px solid #7c3aed;
+    }
+    .node-card.type-init .node-name {
+      color: #4c1d95;
+    }
+    .node-card.type-init .node-status-badge {
+      background: #ede9fe;
+      color: #6d28d9;
+      border: 1px solid #ddd6fe;
+    }
+
+    /* Stacked node back-frames & exterior count label */
+    .stack-backframe {
+      rx: 8px;
+      ry: 8px;
+      stroke-width: 1.5px;
+      transition: opacity 0.2s ease, stroke 0.15s ease;
+    }
+    .stack-backframe.type-task.status-done, .stack-backframe.type-action.status-done {
+      fill: #f0fdf4;
+      stroke: #86efac;
+    }
+    .stack-backframe.type-task.status-running, .stack-backframe.type-action.status-running {
+      fill: #fffbeb;
+      stroke: #fcd34d;
+    }
+    .stack-backframe.type-task.status-error, .stack-backframe.type-action.status-error {
+      fill: #fef2f2;
+      stroke: #fca5a5;
+    }
+    .stack-backframe.type-task.status-waiting, .stack-backframe.type-action.status-waiting {
+      fill: #f8fafc;
+      stroke: #cbd5e1;
+    }
+    .stack-backframe.type-task.status-ready, .stack-backframe.type-action.status-ready {
+      fill: #eff6ff;
+      stroke: #93c5fd;
+    }
+    .stack-backframe.type-init {
+      fill: #f5f3ff;
+      stroke: #c4b5fd;
+    }
+    .stack-backframe.type-config {
+      fill: #f8fafc;
+      stroke: #cbd5e1;
+    }
+    .node-group.dimmed .stack-backframe,
+    .node-group.dimmed .stack-exterior-badge {
+      opacity: 0.12;
+    }
+    .stack-exterior-pill {
+      fill: #1e293b;
+      stroke: #ffffff;
+      stroke-width: 1.5px;
+      rx: 6px;
+      ry: 6px;
+    }
+    .stack-exterior-text {
+      fill: #ffffff;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      dominant-baseline: central;
+      text-anchor: middle;
+      pointer-events: none;
+    }
+
     /* 2. Tasks & Actions by Status */
     .node-card.type-task.status-done, .node-card.type-action.status-done {
       background: #f0fdf4;
@@ -562,6 +633,7 @@
         <button id="btn-layout-dagre" class="btn active" title="Dagre Hierarchical Layout">Dagre</button>
         <button id="btn-layout-aligned" class="btn" title="Aligned Grid Stages Layout">Aligned</button>
       </div>
+      <button id="btn-stack" class="btn active" title="Stack structurally equivalent nodes (same class, parents, and children)">⧉ Stack</button>
       <label class="toggle-label" title="Show Configurations and Parameters">
         <input type="checkbox" id="show-configs-toggle"> Show Configs
       </label>
@@ -617,7 +689,9 @@
     let currentOrientation = "LR"; // "LR" or "TB"
     let currentConfigIdx = (RAW_GRAPH.configs && RAW_GRAPH.configs.length > 0) ? "0" : "all";
     let showConfigs = false;
+    let stackNodes = true;
     let selectedNodeId = null;
+    let currentRenderedNodes = [];
 
     // Node sizing constants matching flat plot aspect ratio
     const CARD_W = 240;
@@ -770,6 +844,185 @@
       return reducedEdges;
     }
 
+    // Stack structurally equivalent nodes sharing (name, type, grid_tags, parent_groups, child_groups)
+    function stackGraphData(nodes, edges) {
+      if (nodes.length <= 1) return { nodes, edges };
+
+      const preds = new Map();
+      const succs = new Map();
+      nodes.forEach(n => {
+        preds.set(n.id, []);
+        succs.set(n.id, []);
+      });
+      edges.forEach(e => {
+        if (preds.has(e.target)) preds.get(e.target).push(e.source);
+        if (succs.has(e.source)) succs.get(e.source).push(e.target);
+      });
+
+      // Determine bottleneck grid_keys to preserve core model branches in Full Grid view
+      const gridKeys = new Set(RAW_GRAPH.grid_keys || []);
+
+      const baseSig = new Map();
+      nodes.forEach(n => {
+        const tags = n.tags || {};
+        const gPairs = [];
+        gridKeys.forEach(k => {
+          if (tags[k] !== undefined && tags[k] !== null) {
+            gPairs.push(`${k}=${tags[k]}`);
+          }
+        });
+        gPairs.sort();
+        baseSig.set(n.id, `${n.name}||${n.type}||${gPairs.join(",")}`);
+      });
+
+      let color = new Map();
+      const initUniq = Array.from(new Set(baseSig.values())).sort();
+      const initMap = new Map(initUniq.map((v, i) => [v, i]));
+      nodes.forEach(n => color.set(n.id, initMap.get(baseSig.get(n.id))));
+
+      for (let iter = 0; iter <= nodes.length; iter++) {
+        const nextSig = new Map();
+        nodes.forEach(n => {
+          const pCols = Array.from(new Set((preds.get(n.id) || []).map(p => color.get(p)))).sort((a, b) => a - b);
+          const cCols = Array.from(new Set((succs.get(n.id) || []).map(c => color.get(c)))).sort((a, b) => a - b);
+          nextSig.set(n.id, `${baseSig.get(n.id)}||P:${pCols.join(",")}||C:${cCols.join(",")}`);
+        });
+        const uniqSigs = Array.from(new Set(nextSig.values())).sort();
+        const sigToId = new Map(uniqSigs.map((v, i) => [v, i]));
+        let changed = false;
+        const nextColor = new Map();
+        nodes.forEach(n => {
+          const nc = sigToId.get(nextSig.get(n.id));
+          if (nc !== color.get(n.id)) changed = true;
+          nextColor.set(n.id, nc);
+        });
+        color = nextColor;
+        if (!changed) break;
+      }
+
+      const groups = new Map();
+      const sortedNodes = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
+      sortedNodes.forEach(n => {
+        const c = color.get(n.id);
+        if (!groups.has(c)) groups.set(c, []);
+        groups.get(c).push(n);
+      });
+
+      const memberToRep = new Map();
+      const stackedNodes = [];
+
+      groups.forEach(members => {
+        const rep = members[0];
+        members.forEach(m => memberToRep.set(m.id, rep.id));
+
+        if (members.length === 1) {
+          stackedNodes.push({
+            ...rep,
+            stack_count: 1,
+            stack_members: [rep],
+          });
+        } else {
+          // Merge tags: keep shared values, summarize varying values as <M values>
+          const allTagKeys = [];
+          members.forEach(m => {
+            Object.keys(m.tags || {}).forEach(k => {
+              if (!allTagKeys.includes(k)) allTagKeys.push(k);
+            });
+          });
+          const mergedTags = {};
+          const varyingTags = {};
+          allTagKeys.forEach(k => {
+            const vals = members
+              .filter(m => m.tags && m.tags[k] !== undefined && m.tags[k] !== null)
+              .map(m => m.tags[k]);
+            const uniqVals = Array.from(new Set(vals.map(v => String(v))));
+            if (uniqVals.length === 1 && vals.length === members.length) {
+              mergedTags[k] = vals[0];
+            } else {
+              mergedTags[k] = `<${uniqVals.length} values>`;
+              varyingTags[k] = uniqVals;
+            }
+          });
+
+          // Merge depends_on (representative IDs)
+          const mergedDeps = [];
+          members.forEach(m => {
+            (m.depends_on || []).forEach(depId => {
+              const repDep = memberToRep.get(depId) || depId;
+              if (repDep !== rep.id && !mergedDeps.includes(repDep)) {
+                mergedDeps.push(repDep);
+              }
+            });
+          });
+
+          stackedNodes.push({
+            ...rep,
+            tags: mergedTags,
+            varying_tags: varyingTags,
+            depends_on: mergedDeps,
+            dependsOn: mergedDeps,
+            stack_count: members.length,
+            stack_members: members,
+          });
+        }
+      });
+
+      // Normalize depends_on to mapped representative IDs
+      stackedNodes.forEach(sn => {
+        const mapped = [];
+        (sn.depends_on || []).forEach(d => {
+          const rd = memberToRep.get(d) || d;
+          if (rd !== sn.id && !mapped.includes(rd)) mapped.push(rd);
+        });
+        sn.depends_on = mapped;
+        sn.dependsOn = mapped;
+      });
+
+      // Deduplicate edges between stacked representatives and transitively reduce
+      const seenEdges = new Set();
+      const rawStackedEdges = [];
+      edges.forEach(e => {
+        const u = memberToRep.get(e.source) || e.source;
+        const v = memberToRep.get(e.target) || e.target;
+        if (u !== v) {
+          const k = `${u}->${v}`;
+          if (!seenEdges.has(k)) {
+            seenEdges.add(k);
+            rawStackedEdges.push({ source: u, target: v });
+          }
+        }
+      });
+
+      // Remove transitive shortcuts on stacked edges
+      const sSuccs = new Map();
+      stackedNodes.forEach(n => sSuccs.set(n.id, []));
+      rawStackedEdges.forEach(e => {
+        if (sSuccs.has(e.source)) sSuccs.get(e.source).push(e.target);
+      });
+      const reducedStackedEdges = [];
+      rawStackedEdges.forEach(e => {
+        let hasAlt = false;
+        const q = (sSuccs.get(e.source) || []).filter(c => c !== e.target);
+        const seen = new Set(q);
+        while (q.length > 0) {
+          const curr = q.pop();
+          if (curr === e.target) {
+            hasAlt = true;
+            break;
+          }
+          for (const nxt of (sSuccs.get(curr) || [])) {
+            if (!seen.has(nxt)) {
+              seen.add(nxt);
+              q.push(nxt);
+            }
+          }
+        }
+        if (!hasAlt) reducedStackedEdges.push(e);
+      });
+
+      return { nodes: stackedNodes, edges: reducedStackedEdges };
+    }
+
     // Filter nodes and edges based on active filters
     function getFilteredData() {
       let nodes = [...RAW_GRAPH.nodes];
@@ -779,15 +1032,55 @@
       if (currentConfigIdx !== "all") {
         const targetConfig = RAW_GRAPH.configs[parseInt(currentConfigIdx, 10)];
         if (targetConfig) {
-          // Find matching job nodes (tasks matching targetConfig, or configs whose tags match a subset of targetConfig)
+          const targetKeys = Object.keys(targetConfig);
+          // Match job nodes whose tags contain all targetConfig key-values (including downstream
+          // tasks with extra fan-out tags), or static config nodes matching a subset of targetConfig
           const matching = nodes.filter(n => {
             const tags = n.tags || {};
             const tagKeys = Object.keys(tags);
             if (tagKeys.length === 0) return false;
-            return tagKeys.every(k => targetConfig[k] == tags[k]);
+            if (targetKeys.length > 0 && targetKeys.every(k => tags[k] !== undefined && tags[k] == targetConfig[k])) {
+              return true;
+            }
+            if (n.type === "config" && tagKeys.every(k => targetConfig[k] !== undefined && targetConfig[k] == tags[k])) {
+              return true;
+            }
+            return false;
           });
           const selected = new Set(matching.map(n => n.id));
-          const stack = [...matching.map(n => n.id)];
+          const matchedTasks = matching.filter(n => n.type === "task");
+          const matchedTaskIds = new Set(matchedTasks.map(n => n.id));
+          const hasMultiStageMatch = matchedTasks.some(n =>
+            (n.depends_on || []).some(d => matchedTaskIds.has(d))
+          );
+
+          // Only traverse downstream tasks when matching hit only a single upstream stage
+          if (matchedTasks.length > 0 && !hasMultiStageMatch) {
+            const dependents = new Map();
+            nodes.forEach(n => {
+              (n.depends_on || []).forEach(dep => {
+                if (!dependents.has(dep)) dependents.set(dep, []);
+                dependents.get(dep).push(n.id);
+              });
+            });
+
+            const downStack = matchedTasks.map(n => n.id);
+            while (downStack.length > 0) {
+              const currId = downStack.pop();
+              for (const childId of (dependents.get(currId) || [])) {
+                if (selected.has(childId)) continue;
+                const childNode = nodeMap.get(childId);
+                if (!childNode || childNode.type !== "task") continue;
+                const cTags = childNode.tags || {};
+                if (targetKeys.every(k => cTags[k] === undefined || cTags[k] === null || cTags[k] == targetConfig[k])) {
+                  selected.add(childId);
+                  downStack.push(childId);
+                }
+              }
+            }
+          }
+
+          const stack = [...selected];
 
           // Traverse upstream dependencies
           while (stack.length > 0) {
@@ -814,9 +1107,9 @@
         }
       }
 
-      // 2. Filter by Show Configs (default: hide static configs)
+      // 2. Filter by Show Configs (default: hide static configs, keep task, action, and init)
       if (!showConfigs) {
-        nodes = nodes.filter(n => n.type === "task" || n.type === "action");
+        nodes = nodes.filter(n => n.type === "task" || n.type === "action" || n.type === "init" || n.init === true);
       }
 
       const activeNodeIds = new Set(nodes.map(n => n.id));
@@ -829,6 +1122,16 @@
         edges = computeTransitiveReduction(nodes, activeNodeIds);
       }
 
+      // 3. Apply structural node stacking if active
+      if (stackNodes) {
+        const stacked = stackGraphData(nodes, edges);
+        nodes = stacked.nodes;
+        edges = stacked.edges;
+      } else {
+        nodes = nodes.map(n => ({ ...n, stack_count: 1, stack_members: [n] }));
+      }
+
+      currentRenderedNodes = nodes;
       return { nodes, edges };
     }
 
@@ -1217,7 +1520,23 @@
 
       nodeGroups.each(function(d) {
         const coords = nodeCoords.get(d.id) || { w: CARD_W, h: MIN_CARD_H };
-        const fo = d3.select(this)
+        const groupEl = d3.select(this);
+        const scount = d.stack_count || 1;
+
+        // Draw stacked offset back-frames behind the primary card
+        if (scount > 1) {
+          const nFrames = scount > 5 ? 3 : 2;
+          for (let layer = nFrames; layer >= 1; layer--) {
+            groupEl.append("rect")
+              .attr("class", `stack-backframe type-${d.type} status-${d.status}`)
+              .attr("x", layer * 5)
+              .attr("y", layer * 5)
+              .attr("width", coords.w)
+              .attr("height", coords.h);
+          }
+        }
+
+        const fo = groupEl
           .append("foreignObject")
           .attr("width", coords.w)
           .attr("height", coords.h);
@@ -1225,6 +1544,30 @@
         const card = fo.append("xhtml:div")
           .attr("class", `node-card type-${d.type} status-${d.status}`)
           .attr("id", `card-${d.id}`);
+
+        // Exterior "x XX" badge outside the node stack
+        if (scount > 1) {
+          const nFrames = scount > 5 ? 3 : 2;
+          const badgeText = `× ${scount}`;
+          const pillW = Math.max(36, badgeText.length * 7 + 12);
+          const pillH = 20;
+          const extX = coords.w + nFrames * 5 + 6;
+          const extY = -4;
+          const extBadge = groupEl.append("g")
+            .attr("class", "stack-exterior-badge")
+            .attr("transform", `translate(${extX}, ${extY})`);
+          extBadge.append("rect")
+            .attr("class", "stack-exterior-pill")
+            .attr("x", 0)
+            .attr("y", 0)
+            .attr("width", pillW)
+            .attr("height", pillH);
+          extBadge.append("text")
+            .attr("class", "stack-exterior-text")
+            .attr("x", pillW / 2)
+            .attr("y", pillH / 2)
+            .text(badgeText);
+        }
 
         // Header
         const header = card.append("div").attr("class", "node-header");
@@ -1234,14 +1577,14 @@
           .text(d.name);
         header.append("div")
           .attr("class", "node-status-badge")
-          .text(d.status);
+          .text(d.type === "init" ? "INIT" : d.status);
 
-        // Subline (Line 2: Job hash only)
+        // Subline (Line 2: Job hash + stacked indicator)
         const subline = card.append("div").attr("class", "node-subline");
         const hashSpan = subline.append("span")
           .attr("class", "node-hash")
-          .attr("title", "Click to copy full ID")
-          .text(`[${d.id.substring(0, 8)}]`);
+          .attr("title", scount > 1 ? `${scount} stacked nodes (click to copy representative ID)` : "Click to copy full ID")
+          .text(scount > 1 ? `[${d.id.substring(0, 8)}] (+${scount - 1} stacked)` : `[${d.id.substring(0, 8)}]`);
         hashSpan.on("click", (e) => {
           e.stopPropagation();
           copyText(d.id, "job ID");
@@ -1285,6 +1628,13 @@
     function highlightLineage(nodeId, edges) {
       const { upstream, downstream, upEdges, downEdges } = computeLineage(nodeId, edges);
 
+      d3.selectAll(".node-group").each(function(d) {
+        const isTarget = d.id === nodeId;
+        const isUp = upstream.has(d.id);
+        const isDown = downstream.has(d.id);
+        d3.select(this).classed("dimmed", !isTarget && !isUp && !isDown);
+      });
+
       d3.selectAll(".node-card").each(function(d) {
         const el = d3.select(this);
         const isTarget = d.id === nodeId;
@@ -1313,6 +1663,7 @@
     }
 
     function clearHighlight() {
+      d3.selectAll(".node-group").classed("dimmed", false);
       d3.selectAll(".node-card")
         .classed("highlight-upstream", false)
         .classed("highlight-downstream", false)
@@ -1340,39 +1691,67 @@
 
     // Side Inspector Drawer
     function openDrawer(nodeId) {
-      const node = RAW_GRAPH.nodes.find(n => n.id === nodeId);
+      const node = currentRenderedNodes.find(n => n.id === nodeId) || RAW_GRAPH.nodes.find(n => n.id === nodeId);
       if (!node) return;
 
       const drawer = document.getElementById("drawer");
       const title = document.getElementById("drawer-title");
       const body = document.getElementById("drawer-body");
+      const scount = node.stack_count || 1;
+      const members = node.stack_members || [node];
 
-      title.innerHTML = `<span>${node.name}</span> <span class="node-status-badge" style="font-size:10px;">${node.status}</span>`;
+      title.innerHTML = `<span>${node.name}${scount > 1 ? ` × ${scount}` : ""}</span> <span class="node-status-badge" style="font-size:10px;">${node.type === "init" ? "INIT" : node.status}</span>`;
 
       let tagsRows = "";
       for (const [k, v] of Object.entries(node.tags || {})) {
-        tagsRows += `<tr><td class="key">${k}</td><td class="val"><strong>${v}</strong></td></tr>`;
+        const varList = node.varying_tags && node.varying_tags[k];
+        const valDisplay = varList ? `<strong>${v}</strong> <div style="font-size:11px;color:#64748b;margin-top:2px;">${varList.slice(0, 8).join(", ")}${varList.length > 8 ? ", …" : ""}</div>` : `<strong>${v}</strong>`;
+        tagsRows += `<tr><td class="key">${k}</td><td class="val">${valDisplay}</td></tr>`;
       }
       if (!tagsRows) tagsRows = `<tr><td colspan="2" style="color:#94a3b8;font-style:italic;">None</td></tr>`;
 
       // Parents / Dependencies
       let depsHtml = "";
       (node.depends_on || []).forEach(depId => {
-        const pNode = RAW_GRAPH.nodes.find(n => n.id === depId);
-        const pName = pNode ? pNode.name : depId.substring(0, 8);
+        const pNode = currentRenderedNodes.find(n => n.id === depId) || RAW_GRAPH.nodes.find(n => n.id === depId);
+        const pName = pNode ? (pNode.stack_count > 1 ? `${pNode.name} × ${pNode.stack_count}` : pNode.name) : depId.substring(0, 8);
         depsHtml += `<div class="lineage-item" onclick="focusNode('${depId}')"><span>${pName}</span> <span style="font-family:monospace;color:#94a3b8;">${depId.substring(0, 8)}</span></div>`;
       });
       if (!depsHtml) depsHtml = `<div style="color:#94a3b8;font-style:italic;font-size:12px;">No dependencies (Root)</div>`;
 
       // Children / Dependents
       let succHtml = "";
-      RAW_GRAPH.nodes.filter(n => (n.depends_on || []).includes(node.id)).forEach(child => {
-        succHtml += `<div class="lineage-item" onclick="focusNode('${child.id}')"><span>${child.name}</span> <span style="font-family:monospace;color:#94a3b8;">${child.id.substring(0, 8)}</span></div>`;
+      currentRenderedNodes.filter(n => (n.depends_on || []).includes(node.id)).forEach(child => {
+        const cName = child.stack_count > 1 ? `${child.name} × ${child.stack_count}` : child.name;
+        succHtml += `<div class="lineage-item" onclick="focusNode('${child.id}')"><span>${cName}</span> <span style="font-family:monospace;color:#94a3b8;">${child.id.substring(0, 8)}</span></div>`;
       });
       if (!succHtml) succHtml = `<div style="color:#94a3b8;font-style:italic;font-size:12px;">No downstream dependents</div>`;
 
       const jobPath = node.path || node.locator || "";
       const displayPath = node.display_path || (jobPath ? '.../' + (node.task_id || node.name) + '/' + node.id.substring(0, 20) + '...' : '');
+
+      let membersSectionHtml = "";
+      if (scount > 1) {
+        const varyingKeys = Object.keys(node.varying_tags || {});
+        const memberItems = members.map(m => {
+          const mTags = m.tags || {};
+          const diffStr = varyingKeys.map(k => mTags[k] !== undefined ? `${k}=${mTags[k]}` : "").filter(Boolean).join(", ");
+          const mPath = m.path || m.locator || "";
+          return `<div class="lineage-item" style="flex-direction:column;align-items:flex-start;gap:2px;" onclick="copyText('${mPath ? mPath.replace(/'/g, "\\'") : m.id}', '${mPath ? "member path" : "member ID"}')">
+            <div style="display:flex;justify-content:space-between;width:100%;">
+              <span style="font-family:monospace;font-weight:600;">[${m.id.substring(0, 8)}]</span>
+              <span style="font-size:10.5px;color:#64748b;">📋 Copy ${mPath ? "Path" : "ID"}</span>
+            </div>
+            ${diffStr ? `<div style="font-size:11px;color:#334155;word-break:break-all;">${diffStr}</div>` : ""}
+          </div>`;
+        }).join("");
+        membersSectionHtml = `
+          <div>
+            <div class="drawer-section-title">Stacked Members (${scount})</div>
+            <div class="lineage-list" style="max-height:220px;overflow-y:auto;">${memberItems}</div>
+          </div>
+        `;
+      }
 
       body.innerHTML = `
         <div>
@@ -1381,8 +1760,9 @@
             <tr><td class="key">Job ID</td><td class="val"><span class="node-hash" onclick="copyText('${node.id}', 'job ID')">${node.id.substring(0, 16)}… 📋</span></td></tr>
             <tr><td class="key">Task ID</td><td class="val">${node.task_id || "—"}</td></tr>
             <tr><td class="key">Type</td><td class="val">${node.type}</td></tr>
-            <tr><td class="key">Status</td><td class="val"><strong>${node.status}</strong></td></tr>
-            ${jobPath ? `<tr><td class="key">Path</td><td class="val"><span class="node-hash" title="${jobPath}" onclick="copyText('${jobPath.replace(/'/g, "\'")}', 'path')">${displayPath} 📋</span></td></tr>` : ''}
+            <tr><td class="key">Status</td><td class="val"><strong>${node.type === "init" ? "init" : node.status}</strong></td></tr>
+            ${scount > 1 ? `<tr><td class="key">Stack Size</td><td class="val"><strong>× ${scount} nodes</strong></td></tr>` : ''}
+            ${jobPath ? `<tr><td class="key">Path</td><td class="val"><span class="node-hash" title="${jobPath}" onclick="copyText('${jobPath.replace(/'/g, "\\'")}', 'path')">${displayPath} 📋</span></td></tr>` : ''}
           </table>
         </div>
 
@@ -1392,6 +1772,8 @@
             ${tagsRows}
           </table>
         </div>
+
+        ${membersSectionHtml}
 
         <div>
           <div class="drawer-section-title">Upstream Dependencies (${(node.depends_on || []).length})</div>
@@ -1477,6 +1859,17 @@
       currentConfigIdx = e.target.value;
       renderGraph();
     });
+
+    const btnStack = document.getElementById("btn-stack");
+    if (btnStack) {
+      btnStack.classList.toggle("active", stackNodes);
+      btnStack.addEventListener("click", () => {
+        stackNodes = !stackNodes;
+        btnStack.classList.toggle("active", stackNodes);
+        clearSelection();
+        renderGraph();
+      });
+    }
 
     const showConfigsToggle = document.getElementById("show-configs-toggle");
     showConfigsToggle.checked = showConfigs;

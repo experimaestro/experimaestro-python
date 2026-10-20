@@ -26,6 +26,8 @@ from experimaestro.tools.inspect_params.models import (
     ObjectNode,
     ParamsGraph,
     ResolvedPath,
+    normalize_identifier,
+    resolve_serialized_value,
 )
 from experimaestro.utils.remote import (
     clean_job_target,
@@ -55,7 +57,9 @@ __all__ = [
     "find_remote_workspace_file",
     "find_workspace_file",
     "get_session_cache_dir",
+    "normalize_identifier",
     "resolve_job_file_pattern",
+    "resolve_serialized_value",
     "resolve_workspace",
     "run_inspector",
     "run_ssh_command",

@@ -18,7 +18,7 @@ import sys
 from typing import Any
 import networkx as nx
 
-from experimaestro import Action, Config, Task, tags
+from experimaestro import Action, Config, LightweightTask, Task, tags
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from experimaestro.settings import find_workspace, get_workspace
 from experimaestro.tools.inspect_params.models import (
@@ -188,14 +188,22 @@ class _LightweightParam:
 class _LightweightXPMInfo:
     """Lightweight metadata container matching ConfigInformation's DAG interface."""
 
-    __slots__ = ("identifier", "task", "init_tasks", "dependencies", "values")
+    __slots__ = (
+        "identifier",
+        "task",
+        "init_tasks",
+        "dependencies",
+        "values",
+        "is_init_task",
+    )
 
-    def __init__(self, identifier: str):
+    def __init__(self, identifier: str, is_init_task: bool = False):
         self.identifier = identifier
         self.task: Any = None
         self.init_tasks: list[Any] = []
         self.dependencies: list[Any] = []
         self.values: dict[str, Any] = {}
+        self.is_init_task = is_init_task
 
     def xpmvalues(self):
         for k, v in self.values.items():
@@ -205,15 +213,27 @@ class _LightweightXPMInfo:
         return {}
 
 
+def is_init_task_node(config: Any) -> bool:
+    """Return True if a node is a LightweightTask (init_task) and not a full Task or Action."""
+    if config is None:
+        return False
+    if isinstance(config, (Task, Action)):
+        return False
+    if isinstance(config, LightweightTask):
+        return True
+    xpm = getattr(config, "__xpm__", None)
+    return bool(getattr(xpm, "is_init_task", False))
+
+
 def _load_lightweight_objects(
     graph: ParamsGraph,
     job_ids: set[str],
     action_ids: set[str],
 ) -> dict[int, Any]:
-    """Construct lightweight Config, Task, and Action nodes from an indexed ParamsGraph.
+    """Construct lightweight Config, LightweightTask, Task, and Action nodes from an indexed ParamsGraph.
 
     Avoids importing external Python modules or executing remote file paths while
-    preserving class names, isinstance(node, (Task, Action, Config)) semantics,
+    preserving class names, isinstance(node, (Task, Action, LightweightTask, Config)) semantics,
     and __xpm__ dependency/parameter traversal.
     """
     cls_cache: dict[tuple[type, str, str], type] = {}
@@ -228,6 +248,8 @@ def _load_lightweight_objects(
             base_cls: type = Action
         elif (ident and ident in job_ids) or obj_node.is_task:
             base_cls = Task
+        elif obj_node.is_init_task:
+            base_cls = LightweightTask
         else:
             base_cls = Config
             # Fallback to already-imported module in sys.modules if present
@@ -239,6 +261,8 @@ def _load_lightweight_objects(
                         base_cls = Action
                     elif issubclass(real_cls, Task):
                         base_cls = Task
+                    elif issubclass(real_cls, LightweightTask):
+                        base_cls = LightweightTask
 
         cls_key = (base_cls, module_name, type_name)
         cls = cls_cache.get(cls_key)
@@ -247,7 +271,11 @@ def _load_lightweight_objects(
             cls_cache[cls_key] = cls
 
         node = object.__new__(cls)
-        object.__setattr__(node, "__xpm__", _LightweightXPMInfo(ident))
+        object.__setattr__(
+            node,
+            "__xpm__",
+            _LightweightXPMInfo(ident, is_init_task=(base_cls is LightweightTask)),
+        )
         objects[obj_id] = node
 
     for obj_id, obj_node in graph.objects.items():
@@ -314,16 +342,51 @@ def load_run_graph(
         if obj_node.identifier
     }
 
-    dependencies = {
-        jid: get_all_dependencies(config, full_jobs)
+    direct_deps = {
+        jid: get_all_dependencies(config, full_jobs, recursive=False)
         for jid, config in full_jobs.items()
     }
-    # Remove PathGenerator back-edges where a Config's generated path points to
-    # the job directory of the enclosing Task that depends on that Config.
-    for jid, deps in list(dependencies.items()):
+    raw_all_deps = {
+        jid: set(get_all_dependencies(config, full_jobs, recursive=True))
+        for jid, config in full_jobs.items()
+    }
+    # Remove PathGenerator back-edges on direct dependencies where a Config's
+    # generated path points to the job directory of an enclosing Task/Config.
+    for jid, deps in list(direct_deps.items()):
         if not isinstance(full_jobs.get(jid), (Task, Action)):
-            dependencies[jid] = [d for d in deps if jid not in dependencies.get(d, ())]
-    dependencies = {k: v for k, v in dependencies.items() if v}
+            direct_deps[jid] = [
+                d for d in deps if jid not in raw_all_deps.get(d, set())
+            ]
+
+    # Expand transitive Config dependencies from cleaned direct_deps so nested
+    # Configs (e.g. ValidationSettings -> AggregatorValidationListener) never
+    # inherit stripped PathGenerator back-edges.
+    dependencies: dict[str, list[str]] = {}
+    for jid in full_jobs:
+        expanded: list[str] = []
+        seen_deps: set[str] = set()
+        queue = list(direct_deps.get(jid, []))
+        visited_cfg: set[str] = set()
+        while queue:
+            d = queue.pop(0)
+            if d == jid:
+                continue
+            if d not in seen_deps:
+                seen_deps.add(d)
+                expanded.append(d)
+            d_obj = full_jobs.get(d)
+            if (
+                d_obj is not None
+                and not isinstance(d_obj, (Task, Action, LightweightTask))
+                and not is_init_task_node(d_obj)
+                and d not in visited_cfg
+            ):
+                visited_cfg.add(d)
+                for sub_d in direct_deps.get(d, []):
+                    if sub_d not in seen_deps:
+                        queue.append(sub_d)
+        if expanded:
+            dependencies[jid] = expanded
 
     # Populate tags for Config nodes (e.g. CNN architecture params)
     for jid, config in full_jobs.items():
@@ -348,7 +411,9 @@ def load_run_status(run_dir: Path) -> dict[str, Any]:
         return {}
 
 
-def get_all_dependencies(config, full_jobs: dict) -> list[str]:
+def get_all_dependencies(
+    config, full_jobs: dict, *, recursive: bool = True
+) -> list[str]:
     """Walk the config and its fields to find all dependencies."""
     xpm = config.__xpm__
     dep_ids = set()
@@ -378,6 +443,8 @@ def get_all_dependencies(config, full_jobs: dict) -> list[str]:
             v_id = str(v.__xpm__.identifier)
             if v_id in full_jobs:
                 dep_ids.add(v_id)
+                if not recursive:
+                    return
             if v_id not in processed_configs:
                 processed_configs.add(v_id)
                 for _, sub_value in v.__xpm__.xpmvalues():
@@ -402,25 +469,109 @@ def get_all_dependencies(config, full_jobs: dict) -> list[str]:
     return list(dep_ids)
 
 
+def _detect_bottleneck_configs(
+    job_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Detect core bottleneck grid-search configurations from jobs.jsonl records.
+
+    When an experiment contains both core model grid-search tasks (e.g. Learner
+    tagged with ``{base, lr, seed}``) and dataset/evaluation fan-out tasks
+    (e.g. IndexBuilder tagged with ``{index_documents}``, 1st-stage Evaluate
+    tagged with ``{dataset, first_stage}``, and 2nd-stage Evaluate tagged with
+    ``{base, lr, seed, dataset, first_stage, checkpoint}``), this function
+    identifies the bottleneck grid-search schema so that configuration filtering
+    selects one complete model run (including all its evaluation datasets) rather
+    than individual dataset jobs.
+    """
+    tagged_records = [r for r in job_records if r.get("tags")]
+    if not tagged_records:
+        return []
+
+    by_schema: dict[frozenset[str], list[dict[str, Any]]] = {}
+    schema_task_ids: dict[frozenset[str], set[str]] = {}
+    for r in tagged_records:
+        tdict = r["tags"]
+        schema = frozenset(tdict.keys())
+        by_schema.setdefault(schema, []).append(tdict)
+        if r.get("task_id"):
+            schema_task_ids.setdefault(schema, set()).add(r["task_id"])
+
+    schemas = list(by_schema.keys())
+    if len(schemas) > 1:
+        # Look for shared bottleneck schemas across distinct task stages via
+        # pairwise schema intersections I = S_a ∩ S_b (which covers both strict
+        # subsets S_a ⊂ S_b like Learner -> Evaluate and non-subset stage overlaps
+        # like IndexBuilder{model, doc} -> Evaluate{model, dataset}).
+        candidate_configs: dict[frozenset[str], list[dict[str, Any]]] = {}
+        for idx_a, s_a in enumerate(schemas):
+            tids_a = schema_task_ids.get(s_a, set())
+            uniq_a = {tuple(sorted(d.items())) for d in by_schema[s_a]}
+            for s_b in schemas[idx_a + 1 :]:
+                tids_b = schema_task_ids.get(s_b, set())
+                if tids_a and tids_b and tids_a == tids_b:
+                    continue
+                inter = s_a & s_b
+                if not inter:
+                    continue
+                uniq_b = {tuple(sorted(d.items())) for d in by_schema[s_b]}
+                proj_a = {
+                    tuple(sorted((k, d[k]) for k in inter))
+                    for d in by_schema[s_a]
+                }
+                proj_b = {
+                    tuple(sorted((k, d[k]) for k in inter))
+                    for d in by_schema[s_b]
+                }
+                shared_proj = proj_a & proj_b
+                union_proj = proj_a | proj_b
+                # Require shared bottleneck configurations across stages and a 1->N fan-out
+                if shared_proj and max(len(uniq_a), len(uniq_b)) > len(union_proj):
+                    if inter not in candidate_configs:
+                        configs_for_inter: list[dict[str, Any]] = []
+                        seen_inter: set[tuple] = set()
+                        for d in by_schema[s_a] + by_schema[s_b]:
+                            proj_dict = {k: d[k] for k in inter}
+                            key = tuple(sorted(proj_dict.items()))
+                            if key in shared_proj and key not in seen_inter:
+                                seen_inter.add(key)
+                                configs_for_inter.append(proj_dict)
+                        if configs_for_inter:
+                            candidate_configs[inter] = configs_for_inter
+
+        if candidate_configs:
+            # Prefer largest bottleneck schema key-set, breaking ties by strongest compression (fewest configs)
+            target_schema = max(
+                candidate_configs.keys(),
+                key=lambda s: (len(s), -len(candidate_configs[s])),
+            )
+            return candidate_configs[target_schema]
+
+    # Default: deduplicate all non-empty tag dictionaries in order
+    configs = []
+    seen = set()
+    for r in tagged_records:
+        tdict = r["tags"]
+        key = tuple(sorted(tdict.items()))
+        if key not in seen:
+            seen.add(key)
+            configs.append(tdict)
+    return configs
+
+
 def get_experiment_configs(run_dir: Path) -> list[dict]:
-    """Retrieve unique non-empty tag dictionaries from jobs.jsonl in a run directory."""
+    """Retrieve unique bottleneck grid-search tag dictionaries from jobs.jsonl in a run directory."""
     jobs_jsonl = run_dir / "jobs.jsonl"
     if not jobs_jsonl.exists():
         return []
 
-    configs: list[dict] = []
-    seen: set[tuple] = set()
+    job_records: list[dict[str, Any]] = []
     with jobs_jsonl.open() as f:
         for line in f:
             if not line.strip():
                 continue
-            d = json.loads(line)
-            tags_dict = d.get("tags")
-            if tags_dict:
-                key = tuple(sorted(tags_dict.items()))
-                if key not in seen:
-                    seen.add(key)
-                    configs.append(tags_dict)
+            job_records.append(json.loads(line))
+
+    configs = _detect_bottleneck_configs(job_records)
     if configs:
         param_keys = sorted(set().union(*(c.keys() for c in configs)))
         logging.info(
@@ -468,9 +619,47 @@ def filter_subgraph_by_config(
     if not matching:
         return {}, {}
 
-    # 2. Traverse upstream ancestors (CNN, Datasets, ParameterLoader)
+    # 2. If filtering matched only upstream tasks (no matched task depends on another
+    # matched task, e.g. --filter index_documents=...), traverse downstream Task
+    # dependents whose tags do not conflict with target_tags.
+    from experimaestro import Action
+
     selected_nodes = set(matching)
-    stack = list(matching)
+    matched_tasks = [
+        jid for jid in matching if isinstance(full_jobs.get(jid), Task)
+    ]
+    matched_task_set = set(matched_tasks)
+    has_multi_stage_match = any(
+        any(d in matched_task_set for d in dependencies.get(jid, []))
+        for jid in matched_tasks
+    )
+    if matched_tasks and not has_multi_stage_match:
+        dependents: dict[str, list[str]] = {}
+        for jid, deps in dependencies.items():
+            if jid not in full_jobs:
+                continue
+            for d in deps:
+                dependents.setdefault(d, []).append(jid)
+
+        down_stack = list(matched_tasks)
+        while down_stack:
+            curr = down_stack.pop()
+            for child in dependents.get(curr, []):
+                if child in selected_nodes:
+                    continue
+                cfg = full_jobs.get(child)
+                if not isinstance(cfg, Task):
+                    continue
+                child_tags = job_tags_dict.get(child) or {}
+                if all(
+                    child_tags.get(k) is None or child_tags.get(k) == v
+                    for k, v in target_tags.items()
+                ):
+                    selected_nodes.add(child)
+                    down_stack.append(child)
+
+    # 3. Traverse upstream ancestors (CNN, Datasets, ParameterLoader, FilterUnassessedTopics)
+    stack = list(selected_nodes)
     while stack:
         curr = stack.pop()
         for parent in dependencies.get(curr, []):
@@ -478,16 +667,14 @@ def filter_subgraph_by_config(
                 selected_nodes.add(parent)
                 stack.append(parent)
 
-    # 3. If requested, include downstream actions and evaluated models that depend on matching jobs
+    # 4. If requested, include downstream actions and evaluated models that depend on matching jobs
     if include_actions:
-        from experimaestro import Action
-
         for jid, config in full_jobs.items():
             if isinstance(config, Action) or type(config).__name__.startswith(
                 "EvaluatedModel"
             ):
                 deps = dependencies.get(jid, [])
-                if any(m in deps for m in matching):
+                if any(m in deps for m in selected_nodes):
                     selected_nodes.add(jid)
 
     # 4. Construct filtered jobs and dependencies restricted to selected_nodes
@@ -503,10 +690,11 @@ def filter_subgraph_by_config(
 def filter_tasks_only(
     full_jobs: dict, dependencies: dict[str, list[str]]
 ) -> tuple[dict, dict[str, list[str]]]:
-    """Filter the graph to include only Task and Action nodes."""
-    from experimaestro import Task, Action
-
-    is_task = {jid: isinstance(c, (Task, Action)) for jid, c in full_jobs.items()}
+    """Filter the graph to include only Task, Action, and LightweightTask (init_task) nodes."""
+    is_task = {
+        jid: isinstance(c, (Task, Action, LightweightTask)) or is_init_task_node(c)
+        for jid, c in full_jobs.items()
+    }
     task_deps: dict[str, list[str]] = {}
     for jid in full_jobs:
         if not is_task[jid]:
@@ -524,6 +712,152 @@ def filter_tasks_only(
         task_deps[jid] = list(tdeps)
     filtered_jobs = {jid: c for jid, c in full_jobs.items() if is_task[jid]}
     return filtered_jobs, task_deps
+
+
+def stack_dag_nodes(
+    full_jobs: dict,
+    dependencies: dict[str, list[str]],
+    job_tags_dict: dict[str, dict],
+    grid_keys: set[str] | None = None,
+) -> tuple[dict, dict[str, list[str]], dict[str, dict], dict[str, list[str]]]:
+    """Stack structurally equivalent nodes sharing class name, grid tags, and parent/child groups.
+
+    Uses iterative bisimulation refinement on the transitively reduced DAG so that
+    parallel chains (e.g. per-dataset index -> 1st-stage evaluate -> 2nd-stage evaluate)
+    collapse into stacked nodes while keeping distinct core grid-search branches separate.
+
+    Returns:
+        Tuple of ``(stacked_jobs, stacked_dependencies, stacked_tags_dict, stack_members)``.
+    """
+    if not full_jobs:
+        return {}, {}, {}, {}
+
+    dag = nx.DiGraph()
+    for jid in full_jobs:
+        dag.add_node(jid)
+    for jid, deps in dependencies.items():
+        if jid in dag:
+            for d in deps:
+                if d in dag and d != jid:
+                    dag.add_edge(d, jid)
+
+    reduced_dag = (
+        nx.transitive_reduction(dag)
+        if nx.is_directed_acyclic_graph(dag)
+        else dag
+    )
+
+    # Infer bottleneck grid_keys if not explicitly supplied
+    if grid_keys is None:
+        mock_records = [
+            {
+                "job_id": jid,
+                "task_id": type(c).__name__,
+                "tags": job_tags_dict.get(jid) or {},
+            }
+            for jid, c in full_jobs.items()
+            if isinstance(c, Task) and job_tags_dict.get(jid)
+        ]
+        detected = _detect_bottleneck_configs(mock_records)
+        if detected:
+            # Only treat as distinguishing grid_keys if there are multiple schemas
+            all_keys = set().union(*(r["tags"].keys() for r in mock_records))
+            det_keys = set().union(*(c.keys() for c in detected))
+            if det_keys < all_keys:
+                grid_keys = det_keys
+
+    base_sig: dict[str, tuple] = {}
+    for jid, config in full_jobs.items():
+        cname = type(config).__name__.replace(".XPMConfig", "")
+        ntype = (
+            "action"
+            if isinstance(config, Action)
+            else "task"
+            if isinstance(config, Task)
+            else "init"
+            if is_init_task_node(config)
+            else "config"
+        )
+        jtags = job_tags_dict.get(jid) or {}
+        if grid_keys:
+            gtag_sig = tuple(
+                sorted((k, str(v)) for k, v in jtags.items() if k in grid_keys)
+            )
+        else:
+            gtag_sig = ()
+        base_sig[jid] = (cname, ntype, gtag_sig)
+
+    # Iterative Weisfeiler-Lehman refinement on (base_sig, set(parent_colors), set(child_colors))
+    uniq_init = {v: i for i, v in enumerate(sorted(set(base_sig.values()), key=str))}
+    color: dict[str, int] = {jid: uniq_init[base_sig[jid]] for jid in full_jobs}
+
+    for _ in range(len(full_jobs) + 1):
+        new_sig: dict[str, tuple] = {}
+        for jid in full_jobs:
+            p_cols = tuple(sorted({color[p] for p in reduced_dag.predecessors(jid)}))
+            c_cols = tuple(sorted({color[c] for c in reduced_dag.successors(jid)}))
+            new_sig[jid] = (base_sig[jid], p_cols, c_cols)
+        uniq_map = {v: i for i, v in enumerate(sorted(set(new_sig.values()), key=str))}
+        new_color = {jid: uniq_map[new_sig[jid]] for jid in full_jobs}
+        if new_color == color:
+            break
+        color = new_color
+
+    groups: dict[int, list[str]] = {}
+    for jid in sorted(full_jobs.keys()):
+        groups.setdefault(color[jid], []).append(jid)
+
+    member_to_rep: dict[str, str] = {}
+    stacked_jobs: dict[str, Any] = {}
+    stack_members: dict[str, list[str]] = {}
+    stacked_tags_dict: dict[str, dict] = {}
+
+    for _, members in groups.items():
+        rep_id = members[0]
+        stacked_jobs[rep_id] = full_jobs[rep_id]
+        stack_members[rep_id] = members
+        for m in members:
+            member_to_rep[m] = rep_id
+
+        if len(members) == 1:
+            if rep_id in job_tags_dict:
+                stacked_tags_dict[rep_id] = dict(job_tags_dict[rep_id])
+        else:
+            all_tkeys: list[str] = []
+            for m in members:
+                for k in (job_tags_dict.get(m) or {}).keys():
+                    if k not in all_tkeys:
+                        all_tkeys.append(k)
+            merged_tags: dict[str, Any] = {}
+            for k in all_tkeys:
+                vals = [
+                    (job_tags_dict.get(m) or {}).get(k)
+                    for m in members
+                    if k in (job_tags_dict.get(m) or {})
+                ]
+                uniq_vals = {str(v) for v in vals}
+                if len(uniq_vals) == 1 and len(vals) == len(members):
+                    merged_tags[k] = vals[0]
+                else:
+                    merged_tags[k] = f"<{len(uniq_vals)} values>"
+            if merged_tags:
+                stacked_tags_dict[rep_id] = merged_tags
+
+    stacked_dependencies: dict[str, list[str]] = {}
+    for rep_id, members in stack_members.items():
+        rep_deps: list[str] = []
+        seen_deps: set[str] = {rep_id}
+        for m in members:
+            for d in dependencies.get(m, []):
+                if d in member_to_rep:
+                    d_rep = member_to_rep[d]
+                    if d_rep not in seen_deps:
+                        seen_deps.add(d_rep)
+                        rep_deps.append(d_rep)
+        if rep_deps:
+            stacked_dependencies[rep_id] = rep_deps
+
+    return stacked_jobs, stacked_dependencies, stacked_tags_dict, stack_members
 
 
 def compute_dag_depths(
@@ -726,11 +1060,22 @@ def build_dag_json(
         name = type(config).__name__.replace(".XPMConfig", "")
         is_action = isinstance(config, Action)
         is_task = isinstance(config, Task)
-        ntype = "action" if is_action else "task" if is_task else "config"
+        is_init = is_init_task_node(config)
+        ntype = (
+            "action"
+            if is_action
+            else "task"
+            if is_task
+            else "init"
+            if is_init
+            else "config"
+        )
 
         # Determine task status
         if jid in job_states:
             status = job_states[jid]
+        elif is_init:
+            status = "init"
         elif is_task or is_action:
             status = "done"  # If in finished run but not explicitly state-tracked
         else:
@@ -772,6 +1117,7 @@ def build_dag_json(
             "taskId": task_id,
             "type": ntype,
             "status": status,
+            "init": is_init,
             "tags": jtags,
             # Dual dependency keys
             "depends_on": deps,
@@ -800,6 +1146,7 @@ def build_dag_json(
         "nodes": nodes,
         "edges": edges,
         "configs": configs,
+        "grid_keys": sorted(grid_keys) if grid_keys else [],
     }
 
 
