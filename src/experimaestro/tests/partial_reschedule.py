@@ -6,7 +6,7 @@ if __name__ == "__main__":
     from pathlib import Path
     import time
 
-    from experimaestro.tests.utils import TemporaryExperiment
+    from experimaestro.tests.utils import TemporaryExperiment, write_atomic
     from experimaestro.tests.task_partial import PartialTask
 
     root = logging.getLogger()
@@ -34,7 +34,7 @@ if __name__ == "__main__":
             time.sleep(0.01)
 
         # Write so that the test knows we are ready
-        Path(readypath).write_text("hello")
+        write_atomic(readypath, "hello")
         logging.info("Partial reschedule [%s]: ready", x)
 
         # Wait until the experiment finishes
@@ -42,4 +42,4 @@ if __name__ == "__main__":
         logging.info("Partial reschedule [%s]: finished", x)
 
         # Write the timestamp from the task so the test can retrieve them easily
-        Path(timepath).write_text(Path(task.stdout()).read_text())
+        write_atomic(timepath, Path(task.stdout()).read_text())

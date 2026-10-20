@@ -7,6 +7,7 @@ if __name__ == "__main__":
     from experimaestro.tokens import CounterToken
     from experimaestro.tests.utils import (
         TemporaryExperiment,
+        write_atomic,
     )
     from experimaestro.tests.task_tokens import TokenTask
 
@@ -41,7 +42,7 @@ if __name__ == "__main__":
             time.sleep(0.01)
 
         # Write so that the test now we are ready
-        Path(readypath).write_text("hello")
+        write_atomic(readypath, "hello")
         logging.info("Reschedule with token [%s]: ready", x)
 
         # Wait until the experiment
@@ -49,4 +50,4 @@ if __name__ == "__main__":
         logging.info("Reschedule with token [%s]: finished", x)
 
         # Write the timestamp from the task so the test can retrieve them easily
-        Path(timepath).write_text(Path(task.stdout()).read_text())
+        write_atomic(timepath, Path(task.stdout()).read_text())

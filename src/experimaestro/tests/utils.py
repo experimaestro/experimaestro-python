@@ -92,6 +92,14 @@ def get_times(task: Task) -> TimeInterval:
     )
 
 
+def write_atomic(path: Path | str, text: str):
+    """Write a file so that pollers never see it empty or partially written"""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
 def get_times_frompath(path) -> TimeInterval:
     s = path.read_text().strip().split("\n")
     logging.info("Read times: %s", s)
