@@ -343,35 +343,8 @@ class Job(BaseJob, Resource):
 
         self._scheduler_state = new_state
 
-        # Helper to determine if a state should be "counted" in unfinishedJobs
-        # A job is counted from UNSCHEDULED (registered) until finished or TRANSIENT.
-        # UNSCHEDULED is counted because add_job increments unfinishedJobs at
-        # registration time, before aio_submit processes the job asynchronously.
-        def is_counted(state):
-            return not state.finished() and state != JobState.TRANSIENT
-
         # Update experiment statistics based on state transition
         for xp in self.experiments:
-            # Handle transitions in/out of "counted" state
-            if is_counted(new_state) and not is_counted(old_state):
-                # Job is now being tracked (new submission or resubmit)
-                xp.unfinishedJobs += 1
-                logger.debug(
-                    "Job %s submitted, unfinished jobs for %s: %d",
-                    self.identifier[:8],
-                    xp.name,
-                    xp.unfinishedJobs,
-                )
-            elif not is_counted(new_state) and is_counted(old_state):
-                # Job is no longer being tracked (finished)
-                xp.unfinishedJobs -= 1
-                logger.debug(
-                    "Job %s finished, unfinished jobs for %s: %d",
-                    self.identifier[:8],
-                    xp.name,
-                    xp.unfinishedJobs,
-                )
-
             # Handle error state
             if new_state.is_error() and not old_state.is_error():
                 xp.failedJobs[self.identifier] = self

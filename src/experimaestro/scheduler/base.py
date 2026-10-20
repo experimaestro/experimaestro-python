@@ -346,7 +346,6 @@ class Scheduler(StateProvider, threading.Thread):
         init_done = threading.Event()
 
         def init_loop_vars():
-            self.exitCondition = asyncio.Condition()
             self.dependencyLock = asyncio.Lock()
             init_done.set()
 
@@ -712,7 +711,7 @@ class Scheduler(StateProvider, threading.Thread):
             # NOTE: Only update execution state (_state), NOT scheduler_state.
             # scheduler_state is managed by the scheduler itself (aio_start/finalize).
             # Calling set_scheduler_state here from the FileWatcher thread would race
-            # with finalize_status and corrupt experiment stats (unfinishedJobs count).
+            # with finalize_status and corrupt experiment stats.
             new_state = STATE_NAME_TO_JOBSTATE.get(event.state)
             if new_state is not None:
                 job.set_state(new_state, loading=True)
@@ -1242,11 +1241,6 @@ class Scheduler(StateProvider, threading.Thread):
             self._settling.add(task)
             task.add_done_callback(self._settling.discard)
 
-        # Notify exitCondition AFTER all queued notifications have been
-        # processed. This is done by submitting the notification to the
-        # executor queue, so it runs after all pending _do_notify tasks.
-        self._notification_executor.submit(self._notify_exit_condition)
-
         return job.scheduler_state
 
     async def aio_settle(self, job: Job, settled: asyncio.Future | None):
@@ -1270,18 +1264,6 @@ class Scheduler(StateProvider, threading.Thread):
                     )
         finally:
             job.settle(settled)
-
-    def _notify_exit_condition(self):
-        """Notify exitCondition from the notification thread.
-
-        Scheduled via the notification executor so it runs after all
-        pending listener notifications (including on_completed callbacks).
-        """
-        asyncio.run_coroutine_threadsafe(self._async_notify_exit(), self.loop)
-
-    async def _async_notify_exit(self):
-        async with self.exitCondition:
-            self.exitCondition.notify_all()
 
     async def _wait_for_job_process(self, job: Job, process: "Process") -> None:
         """Wait for a running job process to complete and update state.

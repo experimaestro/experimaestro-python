@@ -582,10 +582,8 @@ class experiment(BaseExperiment):
     def add_job(self, job: "Job"):
         """Register a job and its tags to jobs.jsonl file and database
 
-        Note: For NEW jobs, the unfinishedJobs counter is updated by
-        job.set_scheduler_state() when the state transitions from UNSCHEDULED.
-        For jobs already running, we increment here since no state
-        transition will occur.
+        The experiment then waits for the job's current run, if any (see
+        :meth:`Job.begin_run`).
         """
 
         if self in job.experiments:
@@ -598,22 +596,6 @@ class experiment(BaseExperiment):
         # The experiment waits for the job's current run, if any
         if job.settled is not None:
             self.track(job.settled)
-
-        # Count this job as unfinished if it hasn't reached a terminal state.
-        # This includes UNSCHEDULED jobs (about to be submitted via aio_submit)
-        # to prevent wait() from returning before submissions are processed.
-        if (
-            not job.scheduler_state.finished()
-            and job.scheduler_state != JobState.TRANSIENT
-        ):
-            self.unfinishedJobs += 1
-            logging.debug(
-                "Job %s tracked (state=%s), unfinished jobs for %s: %d",
-                job.identifier[:8],
-                job.scheduler_state.name,
-                self.name,
-                self.unfinishedJobs,
-            )
 
         # Get tags from config (tags are experiment-specific, not stored on Job)
         job_tags = dict(job.config.tags().items()) if job.config.tags() else {}
@@ -783,11 +765,10 @@ class experiment(BaseExperiment):
 
         async def doStop():
             assert self.scheduler is not None
-            async with self.scheduler.exitCondition:
-                self.exitMode = True
-                self.scheduler.exitmode = True
-                logging.debug("Setting exit mode to true")
-                self.scheduler.exitCondition.notify_all()
+            self.exitMode = True
+            self.scheduler.exitmode = True
+            logging.debug("Setting exit mode to true")
+            self._stop_event.set()
 
         assert self.scheduler is not None and self.scheduler.loop is not None
         asyncio.run_coroutine_threadsafe(doStop(), self.scheduler.loop)
@@ -798,49 +779,45 @@ class experiment(BaseExperiment):
         async def awaitcompletion():
             assert self.scheduler is not None, "No scheduler defined"
             logger.debug("Waiting to exit scheduler...")
-            async with self.scheduler.exitCondition:
-                while True:
-                    if self.exitMode:
-                        break
 
-                    # If we have still unfinished jobs or pending work, wait
-                    logger.debug(
-                        "Checking exit condition: unfinished jobs=%d, pending=%d",
-                        self.unfinishedJobs,
-                        len(self._pending),
+            # Wait for the tracked work (job runs, callbacks, archives...),
+            # which can grow while we wait (e.g. callbacks submit jobs)
+            stop = asyncio.ensure_future(self._stop_event.wait())
+            try:
+                while self._pending and not self.exitMode:
+                    logger.debug("Waiting for %d pending items", len(self._pending))
+                    await asyncio.wait(
+                        [*self._pending, stop], return_when=asyncio.FIRST_COMPLETED
                     )
-                    if self.unfinishedJobs == 0 and not self._pending:
-                        break
+            finally:
+                stop.cancel()
 
-                    # Wait for more news...
-                    await self.scheduler.exitCondition.wait()
+            if self.failedJobs:
+                # Show some more information
+                from experimaestro.scheduler.jobs import (
+                    JobFailureStatus,
+                )
 
-                if self.failedJobs:
-                    # Show some more information
-                    from experimaestro.scheduler.jobs import (
-                        JobFailureStatus,
-                    )
-
-                    count = 0
-                    for job in self.failedJobs.values():
-                        # Skip dependency failures - only log direct failures
-                        if job.state.is_error():
-                            if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
-                                count += 1
-                                logger.error(
-                                    "Job %s failed, check the log file %s",
-                                    job.relpath,
-                                    job.stderr,
-                                )
-                        else:
-                            # Should not happen, but count it anyway
+                count = 0
+                for job in self.failedJobs.values():
+                    # Skip dependency failures - only log direct failures
+                    if job.state.is_error():
+                        if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
                             count += 1
                             logger.error(
                                 "Job %s failed, check the log file %s",
                                 job.relpath,
                                 job.stderr,
                             )
-                    logger.error("Experiment Failed: %d failed jobs", count)
+                    else:
+                        # Should not happen, but count it anyway
+                        count += 1
+                        logger.error(
+                            "Job %s failed, check the log file %s",
+                            job.relpath,
+                            job.stderr,
+                        )
+                logger.error("Experiment Failed: %d failed jobs", count)
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         future.result()
@@ -1030,11 +1007,10 @@ class experiment(BaseExperiment):
 
             self._objects_writer = ObjectsWriter(self.workdir / "objects.jsonl")
 
-        # Number of unfinished jobs
-        self.unfinishedJobs = 0
-
         # Work that must finish before the experiment exits (see track())
         self._pending: set[asyncio.Future] = set()
+        # Set by stop() to stop waiting for it
+        self._stop_event = asyncio.Event()
 
         # Runs user callbacks (dynamic outputs), one at a time
         self._callback_executor = concurrent.futures.ThreadPoolExecutor(
@@ -1183,17 +1159,8 @@ class experiment(BaseExperiment):
         future = asyncio.ensure_future(aw)
         if not future.done():
             self._pending.add(future)
-            future.add_done_callback(self._tracked_done)
+            future.add_done_callback(self._pending.discard)
         return future
-
-    def _tracked_done(self, future: asyncio.Future):
-        self._pending.discard(future)
-        if not self._pending:
-            # Through the notification executor, as for job states, so that
-            # wait() wakes up after pending notifications
-            self.scheduler._notification_executor.submit(
-                self.scheduler._notify_exit_condition
-            )
 
     def run_callback(self, fn: Callable, *args) -> asyncio.Future:
         """Run user code in the callback executor, and track it

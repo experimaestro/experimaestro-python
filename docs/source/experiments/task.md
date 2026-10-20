@@ -380,7 +380,9 @@ class LongRunningTask(Task):
 Callbacks can be registered to accomplish some actions e.g. on task completion.
 
 - {py:meth}`~experimaestro.Task.on_completed` registers a callback that is
-  called when the task terminates successfully
+  called when the task terminates successfully (right away if it already
+  has). It runs in the same thread as the dynamic output callbacks (see
+  below), and the experiment waits for it before exiting.
 
 (dynamic-task-outputs)=
 ## Dynamic Task Outputs
@@ -443,7 +445,8 @@ learn.submit()
 - **ResumableTask only**: Only {py:class}`~experimaestro.ResumableTask` can use {py:meth}`~experimaestro.core.objects.ConfigMixin.register_task_output` (checked at runtime)
 - **Automatic replay**: When a task is restarted, callbacks are replayed for previously produced outputs (events stored in `.experimaestro/task-outputs.jsonl`)
 - **Multiple callbacks**: Multiple callbacks can watch the same output method
-- **Separate thread**: Callbacks run in a dedicated worker thread
+- **Separate thread**: Callbacks run in a dedicated thread of the experiment, one at a time; they can submit tasks
+- **No lost output**: The experiment waits for the callbacks of all the outputs before exiting; on success, the task records how many outputs it wrote (in its `.done` file), so that outputs a network file system shows late are still processed
 
 ### How It Works
 
