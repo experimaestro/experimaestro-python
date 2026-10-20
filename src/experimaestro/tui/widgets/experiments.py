@@ -5,7 +5,7 @@ from typing import Optional
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable, Input, Label, Static
 from textual.widget import Widget
 from textual.reactive import reactive
 from textual.binding import Binding
@@ -33,14 +33,16 @@ class ExperimentsList(Widget):
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("D", "sort_by_date", "Sort Date", show=False),
         Binding("O", "sort_alphabetical", "Sort Name", show=False),
+        Binding("/", "toggle_search", "Search"),
+        Binding("escape", "clear_search", show=False, priority=True),
     ]
 
     current_experiment: reactive[Optional[str]] = reactive(None)
     collapsed: reactive[bool] = reactive(False)
 
-    # Track current sort state
-    _sort_column: Optional[str] = "status"
-    _sort_reverse: bool = False
+    # Track current sort state (newest first by default)
+    _sort_column: Optional[str] = "started"
+    _sort_reverse: bool = True
 
     # Status sort order (for sorting by status)
     STATUS_ORDER = {
@@ -75,6 +77,40 @@ class ExperimentsList(Widget):
         super().__init__()
         self.state_provider = state_provider
         self.experiments = []
+        #: Text searched in the experiment IDs (case-insensitive)
+        self.search = ""
+
+    def _matches(self, experiment_id: str) -> bool:
+        """Whether an experiment is shown with the current search"""
+        return self.search.lower() in experiment_id.lower()
+
+    def action_toggle_search(self) -> None:
+        """Show the search field and give it the focus"""
+        search = self.query_one("#experiments-search", Input)
+        search.display = True
+        search.focus()
+
+    def action_clear_search(self) -> None:
+        """Handle escape: clear and hide the search field, or go back"""
+        search = self.query_one("#experiments-search", Input)
+        if search.display:
+            search.value = ""
+            search.display = False
+            self.query_one("#experiments-table", DataTable).focus()
+        else:
+            self.app.action_go_back()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "experiments-search":
+            self.search = event.value.strip()
+            self.refresh_experiments()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Keep the search and go back to the table"""
+        if event.input.id == "experiments-search":
+            if not self.search:
+                event.input.display = False
+            self.query_one("#experiments-table", DataTable).focus()
 
     def _get_selected_experiment_id(self) -> Optional[str]:
         """Get the experiment ID from the currently selected row"""
@@ -259,6 +295,10 @@ class ExperimentsList(Widget):
         with Container(id="experiments-table-container"):
             yield Label("Experiments", classes="section-title")
             yield Static("Loading experiments...", id="experiments-loading")
+            yield Input(
+                placeholder="Search experiments (ID contains…)",
+                id="experiments-search",
+            )
             yield DataTable(id="experiments-table", cursor_type="row")
 
     def on_mount(self) -> None:
@@ -267,6 +307,7 @@ class ExperimentsList(Widget):
         self.add_class("expanded")
         self._initial_load = True
 
+        self.query_one("#experiments-search", Input).display = False
         table = self.query_one("#experiments-table", DataTable)
         table.add_column("ID", key="id")
         table.add_column("Run", key="run")
@@ -354,8 +395,10 @@ class ExperimentsList(Widget):
         if len(table.columns) == 0:
             return
 
-        # Sort experiments based on selected column
-        experiments_sorted = self._sort_experiments(self.experiments)
+        # Sort the experiments matching the search based on selected column
+        experiments_sorted = self._sort_experiments(
+            [exp for exp in self.experiments if self._matches(exp.experiment_id)]
+        )
 
         # Get existing row keys
         existing_keys = set(table.rows.keys())
@@ -496,8 +539,10 @@ class ExperimentsList(Widget):
         # Check if this experiment has a row in the table
         existing_keys = {str(k.value) for k in table.rows.keys()}
         if experiment_id not in existing_keys:
-            # Experiment not in table yet — need full refresh
-            self.refresh_experiments()
+            # Experiment not in table yet — need full refresh (unless hidden by
+            # the search)
+            if self._matches(experiment_id):
+                self.refresh_experiments()
             return
 
         # Load single experiment

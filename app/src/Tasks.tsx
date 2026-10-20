@@ -7,8 +7,18 @@ import client, { JobsFilterResult } from "./client";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
 import { useAppSelector } from "./store";
+import { clearOnEscape, useShortcuts } from "./shortcuts";
 
-type SortKey = "status" | "task" | "date";
+type SortKey = "status" | "task" | "date" | "name";
+
+// Direction of a sort chosen with its key, as in the TUI (by rank for
+// statuses, otherwise oldest first or alphabetical)
+const SORT_ASC: { [key in SortKey]: boolean } = {
+  status: false,
+  task: true,
+  date: true,
+  name: true,
+};
 type GroupKey = "none" | "status" | "task" | "tag";
 
 // Same hint as the TUI search bar (FILTER_SYNTAX_HINT in cli/filter.py)
@@ -108,6 +118,25 @@ export default () => {
   const jobs = useAppSelector((state) => state.db.jobs);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
   const currentRun = useAppSelector((state) => state.db.currentRun);
+  const searchInput = useRef<HTMLInputElement>(null);
+
+  // The key of the current sort reverses it
+  function sortBy(key: SortKey) {
+    if (key === sortKey) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(key);
+      setSortAsc(SORT_ASC[key]);
+    }
+  }
+
+  useShortcuts({
+    "/": () => searchInput.current?.focus(),
+    S: () => sortBy("status"),
+    T: () => sortBy("task"),
+    D: () => sortBy("date"),
+    O: () => sortBy("name"),
+  });
 
   // --- Server-side filtering (same DSL and semantics as the TUI)
 
@@ -177,6 +206,9 @@ export default () => {
           break;
         case "date":
           z = (a.submitted || "").localeCompare(b.submitted || "");
+          break;
+        case "name":
+          z = a.jobId.localeCompare(b.jobId);
           break;
       }
       return sortAsc ? z : -z;
@@ -273,9 +305,11 @@ export default () => {
               <Form.Label htmlFor="searchjobs">Filter</Form.Label>
               <Form.Control
                 id="searchjobs"
+                ref={searchInput}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter: @state = 'done', @name ~ 'pattern', tag = 'value'"
+                onKeyDown={clearOnEscape(() => setQuery(""))}
+                placeholder="Filter (/): @state = 'done', @name ~ 'pattern', tag = 'value'"
                 isInvalid={!!trimmedQuery && filterResult.error !== null}
                 isValid={
                   !!trimmedQuery &&
@@ -292,9 +326,10 @@ export default () => {
                 value={sortKey}
                 onChange={(e) => setSortKey(e.target.value as SortKey)}
               >
-                <option value="status">Status</option>
-                <option value="task">Task</option>
-                <option value="date">Submitted</option>
+                <option value="status">Status (S)</option>
+                <option value="task">Task (T)</option>
+                <option value="date">Submitted (D)</option>
+                <option value="name">Job ID (O)</option>
               </Form.Select>
             </Form.Group>
             <Button

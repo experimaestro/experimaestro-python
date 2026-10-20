@@ -43,9 +43,15 @@ Then open `http://localhost:12345` in your browser.
   running but with unfinished jobs — or empty, as in the TUI), job counts,
   host, duration and CO₂ per experiment, with buttons to **kill** all the running jobs of an experiment
   or **delete** it (both ask for confirmation; deleting keeps the job
-  directories, and is refused while the experiment is running)
+  directories, and is refused while the experiment is running); searchable
+  by ID and sortable by status, name or start date (newest first by default),
+  by clicking the column headers
 - **Job List**: View all jobs with their status (pending, running, done, error),
-  sortable by status, task or submission date
+  sortable by status, task, submission date or job ID
+- **Keyboard Shortcuts**: The TUI keys, outside text fields: `/` to search the
+  experiments or filter the jobs (`Esc` clears it), and `S` (status), `D`
+  (date), `O` (name) and, for jobs, `T` (task) to sort; the key of the current
+  sort reverses it
 - **Job Filter**: The same [filter expressions](#job-filter-expressions) as the
   TUI search bar, evaluated by the server so that both interfaces select the
   same jobs; invalid expressions are reported below the input
@@ -139,9 +145,12 @@ Press `?` in the TUI to show the help screen with all shortcuts.
 | `d` | Show experiment runs |
 | `Ctrl+d` | Delete experiment |
 | `Ctrl+k` | Kill all running jobs |
+| `/` | Search (in the experiment IDs; `Esc` clears it) |
 | `S` | Sort by status |
-| `D` | Sort by date |
+| `D` | Sort by start date (default, newest first) |
 | `O` | Sort alphabetically |
+
+Pressing the key of the current sort again reverses the order.
 
 **Jobs:**
 

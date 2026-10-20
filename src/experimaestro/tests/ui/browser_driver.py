@@ -176,6 +176,33 @@ class BrowserDriver:
             for row in await rows.all()
         }
 
+    async def experiment_order(self) -> list[str]:
+        await self._show_experiments()
+        rows = self.page.locator("tr[data-experiment-id]")
+        return [
+            await row.get_attribute("data-experiment-id") for row in await rows.all()
+        ]
+
+    async def sort_experiments(self, column: Literal["status", "started", "id"]):
+        await self._show_experiments()
+        # Shortcuts are ignored in text fields
+        await self.page.evaluate("document.activeElement?.blur()")
+        await self.page.keyboard.press(
+            {"status": "S", "started": "D", "id": "O"}[column]
+        )
+        await self.settle()
+
+    async def search_experiments(self, text: str) -> None:
+        await self._show_experiments()
+        await self.page.evaluate("document.activeElement?.blur()")
+        await self.page.keyboard.press("/")
+        search = self.page.locator("#searchexperiments:focus")
+        if text:
+            await search.fill(text)
+        else:
+            await search.press("Escape")
+        await self.settle()
+
     async def runs(self, experiment_id: str) -> list[str]:
         await self.open_experiment(experiment_id)
         selector = self.page.locator("select[title='Run']")

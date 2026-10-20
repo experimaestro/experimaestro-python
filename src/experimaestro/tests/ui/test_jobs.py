@@ -31,6 +31,38 @@ async def test_experiment_status(ui):
     }
 
 
+@pytest.mark.ui("tui", "browser")
+async def test_experiment_sort(ui):
+    """Newest first by default; the key of the current sort reverses it"""
+    assert await ui.experiment_order() == ["ablation", "sweep", "baseline"]
+
+    await ui.sort_experiments("started")
+    assert await ui.experiment_order() == ["baseline", "sweep", "ablation"]
+
+    # Running first, then failed, then stopped
+    await ui.sort_experiments("status")
+    assert await ui.experiment_order() == ["sweep", "baseline", "ablation"]
+
+    await ui.sort_experiments("id")
+    assert await ui.experiment_order() == ["ablation", "baseline", "sweep"]
+    await ui.sort_experiments("id")
+    assert await ui.experiment_order() == ["sweep", "baseline", "ablation"]
+
+
+@pytest.mark.ui("tui", "browser")
+async def test_experiment_search(ui):
+    """The search keeps the experiments whose ID contains the text (ignoring
+    case)"""
+    await ui.search_experiments("LINE")
+    assert await ui.experiment_order() == ["baseline"]
+
+    await ui.search_experiments("e")
+    assert await ui.experiment_order() == ["sweep", "baseline"]
+
+    await ui.search_experiments("")
+    assert set(await ui.experiment_order()) == {"baseline", "sweep", "ablation"}
+
+
 async def test_jobs_of_current_run(ui):
     await ui.open_experiment("baseline")
     assert await ui.visible_jobs() == {LEARN_DONE, LEARN_ERROR, EVAL_DONE}

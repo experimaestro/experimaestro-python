@@ -131,8 +131,9 @@ class HelpScreen(ModalScreen[None]):
   d         Show experiment runs
   Ctrl+d    Delete experiment
   Ctrl+k    Kill all running jobs
+  /         Search (in the IDs)
   S         Sort by status
-  D         Sort by date
+  D         Sort by date (default)
   O         Sort alphabetically
 
 [bold cyan]Jobs[/bold cyan]

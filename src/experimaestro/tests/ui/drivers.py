@@ -73,6 +73,20 @@ class UIDriver(Protocol):
         """Experiments shown, with their status (``BaseExperiment.status_category``)"""
         ...
 
+    async def experiment_order(self) -> list[str]:
+        """Identifiers of the listed experiments, in display order"""
+        ...
+
+    async def sort_experiments(self, column: Literal["status", "started", "id"]):
+        """Press the sort key of a column (the key of the current sort reverses
+        it)"""
+        ...
+
+    async def search_experiments(self, text: str) -> None:
+        """Show the experiments whose ID contains a text (all of them when
+        empty)"""
+        ...
+
     async def runs(self, experiment_id: str) -> list[str]:
         """Runs of an experiment, as listed in the run history"""
         ...

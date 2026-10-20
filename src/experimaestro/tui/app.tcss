@@ -115,6 +115,10 @@ JobsTreeView {
     min-height: 5;
 }
 
+#experiments-search {
+    width: 100%;
+}
+
 ExperimentsList.expanded #experiments-table {
     height: 1fr;
 }

@@ -163,7 +163,17 @@ class WebDriver:
             job_ids &= set(self._filter)
         return job_ids
 
-    # Sorting and grouping are done by the client: see the browser driver
+    # Sorting, grouping and searching experiments are done by the client: see
+    # the browser driver
+
+    async def experiment_order(self) -> list[str]:
+        raise NotImplementedError("experiment order is set by the browser client")
+
+    async def sort_experiments(self, column: Literal["status", "started", "id"]):
+        raise NotImplementedError("sorting is done by the browser client")
+
+    async def search_experiments(self, text: str) -> None:
+        raise NotImplementedError("searching is done by the browser client")
 
     async def job_order(self) -> list[str]:
         raise NotImplementedError("job order is set by the browser client")

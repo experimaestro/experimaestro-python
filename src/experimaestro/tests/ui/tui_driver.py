@@ -134,6 +134,29 @@ class TuiDriver:
             for key in table.rows
         }
 
+    async def experiment_order(self) -> list[str]:
+        await self._show_experiments()
+        await self.settle()
+        return [str(key.value) for key in self._table("#experiments-table").rows]
+
+    async def sort_experiments(self, column: Literal["status", "started", "id"]):
+        await self._show_experiments()
+        await self.pilot.press({"status": "S", "started": "D", "id": "O"}[column])
+        await self.settle()
+
+    async def search_experiments(self, text: str) -> None:
+        await self._show_experiments()
+        await self.pilot.press("/")
+        search = self.app.query_one("#experiments-search", Input)
+        assert self.app.focused is search
+        if text:
+            search.value = ""
+            await self.pilot.press(*text)
+            await self.pilot.press("enter")
+        else:
+            await self.pilot.press("escape")
+        await self.settle()
+
     async def runs(self, experiment_id: str) -> list[str]:
         await self._show_experiments()
         await self._select_row(self._table("#experiments-table"), experiment_id)
