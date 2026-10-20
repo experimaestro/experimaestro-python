@@ -173,6 +173,12 @@ const jobComparator = (jobs: { [key: string]: Job }) => {
   };
 };
 
+// Key of the jobs of an experiment run in jobsRequested (null: all
+// experiments, current run)
+export function jobsKey(experimentId: string | null, runId: string | null): string {
+  return `${experimentId ?? "*"}/${runId ?? ""}`;
+}
+
 export type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
 export type State = {
@@ -184,6 +190,7 @@ export type State = {
   experiments: Experiments; // All experiments
   experimentsLoaded: boolean; // The server answered the experiments request
   jobs: Jobs;
+  jobsRequested: string[]; // Experiment runs whose jobs were requested (jobsKey)
   services: Services;
   warnings: { byKey: { [key: string]: Warning }; keys: string[] };
   actions: { byId: { [key: string]: ActionInfo }; ids: string[] };
@@ -202,6 +209,7 @@ export const slice = createSlice({
     experiments: { byId: {}, ids: [] },
     experimentsLoaded: false,
     jobs: { byId: {}, ids: [] },
+    jobsRequested: [],
     services: { byId: {}, ids: [] },
     warnings: { byKey: {}, keys: [] },
     actions: { byId: {}, ids: [] },
@@ -233,6 +241,15 @@ export const slice = createSlice({
 
     clearJobs(draft) {
       draft.jobs = { byId: {}, ids: [] };
+      draft.jobsRequested = [];
+    },
+
+    markJobsRequested(draft, { payload }: PayloadAction<string>) {
+      draft.jobsRequested.push(payload);
+    },
+
+    resetJobsRequested(draft) {
+      draft.jobsRequested = [];
     },
 
     removeJob(draft, { payload }: PayloadAction<{ jobId: string }>) {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useDispatch } from "react-redux";
 
 import Container from "react-bootstrap/Container";
@@ -19,7 +19,7 @@ import { ExperimentSelector } from "./ExperimentSelector";
 import { RunSelector } from "./RunSelector";
 
 import { useAppSelector } from "./store";
-import { actions } from "./reducers";
+import { actions, jobsKey } from "./reducers";
 import client from "./client";
 
 type View = "experiments" | "tasks" | "graph" | "orphans" | "services" | "actions";
@@ -32,6 +32,21 @@ export default () => {
   const [showQuitModal, setShowQuitModal] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [view, setView] = useState<View>("experiments");
+  const currentRun = useAppSelector((state) => state.db.currentRun);
+  const jobsRequested = useAppSelector((state) => state.db.jobsRequested);
+  const experimentsLoaded = useAppSelector((state) => state.db.experimentsLoaded);
+
+  // Jobs are requested for the experiment run shown, when it is first shown
+  // (all experiments when none is selected). Waits for the experiments, as
+  // the first one is then selected.
+  useEffect(() => {
+    if (connectionStatus !== "connected" || !experimentsLoaded) return;
+    const key = jobsKey(currentExperiment, currentRun);
+    const all = currentRun === null && jobsRequested.includes(jobsKey(null, null));
+    if (all || jobsRequested.includes(key)) return;
+    dispatch(actions.markJobsRequested(key));
+    client.request_jobs(currentExperiment, currentRun);
+  }, [connectionStatus, experimentsLoaded, currentExperiment, currentRun, jobsRequested]);
 
   const handleQuit = () => {
     client.quit();

@@ -18,6 +18,7 @@ from fastapi import WebSocket
 from experimaestro.scheduler import job_operations, service_operations
 from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import display_state, status_rank
+from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.base import Scheduler, Job
 from experimaestro.scheduler.jobs import JobDependency
@@ -328,7 +329,9 @@ class WebSocketHandler:
 
     Message Protocol (JSON):
         Client -> Server:
-            {"type": "refresh", "payload": {"experimentId": "..."}}
+            {"type": "jobs", "payload": {"experimentId": "...", "runId": "..."}}
+                (from the cache; all experiments without experimentId)
+            {"type": "refresh", "payload": {"experimentId": "..."}}  (re-read)
             {"type": "experiments"}
             {"type": "services"}
             {"type": "job.details", "payload": {"jobId": "...", "experimentId": "..."}}
@@ -419,6 +422,7 @@ class WebSocketHandler:
 
         handlers = {
             "refresh": self._handle_refresh,
+            "jobs": self._handle_jobs,
             "experiments": self._handle_experiments,
             "experiment.runs": self._handle_experiment_runs,
             "services": self._handle_services,
@@ -532,38 +536,62 @@ class WebSocketHandler:
             )
         return payloads
 
+    async def _in_thread(self, function, *args):
+        """Run blocking state provider reads outside the event loop
+
+        They can take a while (e.g. over SSH): the other connections, and the
+        messages already sent on this one, are not held up meanwhile.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, function, *args)
+
+    def _jobs_payloads(
+        self, experiment_id: str | None, run_id: str | None, refresh: bool
+    ) -> List[Dict[str, Any]]:
+        """Jobs of an experiment run (or of all the experiments)"""
+        if experiment_id:
+            return self._serialize_jobs_for_experiment(
+                experiment_id, run_id, refresh=refresh
+            )
+        if self._scheduler:
+            # Active mode: get jobs from scheduler (live Job objects)
+            return [serialize_live_job(job) for job in self._scheduler.jobs.values()]
+        # Monitoring mode: get from state provider (MockJob objects)
+        return [
+            job
+            for exp in self.state_provider.get_experiments(refresh=refresh)
+            for job in self._serialize_jobs_for_experiment(
+                exp.experiment_id, refresh=refresh
+            )
+        ]
+
+    async def _send_jobs(
+        self, websocket: WebSocket, payload: Dict[str, Any], *, refresh: bool
+    ):
+        jobs = await self._in_thread(
+            self._jobs_payloads,
+            payload.get("experimentId"),
+            payload.get("runId"),
+            refresh,
+        )
+        for job in jobs:
+            await websocket.send_json({"type": "job.add", "payload": job})
+
+    async def _handle_jobs(self, websocket: WebSocket, payload: Dict[str, Any]):
+        """Send the jobs of an experiment run (all experiments by default)
+
+        Answered from the state provider cache: the client asks for the jobs of
+        the experiment it shows, when it shows it.
+        """
+        await self._send_jobs(websocket, payload, refresh=False)
+
     async def _handle_refresh(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle refresh request - send all jobs for experiment(s)
 
         This is an explicit client refresh: the state provider re-reads the
         state instead of answering from its cache.
         """
-        experiment_id = payload.get("experimentId")
-        run_id = payload.get("runId")
-
-        if experiment_id:
-            # Refresh specific experiment (optionally a specific run)
-            for job_payload in self._serialize_jobs_for_experiment(
-                experiment_id, run_id, refresh=True
-            ):
-                await websocket.send_json({"type": "job.add", "payload": job_payload})
-        else:
-            # Refresh all experiments
-            if self._scheduler:
-                # Active mode: get jobs from scheduler (live Job objects)
-                for job in self._scheduler.jobs.values():
-                    await websocket.send_json(
-                        {"type": "job.add", "payload": serialize_live_job(job)}
-                    )
-            else:
-                # Monitoring mode: get from state provider (MockJob objects)
-                for exp in self.state_provider.get_experiments(refresh=True):
-                    for job_payload in self._serialize_jobs_for_experiment(
-                        exp.experiment_id, refresh=True
-                    ):
-                        await websocket.send_json(
-                            {"type": "job.add", "payload": job_payload}
-                        )
+        await self._send_jobs(websocket, payload, refresh=True)
 
     async def _handle_experiments(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Handle experiments request - send all experiments
@@ -571,11 +599,14 @@ class WebSocketHandler:
         The list ends with ``experiments.loaded``, so that the client can tell
         an empty workspace from a list still loading (slow over SSH).
         """
-        experiments = self.state_provider.get_experiments()
-        for exp in experiments:
-            await websocket.send_json(
-                {"type": "experiment.add", "payload": serialize_experiment(exp)}
-            )
+
+        def serialize():
+            return [
+                serialize_experiment(e) for e in self.state_provider.get_experiments()
+            ]
+
+        for experiment in await self._in_thread(serialize):
+            await websocket.send_json({"type": "experiment.add", "payload": experiment})
         await websocket.send_json({"type": "experiments.loaded"})
 
     async def _handle_services(self, websocket: WebSocket, payload: Dict[str, Any]):
@@ -584,7 +615,9 @@ class WebSocketHandler:
         Read through the state provider, as the TUI does, so that services are
         listed (and can be started) without a running experiment.
         """
-        services = self.state_provider.get_services(payload.get("experimentId"))
+        services = await self._in_thread(
+            self.state_provider.get_services, payload.get("experimentId")
+        )
         for service in services:
             await websocket.send_json(
                 {"type": "service.add", "payload": serialize_service(service)}
@@ -604,22 +637,22 @@ class WebSocketHandler:
             # Get from state provider (MockJob)
             task_id = payload.get("taskId")
             if task_id:
-                job = self.state_provider.get_job(task_id, job_id)
-                if job:
-                    # Enrich with live process info (cpu/memory/threads) when the
-                    # provider supports it.
+
+                def details():
+                    job = self.state_provider.get_job(task_id, job_id)
+                    if job is None:
+                        return None
+                    # Enrich with live process info (cpu/memory/threads) when
+                    # the provider supports it.
                     try:
                         process_info = self.state_provider.get_process_info(job)
                     except Exception:
                         process_info = None
-                    await websocket.send_json(
-                        {
-                            "type": "job.update",
-                            "payload": serialize_job_update(
-                                job, process_info=process_info
-                            ),
-                        }
-                    )
+                    return serialize_job_update(job, process_info=process_info)
+
+                update = await self._in_thread(details)
+                if update is not None:
+                    await websocket.send_json({"type": "job.update", "payload": update})
 
     async def _notify_outcome(self, websocket: WebSocket, operation) -> Outcome:
         """Run a job operation (blocking) and show its outcome as a toast"""
@@ -740,6 +773,9 @@ class WebSocketHandler:
             )
         except FileNotFoundError:
             response["error"] = "No dependency graph recorded for this run"
+        except RemoteMethodNotSupported as e:
+            # Expected with an older remote experimaestro: no traceback
+            response["error"] = f"No dependency graph: {e}"
         except Exception as e:
             logger.exception("Could not build the experiment graph")
             response["error"] = f"Could not build the graph: {e}"
@@ -786,15 +822,17 @@ class WebSocketHandler:
         experiment_id = payload.get("experimentId")
         if not experiment_id:
             return
-        runs = self.state_provider.get_experiment_runs(experiment_id) or []
-        current = self.state_provider.get_current_run(experiment_id)
+
+        def serialize():
+            runs = self.state_provider.get_experiment_runs(experiment_id) or []
+            current = self.state_provider.get_current_run(experiment_id)
+            return [serialize_run(r, current) for r in runs]
+
+        runs = await self._in_thread(serialize)
         await websocket.send_json(
             {
                 "type": "experiment.runs",
-                "payload": {
-                    "experimentId": experiment_id,
-                    "runs": [serialize_run(r, current) for r in runs],
-                },
+                "payload": {"experimentId": experiment_id, "runs": runs},
             }
         )
 
@@ -842,7 +880,8 @@ class WebSocketHandler:
 
     async def _handle_warnings(self, websocket: WebSocket, payload: Dict[str, Any]):
         """Send all unresolved warnings."""
-        for warning in self.state_provider.get_unresolved_warnings():
+        warnings = await self._in_thread(self.state_provider.get_unresolved_warnings)
+        for warning in warnings:
             await websocket.send_json(
                 {"type": "warning.add", "payload": serialize_warning(warning)}
             )
@@ -851,7 +890,8 @@ class WebSocketHandler:
         self, websocket: WebSocket, payload: Dict[str, Any]
     ):
         """Execute a warning action."""
-        self.state_provider.execute_warning_action(
+        await self._in_thread(
+            self.state_provider.execute_warning_action,
             payload.get("warningKey", ""),
             payload.get("actionKey", ""),
             payload.get("experimentId", ""),
@@ -868,9 +908,11 @@ class WebSocketHandler:
         """Send the actions declared by the (selected) experiment(s)."""
         experiment_id = payload.get("experimentId")
         if experiment_id:
-            experiments = [self.state_provider.get_experiment(experiment_id)]
+            experiments = [
+                await self._in_thread(self.state_provider.get_experiment, experiment_id)
+            ]
         else:
-            experiments = self.state_provider.get_experiments()
+            experiments = await self._in_thread(self.state_provider.get_experiments)
         for exp in experiments:
             if exp is None:
                 continue

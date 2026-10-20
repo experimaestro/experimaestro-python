@@ -142,7 +142,7 @@ class WebDriver:
         payload = {"experimentId": experiment_id}
         if run_id is not None:
             payload["runId"] = run_id
-        await self._request("refresh", **payload)
+        await self._request("jobs", **payload)
 
     async def kill_experiment(self, experiment_id: str) -> Notification:
         return await self._notification("experiment.kill", experimentId=experiment_id)

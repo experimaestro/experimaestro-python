@@ -218,3 +218,18 @@ def test_job_info_reads_one_experiment(ssh_provider, remote_workspace, caplog):
     assert set(current) == set(by_run) == set(remote_workspace.jobs.values())
     methods = {r.message.split(" #")[0] for r in caplog.records}
     assert "get_experiments" not in methods
+
+
+async def test_old_remote_graph(old_ssh_provider):
+    """The web UI shows that an older remote cannot send the graph"""
+    async with DRIVERS["web"](old_ssh_provider) as ui:
+        messages = await ui._request(
+            "experiment.graph",
+            requestId=1,
+            experimentId="greetings",
+            config=None,
+            tasksOnly=True,
+            stack=True,
+        )
+    (answer,) = [m["payload"] for m in messages if m["type"] == "experiment.graph"]
+    assert "update experimaestro on the remote host" in answer["error"]

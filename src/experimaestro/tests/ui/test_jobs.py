@@ -99,3 +99,14 @@ async def test_job_logs(ui):
     await ui.open_experiment("baseline")
     assert await ui.job_log(LEARN_ERROR, "stdout") == stdout_text(LEARN_ERROR)
     assert await ui.job_log(LEARN_ERROR, "stderr") == stderr_text(LEARN_ERROR)
+
+
+@pytest.mark.ui("browser")
+async def test_jobs_requested_on_demand(ui):
+    """The page reads the jobs of the experiment it shows, from the cache: it
+    does not ask the server to re-read every experiment (slow over SSH)"""
+    await ui.open_experiment("sweep")
+    assert ui.requests("refresh") == []
+    requested = {r.get("experimentId") for r in ui.requests("jobs")}
+    assert "sweep" in requested
+    assert None not in requested

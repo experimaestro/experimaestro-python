@@ -26,9 +26,8 @@ export const RunSelector: React.FC = () => {
   const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const runId = event.target.value || null;
     dispatch(actions.selectRun(runId));
-    // Reload the jobs for the selected run
+    // The jobs of the selected run are then requested (App.tsx)
     dispatch(actions.clearJobs());
-    client.refresh(currentExperiment, runId || undefined);
   };
 
   return (

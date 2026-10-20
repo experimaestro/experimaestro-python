@@ -78,9 +78,10 @@ class Client {
       this.reconnectAttempts = 0;
       store.dispatch(actions.setConnectionStatus("connected"));
 
-      // Request initial data
+      // Request initial data (jobs are requested for the experiment shown, see
+      // App.tsx)
+      store.dispatch(actions.resetJobsRequested());
       this.send("experiments");
-      this.send("refresh");
       this.send("services");
     };
 
@@ -288,6 +289,15 @@ class Client {
     if (experimentId) payload.experimentId = experimentId;
     if (runId) payload.runId = runId;
     this.send("refresh", payload);
+  }
+
+  // Jobs of an experiment run (of all the experiments by default), from the
+  // server cache
+  request_jobs(experimentId: string | null, runId: string | null): void {
+    const payload: any = {};
+    if (experimentId) payload.experimentId = experimentId;
+    if (runId) payload.runId = runId;
+    this.send("jobs", payload);
   }
 
   request_runs(experimentId: string): void {
