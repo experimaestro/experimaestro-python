@@ -524,6 +524,37 @@ class TestServerRequestHandling:
             since=None, refresh=False
         )
 
+    def test_handle_get_experiments_summaries(
+        self, server_with_mock, mock_state_provider
+    ):
+        """Without job_infos, experiments are sent with their number of jobs"""
+        from experimaestro.scheduler.interfaces import (
+            ExperimentJobInformation,
+            ExperimentStatus,
+        )
+
+        infos = {
+            job_id: ExperimentJobInformation(job_id=job_id, task_id="pkg.Task")
+            for job_id in ("job1", "job2")
+        }
+        mock_state_provider.get_experiments.return_value = [
+            MockExperiment(
+                workdir=Path("/tmp/experiments/exp1/run1"),
+                run_id="run1",
+                status=ExperimentStatus.DONE,
+                job_infos=infos,
+            )
+        ]
+
+        (full,) = server_with_mock._handle_get_experiments({"since": None})
+        (summary,) = server_with_mock._handle_get_experiments(
+            {"since": None, "job_infos": False}
+        )
+
+        assert set(full["job_infos"]) == {"job1", "job2"}
+        assert "job_infos" not in summary
+        assert summary["total_jobs"] == 2
+
     def test_handle_get_experiment(self, server_with_mock, mock_state_provider):
         """Test handling get_experiment request"""
         from experimaestro.scheduler.interfaces import ExperimentStatus

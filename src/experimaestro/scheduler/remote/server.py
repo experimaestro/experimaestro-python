@@ -307,9 +307,11 @@ class SSHStateProviderServer:
         experiments = self._state_provider.get_experiments(
             since=since, refresh=bool(params.get("refresh"))
         )
+        # Clients only need summaries (job_infos=False), older ones get all
+        job_infos = params.get("job_infos", True)
         results = []
         for exp in experiments:
-            data = self._experiment_to_dict(exp)
+            data = self._experiment_to_dict(exp, job_infos)
             try:
                 runs = self._state_provider.get_experiment_runs(exp.experiment_id)
                 data["runs_count"] = len(runs)

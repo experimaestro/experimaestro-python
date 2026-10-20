@@ -220,6 +220,15 @@ def test_job_info_reads_one_experiment(ssh_provider, remote_workspace, caplog):
     assert "get_experiments" not in methods
 
 
+def test_experiment_summaries(ssh_provider, caplog):
+    """The experiment list is sent without the job information of the runs,
+    but with their number of jobs (for the status)"""
+    (experiment,) = ssh_provider.get_experiments()
+    assert experiment.total_jobs == 2
+    assert experiment.status_category == "done"
+    assert len(ssh_provider.get_experiment_job_info("greetings")) == 2
+
+
 async def test_old_remote_graph(old_ssh_provider):
     """The web UI shows that an older remote cannot send the graph"""
     async with DRIVERS["web"](old_ssh_provider) as ui:

@@ -1070,8 +1070,17 @@ class SSHStateProviderClient(OfflineStateProvider):
     def _fetch_experiments(
         self, since: Optional[datetime] = None, *, refresh: bool = False
     ) -> List[BaseExperiment]:
-        """Get list of all experiments"""
-        params = {"since": serialize_datetime(since), "refresh": refresh}
+        """Get list of all experiments
+
+        Their summaries only: the job information of an experiment run is read
+        with the run (see _fetch_experiment_job_info). Older servers ignore
+        job_infos=False, and send it anyway.
+        """
+        params = {
+            "since": serialize_datetime(since),
+            "refresh": refresh,
+            "job_infos": False,
+        }
         result = self._call_sync(RPCMethod.GET_EXPERIMENTS, params)
         return [self._get_or_load_experiment(d) for d in result]
 
@@ -1530,6 +1539,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             exp._failed_jobs = d["failed_jobs"]
         if "runs_count" in d:
             exp._runs_count = d["runs_count"]
+        if "total_jobs" in d:
+            exp._total_jobs = d["total_jobs"]
 
         # Update timestamps
         if d.get("started_at"):
