@@ -11,6 +11,7 @@ import click
 
 # Import data models
 from .models import (
+    SlurmConfig,
     ClusterPartition,
     ClusterQoS,
     ClusterAccount,
@@ -968,7 +969,7 @@ def _infer_gpu_memory_gb(
 
 
 def _generate_slurm_launchers_py(
-    config: "SlurmConfig",
+    config: SlurmConfig,
     config_path: Path,
     default_gpu_memory_gb: int = 16,
 ) -> str:
@@ -1028,7 +1029,9 @@ def _generate_slurm_launchers_py(
                 "memory_bytes": mem_bytes,
                 "gpus": p.gpus_per_node,
                 "gpu_type": p.effective_gpu_type,
-                "gpu_memory_bytes": gpu_mem_gb * (1024**3) if p.gpus_per_node > 0 else 0,
+                "gpu_memory_bytes": gpu_mem_gb * (1024**3)
+                if p.gpus_per_node > 0
+                else 0,
                 "time_limit_seconds": p.time_limit_seconds,
                 "qos": qos,
             }
@@ -1187,7 +1190,9 @@ def generate(
 
     if not config_path.exists():
         config.save_to_yaml(config_path)
-        console.print(f"[green]✓[/green] Saved cluster config to [bold]{config_path}[/bold]")
+        console.print(
+            f"[green]✓[/green] Saved cluster config to [bold]{config_path}[/bold]"
+        )
 
     content = _generate_slurm_launchers_py(
         config, config_path, default_gpu_memory_gb=default_gpu_memory
@@ -1195,4 +1200,3 @@ def generate(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(content)
     console.print(f"[green]✓[/green] Generated [bold]{output}[/bold]")
-

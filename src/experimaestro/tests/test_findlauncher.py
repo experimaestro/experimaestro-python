@@ -512,4 +512,3 @@ class TestLauncherFallbackAndErrors:
             "https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html"
             in msg
         )
-

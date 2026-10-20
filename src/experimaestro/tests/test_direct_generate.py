@@ -467,4 +467,3 @@ class TestDirectGenerateCLI:
         assert out_file.is_file()
         content = out_file.read_text()
         assert "512 * (1024 ** 2)" in content
-

@@ -204,7 +204,7 @@ def find_launcher(
             f"  2. Regenerate or edit {registry.launchers_py}:\n"
             "     - Local machine / laptop: experimaestro launchers direct generate -y\n"
             "     - SLURM cluster:          experimaestro launchers slurm generate -y\n"
-            f"  3. Test your specification with: experimaestro find-launchers \"{sample_spec}\"\n"
+            f'  3. Test your specification with: experimaestro find-launchers "{sample_spec}"\n'
             "  4. Documentation: https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html"
         )
     return launcher

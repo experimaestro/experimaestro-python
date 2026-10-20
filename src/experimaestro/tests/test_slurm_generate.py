@@ -144,4 +144,3 @@ class TestSlurmGenerateCLI:
         assert launcher.options.gpus == 2
         assert launcher.options.account == "myproj"
         assert launcher.options.time == "1:0:0"
-
