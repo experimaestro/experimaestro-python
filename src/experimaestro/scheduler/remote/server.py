@@ -10,6 +10,7 @@ Usage:
 import logging
 import sys
 import threading
+from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import IO, Callable, Dict, Optional
 
@@ -470,6 +471,9 @@ class SSHStateProviderServer:
         """Handle get_sync_info request - includes protocol version for compatibility check"""
         return {
             "protocol_version": PROTOCOL_VERSION,
+            # What this server handles (see RemoteMethodNotSupported)
+            "methods": sorted(self._handlers),
+            "version": get_package_version("experimaestro"),
             "workspace_path": str(self.workspace_path),
             "last_sync_time": (
                 serialize_datetime(self._state_provider.get_last_sync_time())

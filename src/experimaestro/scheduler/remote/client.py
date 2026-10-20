@@ -39,6 +39,8 @@ from experimaestro.scheduler.interfaces import (
     ExperimentJobInformation,
 )
 from experimaestro.scheduler.remote.protocol import (
+    BASE_METHODS,
+    RemoteMethodNotSupported,
     RPCMethod,
     NotificationMethod,
     RPCResponse,
@@ -490,6 +492,11 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._running = False
         self._connected = False
 
+        #: Methods the server handles, and its experimaestro version (both
+        #: sent by the server on connection, except by older ones)
+        self._server_methods: frozenset[str] = BASE_METHODS
+        self.remote_version: str | None = None
+
         self._synchronizer: Optional["RemoteFileSynchronizer"] = None
         self._control_path: Optional[str] = None
 
@@ -645,6 +652,10 @@ class SSHStateProviderClient(OfflineStateProvider):
             resolved_workspace = sync_info.get("workspace_path")
             if resolved_workspace:
                 self.remote_workspace = resolved_workspace
+
+            if "methods" in sync_info:
+                self._server_methods = frozenset(sync_info["methods"])
+            self.remote_version = sync_info.get("version")
 
             logger.info(
                 "Connected to remote workspace: %s (protocol v%s)",
@@ -951,6 +962,11 @@ class SSHStateProviderClient(OfflineStateProvider):
         Returns:
             Future that resolves to the response result
         """
+        if not self.supports(method):
+            future = Future()
+            future.set_exception(RemoteMethodNotSupported(method, self.remote_version))
+            return future
+
         if not self._running:
             future = Future()
             future.set_exception(ConnectionError("Not connected"))
@@ -972,6 +988,10 @@ class SSHStateProviderClient(OfflineStateProvider):
             future.set_exception(e)
 
         return future
+
+    def supports(self, method: RPCMethod) -> bool:
+        """Whether the remote server handles a method (older ones lack some)"""
+        return method in self._server_methods
 
     def _call_sync(
         self, method: RPCMethod, params: Dict, timeout: Optional[float] = None

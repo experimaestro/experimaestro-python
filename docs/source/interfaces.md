@@ -379,8 +379,14 @@ experimaestro experiments ssh-monitor host /workspace --remote-xpm experimaestro
 ### Version Compatibility
 
 The local and remote experimaestro versions should be compatible. The protocol
-version is checked on connection, and a warning is shown if versions differ
-significantly. For best results, use the same version on both sides.
+version is checked on connection, and the connection is refused if it differs.
+For best results, use the same version on both sides.
+
+A remote experimaestro older than the local one may lack some features (e.g.
+the dependency graph): the remote server lists what it handles when the
+connection starts, and the interfaces then report the missing features (*the
+remote experimaestro does not support …*) instead of failing. Update
+experimaestro on the remote host, or point `--remote-xpm` to a more recent one.
 
 ### SSH Output
 

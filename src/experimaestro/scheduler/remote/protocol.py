@@ -22,6 +22,10 @@ JSONRPC_VERSION = "2.0"
 # Remote monitoring protocol version
 # Increment this when making incompatible changes to the RPC protocol
 # Format: MAJOR.MINOR (e.g., "1.0", "1.1", "2.0")
+#
+# Adding a method is not an incompatible change: the server lists the methods it
+# handles (``methods`` in the ``get_sync_info`` answer), and the client refuses
+# to call the others (see RemoteMethodNotSupported)
 PROTOCOL_VERSION = "2.0"
 
 # Standard JSON-RPC error codes
@@ -73,6 +77,45 @@ class RPCMethod(str, Enum):
     GET_UNRESOLVED_WARNINGS = "get_unresolved_warnings"
     GET_ORPHAN_JOBS = "get_orphan_jobs"
     GET_STRAY_JOBS = "get_stray_jobs"
+
+
+#: Methods handled by the servers that do not list theirs (experimaestro 2.7.0)
+BASE_METHODS = frozenset(
+    {
+        RPCMethod.GET_EXPERIMENTS,
+        RPCMethod.GET_EXPERIMENT,
+        RPCMethod.GET_EXPERIMENT_RUNS,
+        RPCMethod.GET_JOBS,
+        RPCMethod.GET_JOB,
+        RPCMethod.GET_ALL_JOBS,
+        RPCMethod.GET_SERVICES,
+        RPCMethod.GET_TAGS_MAP,
+        RPCMethod.GET_DEPENDENCIES_MAP,
+        RPCMethod.KILL_JOB,
+        RPCMethod.CLEAN_JOB,
+        RPCMethod.DELETE_JOB_SAFELY,
+        RPCMethod.DELETE_EXPERIMENT,
+        RPCMethod.GET_SYNC_INFO,
+        RPCMethod.GET_PROCESS_INFO,
+        RPCMethod.EXECUTE_WARNING_ACTION,
+        RPCMethod.GET_UNRESOLVED_WARNINGS,
+        RPCMethod.GET_ORPHAN_JOBS,
+        RPCMethod.GET_STRAY_JOBS,
+    }
+)
+
+
+class RemoteMethodNotSupported(RuntimeError):
+    """The remote experimaestro is too old to handle a method"""
+
+    def __init__(self, method: "RPCMethod", remote_version: str | None):
+        version = f" ({remote_version})" if remote_version else ""
+        super().__init__(
+            f"the remote experimaestro{version} does not support {method.value}:"
+            " update experimaestro on the remote host (or point --remote-xpm to a"
+            " more recent one)"
+        )
+        self.method = method
 
 
 @dataclass
