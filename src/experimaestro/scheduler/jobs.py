@@ -3,6 +3,7 @@ from collections import ChainMap
 from datetime import datetime
 from functools import cached_property
 import itertools
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, List, Optional, Set
 
@@ -255,20 +256,36 @@ class Job(BaseJob, Resource):
             watched.job = self
             xp.watch_output(watched)
 
-    async def aio_done_handler(self):
-        """Process remaining task outputs after job completion.
+    async def aio_drain_task_outputs(self):
+        """Wait until the dynamic outputs of the job have been processed
 
-        Called by: Scheduler.aio_final_state()
+        Called by: Scheduler.aio_final_state(), once the process is over
 
-        Ensures all remaining task output events are queued for processing
-        by explicitly reading the task outputs file. The callbacks will
-        complete asynchronously and decrement task_output_count when done.
+        Reads the outputs file to its end (the watcher may lag behind) and
+        waits for the callbacks of every experiment watching it.
         """
-        if not self.watched_outputs:
-            return
-
+        expected = self.task_outputs_count() if self.state == JobState.DONE else None
         for xp in self.experiments:
-            await xp.taskOutputsWorker.aio_process_job_outputs(self)
+            if reader := xp.task_outputs_reader(self):
+                await reader.drain(expected)
+
+    def task_outputs_count(self) -> int | None:
+        """Number of dynamic outputs the task wrote, as recorded in ``.done``
+
+        Returns None if unknown (no or empty ``.done``, as written by older
+        versions or by :meth:`mark_done`).
+        """
+        try:
+            content = self.donepath.read_text()
+        except OSError:
+            return None
+        if not content.strip():
+            return None
+        try:
+            return json.loads(content)["task_outputs"]
+        except (ValueError, KeyError, TypeError):
+            logger.warning("Unexpected content in %s", self.donepath)
+            return None
 
     def __str__(self):
         return "Job[{}/{}]".format(self.task_id, self.identifier[:8])

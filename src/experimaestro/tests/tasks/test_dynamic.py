@@ -131,48 +131,36 @@ def test_task_dynamic_simple():
     """Test that dynamic task outputs trigger callbacks
 
     This test verifies that callbacks are guaranteed to complete before
-    the experiment context exits. The callback waits for jobs to complete
+    the experiment context exits. The callback waits for the task to complete
     before submitting evaluations, which validates that the synchronization
     logic correctly waits for all callbacks to finish.
     """
-    import asyncio
-
     evaluations = []
-    xp_ref = [None]  # To access xp from callback
+    learn_ref = [None]  # To access the task from the callback
 
     def collect_checkpoint(checkpoint: Checkpoint):
-        """Callback that waits for jobs to complete before evaluating
+        """Callback that waits for the task to complete before evaluating
 
         This simulates a real-world scenario where the callback needs to wait
         for the triggering task to complete before it can proceed (e.g., to
         read outputs from the task's directory).
         """
-        logging.info("Received checkpoint %s, waiting for jobs to complete", checkpoint)
-        xp = xp_ref[0]
-
-        # Wait for unfinished jobs to become 0 (all tasks completed)
-        async def wait_for_jobs_done():
-            async with xp.scheduler.exitCondition:
-                while xp.unfinishedJobs > 0:
-                    await xp.scheduler.exitCondition.wait()
-
-        asyncio.run_coroutine_threadsafe(
-            wait_for_jobs_done(), xp.scheduler.loop
-        ).result()
+        logging.info("Received checkpoint %s, waiting for the task", checkpoint)
+        job = learn_ref[0].__xpm__.job
+        while not job.scheduler_state.finished():
+            time.sleep(0.05)
 
         # Now submit evaluation
-        logging.info("Jobs done, submitting evaluation for checkpoint %s", checkpoint)
+        logging.info("Task done, submitting evaluation for checkpoint %s", checkpoint)
         evaluate(evaluations, checkpoint)
 
     with TemporaryDirectory() as workdir:
-        with TemporaryExperiment(
-            "dynamic", timeout_multiplier=6, workdir=workdir
-        ) as xp:
-            xp_ref[0] = xp
+        with TemporaryExperiment("dynamic", timeout_multiplier=6, workdir=workdir):
             model = Model.C()
             validation = Validation.C(model=model)
             learn = Learn.C(model=model, validation=validation)
             learn.watch_output(validation.checkpoint, collect_checkpoint)
+            learn_ref[0] = learn
 
             learn.submit()
 
@@ -184,6 +172,9 @@ def test_task_dynamic_simple():
             logging.info("Experiment will wait for completion...")
 
         assert len(evaluations) == 2, f"Expected 2 evaluations, got {len(evaluations)}"
+
+        # The task recorded how many outputs it wrote
+        assert learn.__xpm__.job.task_outputs_count() == 2
 
 
 def test_task_dynamic_replay():
@@ -418,3 +409,69 @@ def test_wait_blocks_until_dynamic_tasks_finished():
                 assert state == JobState.DONE, (
                     f"Dynamic task {i} has state {state} after xp.wait(), expected DONE"
                 )
+
+
+def test_task_dynamic_drain_without_watcher(monkeypatch):
+    """Without any file system notification, the drain at job end is enough"""
+    from experimaestro.scheduler.dynamic_outputs import TaskOutputsReader
+
+    monkeypatch.setattr(TaskOutputsReader, "_start_watching", lambda self: None)
+
+    evaluations = []
+    with TemporaryDirectory() as workdir:
+        with TemporaryExperiment(
+            "dynamic_no_watcher", timeout_multiplier=6, workdir=workdir
+        ):
+            model = Model.C()
+            validation = Validation.C(model=model)
+            learn = Learn.C(model=model, validation=validation)
+            learn.watch_output(validation.checkpoint, partial(evaluate, evaluations))
+            learn.submit()
+
+            learn.max_step_file.parent.mkdir(parents=True, exist_ok=True)
+            with learn.max_step_file.open("w") as f:
+                f.write("45")
+
+    assert len(evaluations) == 3, f"Expected 3 evaluations, got {len(evaluations)}"
+
+
+def test_task_outputs_drain_waits_for_late_lines(tmp_path, monkeypatch):
+    """drain() waits until it has read the number of outputs given in .done
+
+    Simulates a file system (e.g. NFS) that shows the last lines late.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from experimaestro.scheduler import dynamic_outputs
+    from experimaestro.scheduler.dynamic_outputs import TaskOutputsReader
+
+    monkeypatch.setattr(dynamic_outputs, "DRAIN_POLL_INTERVAL", 0.05)
+    path = tmp_path / ".experimaestro" / "task-outputs.jsonl"
+    path.parent.mkdir()
+    line = json.dumps({"key": "k", "args": [], "kwargs": {}}) + "\n"
+    path.write_text(line)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        xp = SimpleNamespace(scheduler=SimpleNamespace(loop=loop))
+        job = SimpleNamespace(task_outputs_path=path)
+        reader = TaskOutputsReader(xp, job)
+
+        async def late_write():
+            await asyncio.sleep(0.2)
+            with path.open("at") as fp:
+                # The second line arrives in two parts
+                fp.write(line[:5])
+                fp.flush()
+                await asyncio.sleep(0.2)
+                fp.write(line[5:])
+
+        writer = asyncio.create_task(late_write())
+        await asyncio.wait_for(reader.drain(expected=2), timeout=5)
+        await writer
+        return reader
+
+    reader = asyncio.run(run())
+    assert reader.lines_read == 2
+    assert len(reader.events["k"]) == 2

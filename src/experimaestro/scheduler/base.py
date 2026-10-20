@@ -1219,8 +1219,8 @@ class Scheduler(StateProvider, threading.Thread):
 
             await job.finalize_status(callback=preserve_state_callback)
 
-            # Process task outputs (queues remaining events for processing)
-            await job.aio_done_handler()
+            # Process the remaining task outputs, and wait for their callbacks
+            await job.aio_drain_task_outputs()
 
             # Archive to attached folders (beta). Only on successful
             # completion, and only if the per-job opt-out wasn't set.
