@@ -1,4 +1,4 @@
-"""Click CLI command for Experimaestro Parameters Inspector (`experimaestro inspect`)."""
+"""Click CLI command for Experimaestro Parameters Inspector (`experimaestro jobs inspect`)."""
 
 from __future__ import annotations
 
@@ -27,25 +27,28 @@ def inspect_command(target: str, workspace: Optional[str]) -> None:
 
     \b
         # Inspect current directory / job
-        experimaestro inspect
+        experimaestro jobs inspect
 
     \b
         # Inspect a specific job by task name or hash prefix
-        experimaestro inspect [mymodule.MyTask/]1822b2b
+        experimaestro jobs inspect [mymodule.MyTask/]1822b2b
 
     \b
         # Inspect a specific params.json directly
-        experimaestro inspect /path/to/params.json
+        experimaestro jobs inspect /path/to/params.json
 
     \b
         # Inspect a job in a specific workspace (workspace can be local or remote)
-        experimaestro inspect -w my_(remote)_workspace [mymodule.MyTask/]1822b2b
+        experimaestro jobs inspect -w my_(remote)_workspace [mymodule.MyTask/]1822b2b
     """
     from experimaestro.tools.inspect_params import (
         ParamsInspectorApp,
         find_params_file,
     )
 
+    from experimaestro.cli import root_config
+
+    workspace = workspace or root_config().workspace_spec
     try:
         params_path = find_params_file(target, workspace)
         app = ParamsInspectorApp(params_path)

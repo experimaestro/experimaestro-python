@@ -180,7 +180,7 @@ class ConfigurationLoader:
 @click.option(
     "--console",
     is_flag=True,
-    help="Launch Textual console UI for monitoring with logs",
+    help="Launch the terminal (Textual) UI for monitoring with logs",
 )
 @click.option(
     "--events-viewer",
@@ -449,7 +449,14 @@ def experiments_cli(  # noqa: C901
     else:
         experiment_id = xp_configuration.id
 
-    # Define the workspace (may auto-select based on experiment_id triggers)
+    # Define the workspace (may auto-select based on experiment_id triggers);
+    # defaults to the one given to the root command (`experimaestro -w ID run`)
+    if workdir is None and workspace is None:
+        from experimaestro.cli import RunConfig
+
+        root = click.get_current_context().find_root().obj
+        if isinstance(root, RunConfig):
+            workdir, workspace = root.workdir, root.workspace_id
     ws_env = find_workspace(
         workdir=workdir, workspace=workspace, experiment_id=experiment_id
     )

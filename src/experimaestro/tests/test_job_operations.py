@@ -18,14 +18,15 @@ from experimaestro.utils.disk_usage import folder_size, format_size
 
 
 def test_cli_stray_delete(tmp_path):
-    """``jobs stray --delete --perform`` deletes the finished orphan jobs"""
+    """``workspace stray --delete --perform`` deletes the finished orphan jobs"""
     workspace = tmp_path / "workspace"
     (workspace / "experiments").mkdir(parents=True)
     (workspace / ".__experimaestro__").touch()
     job_path = create_orphan_job(workspace, "pkg.Learn", "orphan1")
 
     result = CliRunner().invoke(
-        cli, ["jobs", "--workdir", str(workspace), "stray", "--delete", "--perform"]
+        cli,
+        ["--workdir", str(workspace), "workspace", "stray", "--delete", "--perform"],
     )
 
     assert result.exit_code == 0, result.output

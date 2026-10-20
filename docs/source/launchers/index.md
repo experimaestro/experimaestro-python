@@ -276,10 +276,10 @@ directory (`~/.config/experimaestro` by default, or the directory given with
 `--config`) and prints the launcher returned for a requirement specification:
 
 ```bash
-experimaestro find-launchers 'duration=1h & cuda(mem=32G) * 1 & cpu(cores=8)'
+experimaestro tools find-launchers 'duration=1h & cuda(mem=32G) * 1 & cpu(cores=8)'
 
 # With an explicit configuration directory
-experimaestro find-launchers --config /path/to/config-dir 'duration=1h & cuda(mem=32G) * 1'
+experimaestro tools find-launchers --config /path/to/config-dir 'duration=1h & cuda(mem=32G) * 1'
 ```
 
 ### From Python

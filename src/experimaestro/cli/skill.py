@@ -70,9 +70,9 @@ def install_skill(targets: tuple[str, ...], list_targets: bool):
     Specify targets to install to specific tools:
 
     \b
-      experimaestro install-skill            # default: .agents
-      experimaestro install-skill claude     # ~/.claude/skills/
-      experimaestro install-skill agents claude  # both
+      experimaestro tools install-skill            # default: .agents
+      experimaestro tools install-skill claude     # ~/.claude/skills/
+      experimaestro tools install-skill agents claude  # both
 
     Available targets: agents, claude, cursor
     """

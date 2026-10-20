@@ -1,23 +1,59 @@
 # Command Line Interface
 
+## Overview
+
+```
+experimaestro [-w WORKSPACE | --workdir PATH] COMMAND
+  run           Run an experiment
+  monitor       Monitor the experiments of a workspace (local or SSH)
+  experiments   Experiments (alias: xp): list, dag, copy, runs, services, actions, carbon
+  jobs          Jobs: list, kill, clean, log, path, recover, inspect, diff
+  workspace     Workspaces (alias: ws): list, cleanup, orphans, stray, migrate
+  tools         Developer tools: check-documentation, find-launchers,
+                install-skill, refactor, deprecated
+  launchers, connectors, tokens
+                Commands provided by plugins
+  version
+```
+
+The workspace is selected once, before the command: `-w`/`--workspace` takes
+a workspace ID from the [settings](settings.md), `--workdir` a directory.
+Without either, the default (first) workspace is used — or, for `run`, the
+workspace whose triggers match the experiment ID.
+
+```bash
+experimaestro -w my-cluster monitor --web
+experimaestro --workdir /path/to/workspace jobs list
+```
+
+:::{note}
+Commands were reorganized in experimaestro 2.x. The old names
+(`run-experiment`, `experiments ssh-monitor`, `experiments history`,
+`orphans`, `cleanup`, `dag`, `inspect`, `workspaces`, `migrate`,
+`refactor`, …) still work but print a deprecation warning.
+`experimaestro run PARAMS.json` (running a single task from its
+`params.json`) is also still supported.
+:::
+
 (running-experiments)=
 ## Running Experiments
 
 The general command to launch experiments is:
 
 ```bash
-experimaestro run-experiment [OPTIONS] YAML_FILE [ARGS]
+experimaestro run [OPTIONS] YAML_FILE [ARGS]
 ```
 
-### run-experiment Options
+### run Options
 
 | Option | Description |
 |--------|-------------|
 | `--run-mode MODE` | Set run mode: `NORMAL`, `DRY_RUN`, `GENERATE_ONLY`, or `PREPARE` |
-| `--workspace ID` | Use a workspace from settings by ID |
+| `--workspace ID` | Use a workspace from settings by ID (same as `experimaestro -w ID run`) |
 | `--workdir PATH` | Specify working directory directly |
 | `--port PORT` | Port for web monitoring interface |
-| `--console` | Use terminal TUI instead of web interface |
+| `--console` | Use the terminal (Textual) UI |
+| `--web` | Start the web interface |
 | `--host HOST` | Server hostname (for remote job access) |
 | `--pre-yaml FILE` | Load YAML file before the main one (can be repeated) |
 | `--post-yaml FILE` | Load YAML file after the main one (can be repeated) |
@@ -31,7 +67,7 @@ experimaestro run-experiment [OPTIONS] YAML_FILE [ARGS]
 
 ### Run Modes
 
-`experimaestro run-experiment --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY|PREPARE]`
+`experimaestro run --run-mode [DRY_RUN|NORMAL|GENERATE_ONLY|PREPARE]`
 
 - `DRY_RUN` - Display task hashes and dependencies without launching
 - `GENERATE_ONLY` - Generate job folders without [launching](./launchers/index.md) tasks
@@ -46,20 +82,6 @@ experimaestro run-experiment [OPTIONS] YAML_FILE [ARGS]
 Besides the web interface, it is possible to use the command line to check the job
 status and control jobs.
 
-### Database Synchronization
-
-**Important:** The job commands read from the workspace database. If jobs are not visible,
-you may need to synchronize the database with the filesystem:
-
-```bash
-experimaestro experiments sync --workdir /path/to/workspace
-```
-
-This is typically needed when:
-- Jobs were run before the database was introduced
-- Jobs were created by an external process
-- The database is out of sync with the filesystem
-
 ### Available Commands
 
 | Command | Description |
@@ -69,13 +91,15 @@ This is typically needed when:
 | `experimaestro jobs clean` | Clean (delete) finished jobs |
 | `experimaestro jobs log JOBID` | View job log (stderr by default) |
 | `experimaestro jobs path JOBID` | Print the path to a job directory |
+| `experimaestro jobs recover JOBID` | Recover a job from a backup folder |
+| `experimaestro jobs inspect [TARGET]` | Inspect job parameters (interactive TUI) |
+| `experimaestro jobs diff PATH1 PATH2` | Difference between two job configurations |
 
 ### Common Options
 
-All job commands support these options:
+The `list`, `kill` and `clean` commands support these options (the workspace
+is selected with `experimaestro -w ID jobs …` or `experimaestro --workdir PATH jobs …`):
 
-- `--workdir PATH`: Specify the workspace directory
-- `--workspace ID`: Use a workspace from settings by ID
 - `--experiment ID`: Filter by experiment ID
 - `--filter EXPR`: Filter using a filter expression (see below)
 - `--tags`: Show job tags in output
@@ -133,7 +157,7 @@ experimaestro jobs log -f mymodule.MyTask/abc123def
 experimaestro jobs path mymodule.MyTask/abc123def
 
 # Inspect job parameters in interactive TUI
-experimaestro inspect mymodule.MyTask/abc123def
+experimaestro jobs inspect mymodule.MyTask/abc123def
 ```
 
 ## Filter Expressions
@@ -209,15 +233,8 @@ RUNNING mymodule.MyTask/def456 [my_experiment] model=splade dataset=msmarco
 ### Cleanup Partial Directories
 
 Partial directories are shared checkpoint locations created by `partial()`.
-When all jobs using a partial are deleted, the partial becomes orphaned:
-
-```bash
-# Dry run - shows what would be deleted
-experimaestro jobs cleanup-partials
-
-# Actually delete orphan partials
-experimaestro jobs cleanup-partials --perform
-```
+When all jobs using a partial are deleted, the partial becomes orphaned;
+`experimaestro workspace cleanup` offers to remove them.
 
 ## Experiment Management
 
@@ -232,18 +249,20 @@ experimaestro experiments [OPTIONS] COMMAND
 | Command | Description |
 |---------|-------------|
 | `list` | List experiments in the workspace |
-| `monitor` | Monitor experiments with web UI or console TUI |
-| `ssh-monitor` | Monitor experiments on a remote server via SSH |
-| `monitor-server` | Start SSH monitoring server (internal, for remote monitoring) |
-| `sync` | Synchronize workspace database from disk state |
+| `dag` | Show the dependency graph of an experiment (see [below](#experiment-dag-visualization-experimaestro-experiments-dag)) |
 | `copy` | Copy an experiment between workspaces |
+| `runs list` / `runs prune` | History of the runs of an experiment, and pruning |
+| `runs tag` / `runs untag` / `runs tags` | Tag runs of an experiment |
+| `services list` / `services start` | Inspect and start experiment services |
+| `actions list` / `actions run` | Experiment actions (alpha) |
+| `carbon summary` / `carbon stats` | Carbon tracking |
 
 ### List Command
 
 List experiments with their status and metadata:
 
 ```bash
-experimaestro experiments list --workdir /path/to/workspace
+experimaestro --workdir /path/to/workspace experiments list
 ```
 
 Output format:
@@ -255,39 +274,38 @@ experiment-id [hostname] (finished_jobs/total_jobs jobs)
 - `hostname`: The host where the experiment was launched (if recorded)
 - Job counts: Number of completed jobs out of total
 
-### Monitor Command
+## Monitoring
 
-Launch an interactive monitoring interface for experiments:
+`experimaestro monitor` launches an interactive monitoring interface for the
+experiments of a workspace; choose the interface with `--web` or `--console`
+(there is no default):
 
 ```bash
 # Web interface (default) on port 12345
-experimaestro experiments monitor --workdir /path/to/workspace
+experimaestro --workdir /path/to/workspace monitor --web
 
 # Console TUI interface
-experimaestro experiments monitor --workdir /path/to/workspace --console
+experimaestro --workdir /path/to/workspace monitor --console
 
 # Custom port for web interface
-experimaestro experiments monitor --workdir /path/to/workspace --port 8080
-
-# Force sync before starting
-experimaestro experiments monitor --workdir /path/to/workspace --sync
+experimaestro --workdir /path/to/workspace monitor --web --port 8080
 ```
 
-### SSH Monitor Command
+### Remote (SSH) workspaces
 
-Monitor experiments running on a remote server through SSH:
+A workspace with SSH settings (`experimaestro -w my-cluster monitor`), or any
+remote directory given with `--ssh HOST:PATH`, is monitored through SSH:
 
 ```bash
-experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
+experimaestro monitor --ssh HOST:REMOTE_WORKDIR (--console | --web) [OPTIONS]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--web` | Use web UI instead of console TUI (console is default) |
+| `--console` / `--web` | Terminal (Textual) UI or web UI (one is required) |
 | `--port PORT` | Port for local web server (default: 12345) |
 | `--remote-xpm PATH` | Path to experimaestro on remote host |
 | `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
-| `--workspace ID` | Load SSH settings from a workspace in settings.yaml |
 | `--remote-shell-init CMD` | Shell commands to run before remote experimaestro |
 | `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
 | `--remote-python NAME` | Python interpreter for `uv tool run --python` |
@@ -297,26 +315,26 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 Examples:
 
 ```bash
-# Basic monitoring (console TUI by default)
-experimaestro experiments ssh-monitor myserver /home/user/experiments
+# Basic monitoring (web UI)
+experimaestro monitor --web --ssh myserver:/home/user/experiments
 
-# With web UI
-experimaestro experiments ssh-monitor user@host /workspace --web
+# With the console TUI
+experimaestro monitor --ssh user@host:/workspace --console
 
 # Using workspace SSH settings from settings.yaml
-experimaestro experiments ssh-monitor --workspace my-cluster
+experimaestro -w my-cluster monitor --web
 
 # With shell init for HPC environments
-experimaestro experiments ssh-monitor host /workspace --remote-shell-init "source /etc/profile; module load python/3.10"
+experimaestro monitor --web --ssh host:/workspace --remote-shell-init "source /etc/profile; module load python/3.10"
 
 # Offline mode (no PyPI access)
-experimaestro experiments ssh-monitor host /workspace --uv-offline --remote-python python3
+experimaestro monitor --web --ssh host:/workspace --uv-offline --remote-python python3
 
 # With SSH port and identity file
-experimaestro experiments ssh-monitor myserver /workspace -o "-p 2222" -o "-i ~/.ssh/mykey"
+experimaestro monitor --web --ssh myserver:/workspace -o "-p 2222" -o "-i ~/.ssh/mykey"
 
 # With custom experimaestro path on remote
-experimaestro experiments ssh-monitor host /workspace --remote-xpm /path/to/venv/bin/experimaestro
+experimaestro monitor --web --ssh host:/workspace --remote-xpm /path/to/venv/bin/experimaestro
 ```
 
 See [Remote Monitoring via SSH](interfaces.md#remote-monitoring-via-ssh) for detailed documentation.
@@ -371,10 +389,11 @@ See also the [Python API](utilities.md#copying-experiments) for programmatic use
 
 ## Workspaces Management
 
-You can list the workspaces configured in your `settings.yaml`:
+The `workspace` command group (alias: `ws`) lists, cleans up and migrates
+workspaces. You can list the workspaces configured in your `settings.yaml`:
 
 ```bash
-experimaestro workspaces list [OPTIONS]
+experimaestro workspace list [OPTIONS]
 ```
 
 ```
@@ -382,23 +401,37 @@ Options:
   `-v`, `--verbose`  Output all workspace configuration parameters (e.g. ssh, env, folders) |
 ```
 
-## Cleaning Up Orphans
+### Cleaning Up
 
-Check for tasks that are not part of any experimental plan in the given
-experimental folder:
+```bash
+# Interactive cleanup: orphaned events, stray and orphan jobs, orphan partials
+experimaestro workspace cleanup
 
+# Jobs that are not part of any experiment
+experimaestro workspace orphans [--size] [--clean] [--no-folders]
+
+# Stray jobs (not associated with any experiment), killing or deleting them
+experimaestro workspace stray [--size] [--kill] [--delete] [--perform]
 ```
-Usage: experimaestro orphans [OPTIONS] PATH
 
-Options:
-  --size      Show size of each folder
-  --clean     Prune the orphan folders
-  --show-all  Show even not orphans
+### Migrating from experimaestro 1.x
+
+```bash
+experimaestro workspace migrate v1-to-v2 [--dry-run] [WORKDIR]
 ```
 
 ## Difference between two configurations
 
-It is possible to look at the differences (that explain that two tasks have a different identifier) by using the `parameters-difference` command
+It is possible to look at the differences (that explain that two tasks have a
+different identifier) with `experimaestro jobs diff PARAMS1 PARAMS2`, and at
+the reason of an identifier change for a job with
+`experimaestro tools deprecated diff JOBPATH`.
+
+## Developer Tools
+
+The `tools` command group gathers helpers for developers of
+experimaestro-based code: `check-documentation`, `find-launchers`,
+`install-skill`, `refactor` and `deprecated`.
 
 ## Refactoring Code
 
@@ -409,10 +442,10 @@ to the explicit `field(ignore_default=...)` syntax:
 
 ```bash
 # Dry run - shows what would be changed (default)
-experimaestro refactor default-values /path/to/project
+experimaestro tools refactor default-values /path/to/project
 
 # Actually apply the changes
-experimaestro refactor default-values /path/to/project --perform
+experimaestro tools refactor default-values /path/to/project --perform
 ```
 
 This converts patterns like:
@@ -444,13 +477,13 @@ more.
 
 ```bash
 # Install to ~/.agents/skills/ (open standard, works with all compatible tools)
-experimaestro install-skill
+experimaestro tools install-skill
 
 # Install for a specific tool
-experimaestro install-skill claude
+experimaestro tools install-skill claude
 
 # Install to multiple targets at once
-experimaestro install-skill agents claude cursor
+experimaestro tools install-skill agents claude cursor
 ```
 
 ### Available targets
@@ -464,7 +497,7 @@ experimaestro install-skill agents claude cursor
 ### List targets and status
 
 ```bash
-experimaestro install-skill --list
+experimaestro tools install-skill --list
 ```
 
 Shows all targets, which tools are detected on your system, and whether the skill
@@ -472,14 +505,14 @@ is already installed.
 
 ### Updating
 
-Run the same `install-skill` command again after upgrading experimaestro to update
+Run the same `tools install-skill` command again after upgrading experimaestro to update
 the skill to the latest version.
 
 ## (Sphinx) Checking undocumented configurations
 
-Use `experimaestro check-documentation objects.inv my_package` to check for undocumented members. The `objects.inv` file should be generated by sphinx
+Use `experimaestro tools check-documentation objects.inv my_package` to check for undocumented members. The `objects.inv` file should be generated by sphinx
 
-## Experiment DAG Visualization (`experimaestro dag`)
+## Experiment DAG Visualization (`experimaestro experiments dag`)
 
 The `dag` command shows the dependency graph of an experiment run: its tasks,
 actions and (optionally) the configurations that link them. It is the same
@@ -502,18 +535,18 @@ the experiment code, and works with remote (SSH) workspaces.
 
 ```bash
 # Open the graph in the browser (default)
-experimaestro dag my_experiment
+experimaestro experiments dag my_experiment
 
 # Save a standalone HTML page
-experimaestro dag my_experiment --html dag.html
+experimaestro experiments dag my_experiment --html dag.html
 
 # List the grid search configurations, and print one stage by stage
-experimaestro dag my_experiment --list-configs
-experimaestro dag my_experiment --tree -c 0
-experimaestro dag my_experiment --tree --filter "lr=0.001,kernel_size=3"
+experimaestro experiments dag my_experiment --list-configs
+experimaestro experiments dag my_experiment --tree -c 0
+experimaestro experiments dag my_experiment --tree --filter "lr=0.001,kernel_size=3"
 
 # Dump the graph and all its views as JSON
-experimaestro dag my_experiment --json -
+experimaestro experiments dag my_experiment --json -
 ```
 
 ### Options
@@ -522,7 +555,7 @@ experimaestro dag my_experiment --json -
 |--------|-------------|
 | `EXPERIMENT_ID` | Experiment identifier (prompted for if not given) |
 | `-r, --run` | Run ID (default: current run) |
-| `-w, --workspace` | Workspace ID or directory (default: from the settings) |
+| `-w, --workspace` | Workspace ID or directory (default: `experimaestro -w`, or from the settings) |
 | `--html PATH` | Save the graph as a standalone HTML page |
 | `--json PATH` | Save the graph and its views as JSON (`-` for the standard output) |
 | `-t, --tree` | Print the graph, stage by stage |
@@ -532,22 +565,22 @@ experimaestro dag my_experiment --json -
 | `--all-nodes` | With `--tree`, also show configurations (not only jobs) |
 | `--stack / --no-stack` | With `--tree`, stack similar nodes (default: stacked) |
 
-## Job Parameters Inspector (`experimaestro inspect`)
+## Job Parameters Inspector (`experimaestro jobs inspect`)
 
 Experimaestro provides an interactive terminal-based (TUI) parameters inspector built with Textual. It visualizes the hierarchical configuration graph of jobs, with support for cycle detection, relative path resolution, Python code synthesis, and remote workspace job inspection via SSH.
 
 ```bash
 # Inspect current directory / job
-experimaestro inspect
+experimaestro jobs inspect
 
 # Inspect a specific job by task name or hash prefix
-experimaestro inspect mymodule.MyTask/1822b2b
+experimaestro jobs inspect mymodule.MyTask/1822b2b
 
 # Inspect a specific params.json directly
-experimaestro inspect /path/to/params.json
+experimaestro jobs inspect /path/to/params.json
 
 # Inspect a job in a remote SSH workspace
-experimaestro inspect -w my_cluster mymodule.MyTask/1822b2b
+experimaestro jobs inspect -w my_cluster mymodule.MyTask/1822b2b
 ```
 
 ### Options

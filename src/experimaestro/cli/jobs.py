@@ -6,21 +6,20 @@ from pathlib import Path
 from termcolor import colored, cprint
 
 from experimaestro.scheduler import job_operations
-from experimaestro.settings import find_workspace
-from experimaestro.utils.disk_usage import folder_size, format_size
-from . import check_xp_path, cli
+from . import RunConfig
+from .inspect import inspect_command
 
 
-@click.option("--workspace", default="", help="Experimaestro workspace")
-@click.option("--workdir", type=Path, default=None)
-@cli.group()
-@click.pass_context
+@click.option("--workspace", default="", hidden=True, help="Experimaestro workspace")
+@click.option("--workdir", type=Path, default=None, hidden=True)
+@click.group()
+@click.pass_obj
 def jobs(
-    ctx,
+    cfg: RunConfig,
     workdir: Optional[Path],
     workspace: Optional[str],
 ):
-    """Job control: list, kill and clean
+    """Jobs: list, kill, clean, inspect, logs
 
     The job filter is a boolean expression where tags (alphanumeric)
     and special job information (@state for job state, @name for job full
@@ -33,13 +32,8 @@ def jobs(
 
     selects jobs where the tag model is "bm25", the tag mode is either
     "a" or "b", and the state is running.
-
-    Note: Jobs are read from the workspace database. If jobs are missing,
-    run 'experimaestro experiments sync' to synchronize the database
-    with the filesystem.
     """
-    ws = ctx.obj.workspace = find_workspace(workdir=workdir, workspace=workspace)
-    check_xp_path(ctx, None, ws.path)
+    cfg.set_workspace(workdir, workspace)
 
 
 def process(
@@ -315,175 +309,15 @@ def recover(ctx, jobid: str):
     cprint(f"Recovered {jobid} into {dest}", "green")
 
 
-@click.option(
-    "--kill", is_flag=True, help="Kill running stray jobs (requires --perform)"
-)
-@click.option(
-    "--delete", is_flag=True, help="Delete non-running stray jobs (requires --perform)"
-)
-@click.option("--perform", is_flag=True, help="Actually perform the operation")
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Bypass safety checks (e.g., when scheduler is running)",
-)
-@click.option("--size", is_flag=True, help="Show size of each job folder")
-@click.option("--fullpath", is_flag=True, help="Show full paths")
+jobs.add_command(inspect_command, "inspect")
+
+
+@click.argument("path2", type=Path)
+@click.argument("path1", type=Path)
 @jobs.command()
-@click.pass_context
-def stray(
-    ctx,
-    kill: bool,
-    delete: bool,
-    perform: bool,
-    force: bool,
-    size: bool,
-    fullpath: bool,
-):
-    """Manage stray jobs (jobs not associated with any experiment)
+def diff(path1, path2):
+    """Compute the difference between two job configurations (params.json)"""
 
-    Stray jobs are jobs that exist on disk but are not referenced by any
-    experiment. This can happen when:
+    from experimaestro.tools.diff import diff
 
-    \b
-    - An experiment plan changes and a job is no longer needed
-    - An experiment is deleted but jobs remain on disk
-    - Jobs are manually created outside of experiments
-
-    Safety: By default, this command will warn if an experiment appears to be
-    running (scheduler active). Use --force to bypass this check.
-
-    Examples:
-
-    \b
-    # List all stray jobs
-    experimaestro jobs stray
-
-    \b
-    # List stray jobs with sizes
-    experimaestro jobs stray --size
-
-    \b
-    # Kill running stray jobs (dry run)
-    experimaestro jobs stray --kill
-
-    \b
-    # Kill running stray jobs (for real)
-    experimaestro jobs stray --kill --perform
-
-    \b
-    # Delete non-running stray jobs
-    experimaestro jobs stray --delete --perform
-
-    \b
-    # Kill and delete all stray jobs (dangerous!)
-    experimaestro jobs stray --kill --delete --perform --force
-    """
-    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
-    from experimaestro.scheduler import JobState
-
-    provider = WorkspaceStateProvider.get_instance(ctx.obj.workspace.path)
-
-    # Safety check: warn if scheduler appears to be running
-    if provider.is_live and not force:
-        cprint(
-            "Warning: Scheduler appears to be running. Stray detection may be inaccurate.",
-            "yellow",
-        )
-        cprint("Use --force to proceed anyway.", "yellow")
-        if perform:
-            cprint("Aborting due to active scheduler.", "red")
-            return
-
-    # Get stray jobs (running orphans) and all orphan jobs
-    stray_jobs = provider.get_stray_jobs()
-    stray_jobs = [j for j in stray_jobs if j.path and j.path.exists()]
-
-    orphan_jobs = provider.get_orphan_jobs()
-    orphan_jobs = [j for j in orphan_jobs if j.path and j.path.exists()]
-
-    # Finished orphans = orphans that are not stray (not running)
-    stray_ids = {j.identifier for j in stray_jobs}
-    finished_jobs = [j for j in orphan_jobs if j.identifier not in stray_ids]
-
-    if not stray_jobs and not finished_jobs:
-        cprint("No stray or orphan jobs found.", "green")
-        return
-
-    # Print summary
-    print(
-        f"Found {len(stray_jobs)} stray (running) and {len(finished_jobs)} orphan (finished) jobs:"
-    )
-    if stray_jobs:
-        cprint(f"  {len(stray_jobs)} stray (running)", "yellow")
-    if finished_jobs:
-        cprint(f"  {len(finished_jobs)} orphan (finished)", "cyan")
-    print()
-
-    # Combine for display (stray first, then finished orphans)
-    all_jobs = stray_jobs + finished_jobs
-
-    # Process each job
-    killed_count = 0
-    deleted_count = 0
-
-    for job in all_jobs:
-        job_str = str(job.path) if fullpath else f"{job.task_id}/{job.identifier}"
-        state_name = job.state.name if job.state else "UNKNOWN"
-
-        # Determine color based on state
-        if job.state and job.state.running():
-            state_color = "yellow"
-        elif job.state == JobState.DONE:
-            state_color = "green"
-        elif job.state == JobState.ERROR:
-            state_color = "red"
-        else:
-            state_color = "white"
-
-        # Show job info
-        print(colored(f"{state_name:10}{job_str}", state_color), end="")
-
-        # Show size if requested
-        if size and job.path and job.path.exists():
-            print(f"  [{format_size(folder_size(job.path))}]", end="")
-
-        print()
-
-        # Kill running jobs if requested
-        if kill and job_operations.check_kill_job(job) is None:
-            if perform:
-                outcome = job_operations.kill_job(provider, job)
-                if outcome.ok:
-                    cprint("  KILLED", "light_red")
-                    killed_count += 1
-                else:
-                    cprint(f"  KILL FAILED: {outcome.message}", "red")
-            else:
-                cprint("  Would kill (dry run)", "yellow")
-
-        # Delete finished jobs if requested (orphan partials are cleaned once,
-        # at the end)
-        if delete and job_operations.check_delete_job(job) is None:
-            if perform:
-                outcome = job_operations.delete_job(provider, job, cleanup=False)
-                if outcome.ok:
-                    cprint("  DELETED", "light_red")
-                    deleted_count += 1
-                else:
-                    cprint(f"  DELETE FAILED: {outcome.message}", "red")
-            else:
-                cprint("  Would delete (dry run)", "yellow")
-
-    # Summary
-    print()
-    if perform:
-        if kill and killed_count > 0:
-            cprint(f"Killed {killed_count} running job(s)", "green")
-        if delete and deleted_count > 0:
-            cprint(f"Deleted {deleted_count} job(s)", "green")
-            # Clean up orphan partials after deleting jobs
-            provider.cleanup_orphan_partials(perform=True)
-    else:
-        if kill or delete:
-            cprint("Dry run - no changes made. Use --perform to execute.", "yellow")
+    diff(path1, path2)

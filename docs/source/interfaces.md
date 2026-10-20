@@ -32,7 +32,7 @@ with experiment(workdir, "my_experiment", port=12345) as xp:
 
 ```bash
 # Monitor an existing workspace
-experimaestro experiments monitor --workdir /path/to/workspace --port 12345
+experimaestro --workdir /path/to/workspace monitor --web --port 12345
 ```
 
 Then open `http://localhost:12345` in your browser.
@@ -105,7 +105,7 @@ If your jobs run on remote machines (e.g., SLURM cluster), use the `--host` opti
 to make the server accessible:
 
 ```bash
-experimaestro run-experiment --host 0.0.0.0 --port 12345 experiment.yaml
+experimaestro run --host 0.0.0.0 --port 12345 experiment.yaml
 ```
 
 ## Terminal UI (TUI)
@@ -118,14 +118,14 @@ It's useful when working over SSH or when you prefer staying in the terminal.
 **During experiment execution:**
 
 ```bash
-# Use --console flag to launch TUI instead of web UI
-experimaestro run-experiment --console experiment.yaml
+# Use --console to launch the terminal UI
+experimaestro run --console experiment.yaml
 ```
 
 **Standalone monitoring:**
 
 ```bash
-experimaestro experiments monitor --workdir /path/to/workspace --console
+experimaestro --workdir /path/to/workspace monitor --console
 ```
 
 ### Features
@@ -296,7 +296,7 @@ host, and communicates via JSON-RPC over the SSH channel.
 ### Basic Usage
 
 ```bash
-experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
+experimaestro monitor --ssh HOST:REMOTE_WORKDIR (--console | --web) [OPTIONS]
 ```
 
 - **HOST**: SSH host in standard format (e.g., `user@server`, `server`, or SSH config alias)
@@ -305,27 +305,27 @@ experimaestro experiments ssh-monitor HOST REMOTE_WORKDIR [OPTIONS]
 ### Examples
 
 ```bash
-# Basic SSH monitoring (console TUI by default)
-experimaestro experiments ssh-monitor myserver /home/user/experiments
+# Basic SSH monitoring (web UI)
+experimaestro monitor --web --ssh myserver:/home/user/experiments
 
-# With web UI instead of console TUI
-experimaestro experiments ssh-monitor user@cluster.example.com /scratch/experiments --web
+# With the console TUI instead of the web UI
+experimaestro monitor --ssh user@cluster.example.com:/scratch/experiments --console
 
 # Custom port for web interface
-experimaestro experiments ssh-monitor myserver /workspace --port 8080
+experimaestro monitor --web --ssh myserver:/workspace --port 8080
 
 # With SSH options (e.g., custom port, identity file)
-experimaestro experiments ssh-monitor myserver /workspace -o "-p 2222" -o "-i ~/.ssh/cluster_key"
+experimaestro monitor --web --ssh myserver:/workspace -o "-p 2222" -o "-i ~/.ssh/cluster_key"
 
 # Specify path to experimaestro on remote host
-experimaestro experiments ssh-monitor myserver /workspace --remote-xpm /opt/conda/bin/experimaestro
+experimaestro monitor --web --ssh myserver:/workspace --remote-xpm /opt/conda/bin/experimaestro
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--web` | Use web UI instead of console TUI (console is default) |
+| `--console` / `--web` | Terminal (Textual) UI or web UI (one is required) |
 | `--port PORT` | Port for local web server (default: 12345) |
 | `--remote-xpm PATH` | Path to experimaestro executable on remote host |
 | `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
@@ -373,7 +373,7 @@ workspaces:
 Then use `--workspace` to load settings automatically:
 
 ```bash
-experimaestro experiments ssh-monitor --workspace my-cluster
+experimaestro -w my-cluster monitor --web
 ```
 
 See [Remote Workspaces (SSH)](settings.md#remote-workspaces-ssh) for all available settings.
@@ -396,10 +396,10 @@ Alternatively, specify a pre-installed experimaestro path:
 
 ```bash
 # If experimaestro is installed in a virtualenv
-experimaestro experiments ssh-monitor host /workspace --remote-xpm /path/to/venv/bin/experimaestro
+experimaestro monitor --web --ssh host:/workspace --remote-xpm /path/to/venv/bin/experimaestro
 
 # If installed system-wide
-experimaestro experiments ssh-monitor host /workspace --remote-xpm experimaestro
+experimaestro monitor --web --ssh host:/workspace --remote-xpm experimaestro
 ```
 
 (version-compatibility)=
@@ -491,7 +491,7 @@ Dependency graph: the selected stack of evaluations, with its lineage highlighte
 The same view can be exported as a standalone HTML page:
 
 ```bash
-experimaestro dag my_experiment --html dag.html
+experimaestro experiments dag my_experiment --html dag.html
 ```
 
 See [Experiment DAG Visualization](cli.md#experiment-dag-visualization-experimaestro-dag) in the CLI reference for details and options.

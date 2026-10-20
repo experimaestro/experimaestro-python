@@ -955,12 +955,12 @@ async def test_root_model_primary_placement(tmp_path):
 
 
 def test_cli_inspect_help():
-    """Verify experimaestro inspect --help CLI command."""
+    """Verify experimaestro jobs inspect --help CLI command."""
     from click.testing import CliRunner
     from experimaestro.cli import cli
 
     runner = CliRunner()
-    res = runner.invoke(cli, ["inspect", "--help"])
+    res = runner.invoke(cli, ["jobs", "inspect", "--help"])
     assert res.exit_code == 0
     assert "Interactive TUI Parameters Inspector" in res.output
     assert "--workspace" in res.output

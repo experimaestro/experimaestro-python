@@ -40,7 +40,7 @@ To pre-warm caches from a connected node (driver / login node) without
 launching any actual tasks:
 
 ```bash
-uv run experimaestro run-experiment --run-mode prepare my_experiment.py
+uv run experimaestro run --run-mode prepare my_experiment.py
 ```
 
 This walks every `Prepare` referenced in your submitted tasks' params,
@@ -51,7 +51,7 @@ Afterwards the compute nodes can run the experiment without internet
 access:
 
 ```bash
-uv run experimaestro run-experiment my_experiment.py
+uv run experimaestro run my_experiment.py
 ```
 
 **Where the data is stored.** PREPARE mode creates **no entries under

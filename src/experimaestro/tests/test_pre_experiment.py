@@ -75,7 +75,7 @@ def test_pre_experiment_sets_env_var(experiment_dir):
     result = runner.invoke(
         cli,
         [
-            "run-experiment",
+            "run",
             "--workdir",
             str(workdir),
             "--run-mode",
@@ -106,7 +106,7 @@ def test_pre_experiment_file_not_found(experiment_dir):
     result = runner.invoke(
         cli,
         [
-            "run-experiment",
+            "run",
             "--workdir",
             str(workdir),
             "--run-mode",
@@ -138,7 +138,7 @@ def test_pre_experiment_execution_error(experiment_dir):
     result = runner.invoke(
         cli,
         [
-            "run-experiment",
+            "run",
             "--workdir",
             str(workdir),
             "--run-mode",
@@ -175,7 +175,7 @@ def test_pre_experiment_relative_path(experiment_dir):
     result = runner.invoke(
         cli,
         [
-            "run-experiment",
+            "run",
             "--workdir",
             str(workdir),
             "--run-mode",
@@ -207,7 +207,7 @@ def test_pre_experiment_mocking_modules(experiment_dir):
     result = runner.invoke(
         cli,
         [
-            "run-experiment",
+            "run",
             "--workdir",
             str(workdir),
             "--run-mode",
@@ -254,7 +254,7 @@ def test_pre_experiment_module_name(experiment_dir):
         result = runner.invoke(
             cli,
             [
-                "run-experiment",
+                "run",
                 "--workdir",
                 str(workdir),
                 "--run-mode",

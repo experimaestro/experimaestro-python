@@ -323,7 +323,7 @@ will create symbolic links so that old jobs are preserved and
 re-used.
 
 ```sh
-experimaestro deprecated list WORKDIR
+experimaestro tools deprecated list WORKDIR
 ```
 
 
@@ -474,7 +474,7 @@ Use `field(default=23, ignore_default=True)` to keep the backwards-compatible be
 (default ignored in identifier) or `field(default=23)` to always include the value in
 identifier.
 
-Run `experimaestro refactor default-values` to automatically convert bare defaults.
+Run `experimaestro tools refactor default-values` to automatically convert bare defaults.
 :::
 
 :::{warning} `field(ignore_default=<value>)` syntax is deprecated
@@ -1108,15 +1108,15 @@ Key properties:
 - **Concurrent.** Distinct Prepares run in parallel — each task starts as
   soon as *its* prepares have completed.
 - **`RunMode.PREPARE`.** Setting `--run-mode prepare` on
-  `experimaestro run-experiment` runs every discovered `Prepare` referenced
+  `experimaestro run` runs every discovered `Prepare` referenced
   by submitted tasks while skipping the tasks themselves. This is useful to
   pre-warm a cache before submitting jobs to an offline cluster.
 
 ```bash
 # Pre-warm all downloads referenced by the experiment, then run tasks
 # (the second invocation can be offline).
-experimaestro run-experiment --run-mode prepare my_experiment.py
-experimaestro run-experiment my_experiment.py
+experimaestro run --run-mode prepare my_experiment.py
+experimaestro run my_experiment.py
 ```
 
 ### Where do results land in each run mode?

@@ -47,7 +47,7 @@ Take an experiment from your editor to results:
   experiment, and the practices that keep results reusable — workspaces, shared
   workspaces, identifier stability, cluster runs, recovery.
 - [The CLI experiment runner](./experiments/cli-runner.md): the `YAML`
-  configuration format and `experimaestro run-experiment`.
+  configuration format and `experimaestro run`.
 - [Interfaces](./interfaces.md): follow experiments from the terminal UI, the
   web UI, or over SSH.
 - [Actions](./experiments/actions.md) and [Analysis](./experiments/analysis.md):

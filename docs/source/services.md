@@ -133,7 +133,7 @@ experimaestro web interface.
 
 ## TUI Service Management
 
-When using the TUI monitor (`experimaestro experiments monitor`), services can
+When using the TUI monitor (`experimaestro monitor --console`), services can
 be managed using the following keyboard shortcuts:
 
 | Shortcut | Action | Description |

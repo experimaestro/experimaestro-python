@@ -1,7 +1,7 @@
 """Dependency graph of an experiment run
 
 The graph holds the tasks, actions and configurations of a run, built from its
-serialized objects (``objects.jsonl``) without importing the experiment code. It is what the web UI graph view, the ``experimaestro dag``
+serialized objects (``objects.jsonl``) without importing the experiment code. It is what the web UI graph view, the ``experimaestro experiments dag``
 command and its standalone HTML export display.
 
 A :class:`GraphView` is what is actually drawn: the graph restricted to a grid

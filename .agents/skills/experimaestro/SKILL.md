@@ -324,13 +324,13 @@ learning_rate: 1e-4
 ```
 
 ```bash
-experimaestro run-experiment --run-mode NORMAL experiment.yaml
+experimaestro run --run-mode NORMAL experiment.yaml
 ```
 
 Override from CLI:
 
 ```bash
-experimaestro run-experiment -c learning_rate=1e-5 experiment.yaml
+experimaestro run -c learning_rate=1e-5 experiment.yaml
 ```
 
 ## Launchers
@@ -482,7 +482,7 @@ Key points:
   to pre-warm caches before submitting to an offline cluster:
 
 ```bash
-experimaestro run-experiment --run-mode PREPARE my_experiment.yaml
+experimaestro run --run-mode PREPARE my_experiment.yaml
 ```
 
 ## Deprecation
@@ -520,7 +520,7 @@ class Learning(Config):
 Fix deprecated identifiers:
 
 ```bash
-experimaestro deprecated list WORKDIR
+experimaestro tools deprecated list WORKDIR
 ```
 
 ## Value Classes
@@ -585,10 +585,10 @@ history:
 
 ```bash
 # TUI (terminal)
-experimaestro experiments --workdir /path/to/workdir monitor --console
+experimaestro --workdir /path/to/workdir monitor --console
 
 # Web UI
-experimaestro experiments --workdir /path/to/workdir monitor --port 12345
+experimaestro --workdir /path/to/workdir monitor --web --port 12345
 ```
 
 ## Experiment Actions (alpha)

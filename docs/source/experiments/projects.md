@@ -3,7 +3,7 @@
 While you *can* drive Experimaestro from a single standalone script (see the
 [hello-world example](../index.md)), real experiments are organised as a
 **project**: a Python package whose experimental plan is launched and monitored
-through the `experimaestro run-experiment` command line.
+through the `experimaestro run` command line.
 
 A project bundles together everything needed to reproduce a set of experiments:
 the {py:class}`~experimaestro.Config`/{py:class}`~experimaestro.Task`
@@ -117,7 +117,7 @@ my_param: 42
 and the experiment is launched with:
 
 ```bash
-uv run experimaestro run-experiment my_project/normal
+uv run experimaestro run my_project/normal
 ```
 
 `run-experiment` reads the YAML, builds the `Configuration` object (validating

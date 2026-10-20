@@ -44,7 +44,7 @@ workspaces:
 
 ## Workspace Selection
 
-When running experiments with `experimaestro run-experiment`, the workspace is selected using the following priority:
+When running experiments with `experimaestro run`, the workspace is selected using the following priority:
 
 1. **Explicit `--workspace` flag**: If provided, uses the workspace with that ID
 2. **Explicit `--workdir` flag**: If provided, uses that directory directly
@@ -111,7 +111,7 @@ The `XPM_LOCK_MODE` environment variable overrides this setting, which is
 useful for processes that do not read the settings file:
 
 ```bash
-XPM_LOCK_MODE=0664 experimaestro experiments monitor --workdir /scratch/shared
+XPM_LOCK_MODE=0664 experimaestro --workdir /scratch/shared monitor --web
 ```
 
 ```{note}
@@ -173,9 +173,9 @@ and still benefit from previously computed results.
 
 ### Orphan handling
 
-`experimaestro orphans` and the TUI orphans tab treat a job as
+`experimaestro workspace orphans` and the TUI orphans tab treat a job as
 **recoverable, not orphan**, when it appears in a `backup` or `move`
-folder. Use `experimaestro orphans --no-folders` to ignore folders and
+folder. Use `experimaestro workspace orphans --no-folders` to ignore folders and
 list everything missing from the primary workspace. Jobs in `use`
 folders are never considered orphan candidates.
 
@@ -223,7 +223,7 @@ workspaces:
   rewriting.
 - A `move` folder must remain mounted for the primary workspace to
   resolve job paths (they are reached through a symlink).
-- `use` folders should never be cleaned by `experimaestro orphans
+- `use` folders should never be cleaned by `experimaestro workspace orphans
   --clean` against a different workspace.
 
 ## Remote Workspaces (SSH)
@@ -265,10 +265,10 @@ Once configured, use `--workspace` with `ssh-monitor` to avoid repeating host/op
 
 ```bash
 # All settings come from the workspace configuration
-experimaestro experiments ssh-monitor --workspace my-cluster
+experimaestro -w my-cluster monitor --web
 
 # CLI flags override workspace settings
-experimaestro experiments ssh-monitor --workspace my-cluster --uv-offline
+experimaestro -w my-cluster monitor --web --uv-offline
 ```
 
 All SSH settings can be overridden by CLI flags (`--remote-shell-init`, `--uv-offline`,

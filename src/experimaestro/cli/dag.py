@@ -132,12 +132,13 @@ def dag(
 
     \b
     Examples:
-      experimaestro dag my_experiment                  # Open in the browser
-      experimaestro dag my_experiment --html dag.html  # Save a standalone page
-      experimaestro dag my_experiment --tree -c 0      # Print configuration #0
-      experimaestro dag my_experiment --json -         # Dump as JSON
+      experimaestro experiments dag my_experiment                  # Open in the browser
+      experimaestro experiments dag my_experiment --html dag.html  # Save a standalone page
+      experimaestro experiments dag my_experiment --tree -c 0      # Print configuration #0
+      experimaestro experiments dag my_experiment --json -         # Dump as JSON
     """
-    from experimaestro.cli import _select_experiment
+    from experimaestro.cli import root_config
+    from experimaestro.cli.experiments import _select_experiment
     from experimaestro.ui.graph import (
         export_state,
         load_experiment_graph,
@@ -145,7 +146,7 @@ def dag(
         standalone_html,
     )
 
-    provider = _open_provider(workspace, experiment_id)
+    provider = _open_provider(workspace or root_config().workspace_spec, experiment_id)
     try:
         exp = _select_experiment(provider, experiment_id)
         if exp is None:

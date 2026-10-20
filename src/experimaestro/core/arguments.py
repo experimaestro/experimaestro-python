@@ -204,7 +204,7 @@ class ArgumentOptions:
                         f"`field(default=..., ignore_default=True)` "
                         f"to keep current behavior (default ignored in identifier) or "
                         f"`field(default=...)` to include default in identifier. "
-                        f"Run `experimaestro refactor default-values` to fix automatically."
+                        f"Run `experimaestro tools refactor default-values` to fix automatically."
                         f"{limit_msg}",
                         DeprecationWarning,
                         stacklevel=6,

@@ -1,7 +1,7 @@
 """Remote workspace utilities via SSH and Rsync.
 
 Provides lightweight remote querying, pattern matching, and file synchronization
-to support tools like `experimaestro inspect` and `experimaestro dag` on remote SSH workspaces.
+to support tools like `experimaestro jobs inspect` and `experimaestro experiments dag` on remote SSH workspaces.
 """
 
 from __future__ import annotations

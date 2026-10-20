@@ -59,7 +59,9 @@ class TestMigrateV1ToV2Basic:
         )
 
         # Run migration
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0, f"Migration failed: {result.output}"
         assert "Migrated: my-experiment" in result.output
@@ -91,7 +93,9 @@ class TestMigrateV1ToV2Basic:
             )
 
         # Run migration
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
         assert "Migrated 3/3 experiment(s)" in result.output
@@ -115,7 +119,9 @@ class TestMigrateV1ToV2Basic:
             ],
         )
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Get the migrated run directory
@@ -136,7 +142,9 @@ class TestMigrateRunIdGeneration:
         """Run ID should use YYYYMMDD_HHMMSS format"""
         create_v1_experiment(workspace, "test-exp", jobs=[])
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Get the run ID
@@ -160,7 +168,9 @@ class TestMigrateRunIdGeneration:
         target_timestamp = target_time.timestamp()
         os.utime(exp_dir, (target_timestamp, target_timestamp))
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Verify run ID matches the mtime
@@ -186,7 +196,9 @@ class TestMigrateCollisionHandling:
         existing_run.mkdir(parents=True)
         (existing_run / "status.json").write_text('{"version": 1}')
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Verify collision was handled with suffix
@@ -211,7 +223,9 @@ class TestMigrateCollisionHandling:
         (base_dir / "20250315_100000.1").mkdir(parents=True)
         (base_dir / "20250315_100000.2").mkdir(parents=True)
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Should have suffix .3
@@ -226,7 +240,7 @@ class TestMigrateDryRun:
         create_v1_experiment(workspace, "my-exp", jobs=[("pkg.Task", "job-1", "done")])
 
         result = cli_runner.invoke(
-            cli, ["migrate", "v1-to-v2", str(workspace), "--dry-run"]
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace), "--dry-run"]
         )
 
         assert result.exit_code == 0
@@ -238,7 +252,7 @@ class TestMigrateDryRun:
         create_v1_experiment(workspace, "my-exp", jobs=[("pkg.Task", "job-1", "done")])
 
         result = cli_runner.invoke(
-            cli, ["migrate", "v1-to-v2", str(workspace), "--dry-run"]
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace), "--dry-run"]
         )
 
         assert result.exit_code == 0
@@ -261,7 +275,9 @@ class TestMigrateLeftoverFiles:
         # Add extra file that won't be migrated
         (workspace / "xp" / "some-file.txt").write_text("extra content")
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
         assert "xp_MIGRATED_TO_V2" in result.output
@@ -280,7 +296,9 @@ class TestMigrateLeftoverFiles:
         """Empty xp directory should be removed after migration"""
         create_v1_experiment(workspace, "my-exp", jobs=[])
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
         assert "Removed empty 'xp' directory" in result.output
@@ -296,7 +314,9 @@ class TestMigrateEdgeCases:
 
     def test_no_xp_directory(self, workspace, cli_runner):
         """Should handle missing xp directory gracefully"""
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
         assert "No old 'xp' directory found" in result.output
@@ -305,7 +325,9 @@ class TestMigrateEdgeCases:
         """Should handle empty xp directory gracefully"""
         (workspace / "xp").mkdir()
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
         assert "No experiments found" in result.output
@@ -323,7 +345,9 @@ class TestMigrateEdgeCases:
             current_run="20260101_100000",
         )
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
 
@@ -346,7 +370,9 @@ class TestMigrateEdgeCases:
         jobs_bak.mkdir()
         (jobs_bak / "old-task").mkdir()
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Verify jobs.bak was migrated
@@ -359,7 +385,9 @@ class TestMigrateEdgeCases:
         create_v1_experiment(workspace, "my-exp", jobs=[("pkg.Task", "job-1", "done")])
 
         # First migration
-        result1 = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result1 = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result1.exit_code == 0
         assert "Migrated: my-exp" in result1.output
 
@@ -369,7 +397,9 @@ class TestMigrateEdgeCases:
         assert len(runs_after_first) == 1
 
         # Second migration - should be a no-op
-        result2 = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result2 = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result2.exit_code == 0
         assert "No old 'xp' directory found" in result2.output
 
@@ -384,12 +414,16 @@ class TestMigrateEdgeCases:
         (workspace / "xp" / "leftover.txt").write_text("content")
 
         # First migration - leftover files get renamed to xp_MIGRATED_TO_V2
-        result1 = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result1 = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result1.exit_code == 0
         assert "xp_MIGRATED_TO_V2" in result1.output
 
         # Second migration - xp is now a broken symlink
-        result2 = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result2 = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result2.exit_code == 0
         assert "No old 'xp' directory found" in result2.output
 
@@ -401,7 +435,9 @@ class TestMigrateBrokenSymlink:
         """Should create broken symlink to prevent v1 usage"""
         create_v1_experiment(workspace, "my-exp", jobs=[])
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
         assert "Created broken 'xp' symlink" in result.output
@@ -420,7 +456,9 @@ class TestMigrateBrokenSymlink:
         create_v1_experiment(workspace, "my-exp", jobs=[])
         (workspace / "xp" / "leftover.txt").write_text("content")
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
 
         assert result.exit_code == 0
 
@@ -452,7 +490,9 @@ class TestMigrateWithWorkspaceStateProvider:
             ],
         )
 
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Use WorkspaceStateProvider to read the migrated experiment
@@ -480,7 +520,9 @@ class TestMigrateWithWorkspaceStateProvider:
         )
 
         # Migrate only the v1 experiment
-        result = cli_runner.invoke(cli, ["migrate", "v1-to-v2", str(workspace)])
+        result = cli_runner.invoke(
+            cli, ["workspace", "migrate", "v1-to-v2", str(workspace)]
+        )
         assert result.exit_code == 0
 
         # Both should be accessible

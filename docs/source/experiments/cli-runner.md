@@ -7,7 +7,7 @@ experimental parameters come from `YAML` configuration files.
 The experiment is then started with
 
 ```sh
-experimaestro run-experiment full.yaml
+experimaestro run full.yaml
 ```
 
 See the [CLI documentation](../cli.md#running-experiments) for all the options,
@@ -98,11 +98,11 @@ learning_rate: 1e-4  # Overrides the value from base.yaml
 
 ```bash
 # Additional files on the command line
-experimaestro run-experiment --pre-yaml defaults.yaml --post-yaml overrides.yaml main.yaml
+experimaestro run --pre-yaml defaults.yaml --post-yaml overrides.yaml main.yaml
 
 # Individual values, using the OmegaConf dotlist syntax: plain values,
 # nested values, and list items by index
-experimaestro run-experiment -c learning_rate=1e-5 -c model.hidden_size=512 \
+experimaestro run -c learning_rate=1e-5 -c model.hidden_size=512 \
     -c data.transforms.0.name=resize experiment.yaml
 ```
 
@@ -110,7 +110,7 @@ Use `--show` to print the merged configuration as JSON instead of running the
 experiment — the quickest way to debug an inheritance or override problem:
 
 ```bash
-experimaestro run-experiment --show -c learning_rate=1e-5 --pre-yaml base.yaml experiment.yaml
+experimaestro run --show -c learning_rate=1e-5 --pre-yaml base.yaml experiment.yaml
 ```
 
 ## Pre-experiment setup

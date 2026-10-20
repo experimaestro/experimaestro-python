@@ -7,7 +7,7 @@ serves the monitoring interfaces.
 
 ## Two ways to run
 
-|  | {py:class}`~experimaestro.experiment` context manager | `experimaestro run-experiment` |
+|  | {py:class}`~experimaestro.experiment` context manager | `experimaestro run` |
 |---|---|---|
 | Parameters | Written in Python | Read from `YAML` files |
 | Workspace | Given explicitly | Selected from the [settings](settings.md) |
@@ -26,7 +26,7 @@ or through the command line, where the experiment code is a `run(helper, cfg)`
 function and its parameters come from a configuration file:
 
 ```sh
-experimaestro run-experiment full.yaml
+experimaestro run full.yaml
 ```
 
 The second form is the recommended one for anything you intend to re-run — see
@@ -105,7 +105,7 @@ unreachable and are silently recomputed.
   {py:class}`~experimaestro.DeprecatedAttribute`
 
 See [Configurations](experiments/config.md) for the details, and
-`experimaestro deprecated` to inspect the identifiers affected by a change.
+`experimaestro tools deprecated` to inspect the identifiers affected by a change.
 
 ### Running on a cluster
 
@@ -138,10 +138,10 @@ fact:
 
 ```bash
 # Terminal UI (add --port to get the web UI instead)
-experimaestro experiments --workdir /path/to/workspace monitor --console
+experimaestro --workdir /path/to/workspace monitor --console
 
 # The same, for a workspace on a remote machine
-experimaestro experiments ssh-monitor --workspace my-cluster
+experimaestro -w my-cluster monitor --web
 ```
 
 Both are described in [Interfaces](interfaces.md). Starting a monitor also
@@ -151,7 +151,7 @@ experiment does not wait on them. Jobs that are no longer part of any
 experiment are reported rather than deleted:
 
 ```bash
-experimaestro orphans /path/to/workspace
+experimaestro --workdir /path/to/workspace workspace orphans
 ```
 
 ### Iterating without losing work
@@ -181,6 +181,6 @@ are launched from several machines:
 
 ```bash
 # Shown in brackets after the experiment ID
-experimaestro experiments --workdir /path/to/workspace list
+experimaestro --workdir /path/to/workspace experiments list
 # my-experiment [hostname.local] (5/10 jobs)
 ```

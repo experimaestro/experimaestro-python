@@ -851,7 +851,7 @@ class experiment(BaseExperiment):
             logger.warning(
                 "Experimaestro v2 has a modified experiment file layout. "
                 "DO NOT use experimaestro v1 to cleanup orphans. "
-                "You can use 'experimaestro migrate v1-to-v2 %s' to migrate old experiment "
+                "You can use 'experimaestro workspace migrate v1-to-v2 %s' to migrate old experiment "
                 "folders to the new structure.",
                 self.workspace.path,
             )

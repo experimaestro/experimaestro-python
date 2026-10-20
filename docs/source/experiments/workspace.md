@@ -175,13 +175,13 @@ If you want to migrate v1 experiments to v2 layout:
 
 ```bash
 # Preview what will be migrated
-experimaestro migrate v1-to-v2 /path/to/workspace --dry-run
+experimaestro workspace migrate v1-to-v2 /path/to/workspace --dry-run
 
 # Perform the migration
-experimaestro migrate v1-to-v2 /path/to/workspace
+experimaestro workspace migrate v1-to-v2 /path/to/workspace
 
 # Keep remaining files (renamed to xp_MIGRATED_TO_V2)
-experimaestro migrate v1-to-v2 /path/to/workspace --keep-old
+experimaestro workspace migrate v1-to-v2 /path/to/workspace --keep-old
 ```
 
 The migration:
@@ -340,14 +340,14 @@ without scanning all run directories
 
 ```bash
 # List experiments in a workspace
-experimaestro experiments --workdir /path/to/workspace list
+experimaestro --workdir /path/to/workspace experiments list
 
 # Monitor experiments (TUI)
-experimaestro experiments --workdir /path/to/workspace monitor --console
+experimaestro --workdir /path/to/workspace monitor --console
 
 # Monitor experiments (Web UI)
-experimaestro experiments --workdir /path/to/workspace monitor --port 12345
+experimaestro --workdir /path/to/workspace monitor --web --port 12345
 
 # Check for orphan jobs
-experimaestro orphans /path/to/workspace
+experimaestro --workdir /path/to/workspace workspace orphans
 ```

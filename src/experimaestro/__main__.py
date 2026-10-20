@@ -1,7 +1,7 @@
 from experimaestro.cli import cli
 
 # flake8: noqa: F401
-import experimaestro.cli.jobs
+import experimaestro.cli.jobs  # noqa: F401
 
 
 def main():

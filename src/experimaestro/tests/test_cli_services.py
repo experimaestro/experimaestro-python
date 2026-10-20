@@ -2,7 +2,8 @@
 
 from click.testing import CliRunner
 
-from experimaestro.cli import _iter_service_rows, cli
+from experimaestro.cli import cli
+from experimaestro.cli.experiments import _iter_service_rows
 from experimaestro.scheduler.services import Service
 
 

@@ -93,17 +93,17 @@ conventions and best practices. Install it with:
 
 ```bash
 # Default: ~/.agents/skills/ (cross-client open standard)
-experimaestro install-skill
+experimaestro tools install-skill
 
 # Install for a specific tool
-experimaestro install-skill claude     # ~/.claude/skills/
-experimaestro install-skill cursor     # ~/.cursor/skills/
+experimaestro tools install-skill claude     # ~/.claude/skills/
+experimaestro tools install-skill cursor     # ~/.cursor/skills/
 
 # Install to several targets at once
-experimaestro install-skill agents claude
+experimaestro tools install-skill agents claude
 
 # List available targets and what is already installed
-experimaestro install-skill --list
+experimaestro tools install-skill --list
 ```
 
 # Example
