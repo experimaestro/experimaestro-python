@@ -2,7 +2,7 @@ from typing import List, Optional
 from experimaestro.experiments.grid import GridSearch, GenericParams
 from experimaestro.experiments.configuration import ConfigurationBase, configuration
 from experimaestro.utils.config import validate_attrs
-
+import pytest
 
 @configuration()
 class SubConfig:
@@ -166,3 +166,14 @@ def test_validate_attrs_with_grid_search_annotation():
 
     assert tags[0] == {"lr": 0.05, "batch_size": 16}
     assert tags[1] == {"lr": 0.005, "batch_size": 64}
+
+
+def test_error_attrs_raises_on_unrecognized_keys():
+    data = {
+        "id": "test",
+        "lr": 0.05,
+        "unexpected_key_xyz": 123,
+    }
+
+    with pytest.raises(ValueError, match="unexpected_key_xyz"):
+        validate_attrs(MainConfig, data)

@@ -153,6 +153,9 @@ def progress(value: float, level=0, desc: Optional[str] = None, console=False):
     if TaskEnv.instance().slave:
         # Skip if in a slave process
         return
+    if TaskEnv.instance().taskpath is None:
+        # Skip progress reporting if running outside an experimaestro task (e.g. unit tests or standalone scripts)
+        return
     Reporter.instance().set_progress(value, level, desc, console=console)
 
 

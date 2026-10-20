@@ -157,11 +157,11 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
     # Create a dynamic Pydantic model
     PydanticModel = create_model(
         cls.__name__,
-        __config__=ConfigDict(extra="allow", arbitrary_types_allowed=True),
+        __config__=ConfigDict(extra="forbid", arbitrary_types_allowed=True),
         **model_fields,
     )
 
-    # Validate
+    # Validate - will raise ValidationError if invalid keys or types are present
     validated_model = PydanticModel(**data)
 
     # Extract only the fields that the attrs class expects
