@@ -6,7 +6,7 @@ import JobModal, { JobTab } from "./JobModal";
 import client, { JobsFilterResult } from "./client";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
-import { useAppSelector } from "./store";
+import { useAppSelector, useNavigate } from "./store";
 import { clearOnEscape, useShortcuts } from "./shortcuts";
 
 type SortKey = "status" | "task" | "date" | "name";
@@ -107,7 +107,6 @@ export default () => {
     ids: Set<string> | null;
     error: string | null;
   }>({ ids: null, error: null });
-  const [jobModal, setJobModal] = useState<{ jobId: string; tab: JobTab }>();
   const [confirm, setConfirm] = useState<{ job: Job; kind: "kill" | "delete" }>();
   const [sortKey, setSortKey] = useState<SortKey>("status");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
@@ -118,6 +117,8 @@ export default () => {
   const jobs = useAppSelector((state) => state.db.jobs);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
   const currentRun = useAppSelector((state) => state.db.currentRun);
+  const route = useAppSelector((state) => state.db.route);
+  const navigate = useNavigate();
   const searchInput = useRef<HTMLInputElement>(null);
 
   // The key of the current sort reverses it
@@ -272,20 +273,17 @@ export default () => {
     setConfirm(undefined);
   }
 
+  const showJob = (job: Job, tab: JobTab) =>
+    navigate({ ...route, job: { taskId: job.taskId, jobId: job.jobId, tab } });
+
   const renderJob = (job: Job) => (
     <TaskJobs
       key={job.jobId}
       job={job}
       onKill={() => setConfirm({ job, kind: "kill" })}
       onDelete={() => setConfirm({ job, kind: "delete" })}
-      onShow={() => {
-        client.job_details(job.jobId, job.taskId);
-        setJobModal({ jobId: job.jobId, tab: "details" });
-      }}
-      onLogs={() => {
-        client.job_details(job.jobId, job.taskId);
-        setJobModal({ jobId: job.jobId, tab: "logs" });
-      }}
+      onShow={() => showJob(job, "details")}
+      onLogs={() => showJob(job, "logs")}
     />
   );
 
@@ -495,13 +493,7 @@ export default () => {
         {filteredJobs.length === 0 && (
           <p className="text-muted">No jobs match the current filter.</p>
         )}
-        {jobModal && jobs.byId[jobModal.jobId] && (
-          <JobModal
-            job={jobs.byId[jobModal.jobId]}
-            initialTab={jobModal.tab}
-            onHide={() => setJobModal(undefined)}
-          />
-        )}
+        <JobModal />
       </>
     </div>
   );

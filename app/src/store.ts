@@ -1,6 +1,8 @@
+import { useCallback } from "react";
 import { configureStore } from "@reduxjs/toolkit";
 import { useSelector, EqualityFn, useDispatch } from "react-redux";
-import rootReducer from "./reducers";
+import rootReducer, { actions } from "./reducers";
+import { Route } from "./routes";
 
 const store = configureStore({
   reducer: rootReducer,
@@ -20,5 +22,11 @@ export const useAppSelector: <Selected = unknown>(
   selector: (state: StoreState) => Selected,
   equalityFn?: EqualityFn<Selected> | undefined
 ) => Selected = useSelector;
+
+// Shows a route (and its URL, see App.tsx)
+export function useNavigate(): (route: Route) => void {
+  const dispatch = useAppDispatch();
+  return useCallback((route: Route) => dispatch(actions.navigate(route)), [dispatch]);
+}
 
 export default store;

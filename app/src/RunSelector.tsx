@@ -1,13 +1,12 @@
 import React, { useEffect } from "react";
 import Form from "react-bootstrap/Form";
-import { useDispatch } from "react-redux";
 
-import { useAppSelector } from "./store";
-import { actions } from "./reducers";
+import { useAppSelector, useNavigate } from "./store";
 import client from "./client";
 
 export const RunSelector: React.FC = () => {
-  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const route = useAppSelector((s) => s.db.route);
   const currentExperiment = useAppSelector((s) => s.db.currentExperiment);
   const currentRun = useAppSelector((s) => s.db.currentRun);
   const runs = useAppSelector((s) => s.db.runs);
@@ -25,9 +24,7 @@ export const RunSelector: React.FC = () => {
 
   const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const runId = event.target.value || null;
-    dispatch(actions.selectRun(runId));
-    // The jobs of the selected run are then requested (App.tsx)
-    dispatch(actions.clearJobs());
+    navigate({ ...route, run: runId, job: null });
   };
 
   return (

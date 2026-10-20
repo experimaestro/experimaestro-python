@@ -8,6 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from importlib.resources import files
 from typing import TYPE_CHECKING
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse, Response
@@ -37,6 +38,21 @@ MIMETYPES = {
     "woff2": "font/woff2",
     "ttf": "font/ttf",
 }
+
+
+# First segment of the paths of the web UI pages (see app/src/routes.ts), all
+# served by index.html
+UI_ROUTES = {"xps", "all", "orphans"}
+
+
+def login_redirect(request: Request) -> RedirectResponse:
+    """Redirects to the login page, which then goes back to the request URL"""
+    target = request.url.path
+    if request.url.query:
+        target += f"?{request.url.query}"
+    return RedirectResponse(
+        url=f"/login.html?{urlencode({'next': target})}", status_code=302
+    )
 
 
 def create_app(server: "WebUIServer") -> FastAPI:
@@ -96,25 +112,22 @@ def create_app(server: "WebUIServer") -> FastAPI:
             logger.error("WebSocket error: %s", e)
             await ws_handler.disconnect(websocket)
 
-    # Root route
-    @app.get("/")
-    async def root(request: Request):
-        """Root redirect based on auth status"""
-        # Check cookie for authentication
-        token = request.cookies.get("experimaestro_token")
-        if token == server.token:
-            return RedirectResponse(url="/index.html", status_code=302)
-        return RedirectResponse(url="/login.html", status_code=302)
-
     # Static file serving (catch-all, must be last)
     @app.get("/{path:path}")
     async def static_files(request: Request, path: str):
-        """Serve static files from data/ directory"""
+        """Serve static files from data/ directory
+
+        The pages of the web UI (/, /xps/..., /all/..., /orphans) are all
+        served by index.html, which shows the page of the URL.
+        """
+        if path == "" or path.split("/", 1)[0] in UI_ROUTES:
+            path = "index.html"
+
         # Check authentication for index.html
         if path == "index.html":
             token = request.cookies.get("experimaestro_token")
             if token != server.token:
-                return RedirectResponse(url="/login.html", status_code=302)
+                return login_redirect(request)
 
         # Get static file
         datapath = f"data/{path}"

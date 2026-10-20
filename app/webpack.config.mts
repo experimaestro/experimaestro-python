@@ -159,6 +159,8 @@ const config: Configuration = {
     hot: true,
     port: 5010,
     static: "./public",
+    // The pages of the web UI (/xps/..., see src/routes.ts) are index.html
+    historyApiFallback: true,
     setupMiddlewares: (middlewares, devServer) => {
       if (!devServer) {
         throw new Error("webpack-dev-server is not defined");

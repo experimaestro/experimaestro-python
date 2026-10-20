@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useDispatch } from "react-redux";
 
 import Container from "react-bootstrap/Container";
@@ -18,11 +18,42 @@ import LogViewer from "./LogViewer";
 import { ExperimentSelector } from "./ExperimentSelector";
 import { RunSelector } from "./RunSelector";
 
-import { useAppSelector } from "./store";
+import { useAppSelector, useNavigate } from "./store";
 import { actions, jobsKey } from "./reducers";
 import client from "./client";
+import {
+  Route,
+  View,
+  currentLocationRoute,
+  formatRoute,
+  isScoped,
+  linkProps,
+  route as viewRoute,
+} from "./routes";
 
-type View = "experiments" | "tasks" | "graph" | "orphans" | "services" | "actions";
+// Keeps the browser URL in sync with the route of the store: a navigation
+// pushes a history entry, and back/forward shows the entry's route
+function useHistory() {
+  const dispatch = useDispatch();
+  const route = useAppSelector((state) => state.db.route);
+  const first = useRef(true);
+
+  useEffect(() => {
+    const url = formatRoute(route);
+    if (url !== window.location.pathname + window.location.search) {
+      // The URL the page was opened with is normalised in place
+      if (first.current) window.history.replaceState(null, "", url);
+      else window.history.pushState(null, "", url);
+    }
+    first.current = false;
+  }, [route]);
+
+  useEffect(() => {
+    const onPop = () => dispatch(actions.navigate(currentLocationRoute()));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+}
 
 export default () => {
   const dispatch = useDispatch();
@@ -31,7 +62,10 @@ export default () => {
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
   const [showQuitModal, setShowQuitModal] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const [view, setView] = useState<View>("experiments");
+  const route = useAppSelector((state) => state.db.route);
+  const view = route.view;
+  const navigate = useNavigate();
+  useHistory();
   const currentRun = useAppSelector((state) => state.db.currentRun);
   const jobsRequested = useAppSelector((state) => state.db.jobsRequested);
   const experimentsLoaded = useAppSelector((state) => state.db.experimentsLoaded);
@@ -53,10 +87,25 @@ export default () => {
     setShowQuitModal(false);
   };
 
-  const openExperiment = (id: string) => {
-    dispatch(actions.selectExperiment(id));
-    setView("tasks");
-  };
+  // The scoped views keep the shown experiment and run
+  const routeOf = (view: View): Route =>
+    isScoped(view)
+      ? isScoped(route.view)
+        ? { ...route, view, job: null }
+        : viewRoute(view, currentExperiment, currentRun)
+      : viewRoute(view);
+  const link = (view: View) => linkProps(routeOf(view), navigate);
+
+  const openExperiment = (id: string) => navigate(viewRoute("tasks", id));
+
+  const breadcrumb = (
+    <div className="text-muted small mb-1">
+      <a className="text-reset text-decoration-none" {...link("experiments")}>
+        Experiments
+      </a>
+      {currentExperiment ? ` / ${currentExperiment}` : " / all"}
+    </div>
+  );
 
   return (
     <>
@@ -87,7 +136,7 @@ export default () => {
       <Navbar bg="dark" variant="dark" expand="lg">
         <Container>
           <Navbar.Brand
-            onClick={() => setView("experiments")}
+            {...link("experiments")}
             style={{ cursor: "pointer", display: "inline-flex", alignItems: "center" }}
           >
             {/* Logo sits in a white, dark-bordered disc that straddles the
@@ -145,32 +194,28 @@ export default () => {
           <Navbar.Toggle aria-controls="basic-navbar-nav" />
           <Navbar.Collapse id="basic-navbar-nav">
             <Nav className="me-auto" activeKey={view}>
-              <Nav.Link eventKey="experiments" onClick={() => setView("experiments")}>
+              <Nav.Link eventKey="experiments" {...link("experiments")}>
                 Experiments
               </Nav.Link>
-              <Nav.Link eventKey="tasks" onClick={() => setView("tasks")}>
+              <Nav.Link eventKey="tasks" {...link("tasks")}>
                 Tasks
               </Nav.Link>
-              <Nav.Link eventKey="graph" onClick={() => setView("graph")}>
+              <Nav.Link eventKey="graph" {...link("graph")}>
                 Graph
               </Nav.Link>
-              <Nav.Link eventKey="services" onClick={() => setView("services")}>
+              <Nav.Link eventKey="services" {...link("services")}>
                 Services
               </Nav.Link>
-              <Nav.Link eventKey="actions" onClick={() => setView("actions")}>
+              <Nav.Link eventKey="actions" {...link("actions")}>
                 Actions
               </Nav.Link>
-              <Nav.Link eventKey="orphans" onClick={() => setView("orphans")}>
+              <Nav.Link eventKey="orphans" {...link("orphans")}>
                 Orphans
               </Nav.Link>
               <Warnings />
             </Nav>
-            {(view === "tasks" || view === "graph") && (
-              <>
-                <ExperimentSelector />
-                <RunSelector />
-              </>
-            )}
+            {isScoped(view) && <ExperimentSelector />}
+            {(view === "tasks" || view === "graph") && <RunSelector />}
             <Button
               variant="outline-light"
               size="sm"
@@ -198,34 +243,9 @@ export default () => {
 
       <Container className="mt-2" style={{ paddingLeft: 80 }}>
         {view === "experiments" && <Experiments onOpen={openExperiment} />}
-        {view === "tasks" && (
-          <>
-            <div className="text-muted small mb-1">
-              <span
-                style={{ cursor: "pointer" }}
-                onClick={() => setView("experiments")}
-              >
-                Experiments
-              </span>
-              {currentExperiment ? ` / ${currentExperiment}` : " / all"}
-            </div>
-            <Tasks />
-          </>
-        )}
-        {view === "graph" && (
-          <>
-            <div className="text-muted small mb-1">
-              <span
-                style={{ cursor: "pointer" }}
-                onClick={() => setView("experiments")}
-              >
-                Experiments
-              </span>
-              {currentExperiment ? ` / ${currentExperiment}` : " / all"}
-            </div>
-            <TaskGraph />
-          </>
-        )}
+        {isScoped(view) && breadcrumb}
+        {view === "tasks" && <Tasks />}
+        {view === "graph" && <TaskGraph />}
         {view === "services" && <Services />}
         {view === "actions" && <Actions />}
         {view === "orphans" && <Orphans />}

@@ -1,6 +1,7 @@
 import { combineReducers, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { messageSlice } from "./ui/messages";
 import _ from "lodash";
+import { Route, currentLocationRoute, isScoped, route } from "./routes";
 
 export type CarbonImpact = {
   co2kg?: number;
@@ -187,6 +188,7 @@ export type State = {
   experiment: string; // Kept for backward compatibility
   currentExperiment: string | null; // Currently selected experiment filter (null = all)
   currentRun: string | null; // Currently selected run (null = current/latest)
+  route: Route; // What is shown (mirrored in the URL, see routes.ts)
   experiments: Experiments; // All experiments
   experimentsLoaded: boolean; // The server answered the experiments request
   jobs: Jobs;
@@ -198,14 +200,19 @@ export type State = {
   runs: Run[];
 };
 
+// The page opens on the route of its URL
+const initialRoute = currentLocationRoute();
+const initialScope = isScoped(initialRoute.view) ? initialRoute : route("experiments");
+
 export const slice = createSlice({
   name: "db",
   initialState: {
     connected: false,
     connectionStatus: "connecting",
-    experiment: "",
-    currentExperiment: null,
-    currentRun: null,
+    experiment: initialScope.experiment || "",
+    currentExperiment: initialScope.experiment,
+    currentRun: initialScope.run,
+    route: initialRoute,
     experiments: { byId: {}, ids: [] },
     experimentsLoaded: false,
     jobs: { byId: {}, ids: [] },
@@ -237,11 +244,6 @@ export const slice = createSlice({
         }
       }
       draft.jobs.ids.sort(jobComparator(draft.jobs.byId));
-    },
-
-    clearJobs(draft) {
-      draft.jobs = { byId: {}, ids: [] };
-      draft.jobsRequested = [];
     },
 
     markJobsRequested(draft, { payload }: PayloadAction<string>) {
@@ -290,8 +292,9 @@ export const slice = createSlice({
       }
       draft.experiments.byId[exp.experiment_id] = exp;
 
-      // Set as current experiment if it's the first one
-      if (draft.experiments.ids.length === 1) {
+      // Set as current experiment if it's the first one, unless the route
+      // names the experiment(s) shown
+      if (draft.experiments.ids.length === 1 && !isScoped(draft.route.view)) {
         draft.currentExperiment = exp.experiment_id;
         draft.experiment = exp.experiment_id; // Backward compatibility
       }
@@ -321,6 +324,9 @@ export const slice = createSlice({
         draft.currentRun = null;
         draft.runs = [];
       }
+      if (isScoped(draft.route.view) && draft.route.experiment === id) {
+        draft.route = route("experiments");
+      }
       // Jobs are kept on disk, but drop those that only belonged to it
       draft.jobs.ids = draft.jobs.ids.filter((jobId) => {
         const xps = draft.jobs.byId[jobId].experimentIds || [];
@@ -332,22 +338,29 @@ export const slice = createSlice({
       });
     },
 
-    selectExperiment(draft, action: PayloadAction<string | null>) {
-      draft.currentExperiment = action.payload;
-      // Update backward compatibility field
-      draft.experiment = action.payload || "";
-      // Reset run selection and known runs when switching experiment
-      draft.currentRun = null;
-      draft.runs = [];
+    // Shows a route; a scoped view selects its experiment and run
+    navigate(draft, { payload }: PayloadAction<Route>) {
+      draft.route = payload;
+      if (!isScoped(payload.view)) return;
+      if (payload.experiment !== draft.currentExperiment) {
+        draft.currentExperiment = payload.experiment;
+        draft.experiment = payload.experiment || "";
+        draft.currentRun = null;
+        draft.runs = [];
+      }
+      if (payload.run !== draft.currentRun) {
+        draft.currentRun = payload.run;
+        // The jobs of the run are then requested (App.tsx)
+        draft.jobs = { byId: {}, ids: [] };
+        draft.jobsRequested = [];
+      }
     },
+
 
     setRuns(draft, action: PayloadAction<Run[]>) {
       draft.runs = action.payload;
     },
 
-    selectRun(draft, action: PayloadAction<string | null>) {
-      draft.currentRun = action.payload;
-    },
 
     addWarning(draft, { payload }: PayloadAction<Warning>) {
       if (draft.warnings.byKey[payload.warningKey] === undefined) {

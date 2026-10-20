@@ -27,8 +27,14 @@
       <div>
         Token
         <input type="text" name="xpm-token" />
+        <input type="hidden" name="next" id="next" />
         <input type="submit" value="submit" />
       </div>
     </form>
+    <script>
+      // Goes back to the page that was asked for
+      document.getElementById("next").value =
+        new URLSearchParams(window.location.search).get("next") || "/";
+    </script>
   </body>
 </html>

@@ -1,11 +1,10 @@
 import React from "react";
 import Form from "react-bootstrap/Form";
-import { useAppSelector } from "./store";
-import { actions } from "./reducers";
-import { useDispatch } from "react-redux";
+import { useAppSelector, useNavigate } from "./store";
 
 export const ExperimentSelector: React.FC = () => {
-  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const route = useAppSelector((state) => state.db.route);
   const experiments = useAppSelector((state) => state.db.experiments);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
 
@@ -16,7 +15,7 @@ export const ExperimentSelector: React.FC = () => {
 
   const handleChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value;
-    dispatch(actions.selectExperiment(value === "" ? null : value));
+    navigate({ ...route, experiment: value === "" ? null : value, run: null, job: null });
   };
 
   // Helper to get experiment status color

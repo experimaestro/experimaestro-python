@@ -68,6 +68,24 @@ Then open `http://localhost:12345` in your browser.
 - **Services**: The services of the selected experiment (of all experiments by
   default), also when the experiment is not running; start, stop and open
   them (through `/services/<experiment>/<service>/`), or view their logs
+- **Links**: Each page has its own URL, which can be bookmarked or shared, and
+  the browser's back and forward buttons move between the pages (see below)
+
+#### Page URLs
+
+| URL | Page |
+|-----|------|
+| `/` | Experiments |
+| `/xps/<experiment>/jobs` | Jobs of an experiment (`?run=<run>` for a past run) |
+| `/xps/<experiment>/graph` | Dependency graph (`?run=<run>` for a past run) |
+| `/xps/<experiment>/services` | Services of an experiment |
+| `/xps/<experiment>/actions` | Actions of an experiment |
+| `/xps/<experiment>/jobs/<task>/<job>` | Details of a job (`.../logs` for its logs) |
+| `/all/jobs`, `/all/services`, ... | The same pages, for all the experiments |
+| `/orphans` | Orphan and stray jobs |
+
+When the server asks for the token, the login page goes back to the page that
+was opened.
 
 Killing and deleting jobs or experiments, and starting and stopping services,
 behave the same in the web UI, the TUI and (for jobs) the `experimaestro jobs`

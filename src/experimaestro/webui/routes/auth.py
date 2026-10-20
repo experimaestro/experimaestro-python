@@ -1,6 +1,7 @@
 """Authentication routes for WebUI"""
 
 import logging
+from urllib.parse import urlencode
 from typing import Optional
 from fastapi import APIRouter, Request, Response, Query
 from fastapi.responses import RedirectResponse
@@ -14,16 +15,22 @@ router = APIRouter()
 async def auth(
     request: Request,
     xpm_token: Optional[str] = Query(None, alias="xpm-token"),
+    next_page: Optional[str] = Query(None, alias="next"),
 ):
     """Authenticate with token and set cookie
 
-    If valid token provided, redirects to index.html with cookie set.
-    The token is passed as ?xpm-token=... in the URL.
+    If valid token provided, redirects to the page ``next`` (by default, the
+    home page) with cookie set. The token is passed as ?xpm-token=... in the
+    URL.
     """
     server = request.app.state.server
 
+    # Only local pages (not //host/... or /\host/...)
+    if not next_page or not next_page.startswith("/") or next_page[1:2] in ("/", "\\"):
+        next_page = "/"
+
     if xpm_token and server.token == xpm_token:
-        response = RedirectResponse(url="/index.html", status_code=302)
+        response = RedirectResponse(url=next_page, status_code=302)
         response.set_cookie(
             key="experimaestro_token",
             value=xpm_token,
@@ -32,7 +39,9 @@ async def auth(
         )
         return response
 
-    return RedirectResponse(url="/login.html", status_code=302)
+    return RedirectResponse(
+        url=f"/login.html?{urlencode({'next': next_page})}", status_code=302
+    )
 
 
 @router.get("/stop")

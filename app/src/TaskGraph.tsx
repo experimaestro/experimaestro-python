@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import { useAppSelector } from "./store";
+import { useAppSelector, useNavigate } from "./store";
 import JobModal from "./JobModal";
 import client, { ExperimentGraphResult } from "./client";
 import DagView from "./dag/DagView";
@@ -21,7 +21,8 @@ export default () => {
     stack: true,
   });
   const [result, setResult] = useState<ExperimentGraphResult | null>(null);
-  const [showJob, setShowJob] = useState<string>();
+  const route = useAppSelector((state) => state.db.route);
+  const navigate = useNavigate();
   const requestId = useRef(0);
   // First request for the displayed experiment, run and view: the answers to
   // later requests are shown as they arrive (the latest may take a while)
@@ -97,15 +98,16 @@ export default () => {
         onParamsChange={setParams}
         statusOf={(jobId) => jobs.byId[jobId]?.status}
         onOpenJob={(node) => {
-          if (jobs.byId[node.id]) {
-            client.job_details(node.id, node.taskId ?? undefined);
-            setShowJob(node.id);
+          const job = jobs.byId[node.id];
+          if (job) {
+            navigate({
+              ...route,
+              job: { taskId: job.taskId, jobId: job.jobId, tab: "details" },
+            });
           }
         }}
       />
-      {showJob && jobs.byId[showJob] && (
-        <JobModal onHide={() => setShowJob(undefined)} job={jobs.byId[showJob]} />
-      )}
+      <JobModal />
     </>
   );
 };

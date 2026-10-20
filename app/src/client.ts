@@ -93,7 +93,7 @@ class Client {
       // Handle authentication error
       if (event.code === 1008 && event.reason === "Invalid token") {
         console.log("Invalid token, redirecting to login");
-        window.location.href = `${window.location.protocol}//${window.location.host}/login.html`;
+        window.location.href = `${window.location.protocol}//${window.location.host}/login.html?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
         return;
       }
 
@@ -213,7 +213,7 @@ class Client {
         case "error":
           console.error("Server error:", payload?.message);
           if (payload?.message === "Invalid token") {
-            window.location.href = `${window.location.protocol}//${window.location.host}/login.html`;
+            window.location.href = `${window.location.protocol}//${window.location.host}/login.html?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
           }
           break;
         default:

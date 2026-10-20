@@ -81,11 +81,13 @@ class BrowserDriver:
         self.provider = provider
         self.server = _Server(provider)
         self.page: Page
+        #: Address of the server
+        self.url: str
         #: Messages the page sent over the WebSocket
         self.sent: list[dict] = []
 
     async def __aenter__(self) -> "BrowserDriver":
-        url = self.server.start()
+        url = self.url = self.server.start()
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch()
         context = await self._browser.new_context(
