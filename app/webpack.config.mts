@@ -61,6 +61,8 @@ const config: Configuration = {
   mode: isProduction ? "production" : "development",
   entry: {
     index: [...stylesheets, "./src/index.tsx"],
+    // Standalone graph page bundle, inlined by experimaestro.ui.graph.standalone_html
+    dag: ["./src/dag-standalone.tsx"],
   },
   resolve: {
     extensions: [".mjs", ".js", ".ts", ".tsx"],

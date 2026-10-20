@@ -372,6 +372,11 @@ class TuiDriver:
 
     # --- Services
 
+    async def graph(
+        self, experiment_id: str, *, tasks_only: bool = True, stack: bool = True
+    ) -> set[frozenset[str]]:
+        raise NotImplementedError("the TUI has no dependency graph view")
+
     async def services(self, experiment_id: str) -> dict[str, str]:
         await self.open_experiment(experiment_id)
         self.app.query_one("#experiment-tabs", TabbedContent).active = "services-tab"

@@ -2,6 +2,7 @@
 import store from "./store"
 import { actions } from "./reducers"
 import { showMessage } from "./ui/messages"
+import { ExperimentGraph, GraphView, ViewParams } from "./dag/types"
 
 // Message types for JSON protocol
 interface Message {
@@ -17,6 +18,14 @@ export type JobsFilterResult = {
   error: string | null;
 };
 
+// Answer to an "experiment.graph" request (see experimaestro.ui.graph)
+export type ExperimentGraphResult = {
+  requestId: number;
+  graph?: ExperimentGraph;
+  view?: GraphView;
+  error?: string;
+};
+
 class Client {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -29,6 +38,8 @@ class Client {
   onActionResult: ((payload: any) => void) | null = null;
   // Callback for server-side job filter results (set by the Tasks view)
   onJobsFilter: ((payload: JobsFilterResult) => void) | null = null;
+  // Callback for experiment graph results (set by the graph view)
+  onExperimentGraph: ((payload: ExperimentGraphResult) => void) | null = null;
 
   constructor() {
     this.connect();
@@ -171,6 +182,9 @@ class Client {
         case "jobs.filter":
           if (this.onJobsFilter) this.onJobsFilter(payload);
           break;
+        case "experiment.graph":
+          if (this.onExperimentGraph) this.onExperimentGraph(payload);
+          break;
         case "experiment.removed":
           store.dispatch(actions.removeExperiment(payload));
           break;
@@ -241,6 +255,20 @@ class Client {
       requestId,
       experimentId: experimentId || undefined,
       runId: runId || undefined,
+    });
+  }
+
+  experiment_graph(
+    requestId: number,
+    experimentId: string,
+    runId: string | null,
+    params: ViewParams,
+  ): void {
+    this.send("experiment.graph", {
+      requestId,
+      experimentId,
+      runId: runId || undefined,
+      ...params,
     });
   }
 

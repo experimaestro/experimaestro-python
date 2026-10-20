@@ -374,6 +374,28 @@ class ScenarioProvider(OfflineStateProvider):
         run = self._run(experiment_id, run_id)
         return run.job_infos if run else {}
 
+    def _fetch_run_objects(self, experiment_id, run_id):
+        # One serialized object per job, referring to its dependencies
+        run = self._run(experiment_id, run_id)
+        if run is None:
+            raise FileNotFoundError(f"No run {run_id} for {experiment_id}")
+        oids = {job_id: oid for oid, job_id in enumerate(run.job_infos)}
+        return [
+            {
+                "id": oid,
+                "module": "pkg",
+                "type": run.job_infos[job_id].task_id.rsplit(".", 1)[-1],
+                "identifier": job_id,
+                "fields": {
+                    "inputs": [
+                        {"type": "python", "value": oids[dep]}
+                        for dep in run.dependencies.get(job_id, [])
+                    ]
+                },
+            }
+            for job_id, oid in oids.items()
+        ]
+
     def _fetch_orphan_jobs(self, *, refresh=False, **kwargs):
         return [self.jobs[job_id] for job_id in self.orphans if job_id in self.jobs]
 

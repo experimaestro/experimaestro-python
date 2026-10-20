@@ -365,6 +365,20 @@ class BrowserDriver:
 
     # --- Services
 
+    async def graph(
+        self, experiment_id: str, *, tasks_only: bool = True, stack: bool = True
+    ) -> set[frozenset[str]]:
+        await self.open_experiment(experiment_id)
+        await self._nav("Graph")
+        await self.page.locator(".xpm-dag-node").first.wait_for()
+        await self.page.get_by_label("Jobs only").set_checked(tasks_only)
+        await self.page.get_by_label("Stack similar nodes").set_checked(stack)
+        await self.settle()
+        return {
+            frozenset((await node.get_attribute("data-members") or "").split())
+            for node in await self.page.locator(".xpm-dag-node").all()
+        }
+
     async def services(self, experiment_id: str) -> dict[str, str]:
         await self.open_experiment(experiment_id)
         await self._nav("Services")

@@ -20,6 +20,24 @@ from experimaestro.core.objects import ConfigMixin
 logger = logging.getLogger("xpm.objects_writer")
 
 
+def read_objects(path: Path) -> list[dict[str, Any]]:
+    """Read the serialized objects of an objects.jsonl file
+
+    A partially written last line (the run is still going) is skipped.
+
+    :raises FileNotFoundError: if the file does not exist
+    """
+    objects = []
+    with path.open() as f:
+        for line in f:
+            if line.strip():
+                try:
+                    objects.append(json.loads(line))
+                except json.JSONDecodeError:
+                    logger.debug("Skipping invalid line in %s", path)
+    return objects
+
+
 class ObjectsWriter:
     """Streams serialized Config objects to a JSONL file.
 

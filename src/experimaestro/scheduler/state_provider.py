@@ -314,6 +314,30 @@ class StateProvider(ABC):
         # Conflict: resolve() returned None
         return exec_state, exp_state
 
+    def get_run_objects(
+        self,
+        experiment_id: str,
+        run_id: str | None = None,
+        *,
+        refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Serialized objects (configurations, tasks, actions) of a run
+
+        These are the records of the run's objects.jsonl, read as they are:
+        unlike :meth:`load_xp_info`, the experiment code is not imported.
+
+        Args:
+            experiment_id: Experiment identifier
+            run_id: Run identifier (None = current run)
+
+        Raises:
+            FileNotFoundError: If the run or its objects.jsonl does not exist
+            NotImplementedError: If the provider doesn't support this
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support get_run_objects"
+        )
+
     def load_xp_info(
         self, experiment_id: str, run_id: str | None = None
     ) -> "ExperimentInfo":
@@ -948,6 +972,21 @@ class OfflineStateProvider(StateProvider):
             copy=dict,
         )
 
+    def get_run_objects(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        return self._cached_query(
+            ("run_objects", experiment_id, run_id),
+            lambda: self._fetch_run_objects(experiment_id, run_id),
+            refresh=refresh,
+            experiment_id=experiment_id,
+            copy=list,
+        )
+
     def get_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
         return self._cached_query(
             ("orphan_jobs", freeze(kwargs)),
@@ -1038,6 +1077,14 @@ class OfflineStateProvider(StateProvider):
     ) -> Dict[str, ExperimentJobInformation]:
         """Read the experiment-level job information from storage"""
         ...
+
+    def _fetch_run_objects(
+        self, experiment_id: str, run_id: Optional[str]
+    ) -> list[dict[str, Any]]:
+        """Read the serialized objects of a run (providers that support it)"""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support get_run_objects"
+        )
 
     def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
         """Read the orphan jobs from storage (providers that support it)"""
@@ -1351,6 +1398,14 @@ class OfflineStateProvider(StateProvider):
                 self._query_cache.update(
                     key, lambda mapping, v=value: mapping.setdefault(event.job_id, v)
                 )
+
+            elif name == "run_objects":
+                # The objects of the new job are only in objects.jsonl
+                _, exp_id, run_id = key
+                if exp_id == event.experiment_id and (
+                    run_id is None or not event_run_id or run_id == event_run_id
+                ):
+                    self._query_cache.drop(key)
 
             # Experiment queries are unaffected: a new job does not change the
             # experiment list, and the counts come from the cached experiment

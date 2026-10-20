@@ -427,6 +427,7 @@ class WebSocketHandler:
             "job.kill": self._handle_job_kill,
             "job.delete": self._handle_job_delete,
             "jobs.filter": self._handle_jobs_filter,
+            "experiment.graph": self._handle_experiment_graph,
             "experiment.kill": self._handle_experiment_kill,
             "experiment.delete": self._handle_experiment_delete,
             "warnings": self._handle_warnings,
@@ -703,6 +704,40 @@ class WebSocketHandler:
             except Exception as e:
                 response["error"] = f"Invalid query: {e}"
         await websocket.send_json({"type": "jobs.filter", "payload": response})
+
+    def _experiment_graph(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Graph of an experiment run with the requested view"""
+        from experimaestro.ui.graph import load_experiment_graph
+
+        graph = load_experiment_graph(
+            self.state_provider, payload["experimentId"], payload.get("runId")
+        )
+        config = payload.get("config")
+        if config is not None and not 0 <= config < len(graph.configs):
+            config = None
+        view = graph.view(
+            config,
+            tasks_only=bool(payload.get("tasksOnly")),
+            stack=bool(payload.get("stack", True)),
+        )
+        return {"graph": graph.state_dict(), "view": view.state_dict(graph.index())}
+
+    async def _handle_experiment_graph(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Dependency graph of an experiment run (see experimaestro.ui.graph)"""
+        response: Dict[str, Any] = {"requestId": payload.get("requestId")}
+        loop = asyncio.get_running_loop()
+        try:
+            response.update(
+                await loop.run_in_executor(None, self._experiment_graph, payload)
+            )
+        except FileNotFoundError:
+            response["error"] = "No dependency graph recorded for this run"
+        except Exception as e:
+            logger.exception("Could not build the experiment graph")
+            response["error"] = f"Could not build the graph: {e}"
+        await websocket.send_json({"type": "experiment.graph", "payload": response})
 
     async def _notify(self, websocket: WebSocket, severity: str, message: str):
         """Send a user-facing notification (shown as a toast)"""

@@ -480,68 +480,56 @@ Use `experimaestro check-documentation objects.inv my_package` to check for undo
 
 ## Experiment DAG Visualization (`experimaestro dag`)
 
-Experimaestro provides dependency graph visualization and export capabilities via the `dag` command. It supports interactive browser rendering, standalone HTML reports, standardized JSON graphs, visual plots, and console text trees.
+The `dag` command shows the dependency graph of an experiment run: its tasks,
+actions and (optionally) the configurations that link them. It is the same
+view as the *Graph* tab of the [web UI](interfaces.md#experiment-dag-visualization),
+exported as a standalone HTML page that needs no server.
 
 ![Experimaestro DAG Visualization](img/DAG_example.png)
 
-Principal Features:
-- Two views available - a hiearchical-aligned heuristic (Aligned) and a more advanced using [Dagre JS](https://github.com/dagrejs/dagre)
-- Optionally display intermediate configs (here `ParameterLoader` is just the output of `Learner` passed to `Evaluate`, not a task) or only the Tasks that are run.
-- Shows the status of Tasks
-- Wired with the [Grid Search](experiments/grid_search.md) feature to only show by default the first config - you can still choose to display all of them.
+- Nodes are coloured by job status; clicking a node highlights its ancestors
+  and descendants and shows its details
+- Structurally equivalent nodes (e.g. the same evaluation run on many
+  datasets) are stacked into one
+- Configurations (e.g. a trained model, output of a task and input of another)
+  can be shown or hidden
+- Wired with the [Grid Search](experiments/grid_search.md) feature: the graph
+  can be restricted to one configuration of the grid
 
-Example usage:
+The graph is read from the run records (`objects.jsonl`), without importing
+the experiment code, and works with remote (SSH) workspaces.
+
 ```bash
-# Launch interactive web viewer in browser (default mode)
+# Open the graph in the browser (default)
 experimaestro dag my_experiment
 
-# Export standalone interactive HTML report (zero-server requirement)
-experimaestro dag my_experiment --save-as dag.html
+# Save a standalone HTML page
+experimaestro dag my_experiment --html dag.html
 
-# Print terminal ASCII tree
-experimaestro dag my_experiment --tree
-
-# Display interactive matplotlib plot window (requires matplotlib)
-experimaestro dag my_experiment --plot
-
-# Save plot image directly without GUI window
-experimaestro dag my_experiment --save-as dag.png
-
-# List hyperparameter trial configurations
+# List the grid search configurations, and print one stage by stage
 experimaestro dag my_experiment --list-configs
+experimaestro dag my_experiment --tree -c 0
+experimaestro dag my_experiment --tree --filter "lr=0.001,kernel_size=3"
 
-# Inspect a single trial configuration
-experimaestro dag my_experiment -c 0
-experimaestro dag my_experiment --filter "lr=0.001,kernel_size=3"
-
-# Export standardized JSON graph
-experimaestro dag my_experiment --save-as dag.json
-experimaestro dag my_experiment --json
+# Dump the graph and all its views as JSON
+experimaestro dag my_experiment --json -
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `EXPERIMENT_ID` | Experiment identifier (positional or via `-e`, `--experiment`, `--experiment-id`). Auto-selected if only one experiment exists in the workspace |
-| `-r, --run, --run-id` | Run timestamp ID (default: most recent run) |
-| `-w, --workspace` | Workspace ID or path (default: auto-detected) |
-| `-W, --web / -nw, --no-web` | Interactive web viewer in browser (default: enabled unless `--tree`, `--plot`, or file export is specified) |
-| `-t, --tree` | Print text tree representation of the DAG to terminal |
-| `--plot` | Display matplotlib interactive plot window (requires matplotlib) |
-| `--port` | Port for web server (default: random available port) |
-| `--no-open` | Do not automatically open browser when launching web viewer |
-| `--save-as` | Save output file (`.html`, `.json`, `.png`, `.svg`, `.pdf`) |
-| `--html` | Save standalone interactive HTML page |
-| `--json` | Export DAG as JSON to standard output |
-| `--json-file` | Export DAG as JSON to specified file |
-| `--tasks-only` | Only display Task and Action nodes, skipping static config nodes |
-| `--list-configs` | List all unique configuration parameter sets found in the experiment |
-| `--single-config` | Render DAG for a single grid configuration (defaults to trial 0) |
-| `-c, --config-index` | Index of configuration to display |
-| `--filter` | Filter DAG by tag values (e.g. `lr=0.001,kernel_size=3`) |
-| `--include-actions` | Include downstream Action and EvaluatedModel nodes when filtering configs |
-| `--layout` | Web viewer layout algorithm: `dagre` (default) or `aligned` |
+| `EXPERIMENT_ID` | Experiment identifier (prompted for if not given) |
+| `-r, --run` | Run ID (default: current run) |
+| `-w, --workspace` | Workspace ID or directory (default: from the settings) |
+| `--html PATH` | Save the graph as a standalone HTML page |
+| `--json PATH` | Save the graph and its views as JSON (`-` for the standard output) |
+| `-t, --tree` | Print the graph, stage by stage |
+| `--list-configs` | List the grid search configurations |
+| `-c, --config` | With `--tree`, restrict to a configuration (see `--list-configs`) |
+| `--filter` | With `--tree`, restrict to the nodes with these tags (e.g. `lr=0.001,seed=1`) |
+| `--all-nodes` | With `--tree`, also show configurations (not only jobs) |
+| `--stack / --no-stack` | With `--tree`, stack similar nodes (default: stacked) |
 
 ## Job Parameters Inspector (`experimaestro inspect`)
 

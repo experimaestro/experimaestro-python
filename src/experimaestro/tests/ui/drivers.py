@@ -147,6 +147,13 @@ class UIDriver(Protocol):
         """Services of an experiment, with their (lowercase) state"""
         ...
 
+    async def graph(
+        self, experiment_id: str, *, tasks_only: bool = True, stack: bool = True
+    ) -> set[frozenset[str]]:
+        """Nodes of the dependency graph of the current run (as the identifiers
+        of the nodes stacked in each)"""
+        ...
+
     async def start_service(
         self, experiment_id: str, service_id: str
     ) -> Notification | None:

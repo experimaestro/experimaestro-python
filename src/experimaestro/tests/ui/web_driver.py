@@ -247,6 +247,31 @@ class WebDriver:
     async def delete_all_orphans(self) -> Notification:
         return await self._notification("orphans.delete")
 
+    # --- Graph
+
+    async def graph(
+        self, experiment_id: str, *, tasks_only: bool = True, stack: bool = True
+    ) -> set[frozenset[str]]:
+        request_id = next(self._request_ids)
+        (response,) = [
+            m["payload"]
+            for m in await self._request(
+                "experiment.graph",
+                requestId=request_id,
+                experimentId=experiment_id,
+                config=None,
+                tasksOnly=tasks_only,
+                stack=stack,
+            )
+            if m["type"] == "experiment.graph"
+            and m["payload"]["requestId"] == request_id
+        ]
+        nodes = response["graph"]["nodes"]
+        return {
+            frozenset(nodes[ix]["id"] for ix in node["members"])
+            for node in response["view"]["nodes"]
+        }
+
     # --- Services
 
     async def services(self, experiment_id: str) -> dict[str, str]:

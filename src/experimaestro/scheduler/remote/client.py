@@ -1155,6 +1155,15 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_DEPENDENCIES_MAP, params)
         return result or {}
 
+    def _fetch_run_objects(
+        self, experiment_id: str, run_id: Optional[str]
+    ) -> list[dict]:
+        result = self._call_sync(
+            RPCMethod.GET_RUN_OBJECTS,
+            {"experiment_id": experiment_id, "run_id": run_id},
+        )
+        return result or []
+
     def _fetch_experiment_job_info(
         self,
         experiment_id: str,

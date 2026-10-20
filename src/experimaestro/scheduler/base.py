@@ -1842,6 +1842,21 @@ class Scheduler(StateProvider, threading.Thread):
         info = self._get_run_info(experiment_id, run_id)
         return info.job_infos if info else {}
 
+    def get_run_objects(
+        self,
+        experiment_id: str,
+        run_id: Optional[str] = None,
+        *,
+        refresh: bool = False,  # noqa: ARG002 - live state is never stale
+    ) -> list[dict]:
+        from experimaestro.scheduler.objects_writer import read_objects
+
+        # objects.jsonl is written as jobs are submitted
+        exp = self.experiments.get(experiment_id)
+        if exp is None or exp.workdir is None or run_id not in (None, exp.run_id):
+            raise FileNotFoundError(f"No live run {run_id} for {experiment_id}")
+        return read_objects(exp.workdir / "objects.jsonl")
+
     def kill_job(self, job: BaseJob, perform: bool = False) -> bool:
         """Kill a running or scheduled job.
 
