@@ -186,7 +186,7 @@ markers = [
     "transient: Transient (non-cached) execution tests",
     # Infrastructure
     "connectors: Local/SSH connectors tests",
-    "launchers: Direct/SLURM/OAR launchers tests",
+    "launchers: Direct/SLURM launchers tests",
     "state: Workspace state, remote state providers tests",
     # Utilities & misc
     "workspace: Workspace triggers, settings tests",

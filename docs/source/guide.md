@@ -60,7 +60,7 @@ Take an experiment from your editor to results:
 Control where and how your code runs:
 
 - [Launchers](./launchers/index.md): manage execution environments (Direct,
-  Slurm, OAR).
+  Slurm).
 - [Connectors](./connectors/index.md): abstract file access and command
   execution (Local, SSH).
 - [Settings](./settings.md): workspaces, auxiliary folders, remote workspaces,

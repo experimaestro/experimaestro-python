@@ -189,7 +189,7 @@ A project describes *what* to run; two pieces of per-user configuration describe
   created. See [Workspaces](workspace.md) and [Settings](../settings.md).
 - **Launchers** (`~/.config/experimaestro/launchers.py`) map a hardware
   requirement string such as `"duration=1h & gpu(mem=4G)*1 & cpu(cores=4)"` to a
-  concrete way of running tasks (local, SLURM, OAR, …). Generate one with
+  concrete way of running tasks (local, SLURM, …). Generate one with
   `experimaestro launchers direct generate` (single host) or
   `experimaestro launchers slurm generate` (cluster). See the
   [launchers documentation](../launchers/index.md).

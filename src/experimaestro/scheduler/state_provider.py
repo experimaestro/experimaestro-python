@@ -63,7 +63,7 @@ class ProcessInfo:
     """Process ID"""
 
     type: str
-    """Process type (e.g., 'local', 'slurm', 'oar')"""
+    """Process type (e.g., 'local', 'slurm')"""
 
     running: bool = False
     """Whether the process is currently running"""
