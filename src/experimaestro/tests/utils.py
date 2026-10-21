@@ -8,6 +8,7 @@ import signal
 
 from experimaestro import experiment, Task
 from experimaestro.scheduler.workspace import RunMode
+from experimaestro.utils.atomic import atomic_write
 
 
 # --- Centralized test timeout configuration ---
@@ -94,10 +95,7 @@ def get_times(task: Task) -> TimeInterval:
 
 def write_atomic(path: Path | str, text: str):
     """Write a file so that pollers never see it empty or partially written"""
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
+    atomic_write(path, text)
 
 
 def get_times_frompath(path) -> TimeInterval:

@@ -1,6 +1,5 @@
 """Command line jobs"""
 
-import json
 import io
 import os
 import socket
@@ -12,6 +11,7 @@ from experimaestro.core.context import SerializationContext
 from experimaestro.scheduler.workspace import RunMode
 
 from experimaestro.utils import logger
+from experimaestro.utils.atomic import atomic_open, atomic_write_json
 from .scheduler import Job, JobState
 from .connectors import Redirect, RedirectType, Connector
 from .scheduler import Workspace
@@ -135,7 +135,7 @@ class CommandString(AbstractCommandComponent):
 class CommandParameters(AbstractCommandComponent):
     def output(self, context: CommandContext, out: io.TextIOBase):
         path = context.getAuxiliaryFile("params", ".json")
-        with path.open("wt") as fileout:
+        with atomic_open(path, fsync=True) as fileout:
             context.config.__xpm__.outputjson(fileout, context)
         out.write(context.relpath(path))
 
@@ -312,12 +312,11 @@ class CommandLineJob(Job):
         # it cannot check a host-dependent process identifier (see #270)
         spec = self._process.tospec()
         spec.setdefault("host", socket.gethostname())
-        with self.pidpath.open("w") as fp:
-            json.dump(spec, fp)
+        atomic_write_json(self.pidpath, spec)
 
         # Write status with process info
         self.state = JobState.SCHEDULED
-        self.status_path.write_text(json.dumps(self.state_dict()))
+        atomic_write_json(self.status_path, self.state_dict())
 
         logger.info("Process started (%s)", self._process)
         return self._process

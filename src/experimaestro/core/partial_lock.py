@@ -20,6 +20,7 @@ from experimaestro.locking import (
     create_file_lock,
 )
 from experimaestro.dynamic import DynamicDependency
+from experimaestro.utils.atomic import atomic_create, read_json
 from experimaestro.scheduler.dependencies import Resource
 
 
@@ -109,19 +110,16 @@ class PartialJobResource(Resource, TrackedDynamicResource):
         return self._partial_path
 
     def _write_informations(self, max_write_locks: int) -> None:
-        """Write partial informations to disk."""
+        """Write partial informations to disk (if not already there)."""
         self.lock_folder.mkdir(parents=True, exist_ok=True)
-        with self.informations_path.open("w") as f:
-            json.dump({"max_write_locks": max_write_locks}, f)
+        atomic_create(
+            self.informations_path, json.dumps({"max_write_locks": max_write_locks})
+        )
 
     def _read_informations(self) -> int:
         """Read max_write_locks from informations file."""
-        try:
-            with self.informations_path.open("r") as f:
-                data = json.load(f)
-                return data.get("max_write_locks", 1)
-        except FileNotFoundError:
-            return 1
+        data = read_json(self.informations_path, default={})
+        return data.get("max_write_locks", 1)
 
     def __init__(self, partial_path: Path, max_write_locks: int = 1):
         """Initialize a partial job resource.
@@ -136,8 +134,7 @@ class PartialJobResource(Resource, TrackedDynamicResource):
 
         # Create informations file if needed
         self.lock_folder.mkdir(parents=True, exist_ok=True)
-        if not self.informations_path.is_file():
-            self._write_informations(max_write_locks)
+        self._write_informations(max_write_locks)
 
         # Initialize base classes
         Resource.__init__(self)

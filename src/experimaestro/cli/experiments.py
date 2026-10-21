@@ -130,11 +130,9 @@ def _read_run_status(run_dir: Path) -> dict:
 
 def _write_run_status(run_dir: Path, status: dict) -> None:
     """Write status.json to a run directory."""
-    import json
+    from experimaestro.utils.atomic import atomic_write_json
 
-    status_path = run_dir / "status.json"
-    with status_path.open("w") as f:
-        json.dump(status, f, indent=2)
+    atomic_write_json(run_dir / "status.json", status, indent=2)
 
 
 def _get_run_info(run_dir: Path) -> dict:

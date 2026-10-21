@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 from experimaestro.locking import create_file_lock
+from experimaestro.utils.atomic import atomic_write_json
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -875,10 +876,9 @@ class BaseJob:
         This is a sync method for writing the canonical state_dict() to disk.
         Call this while holding the job lock to ensure atomic status updates.
         """
-        import json
 
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
-        self.status_path.write_text(json.dumps(self.state_dict()))
+        atomic_write_json(self.status_path, self.state_dict())
 
     def apply_event(self, event: "EventBase") -> None:
         """Apply a job event to update this job's state.
@@ -1159,7 +1159,7 @@ class BaseJob:
             status_written = False
             if current_dict != new_dict:
                 self.status_path.parent.mkdir(parents=True, exist_ok=True)
-                self.status_path.write_text(json.dumps(new_dict))
+                atomic_write_json(self.status_path, new_dict)
                 status_written = True
 
             return status_written
@@ -1696,10 +1696,7 @@ class BaseExperiment:
         data["last_updated"] = datetime.now().isoformat()
 
         with create_file_lock(lock_path):
-            temp_path = status_path.with_suffix(".json.tmp")
-            with temp_path.open("w") as f:
-                json.dump(data, f, indent=2)
-            temp_path.replace(status_path)
+            atomic_write_json(status_path, data, indent=2)
 
     def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:
         """Apply an event to update experiment state.
@@ -1985,7 +1982,7 @@ class BaseExperiment:
                     new_dict = {
                         k: v for k, v in new_dict.items() if k != "events_count"
                     }
-                status_path.write_text(json.dumps(new_dict, indent=2))
+                atomic_write_json(status_path, new_dict, indent=2)
                 status_written = True
 
             return status_written

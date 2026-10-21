@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from experimaestro.scheduler import job_operations
+from experimaestro.utils.atomic import atomic_write_json
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.state_provider import MockJob
@@ -309,7 +310,7 @@ def _consolidate_experiment_events_with_count(
         status_dict.pop("events_count", None)
 
         status_path = run_dir / "status.json"
-        status_path.write_text(json.dumps(status_dict, indent=2))
+        atomic_write_json(status_path, status_dict, indent=2)
 
         logger.info(
             f"Consolidated experiment {experiment_id}, status={exp.status.value}"
@@ -499,14 +500,14 @@ def _cleanup_stale_pid_files(workspace_path: Path) -> int:
                             task_id,
                             job_dir.name,
                         )
-                        failedfile.write_text(
-                            json.dumps(
-                                {
-                                    "code": 1,
-                                    "reason": "failed",
-                                    "message": "Process died without writing markers",
-                                }
-                            )
+                        atomic_write_json(
+                            failedfile,
+                            {
+                                "code": 1,
+                                "reason": "failed",
+                                "message": "Process died without writing markers",
+                            },
+                            fsync=True,
                         )
             except filelock.Timeout:
                 # Job is active, skip
@@ -586,14 +587,14 @@ def _is_job_active(job_path: Path, task_id: str) -> bool:
         failedfile = BaseJob.get_failedfile(job_path, scriptname)
         if not donefile.exists() and not failedfile.exists():
             logger.info("Writing .failed marker for crashed job %s", task_id)
-            failedfile.write_text(
-                json.dumps(
-                    {
-                        "code": 1,
-                        "reason": "failed",
-                        "message": "Process died without writing markers",
-                    }
-                )
+            atomic_write_json(
+                failedfile,
+                {
+                    "code": 1,
+                    "reason": "failed",
+                    "message": "Process died without writing markers",
+                },
+                fsync=True,
             )
         return False
 
@@ -793,7 +794,7 @@ def _consolidate_job_events(
 
     status_path = job_path / ".experimaestro" / "status.json"
     try:
-        status_path.write_text(json.dumps(status_dict, indent=2))
+        atomic_write_json(status_path, status_dict, indent=2)
         logger.debug(f"Consolidated and updated status.json for job {task_id}/{job_id}")
     except OSError as e:
         logger.warning(f"Failed to write status.json for {task_id}/{job_id}: {e}")

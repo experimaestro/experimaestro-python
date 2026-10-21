@@ -5,6 +5,7 @@ import logging
 import time
 from pathlib import Path
 from typing import TypedDict
+from experimaestro.utils.atomic import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +146,7 @@ def _save_cache(info: RegionInfo) -> None:
     """
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        with CACHE_FILE.open("w") as f:
-            json.dump(info, f, indent=2)
+        atomic_write_json(CACHE_FILE, info, indent=2)
         logger.debug("Saved region cache: %s", info["country_iso_code"])
     except Exception as e:
         logger.warning("Failed to save region cache: %s", e)

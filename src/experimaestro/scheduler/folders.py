@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Optional
 import filelock
 
 from experimaestro.locking import create_file_lock
+from experimaestro.utils.atomic import atomic_write_json
 
 from experimaestro.settings import FolderMode, FolderSettings
 
@@ -185,7 +186,7 @@ def _rewrite_legacy_params_json(dest: Path, src_workspace: Path) -> None:
         return value
 
     data = rewrite(data)
-    params.write_text(json.dumps(data))
+    atomic_write_json(params, data, fsync=True)
 
 
 def _archive_job(job: _Job, folder: FolderSettings) -> Optional[Path]:

@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from experimaestro.scheduler import Workspace
 
 from .config_walk import ConfigWalk, ConfigWalkContext
+from experimaestro.utils.atomic import atomic_write_json
 from .config_utils import (
     getqualattr,
     load_definition_module,
@@ -1446,9 +1447,9 @@ class ConfigInformation:
         if context is None:
             context = SerializationContext(save_directory=save_directory)
 
-        with (save_directory / definition_filename).open("wt") as out:
-            objects = self.__get_objects__([], context)
-            json.dump(objects, out)
+        atomic_write_json(
+            save_directory / definition_filename, self.__get_objects__([], context)
+        )
 
     @staticmethod
     def deserialize(

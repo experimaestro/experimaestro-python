@@ -23,6 +23,7 @@ from .locking import (
     TrackedDynamicResource,
 )
 from .dynamic import DynamicDependency
+from .utils.atomic import atomic_create, atomic_write, atomic_write_json, read_json
 from .scheduler.dependencies import Resource
 import logging
 
@@ -236,17 +237,11 @@ class CounterToken(Token, TrackedDynamicResource):
 
     def _write_informations(self, total: int) -> None:
         """Write token informations to disk."""
-        with self.informations_path.open("w") as f:
-            json.dump({"total": total}, f)
+        atomic_write_json(self.informations_path, {"total": total})
 
     def _read_informations(self) -> int:
         """Read token total from informations file."""
-        try:
-            with self.informations_path.open("r") as f:
-                data = json.load(f)
-                return data.get("total", 0)
-        except FileNotFoundError:
-            return 0
+        return read_json(self.informations_path, default={}).get("total", 0)
 
     def __init__(self, name: str, path: Path, count: int, force=True):
         """Initialize a counter token.
@@ -264,9 +259,11 @@ class CounterToken(Token, TrackedDynamicResource):
 
         # Set the informations file if needed (before TrackedDynamicResource init)
         path.mkdir(exist_ok=True, parents=True)
-        if force or not (path / "informations.json").is_file():
-            with (path / "informations.json").open("w") as f:
-                json.dump({"total": count}, f)
+        informations = json.dumps({"total": count})
+        if force:
+            atomic_write(path / "informations.json", informations)
+        else:
+            atomic_create(path / "informations.json", informations)
 
         # Initialize base classes - this will call _update()
         Token.__init__(self)

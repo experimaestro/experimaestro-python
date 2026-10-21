@@ -24,6 +24,7 @@ from pathlib import Path
 
 from experimaestro.scheduler.interfaces import ExperimentJobInformation
 from experimaestro.settings import WorkspaceSettings
+from experimaestro.utils.atomic import atomic_write_json
 
 logger = logging.getLogger("xpm.copy")
 
@@ -352,7 +353,7 @@ def _rewrite_params_json(
             params.get("objects", []), src_workspace_path, dst_workspace_path
         )
 
-        params_path.write_text(json.dumps(params))
+        atomic_write_json(params_path, params, fsync=True)
 
 
 # ---------------------------------------------------------------------------

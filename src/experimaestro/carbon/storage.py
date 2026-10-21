@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from experimaestro.locking import create_file_lock
+from experimaestro.utils.atomic import atomic_write_json
 from typing import Iterator
 
 logger = logging.getLogger(__name__)
@@ -191,10 +192,7 @@ class CarbonStorage:
         """Save index to disk."""
         self._ensure_dir()
         index.last_updated = time.time()
-        temp_path = self._index_path.with_suffix(".tmp")
-        with temp_path.open("w") as f:
-            json.dump(index.to_dict(), f, indent=2)
-        temp_path.replace(self._index_path)
+        atomic_write_json(self._index_path, index.to_dict(), indent=2)
 
     def write_record(self, record: CarbonRecord) -> None:
         """Write a carbon record to storage.

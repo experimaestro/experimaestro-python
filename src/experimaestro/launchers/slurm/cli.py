@@ -9,6 +9,8 @@ import sys
 
 import click
 
+from experimaestro.utils.atomic import atomic_write_json
+
 # Import data models
 from .models import (
     SlurmConfig,
@@ -103,8 +105,7 @@ class SlurmCommandCache:
         """Save JSON data to cache."""
         if self.cache_file:
             self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.cache_file, "w") as f:
-                json.dump(self._data, f, indent=2)
+            atomic_write_json(self.cache_file, self._data, indent=2)
 
     @property
     def cached_command_count(self) -> int:

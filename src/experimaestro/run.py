@@ -14,6 +14,7 @@ from experimaestro.exceptions import GracefulTimeout, TaskCancelled
 from experimaestro.locking import JobDependencyLocks, create_file_lock
 from .core.types import ObjectType
 from experimaestro.utils import logger
+from experimaestro.utils.atomic import atomic_write_json
 from experimaestro.core.objects import ConfigInformation
 import experimaestro.taskglobals as taskglobals
 import atexit
@@ -443,11 +444,11 @@ class TaskRunner:
         from experimaestro.scheduler.dynamic_outputs import count_task_outputs
 
         outputs_path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
-        tmp_path = self.donepath.with_suffix(".done.tmp")
-        tmp_path.write_text(
-            json.dumps({"task_outputs": count_task_outputs(outputs_path)})
+        atomic_write_json(
+            self.donepath,
+            {"task_outputs": count_task_outputs(outputs_path)},
+            fsync=True,
         )
-        os.replace(tmp_path, self.donepath)
 
     def cleanup(self):
         if not self.cleaned:
@@ -534,7 +535,7 @@ class TaskRunner:
             failure_info = {"code": code, "reason": reason}
             if message:
                 failure_info["message"] = message
-            self.failedpath.write_text(json.dumps(failure_info))
+            atomic_write_json(self.failedpath, failure_info, fsync=True)
 
         self.cleanup()
         logger.info("Exiting")
@@ -550,7 +551,7 @@ class TaskRunner:
                 failure_info = {"code": signal.SIGTERM, "reason": reason}
                 if message:
                     failure_info["message"] = message
-                self.failedpath.write_text(json.dumps(failure_info))
+                atomic_write_json(self.failedpath, failure_info, fsync=True)
             self.cleanup()
             logger.info("Background cleanup finished")
         except Exception:

@@ -9,7 +9,6 @@ Classes:
 
 import json
 import logging
-import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
     from experimaestro.core.serialization import ExperimentInfo
 
 from experimaestro.locking import LOCK_MODE_INHERIT, register_workspace_lock_mode
+from experimaestro.utils.atomic import atomic_write_json
 from experimaestro.scheduler.interfaces import (
     BaseExperiment,
     BaseJob,
@@ -372,7 +372,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
             job_id: Job identifier
             event_files: List of event file paths for this job
         """
-        import json
 
         job_path = self.workspace_path / "jobs" / task_id / job_id
         if not job_path.exists():
@@ -418,7 +417,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         status_path = job_path / ".experimaestro" / "status.json"
         try:
-            status_path.write_text(json.dumps(status_dict, indent=2))
+            atomic_write_json(status_path, status_dict, indent=2)
             logger.debug(
                 f"Consolidated and updated status.json for job {task_id}/{job_id}"
             )
@@ -583,7 +582,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             status_dict.pop("events_count", None)
 
             try:
-                status_path.write_text(json.dumps(status_dict, indent=2))
+                atomic_write_json(status_path, status_dict, indent=2)
                 logger.info(
                     "Consolidated experiment %s, status=%s",
                     experiment_id,
@@ -610,8 +609,6 @@ class WorkspaceStateProvider(OfflineStateProvider):
             remove_events_count: If True, remove events_count from the output
                 (indicates all events have been processed)
         """
-        import tempfile
-
         from experimaestro.locking import create_file_lock
 
         status_path.parent.mkdir(parents=True, exist_ok=True)
@@ -624,18 +621,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             state.pop("events_count", None)
 
         with create_file_lock(lock_path):
-            # Write to temp file first, then atomic rename
-            fd, temp_path = tempfile.mkstemp(
-                dir=status_path.parent, suffix=".tmp", prefix="status"
-            )
-            try:
-                with os.fdopen(fd, "w") as f:
-                    json.dump(state, f, indent=2)
-                os.replace(temp_path, status_path)
-            except Exception:
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-                raise
+            atomic_write_json(status_path, state, indent=2)
 
     def _cleanup_event_files(self, events_dir: Path, event_files: List[Path]) -> None:
         """Remove temporary event files after consolidation
@@ -1987,8 +1973,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         existing["job_states"] = exp._serialize_job_states()
         try:
-            with status_path.open("w") as f:
-                json.dump(existing, f, indent=2)
+            atomic_write_json(status_path, existing, indent=2)
         except OSError as e:
             logger.warning(
                 "Failed to update status.json for %s/%s after deleting job %s: %s",

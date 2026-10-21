@@ -16,6 +16,7 @@ import asyncio
 
 
 from experimaestro.exceptions import GracefulTimeout
+from experimaestro.utils.atomic import atomic_write_json
 from experimaestro.scheduler import experiment
 from experimaestro.scheduler.jobs import (
     Job,
@@ -1476,7 +1477,7 @@ class Scheduler(StateProvider, threading.Thread):
 
                     # Write metadata with submit and start time (after directory creation)
                     job.status_path.parent.mkdir(parents=True, exist_ok=True)
-                    job.status_path.write_text(json.dumps(job.state_dict()))
+                    atomic_write_json(job.status_path, job.state_dict())
 
                     # Notify locks before job starts (e.g., create symlinks)
                     await locks.aio_job_before_start(job)
@@ -1503,24 +1504,10 @@ class Scheduler(StateProvider, threading.Thread):
 
                     # Write locks.json for job process (if there are dynamic locks)
                     if locks.locks:
-                        import tempfile
-
-                        locks_path = job.path / "locks.json"
-                        locks_data = {"dynamic_locks": locks.to_json()}
-                        # Atomic write: write to temp file then rename
-                        with tempfile.NamedTemporaryFile(
-                            mode="w",
-                            dir=job.path,
-                            prefix=".locks.",
-                            suffix=".json",
-                            delete=False,
-                        ) as tmp:
-                            json.dump(locks_data, tmp)
-                            tmp_path = tmp.name
-                        # Rename is atomic on POSIX
-                        import os
-
-                        os.rename(tmp_path, locks_path)
+                        atomic_write_json(
+                            job.path / "locks.json",
+                            {"dynamic_locks": locks.to_json()},
+                        )
                 except Exception:
                     logger.error(
                         "Error while starting job %s (path: %s)",

@@ -8,6 +8,7 @@ from experimaestro.core.context import (
     SerializedPathLoader,
 )
 from experimaestro.core.objects import ConfigInformation
+from experimaestro.utils.atomic import atomic_write_json
 
 if TYPE_CHECKING:
     from experimaestro import LightweightTask
@@ -48,8 +49,7 @@ def state_dict(context: SerializationContext, obj: Any):
 
 def save_definition(obj: Any, context: SerializationContext, path: Path):
     data = state_dict(context, obj)
-    with path.open("wt") as out:
-        json.dump(data, out)
+    atomic_write_json(path, data)
 
 
 def save(

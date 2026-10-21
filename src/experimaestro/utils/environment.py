@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 from importlib.metadata import distributions
 
 from experimaestro.utils.git import get_git_info
+from experimaestro.utils.atomic import atomic_write_json
 
 logger = logging.getLogger("xpm.environment")
 
@@ -106,7 +107,7 @@ class ExperimentEnvironment:
 
     def save(self, path: Path) -> None:
         """Save to a JSON file"""
-        path.write_text(json.dumps(self.to_dict(), indent=2))
+        atomic_write_json(path, self.to_dict(), indent=2)
 
 
 def get_environment_info() -> dict:

@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
+from experimaestro.utils.atomic import atomic_write_json
 from experimaestro.filewatcher import (
     DirectoryWatch,
     FileWatcherService,
@@ -533,8 +534,7 @@ class EventWriter(ABC):
             with status_path.open("r") as f:
                 status = json.load(f)
             status["events_count"] = self._count
-            with status_path.open("w") as f:
-                json.dump(status, f)
+            atomic_write_json(status_path, status)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to update status with events_count: %s", e)
 
@@ -843,8 +843,7 @@ class JobEventWriter(EventWriter):
         try:
             state = self._mock_job.state_dict()
             state["events_count"] = self._count
-            with status_path.open("w") as f:
-                json.dump(state, f)
+            atomic_write_json(status_path, state)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to write job state to status: %s", e)
 
@@ -946,8 +945,7 @@ class ExperimentEventWriter(EventWriter):
             state = self.experiment.state_dict()
             state["events_count"] = self._count
             state["last_updated"] = datetime.now().isoformat()
-            with status_path.open("w") as f:
-                json.dump(state, f)
+            atomic_write_json(status_path, state)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to write experiment state to status: %s", e)
 

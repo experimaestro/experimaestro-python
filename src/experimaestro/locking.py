@@ -14,6 +14,7 @@ import weakref
 import filelock
 
 from experimaestro.dynamic import DynamicResource
+from experimaestro.utils.atomic import atomic_write_json
 
 logger = logging.getLogger("xpm.locking")
 
@@ -843,8 +844,7 @@ class DynamicLockFile(ABC):
         data["process"] = process.tospec()
 
         logging.debug("Writing process info to lock file %s", self.path)
-        with self.path.open("wt") as fp:
-            json.dump(data, fp)
+        atomic_write_json(self.path, data)
 
         self.timestamp = os.path.getmtime(self.path)
 
@@ -994,8 +994,7 @@ class DynamicLockFile(ABC):
 
         logging.debug("Writing lock file %s", path)
         data = {"job_uri": job_uri, "information": self.to_information()}
-        with path.open("wt") as fp:
-            json.dump(data, fp)
+        atomic_write_json(path, data)
 
         self.timestamp = os.path.getmtime(path)
 
@@ -1246,6 +1245,8 @@ class TrackedDynamicResource(DynamicResource, ABC):
             name: Human-readable name for the resource
         """
         self.name = name
+        # Set early so that __del__ works if __init__ fails
+        self.watcher = None
         self.lock_folder.mkdir(exist_ok=True, parents=True)
 
         # Ensure event loop thread is running before setting up file watching

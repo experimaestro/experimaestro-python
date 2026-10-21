@@ -4,6 +4,7 @@ from experimaestro.utils import logger
 import experimaestro.taskglobals as taskglobals
 from pathlib import Path
 import json
+from experimaestro.utils.atomic import atomic_write_json
 
 
 def load_job(job_path: Path, discard_id=True):
@@ -81,10 +82,7 @@ def fix_deprecated(workpath: Path, fix: bool, cleanup: bool):
                         params["objects"] = job.__xpm__.__get_objects__(
                             [], SerializationContext()
                         )
-                        tmppath = job_path.with_suffix(".json.tmp")
-                        with tmppath.open("wt") as out:
-                            json.dump(params, out)
-                        tmppath.replace(job_path)
+                        atomic_write_json(job_path, params, fsync=True)
 
                         # Rename the folder
                         oldjobpath.rename(newjobpath)
