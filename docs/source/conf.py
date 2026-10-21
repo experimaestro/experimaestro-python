@@ -6,6 +6,7 @@
 # Mock mkdocs module if not installed (mkdocs is only needed for mkdocs builds)
 import sys
 from unittest.mock import MagicMock
+from urllib.parse import quote
 
 try:
     import mkdocs  # noqa: F401
@@ -100,8 +101,15 @@ myst_enable_extensions = [
     "substitution",
 ]
 
-# {{ version }} in Markdown pages expands to the documented version
-myst_substitutions = {"version": release}
+# {{ version_badge }} in Markdown pages expands to a badge with the documented
+# version (shields.io escapes "-" and "_" by doubling them)
+_badge_version = quote(release.replace("-", "--").replace("_", "__"))
+myst_substitutions = {
+    "version_badge": (
+        f"![version {release}]"
+        f"(https://img.shields.io/badge/version-{_badge_version}-blue)"
+    )
+}
 
 # Enable heading anchors for cross-reference support
 # 4 levels: lets the walkthrough link to H4 subsections (e.g. "Launchers"
