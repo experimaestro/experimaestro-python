@@ -78,6 +78,8 @@ class RemoteFileSynchronizer:
         # Build source and destination
         source = f"{self.host}:{self.remote_workspace}/{relative_path}/"
         local_path = self.local_cache / relative_path
+        if local_path.is_file():
+            raise ValueError(f"{relative_path} is a file: synchronize its directory")
         local_path.mkdir(parents=True, exist_ok=True)
         dest = f"{local_path}/"
 

@@ -392,7 +392,10 @@ class SSHMockService(MockService):
             self._live_service._on_status_change = callback
 
     def _extract_paths(self) -> List[str]:
-        """Extract path strings from state_dict for syncing."""
+        """Extract path strings from state_dict for syncing
+
+        The log directory of the service is left out: the live service writes
+        its logs locally (see :meth:`to_service`)."""
         paths = []
 
         def find_paths(d):
@@ -406,7 +409,9 @@ class SSHMockService(MockService):
                 for item in d:
                     find_paths(item)
 
-        find_paths(self._state_dict_data)
+        find_paths(
+            {k: v for k, v in self._state_dict_data.items() if k != "log_directory"}
+        )
         return paths
 
     def to_service(self) -> "BaseService":

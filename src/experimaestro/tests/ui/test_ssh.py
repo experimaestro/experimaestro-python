@@ -17,6 +17,9 @@ from pathlib import Path
 import pytest
 
 from experimaestro import Param, Task
+from experimaestro.scheduler.remote.sync import RemoteFileSynchronizer
+from experimaestro.scheduler.service_operations import find_service
+from experimaestro.scheduler.services import WebService
 from experimaestro.scheduler.remote.client import SSHStateProviderClient
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported, RPCMethod
 from experimaestro.tests.utils import TemporaryExperiment
@@ -46,6 +49,29 @@ class Greet(Task):
         print(f"hello {self.name}")  # noqa: T201 (the job log)
 
 
+class DataService(WebService):
+    """A service reading data from the workspace (as TensorBoard does): its
+    stored state holds its data path and its log directory"""
+
+    id = "viewer"
+
+    def __init__(self, data: Path, log_directory: Path | None = None):
+        super().__init__()
+        self.data = data
+        if log_directory is not None:
+            self.log_directory = log_directory
+
+    def state_dict(self):
+        return {**super().state_dict(), "data": self.data}
+
+    def description(self):
+        return "Data viewer"
+
+    def _serve(self, running):
+        self.url = "http://localhost:1/viewer"
+        running.set()
+
+
 @dataclass
 class RemoteWorkspace:
     path: Path
@@ -56,7 +82,9 @@ class RemoteWorkspace:
 @pytest.fixture(scope="module")
 def remote_workspace(tmp_path_factory) -> RemoteWorkspace:
     workdir = tmp_path_factory.mktemp("remote").resolve()
-    with TemporaryExperiment("greetings", workdir=workdir):
+    with TemporaryExperiment("greetings", workdir=workdir) as xp:
+        (workdir / "data").mkdir()
+        xp.add_service(DataService(workdir / "data", workdir / "service-logs"))
         tasks = {
             name: Greet.C(name=name).tag("who", name).submit()
             for name in ("alice", "bob")
@@ -242,3 +270,44 @@ async def test_old_remote_graph(old_ssh_provider):
         )
     (answer,) = [m["payload"] for m in messages if m["type"] == "experiment.graph"]
     assert "update experimaestro on the remote host" in answer["error"]
+
+
+def test_service_log_directory_not_synced(ssh_provider, remote_workspace):
+    """Only the data of a service is synchronized, not its (remote) log
+    directory: the service runs and logs locally"""
+    live = find_service(ssh_provider, "greetings", "viewer").to_service()
+    assert live._remote_paths == [str(remote_workspace.path / "data")]
+    assert live.log_directory == ssh_provider.local_cache_dir / "services" / "viewer"
+
+
+async def test_service_log_read_locally(ssh_provider, monkeypatch):
+    """The logs of a service are read where the live service writes them,
+    without asking rsync for them (which created a directory named after the
+    log file when it did not exist yet)"""
+    synced = []
+    monkeypatch.setattr(
+        ssh_provider, "sync_path", lambda path, **kwargs: synced.append(path)
+    )
+    live = find_service(ssh_provider, "greetings", "viewer").to_service()
+    url = "/api/services/greetings/viewer/logs/stdout"
+    async with DRIVERS["web"](ssh_provider) as ui:
+        # No log yet
+        response = ui.client.get(url)
+        assert response.json()["content"] == ""
+        assert not live.stdout.exists()
+
+        live.stdout.parent.mkdir(parents=True, exist_ok=True)
+        live.stdout.write_text("serving\n")
+        assert ui.client.get(url).json()["content"] == "serving\n"
+    assert synced == []
+
+
+def test_sync_refuses_file(tmp_path, monkeypatch):
+    """Synchronizing a path that is a file locally is refused (rsync works on
+    directories)"""
+    sync = RemoteFileSynchronizer("host", Path("/remote"), tmp_path)
+    monkeypatch.setattr(sync, "_rsync", lambda *args, **kwargs: None)
+    (tmp_path / "logs.out").write_text("")
+    with pytest.raises(ValueError, match="is a file"):
+        sync.sync_path("/remote/logs.out")
+    assert sync.sync_path("/remote/dir") == tmp_path / "dir"

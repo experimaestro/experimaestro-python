@@ -55,6 +55,12 @@ def _maybe_sync(state_provider, path: Path, include: list[str]) -> Path:
     return path
 
 
+def _maybe_sync_file(state_provider, path: Path) -> Path:
+    """For remote providers, sync a file (through its directory) before
+    reading it"""
+    return _maybe_sync(state_provider, path.parent, include=[path.name]) / path.name
+
+
 @router.get("/api/jobs/{task_id}/{job_id}/logs/{stream}")
 async def job_logs(request: Request, task_id: str, job_id: str, stream: str):
     """Return a slice of a job's stdout/stderr log."""
@@ -96,9 +102,7 @@ async def experimaestro_logs(request: Request):
     if log_path is None:
         return JSONResponse({"content": "", "offset": 0, "size": 0})
 
-    log_path = _maybe_sync(
-        state_provider, Path(log_path), include=[Path(log_path).name]
-    )
+    log_path = _maybe_sync_file(state_provider, Path(log_path))
     return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
 
 
@@ -125,7 +129,6 @@ async def service_logs(
     if log_path is None:
         return JSONResponse({"content": "", "offset": 0, "size": 0})
 
-    log_path = _maybe_sync(
-        state_provider, Path(log_path), include=[Path(log_path).name]
-    )
-    return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
+    # Not synchronized: the logs are those of the live service, which runs on
+    # this machine (also when monitoring a remote workspace)
+    return JSONResponse(read_log_slice(Path(log_path), _parse_offset(request)))
