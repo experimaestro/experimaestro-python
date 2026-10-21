@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 
 if TYPE_CHECKING:
     from experimaestro.core.serialization import ExperimentInfo
-    from experimaestro.scheduler.state_status import WarningEvent
+    from experimaestro.scheduler.state_status import ExperimentEventBase, WarningEvent
 
 from experimaestro.scheduler.interfaces import (
     BaseAction,
@@ -1337,6 +1337,8 @@ class OfflineStateProvider(StateProvider):
         - JobProgressEvent: Updates job progress in cache
         - CarbonMetricsEvent: Updates job carbon metrics in cache
         - JobSubmittedEvent: Adds new job to cache
+        - ExperimentJobStateEvent / JobSubmittedEvent: also applied to the
+          cached experiments (job counts)
         - ExperimentUpdatedEvent: Invalidates experiment cache
 
         Cached queries are invalidated for the events that change *which*
@@ -1374,11 +1376,13 @@ class OfflineStateProvider(StateProvider):
         # Handle ExperimentJobStateEvent with scheduler_state="submitted"
         # (supersedes JobSubmittedEvent)
         elif isinstance(event, ExperimentJobStateEvent):
+            self._apply_to_cached_experiments(event)
             if event.scheduler_state == "submitted" and event.task_id:
                 self._add_submitted_job(event)
 
         # Legacy: handle old JobSubmittedEvent from event files
         elif isinstance(event, JobSubmittedEvent):
+            self._apply_to_cached_experiments(event)
             if event.task_id:
                 self._add_submitted_job(event)
 
@@ -1391,6 +1395,23 @@ class OfflineStateProvider(StateProvider):
                 ]
                 for key in keys_to_remove:
                     del self._experiment_cache[key]
+
+    def _apply_to_cached_experiments(self, event: "ExperimentEventBase") -> None:
+        """Apply an experiment event to the cached runs of its experiment
+
+        The cached experiments are those referenced by the cached experiment
+        queries: updating them in place keeps the job counts of the
+        experiment list current. Each run ignores the events of the other
+        runs (see :meth:`MockExperiment.apply_event`).
+        """
+        with self._experiment_cache_lock:
+            experiments = [
+                exp
+                for (experiment_id, _), exp in self._experiment_cache.items()
+                if experiment_id == event.experiment_id
+            ]
+            for exp in experiments:
+                exp.apply_event(event)
 
     def _add_submitted_job(self, event: "EventBase") -> None:
         """Register a newly submitted job in the caches
@@ -2104,7 +2125,8 @@ class MockExperiment(BaseExperiment):
     def total_jobs(self) -> int:
         if self._total_jobs > 0:
             return self._total_jobs
-        return max(len(self.job_infos), len(self._job_states))
+        # Jobs can be known by their information, their state, or both
+        return len(self.job_infos.keys() | self._job_states.keys())
 
     @property
     def finished_jobs(self) -> int:
@@ -2376,22 +2398,9 @@ class MockExperiment(BaseExperiment):
         } or None
 
         # Parse job_states from status.json and compute counters
-        job_states_raw = d.get("job_states", {})
-        job_states = {}
-        for job_id, state_str in job_states_raw.items():
-            if state_str.startswith("error:"):
-                reason_name = state_str[6:]
-                try:
-                    job_states[job_id] = JobStateError(JobFailureStatus[reason_name])
-                except KeyError:
-                    job_states[job_id] = JobStateError()
-            else:
-                job_states[job_id] = STATE_NAME_TO_JOBSTATE.get(
-                    state_str, JobState.UNSCHEDULED
-                )
+        job_states = cls.parse_job_states(d.get("job_states", {}))
         if job_states:
-            finished_jobs = sum(1 for s in job_states.values() if s == JobState.DONE)
-            failed_jobs = sum(1 for s in job_states.values() if s.is_error())
+            finished_jobs, failed_jobs = cls._count_job_states(job_states)
         else:
             # Backward compat: old status.json without job_states
             finished_jobs = d.get("finished_jobs", 0)
@@ -2427,6 +2436,48 @@ class MockExperiment(BaseExperiment):
 
         return exp
 
+    @staticmethod
+    def parse_job_states(raw: Dict[str, str]) -> Dict[str, JobState]:
+        """Parse the job states of a state dictionary (``job_states``)"""
+        job_states = {}
+        for job_id, state_str in raw.items():
+            if state_str.startswith("error:"):
+                reason_name = state_str[6:]
+                try:
+                    job_states[job_id] = JobStateError(JobFailureStatus[reason_name])
+                except KeyError:
+                    job_states[job_id] = JobStateError()
+            else:
+                job_states[job_id] = STATE_NAME_TO_JOBSTATE.get(
+                    state_str, JobState.UNSCHEDULED
+                )
+        return job_states
+
+    @staticmethod
+    def _count_job_states(job_states: Dict[str, JobState]) -> tuple[int, int]:
+        """The numbers of finished and failed jobs"""
+        finished = sum(1 for s in job_states.values() if s == JobState.DONE)
+        failed = sum(1 for s in job_states.values() if s.is_error())
+        return finished, failed
+
+    def set_job_states(self, job_states: Dict[str, JobState]) -> None:
+        """Replace the tracked job states (and the counters derived from them)"""
+        self._job_states = job_states
+        self._finished_jobs, self._failed_jobs = self._count_job_states(job_states)
+
+    def _count_new_job(self, job_id: str) -> None:
+        """Count a job that was not known yet in the total
+
+        Only needed when the total is given (``_total_jobs``, e.g. by a remote
+        server): otherwise, it is derived from the known jobs.
+        """
+        if (
+            self._total_jobs > 0
+            and job_id not in self._job_states
+            and job_id not in self._job_infos
+        ):
+            self._total_jobs += 1
+
     def _update_job_state(
         self, job_id: str, job_state: JobState, merge_mode: bool
     ) -> None:
@@ -2434,6 +2485,8 @@ class MockExperiment(BaseExperiment):
         if merge_mode and job_id in self._job_states:
             return
 
+        if not merge_mode:
+            self._count_new_job(job_id)
         previous_state = self._job_states.get(job_id)
         self._job_states[job_id] = job_state
 
@@ -2480,6 +2533,8 @@ class MockExperiment(BaseExperiment):
             if merge_mode and event.job_id in self._job_infos:
                 return  # Already exists, skip
 
+            if not merge_mode:
+                self._count_new_job(event.job_id)
             self._job_infos[event.job_id] = ExperimentJobInformation(
                 job_id=event.job_id,
                 task_id=event.task_id,

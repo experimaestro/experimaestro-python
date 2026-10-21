@@ -63,6 +63,47 @@ def test_filter_jobs():
     assert event_filter.accepts(job_state("j3"))
 
 
+def test_filter_job_counts():
+    """With job_counts, the scheduler events of the other experiments are
+    sent when they change the job counts, but not the job events after them"""
+
+    def scheduler_state(experiment_id, job_id, state, **kwargs):
+        return ExperimentJobStateEvent(
+            experiment_id=experiment_id,
+            run_id="run",
+            job_id=job_id,
+            scheduler_state=state,
+            **kwargs,
+        )
+
+    event_filter = EventFilter(job_counts=True)
+    event_filter.watch({"a"})
+    assert event_filter.accepts(scheduler_state("b", "j1", "submitted"))
+    assert not event_filter.accepts(scheduler_state("b", "j1", "waiting"))
+    assert not event_filter.accepts(scheduler_state("b", "j1", "running"))
+    assert not event_filter.accepts(job_state("j1"))
+    assert event_filter.accepts(scheduler_state("b", "j1", "done"))
+    assert not event_filter.accepts(scheduler_state("b", "j1", "done"))
+    assert event_filter.accepts(
+        scheduler_state("b", "j2", "error", failure_reason="FAILED")
+    )
+    assert event_filter.accepts(scheduler_state("b", "j2", "waiting"))
+    assert event_filter.accepts(JobSubmittedEvent(experiment_id="b", job_id="j3"))
+    assert not event_filter.accepts(job_state("j3"))
+
+    # The states seen while an experiment is watched are tracked
+    event_filter.watch({"a", "b"})
+    assert event_filter.accepts(scheduler_state("b", "j1", "running"))
+    event_filter.watch({"a"})
+    assert event_filter.accepts(scheduler_state("b", "j1", "done"))
+
+    # Without job_counts, none of them
+    event_filter = EventFilter()
+    event_filter.watch({"a"})
+    assert not event_filter.accepts(scheduler_state("b", "j1", "submitted"))
+    assert not event_filter.accepts(scheduler_state("b", "j1", "done"))
+
+
 def test_filter_experiment_events():
     """Experiment-level events are always sent, actions of watched experiments"""
     event_filter = EventFilter()
@@ -112,6 +153,20 @@ def test_server_sends_watched_events(provider, tmp_path):
     server._on_state_event(ExperimentUpdatedEvent(experiment_id="sweep"))
     server._on_state_event(job_state(LEARN_DONE))  # baseline
     assert notified(stdout) == ["ExperimentUpdatedEvent", "JobStateChangedEvent"]
+
+    # The job counts of the other experiments are kept up to date
+    stdout.seek(0)
+    stdout.truncate()
+    for state in ("running", "done"):
+        server._on_state_event(
+            ExperimentJobStateEvent(
+                experiment_id="sweep",
+                run_id="run",
+                job_id=LEARN_RUNNING,
+                scheduler_state=state,
+            )
+        )
+    assert notified(stdout) == ["ExperimentJobStateEvent"] * 2
 
 
 # --- Web server

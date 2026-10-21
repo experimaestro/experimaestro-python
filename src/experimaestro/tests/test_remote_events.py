@@ -175,3 +175,95 @@ def test_coalesce_per_entity():
         15,
         16,
     ]
+
+
+# --- Job counts of the experiment list
+
+
+@pytest.fixture
+def server_experiments(client, tmp_path):
+    """The client reads one running experiment from the (fake) server"""
+    client.local_cache_dir = tmp_path
+    calls = []
+
+    def call_sync(method, params, timeout=None):
+        calls.append(method)
+        return [
+            {
+                "experiment_id": "exp",
+                "run_id": "run",
+                "status": "running",
+                "job_states": {"j1": "running", "j2": "done", "j3": "error"},
+                "total_jobs": 3,
+                "finished_jobs": 1,
+                "failed_jobs": 1,
+            }
+        ]
+
+    client._call_sync = call_sync
+    return calls
+
+
+def counts(client) -> tuple[int, int, int]:
+    (exp,) = client.get_experiments()
+    return exp.total_jobs, exp.finished_jobs, exp.failed_jobs
+
+
+def test_job_events_update_the_experiment_counts(client, server_experiments):
+    """The job counts of the cached experiments follow the scheduler events,
+    without reading the experiments again"""
+    assert counts(client) == (3, 1, 1)
+
+    notify(client, job_state("j1", "done"))
+    assert counts(client) == (3, 2, 1)
+
+    # A job is submitted, and fails
+    notify(client, job_state("j4", "submitted"))
+    assert counts(client) == (4, 2, 1)
+    notify(client, job_state("j4", "error", failure_reason="FAILED"))
+    assert counts(client) == (4, 2, 2)
+
+    # A failed job is restarted
+    notify(client, job_state("j3", "waiting"))
+    assert counts(client) == (4, 2, 1)
+
+    # Events of another run are ignored
+    notify(
+        client,
+        ExperimentJobStateEvent(
+            experiment_id="exp", run_id="other", job_id="j5", scheduler_state="done"
+        ),
+    )
+    assert counts(client) == (4, 2, 1)
+
+    assert len(server_experiments) == 1
+
+
+def test_read_experiment_updates_job_states(client, server_experiments):
+    """Reading an experiment again updates the job states the events are
+    applied to (an event already counted is not counted twice)"""
+    assert counts(client) == (3, 1, 1)
+    notify(client, job_state("j1", "done"))
+    assert counts(client) == (3, 2, 1)
+
+    # The server state is read again... before the event telling j1 is done
+    client.get_experiments(refresh=True)
+    assert counts(client) == (3, 1, 1)
+    server_experiments.clear()
+
+    def call_sync(method, params, timeout=None):
+        return [
+            {
+                "experiment_id": "exp",
+                "run_id": "run",
+                "status": "running",
+                "job_states": {"j1": "done", "j2": "done", "j3": "error"},
+                "total_jobs": 3,
+            }
+        ]
+
+    client._call_sync = call_sync
+    client.get_experiments(refresh=True)
+    assert counts(client) == (3, 2, 1)
+    notify(client, job_state("j1", "done"))
+    assert counts(client) == (3, 2, 1)

@@ -642,6 +642,54 @@ class TestEventWatcher:
         finally:
             provider.close()
 
+    def test_job_counts_follow_scheduler_events(self, mock_workspace):
+        """The job counts of the experiment list follow the scheduler events,
+        also when status.json has no job states (older experiments)"""
+        provider = WorkspaceStateProvider(mock_workspace)
+
+        def counts():
+            (exp,) = [
+                e
+                for e in provider.get_experiments()
+                if e.experiment_id == "v2-multi-run"
+            ]
+            return exp.total_jobs, exp.finished_jobs, exp.failed_jobs
+
+        def event(job_id, state):
+            return {
+                "event_type": "ExperimentJobStateEvent",
+                "experiment_id": "v2-multi-run",
+                "run_id": "20260101_120000",
+                "job_id": job_id,
+                "task_id": "pkg.NewTask",
+                "scheduler_state": state,
+            }
+
+        def wait_for(expected):
+            deadline = time.monotonic() + 5
+            while counts() != expected and time.monotonic() < deadline:
+                time.sleep(0.1)
+            assert counts() == expected
+
+        try:
+            assert counts() == (3, 1, 0)
+            exp_dir = mock_workspace / ".events" / "experiments"
+            exp_dir.mkdir(parents=True, exist_ok=True)
+            events_file = exp_dir / "v2-multi-run-0.jsonl"
+            with events_file.open("w") as f:
+                for job_id, state in (
+                    ("new-job-1", "done"),
+                    ("new-job-4", "submitted"),
+                ):
+                    f.write(json.dumps(event(job_id, state)) + "\n")
+            wait_for((4, 2, 0))
+
+            with events_file.open("a") as f:
+                f.write(json.dumps(event("new-job-2", "error")) + "\n")
+            wait_for((4, 2, 1))
+        finally:
+            provider.close()
+
     def test_event_file_ordering_enforced(self, mock_workspace):
         """Events from events-2.jsonl must not be processed before events-1.jsonl
 

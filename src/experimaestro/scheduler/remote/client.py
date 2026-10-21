@@ -1674,11 +1674,16 @@ class SSHStateProviderClient(OfflineStateProvider):
             except ValueError:
                 pass
 
-        # Update counts
-        if "finished_jobs" in d:
-            exp._finished_jobs = d["finished_jobs"]
-        if "failed_jobs" in d:
-            exp._failed_jobs = d["failed_jobs"]
+        # Update the job states and counts: the job events received next are
+        # applied to them (see OfflineStateProvider.apply_event), so the
+        # states must match the counts
+        if job_states := MockExperiment.parse_job_states(d.get("job_states", {})):
+            exp.set_job_states(job_states)
+        else:
+            if "finished_jobs" in d:
+                exp._finished_jobs = d["finished_jobs"]
+            if "failed_jobs" in d:
+                exp._failed_jobs = d["failed_jobs"]
         if "runs_count" in d:
             exp._runs_count = d["runs_count"]
         if "total_jobs" in d:

@@ -76,8 +76,9 @@ class SSHStateProviderServer:
         self._state_provider: Optional[WorkspaceStateProvider] = None
         self._running = False
         self._write_lock = threading.Lock()
-        #: Events the client watches (all of them until it says otherwise)
-        self._event_filter = EventFilter()
+        #: Events the client watches (all of them until it says otherwise);
+        #: the client keeps the job counts of all the experiments up to date
+        self._event_filter = EventFilter(job_counts=True)
 
         # Map of method names to handler functions
         self._handlers: Dict[str, Callable] = {
@@ -300,7 +301,10 @@ class SSHStateProviderServer:
         can be derived from them) is sent instead.
         """
         data = exp.state_dict()
+        # The counts, for the experiments without job states (older ones)
         data["total_jobs"] = exp.total_jobs
+        data["finished_jobs"] = exp.finished_jobs
+        data["failed_jobs"] = exp.failed_jobs
         # Include job_infos (stored in jobs.jsonl, not in state_dict)
         if job_infos and hasattr(exp, "job_infos"):
             data["job_infos"] = {
