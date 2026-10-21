@@ -30,6 +30,16 @@ Usage::
     uv run python scripts/make-app-icon.py --drop label --drop maestro
     uv run python scripts/make-app-icon.py src.svg out.svg --no-crop --show
 
+Groups can also be *kept* instead of dropped, and the result painted in a
+single colour — e.g. the browser-tab icon: the hand alone, framed in a square
+(``--square``/``--zoom``) so that it is large enough at 16 pixels, in white on
+a rounded square of the logo colour (``--background``) so that it reads on
+light and dark backgrounds::
+
+    uv run python scripts/make-app-icon.py --keep hand --color '#ffffff' \\
+        --square bottom-left --zoom 1.1 --background '#026678' \\
+        docs/source/img/icon.svg app/public/tab-icon.svg
+
 With ``--adaptive`` it instead emits a single self-contained SVG (default
 ``docs/source/img/icon-adaptive.svg``) that keeps the full artwork and its
 original light colours, plus a ``prefers-color-scheme: dark`` ``<style>`` block
@@ -139,6 +149,23 @@ class DarkRecolour:
         return ";".join(parts)
 
 
+class Monochrome:
+    """Paint every colour with a single one (same interface as DarkRecolour)"""
+
+    def __init__(self, colour: str) -> None:
+        self.colour = colour
+        self.mapping: dict[str, str] = {}
+
+    def __call__(self, value: str | None) -> str | None:
+        if value is None or _parse_rgb(value) is None:  # none, url(#…)...
+            return value
+        self.mapping[value.strip().lower()] = self.colour
+        return self.colour
+
+    def style(self, style: str) -> str:
+        return DarkRecolour.style(self, style)  # type: ignore[arg-type]
+
+
 def normalize_style_colors(root: ET.Element) -> None:
     """Move fill and stroke from style attributes to presentation attributes."""
     for element in root.iter():
@@ -167,9 +194,14 @@ def normalize_style_colors(root: ET.Element) -> None:
 
 
 def transform(
-    tree: ET.ElementTree, *, drop: set[str], recolour: DarkRecolour | None
+    tree: ET.ElementTree,
+    *,
+    drop: set[str],
+    recolour: DarkRecolour | Monochrome | None,
+    keep: set[str] | None = None,
+    outline: tuple[str, float] | None = None,
 ) -> None:
-    """Apply the drop + recolour steps to ``tree`` in place."""
+    """Apply the keep/drop + recolour (+ outline) steps to ``tree`` in place."""
     root = tree.getroot()
     normalize_style_colors(root)
     parents = {child: parent for parent in root.iter() for child in parent}
@@ -180,10 +212,37 @@ def transform(
         node for defs in root.iter(f"{{{SVG_NS}}}defs") for node in defs.iter()
     }
 
-    # 1. Drop unwanted labelled groups (and everything they contain).
+    # 1. Drop unwanted labelled groups (and everything they contain)...
     for element in list(root.iter()):
         if element.get(f"{{{INK_NS}}}label") in drop:
             parents[element].remove(element)
+
+    # ... or keep only the labelled ones (with their ancestors and contents)
+    if keep:
+        kept = [e for e in root.iter() if e.get(f"{{{INK_NS}}}label") in keep]
+        if missing := keep - {e.get(f"{{{INK_NS}}}label") for e in kept}:
+            raise ValueError(f"no element labelled {sorted(missing)}")
+        needed = {node for element in kept for node in element.iter()}
+        for element in kept:
+            while element in parents:
+                element = parents[element]
+                needed.add(element)
+        for element in list(root.iter()):
+            if element not in needed and element not in protected:
+                if element in list(parents[element]):
+                    parents[element].remove(element)
+
+    # Outline under every painted shape (paint-order: the fill stays on top)
+    if outline is not None:
+        colour, width = outline
+        for element in root.iter():
+            fill = element.get("fill")
+            if element in protected or fill is None or fill == "none":
+                continue
+            element.set("stroke", colour)
+            element.set("stroke-width", str(width))
+            element.set("stroke-linejoin", "round")
+            element.set("paint-order", "stroke")
 
     # 2. Recolour every remaining painted colour for a dark background.
     if recolour is None:  # keep the original (light-background) colours
@@ -192,6 +251,8 @@ def transform(
         if element in protected:
             continue
         for prop in _PAINT:
+            if outline is not None and prop == "stroke":
+                continue  # the outline has its own colour
             if (value := element.get(prop)) is not None:
                 element.set(prop, recolour(value))
         if style := element.get("style"):
@@ -212,6 +273,44 @@ def crop_and_clean(src: Path, dst: Path) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def square_viewbox(
+    path: Path, anchor: str, zoom: float, background: str | None = None
+) -> None:
+    """Make the canvas a square (side: the smallest dimension divided by
+    ``zoom``) placed at ``anchor`` (e.g. ``bottom-left``); what lies outside is
+    cut off — used to frame part of the drawing, such as the hand"""
+    ET.register_namespace("", SVG_NS)
+    tree = ET.parse(path)
+    root = tree.getroot()
+    x, y, width, height = (float(v) for v in root.get("viewBox", "").split())
+    side = min(width, height) / zoom
+    vertical, _, horizontal = anchor.partition("-")
+    left = {"left": x, "center": x + (width - side) / 2, "right": x + width - side}
+    top = {"top": y, "center": y + (height - side) / 2, "bottom": y + height - side}
+    x0, y0 = left[horizontal or "center"], top[vertical]
+    if background is not None:
+        # A margin around the drawing, on a rounded square
+        margin = side * 0.12
+        x0, y0, side = x0 - margin, y0 - margin, side + 2 * margin
+        rect = ET.Element(
+            f"{{{SVG_NS}}}rect",
+            {
+                "x": str(x0),
+                "y": str(y0),
+                "width": str(side),
+                "height": str(side),
+                "rx": str(side * 0.22),
+                "fill": background,
+            },
+        )
+        defs = root.find(f"{{{SVG_NS}}}defs")
+        root.insert(0 if defs is None else list(root).index(defs) + 1, rect)
+    root.set("viewBox", f"{x0} {y0} {side} {side}")
+    for attribute in ("width", "height"):
+        root.set(attribute, "64")
+    tree.write(path, xml_declaration=True, encoding="UTF-8")
 
 
 def collect_paint(
@@ -343,6 +442,51 @@ def main() -> int:
         "default: 'label', or nothing with --adaptive)",
     )
     parser.add_argument(
+        "--keep",
+        action="append",
+        metavar="LABEL",
+        help="inkscape:label of an element to keep, removing everything else "
+        "(repeatable)",
+    )
+    parser.add_argument(
+        "--color",
+        "--colour",
+        dest="colour",
+        help="paint everything with this single colour (instead of recolouring "
+        "for a dark background)",
+    )
+    parser.add_argument(
+        "--outline",
+        metavar="COLOUR",
+        help="outline the shapes with this colour (under the fill)",
+    )
+    parser.add_argument(
+        "--outline-width",
+        type=float,
+        default=24.0,
+        help="outline width in SVG units of the source (default 24)",
+    )
+    parser.add_argument(
+        "--square",
+        metavar="ANCHOR",
+        choices=[
+            f"{v}-{h}" for v in ("top", "center", "bottom") for h in ("left", "right")
+        ]
+        + ["center"],
+        help="after cropping, frame a square at this anchor (e.g. bottom-left)",
+    )
+    parser.add_argument(
+        "--zoom",
+        type=float,
+        default=1.0,
+        help="with --square, zoom factor (>1 frames a smaller square)",
+    )
+    parser.add_argument(
+        "--background",
+        metavar="COLOUR",
+        help="with --square, draw on a rounded square of this colour",
+    )
+    parser.add_argument(
         "--saturation",
         type=float,
         default=1.0,
@@ -405,14 +549,23 @@ def main() -> int:
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    recolour = (
-        DarkRecolour(saturation=args.saturation, min_lightness=args.min_lightness)
-        if args.recolour
-        else None
-    )
+    if args.colour:
+        recolour = Monochrome(args.colour)
+    elif args.recolour:
+        recolour = DarkRecolour(
+            saturation=args.saturation, min_lightness=args.min_lightness
+        )
+    else:
+        recolour = None
 
     tree = ET.parse(args.src)
-    transform(tree, drop=drop, recolour=recolour)
+    transform(
+        tree,
+        drop=drop,
+        recolour=recolour,
+        keep=set(args.keep) if args.keep else None,
+        outline=(args.outline, args.outline_width) if args.outline else None,
+    )
 
     success = False
     if args.crop:
@@ -431,9 +584,13 @@ def main() -> int:
 
     if not success:
         tree.write(dst, xml_declaration=True, encoding="UTF-8")
+    if args.square:
+        square_viewbox(dst, args.square, args.zoom, args.background)
 
     if recolour is None:
         print(f"Wrote {dst} (dropped {sorted(drop)}, original colours kept)")
+    elif isinstance(recolour, Monochrome):
+        print(f"Wrote {dst} (painted in {recolour.colour})")
     else:
         print(
             f"Wrote {dst} (dropped {sorted(drop)}, "
