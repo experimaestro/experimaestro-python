@@ -97,7 +97,11 @@ def test_ssh_local_service_multiple_get_url_does_not_duplicate_synchronizers():
 
 
 def test_ssh_local_service_starting_state():
-    """Verify that SSHLocalService.state reports STARTING during get_url() execution"""
+    """SSHLocalService reports STARTING while the inner service starts
+
+    The files are synchronized in the background: the service does not wait
+    for the sync, and is RUNNING as soon as the inner service is.
+    """
     import threading
     from pathlib import Path
     from unittest.mock import MagicMock
@@ -115,13 +119,18 @@ def test_ssh_local_service_starting_state():
 
     def slow_sync(remote_path, include=None):
         sync_started.set()
-        finish_sync.wait(timeout=2.0)
+        finish_sync.wait(timeout=5.0)
         return Path("/tmp/local")
 
     mock_state_provider = MagicMock()
     mock_state_provider.sync_path.side_effect = slow_sync
 
+    inner_starting = threading.Event()
+    finish_inner = threading.Event()
+
     def fake_inner_get_url():
+        inner_starting.set()
+        assert finish_inner.wait(timeout=5.0)
         mock_inner.state = ServiceState.RUNNING
         mock_inner.url = "http://localhost:6006"
         return mock_inner.url
@@ -136,17 +145,24 @@ def test_ssh_local_service_starting_state():
 
     t = threading.Thread(target=ssh_service.get_url)
     t.start()
+    try:
+        # While the inner service is starting, the state must be STARTING
+        assert inner_starting.wait(timeout=5.0)
+        assert ssh_service.state == ServiceState.STARTING
 
-    sync_started.wait(timeout=2.0)
-    # While sync is executing, ssh_service.state must be STARTING
-    assert ssh_service.state == ServiceState.STARTING
+        finish_inner.set()
+        t.join(timeout=5.0)
+        assert not t.is_alive()
 
-    finish_sync.set()
-    t.join(timeout=2.0)
-
-    # After completion, state should be RUNNING
-    assert ssh_service.state == ServiceState.RUNNING
-    ssh_service.stop()
+        # The service is running even though the first sync is not over
+        assert sync_started.wait(timeout=5.0)
+        assert ssh_service.state == ServiceState.RUNNING
+        assert ssh_service.sync_status == "⟳ Syncing"
+    finally:
+        finish_inner.set()
+        finish_sync.set()
+        t.join(timeout=5.0)
+        ssh_service.stop()
 
 
 def test_services_list_double_start_guard():
