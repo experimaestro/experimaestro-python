@@ -468,6 +468,12 @@ class TuiDriver:
     ) -> set[frozenset[str]]:
         raise NotImplementedError("the TUI has no dependency graph view")
 
+    async def filter_completions(self, query: str) -> list[str]:
+        raise NotImplementedError("the TUI search bar has no completion")
+
+    async def accept_filter_completion(self, query: str, label: str) -> str:
+        raise NotImplementedError("the TUI search bar has no completion")
+
     async def services(self, experiment_id: str) -> dict[str, str]:
         await self.open_experiment(experiment_id)
         self.app.query_one("#experiment-tabs", TabbedContent).active = "services-tab"

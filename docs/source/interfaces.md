@@ -56,7 +56,12 @@ Then open `http://localhost:12345` in your browser.
   sort reverses it; `g` cycles the grouping of the experiments
 - **Job Filter**: The same [filter expressions](#job-filter-expressions) as the
   TUI search bar, evaluated by the server so that both interfaces select the
-  same jobs; invalid expressions are reported below the input
+  same jobs; invalid expressions are reported below the input. Suggestions
+  appear while typing (or with `Ctrl+Space` / `↓`): the fields (`@state`,
+  `@name` and the tag keys), the operators, then the values of the field —
+  job states, task identifiers or tag values of the displayed jobs — and
+  `and`/`or`; `↑`/`↓` select one, `Tab` or `Enter` accepts it, `Esc` closes
+  the list (a second `Esc` clears the filter)
 - **Grouped View**: *Group by* status, task or tag value, with collapsible
   groups showing job counts (and a status breakdown); the flat list is the
   default

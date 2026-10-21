@@ -18,6 +18,23 @@ export type JobsFilterResult = {
   error: string | null;
 };
 
+// A completion of the filter expression (see complete_filter in cli/filter.py)
+export type FilterSuggestion = {
+  label: string;
+  // Replaces the text between start and end of the query
+  text: string;
+  kind: "field" | "operator" | "value" | "keyword";
+  detail: string;
+};
+
+// Answer to a "jobs.complete" request
+export type JobsCompleteResult = {
+  requestId: number;
+  start: number;
+  end: number;
+  items: FilterSuggestion[];
+};
+
 // Answer to an "experiment.graph" request (see experimaestro.ui.graph)
 export type ExperimentGraphResult = {
   requestId: number;
@@ -38,6 +55,8 @@ class Client {
   onActionResult: ((payload: any) => void) | null = null;
   // Callback for server-side job filter results (set by the Tasks view)
   onJobsFilter: ((payload: JobsFilterResult) => void) | null = null;
+  // Callback for the completions of the filter (set by the filter input)
+  onJobsComplete: ((payload: JobsCompleteResult) => void) | null = null;
   // Callback for experiment graph results (set by the graph view)
   onExperimentGraph: ((payload: ExperimentGraphResult) => void) | null = null;
 
@@ -187,6 +206,9 @@ class Client {
         case "jobs.filter":
           if (this.onJobsFilter) this.onJobsFilter(payload);
           break;
+        case "jobs.complete":
+          if (this.onJobsComplete) this.onJobsComplete(payload);
+          break;
         case "experiment.graph":
           if (this.onExperimentGraph) this.onExperimentGraph(payload);
           break;
@@ -257,6 +279,22 @@ class Client {
   ): void {
     this.send("jobs.filter", {
       query,
+      requestId,
+      experimentId: experimentId || undefined,
+      runId: runId || undefined,
+    });
+  }
+
+  jobs_complete(
+    query: string,
+    cursor: number,
+    requestId: number,
+    experimentId?: string | null,
+    runId?: string | null,
+  ): void {
+    this.send("jobs.complete", {
+      query,
+      cursor,
       requestId,
       experimentId: experimentId || undefined,
       runId: runId || undefined,

@@ -5,7 +5,13 @@ from pathlib import Path
 import pyparsing as pp
 import pytest
 
-from experimaestro.cli.filter import FilterContext, createFilter, filter_jobs
+from experimaestro.cli.filter import (
+    FilterContext,
+    FilterVocabulary,
+    complete_filter,
+    createFilter,
+    filter_jobs,
+)
 from experimaestro.scheduler.state_provider import MockJob
 
 
@@ -72,3 +78,129 @@ def test_filter_context_is_read_at_evaluation_time():
 def test_invalid_query_raises():
     with pytest.raises(pp.ParseException):
         filter_jobs("@state = ", JOBS, TAGS)
+
+
+# --- Completion
+
+
+def _vocabulary() -> FilterVocabulary:
+    vocabulary = FilterVocabulary()
+    vocabulary.add_jobs(JOBS, TAGS)
+    return vocabulary
+
+
+def _labels(query: str, cursor: int | None = None) -> list[str]:
+    return [item.label for item in complete_filter(query, cursor, _vocabulary()).items]
+
+
+def _accept(query: str, label: str, cursor: int | None = None) -> str:
+    """The query once a suggestion is accepted"""
+    completion = complete_filter(query, cursor, _vocabulary())
+    (item,) = [item for item in completion.items if item.label == label]
+    return query[: completion.start] + item.text + query[completion.end :]
+
+
+def test_vocabulary_from_jobs():
+    vocabulary = _vocabulary()
+    assert vocabulary.names == {"pkg.Learn", "pkg.Evaluate"}
+    assert vocabulary.tags == {"model": {"bm25", "splade"}, "lr": {"0.1"}}
+    assert "done" in vocabulary.states and "error" in vocabulary.states
+
+
+def test_complete_fields():
+    # Special fields first, then the tag keys
+    assert _labels("") == ["@state", "@name", "lr", "model"]
+    assert _labels("@st") == ["@state"]
+    assert _labels("mo") == ["model"]
+    assert _accept("mo", "model") == "model "
+    # In the middle of a query, the whole word is replaced
+    assert _accept("@st = 'done'", "@state", cursor=2) == "@state  = 'done'"
+
+
+def test_complete_operators():
+    assert _labels("model ") == ["=", "~", "in", "not in"]
+    assert _labels("model n") == ["not in"]
+    assert _accept("model n", "not in") == "model not in ["
+    assert _labels("model not ") == ["in"]
+    # Unknown special fields are not completed
+    assert _labels("@unknown ") == []
+
+
+def test_complete_values():
+    assert _labels("@state = ") == [
+        "'unscheduled'",
+        "'waiting'",
+        "'ready'",
+        "'scheduled'",
+        "'running'",
+        "'done'",
+        "'error'",
+    ]
+    assert _labels("@state = 'ru") == ["'running'"]
+    assert _labels("model = ") == ["'bm25'", "'splade'"]
+    assert _accept("model = 'sp", "'splade'") == "model = 'splade' "
+    # The quote typed by the user is kept, an unquoted word gets quotes
+    assert _labels('model = "b') == ['"bm25"']
+    assert _accept("model = bm", "'bm25'") == "model = 'bm25' "
+    # Values of an unknown tag
+    assert _labels("other = ") == []
+
+
+def test_complete_values_substring():
+    assert _labels("@name = 'Eval") == ["'pkg.Evaluate'"]
+    # Not from a single character, which would match too many values
+    assert _labels("@state = 'u") == ["'unscheduled'"]
+
+
+def test_complete_regex_escapes_values():
+    assert _labels("@name ~ 'pkg") == ["'pkg\\.Evaluate'", "'pkg\\.Learn'"]
+
+
+def test_complete_in_list():
+    assert _labels("model in ") == ["["]
+    assert _labels("model in [") == ["'bm25'", "'splade'"]
+    assert _accept("model in [", "'bm25'") == "model in ['bm25'"
+    assert _labels("model in ['bm25'") == [",", "]"]
+    assert _labels("model in ['bm25', ") == ["'bm25'", "'splade'"]
+
+
+def test_complete_boolean_operators():
+    assert _labels("model = 'bm25' ") == ["and", "or"]
+    assert _labels("model = 'bm25' o") == ["or"]
+    assert _accept("model = 'bm25' a", "and") == "model = 'bm25' and "
+    # A space is added when needed
+    assert _accept("model='bm25'", "and") == "model='bm25' and "
+    assert _labels("model = 'bm25' and ") == ["@state", "@name", "lr", "model"]
+
+
+def test_complete_replaces_up_to_the_closing_quote():
+    query = "@state = 'do' and model = 'bm25'"
+    assert _accept(query, "'done'", cursor=11) == (
+        "@state = 'done'  and model = 'bm25'"
+    )
+
+
+def test_complete_invalid_prefix():
+    assert _labels("model = = ") == []
+    assert _labels("(") == []
+
+
+def test_completions_build_valid_queries():
+    """Accepting suggestions builds expressions the filter accepts"""
+    steps = [
+        ("model", "model "),
+        ("in", "model in ["),
+        ("'splade'", "model in ['splade'"),
+        (",", "model in ['splade', "),
+        ("'bm25'", "model in ['splade', 'bm25'"),
+        ("]", "model in ['splade', 'bm25'] "),
+        ("and", "model in ['splade', 'bm25'] and "),
+        ("@state", "model in ['splade', 'bm25'] and @state "),
+        ("=", "model in ['splade', 'bm25'] and @state = "),
+        ("'done'", "model in ['splade', 'bm25'] and @state = 'done' "),
+    ]
+    query = ""
+    for label, expected in steps:
+        query = _accept(query, label)
+        assert query == expected
+    assert _ids(query) == ["j1"]

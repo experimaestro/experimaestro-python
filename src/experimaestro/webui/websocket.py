@@ -346,6 +346,10 @@ class WebSocketHandler:
             {"type": "job.kill", "payload": {"jobId": "...", "experimentId": "..."}}
             {"type": "jobs.filter", "payload": {"query": "...", "experimentId": "...",
                                                "runId": "...", "requestId": 1}}
+            {"type": "jobs.complete", "payload": {"query": "...", "cursor": 3,
+                                                 "experimentId": "...", "runId": "...",
+                                                 "requestId": 1}}
+                (completions of the filter expression at the cursor)
             {"type": "experiment.kill", "payload": {"experimentId": "..."}}
             {"type": "experiment.delete", "payload": {"experimentId": "..."}}
             {"type": "orphans.kill"}  (all stray jobs)
@@ -361,6 +365,10 @@ class WebSocketHandler:
             {"type": "service.update", "payload": {...}}
             {"type": "jobs.filter", "payload": {"requestId": 1, "query": "...",
                                                "jobIds": [...], "error": null}}
+            {"type": "jobs.complete", "payload": {"requestId": 1, "start": 0, "end": 3,
+                                                 "items": [{"label": "...",
+                                                 "text": "...", "kind": "...",
+                                                 "detail": "..."}]}}
             {"type": "experiment.removed", "payload": {"experimentId": "..."}}
             {"type": "notify", "payload": {"severity": "...", "message": "..."}}
             {"type": "error", "payload": {"message": "..."}}
@@ -452,6 +460,7 @@ class WebSocketHandler:
             "job.kill": self._handle_job_kill,
             "job.delete": self._handle_job_delete,
             "jobs.filter": self._handle_jobs_filter,
+            "jobs.complete": self._handle_jobs_complete,
             "experiment.graph": self._handle_experiment_graph,
             "experiment.kill": self._handle_experiment_kill,
             "experiment.delete": self._handle_experiment_delete,
@@ -765,6 +774,17 @@ class WebSocketHandler:
         if outcome.ok:
             await self.broadcast("job.removed", {"jobId": job.identifier})
 
+    def _filter_scopes(
+        self, experiment_id: Optional[str], run_id: Optional[str]
+    ) -> List[tuple[str, Optional[str]]]:
+        """(experiment, run) pairs a filter applies to: the displayed run, or
+        the current run of every experiment"""
+        if experiment_id:
+            return [(experiment_id, run_id)]
+        return [
+            (exp.experiment_id, None) for exp in self.state_provider.get_experiments()
+        ]
+
     def _filter_job_ids(
         self, query: str, experiment_id: Optional[str], run_id: Optional[str]
     ) -> List[str]:
@@ -783,17 +803,9 @@ class WebSocketHandler:
         ctx = FilterContext()
         filter_fn = createFilter(query, ctx)
 
-        if experiment_id:
-            scopes = [(experiment_id, run_id)]
-        else:
-            scopes = [
-                (exp.experiment_id, None)
-                for exp in self.state_provider.get_experiments()
-            ]
-
         matched: List[str] = []
         seen: Set[str] = set()
-        for exp_id, scope_run_id in scopes:
+        for exp_id, scope_run_id in self._filter_scopes(experiment_id, run_id):
             ctx.tags_map = self.state_provider.get_tags_map(exp_id, scope_run_id) or {}
             for job in self.state_provider.get_jobs(exp_id, run_id=scope_run_id):
                 if job.identifier not in seen and filter_fn(job):
@@ -823,6 +835,53 @@ class WebSocketHandler:
             except Exception as e:
                 response["error"] = f"Invalid query: {e}"
         await websocket.send_json({"type": "jobs.filter", "payload": response})
+
+    def _complete_filter(
+        self,
+        query: str,
+        cursor: Optional[int],
+        experiment_id: Optional[str],
+        run_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Completions of a filter expression, with the task identifiers and
+        tags of the displayed jobs (from the provider's query cache)"""
+        from experimaestro.cli.filter import FilterVocabulary, complete_filter
+
+        vocabulary = FilterVocabulary()
+        for exp_id, scope_run_id in self._filter_scopes(experiment_id, run_id):
+            vocabulary.add_jobs(
+                self.state_provider.get_jobs(exp_id, run_id=scope_run_id),
+                self.state_provider.get_tags_map(exp_id, scope_run_id) or {},
+            )
+        return complete_filter(query, cursor, vocabulary).to_dict()
+
+    async def _handle_jobs_complete(
+        self, websocket: WebSocket, payload: Dict[str, Any]
+    ):
+        """Completions of a filter expression at the cursor position"""
+        query = payload.get("query") or ""
+        cursor = payload.get("cursor")
+        response: Dict[str, Any] = {
+            "requestId": payload.get("requestId"),
+            "start": cursor or 0,
+            "end": cursor or 0,
+            "items": [],
+        }
+        loop = asyncio.get_running_loop()
+        try:
+            response.update(
+                await loop.run_in_executor(
+                    None,
+                    self._complete_filter,
+                    query,
+                    cursor if isinstance(cursor, int) else None,
+                    payload.get("experimentId"),
+                    payload.get("runId"),
+                )
+            )
+        except Exception:
+            logger.exception("Error while completing the filter %r", query)
+        await websocket.send_json({"type": "jobs.complete", "payload": response})
 
     def _experiment_graph(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Graph of an experiment run with the requested view"""

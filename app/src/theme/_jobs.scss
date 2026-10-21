@@ -414,6 +414,31 @@
   overflow-y: auto;
 }
 
+/* Completions of the job filter */
+.filter-input {
+  position: relative;
+}
+.filter-completions {
+  top: 100%;
+  left: 0;
+  min-width: 16rem;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-top: 2px;
+}
+.filter-completions .dropdown-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+.filter-completions .completion-label {
+  color: inherit;
+}
+.filter-completions .completion-detail {
+  font-size: 0.8em;
+  opacity: 0.65;
+}
+
 /* Services starting or running, shown under the navigation bar */
 .active-services {
   display: flex;
