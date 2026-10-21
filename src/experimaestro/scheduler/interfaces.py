@@ -2066,6 +2066,14 @@ class BaseService(ABC):
         """
         return self  # Default: return self (for live services)
 
+    def subservices(self) -> List["BaseService"]:
+        """Startable sub-services, addressed as ``<service id>/<sub id>``
+
+        The sub-service that is the service itself (by default, the only one)
+        keeps the bare service id.
+        """
+        return [self]
+
     @property
     def sync_status(self) -> Optional[str]:
         """Return sync status for display.

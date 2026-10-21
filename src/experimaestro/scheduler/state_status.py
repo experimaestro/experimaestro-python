@@ -409,6 +409,8 @@ class ServiceAddedEvent(ServiceEventBase):
     description: str = ""
     service_class: str = ""
     state_dict: dict[str, Any] = field(default_factory=dict)
+    # See Service.subservices_state (None: written before sub-services were stored)
+    subservices: list[dict[str, Any]] | None = None
 
 
 @dataclass

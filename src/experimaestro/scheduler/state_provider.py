@@ -2409,6 +2409,7 @@ class MockExperiment(BaseExperiment):
                 service_class=event.service_class,
                 experiment_id=self.experiment_id,
                 run_id=self.run_id,
+                subservices=event.subservices,
             )
 
         elif isinstance(event, ServiceStateChangedEvent):
@@ -2498,6 +2499,7 @@ class MockService(BaseService):
         run_id: Optional[str] = None,
         url: Optional[str] = None,
         state: Optional[str] = None,
+        subservices: Optional[list[dict]] = None,
     ):
         self.id = service_id
         self._description = description_text
@@ -2510,6 +2512,9 @@ class MockService(BaseService):
         self._url = url
         self._live_service: Optional["BaseService"] = None  # Cached live service
         self._error: Optional[str] = None  # Error message if start failed
+        # Stored sub-services (Service.subservices_state), None if unknown
+        self._subservices_data = subservices
+        self._subservices: Optional[list[BaseService]] = None
 
     @property
     def experiment_id(self) -> str:
@@ -2628,6 +2633,7 @@ class MockService(BaseService):
             if hasattr(self.state, "name")
             else str(self.state),
             "url": self.url,
+            "subservices": self._subservices_data,
         }
 
     @property
@@ -2654,7 +2660,27 @@ class MockService(BaseService):
             run_id=d.get("run_id"),
             url=d.get("url"),
             state=d.get("state"),
+            subservices=d.get("subservices"),
         )
+
+    def subservices(self) -> List["BaseService"]:
+        """Sub-services, listed from the stored data when available so that
+        listing services does not import their modules"""
+        if self._subservices is None:
+            if self._subservices_data is not None:
+                self._subservices = [
+                    self if d["service_id"] == self.id else MockSubService(self, d)
+                    for d in self._subservices_data
+                ] or [self]
+            else:
+                # Stored before sub-services were: recreate the service
+                live = self.to_service()
+                if live is self:
+                    return [self]
+                self._subservices = [
+                    self if sub is live else sub for sub in live.subservices()
+                ]
+        return self._subservices
 
     def to_service(self) -> "BaseService":
         """Try to recreate a live Service instance from this mock.
@@ -2686,6 +2712,95 @@ class MockService(BaseService):
             return self
 
 
+class MockSubService(BaseService):
+    """A sub-service of a :class:`MockService`, listed from the stored data
+
+    Delegates to the live sub-service once the parent service is recreated
+    (when this sub-service, or its parent, is started).
+    """
+
+    def __init__(self, parent: MockService, data: dict):
+        self.parent = parent
+        self.id = data["service_id"]
+        self._description = data.get("description", "")
+        self._state_name = data.get("state") or "STOPPED"
+        self._url = data.get("url")
+        self._error: Optional[str] = None
+
+    def _live(self) -> Optional["BaseService"]:
+        if self.parent._live_service is None:
+            return None
+        return self.parent._live_service.get_subservice(self.id)
+
+    @property
+    def experiment_id(self) -> str:
+        return self.parent.experiment_id
+
+    @property
+    def run_id(self) -> str:
+        return self.parent.run_id
+
+    @property
+    def state(self):
+        if (live := self._live()) is not None:
+            return live.state
+        from experimaestro.scheduler.services import ServiceState
+
+        return ServiceState.__members__.get(self._state_name, ServiceState.STOPPED)
+
+    def description(self) -> str:
+        return self._description
+
+    @property
+    def url(self) -> Optional[str]:
+        if (live := self._live()) is not None:
+            return getattr(live, "url", None)
+        return self._url
+
+    @property
+    def log_directory(self) -> Optional[Path]:
+        return live.log_directory if (live := self._live()) is not None else None
+
+    @property
+    def stdout(self) -> Optional[Path]:
+        return live.stdout if (live := self._live()) is not None else None
+
+    @property
+    def stderr(self) -> Optional[Path]:
+        return live.stderr if (live := self._live()) is not None else None
+
+    @property
+    def sync_status(self) -> Optional[str]:
+        return live.sync_status if (live := self._live()) is not None else None
+
+    @property
+    def error(self) -> Optional[str]:
+        if (live := self._live()) is not None and live.error:
+            return live.error
+        return self._error
+
+    def set_error(self, error: Optional[str]) -> None:
+        self._error = error
+        if error:
+            self._state_name = "ERROR"
+
+    def set_starting(self) -> None:
+        self._state_name = "STARTING"
+        self._error = None
+
+    def to_service(self) -> "BaseService":
+        """The live sub-service (recreating the parent service)"""
+        live = self.parent.to_service()
+        if live is self.parent:
+            self.set_error(self.parent.error or "Service cannot be recreated")
+            return self
+        try:
+            return live.get_subservice(self.id)
+        except (AttributeError, KeyError) as e:
+            self.set_error(f"No sub-service {self.id}: {e}")
+            return self
+
+
 __all__ = [
     # Data classes
     "ProcessInfo",
@@ -2701,4 +2816,5 @@ __all__ = [
     "MockJob",
     "MockExperiment",
     "MockService",
+    "MockSubService",
 ]

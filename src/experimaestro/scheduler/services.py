@@ -165,17 +165,21 @@ class Service(BaseService):
             if hasattr(self.state, "name")
             else str(self.state),
             "url": getattr(self, "url", None),
+            "subservices": self.subservices_state(),
         }
-
-        # Composite services expose several startable sub-services. The common
-        # case (a service that is its own single sub-service) is omitted so that
-        # the payload — and clients that do not know about sub-services — are
-        # unchanged.
-        subs = self.subservices()
-        if subs != [self]:
-            data["subservices"] = [_subservice_state_dict(sub) for sub in subs]
-
         return data
+
+    def subservices_state(self) -> list[dict]:
+        """Stored view of the sub-services, so that UIs can list them without
+        recreating the service (and importing its module)
+
+        Empty when the service is its own single sub-service (the common case);
+        the sub-service that is the service itself has the service id.
+        """
+        subs = self.subservices()
+        if subs == [self]:
+            return []
+        return [_subservice_state_dict(sub) for sub in subs]
 
     @staticmethod
     def serialize_state_dict(data: dict) -> dict:

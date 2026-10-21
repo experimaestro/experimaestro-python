@@ -238,10 +238,9 @@ def _iter_service_rows(services_by_id: dict):
     sub-service yields ``<service>`` plus ``<service>/wandb``.
     """
     for sid in sorted(services_by_id):
-        live = _as_live_service(services_by_id[sid])
-        subs = live.subservices() if hasattr(live, "subservices") else [live]
-        for sub in subs:
-            addr = sid if sub is live else f"{sid}/{sub.id}"
+        service = services_by_id[sid]
+        for sub in service.subservices():
+            addr = sid if sub is service else f"{sid}/{sub.id}"
             yield (
                 addr,
                 sub.description(),

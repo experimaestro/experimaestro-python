@@ -372,6 +372,10 @@ class SSHMockService(MockService):
         self._state_provider = state_provider
         self._on_status_change: Optional[Callable[[], None]] = None
 
+    def subservices(self) -> List[BaseService]:
+        # SSHLocalService does not expose sub-services (no import to list them)
+        return [self]
+
     def set_status_change_callback(
         self, callback: Optional[Callable[[], None]]
     ) -> None:

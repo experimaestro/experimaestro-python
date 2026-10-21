@@ -112,6 +112,7 @@ class StateListener:
             description=service.description(),
             service_class=service_class,
             state_dict=state_dict,
+            subservices=service.subservices_state(),
         )
         self.event_writer.write_event(event)
 

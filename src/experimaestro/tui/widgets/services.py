@@ -18,22 +18,19 @@ def expand_services(services: list) -> dict:
 
     A service is its own sub-service by default and is kept under its bare id
     (preserving the original object — e.g. a MockService with its sync/error
-    features); any *extra* sub-services (e.g. a wandb sync) are added as live
-    ``"<service>/<sub>"`` entries. Robust to services that predate the
-    sub-service API (kept as a single entry).
+    features); any *extra* sub-services (e.g. a wandb sync) are added as
+    ``"<service>/<sub>"`` entries. Services read from disk list them from the
+    stored data, without recreating the service. Robust to services that
+    predate the sub-service API (kept as a single entry).
     """
     result: dict = {}
     for service in services:
         try:
-            live = service.to_service() if hasattr(service, "to_service") else service
-            subs = live.subservices()
+            subs = service.subservices()
         except Exception:
-            subs = None
-        if not subs:
-            result[service.id] = service
-            continue
+            subs = [service]
         for sub in subs:
-            if sub is live:
+            if sub is service:
                 result[service.id] = service
             else:
                 result[f"{service.id}/{sub.id}"] = sub
