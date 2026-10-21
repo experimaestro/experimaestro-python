@@ -5,6 +5,7 @@ import { useAppSelector } from "./store";
 import { OrphanJob } from "./reducers";
 import client from "./client";
 import { StatusBadge } from "./StatusBadge";
+import { DocLink } from "./ui/DocLink";
 
 function formatBytes(n: number): string {
   if (!n) return "0 B";
@@ -66,7 +67,10 @@ const Orphans: React.FC = () => {
         </Modal>
       )}
       <div className="d-flex align-items-center mb-2" style={{ gap: "0.5rem" }}>
-        <h5 className="mb-0">Orphan &amp; stray jobs</h5>
+        <h5 className="mb-0">
+          Orphan &amp; stray jobs
+          <DocLink page="cli.html#cleaning-up" />
+        </h5>
         <Button size="sm" variant="outline-secondary" onClick={() => client.request_orphans()}>
           <i className="fas fa-rotate-right" /> Refresh
         </Button>

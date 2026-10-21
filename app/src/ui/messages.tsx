@@ -1,10 +1,9 @@
 import React from "react";
 import { createUseStyles } from "react-jss";
-import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+import { createSlice, Dispatch, PayloadAction } from "@reduxjs/toolkit";
 import { useSelector, useDispatch } from "react-redux";
 import Toast from "react-bootstrap/Toast";
 import ToastContainer from "react-bootstrap/ToastContainer";
-import { SliceDispatchType } from "tc/store/utils";
 
 export type MessageInput = {
   severity: string;
@@ -44,7 +43,7 @@ export const messageSlice = createSlice({
   },
 });
 
-type MessageDispatchType = SliceDispatchType<typeof messageSlice>;
+type MessageDispatchType = Dispatch;
 
 export function showMessage(message: MessageInput) {
   return (dispatch: MessageDispatchType) => {

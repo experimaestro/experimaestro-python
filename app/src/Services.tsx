@@ -4,6 +4,7 @@ import { Table, Badge, Button } from "react-bootstrap";
 import { useAppSelector } from "./store";
 import client from "./client";
 import LogViewer, { LogTarget } from "./LogViewer";
+import { DocLink } from "./ui/DocLink";
 
 const STATE_COLOR: { [key: string]: string } = {
   STOPPED: "secondary",
@@ -26,7 +27,10 @@ const Services = () => {
 
   return (
     <div className="mt-3">
-      <h5 className="mb-3">Services</h5>
+      <h5 className="mb-3">
+        Services
+        <DocLink page="services.html" />
+      </h5>
       {keys.length === 0 ? (
         <p className="text-muted">No services.</p>
       ) : (

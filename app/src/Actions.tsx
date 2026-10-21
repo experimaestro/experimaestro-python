@@ -4,6 +4,7 @@ import { Table, Modal, Button, Form } from "react-bootstrap";
 import { useAppSelector } from "./store";
 import { useMessages } from "./ui/messages";
 import client from "./client";
+import { DocLink } from "./ui/DocLink";
 
 type PromptField = {
   key: string;
@@ -63,7 +64,10 @@ const Actions: React.FC = () => {
 
   return (
     <div className="mt-3">
-      <h5 className="mb-3">Actions</h5>
+      <h5 className="mb-3">
+        Actions
+        <DocLink page="experiments/actions.html" />
+      </h5>
       {actionsState.ids.length === 0 ? (
         <p className="text-muted">No actions declared by this experiment.</p>
       ) : (
