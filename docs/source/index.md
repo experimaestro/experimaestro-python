@@ -6,7 +6,7 @@
 :align: left
 ```
 
-[![GitHub Release](https://img.shields.io/github/v/release/experimaestro/experimaestro-python)](https://github.com/experimaestro/experimaestro-python)
+Documentation for version **{{ version }}** ([releases](https://github.com/experimaestro/experimaestro-python/releases))
 
 **Experimaestro** is a Python framework designed for researchers and engineers who need to manage complex, large-scale experimental workflows without losing track of reproducibility.
 

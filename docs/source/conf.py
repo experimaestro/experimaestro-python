@@ -97,7 +97,11 @@ intersphinx_mapping = {
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
+    "substitution",
 ]
+
+# {{ version }} in Markdown pages expands to the documented version
+myst_substitutions = {"version": release}
 
 # Enable heading anchors for cross-reference support
 # 4 levels: lets the walkthrough link to H4 subsections (e.g. "Launchers"

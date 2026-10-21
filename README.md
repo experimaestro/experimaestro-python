@@ -6,7 +6,7 @@
 ---
 
 [![PyPI version](https://badge.fury.io/py/experimaestro.svg)](https://badge.fury.io/py/experimaestro)
-[![RTD](https://app.readthedocs.org/projects/experimaestro-python/badge/?version=latest)](https://experimaestro-python.readthedocs.io/en/latest/)
+[![RTD](https://app.readthedocs.org/projects/experimaestro-python/badge/?version=stable)](https://experimaestro-python.readthedocs.io/en/stable/)
 </div>
 
 
@@ -27,10 +27,10 @@ Unlike traditional schedulers, Experimaestro focuses on the **experimental logic
 
 The full documentation is at [experimaestro-python.readthedocs.io](https://experimaestro-python.readthedocs.io):
 
-- [Tutorial](https://experimaestro-python.readthedocs.io/en/latest/tutorial.html) — set up your first workspace and run a basic experiment (training a CNN on MNIST).
-- [Configurations](https://experimaestro-python.readthedocs.io/en/latest/experiments/config.html) & [Tasks](https://experimaestro-python.readthedocs.io/en/latest/experiments/task.html) — define parameters, dependencies and execution logic.
-- [Launchers](https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html) & [Connectors](https://experimaestro-python.readthedocs.io/en/latest/connectors/index.html) — control where and how your code runs.
-- [How it differs](https://experimaestro-python.readthedocs.io/en/latest/index.html#difference-with-other-projects) from Slurm, OAR, Comet, Sacred and other experiment managers.
+- [Tutorial](https://experimaestro-python.readthedocs.io/en/stable/tutorial.html) — set up your first workspace and run a basic experiment (training a CNN on MNIST).
+- [Configurations](https://experimaestro-python.readthedocs.io/en/stable/experiments/config.html) & [Tasks](https://experimaestro-python.readthedocs.io/en/stable/experiments/task.html) — define parameters, dependencies and execution logic.
+- [Launchers](https://experimaestro-python.readthedocs.io/en/stable/launchers/index.html) & [Connectors](https://experimaestro-python.readthedocs.io/en/stable/connectors/index.html) — control where and how your code runs.
+- [How it differs](https://experimaestro-python.readthedocs.io/en/stable/index.html#difference-with-other-projects) from Slurm, OAR, Comet, Sacred and other experiment managers.
 
 # Screenshots
 
@@ -198,6 +198,6 @@ A number of libraries and tools are built around experimaestro:
 
 **Tools & services** — [xpm-mlboard](https://github.com/experimaestro/xpm-mlboard), lightweight services to monitor ML learning curves (TensorBoard, …).
 
-**Starting points** — [experiment-template](https://github.com/experimaestro/experiment-template) (minimal skeleton) and [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) (fuller MNIST example, also the [tutorial](https://experimaestro-python.readthedocs.io/en/latest/tutorial.html)).
+**Starting points** — [experiment-template](https://github.com/experimaestro/experiment-template) (minimal skeleton) and [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) (fuller MNIST example, also the [tutorial](https://experimaestro-python.readthedocs.io/en/stable/tutorial.html)).
 
-See the [Experimaestro projects guide](https://experimaestro-python.readthedocs.io/en/latest/experiments/projects.html) for how to structure your own project.
+See the [Experimaestro projects guide](https://experimaestro-python.readthedocs.io/en/stable/experiments/projects.html) for how to structure your own project.
