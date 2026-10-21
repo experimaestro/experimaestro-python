@@ -2,12 +2,16 @@ from dataclasses import dataclass
 from pathlib import Path
 import platform
 import sys
+from typing import TYPE_CHECKING
 
 import click
 import jinja2
 
 from experimaestro.scriptbuilder import PythonScriptBuilder
 from . import Launcher
+
+if TYPE_CHECKING:
+    from rich.console import Console
 
 
 class DirectLauncher(Launcher):
@@ -175,75 +179,32 @@ def direct_cli():
     pass
 
 
-@direct_cli.command("generate")
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output path for launchers.py (default: ~/.config/experimaestro/launchers.py)",
-)
-@click.option(
-    "--force",
-    "-f",
-    is_flag=True,
-    help="Overwrite existing file without prompting",
-)
-def generate(output: Path | None, force: bool):
-    """Generate a launchers.py file for direct (local) execution.
+def _check_output_file(
+    output: Path,
+    force: bool,
+    yes: bool,
+    non_interactive: bool,
+    console: "Console",
+) -> bool:
+    """Check if output file exists and handle overwrite confirmation."""
+    from rich.prompt import Confirm
 
-    This command detects system resources and interactively configures
-    memory-based tokens for CPU and GPU resource management.
-
-    Token system:
-      - Memory tokens: 1 token = configurable unit (default 256 MiB)
-      - Tasks request tokens based on their memory requirements
-      - Example: 1 GiB requirement = 4 tokens (with 256 MiB unit)
-
-    Apple Silicon (MPS):
-      - GPU uses unified memory (shared with CPU)
-      - GPU memory requests reduce available CPU memory tokens
-
-    Examples:
-        experimaestro launchers direct generate
-        experimaestro launchers direct generate -o ./launchers.py
-    """
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.prompt import Confirm, FloatPrompt, IntPrompt, Prompt
-    from rich.table import Table
-
-    console = Console()
-
-    # Default output path
-    if output is None:
-        output = Path("~/.config/experimaestro/launchers.py").expanduser()
-    else:
-        output = output.expanduser()
-
-    # Header
-    console.print()
-    console.print(
-        Panel.fit(
-            "[bold cyan]Direct Launcher Configuration[/bold cyan]\n\n"
-            "This wizard configures resource tokens for local task execution.\n"
-            "Tokens ensure tasks don't exceed available memory.",
-            border_style="cyan",
-        )
-    )
-
-    # Check if file exists
-    if output.exists() and not force:
+    if output.exists() and not (force or yes):
         console.print(f"\n[yellow]File already exists:[/yellow] {output}")
+        if non_interactive:
+            raise click.ClickException(
+                f"File already exists: {output}. Pass --force (-f) or --yes (-y) to overwrite."
+            )
         if not Confirm.ask("Overwrite?", default=False):
             console.print("[yellow]Aborted.[/yellow]")
-            return
+            return False
+    return True
 
-    # Detect system resources
-    console.print("\n[cyan]Detecting system resources...[/cyan]")
-    sys_info = detect_system_info()
 
-    # Display system info
+def _display_system_info(console: "Console", sys_info: SystemInfo) -> None:
+    """Display detected system resources table."""
+    from rich.table import Table
+
     table = Table(title="System Resources", border_style="blue")
     table.add_column("Resource", style="cyan")
     table.add_column("Value", style="green")
@@ -267,36 +228,61 @@ def generate(output: Path | None, force: bool):
     console.print(table)
     console.print()
 
-    # Initialize config
-    config = LauncherConfig()
-    config.is_mps = sys_info.has_mps
 
-    # === Memory tokens configuration ===
-    console.print(
-        Panel(
-            "[bold]Memory Tokens[/bold]\n\n"
-            "Memory tokens prevent over-committing system RAM.\n"
-            "Each token represents a unit of memory (default: 256 MiB).\n"
-            "Tasks request tokens based on their memory needs.\n\n"
-            "[dim]Example: 1 GiB requirement = 4 tokens (with 256 MiB unit)[/dim]",
-            border_style="blue",
+def _configure_memory_tokens(
+    console: "Console",
+    config: LauncherConfig,
+    sys_info: SystemInfo,
+    non_interactive: bool,
+    memory_tokens: bool | None,
+    reserved_memory: float | None,
+    memory_token_unit: int | None,
+) -> None:
+    """Prompt and configure memory tokens on LauncherConfig."""
+    from rich.panel import Panel
+    from rich.prompt import Confirm, FloatPrompt, IntPrompt
+
+    if not non_interactive:
+        console.print(
+            Panel(
+                "[bold]Memory Tokens[/bold]\n\n"
+                "Memory tokens prevent over-committing system RAM.\n"
+                "Each token represents a unit of memory (default: 256 MiB).\n"
+                "Tasks request tokens based on their memory needs.\n\n"
+                "[dim]Example: 1 GiB requirement = 4 tokens (with 256 MiB unit)[/dim]",
+                border_style="blue",
+            )
         )
-    )
 
-    config.use_memory_tokens = Confirm.ask("\nEnable memory tokens?", default=True)
+    if memory_tokens is not None:
+        config.use_memory_tokens = memory_tokens
+    elif non_interactive:
+        config.use_memory_tokens = True
+    else:
+        config.use_memory_tokens = Confirm.ask("\nEnable memory tokens?", default=True)
 
     if config.use_memory_tokens:
         # Reserved memory for OS
-        config.reserved_memory_gib = FloatPrompt.ask(
-            "  Reserved memory for OS (GiB)",
-            default=2.0,
-        )
+        if reserved_memory is not None:
+            config.reserved_memory_gib = reserved_memory
+        elif non_interactive:
+            config.reserved_memory_gib = 2.0
+        else:
+            config.reserved_memory_gib = FloatPrompt.ask(
+                "  Reserved memory for OS (GiB)",
+                default=2.0,
+            )
 
         # Token unit size
-        config.memory_token_unit_mib = IntPrompt.ask(
-            "  Token unit size (MiB)",
-            default=DEFAULT_TOKEN_UNIT_MIB,
-        )
+        if memory_token_unit is not None:
+            config.memory_token_unit_mib = memory_token_unit
+        elif non_interactive:
+            config.memory_token_unit_mib = DEFAULT_TOKEN_UNIT_MIB
+        else:
+            config.memory_token_unit_mib = IntPrompt.ask(
+                "  Token unit size (MiB)",
+                default=DEFAULT_TOKEN_UNIT_MIB,
+            )
 
         # Calculate available tokens
         available_bytes = sys_info.total_memory_bytes - int(
@@ -310,8 +296,24 @@ def generate(output: Path | None, force: bool):
             f"  [green]→ {config.total_memory_tokens} memory tokens available[/green]"
         )
 
-    # === GPU tokens configuration ===
-    if sys_info.gpus:
+
+def _configure_gpu_tokens(
+    console: "Console",
+    config: LauncherConfig,
+    sys_info: SystemInfo,
+    non_interactive: bool,
+    gpu_tokens: bool | None,
+    gpu_mode: str | None,
+    gpu_token_unit: int | None,
+) -> None:
+    """Prompt and configure GPU tokens on LauncherConfig."""
+    from rich.panel import Panel
+    from rich.prompt import Confirm, IntPrompt, Prompt
+
+    if not sys_info.gpus:
+        return
+
+    if not non_interactive:
         console.print()
         console.print(
             Panel(
@@ -329,55 +331,72 @@ def generate(output: Path | None, force: bool):
             )
         )
 
+    if gpu_tokens is not None:
+        config.use_gpu_tokens = gpu_tokens
+    elif non_interactive:
+        config.use_gpu_tokens = True
+    else:
         config.use_gpu_tokens = Confirm.ask("\nEnable GPU tokens?", default=True)
 
-        if config.use_gpu_tokens:
-            config.gpu_count = len(sys_info.gpus)
+    if not config.use_gpu_tokens:
+        return
 
-            # GPU mode selection
-            if sys_info.has_mps:
-                console.print(
-                    "  [yellow]MPS detected: using memory-based tokens "
-                    "(shared with CPU memory)[/yellow]"
-                )
-                config.gpu_mode = "memory"
-                config.mps_shared_memory = True
-            else:
-                config.gpu_mode = Prompt.ask(
-                    "  GPU token mode",
-                    choices=["exclusive", "memory"],
-                    default="exclusive",
-                )
+    config.gpu_count = len(sys_info.gpus)
 
-            if config.gpu_mode == "exclusive":
-                config.total_gpu_tokens = config.gpu_count
-                console.print(
-                    f"  [green]→ {config.total_gpu_tokens} GPU tokens "
-                    f"(1 per GPU)[/green]"
-                )
-            else:
-                config.gpu_token_unit_mib = IntPrompt.ask(
-                    "  GPU token unit size (MiB)",
-                    default=1024,
-                )
-                # Calculate GPU tokens from first GPU (or total for MPS)
-                if sys_info.has_mps:
-                    # For MPS, GPU memory is same as system memory
-                    # Don't double-count - just note that GPU uses memory tokens
-                    console.print(
-                        "  [yellow]→ MPS: GPU tasks will use memory tokens[/yellow]"
-                    )
-                    config.total_gpu_tokens = 0  # Use memory tokens instead
-                else:
-                    total_gpu_mem = sum(g.memory_bytes for g in sys_info.gpus)
-                    config.total_gpu_tokens = max(
-                        1, total_gpu_mem // (config.gpu_token_unit_mib * (1024**2))
-                    )
-                    console.print(
-                        f"  [green]→ {config.total_gpu_tokens} GPU memory tokens[/green]"
-                    )
+    # GPU mode selection
+    if sys_info.has_mps:
+        console.print(
+            "  [yellow]MPS detected: using memory-based tokens "
+            "(shared with CPU memory)[/yellow]"
+        )
+        config.gpu_mode = "memory"
+        config.mps_shared_memory = True
+    elif gpu_mode is not None:
+        config.gpu_mode = gpu_mode
+    elif non_interactive:
+        config.gpu_mode = "exclusive"
+    else:
+        config.gpu_mode = Prompt.ask(
+            "  GPU token mode",
+            choices=["exclusive", "memory"],
+            default="exclusive",
+        )
 
-    # === Summary ===
+    if config.gpu_mode == "exclusive":
+        config.total_gpu_tokens = config.gpu_count
+        console.print(
+            f"  [green]→ {config.total_gpu_tokens} GPU tokens (1 per GPU)[/green]"
+        )
+    else:
+        if gpu_token_unit is not None:
+            config.gpu_token_unit_mib = gpu_token_unit
+        elif non_interactive:
+            config.gpu_token_unit_mib = 1024
+        else:
+            config.gpu_token_unit_mib = IntPrompt.ask(
+                "  GPU token unit size (MiB)",
+                default=1024,
+            )
+        # Calculate GPU tokens from first GPU (or total for MPS)
+        if sys_info.has_mps:
+            # For MPS, GPU memory is same as system memory
+            # Don't double-count - just note that GPU uses memory tokens
+            console.print("  [yellow]→ MPS: GPU tasks will use memory tokens[/yellow]")
+            config.total_gpu_tokens = 0  # Use memory tokens instead
+        else:
+            total_gpu_mem = sum(g.memory_bytes for g in sys_info.gpus)
+            config.total_gpu_tokens = max(
+                1, total_gpu_mem // (config.gpu_token_unit_mib * (1024**2))
+            )
+            console.print(
+                f"  [green]→ {config.total_gpu_tokens} GPU memory tokens[/green]"
+            )
+
+
+def _display_summary(console: "Console", output: Path, config: LauncherConfig) -> None:
+    """Display configuration summary table."""
+    from rich.table import Table
+
     console.print()
     summary = Table(title="Configuration Summary", border_style="green")
     summary.add_column("Setting", style="cyan")
@@ -409,8 +428,21 @@ def generate(output: Path | None, force: bool):
     console.print(summary)
     console.print()
 
+
+def _write_outputs(
+    output: Path,
+    config: LauncherConfig,
+    sys_info: SystemInfo,
+    force: bool,
+    yes: bool,
+    non_interactive: bool,
+    console: "Console",
+) -> None:
+    """Prompt confirmation (if interactive) and write output files."""
+    from rich.prompt import Confirm
+
     # Confirm generation
-    if not Confirm.ask("Generate configuration?", default=True):
+    if not non_interactive and not Confirm.ask("Generate configuration?", default=True):
         console.print("[yellow]Aborted.[/yellow]")
         return
 
@@ -425,7 +457,7 @@ def generate(output: Path | None, force: bool):
         config.use_gpu_tokens and config.total_gpu_tokens > 0
     ):
         tokens_yaml_path = output.parent / "tokens.yaml"
-        write_tokens = force or not tokens_yaml_path.exists()
+        write_tokens = force or yes or non_interactive or not tokens_yaml_path.exists()
         if not write_tokens:
             write_tokens = Confirm.ask(f"Generate {tokens_yaml_path}?", default=True)
 
@@ -436,6 +468,164 @@ def generate(output: Path | None, force: bool):
 
     console.print(
         "\n[bold green]Done![/bold green] Your launcher configuration is ready.\n"
+    )
+
+
+@direct_cli.command("generate")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output path for launchers.py (default: ~/.config/experimaestro/launchers.py)",
+)
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Overwrite existing file without prompting",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Non-interactive mode: accept defaults without prompting",
+)
+@click.option(
+    "--memory-tokens/--no-memory-tokens",
+    default=None,
+    help="Enable or disable CPU memory tokens (default: enabled)",
+)
+@click.option(
+    "--reserved-memory",
+    type=float,
+    default=None,
+    help="Reserved memory for OS in GiB (default: 2.0)",
+)
+@click.option(
+    "--memory-token-unit",
+    type=int,
+    default=None,
+    help=f"Memory token unit size in MiB (default: {DEFAULT_TOKEN_UNIT_MIB})",
+)
+@click.option(
+    "--gpu-tokens/--no-gpu-tokens",
+    default=None,
+    help="Enable or disable GPU tokens when GPUs are detected (default: enabled)",
+)
+@click.option(
+    "--gpu-mode",
+    type=click.Choice(["exclusive", "memory"]),
+    default=None,
+    help="GPU token mode: 'exclusive' (1 token/GPU) or 'memory' (default: exclusive for CUDA, memory for MPS)",
+)
+@click.option(
+    "--gpu-token-unit",
+    type=int,
+    default=None,
+    help="GPU memory token unit size in MiB when using memory mode (default: 1024)",
+)
+def generate(
+    output: Path | None,
+    force: bool,
+    yes: bool,
+    memory_tokens: bool | None,
+    reserved_memory: float | None,
+    memory_token_unit: int | None,
+    gpu_tokens: bool | None,
+    gpu_mode: str | None,
+    gpu_token_unit: int | None,
+):
+    """Generate a launchers.py file for direct (local) execution.
+
+    This command detects system resources and configures memory-based tokens
+    for CPU and GPU resource management. Use `-y / --yes` for non-interactive
+    generation with sensible defaults.
+
+    Token system:
+      - Memory tokens: 1 token = configurable unit (default 256 MiB)
+      - Tasks request tokens based on their memory requirements
+      - Example: 1 GiB requirement = 4 tokens (with 256 MiB unit)
+
+    Apple Silicon (MPS):
+      - GPU uses unified memory (shared with CPU)
+      - GPU memory requests reduce available CPU memory tokens
+
+    Examples:
+        experimaestro launchers direct generate -y
+        experimaestro launchers direct generate
+        experimaestro launchers direct generate -o ./launchers.py -y
+    """
+    from rich.console import Console
+    from rich.panel import Panel
+
+    console = Console()
+    non_interactive = yes or not sys.stdin.isatty()
+
+    # Default output path
+    if output is None:
+        output = Path("~/.config/experimaestro/launchers.py").expanduser()
+    else:
+        output = output.expanduser()
+
+    # Header
+    console.print()
+    console.print(
+        Panel.fit(
+            "[bold cyan]Direct Launcher Configuration[/bold cyan]\n\n"
+            "This wizard configures resource tokens for local task execution.\n"
+            "Tokens ensure tasks don't exceed available memory.",
+            border_style="cyan",
+        )
+    )
+
+    # Check if file exists
+    if not _check_output_file(output, force, yes, non_interactive, console):
+        return
+
+    # Detect system resources
+    console.print("\n[cyan]Detecting system resources...[/cyan]")
+    sys_info = detect_system_info()
+    _display_system_info(console, sys_info)
+
+    # Initialize config
+    config = LauncherConfig()
+    config.is_mps = sys_info.has_mps
+
+    # Configure memory tokens
+    _configure_memory_tokens(
+        console,
+        config,
+        sys_info,
+        non_interactive,
+        memory_tokens,
+        reserved_memory,
+        memory_token_unit,
+    )
+
+    # Configure GPU tokens
+    _configure_gpu_tokens(
+        console,
+        config,
+        sys_info,
+        non_interactive,
+        gpu_tokens,
+        gpu_mode,
+        gpu_token_unit,
+    )
+
+    # Display configuration summary
+    _display_summary(console, output, config)
+
+    # Write generated files
+    _write_outputs(
+        output,
+        config,
+        sys_info,
+        force,
+        yes,
+        non_interactive,
+        console,
     )
 
 

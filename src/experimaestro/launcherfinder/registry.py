@@ -77,6 +77,8 @@ class LauncherRegistry:
         LauncherRegistry.CURRENT_CONFIG_DIR = config_dir
 
     def __init__(self, basepath: Path):
+        self.basepath = basepath
+        self.launchers_py = basepath / "launchers.py"
         self.connectors_schema: Dict[str, Type] = {}
         self.tokens_schema: Dict[str, Type] = {}
         self.find_launcher_fn = None
@@ -89,13 +91,12 @@ class LauncherRegistry:
             entry_point.load().init_registry(self)
 
         # Register the find launcher function if it exists
-        launchers_py = basepath / "launchers.py"
-        if launchers_py.is_file():
-            logger.info("Loading %s", launchers_py)
+        if self.launchers_py.is_file():
+            logger.info("Loading %s", self.launchers_py)
 
             from importlib import util
 
-            with ensure_enter(launchers_py.__fspath__()) as fp:
+            with ensure_enter(self.launchers_py.__fspath__()) as fp:
                 spec = util.spec_from_file_location("xpm_launchers_conf", fp)
                 module = util.module_from_spec(spec)
                 spec.loader.exec_module(module)
@@ -103,7 +104,7 @@ class LauncherRegistry:
             self.find_launcher_fn = getattr(module, "find_launcher", None)
             if self.find_launcher_fn is None:
                 logger.warning(
-                    "No find_launcher() function was found in %s", launchers_py
+                    "No find_launcher() function was found in %s", self.launchers_py
                 )
 
         # Read the configuration file
@@ -147,7 +148,14 @@ class LauncherRegistry:
         """
 
         if self.find_launcher_fn is None:
-            logger.info("No launchers.yaml file: using local host ")
+            logger.warning(
+                "No launcher configuration found at %s: falling back to local DirectLauncher.\n"
+                "Tip: To configure launchers with resource management:\n"
+                "  - Local machine / laptop: experimaestro launchers direct generate -y\n"
+                "  - SLURM cluster:          experimaestro launchers slurm generate -y\n"
+                "  - Documentation:          https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html",
+                self.launchers_py,
+            )
             from experimaestro.launchers.direct import DirectLauncher
             from experimaestro.connectors.local import LocalConnector
 
@@ -170,7 +178,7 @@ class LauncherRegistry:
             for spec in specs.requirements:
                 if launcher := self.find_launcher_fn(spec, tags):
                     assert isinstance(launcher, Launcher), (
-                        "f{self.find_launcher_fn} did not return a Launcher but {type(launcher)}"
+                        f"{self.find_launcher_fn} did not return a Launcher but {type(launcher)}"
                     )
                     return launcher
 
@@ -181,11 +189,22 @@ def find_launcher(
     *specs: Union[HostRequirement, str], tags: Set[str] = set()
 ) -> "Launcher":
     """Find a launcher matching a given specification"""
-    launcher = LauncherRegistry.instance().find(*specs, tags=tags)
+    registry = LauncherRegistry.instance()
+    launcher = registry.find(*specs, tags=tags)
     if not launcher:
+        specs_str = ", ".join(str(s) for s in specs)
+        tags_info = f" (tags={tags})" if tags else ""
+        sample_spec = str(specs[0]) if specs else "cpu(cores=2)"
         raise LauncherNotFoundError(
-            f"No launcher with specification: {specs}."
-            "Please refer to the documentation at the following URL: "
-            "https://experimaestro-python.readthedocs.io/en/latest/launchers/"
+            f"No launcher matched specification: {specs_str}{tags_info} "
+            f"(using {registry.launchers_py}).\n"
+            "How to fix:\n"
+            "  1. Adjust the requested resources or add a fallback with '|' "
+            "(e.g. 'gpu(mem=4G) | cpu(cores=2)') if they exceed your host capabilities.\n"
+            f"  2. Regenerate or edit {registry.launchers_py}:\n"
+            "     - Local machine / laptop: experimaestro launchers direct generate -y\n"
+            "     - SLURM cluster:          experimaestro launchers slurm generate -y\n"
+            f'  3. Test your specification with: experimaestro find-launchers "{sample_spec}"\n'
+            "  4. Documentation: https://experimaestro-python.readthedocs.io/en/latest/launchers/index.html"
         )
     return launcher

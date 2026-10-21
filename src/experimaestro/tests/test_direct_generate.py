@@ -419,3 +419,51 @@ class TestGenerateTokensYaml:
         yaml = _generate_tokens_yaml(config)
 
         assert "gpu:" not in yaml
+
+
+class TestDirectGenerateCLI:
+    """Test non-interactive CLI execution of `experimaestro launchers direct generate`."""
+
+    def test_direct_generate_yes(self, tmp_path):
+        """`direct generate -y` writes launchers.py and tokens.yaml without prompts."""
+        from click.testing import CliRunner
+        from experimaestro.launchers.direct import direct_cli
+
+        out_file = tmp_path / "launchers.py"
+        runner = CliRunner()
+        result = runner.invoke(
+            direct_cli,
+            ["generate", "-o", str(out_file), "-y"],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert out_file.is_file()
+        assert (tmp_path / "tokens.yaml").is_file()
+        assert "def find_launcher(" in out_file.read_text()
+
+    def test_direct_generate_custom_flags(self, tmp_path):
+        """`direct generate` respects explicit token CLI flags in non-interactive mode."""
+        from click.testing import CliRunner
+        from experimaestro.launchers.direct import direct_cli
+
+        out_file = tmp_path / "launchers.py"
+        runner = CliRunner()
+        result = runner.invoke(
+            direct_cli,
+            [
+                "generate",
+                "-o",
+                str(out_file),
+                "-y",
+                "--reserved-memory",
+                "1.0",
+                "--memory-token-unit",
+                "512",
+                "--no-gpu-tokens",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert out_file.is_file()
+        content = out_file.read_text()
+        assert "512 * (1024 ** 2)" in content

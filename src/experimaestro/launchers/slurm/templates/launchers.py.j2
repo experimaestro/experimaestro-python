@@ -57,6 +57,7 @@ def _get_partition_spec(partition: dict) -> HostSpecification:
             )
 
     return HostSpecification(
+        max_duration=partition["time_limit_seconds"] or 0,
         cpu=CPUSpecification(
             memory=partition["memory_bytes"],
             cores=partition["cpus"],
@@ -116,7 +117,7 @@ def find_launcher(requirements: HostRequirement, tags: Set[str] = set()):
     # Get duration for time limit
     duration_seconds = None
     if hasattr(req, "duration") and req.duration:
-        duration_seconds = req.duration
+        duration_seconds = int(req.duration)
 
     # Build options
     options = SlurmOptions(
