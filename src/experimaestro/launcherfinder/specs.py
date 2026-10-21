@@ -1,3 +1,5 @@
+__lazy_modules__ = ["humanfriendly"]  # PEP 810 (Python 3.15+)
+
 from abc import ABC, abstractmethod
 from enum import Enum
 import logging

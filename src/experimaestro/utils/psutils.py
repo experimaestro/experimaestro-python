@@ -6,6 +6,8 @@ Provides true async process waiting using OS-native mechanisms:
 - Fallback: polling with psutil
 """
 
+__lazy_modules__ = ["psutil"]  # PEP 810 (Python 3.15+)
+
 import asyncio
 import logging
 import os

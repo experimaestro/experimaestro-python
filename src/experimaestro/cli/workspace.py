@@ -1,6 +1,8 @@
 # flake8: noqa: T201
 """``experimaestro workspace``: list, clean up and migrate workspaces"""
 
+__lazy_modules__ = ["yaml"]  # PEP 810 (Python 3.15+)
+
 import logging
 from dataclasses import asdict
 from pathlib import Path

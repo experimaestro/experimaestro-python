@@ -1,5 +1,7 @@
 # Configuration registers
 
+__lazy_modules__ = ["yaml", "pydantic"]  # PEP 810 (Python 3.15+)
+
 from contextlib import contextmanager
 from typing import ClassVar, Dict, Optional, Set, Type, Union
 

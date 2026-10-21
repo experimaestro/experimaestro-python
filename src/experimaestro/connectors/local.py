@@ -1,5 +1,7 @@
 """All classes related to localhost management"""
 
+__lazy_modules__ = ["filelock", "psutil"]  # PEP 810 (Python 3.15+)
+
 import subprocess
 from typing import Optional
 from pathlib import Path, WindowsPath, PosixPath

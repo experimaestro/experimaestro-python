@@ -1,3 +1,9 @@
+__lazy_modules__ = [  # PEP 810 (Python 3.15+)
+    "yaml",
+    "experimaestro.launcherfinder.registry",
+    "experimaestro.utils.config",
+]
+
 import datetime
 import importlib
 import inspect

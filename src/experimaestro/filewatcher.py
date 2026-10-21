@@ -20,6 +20,8 @@ Thread model:
 
 from __future__ import annotations
 
+__lazy_modules__ = ["watchdog.observers"]  # PEP 810 (Python 3.15+)
+
 import asyncio
 import logging
 import os

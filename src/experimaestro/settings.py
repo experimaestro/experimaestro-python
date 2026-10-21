@@ -1,3 +1,5 @@
+__lazy_modules__ = ["yaml", "pydantic"]  # PEP 810 (Python 3.15+)
+
 import sys
 import yaml
 import os

@@ -4,8 +4,17 @@ from typing import Callable, Dict, List, Optional
 from experimaestro.commandline import AbstractCommand, Job, CommandLineJob
 from experimaestro.connectors import Connector
 from experimaestro.connectors.local import ProcessBuilder, LocalConnector
-from experimaestro.connectors.ssh import SshPath, SshConnector
 from abc import ABC, abstractmethod
+
+
+def __getattr__(name: str):
+    # The SSH connector pulls fabric/paramiko: only load it when used (on every
+    # Python version, unlike __lazy_modules__)
+    if name in ("SshPath", "SshConnector"):
+        from experimaestro.connectors import ssh
+
+        return getattr(ssh, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class ScriptBuilder(ABC):
@@ -106,6 +115,8 @@ class Launcher(ABC):
             from .direct import DirectLauncher
 
             return DirectLauncher(LocalConnector())
+
+        from experimaestro.connectors.ssh import SshPath, SshConnector
 
         if isinstance(path, SshPath):
             from .direct import DirectLauncher

@@ -1,3 +1,5 @@
+__lazy_modules__ = ["docstring_parser.parser"]  # PEP 810 (Python 3.15+)
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import cached_property

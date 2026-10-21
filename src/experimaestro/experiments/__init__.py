@@ -1,3 +1,9 @@
+__lazy_modules__ = [  # PEP 810 (Python 3.15+)
+    "experimaestro.experiments.cli",
+    "experimaestro.experiments.mockmodule",
+    "experimaestro.experiments.grid",
+]
+
 from .configuration import (  # noqa: F401
     configuration,
     ConfigurationBase,
