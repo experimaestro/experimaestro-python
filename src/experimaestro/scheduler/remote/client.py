@@ -12,8 +12,10 @@ Usage:
 import atexit
 import logging
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -98,6 +100,52 @@ def _version_minor_constraint(version: str) -> str:
     if m:
         return f">={m.group(1)}.0"
     return f">={version}"
+
+
+def remote_xpm_command(
+    remote_xpm_path: Optional[str] = None,
+    *,
+    uv_offline: bool = False,
+    remote_python: Optional[str] = None,
+    force_version: bool = False,
+) -> List[str]:
+    """The command running experimaestro on the remote host
+
+    Either ``remote_xpm_path`` (which may contain arguments), or ``uv tool run``
+    with a version compatible with the local one.
+    """
+    if remote_xpm_path:
+        return shlex.split(remote_xpm_path)
+
+    try:
+        # Strip .devN suffix for release compatibility
+        xpm_version = _strip_dev_version(get_package_version("experimaestro"))
+    except Exception:
+        xpm_version = None
+
+    parts = ["uv", "tool", "run"]
+    if uv_offline:
+        parts.append("--offline")
+    if remote_python:
+        parts.extend(["--python", remote_python])
+    if xpm_version is None:
+        parts.append("experimaestro")
+    elif force_version:
+        parts.append(f"experimaestro=={xpm_version}")
+    else:
+        parts.append(f"experimaestro{_version_minor_constraint(xpm_version)}")
+    return parts
+
+
+def remote_shell_command(args: List[str], shell_init: Optional[str] = None) -> str:
+    """The shell command line running ``args`` on the remote host
+
+    SSH joins its arguments with spaces and passes them to the remote shell,
+    so the command is given as a single string, run after ``shell_init`` (in
+    the same shell).
+    """
+    command = shlex.join(args)
+    return f"{shell_init}; {command}" if shell_init else command
 
 
 class SSHLocalService(BaseService):
@@ -558,54 +606,18 @@ class SSHStateProviderClient(OfflineStateProvider):
         cmd.append(self.host)
 
         # Build remote command (workdir is passed to experiments group)
-        # Use shlex.split to properly handle complex commands with arguments
-        import shlex
-
-        if self.remote_xpm_path:
-            # Use specified path/command to experimaestro
-            # Parse the remote_xpm_path in case it contains arguments
-            remote_cmd_parts = shlex.split(self.remote_xpm_path)
-        else:
-            # Use uv tool run with version pinning
-            try:
-                xpm_version = get_package_version("experimaestro")
-                # Strip .devN suffix for release compatibility
-                xpm_version = _strip_dev_version(xpm_version)
-            except Exception:
-                xpm_version = None
-
-            remote_cmd_parts = ["uv", "tool", "run"]
-            if self.uv_offline:
-                remote_cmd_parts.append("--offline")
-            if self.remote_python:
-                remote_cmd_parts.extend(["--python", self.remote_python])
-            if xpm_version:
-                if self.force_version:
-                    remote_cmd_parts.append(f"experimaestro=={xpm_version}")
-                else:
-                    version_spec = _version_minor_constraint(xpm_version)
-                    remote_cmd_parts.append(f"experimaestro{version_spec}")
-            else:
-                remote_cmd_parts.append("experimaestro")
-
-        # Add the subcommand arguments
+        remote_cmd_parts = remote_xpm_command(
+            self.remote_xpm_path,
+            uv_offline=self.uv_offline,
+            remote_python=self.remote_python,
+            force_version=self.force_version,
+        )
         if self.remote_log_levels:
             remote_cmd_parts.extend(["--logging", self.remote_log_levels])
         remote_cmd_parts.extend(
             ["experiments", "--workdir", self.remote_workspace, "monitor-server"]
         )
-
-        # If shell_init is set, wrap the entire remote command as a single
-        # shell string so the preamble runs in the same shell.
-        # SSH executes remote args by joining them with spaces and passing
-        # to the remote shell, so we pass the full command as a single string.
-        if self.remote_shell_init:
-            full_remote_cmd = (
-                f"{self.remote_shell_init}; {shlex.join(remote_cmd_parts)}"
-            )
-            cmd.append(full_remote_cmd)
-        else:
-            cmd.append(shlex.join(remote_cmd_parts))
+        cmd.append(remote_shell_command(remote_cmd_parts, self.remote_shell_init))
 
         logger.info("Connecting to %s, workspace: %s", self.host, self.remote_workspace)
         logger.debug("SSH command: %s", shlex.join(cmd))
@@ -823,9 +835,10 @@ class SSHStateProviderClient(OfflineStateProvider):
                 if self._output_callback is not None:
                     self._output_callback(line_str)
                 else:
-                    # Default: print with colored prefix
+                    # Default: print with colored prefix (on stderr, to keep
+                    # the standard output of the command line clean)
                     prefix = colored("[SSH] ", "cyan", attrs=["bold"])
-                    print(f"{prefix}{line_str}")  # noqa: T201
+                    print(f"{prefix}{line_str}", file=sys.stderr)  # noqa: T201
 
             except Exception as e:
                 if self._running:

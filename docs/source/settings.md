@@ -228,9 +228,11 @@ workspaces:
 
 ## Remote Workspaces (SSH)
 
-Workspaces can be configured with SSH settings for remote monitoring. A workspace
-with `ssh` settings is a **remote workspace** — it is automatically excluded from
-local experiment workspace discovery (trigger matching and default workspace selection).
+Workspaces can be configured with SSH settings for remote access. A workspace
+with `ssh` settings is a **remote workspace**: all the commands except `run` work
+on it (see [Remote Workspaces](cli.md#remote-workspaces)), and it is
+automatically excluded from local experiment workspace discovery (trigger
+matching and default workspace selection).
 
 ```yaml
 workspaces:
@@ -261,14 +263,15 @@ workspaces:
 
 ### Using Workspace SSH Settings
 
-Once configured, select the workspace (`-w`) when monitoring to avoid repeating host/options:
+Once configured, select the workspace (`-w`) to avoid repeating host/options:
 
 ```bash
 # All settings come from the workspace configuration
 experimaestro -w my-cluster monitor --web
+experimaestro -w my-cluster jobs list
 
-# CLI flags override workspace settings
-experimaestro -w my-cluster monitor --web --uv-offline
+# CLI flags (given before the command) override workspace settings
+experimaestro -w my-cluster --uv-offline monitor --web
 ```
 
 All SSH settings can be overridden by CLI flags (`--remote-shell-init`, `--uv-offline`,

@@ -7,8 +7,10 @@ from typing import Optional
 
 import click
 
+from .remote import RemoteCommand
 
-@click.command(name="inspect")
+
+@click.command(name="inspect", cls=RemoteCommand)
 @click.argument("target", required=False, default=".")
 @click.option(
     "-w",

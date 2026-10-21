@@ -1,6 +1,6 @@
 # flake8: noqa: T201
 import subprocess
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 import click
 from pathlib import Path
 from termcolor import colored, cprint
@@ -8,6 +8,10 @@ from termcolor import colored, cprint
 from experimaestro.scheduler import job_operations
 from . import RunConfig
 from .inspect import inspect_command
+from .remote import RemoteCommand
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_provider import StateProvider
 
 
 @click.option("--workspace", default="", hidden=True, help="Experimaestro workspace")
@@ -37,7 +41,7 @@ def jobs(
 
 
 def process(
-    workspace,
+    provider: "StateProvider",
     *,
     experiment="",
     tags="",
@@ -51,7 +55,7 @@ def process(
     """Process jobs from the workspace database
 
     Args:
-        workspace: Workspace settings
+        provider: State provider of the workspace
         experiment: Filter by experiment ID
         tags: Show tags in output
         clean: Clean finished jobs
@@ -62,11 +66,7 @@ def process(
         count: Limit output to N most recent jobs (0 = no limit)
     """
     from .filter import createFilter, FilterContext
-    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
     from experimaestro.scheduler import JobState
-
-    # Get state provider (read-only monitoring)
-    provider = WorkspaceStateProvider.get_instance(workspace.path)
 
     # Get jobs from the database, optionally filtered by experiment
     if experiment:
@@ -177,7 +177,7 @@ def list(
 ):
     """List all jobs in the workspace (sorted by submission date, most recent first)"""
     process(
-        ctx.obj.workspace,
+        ctx.obj.state_provider(),
         experiment=experiment,
         filter=filter,
         tags=tags,
@@ -203,7 +203,7 @@ def kill(
 ):
     """Kill running jobs"""
     process(
-        ctx.obj.workspace,
+        ctx.obj.state_provider(),
         experiment=experiment,
         filter=filter,
         tags=tags,
@@ -230,7 +230,7 @@ def clean(
 ):
     """Clean finished jobs (delete directories and DB entries)"""
     process(
-        ctx.obj.workspace,
+        ctx.obj.state_provider(),
         experiment=experiment,
         filter=filter,
         tags=tags,
@@ -245,7 +245,7 @@ def clean(
     "--follow", "-f", help="Use tail instead of less to follow changes", is_flag=True
 )
 @click.option("--std", help="Follow stdout instead of stderr", is_flag=True)
-@jobs.command()
+@jobs.command(cls=RemoteCommand)
 @click.pass_context
 def log(ctx, jobid: str, follow: bool, std: bool):
     """View job log (stderr by default, stdout with --std)
@@ -271,7 +271,7 @@ def log(ctx, jobid: str, follow: bool, std: bool):
 
 
 @click.argument("jobid", type=str)
-@jobs.command()
+@jobs.command(cls=RemoteCommand)
 @click.pass_context
 def path(ctx, jobid: str):
     """Print the path to a job directory
@@ -287,7 +287,7 @@ def path(ctx, jobid: str):
 
 
 @click.argument("jobid", type=str)
-@jobs.command()
+@jobs.command(cls=RemoteCommand)
 @click.pass_context
 def recover(ctx, jobid: str):
     """Recover a job from a configured backup folder (**Beta**).

@@ -3,7 +3,7 @@
 ## Overview
 
 ```
-experimaestro [-w WORKSPACE | --workdir PATH] COMMAND
+experimaestro [-w WORKSPACE | --workdir PATH | --ssh HOST:PATH] COMMAND
   run           Run an experiment
   monitor       Monitor the experiments of a workspace (local or SSH)
   experiments   Experiments (alias: xp): list, dag, copy, runs, services, actions, carbon
@@ -17,13 +17,15 @@ experimaestro [-w WORKSPACE | --workdir PATH] COMMAND
 ```
 
 The workspace is selected once, before the command: `-w`/`--workspace` takes
-a workspace ID from the [settings](settings.md), `--workdir` a directory.
+a workspace ID from the [settings](settings.md), `--workdir` a directory and
+`--ssh` a directory on a remote host (see [](#remote-workspaces)).
 Without either, the default (first) workspace is used — or, for `run`, the
 workspace whose triggers match the experiment ID.
 
 ```bash
 experimaestro -w my-cluster monitor --web
 experimaestro --workdir /path/to/workspace jobs list
+experimaestro --ssh user@cluster:/scratch/experiments jobs list
 ```
 
 :::{note}
@@ -34,6 +36,59 @@ Commands were reorganized in experimaestro 2.x. The old names
 `experimaestro run PARAMS.json` (running a single task from its
 `params.json`) is also still supported.
 :::
+
+(remote-workspaces)=
+## Remote (SSH) Workspaces
+
+A workspace is remote when it has [SSH settings](settings.md#remote-workspaces-ssh)
+(`experimaestro -w my-cluster …`), or when it is given with `--ssh HOST:PATH`.
+All the commands work on a remote workspace, except `run` (experiments are run
+on the host of their workspace):
+
+- `monitor`, `experiments list`, `experiments dag`, `experiments services list`
+  and `jobs list/kill/clean` read the workspace through a monitoring server
+  started on the remote host (JSON-RPC over SSH);
+- the other commands are run on the remote host (`experimaestro --workdir PATH
+  COMMAND …` over SSH), with their output and prompts shown locally.
+
+The remote host needs experimaestro: by default, it is run with `uv tool run`,
+with a version compatible with the local one. The SSH options are given before
+the command, and override the workspace SSH settings:
+
+| Option | Description |
+|--------|-------------|
+| `--ssh HOST:PATH` | Remote workspace `PATH` on `HOST` (cannot be used with `--workdir`) |
+| `--remote-xpm PATH` | Path to experimaestro on remote host |
+| `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
+| `--remote-shell-init CMD` | Shell commands to run before remote experimaestro |
+| `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
+| `--remote-python NAME` | Python interpreter for `uv tool run --python` |
+| `--force-version` | Run exactly the local experimaestro version (instead of the same minor version) |
+| `--request-timeout SECS` | Timeout for remote RPC requests (default: 60) |
+| `--remote-logging LEVELS` | Logging levels of the remote server, shown locally (e.g. `xpm.remote.trace=DEBUG`) |
+
+Examples:
+
+```bash
+# Using workspace SSH settings from settings.yaml
+experimaestro -w my-cluster jobs list --filter '@state = "ERROR"'
+experimaestro -w my-cluster experiments runs list my-experiment
+
+# Ad-hoc remote workspace
+experimaestro --ssh user@host:/workspace workspace orphans
+
+# With shell init for HPC environments
+experimaestro --ssh host:/workspace --remote-shell-init "source /etc/profile; module load python/3.10" jobs list
+
+# Offline mode (no PyPI access)
+experimaestro --ssh host:/workspace --uv-offline --remote-python python3 jobs list
+
+# With SSH port and identity file
+experimaestro --ssh myserver:/workspace -o "-p 2222" -o "-i ~/.ssh/mykey" experiments list
+
+# With custom experimaestro path on remote
+experimaestro --ssh host:/workspace --remote-xpm /path/to/venv/bin/experimaestro jobs log mymodule.MyTask/abc123
+```
 
 (running-experiments)=
 ## Running Experiments
@@ -293,48 +348,14 @@ experimaestro --workdir /path/to/workspace monitor --web --port 8080
 
 ### Remote (SSH) workspaces
 
-A workspace with SSH settings (`experimaestro -w my-cluster monitor`), or any
-remote directory given with `--ssh HOST:PATH`, is monitored through SSH:
+A [remote workspace](#remote-workspaces) is monitored through SSH:
 
 ```bash
-experimaestro monitor --ssh HOST:REMOTE_WORKDIR (--console | --web) [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--console` / `--web` | Terminal (Textual) UI or web UI (one is required) |
-| `--port PORT` | Port for local web server (default: 12345) |
-| `--remote-xpm PATH` | Path to experimaestro on remote host |
-| `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
-| `--remote-shell-init CMD` | Shell commands to run before remote experimaestro |
-| `--uv-offline` | Pass `--offline` to `uv tool run` (no network) |
-| `--remote-python NAME` | Python interpreter for `uv tool run --python` |
-| `--request-timeout SECS` | Timeout for remote RPC requests (default: 60) |
-| `--remote-logging LEVELS` | Logging levels of the remote server, shown locally (e.g. `xpm.remote.trace=DEBUG`) |
-
-Examples:
-
-```bash
-# Basic monitoring (web UI)
-experimaestro monitor --web --ssh myserver:/home/user/experiments
-
-# With the console TUI
-experimaestro monitor --ssh user@host:/workspace --console
-
 # Using workspace SSH settings from settings.yaml
 experimaestro -w my-cluster monitor --web
 
-# With shell init for HPC environments
-experimaestro monitor --web --ssh host:/workspace --remote-shell-init "source /etc/profile; module load python/3.10"
-
-# Offline mode (no PyPI access)
-experimaestro monitor --web --ssh host:/workspace --uv-offline --remote-python python3
-
-# With SSH port and identity file
-experimaestro monitor --web --ssh myserver:/workspace -o "-p 2222" -o "-i ~/.ssh/mykey"
-
-# With custom experimaestro path on remote
-experimaestro monitor --web --ssh host:/workspace --remote-xpm /path/to/venv/bin/experimaestro
+# Ad-hoc remote workspace, with the console TUI
+experimaestro --ssh user@host:/workspace monitor --console
 ```
 
 See [Remote Monitoring via SSH](interfaces.md#remote-monitoring-via-ssh) for detailed documentation.

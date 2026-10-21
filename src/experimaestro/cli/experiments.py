@@ -11,7 +11,8 @@ from termcolor import cprint
 
 from experimaestro.settings import get_settings
 
-from . import RunConfig, deprecated_alias, pass_workdir
+from . import RunConfig, deprecated_alias, pass_workdir, root_config
+from .remote import RemoteCommand
 from .dag import dag
 from .monitor import experiments_monitor, ssh_monitor
 
@@ -33,48 +34,21 @@ experiments.add_command(dag, "dag")
 
 
 @experiments.command("list")
-@pass_workdir
-def list_experiments(workdir: Path):
+def list_experiments():
     """List experiments in the workspace"""
-    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
-
-    # Get experiments from state provider for detailed info
-    state_provider = WorkspaceStateProvider.get_instance(workdir)
-    experiments_list = state_provider.get_experiments()
-
-    # Build lookup by experiment_id
-    exp_info = {exp.experiment_id: exp for exp in experiments_list}
-
-    # New layout: experiments/{exp-id}/{run-id}/
-    experiments_dir = workdir / "experiments"
-    if not experiments_dir.exists():
+    experiments_list = root_config().state_provider().get_experiments()
+    if not experiments_list:
         cprint("No experiments found", "yellow")
         return
 
-    for exp_dir in experiments_dir.iterdir():
-        if not exp_dir.is_dir():
-            continue
-
-        exp_id = exp_dir.name
-        exp = exp_info.get(exp_id)
-
-        # Build display string
-        display_parts = [exp_id]
-
-        # Add current run_id if available
-        if exp and getattr(exp, "current_run_id", None):
-            display_parts.append(f"[run: {exp.current_run_id}]")
-
-        # Add hostname if available
-        if exp and getattr(exp, "hostname", None):
+    for exp in experiments_list:
+        display_parts = [exp.experiment_id]
+        if exp.run_id:
+            display_parts.append(f"[run: {exp.run_id}]")
+        if exp.hostname:
             display_parts.append(f"[{exp.hostname}]")
-
-        # Add job stats if available
-        if exp:
-            display_parts.append(f"({exp.finished_jobs}/{exp.total_jobs} jobs)")
-
-        display_str = " ".join(display_parts)
-        cprint(display_str, "cyan")
+        display_parts.append(f"({exp.finished_jobs}/{exp.total_jobs} jobs)")
+        cprint(" ".join(display_parts), "cyan")
 
 
 @experiments.command("monitor-server", hidden=True)
@@ -182,7 +156,7 @@ def _find_run_with_tag(experiment_base: Path, tag_name: str) -> Path | None:
     return None
 
 
-@runs.command("list")
+@runs.command("list", cls=RemoteCommand)
 @click.argument("experiment_id", type=str)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @pass_workdir
@@ -249,11 +223,8 @@ def _as_live_service(service):
     return service.to_service() if hasattr(service, "to_service") else service
 
 
-def _load_services_by_id(workdir: Path, experiment_id, run_id) -> dict:
-    from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
-
-    provider = WorkspaceStateProvider.get_instance(workdir)
-    services = provider.get_services(experiment_id, run_id)
+def _load_services_by_id(experiment_id, run_id) -> dict:
+    services = root_config().state_provider().get_services(experiment_id, run_id)
     return {service.id: service for service in services}
 
 
@@ -287,12 +258,9 @@ def services_group():
 @services_group.command("list")
 @click.argument("experiment_id", required=False, default=None)
 @click.option("--run", "run_id", default=None, help="Run id (default: current run)")
-@pass_workdir
-def services_list(workdir: Path, experiment_id, run_id):
+def services_list(experiment_id, run_id):
     """List services and sub-services with their state."""
-    rows = list(
-        _iter_service_rows(_load_services_by_id(workdir, experiment_id, run_id))
-    )
+    rows = list(_iter_service_rows(_load_services_by_id(experiment_id, run_id)))
     if not rows:
         cprint("No services found", "yellow")
         return
@@ -303,12 +271,11 @@ def services_list(workdir: Path, experiment_id, run_id):
         print(f"{sid:<32} {state:<10} {(desc or ''):<28} {url or ''}")
 
 
-@services_group.command("start")
+@services_group.command("start", cls=RemoteCommand)
 @click.argument("service_id")
 @click.argument("experiment_id", required=False, default=None)
 @click.option("--run", "run_id", default=None, help="Run id (default: current run)")
-@pass_workdir
-def services_start(workdir: Path, service_id: str, experiment_id, run_id):
+def services_start(service_id: str, experiment_id, run_id):
     """Start a service or sub-service, e.g. ``monitoring/wandb``.
 
     Blocks while the service runs (Ctrl-C to stop). A service that completes on
@@ -317,7 +284,7 @@ def services_start(workdir: Path, service_id: str, experiment_id, run_id):
     import time
     from experimaestro.scheduler.services import ServiceState
 
-    services_by_id = _load_services_by_id(workdir, experiment_id, run_id)
+    services_by_id = _load_services_by_id(experiment_id, run_id)
     parent_id, _, sub_id = service_id.partition("/")
     if parent_id not in services_by_id:
         cprint(f"Service '{parent_id}' not found", "red")
@@ -360,7 +327,7 @@ def services_start(workdir: Path, service_id: str, experiment_id, run_id):
             target.stop()
 
 
-@runs.command("prune")
+@runs.command("prune", cls=RemoteCommand)
 @click.argument("experiment_id", type=str)
 @click.option(
     "--before", type=str, help="Remove runs before this timestamp (YYYYMMDD_HHMMSS)"
@@ -487,7 +454,7 @@ def history_prune(
     cprint(f"\nRemoved {removed}/{len(to_remove)} run(s)", "cyan")
 
 
-@runs.command("tag")
+@runs.command("tag", cls=RemoteCommand)
 @click.argument("experiment_id", type=str)
 @click.argument("run_id", type=str)
 @click.argument("tag_name", type=str)
@@ -573,7 +540,7 @@ def tag(workdir: Path, experiment_id: str, run_id: str, tag_name: str, force: bo
     cprint(f"Tagged {run_id} as '{tag_name}'", "green")
 
 
-@runs.command("untag")
+@runs.command("untag", cls=RemoteCommand)
 @click.argument("experiment_id", type=str)
 @click.argument("tag_name", type=str)
 @pass_workdir
@@ -601,7 +568,7 @@ def untag(workdir: Path, experiment_id: str, tag_name: str):
     cprint(f"Removed tag '{tag_name}' (was on {run_dir.name})", "green")
 
 
-@runs.command("tags")
+@runs.command("tags", cls=RemoteCommand)
 @click.argument("experiment_id", type=str)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @pass_workdir
@@ -762,7 +729,7 @@ def _print_carbon_summary(
                 print(f"  {exp_id}: {exp_co2} ({exp_totals['job_count']} jobs)")
 
 
-@carbon.command("summary")
+@carbon.command("summary", cls=RemoteCommand)
 @click.option(
     "--name",
     "-n",
@@ -872,7 +839,7 @@ def carbon_summary(
     )
 
 
-@carbon.command("stats")
+@carbon.command("stats", cls=RemoteCommand)
 @pass_workdir
 def carbon_stats(workdir: Path):
     """Show carbon storage statistics
@@ -1111,7 +1078,7 @@ def _select_experiment(state_provider, experiment_id: str | None):
     return experiments_list[idx - 1]
 
 
-@actions_group.command("list")
+@actions_group.command("list", cls=RemoteCommand)
 @click.argument("experiment_id", type=str, required=False, default=None)
 @pass_workdir
 def list_actions(workdir: Path, experiment_id: str | None):
@@ -1187,7 +1154,7 @@ def _select_action(state_provider, exp, action_id: str | None):
     return action_list[idx - 1][0]
 
 
-@actions_group.command("run")
+@actions_group.command("run", cls=RemoteCommand)
 @click.argument("experiment_id", type=str, required=False, default=None)
 @click.argument("action_id", type=str, required=False, default=None)
 @click.option(

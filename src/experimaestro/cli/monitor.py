@@ -6,9 +6,10 @@ from pathlib import Path
 import click
 from termcolor import cprint
 
-from experimaestro.settings import WorkspaceSettings, get_settings, get_workspace
+from experimaestro.settings import get_settings, get_workspace
 
 from . import deprecated_alias, root_config
+from .remote import RemoteWorkspace, SSHOptions, ssh_options
 
 
 def _run_monitor_ui(
@@ -125,65 +126,6 @@ def _events_options(f):
     )(f)
 
 
-def _ssh_options(f):
-    options = [
-        click.option(
-            "--remote-xpm",
-            type=str,
-            default=None,
-            help="Path to experimaestro on remote host (default: use 'uv tool run')",
-        ),
-        click.option(
-            "--ssh-option",
-            "-o",
-            multiple=True,
-            help="Additional SSH options (can be repeated, e.g., -o '-p 2222')",
-        ),
-        click.option(
-            "--remote-shell-init",
-            type=str,
-            default=None,
-            help="Shell commands to run before remote experimaestro "
-            "(e.g., 'source /etc/profile; module load python/3.10')",
-        ),
-        click.option(
-            "--uv-offline",
-            is_flag=True,
-            default=False,
-            help="Pass --offline to uv tool run (use cached packages, no network)",
-        ),
-        click.option(
-            "--remote-python",
-            type=str,
-            default=None,
-            help="Python interpreter for uv tool run --python on the remote host",
-        ),
-        click.option(
-            "--force-version",
-            is_flag=True,
-            default=False,
-            help="Pin exact experimaestro version (==X.Y.Z) instead of minor (>=X.Y.0)",
-        ),
-        click.option(
-            "--request-timeout",
-            type=float,
-            default=60.0,
-            help="Timeout in seconds for remote RPC requests (default: 60)",
-        ),
-        click.option(
-            "--remote-logging",
-            "remote_log_levels",
-            type=str,
-            default=None,
-            help="Logging levels of the remote server, shown locally (as --logging, "
-            "e.g. xpm.remote.trace=DEBUG to trace the requests)",
-        ),
-    ]
-    for option in reversed(options):
-        f = option(f)
-    return f
-
-
 def _configure_watcher(watcher: str, polling_interval: float):
     from experimaestro.filewatcher import FileWatcherService, WatcherType
 
@@ -193,93 +135,13 @@ def _configure_watcher(watcher: str, polling_interval: float):
         FileWatcherService.configure(WatcherType.POLLING, polling_interval)
 
 
-def _connect_ssh(
-    host: str | None,
-    remote_workdir: str | None,
-    ws_settings: WorkspaceSettings | None,
-    *,
-    remote_xpm: str | None,
-    ssh_option: tuple,
-    remote_shell_init: str | None,
-    uv_offline: bool,
-    remote_python: str | None,
-    force_version: bool,
-    request_timeout: float,
-    remote_log_levels: str | None,
-):
-    """Connects to a remote workspace (CLI flags override the workspace settings)"""
-    effective_host = host
-    effective_workdir = remote_workdir
-    effective_xpm = remote_xpm
-    effective_shell_init = remote_shell_init
-    effective_uv_offline = uv_offline
-    effective_python = remote_python
-    effective_ssh_options = list(ssh_option) if ssh_option else []
-
-    ws_ssh = ws_settings.ssh if ws_settings else None
-    if ws_ssh:
-        if not effective_host and ws_ssh.host:
-            effective_host = ws_ssh.host
-        if not effective_workdir:
-            effective_workdir = ws_settings._raw_path
-        if not effective_xpm and ws_ssh.xpm_path:
-            effective_xpm = ws_ssh.xpm_path
-        if not effective_shell_init and ws_ssh.shell_init:
-            effective_shell_init = ws_ssh.shell_init
-        if not effective_uv_offline and ws_ssh.uv_offline:
-            effective_uv_offline = True
-        if not effective_python and ws_ssh.python:
-            effective_python = ws_ssh.python
-        if not effective_ssh_options and ws_ssh.options:
-            effective_ssh_options = ws_ssh.options
-        if not remote_log_levels and ws_ssh.log_levels:
-            remote_log_levels = ws_ssh.log_levels
-
-    if not effective_host:
-        cprint(
-            "Error: HOST is required (provide it or use a workspace with SSH settings)",
-            "red",
-        )
-        raise click.Abort()
-    if not effective_workdir:
-        cprint(
-            "Error: the remote workspace path is required "
-            "(provide it or use a workspace with SSH settings)",
-            "red",
-        )
-        raise click.Abort()
-
-    from experimaestro.scheduler.remote.client import SSHStateProviderClient
-
-    cprint(f"Connecting to {effective_host}...", "yellow")
-    state_provider = SSHStateProviderClient(
-        host=effective_host,
-        remote_workspace=effective_workdir,
-        ssh_options=effective_ssh_options or None,
-        remote_xpm_path=effective_xpm,
-        remote_shell_init=effective_shell_init,
-        uv_offline=effective_uv_offline,
-        remote_python=effective_python,
-        force_version=force_version,
-        request_timeout=request_timeout,
-        remote_log_levels=remote_log_levels,
-    )
-    try:
-        state_provider.connect()
-        cprint(f"Connected to {effective_host}", "green")
-    except Exception as e:
-        cprint(f"Failed to connect: {e}", "red")
-        raise click.Abort()
-
-    return effective_host, state_provider
-
-
 @click.command()
 @click.option(
     "--ssh",
     "ssh_target",
     metavar="HOST:PATH",
     default=None,
+    hidden=True,
     help="Monitor the workspace PATH on a remote HOST (e.g. user@server:/path)",
 )
 @click.option("--console", is_flag=True, help="Use the terminal (Textual) UI")
@@ -292,7 +154,7 @@ def _connect_ssh(
     help="Port for web server (default: 12345 or from settings.yaml)",
 )
 @_watcher_options
-@_ssh_options
+@ssh_options(hidden=True)
 @click.option(
     "--sync",
     is_flag=True,
@@ -314,15 +176,15 @@ def monitor(
 ):
     """Monitor the experiments of a workspace (--console or --web)
 
-    The workspace is the one selected with `experimaestro -w ID` or
-    `experimaestro --workdir PATH`; a workspace with SSH settings is
-    monitored remotely, as is any workspace given with --ssh.
+    The workspace is the one selected with `experimaestro -w ID`,
+    `experimaestro --workdir PATH` or `experimaestro --ssh HOST:PATH`; a
+    workspace with SSH settings is monitored remotely.
 
     \b
     Examples:
       experimaestro monitor --web              # default workspace, web UI
       experimaestro -w my-cluster monitor --console  # remote workspace
-      experimaestro monitor --ssh host:/path/ws --web  # ad-hoc remote
+      experimaestro --ssh host:/path/ws monitor --web  # ad-hoc remote
       experimaestro monitor --console             # terminal UI
     """
     if sync:
@@ -335,30 +197,18 @@ def monitor(
     if console == web and not events_viewer:
         raise click.UsageError("Choose one of --console or --web")
     cfg = root_config()
+    # Kept for compatibility: the SSH options used to be given here
+    cfg.ssh.set_target(ssh_target)
+    cfg.ssh.update(**ssh_kwargs)
     _configure_watcher(watcher, polling_interval)
 
-    ws_settings = None
-    if ssh_target is None and cfg.workspace_id and cfg.workdir is None:
-        ws_settings = get_workspace(cfg.workspace_id, include_remote=True)
-
-    title = ""
-    if ssh_target is not None or (ws_settings is not None and ws_settings.is_remote):
-        host, remote_workdir = None, None
-        if ssh_target is not None:
-            host, _, remote_workdir = ssh_target.partition(":")
-            if not remote_workdir:
-                raise click.UsageError("--ssh expects HOST:PATH")
-        title, state_provider = _connect_ssh(
-            host, remote_workdir, ws_settings, **ssh_kwargs
-        )
+    state_provider = cfg.state_provider()
+    if (remote := cfg.remote) is not None:
+        title = remote.host
         workdir = state_provider.local_cache_dir
     else:
-        from experimaestro.scheduler.workspace_state_provider import (
-            WorkspaceStateProvider,
-        )
-
+        title = ""
         workdir = cfg.workspace.path
-        state_provider = WorkspaceStateProvider.get_instance(workdir)
 
     _run_monitor_ui(
         state_provider,
@@ -383,7 +233,7 @@ def monitor(
     "--port", type=int, default=12345, help="Port for web server (default: 12345)"
 )
 @_watcher_options
-@_ssh_options
+@ssh_options
 @click.option(
     "--workspace",
     "ssh_workspace",
@@ -417,16 +267,18 @@ def ssh_monitor(
             cprint(f"Workspace '{ssh_workspace}' not found in settings", "red")
             raise click.Abort()
 
+    options = SSHOptions(host=host, path=remote_workdir)
+    options.update(**ssh_kwargs)
+    remote = RemoteWorkspace.resolve(options, ws_settings)
+
     _configure_watcher(watcher, polling_interval)
-    title, state_provider = _connect_ssh(
-        host, remote_workdir, ws_settings, **ssh_kwargs
-    )
+    state_provider = remote.connect()
     _run_monitor_ui(
         state_provider,
         state_provider.local_cache_dir,
         not web,
         port,
-        title=title,
+        title=remote.host,
         events_viewer=events_viewer,
         events_format=events_format,
         events_show_progress=not no_progress,

@@ -15,6 +15,7 @@ from experimaestro.settings import get_settings
 from experimaestro.utils.disk_usage import folder_size, format_size
 
 from . import RunConfig, check_xp_path, root_config
+from .remote import RemoteCommand
 
 
 @click.group()
@@ -113,7 +114,7 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
         "(default: enabled). Disable to scan only the primary workspace."
     ),
 )
-@workspace.command()
+@workspace.command(cls=RemoteCommand)
 @click.pass_obj
 def orphans(cfg: RunConfig, clean: bool, size: bool, include_folders: bool):
     """Check for jobs that are not part of any experiment
@@ -151,7 +152,7 @@ def migrate():
     pass
 
 
-@migrate.command("v1-to-v2")
+@migrate.command("v1-to-v2", cls=RemoteCommand)
 @click.argument("workdir", type=Path, required=False, callback=_check_xp_path)
 @click.option(
     "--dry-run", is_flag=True, help="Show what would be done without making changes"
@@ -260,7 +261,7 @@ def migrate_v1_to_v2(workdir: Path, dry_run: bool):
             )
 
 
-@workspace.command("cleanup")
+@workspace.command("cleanup", cls=RemoteCommand)
 @click.option("--workdir", type=Path, default=None, hidden=True)
 @click.option("--workspace", "workspace_id", type=str, default=None, hidden=True)
 @click.pass_obj
@@ -391,7 +392,7 @@ def cleanup(cfg: RunConfig, workdir: Path | None, workspace_id: str | None):
 )
 @click.option("--size", is_flag=True, help="Show size of each job folder")
 @click.option("--fullpath", is_flag=True, help="Show full paths")
-@workspace.command()
+@workspace.command(cls=RemoteCommand)
 @click.pass_context
 def stray(
     ctx,

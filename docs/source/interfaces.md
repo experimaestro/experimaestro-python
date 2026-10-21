@@ -289,14 +289,14 @@ For example, `@state = 'error' and model = 'bm25'` selects the failed jobs whose
 ## Remote Monitoring via SSH
 
 When experiments run on remote servers (e.g., HPC clusters, cloud instances),
-you can monitor them from your local machine using SSH tunneling. `monitor --ssh`
-establishes an SSH connection, starts a monitoring server on the remote
+you can monitor them from your local machine using SSH tunneling. Monitoring a
+[remote workspace](cli.md#remote-workspaces) establishes an SSH connection, starts a monitoring server on the remote
 host, and communicates via JSON-RPC over the SSH channel.
 
 ### Basic Usage
 
 ```bash
-experimaestro monitor --ssh HOST:REMOTE_WORKDIR (--console | --web) [OPTIONS]
+experimaestro [SSH OPTIONS] --ssh HOST:REMOTE_WORKDIR monitor (--console | --web)
 ```
 
 - **HOST**: SSH host in standard format (e.g., `user@server`, `server`, or SSH config alias)
@@ -306,19 +306,19 @@ experimaestro monitor --ssh HOST:REMOTE_WORKDIR (--console | --web) [OPTIONS]
 
 ```bash
 # Basic SSH monitoring (web UI)
-experimaestro monitor --web --ssh myserver:/home/user/experiments
+experimaestro --ssh myserver:/home/user/experiments monitor --web
 
 # With the console TUI instead of the web UI
-experimaestro monitor --ssh user@cluster.example.com:/scratch/experiments --console
+experimaestro --ssh user@cluster.example.com:/scratch/experiments monitor --console
 
 # Custom port for web interface
-experimaestro monitor --web --ssh myserver:/workspace --port 8080
+experimaestro --ssh myserver:/workspace monitor --web --port 8080
 
 # With SSH options (e.g., custom port, identity file)
-experimaestro monitor --web --ssh myserver:/workspace -o "-p 2222" -o "-i ~/.ssh/cluster_key"
+experimaestro --ssh myserver:/workspace -o "-p 2222" -o "-i ~/.ssh/cluster_key" monitor --web
 
 # Specify path to experimaestro on remote host
-experimaestro monitor --web --ssh myserver:/workspace --remote-xpm /opt/conda/bin/experimaestro
+experimaestro --ssh myserver:/workspace --remote-xpm /opt/conda/bin/experimaestro monitor --web
 ```
 
 ### Options
@@ -327,8 +327,9 @@ experimaestro monitor --web --ssh myserver:/workspace --remote-xpm /opt/conda/bi
 |--------|-------------|
 | `--console` / `--web` | Terminal (Textual) UI or web UI (one is required) |
 | `--port PORT` | Port for local web server (default: 12345) |
-| `--remote-xpm PATH` | Path to experimaestro executable on remote host |
-| `-o, --ssh-option OPT` | Additional SSH options (can be repeated) |
+
+The SSH options (`--remote-xpm`, `-o`, …) are given before the command, see
+[Remote Workspaces](cli.md#remote-workspaces).
 
 ### How It Works
 
@@ -342,7 +343,7 @@ experimaestro monitor --web --ssh myserver:/workspace --remote-xpm /opt/conda/bi
 
 ### Shared Workspaces
 
-Like local monitoring, `monitor --ssh` runs the workspace cleanup, so that
+Like local monitoring, remote monitoring runs the workspace cleanup, so that
 crashed jobs are recovered without waiting for the next experiment. This is safe
 in a workspace shared with other users: a job whose process cannot be checked
 from the monitoring machine (its PID belongs to another host, or its launcher is
@@ -396,10 +397,10 @@ Alternatively, specify a pre-installed experimaestro path:
 
 ```bash
 # If experimaestro is installed in a virtualenv
-experimaestro monitor --web --ssh host:/workspace --remote-xpm /path/to/venv/bin/experimaestro
+experimaestro --ssh host:/workspace --remote-xpm /path/to/venv/bin/experimaestro monitor --web
 
 # If installed system-wide
-experimaestro monitor --web --ssh host:/workspace --remote-xpm experimaestro
+experimaestro --ssh host:/workspace --remote-xpm experimaestro monitor --web
 ```
 
 (version-compatibility)=

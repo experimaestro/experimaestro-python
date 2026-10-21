@@ -4,8 +4,9 @@
 Commands are grouped by what they act on (``experiments``, ``jobs``,
 ``workspace``) plus ``tools`` for development helpers; ``run`` and ``monitor``
 are the two everyday entry points. The workspace is chosen once, with the root
-``--workspace``/``--workdir`` options, and read by the subcommands through
-:class:`RunConfig`.
+``--workspace``/``--workdir``/``--ssh`` options, and read by the subcommands
+through :class:`RunConfig`. A remote workspace is reached through its state
+provider, or by running the command remotely (see :mod:`.remote`).
 
 Old command names are kept as hidden aliases (see :func:`deprecated_alias`).
 ``rpyc-server`` and ``experiments --workdir X monitor-server`` are called by
@@ -21,12 +22,18 @@ import click
 import logging
 from functools import cached_property, update_wrapper
 from pathlib import Path
+from typing import TYPE_CHECKING
 from termcolor import cprint
 from importlib.metadata import entry_points
 
 import experimaestro
 from experimaestro.experiments.cli import experiments_cli
-from experimaestro.settings import WorkspaceSettings, find_workspace
+from experimaestro.settings import WorkspaceSettings, find_workspace, get_workspace
+
+from .remote import RemoteWorkspace, SSHOptions, ssh_options
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_provider import StateProvider
 
 # --- Command line main options
 # Only configure logging if not running under pytest (pytest has its own config)
@@ -58,12 +65,21 @@ class RunConfig:
         self.workspace_id: str | None = None
         self._workspace: WorkspaceSettings | None = None
 
+        #: SSH options (a remote workspace given with ``--ssh``, overrides)
+        self.ssh = SSHOptions()
+
+        #: Root options passed along to the remote commands
+        self.root_args: list[str] = []
+
+        self._provider: "StateProvider | None" = None
+
     def set_workspace(self, workdir: Path | None, workspace: str | None):
         """Overrides the workspace (if any is given)"""
         if workdir is not None or workspace:
             self.workdir = workdir
             self.workspace_id = workspace or None
             self._workspace = None
+            self._provider = None
 
     @property
     def workspace_spec(self) -> str | None:
@@ -73,15 +89,48 @@ class RunConfig:
         return str(self.workdir) if self.workdir is not None else None
 
     @property
+    def remote(self) -> RemoteWorkspace | None:
+        """The selected workspace, if it is remote"""
+        settings = None
+        if self.workspace_id and self.workdir is None:
+            settings = get_workspace(self.workspace_id, include_remote=True)
+        if self.ssh.is_set or (settings is not None and settings.is_remote):
+            return RemoteWorkspace.resolve(self.ssh, settings)
+        return None
+
+    @property
     def workspace(self) -> WorkspaceSettings:
         """The selected (local) workspace, resolved on first use"""
         if self._workspace is None:
+            if (remote := self.remote) is not None:
+                command = click.get_current_context().command_path
+                raise click.UsageError(
+                    f"`{command}` does not work with a remote workspace ({remote})"
+                )
             ws = find_workspace(workdir=self.workdir, workspace=self.workspace_id)
             path = check_xp_path(None, None, ws.path)
             if path != ws.path:
                 ws = find_workspace(workdir=path)
             self._workspace = ws
         return self._workspace
+
+    def state_provider(self) -> "StateProvider":
+        """The state provider of the selected workspace (local or remote)
+
+        It is closed when the command line ends.
+        """
+        if self._provider is None:
+            if (remote := self.remote) is not None:
+                provider = remote.connect()
+            else:
+                from experimaestro.scheduler.workspace_state_provider import (
+                    WorkspaceStateProvider,
+                )
+
+                provider = WorkspaceStateProvider.get_instance(self.workspace.path)
+            click.get_current_context().find_root().call_on_close(provider.close)
+            self._provider = provider
+        return self._provider
 
 
 def root_config() -> RunConfig:
@@ -146,6 +195,14 @@ def deprecated_alias(command: click.Command, new_name: str) -> click.Command:
     default=None,
     help="Workspace directory (instead of a workspace ID)",
 )
+@click.option(
+    "--ssh",
+    "ssh_target",
+    metavar="HOST:PATH",
+    default=None,
+    help="Remote workspace PATH on HOST, reached through SSH (e.g. user@server:/path)",
+)
+@ssh_options
 @click.pass_context
 def cli(
     ctx,
@@ -155,6 +212,8 @@ def cli(
     traceback,
     workspace: str | None,
     workdir: Path | None,
+    ssh_target: str | None,
+    **ssh_kwargs,
 ):
     if quiet:
         logging.getLogger().setLevel(logging.WARN)
@@ -174,9 +233,20 @@ def cli(
                 else:
                     click.echo(f"Warning: Unknown log level '{level_str}'", err=True)
 
+    if ssh_target is not None and workdir is not None:
+        raise click.UsageError("--ssh and --workdir cannot be used together")
+
     ctx.obj = RunConfig()
     ctx.obj.traceback = traceback
     ctx.obj.set_workspace(workdir, workspace)
+    ctx.obj.ssh.set_target(ssh_target)
+    ctx.obj.ssh.update(**ssh_kwargs)
+    ctx.obj.root_args = [
+        *(["--quiet"] if quiet else []),
+        *(["--debug"] if debug else []),
+        *(["--logging", log_levels] if log_levels else []),
+        *(["--traceback"] if traceback else []),
+    ]
 
 
 @cli.command(help="Get version")
@@ -200,6 +270,10 @@ def _is_task_parameters(path: str) -> bool:
 
 
 def _run(**kwargs):
+    if (remote := root_config().remote) is not None:
+        raise click.UsageError(
+            f"Experiments cannot be run on a remote workspace ({remote})"
+        )
     if not kwargs["args"] and _is_task_parameters(kwargs["yaml_file"]):
         # Before 2.x, `experimaestro run` ran a single task
         from experimaestro.run import run as run_task

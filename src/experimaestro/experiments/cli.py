@@ -460,6 +460,10 @@ def experiments_cli(  # noqa: C901
     ws_env = find_workspace(
         workdir=workdir, workspace=workspace, experiment_id=experiment_id
     )
+    if ws_env.is_remote:
+        raise click.UsageError(
+            f"Experiments cannot be run on a remote workspace ({ws_env.id})"
+        )
 
     workdir = ws_env.path
 

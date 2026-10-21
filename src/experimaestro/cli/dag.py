@@ -15,35 +15,24 @@ from experimaestro.scheduler.state_provider import StateProvider
 
 def _open_provider(workspace: str | None, experiment_id: str | None) -> StateProvider:
     """State provider for a workspace given by ID or path (or found from settings)"""
+    from experimaestro.cli import root_config
     from experimaestro.settings import find_workspace, get_workspace
 
-    ws = get_workspace(workspace, include_remote=True) if workspace else None
-    if ws is None:
-        ws = find_workspace(
-            workdir=Path(workspace).expanduser() if workspace else None,
-            experiment_id=experiment_id,
-        )
+    cfg = root_config()
+    if workspace:
+        if get_workspace(workspace, include_remote=True) is not None:
+            cfg.set_workspace(None, workspace)
+        else:
+            cfg.set_workspace(Path(workspace).expanduser(), None)
+    if cfg.workspace_spec or cfg.remote is not None:
+        return cfg.state_provider()
 
-    if ws.is_remote:
-        from experimaestro.scheduler.remote.client import SSHStateProviderClient
-
-        provider = SSHStateProviderClient(
-            host=ws.ssh.host,
-            remote_workspace=ws._raw_path,
-            ssh_options=ws.ssh.options or None,
-            remote_xpm_path=ws.ssh.xpm_path,
-            remote_shell_init=ws.ssh.shell_init,
-            uv_offline=ws.ssh.uv_offline,
-            remote_python=ws.ssh.python,
-            remote_log_levels=ws.ssh.log_levels,
-        )
-        provider.connect()
-        return provider
-
+    # No workspace given: the experiment may select one (workspace triggers)
     from experimaestro.scheduler.workspace_state_provider import (
         WorkspaceStateProvider,
     )
 
+    ws = find_workspace(experiment_id=experiment_id)
     return WorkspaceStateProvider(ws.path, no_cleanup=True)
 
 
@@ -137,7 +126,6 @@ def dag(
       experimaestro experiments dag my_experiment --tree -c 0      # Print configuration #0
       experimaestro experiments dag my_experiment --json -         # Dump as JSON
     """
-    from experimaestro.cli import root_config
     from experimaestro.cli.experiments import _select_experiment
     from experimaestro.ui.graph import (
         export_state,
@@ -146,7 +134,7 @@ def dag(
         standalone_html,
     )
 
-    provider = _open_provider(workspace or root_config().workspace_spec, experiment_id)
+    provider = _open_provider(workspace, experiment_id)
     try:
         exp = _select_experiment(provider, experiment_id)
         if exp is None:
