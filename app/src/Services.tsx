@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Table, Badge, Button } from "react-bootstrap";
 
 import { useAppSelector } from "./store";
@@ -17,11 +17,17 @@ const STATE_COLOR: { [key: string]: string } = {
 const Services = () => {
   const services = useAppSelector((state) => state.db.services);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
+  const connectionStatus = useAppSelector((state) => state.db.connectionStatus);
   const [logTarget, setLogTarget] = useState<LogTarget>();
-  // Services of the selected experiment (all of them by default)
+
+  // Only the services of the selected experiment are requested
+  useEffect(() => {
+    if (connectionStatus === "connected" && currentExperiment !== null)
+      client.request_services(currentExperiment);
+  }, [connectionStatus, currentExperiment]);
+
   const keys = services.ids.filter(
-    (key) =>
-      currentExperiment === null || services.byId[key].experimentId === currentExperiment,
+    (key) => services.byId[key].experimentId === currentExperiment,
   );
 
   return (
@@ -30,7 +36,9 @@ const Services = () => {
         Services
         <DocLink page="services.html" />
       </h5>
-      {keys.length === 0 ? (
+      {currentExperiment === null ? (
+        <p className="text-muted">Select an experiment to see its services.</p>
+      ) : keys.length === 0 ? (
         <p className="text-muted">No services.</p>
       ) : (
         <Table hover responsive className="align-middle">

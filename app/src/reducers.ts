@@ -325,6 +325,10 @@ export const slice = createSlice({
         draft.experiment = "";
         draft.currentRun = null;
         draft.runs = [];
+        // The server only sends the events of the experiment whose jobs were
+        // last requested: the jobs of the others would go stale, and are
+        // requested again when shown (App.tsx)
+        draft.jobsRequested = [];
       }
       if (isScoped(draft.route.view) && draft.route.experiment === id) {
         draft.route = route("experiments");
@@ -349,6 +353,10 @@ export const slice = createSlice({
         draft.experiment = payload.experiment || "";
         draft.currentRun = null;
         draft.runs = [];
+        // The server only sends the events of the experiment whose jobs were
+        // last requested: the jobs of the others would go stale, and are
+        // requested again when shown (App.tsx)
+        draft.jobsRequested = [];
       }
       if (payload.run !== draft.currentRun) {
         draft.currentRun = payload.run;

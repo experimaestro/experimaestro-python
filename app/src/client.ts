@@ -82,6 +82,7 @@ class Client {
       // App.tsx)
       store.dispatch(actions.resetJobsRequested());
       this.send("experiments");
+      // The started services (shown on every page)
       this.send("services");
     };
 
@@ -292,12 +293,19 @@ class Client {
   }
 
   // Jobs of an experiment run (of all the experiments by default), from the
-  // server cache
+  // server cache. The connection then watches that experiment: the server
+  // only sends the job, action and service events of the watched experiment
+  // (and of the started services)
   request_jobs(experimentId: string | null, runId: string | null): void {
     const payload: any = {};
     if (experimentId) payload.experimentId = experimentId;
     if (runId) payload.runId = runId;
     this.send("jobs", payload);
+  }
+
+  // Services of an experiment (shown by the services page)
+  request_services(experimentId: string): void {
+    this.send("services", { experimentId });
   }
 
   request_runs(experimentId: string): void {

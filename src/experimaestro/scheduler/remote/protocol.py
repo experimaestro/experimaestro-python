@@ -97,6 +97,7 @@ class RPCMethod(str, Enum):
     GET_UNRESOLVED_WARNINGS = "get_unresolved_warnings"
     GET_ORPHAN_JOBS = "get_orphan_jobs"
     GET_STRAY_JOBS = "get_stray_jobs"
+    WATCH = "watch"
 
 
 #: Methods handled by the servers that do not list theirs (experimaestro 2.7.0)

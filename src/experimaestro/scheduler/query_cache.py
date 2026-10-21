@@ -127,6 +127,13 @@ class QueryCache:
                 if entry.experiment_id in (experiment_id, None):
                     del self._entries[key]
 
+    def drop_if(self, predicate: Callable[[Hashable, CacheEntry], bool]) -> None:
+        """Drop the entries for which ``predicate(key, entry)`` holds"""
+        with self._lock:
+            for key, entry in list(self._entries.items()):
+                if predicate(key, entry):
+                    del self._entries[key]
+
     def invalidate_global(self) -> None:
         """Drop the workspace-wide queries, keeping the per-experiment ones
 

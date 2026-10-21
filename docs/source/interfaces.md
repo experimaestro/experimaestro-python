@@ -364,6 +364,10 @@ The SSH options (`--remote-xpm`, `-o`, …) are given before the command, see
 4. **File Sync**: When needed (e.g., for TensorBoard logs), files are synchronized
    on-demand using rsync over SSH
 5. **Real-time Updates**: The server sends notifications when job states change
+   — only for what the UI shows: the experiment list is always kept up to date,
+   but job, action and service events are only sent for the experiment shown
+   (and for the started services, shown on every page). The same applies to
+   the web UI, for each browser page.
 
 ### Shared Workspaces
 

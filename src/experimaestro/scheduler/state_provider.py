@@ -115,6 +115,57 @@ class StateProvider(ABC):
         # Cache for warning metadata: warning_key -> WarningEvent
         self._warning_metadata: Dict[str, "WarningEvent"] = {}
         self._warning_actions_lock = threading.Lock()
+        # What each UI watches (see watch); None watches every experiment
+        self._watchers: Dict[Any, frozenset[str] | None] = {}
+        self._watchers_lock = threading.Lock()
+
+    def watch(self, owner: Any, experiments: set[str] | None) -> None:
+        """Declare the experiments whose job events a UI needs
+
+        Experiment-level events (experiment list, runs, warnings) are always
+        delivered; job, service and action events are only needed for the
+        experiments that are shown. A provider may then stop delivering the
+        events of the other experiments — the remote (SSH) provider asks the
+        server not to send them.
+
+        Args:
+            owner: The watching UI (one declaration per owner, replaced by
+                the next call)
+            experiments: Watched experiment IDs, or None for all of them
+        """
+        with self._watchers_lock:
+            before = self._watched()
+            self._watchers[owner] = (
+                None if experiments is None else frozenset(experiments)
+            )
+            after = self._watched()
+        if after != before:
+            self._watched_changed(before, after)
+
+    def unwatch(self, owner: Any) -> None:
+        """Withdraw the declaration of an owner (see :meth:`watch`)"""
+        with self._watchers_lock:
+            before = self._watched()
+            self._watchers.pop(owner, None)
+            after = self._watched()
+        if after != before:
+            self._watched_changed(before, after)
+
+    def _watched(self) -> frozenset[str] | None:
+        """Union of the watched experiments (None: all of them)
+
+        Without any declaration, everything is watched: listeners that do not
+        declare what they need still get every event.
+        """
+        if not self._watchers or None in self._watchers.values():
+            return None
+        return frozenset().union(*self._watchers.values())
+
+    def _watched_changed(
+        self, before: frozenset[str] | None, after: frozenset[str] | None
+    ) -> None:
+        """Called when the watched experiments change (local providers deliver
+        every event anyway)"""
 
     def add_listener(self, listener: StateListener) -> None:
         """Register a listener for state change events
@@ -532,6 +583,17 @@ class StateProvider(ABC):
     ) -> List[BaseService]:
         """Get services for an experiment"""
         ...
+
+    def get_started_services(self) -> List[BaseService]:
+        """The started services (starting, running or stopping), of all the
+        experiments — shown by the UIs on every page"""
+        from experimaestro.scheduler.event_filter import STARTED_SERVICE_STATES
+
+        return [
+            service
+            for service in self.get_services()
+            if service.state.name in STARTED_SERVICE_STATES
+        ]
 
     # add_listener and remove_listener are implemented in base class
 
@@ -1512,6 +1574,22 @@ class OfflineStateProvider(StateProvider):
             experiment_id=experiment_id,
             copy=list,
         )
+
+    def get_started_services(self) -> List["BaseService"]:
+        """The started services, among the cached ones
+
+        Without reading the services of every experiment: the services are
+        started from the UIs (and run locally), on services they have read.
+        """
+        from experimaestro.scheduler.event_filter import STARTED_SERVICE_STATES
+
+        return [
+            service
+            for key, entry in self._query_cache.entries()
+            if key[0] == "services"
+            for service in entry.value
+            if service.state.name in STARTED_SERVICE_STATES
+        ]
 
     def _get_live_services(
         self, experiment_id: Optional[str], run_id: Optional[str]

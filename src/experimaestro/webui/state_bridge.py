@@ -39,7 +39,8 @@ class StateBridge:
     """Bridges StateProvider events to WebSocket broadcasts
 
     Similar to TUI's STATE_EVENT_HANDLERS pattern, converts events
-    to WebSocket messages and broadcasts to all connected clients.
+    to WebSocket messages and sends them to the connected clients that watch
+    them (see :class:`~experimaestro.scheduler.event_filter.EventFilter`).
     """
 
     def __init__(
@@ -128,7 +129,7 @@ class StateBridge:
         experiment = self.state_provider.get_experiment(event.experiment_id)
         if experiment:
             payload = serialize_experiment(experiment)
-            await self.ws_handler.broadcast("experiment.add", payload)
+            await self.ws_handler.send_event(event, "experiment.add", payload)
 
     async def _handle_job_state_changed(self, event: JobStateChangedEvent):
         """Handle job execution state change - broadcast job.update"""
@@ -150,6 +151,9 @@ class StateBridge:
         """Broadcast the execution state of the job an event is about"""
         from experimaestro.webui.websocket import serialize_job_update
 
+        recipients = self.ws_handler.recipients(event)
+        if not recipients:
+            return
         if event.task_id:
             job = self.state_provider.get_job(event.task_id, event.job_id)
         else:
@@ -168,14 +172,20 @@ class StateBridge:
                 if isinstance(event, ExperimentJobStateEvent) and event.experiment_id
                 else None
             )
-            await self.ws_handler.broadcast(
-                "job.update", serialize_job_update(job, experiment=experiment)
+            await self.ws_handler.send_event(
+                event,
+                "job.update",
+                serialize_job_update(job, experiment=experiment),
+                recipients,
             )
 
     async def _handle_job_submitted(self, event: JobSubmittedEvent):
         """Handle job added to experiment - broadcast job.add"""
         from experimaestro.webui.websocket import serialize_job
 
+        recipients = self.ws_handler.recipients(event)
+        if not recipients:
+            return
         # Fetch the full job data from state provider
         job = self.state_provider.get_job(event.task_id, event.job_id)
         if job:
@@ -192,32 +202,41 @@ class StateBridge:
                     else None
                 ),
             )
-            await self.ws_handler.broadcast("job.add", payload)
+            await self.ws_handler.send_event(event, "job.add", payload, recipients)
 
     async def _handle_service_added(self, event: ServiceAddedEvent):
         """Handle service added - broadcast service.add"""
         from experimaestro.webui.websocket import serialize_service
 
+        recipients = self.ws_handler.recipients(event)
+        if not recipients:
+            return
         # Fetch service from state provider
         services = self.state_provider.get_services(event.experiment_id, event.run_id)
         service = next((s for s in services if s.id == event.service_id), None)
         if service:
-            await self.ws_handler.broadcast("service.add", serialize_service(service))
+            await self.ws_handler.send_event(
+                event, "service.add", serialize_service(service), recipients
+            )
 
     async def _handle_service_state_changed(self, event: ServiceStateChangedEvent):
         """Handle service state change - broadcast service.update"""
         from experimaestro.webui.websocket import serialize_service
 
+        recipients = self.ws_handler.recipients(event)
+        if not recipients:
+            return
         services = self.state_provider.get_services(event.experiment_id, event.run_id)
         service = next((s for s in services if s.id == event.service_id), None)
         if service:
-            await self.ws_handler.broadcast(
-                "service.update", serialize_service(service)
+            await self.ws_handler.send_event(
+                event, "service.update", serialize_service(service), recipients
             )
 
     async def _handle_action_added(self, event: ActionAddedEvent):
         """Handle action added - broadcast action.add"""
-        await self.ws_handler.broadcast(
+        await self.ws_handler.send_event(
+            event,
             "action.add",
             {
                 "actionId": event.action_id,
@@ -231,11 +250,13 @@ class StateBridge:
         """Handle warning - broadcast warning.add"""
         from experimaestro.webui.websocket import serialize_warning
 
-        await self.ws_handler.broadcast("warning.add", serialize_warning(event))
+        await self.ws_handler.send_event(event, "warning.add", serialize_warning(event))
 
     async def _handle_error(self, event: ErrorEvent):
         """Handle error - broadcast error toast"""
-        await self.ws_handler.broadcast("error", {"message": event.error_message})
+        await self.ws_handler.send_event(
+            event, "error", {"message": event.error_message}
+        )
 
     async def _handle_run_updated(self, event):
         """Handle run update - triggers experiment refresh"""
@@ -245,10 +266,11 @@ class StateBridge:
         experiment = self.state_provider.get_experiment(event.experiment_id)
         if experiment:
             payload = serialize_experiment(experiment)
-            await self.ws_handler.broadcast("experiment.add", payload)
+            await self.ws_handler.send_event(event, "experiment.add", payload)
 
     def close(self):
         """Clean up - remove listener"""
+        self.state_provider.unwatch(self.ws_handler)
         try:
             self.state_provider.remove_listener(self._on_state_event)
         except ValueError:

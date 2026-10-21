@@ -18,6 +18,7 @@ from typing import IO, Callable, Dict, Optional
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from dataclasses import asdict
 
+from experimaestro.scheduler.event_filter import EventFilter
 from experimaestro.scheduler.state_status import EventBase
 from experimaestro.scheduler.remote.protocol import (
     RPCMethod,
@@ -75,6 +76,8 @@ class SSHStateProviderServer:
         self._state_provider: Optional[WorkspaceStateProvider] = None
         self._running = False
         self._write_lock = threading.Lock()
+        #: Events the client watches (all of them until it says otherwise)
+        self._event_filter = EventFilter()
 
         # Map of method names to handler functions
         self._handlers: Dict[str, Callable] = {
@@ -98,6 +101,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_UNRESOLVED_WARNINGS.value: self._handle_get_unresolved_warnings,
             RPCMethod.GET_ORPHAN_JOBS.value: self._handle_get_orphan_jobs,
             RPCMethod.GET_STRAY_JOBS.value: self._handle_get_stray_jobs,
+            RPCMethod.WATCH.value: self._handle_watch,
         }
 
     def start(self):
@@ -254,8 +258,11 @@ class SSHStateProviderServer:
         """Handle state change events from the state provider
 
         Converts events to JSON-RPC notifications and sends them to the client.
-        Uses generic serialization via dataclasses.asdict.
+        Uses generic serialization via dataclasses.asdict. Only the events of
+        what the client watches are sent (see :meth:`_handle_watch`).
         """
+        if not self._event_filter.accepts(event):
+            return
         try:
             # Serialize event to dict, filtering out None values and non-serializable objects
             event_dict = {}
@@ -392,6 +399,21 @@ class SSHStateProviderServer:
         """Handle get_stray_jobs request"""
         jobs = self._state_provider.get_stray_jobs(refresh=bool(params.get("refresh")))
         return [job.state_dict() for job in jobs]
+
+    def _handle_watch(self, params: Dict) -> None:
+        """Handle watch request: the experiments whose events the client needs
+
+        ``experiments`` is the list of watched experiment IDs, or null for all
+        of them (the default, also for clients that never send this request).
+        See :class:`~experimaestro.scheduler.event_filter.EventFilter`.
+        """
+        experiments = params.get("experiments")
+        jobs = [
+            job.identifier
+            for experiment_id in experiments or ()
+            for job in self._state_provider.get_jobs(experiment_id)
+        ]
+        self._event_filter.watch(experiments, jobs)
 
     def _handle_get_services(self, params: Dict) -> list:
         """Handle get_services request

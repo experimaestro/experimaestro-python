@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Optional, Set
 from fastapi import WebSocket
 
 from experimaestro.scheduler import job_operations, service_operations
+from experimaestro.scheduler.event_filter import EventFilter
 from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import display_state, status_rank
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported
 from experimaestro.scheduler.state_provider import StateProvider
+from experimaestro.scheduler.state_status import EventBase
 from experimaestro.scheduler.base import Scheduler, Job
 from experimaestro.scheduler.jobs import JobDependency
 from experimaestro.scheduler.interfaces import BaseJob, BaseExperiment, BaseService
@@ -334,8 +336,12 @@ class WebSocketHandler:
             {"type": "jobs", "payload": {"experimentId": "...", "runId": "..."}}
                 (from the cache; all experiments without experimentId)
             {"type": "refresh", "payload": {"experimentId": "..."}}  (re-read)
+                Both set the experiment the connection watches: the job,
+                action and service events of the other experiments are not
+                sent (see EventFilter)
             {"type": "experiments"}
-            {"type": "services"}
+            {"type": "services", "payload": {"experimentId": "..."}}
+                (the started services without experimentId)
             {"type": "job.details", "payload": {"jobId": "...", "experimentId": "..."}}
             {"type": "job.kill", "payload": {"jobId": "...", "experimentId": "..."}}
             {"type": "jobs.filter", "payload": {"query": "...", "experimentId": "...",
@@ -370,6 +376,8 @@ class WebSocketHandler:
         self.state_provider = state_provider
         self.token = token
         self.connections: Set[WebSocket] = set()
+        #: Events each connection watches (set by its jobs requests)
+        self.filters: Dict[WebSocket, EventFilter] = {}
         self._lock = asyncio.Lock()
         #: Background tasks (kept so that they are not garbage collected)
         self._tasks: Set[asyncio.Task] = set()
@@ -378,6 +386,9 @@ class WebSocketHandler:
         self._scheduler: Optional[Scheduler] = None
         if isinstance(state_provider, Scheduler):
             self._scheduler = state_provider
+
+        # Nothing is watched until a page asks for jobs
+        state_provider.watch(self, set())
 
     async def connect(self, websocket: WebSocket):
         """Handle new WebSocket connection
@@ -402,8 +413,11 @@ class WebSocketHandler:
             await websocket.close(code=1008, reason="Invalid token")
             return
 
+        event_filter = EventFilter()
+        event_filter.watch(set())
         async with self._lock:
             self.connections.add(websocket)
+            self.filters[websocket] = event_filter
 
         logger.debug("WebSocket client connected (total: %d)", len(self.connections))
 
@@ -411,6 +425,8 @@ class WebSocketHandler:
         """Handle WebSocket disconnection"""
         async with self._lock:
             self.connections.discard(websocket)
+            self.filters.pop(websocket, None)
+        self._update_watch()
 
         logger.debug("WebSocket client disconnected (total: %d)", len(self.connections))
 
@@ -483,6 +499,51 @@ class WebSocketHandler:
             # Clean up disconnected clients
             for ws in disconnected:
                 self.connections.discard(ws)
+
+    def recipients(self, event: EventBase) -> List[WebSocket]:
+        """The connections that watch an event (see EventFilter)"""
+        return [
+            websocket
+            for websocket, event_filter in list(self.filters.items())
+            if event_filter.accepts(event)
+        ]
+
+    async def send_event(
+        self,
+        event: EventBase,
+        msg_type: str,
+        payload: Dict[str, Any],
+        recipients: List[WebSocket] | None = None,
+    ):
+        """Send the message of a state event to the connections watching it
+
+        Args:
+            recipients: The connections watching the event, when already
+                computed (``recipients(event)`` must be called once per event)
+        """
+        if recipients is None:
+            recipients = self.recipients(event)
+        message = {"type": msg_type, "payload": payload}
+        for websocket in recipients:
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                async with self._lock:
+                    self.connections.discard(websocket)
+                    self.filters.pop(websocket, None)
+
+    def _update_watch(self):
+        """Tell the state provider what the connections watch
+
+        A remote provider then only receives the events of these experiments.
+        """
+        watched: set[str] | None = set()
+        for event_filter in list(self.filters.values()):
+            if event_filter.experiments is None:
+                watched = None
+                break
+            watched.update(event_filter.experiments)
+        self.state_provider.watch(self, watched)
 
     def _serialize_jobs_for_experiment(
         self,
@@ -572,12 +633,22 @@ class WebSocketHandler:
     async def _send_jobs(
         self, websocket: WebSocket, payload: Dict[str, Any], *, refresh: bool
     ):
+        # The connection now watches this experiment (all without one); set
+        # first, so that a remote provider receives its events when reading
+        experiment_id = payload.get("experimentId")
+        event_filter = self.filters.get(websocket)
+        if event_filter is not None:
+            event_filter.watch(None if experiment_id is None else {experiment_id})
+            await self._in_thread(self._update_watch)
+
         jobs = await self._in_thread(
             self._jobs_payloads,
             payload.get("experimentId"),
             payload.get("runId"),
             refresh,
         )
+        if event_filter is not None:
+            event_filter.add_jobs(job["jobId"] for job in jobs)
         for job in jobs:
             await websocket.send_json({"type": "job.add", "payload": job})
 
@@ -614,14 +685,19 @@ class WebSocketHandler:
         await websocket.send_json({"type": "experiments.loaded"})
 
     async def _handle_services(self, websocket: WebSocket, payload: Dict[str, Any]):
-        """Send the services of an experiment (all experiments by default)
+        """Send the services of an experiment (the started ones by default)
 
         Read through the state provider, as the TUI does, so that services are
-        listed (and can be started) without a running experiment.
+        listed (and can be started) without a running experiment. Without an
+        experiment, only the started services (shown on every page) are sent.
         """
-        services = await self._in_thread(
-            self.state_provider.get_services, payload.get("experimentId")
-        )
+        experiment_id = payload.get("experimentId")
+        if experiment_id:
+            services = await self._in_thread(
+                self.state_provider.get_services, experiment_id
+            )
+        else:
+            services = await self._in_thread(self.state_provider.get_started_services)
         for service in services:
             await websocket.send_json(
                 {"type": "service.add", "payload": serialize_service(service)}

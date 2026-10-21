@@ -57,6 +57,9 @@ class FakeProvider:
     def get_experiments(self, refresh=False):
         return list(self.experiments.values())
 
+    def watch(self, owner, experiments):
+        pass
+
     def get_experiment(self, experiment_id, refresh=False):
         return self.experiments.get(experiment_id)
 

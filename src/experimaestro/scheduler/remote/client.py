@@ -712,6 +712,11 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         self._connected = True
 
+        # What the UIs declared before the connection
+        watched = self._watched()
+        if watched is not None:
+            self._send_watch(watched)
+
     def disconnect(self):
         """Disconnect from the remote server"""
         self._running = False
@@ -1049,6 +1054,62 @@ class SSHStateProviderClient(OfflineStateProvider):
             future.set_exception(e)
 
         return future
+
+    def _watched_changed(
+        self, before: frozenset[str] | None, after: frozenset[str] | None
+    ) -> None:
+        """Ask the server for the events of the watched experiments only
+
+        The cached job answers about the experiments no longer watched would
+        go stale (their job events are not sent anymore): they are dropped,
+        with the workspace-wide job queries, and read again when asked. The
+        services are kept: their cache owns the live (local) service instances.
+        """
+        if after is not None:
+
+            def unwatched(key, entry) -> bool:
+                if key[0] not in self._JOB_QUERIES:
+                    return False
+                return entry.experiment_id is None or entry.experiment_id not in after
+
+            self._query_cache.drop_if(unwatched)
+
+        if self._running:
+            self._send_watch(after)
+
+    #: Queries whose answers depend on job events
+    _JOB_QUERIES = frozenset(
+        {
+            "jobs",
+            "job",
+            "all_jobs",
+            "orphan_jobs",
+            "stray_jobs",
+            "tags_map",
+            "dependencies_map",
+            "experiment_job_info",
+            "run_objects",
+        }
+    )
+
+    def _send_watch(self, experiments: frozenset[str] | None) -> None:
+        """Send the watched experiments to the server (if it can filter)
+
+        Not waited for: the server handles the requests in order, so the ones
+        sent next are answered once the watch is applied.
+        """
+        if not self.supports(RPCMethod.WATCH):
+            return
+        future = self._call(
+            RPCMethod.WATCH,
+            {"experiments": None if experiments is None else sorted(experiments)},
+        )
+
+        def done(future):
+            if error := future.exception():
+                logger.warning("Could not set the watched experiments: %s", error)
+
+        future.add_done_callback(done)
 
     def supports(self, method: RPCMethod) -> bool:
         """Whether the remote server handles a method (older ones lack some)"""

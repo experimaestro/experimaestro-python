@@ -218,6 +218,7 @@ class ExperimaestroUI(App):
         # The state provider handles its own notification strategy internally
         if self.state_provider:
             self.state_provider.add_listener(self._on_state_event)
+            self._watch_experiment(None)
             self._listener_registered = True
             self.log("Registered state listener for notifications")
 
@@ -240,6 +241,7 @@ class ExperimaestroUI(App):
         # Register listener
         if not self._listener_registered:
             self.state_provider.add_listener(self._on_state_event)
+            self._watch_experiment(None)
             self._listener_registered = True
             self.log("Registered state listener for notifications")
 
@@ -604,6 +606,8 @@ class ExperimaestroUI(App):
             f"Experiment selected: {message.experiment_id} (run: {message.run_id})"
         )
 
+        self._watch_experiment(message.experiment_id)
+
         # Set up services and actions lists
         services_list = self.query_one(ServicesList)
         services_list.set_experiment(message.experiment_id, message.run_id)
@@ -622,12 +626,21 @@ class ExperimaestroUI(App):
         jobs_table = self.query_one("#jobs-table", DataTable)
         jobs_table.focus()
 
+    def _watch_experiment(self, experiment_id: str | None) -> None:
+        """Tell the state provider which experiment is shown (None: the
+        experiment list only), so that a remote one only receives its events"""
+        if self.state_provider:
+            self.state_provider.watch(
+                self, {experiment_id} if experiment_id is not None else set()
+            )
+
     def on_job_highlighted(self, message: JobHighlighted) -> None:
         """Handle job highlight - show status info in subtitle"""
         self.sub_title = message.status_text
 
     def on_experiment_deselected(self, message: ExperimentDeselected) -> None:
         """Handle experiment deselection - hide jobs/services tabs"""
+        self._watch_experiment(None)
         # Hide the tabbed content
         tabs = self.query_one("#experiment-tabs", TabbedContent)
         tabs.add_class("hidden")
@@ -965,6 +978,8 @@ class ExperimaestroUI(App):
             f"for {message.experiment_id}"
         )
 
+        self._watch_experiment(message.experiment_id)
+
         # Set up jobs table with the selected run
         jobs_table_widget = self.query_one(JobsTable)
         jobs_table_widget.set_experiment(
@@ -1121,5 +1136,6 @@ class ExperimaestroUI(App):
         # Unregister listener
         if self._listener_registered and self.state_provider:
             self.state_provider.remove_listener(self._on_state_event)
+            self.state_provider.unwatch(self)
             self._listener_registered = False
             self.log("Unregistered state listener")
