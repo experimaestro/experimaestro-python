@@ -22,6 +22,17 @@ with experiment("/path/to/workspace", "my-experiment", port=12345) as xp:
     model = Learn.C(epochs=100).submit()
 ```
 
+Task workers load the task module from its file and do not inherit the
+`sys.path` of the launching script. If your tasks import modules *by name* at
+run time (plugin registries, factories, sibling packages), give the roots of
+these packages with `python_path` — the counterpart of the `pythonpath` key of
+the [YAML configuration](experiments/cli-runner.md):
+
+```python
+with experiment("/path/to/workspace", "my-experiment", python_path=["src"]) as xp:
+    ...
+```
+
 or through the command line, where the experiment code is a `run(helper, cfg)`
 function and its parameters come from a configuration file:
 
