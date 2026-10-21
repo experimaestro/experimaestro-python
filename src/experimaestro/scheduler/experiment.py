@@ -197,7 +197,7 @@ class experiment(BaseExperiment):
             tasks import *by name* at run time (plugins, factories, sibling
             packages) here. Equivalent to exporting ``PYTHONPATH`` before
             submitting, and the counterpart of the ``pythonpath`` YAML key of
-            ``run-experiment``.
+            ``experimaestro run``.
 
         :param wait_for_quit: Deprecated, no longer used. Web server is no longer
             started automatically.
@@ -215,7 +215,7 @@ class experiment(BaseExperiment):
 
         .. deprecated::
             The ``host``, ``port``, ``token``, and ``wait_for_quit`` parameters are
-            deprecated. Use ``--web`` flag with ``run-experiment`` CLI or start the
+            deprecated. Use ``--web`` flag with the ``experimaestro run`` CLI or start the
             web server separately.
         """
         import warnings
@@ -226,28 +226,28 @@ class experiment(BaseExperiment):
         if host is not None:
             warnings.warn(
                 "The 'host' parameter is deprecated. Use '--web' flag with "
-                "'run-experiment' CLI or start the web server separately.",
+                "'experimaestro run' CLI or start the web server separately.",
                 DeprecationWarning,
                 stacklevel=2,
             )
         if port is not None:
             warnings.warn(
                 "The 'port' parameter is deprecated. Use '--web' flag with "
-                "'run-experiment' CLI or start the web server separately.",
+                "'experimaestro run' CLI or start the web server separately.",
                 DeprecationWarning,
                 stacklevel=2,
             )
         if token is not None:
             warnings.warn(
                 "The 'token' parameter is deprecated. Use '--web' flag with "
-                "'run-experiment' CLI or start the web server separately.",
+                "'experimaestro run' CLI or start the web server separately.",
                 DeprecationWarning,
                 stacklevel=2,
             )
         if wait_for_quit:
             warnings.warn(
                 "The 'wait_for_quit' parameter is deprecated. Use '--web' flag with "
-                "'run-experiment' CLI or start the web server separately.",
+                "'experimaestro run' CLI or start the web server separately.",
                 DeprecationWarning,
                 stacklevel=2,
             )
