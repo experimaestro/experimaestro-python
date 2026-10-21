@@ -51,6 +51,11 @@ on the host of their workspace):
 - the other commands are run on the remote host (`experimaestro --workdir PATH
   COMMAND …` over SSH), with their output and prompts shown locally.
 
+When the connection of a monitoring server drops (e.g. `monitor`), it is
+re-established automatically, a bounded number of times (see
+[reconnection settings](settings.md#reconnection)); the TUI and the web UI
+show the connection state.
+
 The remote host needs experimaestro: by default, it is run with `uv tool run`,
 with a version compatible with the local one. The SSH options are given before
 the command, and override the workspace SSH settings:
@@ -71,7 +76,7 @@ Examples:
 
 ```bash
 # Using workspace SSH settings from settings.yaml
-experimaestro -w my-cluster jobs list --filter '@state = "ERROR"'
+experimaestro -w my-cluster jobs list --filter '@state = "error"'
 experimaestro -w my-cluster experiments runs list my-experiment
 
 # Ad-hoc remote workspace
@@ -232,6 +237,12 @@ The job filter is a boolean expression that allows filtering jobs by state, name
 - `not in`: Non-membership in a list
 - `and`: Logical AND
 - `or`: Logical OR
+
+Values are quoted with `"` or `'` (there is no escape character: a value
+containing a `"` is written between `'`). Parentheses are not supported.
+In the web UI, the filter input suggests fields, operators, states and the tag
+keys and values of the displayed jobs (see
+[Job Filter Expressions](interfaces.md#job-filter-expressions)).
 
 ### Examples
 
