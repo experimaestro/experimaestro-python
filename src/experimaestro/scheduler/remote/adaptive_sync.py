@@ -120,13 +120,14 @@ class AdaptiveSynchronizer:
             "[%s] Started adaptive sync (path: %s)", self.name, self.remote_path
         )
 
-    def stop(self) -> None:
-        """Stop background syncing"""
-        if not self._running:
-            return
-
+    def request_stop(self) -> None:
+        """Ask the background syncing to stop (without waiting)"""
         self._running = False
         self._stop_event.set()
+
+    def stop(self) -> None:
+        """Stop background syncing"""
+        self.request_stop()
 
         if self._thread:
             self._thread.join(timeout=2.0)
@@ -224,6 +225,9 @@ class AdaptiveSynchronizer:
                     self.on_sync_complete(local_path)
 
                 return local_path
+            elif not self._running:
+                # Stopped (and the running sync cancelled)
+                return None
             else:
                 logger.warning("[%s] Rsync returned no path", self.name)
                 self._handle_failure("Sync returned no path")

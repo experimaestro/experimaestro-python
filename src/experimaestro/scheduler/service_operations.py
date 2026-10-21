@@ -67,6 +67,10 @@ def start_service(service: BaseService) -> Outcome:
         logger.warning("Service %s could not be started: %s", service.id, e)
         service.set_error(str(e))
         return Outcome("error", f"Failed to start service: {e}")
+    if url is None:
+        if live.error:
+            return Outcome("error", f"Failed to start service: {live.error}")
+        return Outcome("info", f"Service '{service.id}' stopped while starting")
     return Outcome("info", f"Service started: {url}")
 
 

@@ -2672,8 +2672,8 @@ class MockService(BaseService):
             service_class=d.get("class"),
             experiment_id=d.get("experiment_id"),
             run_id=d.get("run_id"),
-            url=d.get("url"),
-            state=d.get("state"),
+            # The stored state and URL (older experimaestro versions) are
+            # ignored: the service ran in another process
             subservices=d.get("subservices"),
         )
 
@@ -2737,8 +2737,9 @@ class MockSubService(BaseService):
         self.parent = parent
         self.id = data["service_id"]
         self._description = data.get("description", "")
-        self._state_name = data.get("state") or "STOPPED"
-        self._url = data.get("url")
+        # Not started (a stored state or URL comes from another process)
+        self._state_name = "STOPPED"
+        self._url: Optional[str] = None
         self._error: Optional[str] = None
 
     def _live(self) -> Optional["BaseService"]:

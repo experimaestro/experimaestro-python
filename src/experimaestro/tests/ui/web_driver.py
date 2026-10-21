@@ -111,6 +111,10 @@ class WebDriver:
     async def _notification(self, msg_type: str, **payload) -> Notification:
         start = len(self.notifications)
         await self._request(msg_type, **payload)
+        if msg_type == "service.start":
+            # Started in the background: the outcome comes later
+            while len(self.notifications) == start:
+                self._receive(self.ws.receive_json())
         new = self.notifications[start:]
         assert new, f"no notification for {msg_type}"
         return new[-1]

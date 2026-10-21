@@ -125,3 +125,30 @@ def test_mock_full_state_dict_keeps_subservices():
         MockService.from_full_state_dict(mock.full_state_dict()).subservices()[1].id
         == "wandb"
     )
+
+
+def test_process_service_failing_to_start(tmp_path):
+    """A service whose process cannot be started is in error, not starting"""
+    from experimaestro.scheduler.services import ProcessWebService, ServiceState
+
+    class _Process(ProcessWebService):
+        id = "proc"
+
+        def _build_command(self):
+            return ["true"]
+
+        def _wait_for_ready(self):
+            return "http://localhost:1"
+
+    service = _Process(log_directory=tmp_path)
+    # The log file cannot be opened
+    service.stdout.mkdir()
+    with pytest.raises(IsADirectoryError):
+        service.get_url()
+    assert service.state == ServiceState.ERROR
+
+    # It can be started again once fixed
+    service.stdout.rmdir()
+    assert service.get_url() == "http://localhost:1"
+    assert service.state == ServiceState.RUNNING
+    service.stop()

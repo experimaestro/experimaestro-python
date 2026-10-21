@@ -58,6 +58,11 @@ export const ActiveServices = () => {
             ) : (
               <span title={svc.description}>{id}</span>
             )}
+            {svc.syncStatus && (
+              <span className="text-muted ms-2" title="Synchronization of its files">
+                {svc.syncStatus}
+              </span>
+            )}
             <Button
               size="sm"
               variant="link"

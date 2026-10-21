@@ -537,6 +537,8 @@ class WebService(Service):
         with self._start_lock:
             self.url = None
             self._running_event = None
+            # Not an error if it was stopped while starting
+            self._error = None
             self.state = ServiceState.STOPPED
 
     def _force_stop_thread(self):
@@ -670,11 +672,18 @@ class ProcessWebService(Service):
             if self.state == ServiceState.RUNNING:
                 return self.url
 
-            if self.state == ServiceState.STOPPED:
+            if self.state in (ServiceState.STOPPED, ServiceState.ERROR):
                 logger.info(f"Starting service {self.id} as subprocess")
+                self._error = None
                 self.state = ServiceState.STARTING
                 self._running_event = threading.Event()
-                self._start_process()
+                try:
+                    self._start_process()
+                except Exception as e:
+                    # Not left starting (later calls would wait forever)
+                    self.set_error(str(e))
+                    self._running_event.set()
+                    raise
 
             running_event = self._running_event
 
@@ -781,8 +790,10 @@ class ProcessWebService(Service):
 
             self.state = ServiceState.STOPPING
 
-        # Wait for startup to complete
+        # Starting: kill the process now rather than waiting for it to be ready
+        # (its monitor then sees it exit)
         if running_event:
+            self._kill_process(timeout=timeout)
             running_event.wait()
 
         # Terminate process
@@ -792,6 +803,8 @@ class ProcessWebService(Service):
         with self._start_lock:
             self.url = None
             self._running_event = None
+            # Not an error if it was stopped while starting
+            self._error = None
             self.state = ServiceState.STOPPED
 
     def _kill_process(self, timeout: float = 2.0):

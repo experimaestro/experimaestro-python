@@ -371,6 +371,8 @@ class WebSocketHandler:
         self.token = token
         self.connections: Set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        #: Background tasks (kept so that they are not garbage collected)
+        self._tasks: Set[asyncio.Task] = set()
 
         # Check if we have a scheduler (active experiment mode)
         self._scheduler: Optional[Scheduler] = None
@@ -852,9 +854,31 @@ class WebSocketHandler:
             return
         service.set_starting()
         await self.broadcast("service.update", serialize_service(service))
-        await self._notify_outcome(
-            websocket, lambda: service_operations.start_service(service)
-        )
+
+        # Updates while the files of the service are synchronized
+        loop = asyncio.get_running_loop()
+
+        def on_status_change():
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast("service.update", serialize_service(service)), loop
+            )
+
+        service.set_status_change_callback(on_status_change)
+
+        # Started in the background, so that the service can be stopped while
+        # starting (messages of a connection are handled one at a time)
+        task = asyncio.create_task(self._start_service(websocket, service))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _start_service(self, websocket: WebSocket, service: BaseService):
+        try:
+            await self._notify_outcome(
+                websocket, lambda: service_operations.start_service(service)
+            )
+        except Exception as e:
+            # E.g. the connection was closed while starting
+            logger.warning("Service %s start: %s", service.id, e)
         await self.broadcast("service.update", serialize_service(service))
 
     async def _handle_service_stop(self, websocket: WebSocket, payload: Dict[str, Any]):

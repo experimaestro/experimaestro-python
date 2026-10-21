@@ -7,10 +7,15 @@ when services need them (e.g., TensorboardService).
 
 import logging
 import subprocess
+import threading
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger("xpm.remote.sync")
+
+
+class SyncCancelled(RuntimeError):
+    """The sync was cancelled (see :meth:`RemoteFileSynchronizer.cancel`)"""
 
 
 class RemoteFileSynchronizer:
@@ -46,6 +51,28 @@ class RemoteFileSynchronizer:
         self.ssh_options = ssh_options or []
         self.compress = compress
         self.bwlimit = bwlimit
+        #: Running rsync processes, by relative path (to cancel them)
+        self._processes: dict[str, subprocess.Popen] = {}
+        #: Relative paths whose running sync was cancelled
+        self._cancelled: set[str] = set()
+        self._lock = threading.Lock()
+
+    def _relative_path(self, remote_path: str) -> str:
+        """Path relative to the remote workspace"""
+        if remote_path.startswith(str(self.remote_workspace)):
+            return remote_path[len(str(self.remote_workspace)) :].lstrip("/")
+        return remote_path.lstrip("/")
+
+    def cancel(self, remote_path: str) -> None:
+        """Kill the running sync of a path, if any"""
+        relative_path = self._relative_path(remote_path)
+        with self._lock:
+            process = self._processes.get(relative_path)
+            if process is None:
+                return
+            self._cancelled.add(relative_path)
+        logger.info("Cancelling the sync of %s", relative_path)
+        process.kill()
 
     def sync_path(
         self,
@@ -65,10 +92,7 @@ class RemoteFileSynchronizer:
             Local path where the files were synced to
         """
         # Normalize the path - get relative path within workspace
-        if remote_path.startswith(str(self.remote_workspace)):
-            relative_path = remote_path[len(str(self.remote_workspace)) :].lstrip("/")
-        else:
-            relative_path = remote_path.lstrip("/")
+        relative_path = self._relative_path(remote_path)
 
         if not relative_path:
             raise ValueError("Cannot sync empty path")
@@ -84,7 +108,9 @@ class RemoteFileSynchronizer:
         dest = f"{local_path}/"
 
         use_compress = self.compress if compress is None else compress
-        self._rsync(source, dest, include=include, compress=use_compress)
+        self._rsync(
+            source, dest, include=include, compress=use_compress, key=relative_path
+        )
 
         return local_path
 
@@ -94,6 +120,7 @@ class RemoteFileSynchronizer:
         dest: str,
         include: list[str] | None = None,
         compress: bool = False,
+        key: str | None = None,
     ):
         """Execute rsync command
 
@@ -102,6 +129,7 @@ class RemoteFileSynchronizer:
             dest: Local destination path
             include: Optional list of filename patterns to include
             compress: Whether to enable gzip compression
+            key: Name under which the running process can be cancelled
         """
         cmd = [
             "rsync",
@@ -138,14 +166,30 @@ class RemoteFileSynchronizer:
 
         logger.debug("Running rsync: %s", " ".join(cmd))
 
+        cancelled = False
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minute timeout
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
             )
+            if key is not None:
+                with self._lock:
+                    self._processes[key] = process
+            try:
+                _, stderr = process.communicate(timeout=300)  # 5 minute timeout
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+            finally:
+                if key is not None:
+                    with self._lock:
+                        self._processes.pop(key, None)
+                        cancelled = key in self._cancelled
+                        self._cancelled.discard(key)
+            result = subprocess.CompletedProcess(cmd, process.returncode, "", stderr)
 
+            if cancelled:
+                raise SyncCancelled(f"Sync of {key} cancelled")
             if result.returncode != 0:
                 # rsync returns non-zero for some warnings
                 if result.returncode == 23:

@@ -11,6 +11,8 @@ import logging
 import os
 import shlex
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -311,3 +313,69 @@ def test_sync_refuses_file(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="is a file"):
         sync.sync_path("/remote/logs.out")
     assert sync.sync_path("/remote/dir") == tmp_path / "dir"
+
+
+#: rsync taking a long time (a large first synchronization)
+SLOW_RSYNC = """#!/bin/sh
+exec sleep 60
+"""
+
+
+def test_service_starts_while_syncing(ssh_provider, tmp_path, monkeypatch):
+    """A service starts without waiting for the first synchronization of its
+    files, and stopping it kills the running synchronization"""
+    bin_dir = tmp_path / "slow-bin"
+    bin_dir.mkdir()
+    (bin_dir / "rsync").write_text(SLOW_RSYNC)
+    (bin_dir / "rsync").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
+
+    live = find_service(ssh_provider, "greetings", "viewer").to_service()
+    start = time.time()
+    assert live.get_url() == "http://localhost:1/viewer"
+    assert time.time() - start < 10
+    assert live.state.name == "RUNNING"
+
+    # The first synchronization is running
+    synchronizer = ssh_provider._synchronizer
+    deadline = time.time() + 10
+    while not synchronizer._processes and time.time() < deadline:
+        time.sleep(0.05)
+    (process,) = synchronizer._processes.values()
+    assert live.sync_status == "⟳ Syncing"
+
+    start = time.time()
+    live.stop()
+    assert time.time() - start < 10
+    assert process.poll() is not None
+    assert not synchronizer._processes
+    assert live.state.name == "STOPPED"
+
+
+def test_process_service_stopped_while_starting(tmp_path):
+    """A process service can be stopped before it is ready"""
+    from experimaestro.scheduler.services import ProcessWebService, ServiceState
+
+    class _NeverReady(ProcessWebService):
+        id = "never-ready"
+
+        def _build_command(self):
+            return ["sleep", "60"]
+
+        def _wait_for_ready(self):
+            while self.process.poll() is None:
+                time.sleep(0.05)
+            raise RuntimeError("exited")
+
+    service = _NeverReady(log_directory=tmp_path)
+    urls = []
+    starting = threading.Thread(target=lambda: urls.append(service.get_url()))
+    starting.start()
+    while service.state != ServiceState.STARTING or service.process is None:
+        time.sleep(0.01)
+
+    service.stop()
+    starting.join(timeout=10)
+    assert urls == [None]
+    assert service.state == ServiceState.STOPPED
+    assert service.error is None

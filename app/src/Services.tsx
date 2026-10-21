@@ -21,8 +21,7 @@ const Services = () => {
   // Services of the selected experiment (all of them by default)
   const keys = services.ids.filter(
     (key) =>
-      currentExperiment === null ||
-      services.byId[key].experimentId === currentExperiment,
+      currentExperiment === null || services.byId[key].experimentId === currentExperiment,
   );
 
   return (
@@ -49,37 +48,37 @@ const Services = () => {
               const svc = services.byId[key];
               const { id, experimentId } = svc;
               const running = svc.state === "RUNNING";
+              // A starting service can be stopped (e.g. a long synchronization)
+              const active = running || svc.state === "STARTING";
               return (
                 <tr key={key} data-service-id={id} data-experiment-id={experimentId}>
                   <td>
-                    <Badge bg={STATE_COLOR[svc.state] || "secondary"}>
-                      {svc.state}
-                    </Badge>
+                    <Badge bg={STATE_COLOR[svc.state] || "secondary"}>{svc.state}</Badge>
                   </td>
                   <td>
                     <code>{id}</code>
                   </td>
                   <td className="small">
                     {svc.description}
-                    {svc.error && (
-                      <div className="text-danger small">{svc.error}</div>
-                    )}
+                    {svc.error && <div className="text-danger small">{svc.error}</div>}
                   </td>
                   <td className="text-muted small">{svc.syncStatus || "—"}</td>
                   <td className="text-nowrap">
-                    {running ? (
+                    {active ? (
                       <>
-                        <Button
-                          size="sm"
-                          variant="outline-primary"
-                          className="me-1"
-                          href={`/services/${encodeURIComponent(
-                            experimentId,
-                          )}/${encodeURIComponent(id)}/`}
-                          target="_blank"
-                        >
-                          Open
-                        </Button>
+                        {running && (
+                          <Button
+                            size="sm"
+                            variant="outline-primary"
+                            className="me-1"
+                            href={`/services/${encodeURIComponent(
+                              experimentId,
+                            )}/${encodeURIComponent(id)}/`}
+                            target="_blank"
+                          >
+                            Open
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline-danger"

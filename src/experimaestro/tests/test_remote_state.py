@@ -451,6 +451,7 @@ class TestSSHRoundTrip:
             experiment_id="exp1",
             run_id="run1",
             url="http://localhost:8080",
+            state="RUNNING",
         )
 
         # Server-side: serialize using full_state_dict
@@ -463,8 +464,53 @@ class TestSSHRoundTrip:
         )
         restored = SSHStateProviderClient._dict_to_service(mock_client, serialized)
 
-        # Verify equality by comparing full_state_dict outputs
-        assert original.full_state_dict() == restored.full_state_dict()
+        # Same service, but not its remote runtime state (the service runs
+        # locally when monitoring over SSH)
+        runtime = ("state", "url")
+        assert {
+            k: v for k, v in original.full_state_dict().items() if k not in runtime
+        } == {k: v for k, v in restored.full_state_dict().items() if k not in runtime}
+        assert restored.state.name == "STOPPED"
+        assert restored.url is None
+
+
+class TestServiceStateNotStored:
+    """The state of a service is not stored with the experiment run: it only
+    makes sense in the process running the service"""
+
+    def test_stored_without_runtime_state(self):
+        from experimaestro.scheduler.interfaces import _stored_service
+
+        service = MockService(
+            service_id="tensorboard",
+            description_text="TensorBoard",
+            state_dict_data={},
+            url="http://localhost:6006",
+            state="RUNNING",
+            subservices=[
+                {"service_id": "wandb", "state": "RUNNING", "url": "http://x"}
+            ],
+        )
+        stored = _stored_service(service)
+        assert "state" not in stored and "url" not in stored
+        assert stored["subservices"] == [{"service_id": "wandb"}]
+
+    def test_stored_state_ignored(self):
+        """Runs stored by older versions (with the state) show stopped services"""
+        service = MockService.from_full_state_dict(
+            {
+                "service_id": "tensorboard",
+                "state": "RUNNING",
+                "url": "http://localhost:6006",
+                "subservices": [
+                    {"service_id": "wandb", "state": "RUNNING", "url": "http://x"}
+                ],
+            }
+        )
+        assert service.state.name == "STOPPED"
+        assert service.url is None
+        (wandb,) = service.subservices()
+        assert wandb.state.name == "STOPPED"
 
 
 # =============================================================================
@@ -1242,10 +1288,11 @@ class TestRemoteFileSynchronizer:
         # Should return the original path
         assert local_path == Path("/other/path/file.txt")
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_rsync_command_construction(self, mock_run, synchronizer):
         """Test that rsync command is constructed correctly"""
         mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value.communicate.return_value = ("", "")
 
         synchronizer._rsync(
             "testhost:/remote/workspace/logs/",
@@ -1264,10 +1311,11 @@ class TestRemoteFileSynchronizer:
         assert "-v" in cmd
         assert "testhost:/remote/workspace/logs/" in cmd
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     def test_rsync_command_compression_and_include(self, mock_run, synchronizer):
         """Test that rsync command includes -z when enabled and preserves directory hierarchy with include"""
         mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value.communicate.return_value = ("", "")
 
         synchronizer._rsync(
             "testhost:/remote/workspace/logs/",

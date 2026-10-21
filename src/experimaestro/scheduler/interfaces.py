@@ -1455,6 +1455,26 @@ def _action_to_dict(action_id: str, action) -> dict[str, Any]:
 # =============================================================================
 
 
+#: Runtime fields of a service, not stored: they only make sense in the
+#: process running the service
+_SERVICE_RUNTIME_FIELDS = ("state", "url")
+
+
+def _stored_service(service: "BaseService") -> dict:
+    """Stored view of a service (without its runtime state)"""
+    data = {
+        k: v
+        for k, v in service.full_state_dict().items()
+        if k not in _SERVICE_RUNTIME_FIELDS
+    }
+    if data.get("subservices"):
+        data["subservices"] = [
+            {k: v for k, v in sub.items() if k not in _SERVICE_RUNTIME_FIELDS}
+            for sub in data["subservices"]
+        ]
+    return data
+
+
 class BaseExperiment:
     """Base interface for experiment information
 
@@ -1660,7 +1680,7 @@ class BaseExperiment:
             "started_at": serialize_timestamp(self.started_at),
             "ended_at": serialize_timestamp(self.ended_at),
             "job_states": self._serialize_job_states(),
-            "services": {k: v.full_state_dict() for k, v in self.services.items()},
+            "services": {k: _stored_service(v) for k, v in self.services.items()},
             "actions": {k: _action_to_dict(k, v) for k, v in self.actions.items()},
             "run_tags": self.run_tags,
             "experiment_tags": self.experiment_tags,
@@ -2105,6 +2125,10 @@ class BaseService(ABC):
             Error message string or None if no error
         """
         return None
+
+    def set_status_change_callback(self, callback: Callable[[], None] | None) -> None:
+        """Callback invoked when the service status changes outside of its state
+        (e.g. the synchronization of its files when monitoring over SSH)"""
 
 
 # =============================================================================
