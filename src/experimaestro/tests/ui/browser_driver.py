@@ -348,6 +348,37 @@ class BrowserDriver:
             return (await error.inner_text()).strip()
         return None
 
+    async def _show_completions(self, query: str) -> list[str]:
+        """Types a filter and asks for its completions (Ctrl+Space)"""
+        await self._close_modals()
+        search = self.page.locator("#searchjobs")
+        await search.fill(query)
+        await search.press("End")
+        await search.press("Control+Space")
+        await self.settle()
+        options = self.page.locator("#searchjobs-completions [role=option]")
+        return [
+            (await option.locator(".completion-label").inner_text()).strip()
+            for option in await options.all()
+        ]
+
+    async def filter_completions(self, query: str) -> list[str]:
+        labels = await self._show_completions(query)
+        # Leaving the input closes the suggestions
+        await self.page.locator("#searchjobs").blur()
+        return labels
+
+    async def accept_filter_completion(self, query: str, label: str) -> str:
+        labels = await self._show_completions(query)
+        search = self.page.locator("#searchjobs")
+        for _ in range(labels.index(label)):
+            await search.press("ArrowDown")
+        await search.press("Tab")
+        await self.settle()
+        value = await search.input_value()
+        await search.blur()
+        return value
+
     async def job_detail(self, job_id: str) -> JobDetail:
         await self._close_modals()
         await self._job_row(job_id).locator("i[title='Details']").click()

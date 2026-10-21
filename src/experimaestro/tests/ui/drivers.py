@@ -133,6 +133,16 @@ class UIDriver(Protocol):
         """Filter the job list; returns the error shown for an invalid query"""
         ...
 
+    async def filter_completions(self, query: str) -> list[str]:
+        """Suggestions offered (when asked for) for a filter being typed, with
+        the cursor at its end"""
+        ...
+
+    async def accept_filter_completion(self, query: str, label: str) -> str:
+        """Type a filter, accept one of the suggestions (with the keyboard);
+        returns the filter shown"""
+        ...
+
     async def job_detail(self, job_id: str) -> JobDetail:
         """Open the detail view of a job of the open experiment"""
         ...

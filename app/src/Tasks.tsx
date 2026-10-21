@@ -7,7 +7,8 @@ import client, { JobsFilterResult } from "./client";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
 import { useAppSelector, useNavigate } from "./store";
-import { clearOnEscape, useShortcuts } from "./shortcuts";
+import { useShortcuts } from "./shortcuts";
+import FilterInput from "./FilterInput";
 import { KeyHints, SortHeader, SortLabel, sortedMessage } from "./ui/sorting";
 
 type SortKey = "status" | "task" | "date" | "name";
@@ -375,12 +376,14 @@ export default () => {
           >
             <Form.Group style={{ flex: "1 1 24rem" }}>
               <Form.Label htmlFor="searchjobs">Filter</Form.Label>
-              <Form.Control
+              <FilterInput
                 id="searchjobs"
-                ref={searchInput}
+                inputRef={searchInput}
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={clearOnEscape(() => setQuery(""))}
+                onChange={setQuery}
+                onClear={() => setQuery("")}
+                experimentId={currentExperiment}
+                runId={currentRun}
                 placeholder="Filter (/): @state = 'done', @name ~ 'pattern', tag = 'value'"
                 isInvalid={!!trimmedQuery && filterResult.error !== null}
                 isValid={
@@ -503,6 +506,7 @@ export default () => {
           <KeyHints
             hints={[
               ["/", "filter"],
+              ["Ctrl+Space", "suggestions"],
               ["S", "sort by status"],
               ["T", "sort by task"],
               ["D", "sort by date"],

@@ -220,6 +220,29 @@ class WebDriver:
         self._filter = response["jobIds"]
         return None
 
+    async def _complete(self, query: str) -> dict[str, Any]:
+        request_id = next(self._request_ids)
+        payload = {"query": query, "cursor": len(query), "requestId": request_id}
+        if self._experiment is not None:
+            payload["experimentId"] = self._experiment
+        if self._run is not None:
+            payload["runId"] = self._run
+        (response,) = [
+            m["payload"]
+            for m in await self._request("jobs.complete", **payload)
+            if m["type"] == "jobs.complete" and m["payload"]["requestId"] == request_id
+        ]
+        return response
+
+    async def filter_completions(self, query: str) -> list[str]:
+        return [item["label"] for item in (await self._complete(query))["items"]]
+
+    async def accept_filter_completion(self, query: str, label: str) -> str:
+        # Replaces the completed range, as the client does
+        response = await self._complete(query)
+        (text,) = [i["text"] for i in response["items"] if i["label"] == label]
+        return query[: response["start"]] + text + query[response["end"] :]
+
     async def job_detail(self, job_id: str) -> JobDetail:
         await self._request("job.details", jobId=job_id, taskId=self._task_id(job_id))
         job = self.jobs[job_id]

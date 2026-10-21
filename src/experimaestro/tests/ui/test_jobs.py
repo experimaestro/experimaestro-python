@@ -163,6 +163,56 @@ async def test_invalid_filter_reports_error(ui):
     assert error is not None and error.startswith("Invalid query")
 
 
+@pytest.mark.ui("web")
+async def test_filter_completion(ui):
+    """Fields, operators and values (from the jobs displayed) are suggested"""
+    await ui.open_experiment("sweep")
+    assert await ui.filter_completions("") == ["@state", "@name", "model"]
+    assert await ui.filter_completions("@st") == ["@state"]
+    assert await ui.filter_completions("model ") == ["=", "~", "in", "not in"]
+    assert "'running'" in await ui.filter_completions("@state = ")
+    # Tag values of the displayed run only
+    assert await ui.filter_completions("model = ") == ["'bm25'", "'dense'"]
+    assert await ui.filter_completions("@name = 'pkg.E") == ["'pkg.Evaluate'"]
+
+    await ui.open_experiment("baseline")
+    assert await ui.filter_completions("model = ") == ["'bm25'", "'splade'"]
+
+
+@pytest.mark.ui("web")
+async def test_filter_completion_accept(ui):
+    await ui.open_experiment("baseline")
+    assert await ui.accept_filter_completion("mo", "model") == "model "
+    assert await ui.accept_filter_completion("model ", "in") == "model in ["
+    query = await ui.accept_filter_completion("model = 's", "'splade'")
+    assert query == "model = 'splade' "
+    assert await ui.set_filter(query) is None
+    assert await ui.visible_jobs() == {LEARN_ERROR}
+
+
+@pytest.mark.ui("browser")
+async def test_filter_completion_while_typing(ui):
+    """Suggestions open while typing; Enter accepts, Escape closes them (and
+    then clears the filter)"""
+    await ui.open_experiment("baseline")
+    search = ui.page.locator("#searchjobs")
+    options = ui.page.locator("#searchjobs-completions [role=option]")
+    await search.press_sequentially("@sta")
+    await options.first.wait_for()
+    assert await options.all_inner_texts() == ["@state\njob state"]
+    await search.press("Enter")
+    # Then the operators are suggested
+    await ui.settle()
+    assert await search.input_value() == "@state "
+    assert await options.count() == 4
+    await search.press("Escape")
+    await ui.settle()
+    assert await options.count() == 0
+    assert await search.input_value() == "@state "
+    await search.press("Escape")
+    assert await search.input_value() == ""
+
+
 async def test_job_detail(ui):
     await ui.open_experiment("baseline")
     detail = await ui.job_detail(EVAL_DONE)
