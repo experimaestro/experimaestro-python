@@ -260,6 +260,37 @@ workspaces:
 | `xpm_path` | Path to experimaestro on remote host (bypasses `uv tool run` entirely) |
 | `options` | Additional SSH options (e.g., `["-p", "2222"]`) |
 | `log_levels` | Logging levels of the remote server, shown locally (e.g., `xpm.remote.trace=DEBUG`) |
+| `reconnect` | Reconnection policy of this workspace (overrides the global `reconnect` settings, see [Reconnection](#reconnection)) |
+
+### Reconnection
+
+When the SSH connection of a monitor (`monitor --console` or `--web`) drops,
+it reconnects on its own and shows the connection state (reconnecting,
+disconnected) in the interface. The policy is set globally, and can be
+overridden per workspace in its `ssh` settings:
+
+```yaml
+# Global policy (these are the defaults)
+reconnect:
+  max_retries: 5     # attempts within the time window (0 disables reconnecting)
+  window: 300        # seconds over which the attempts are counted
+  delay: 1           # seconds before the first attempt (doubled after each failure)
+  max_delay: 30      # maximum delay between two attempts (seconds)
+
+workspaces:
+  - id: my-cluster
+    path: /scratch/experiments
+    ssh:
+      host: user@cluster
+      reconnect:
+        max_retries: 10
+        window: 600
+```
+
+The attempts are counted over a sliding window, successful ones included: a
+connection that keeps dropping right after reconnecting is given up as well.
+Once `max_retries` attempts were made within the last `window` seconds, the
+monitor stays disconnected (restart it to try again).
 
 ### Using Workspace SSH Settings
 

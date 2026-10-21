@@ -136,6 +136,30 @@ class HistorySettings:
 
 
 @dataclass
+class ReconnectSettings:
+    """Reconnection of the remote (SSH) workspaces when the connection drops
+
+    The monitor (TUI or web UI) reconnects on its own, at most
+    ``max_retries`` times within ``window`` seconds; it then stays
+    disconnected (restart it to try again). The delay between two attempts
+    doubles from ``delay`` up to ``max_delay``.
+    """
+
+    max_retries: int = 5
+    """Maximum number of reconnection attempts within the time window
+    (0 disables the reconnection)"""
+
+    window: float = 300.0
+    """Time window (in seconds) over which the attempts are counted"""
+
+    delay: float = 1.0
+    """Delay (in seconds) before the first attempt"""
+
+    max_delay: float = 30.0
+    """Maximum delay (in seconds) between two attempts"""
+
+
+@dataclass
 class SSHSettings:
     """SSH settings for remote workspace access."""
 
@@ -162,6 +186,10 @@ class SSHSettings:
     log_levels: Optional[str] = None
     """Logging levels of the remote server, shown locally (as ``--logging``,
     e.g. ``xpm.remote.trace=DEBUG`` to trace the requests)"""
+
+    reconnect: Optional[ReconnectSettings] = None
+    """Reconnection policy of this workspace (defaults to the global
+    ``reconnect`` settings)"""
 
 
 @dataclass
@@ -241,6 +269,10 @@ class Settings:
 
     carbon: CarbonSettings = field(default_factory=CarbonSettings)
     """Settings for environmental impact tracking"""
+
+    reconnect: ReconnectSettings = field(default_factory=ReconnectSettings)
+    """Reconnection of the remote (SSH) workspaces (can be overridden per
+    workspace, in its ``ssh`` settings)"""
 
 
 def _interpolate(obj, is_env=False):

@@ -97,12 +97,7 @@ class Client {
       this.reconnectAttempts = 0;
       store.dispatch(actions.setConnectionStatus("connected"));
 
-      // Request initial data (jobs are requested for the experiment shown, see
-      // App.tsx)
-      store.dispatch(actions.resetJobsRequested());
-      this.send("experiments");
-      // The started services (shown on every page)
-      this.send("services");
+      this.requestState();
     };
 
     this.ws.onclose = (event) => {
@@ -128,6 +123,16 @@ class Client {
     this.ws.onmessage = (event) => {
       this.handleMessage(event.data);
     };
+  }
+
+  // Request the state shown (on connection, and once the server reconnected
+  // to a remote workspace)
+  private requestState(): void {
+    // Jobs are requested for the experiment shown, see App.tsx
+    store.dispatch(actions.resetJobsRequested());
+    this.send("experiments");
+    // The started services (shown on every page)
+    this.send("services");
   }
 
   private scheduleReconnect(): void {
@@ -212,6 +217,19 @@ class Client {
         case "experiment.graph":
           if (this.onExperimentGraph) this.onExperimentGraph(payload);
           break;
+        case "connection.state": {
+          const previous = store.getState().db.providerConnection;
+          store.dispatch(actions.setProviderConnection(payload));
+          // Events were missed while the server was disconnected
+          if (
+            payload?.state === "connected" &&
+            previous !== null &&
+            previous.state !== "connected"
+          ) {
+            this.requestState();
+          }
+          break;
+        }
         case "experiment.removed":
           store.dispatch(actions.removeExperiment(payload));
           break;

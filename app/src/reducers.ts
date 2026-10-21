@@ -184,9 +184,21 @@ export function jobsKey(experimentId: string | null, runId: string | null): stri
 
 export type ConnectionStatus = "connected" | "connecting" | "disconnected";
 
+// Connection of the server to the workspace (a remote, SSH, workspace
+// reconnects when its connection drops)
+export type ProviderConnection = {
+  state: "connected" | "reconnecting" | "disconnected";
+  host: string;
+  attempt: number;
+  maxRetries: number;
+  delay: number;
+  error: string;
+};
+
 export type State = {
   connected: boolean;
   connectionStatus: ConnectionStatus;
+  providerConnection: ProviderConnection | null;
   experiment: string; // Kept for backward compatibility
   currentExperiment: string | null; // Currently selected experiment filter (null = all)
   currentRun: string | null; // Currently selected run (null = current/latest)
@@ -211,6 +223,7 @@ export const slice = createSlice({
   initialState: {
     connected: false,
     connectionStatus: "connecting",
+    providerConnection: null,
     experiment: initialScope.experiment || "",
     currentExperiment: initialScope.experiment,
     currentRun: initialScope.run,
@@ -285,6 +298,10 @@ export const slice = createSlice({
     setConnectionStatus(draft, action: PayloadAction<ConnectionStatus>) {
       draft.connectionStatus = action.payload;
       draft.connected = action.payload === "connected";
+    },
+
+    setProviderConnection(draft, { payload }: PayloadAction<ProviderConnection>) {
+      draft.providerConnection = payload;
     },
 
     addExperiment(draft, action: PayloadAction<Experiment>) {

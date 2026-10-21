@@ -26,6 +26,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -464,6 +465,47 @@ class ErrorEvent(ExperimentEventBase):
     warning_key: str = ""  # Key of the warning that caused the error
     action_key: str = ""  # Action that failed
     error_message: str = ""  # Error description
+
+
+# -----------------------------------------------------------------------------
+# Connection Events
+# -----------------------------------------------------------------------------
+
+
+class ConnectionState(str, Enum):
+    """State of the connection of a state provider to its source
+
+    Local providers are always connected; the remote (SSH) one reconnects when
+    its connection drops (see :class:`~experimaestro.settings.ReconnectSettings`).
+    """
+
+    CONNECTED = "connected"
+    #: The connection dropped: trying to reconnect
+    RECONNECTING = "reconnecting"
+    #: Not connected (and not trying anymore)
+    DISCONNECTED = "disconnected"
+
+
+@dataclass
+class ConnectionStateEvent(EventBase):
+    """Event: The connection of the state provider changed (remote providers)
+
+    Once reconnected (``state == "connected"``), the cached answers were
+    dropped: the UIs read the state again.
+    """
+
+    #: A :class:`ConnectionState` value
+    state: str = ConnectionState.CONNECTED.value
+    #: The remote host
+    host: str = ""
+    #: Number of the reconnection attempt (reconnecting) or of the attempts made
+    attempt: int = 0
+    #: Maximum number of attempts within the time window
+    max_retries: int = 0
+    #: Seconds before the next attempt (reconnecting)
+    delay: float = 0.0
+    #: Why the connection was lost, or why the last attempt failed
+    error: str = ""
 
 
 # =============================================================================

@@ -9,6 +9,7 @@ from textual.widgets import (
     Header,
     Footer,
     DataTable,
+    Static,
     TabbedContent,
     TabPane,
 )
@@ -30,6 +31,8 @@ from experimaestro.scheduler.state_status import (
     CarbonMetricsEvent,
     WarningEvent,
     ErrorEvent,
+    ConnectionState,
+    ConnectionStateEvent,
 )
 from experimaestro.tui.log_viewer import LogViewerScreen
 from experimaestro.tui.utils import (  # noqa: F401
@@ -152,6 +155,8 @@ class ExperimaestroUI(App):
     def compose(self) -> ComposeResult:
         """Compose the TUI layout"""
         yield Header()
+        # Connection state of a remote workspace (hidden when connected)
+        yield Static(id="connection-status", classes="hidden")
 
         if self.state_provider is None:
             # Deferred mode: only show logs, monitor will be added later
@@ -221,6 +226,9 @@ class ExperimaestroUI(App):
             self._watch_experiment(None)
             self._listener_registered = True
             self.log("Registered state listener for notifications")
+            self._show_connection_state(
+                ConnectionStateEvent(state=self.state_provider.connection_state.value)
+            )
 
     def set_state_provider(self, state_provider: StateProvider) -> None:
         """Set the state provider and mount monitor widgets (for deferred mode)
@@ -1090,6 +1098,61 @@ class ExperimaestroUI(App):
             handle_warning_response,
         )
 
+    def _show_connection_state(self, event: ConnectionStateEvent) -> None:
+        """Show the connection state of the provider (hidden when connected)"""
+        status = self.query_one("#connection-status", Static)
+        status.remove_class("reconnecting", "disconnected")
+        host = f" to {event.host}" if event.host else ""
+        host_from = f" from {event.host}" if event.host else ""
+        match ConnectionState(event.state):
+            case ConnectionState.CONNECTED:
+                status.add_class("hidden")
+                return
+            case ConnectionState.RECONNECTING:
+                text = f"⟳ Connection{host} lost, reconnecting"
+                if event.attempt:
+                    text += f" (attempt {event.attempt}/{event.max_retries})"
+            case ConnectionState.DISCONNECTED:
+                text = (
+                    f"✗ Disconnected{host_from}: restart the monitor to reconnect"
+                    if event.attempt
+                    else f"✗ Disconnected{host_from}"
+                )
+        if event.error:
+            text += f" — {event.error}"
+        status.update(text)
+        status.add_class(event.state)
+        status.remove_class("hidden")
+
+    def _handle_connection_state(self, event: ConnectionStateEvent) -> None:
+        """Handle ConnectionStateEvent - show the state, and read the state
+        again once reconnected (the provider dropped its cached answers)"""
+        was_connected = self.query_one("#connection-status", Static).has_class("hidden")
+        self._show_connection_state(event)
+        match ConnectionState(event.state):
+            case ConnectionState.CONNECTED:
+                if not was_connected:
+                    self.notify(f"Reconnected to {event.host}", timeout=5)
+                self._refresh_views()
+            case ConnectionState.DISCONNECTED:
+                self.notify(
+                    f"Could not reconnect to {event.host}: {event.error}",
+                    severity="error",
+                    timeout=10,
+                )
+
+    def _refresh_views(self) -> None:
+        """Show the state again (from the provider cache)"""
+        for experiments_list in self.query(ExperimentsList):
+            experiments_list.refresh_experiments()
+        for jobs_table in self.query(JobsTable):
+            jobs_table.refresh_jobs()
+        for services_list in self.query(ServicesList):
+            services_list.refresh_services()
+        for job_detail_container in self.query("#job-detail-container"):
+            if not job_detail_container.has_class("hidden"):
+                self.query_one(JobDetailView).refresh_job_detail()
+
     def _handle_error_event(self, event: "ErrorEvent") -> None:
         """Handle error event from warning action execution"""
         self.log(f"Error: {event.error_message}")
@@ -1113,6 +1176,7 @@ class ExperimaestroUI(App):
         JobSubmittedEvent: _handle_job_submitted,
         WarningEvent: _handle_warning_event,
         ErrorEvent: _handle_error_event,
+        ConnectionStateEvent: _handle_connection_state,
     }
 
     def action_quit(self) -> None:

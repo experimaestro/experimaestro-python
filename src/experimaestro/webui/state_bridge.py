@@ -27,6 +27,7 @@ from experimaestro.scheduler.state_status import (
     ErrorEvent,
     RunUpdatedEvent,
     RunCompletedEvent,
+    ConnectionStateEvent,
 )
 
 if TYPE_CHECKING:
@@ -118,6 +119,7 @@ class StateBridge:
             ErrorEvent: self._handle_error,
             RunUpdatedEvent: self._handle_run_updated,
             RunCompletedEvent: self._handle_run_updated,
+            ConnectionStateEvent: self._handle_connection_state,
         }
         return handlers.get(type(event))
 
@@ -267,6 +269,16 @@ class StateBridge:
         if experiment:
             payload = serialize_experiment(experiment)
             await self.ws_handler.send_event(event, "experiment.add", payload)
+
+    async def _handle_connection_state(self, event: ConnectionStateEvent):
+        """Handle a change of the provider connection - broadcast
+        connection.state (once reconnected, the pages request the state
+        again)"""
+        from experimaestro.webui.websocket import serialize_connection_state
+
+        await self.ws_handler.send_event(
+            event, "connection.state", serialize_connection_state(event)
+        )
 
     def close(self):
         """Clean up - remove listener"""

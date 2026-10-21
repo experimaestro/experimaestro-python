@@ -47,6 +47,8 @@ class WebDriver:
         self._filter: list[str] | None = None
         self._experiment: str | None = None
         self._run: str | None = None
+        #: Last connection state of the provider sent by the server
+        self.connection: dict[str, Any] | None = None
 
     async def __aenter__(self) -> "WebDriver":
         self.client.__enter__()
@@ -89,10 +91,26 @@ class WebDriver:
                 )
             case "error":
                 self.notifications.append(Notification("error", payload["message"]))
+            case "connection.state":
+                previous, self.connection = self.connection, payload
+                if (
+                    payload["state"] == "connected"
+                    and previous is not None
+                    and previous["state"] != "connected"
+                ):
+                    # The client requests the state again (answered later)
+                    self.ws.send_json({"type": "experiments", "payload": {}})
+                    if self._experiment is not None:
+                        jobs = {"experimentId": self._experiment}
+                        if self._run is not None:
+                            jobs["runId"] = self._run
+                        self.ws.send_json({"type": "jobs", "payload": jobs})
 
-    async def _request(self, msg_type: str, **payload) -> list[dict[str, Any]]:
-        """Send a request; returns the messages received in response"""
-        self.ws.send_json({"type": msg_type, "payload": payload})
+    async def _request(self, msg_type: str | None, **payload) -> list[dict[str, Any]]:
+        """Send a request (only the barrier when None); returns the messages
+        received in response"""
+        if msg_type is not None:
+            self.ws.send_json({"type": msg_type, "payload": payload})
         barrier = next(self._request_ids)
         self.ws.send_json(
             {"type": "jobs.filter", "payload": {"query": "", "requestId": barrier}}
@@ -347,3 +365,10 @@ class WebDriver:
         return await self._notification(
             "service.stop", experimentId=experiment_id, id=service_id
         )
+
+    async def connection_state(self) -> str | None:
+        # Receives what the server pushed
+        await self._request(None)
+        assert self.connection is not None, "connection state not sent"
+        state = self.connection["state"]
+        return None if state == "connected" else state

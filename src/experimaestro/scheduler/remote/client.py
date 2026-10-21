@@ -36,6 +36,8 @@ from experimaestro.scheduler.state_provider import (
 )
 from experimaestro.scheduler.state_status import (
     CarbonMetricsEvent,
+    ConnectionState,
+    ConnectionStateEvent,
     EventBase,
     ExperimentJobStateEvent,
     ExperimentUpdatedEvent,
@@ -44,6 +46,8 @@ from experimaestro.scheduler.state_status import (
     RunUpdatedEvent,
     ServiceStateChangedEvent,
 )
+from experimaestro.scheduler.remote.reconnect import ReconnectPolicy
+from experimaestro.settings import ReconnectSettings
 from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
@@ -564,6 +568,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         force_version: bool = False,
         request_timeout: float = DEFAULT_TIMEOUT,
         remote_log_levels: Optional[str] = None,
+        reconnect: ReconnectSettings | None = None,
     ):
         """Initialize the client
 
@@ -584,6 +589,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             remote_log_levels: Logging levels of the remote server, as the
                 ``--logging`` option (e.g. ``xpm.remote.trace=DEBUG``); its
                 logs are shown locally
+            reconnect: Reconnection policy when the connection drops
+                (defaults to :class:`ReconnectSettings` defaults)
         """
         # Initialize base class (includes service cache)
         super().__init__()
@@ -622,8 +629,19 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._read_thread: Optional[threading.Thread] = None
         self._notify_thread: Optional[threading.Thread] = None
         self._stderr_thread: Optional[threading.Thread] = None
+        #: Between connect() and disconnect()
         self._running = False
-        self._connected = False
+        #: Whether the SSH process of the current session can be used
+        self._session_open = False
+        #: Session number (incremented each time the SSH process is started)
+        self._session = 0
+        self._connection_state = ConnectionState.DISCONNECTED
+        self._state_lock = threading.Lock()
+        #: Set by disconnect(), to stop reconnecting
+        self._closing = threading.Event()
+        self._reconnect_thread: Optional[threading.Thread] = None
+        self._connect_timeout = 30.0
+        self.reconnect_policy = ReconnectPolicy(reconnect)
 
         #: Methods the server handles, and its experimaestro version (both
         #: sent by the server on connection, except by older ones)
@@ -640,13 +658,21 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         # Job and experiment caches are inherited from OfflineStateProvider
 
+    @property
+    def connection_state(self) -> ConnectionState:
+        return self._connection_state
+
     def connect(self, timeout: float = 30.0):
         """Establish SSH connection and start remote server
 
+        When the connection drops afterwards, the client reconnects on its
+        own (see :class:`ReconnectPolicy`).
+
         Args:
-            timeout: Connection timeout in seconds
+            timeout: Connection timeout in seconds (of each reconnection
+                attempt as well)
         """
-        if self._connected:
+        if self._running:
             logger.warning("Already connected")
             return
 
@@ -663,7 +689,34 @@ class SSHStateProviderClient(OfflineStateProvider):
         # This allows rsync and other SSH commands to reuse the same connection
         # Use a short temp path to stay under Unix socket path limit (104 bytes)
         self._control_path = tempfile.mktemp(prefix="xpm-", dir="/tmp")
-        control_opts = [
+        self._connect_timeout = timeout
+        self._closing.clear()
+        self._running = True
+
+        try:
+            self._open_session(timeout)
+        except Exception:
+            self.disconnect()
+            raise
+
+        # Start notification thread for throttled event delivery
+        self._notify_thread = threading.Thread(
+            target=self._notify_loop, daemon=True, name="SSHClient-Notify"
+        )
+        self._notify_thread.start()
+
+        with self._state_lock:
+            lost = not self._session_open
+            if not lost:
+                self._connection_state = ConnectionState.CONNECTED
+        if lost:
+            self.disconnect()
+            raise ConnectionError(f"Connection to {self.host} lost while connecting")
+
+    def _ssh_command(self) -> List[str]:
+        """The SSH command running the remote server"""
+        cmd = [
+            "ssh",
             "-o",
             "ControlMaster=auto",
             "-o",
@@ -671,11 +724,10 @@ class SSHStateProviderClient(OfflineStateProvider):
             "-o",
             "ControlPersist=yes",
         ]
-
-        # Build SSH command
-        cmd = ["ssh"]
-        cmd.extend(control_opts)
         cmd.extend(self.ssh_options)
+        # Detect a dead connection (the first value of an option is used: the
+        # user's options take precedence)
+        cmd.extend(["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"])
         cmd.append(self.host)
 
         # Build remote command (workdir is passed to experiments group)
@@ -691,162 +743,322 @@ class SSHStateProviderClient(OfflineStateProvider):
             ["experiments", "--workdir", self.remote_workspace, "monitor-server"]
         )
         cmd.append(remote_shell_command(remote_cmd_parts, self.remote_shell_init))
+        return cmd
 
+    def _open_session(self, timeout: float) -> None:
+        """Start the remote server (through SSH) and check it answers
+
+        The watched experiments are sent to the new server.
+
+        Raises:
+            ConnectionError: when the server cannot be started or reached
+        """
+        cmd = self._ssh_command()
         logger.info("Connecting to %s, workspace: %s", self.host, self.remote_workspace)
         logger.debug("SSH command: %s", shlex.join(cmd))
 
-        # Start SSH process
         try:
-            self._process = subprocess.Popen(
+            process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0,  # Unbuffered
             )
-            self._stdin = self._process.stdin
-            self._stdout = self._process.stdout
-            self._stderr = self._process.stderr
         except Exception as e:
             logger.error("Failed to start SSH process: %s", e)
             raise ConnectionError(f"Failed to connect to {self.host}: {e}")
 
-        self._running = True
+        with self._state_lock:
+            self._session += 1
+            session = self._session
+            self._process = process
+            self._stdin = process.stdin
+            self._stdout = process.stdout
+            self._stderr = process.stderr
+            self._session_open = True
 
-        # Start read thread for responses and notifications
+        # Read thread for responses and notifications
         self._read_thread = threading.Thread(
-            target=self._read_loop, daemon=True, name="SSHClient-Read"
+            target=self._read_loop,
+            args=(session, process.stdout),
+            daemon=True,
+            name="SSHClient-Read",
         )
         self._read_thread.start()
 
-        # Start notification thread for throttled event delivery
-        self._notify_thread = threading.Thread(
-            target=self._notify_loop, daemon=True, name="SSHClient-Notify"
-        )
-        self._notify_thread.start()
-
-        # Start stderr thread to display SSH output
+        # Stderr thread to display SSH output
         self._stderr_thread = threading.Thread(
-            target=self._stderr_loop, daemon=True, name="SSHClient-Stderr"
+            target=self._stderr_loop,
+            args=(process.stderr,),
+            daemon=True,
+            name="SSHClient-Stderr",
         )
         self._stderr_thread.start()
 
         # Wait for connection to be established by sending a test request
         try:
             sync_info = self._call_sync(RPCMethod.GET_SYNC_INFO, {}, timeout=timeout)
-
-            # Check protocol version compatibility
-            server_version = sync_info.get("protocol_version")
-            if server_version != PROTOCOL_VERSION:
-                self.disconnect()
-                error_msg = (
-                    f"Protocol version mismatch: client={PROTOCOL_VERSION}, "
-                    f"server={server_version}. Please ensure both client and server "
-                    f"are running the same version of experimaestro."
-                )
-                raise ConnectionError(error_msg)
-
-            # Update remote_workspace with the resolved path from the server
-            # (handles ~/path expansion, symlinks, etc.)
-            resolved_workspace = sync_info.get("workspace_path")
-            if resolved_workspace:
-                self.remote_workspace = resolved_workspace
-
-            if "methods" in sync_info:
-                self._server_methods = frozenset(sync_info["methods"])
-            self.remote_version = sync_info.get("version")
-
-            logger.info(
-                "Connected to remote workspace: %s (protocol v%s, experimaestro %s)",
-                self.remote_workspace,
-                server_version,
-                # Servers that do not send their version also lack some methods
-                self.remote_version or "unknown: an older release, lacking features",
-            )
-        except ConnectionError:
-            # Re-raise ConnectionError (includes version mismatch)
-            raise
         except Exception as e:
-            self.disconnect()
+            self._close_session()
             raise ConnectionError(f"Failed to establish connection: {e}")
 
-        self._connected = True
+        # Check protocol version compatibility
+        server_version = sync_info.get("protocol_version")
+        if server_version != PROTOCOL_VERSION:
+            self._close_session()
+            raise ConnectionError(
+                f"Protocol version mismatch: client={PROTOCOL_VERSION}, "
+                f"server={server_version}. Please ensure both client and server "
+                f"are running the same version of experimaestro."
+            )
 
-        # What the UIs declared before the connection
+        # Update remote_workspace with the resolved path from the server
+        # (handles ~/path expansion, symlinks, etc.)
+        resolved_workspace = sync_info.get("workspace_path")
+        if resolved_workspace:
+            self.remote_workspace = resolved_workspace
+
+        self._server_methods = frozenset(sync_info.get("methods", BASE_METHODS))
+        self.remote_version = sync_info.get("version")
+
+        logger.info(
+            "Connected to remote workspace: %s (protocol v%s, experimaestro %s)",
+            self.remote_workspace,
+            server_version,
+            # Servers that do not send their version also lack some methods
+            self.remote_version or "unknown: an older release, lacking features",
+        )
+
+        # What the UIs declared (before the connection, or before it dropped)
         watched = self._watched()
         if watched is not None:
             self._send_watch(watched)
 
-    def disconnect(self):
-        """Disconnect from the remote server"""
-        self._running = False
-        self._connected = False
+    def _close_session(self) -> None:
+        """Stop the SSH process of the current session, failing the pending
+        requests"""
+        with self._state_lock:
+            self._session_open = False
+            process, stdin = self._process, self._stdin
+            self._process = self._stdin = self._stdout = self._stderr = None
 
         # Close stdin to signal EOF to remote server
-        if self._stdin:
+        if stdin:
             try:
-                self._stdin.close()
+                stdin.close()
             except Exception:
                 pass
 
         # Terminate the SSH process
-        if self._process:
+        if process:
             try:
-                self._process.terminate()
-                self._process.wait(timeout=5.0)
+                process.terminate()
+                process.wait(timeout=5.0)
             except Exception:
                 try:
-                    self._process.kill()
+                    process.kill()
                 except Exception:
                     pass
 
-        # Wait for threads to finish
-        if self._read_thread and self._read_thread.is_alive():
-            self._read_thread.join(timeout=2.0)
+        # Wait for the threads reading the process to finish
+        for thread in (self._read_thread, self._stderr_thread):
+            if (
+                thread is not None
+                and thread.is_alive()
+                and thread is not threading.current_thread()
+            ):
+                thread.join(timeout=2.0)
+
+        self._fail_pending(ConnectionError("Disconnected"))
+
+    def _fail_pending(self, error: Exception) -> None:
+        """Fail the requests waiting for an answer"""
+        with self._response_lock:
+            futures = list(self._response_handlers.values())
+            self._response_handlers.clear()
+            self._pending_calls.clear()
+        for future in futures:
+            if not future.done():
+                future.set_exception(error)
+
+    def _connection_lost(self, session: int, error: str) -> None:
+        """Called when the SSH process of a session ends
+
+        Starts reconnecting when the connection was up (and not closed on
+        purpose).
+        """
+        with self._state_lock:
+            if session != self._session or not self._session_open:
+                # Closed on purpose, or an older session
+                return
+            self._session_open = False
+            reconnect = (
+                self._running and self._connection_state == ConnectionState.CONNECTED
+            )
+
+        # Requests sent to the lost server will not be answered
+        self._fail_pending(ConnectionError(f"Connection to {self.host} lost"))
+        if not reconnect:
+            return
+
+        logger.warning("Connection to %s lost: %s", self.host, error)
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_loop,
+            args=(error,),
+            daemon=True,
+            name="SSHClient-Reconnect",
+        )
+        self._reconnect_thread.start()
+
+    def _set_connection_state(self, state: ConnectionState, **details) -> None:
+        """Changes the connection state and notifies the listeners (at once)"""
+        with self._state_lock:
+            self._connection_state = state
+        self._notify_listeners(
+            ConnectionStateEvent(
+                state=state.value,
+                host=self.host,
+                max_retries=self.reconnect_policy.max_retries,
+                **details,
+            )
+        )
+
+    def _reconnect_loop(self, error: str) -> None:
+        """Reconnects (in a dedicated thread), following the reconnect policy
+
+        Once reconnected, the cached answers are dropped (events were missed
+        while disconnected) and the listeners told: the UIs read the state
+        again.
+        """
+        self._close_session()
+        policy = self.reconnect_policy
+        while self._running:
+            delay = policy.next_delay(time.monotonic())
+            if delay is None:
+                logger.error(
+                    "Could not reconnect to %s (%d attempts within %ss): %s",
+                    self.host,
+                    policy.max_retries,
+                    policy.settings.window,
+                    error,
+                )
+                self._set_connection_state(
+                    ConnectionState.DISCONNECTED,
+                    attempt=policy.attempts(time.monotonic()),
+                    error=error,
+                )
+                return
+
+            attempt = policy.attempts(time.monotonic()) + 1
+            self._set_connection_state(
+                ConnectionState.RECONNECTING,
+                attempt=attempt,
+                delay=delay,
+                error=error,
+            )
+            logger.info(
+                "Reconnecting to %s in %.1fs (attempt %d/%d)",
+                self.host,
+                delay,
+                attempt,
+                policy.max_retries,
+            )
+            if self._closing.wait(delay):
+                return
+
+            start = time.monotonic()
+            # A dead connection may still be the master of the multiplexed ones
+            self._exit_control_master()
+            try:
+                self._open_session(self._connect_timeout)
+            except Exception as e:
+                policy.attempted(start, success=False)
+                error = str(e)
+                logger.warning("Reconnection to %s failed: %s", self.host, error)
+                continue
+            policy.attempted(start, success=True)
+
+            with self._state_lock:
+                lost = not self._session_open
+            if not self._running:
+                self._close_session()
+                return
+            if lost:
+                error = "connection lost right after reconnecting"
+                continue
+
+            self._resync()
+            logger.info("Reconnected to %s", self.host)
+            self._set_connection_state(ConnectionState.CONNECTED, attempt=attempt)
+            return
+
+    def _resync(self) -> None:
+        """Drop the cached answers after a reconnection (events were missed)
+
+        The cached objects are kept, so that the UIs keep the same instances:
+        they are updated when read again. The services are kept too (their
+        cache owns the live, local, service instances).
+        """
+        self._query_cache.drop_if(lambda key, entry: key[0] != "services")
+
+    def disconnect(self):
+        """Disconnect from the remote server"""
+        self._running = False
+        self._closing.set()
+
+        reconnect_thread = self._reconnect_thread
+        if (
+            reconnect_thread is not None
+            and reconnect_thread.is_alive()
+            and reconnect_thread is not threading.current_thread()
+        ):
+            reconnect_thread.join(timeout=5.0)
+
+        self._close_session()
+        with self._state_lock:
+            self._connection_state = ConnectionState.DISCONNECTED
+
         if self._notify_thread and self._notify_thread.is_alive():
             self._notify_thread.join(timeout=2.0)
-        if self._stderr_thread and self._stderr_thread.is_alive():
-            self._stderr_thread.join(timeout=2.0)
-
-        # Cancel any pending requests
-        with self._response_lock:
-            for future in self._response_handlers.values():
-                if not future.done():
-                    future.set_exception(ConnectionError("Disconnected"))
-            self._response_handlers.clear()
 
         # Clear job and experiment caches (using inherited methods)
         self._clear_job_cache()
         self._clear_experiment_cache_all()
 
         # Close SSH ControlMaster socket
-        if self._control_path:
-            try:
-                subprocess.run(
-                    [
-                        "ssh",
-                        "-o",
-                        f"ControlPath={self._control_path}",
-                        "-O",
-                        "exit",
-                        self.host,
-                    ],
-                    capture_output=True,
-                    timeout=5.0,
-                )
-            except Exception:
-                pass
-            # Remove socket file if still present
-            try:
-                Path(self._control_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-            self._control_path = None
+        self._exit_control_master()
+        self._control_path = None
 
         # Clean up temporary cache directory
         self._cleanup_temp_dir()
 
         logger.info("Disconnected from %s", self.host)
+
+    def _exit_control_master(self) -> None:
+        """Stop the SSH ControlMaster (if any)"""
+        if not self._control_path:
+            return
+        try:
+            subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    f"ControlPath={self._control_path}",
+                    "-O",
+                    "exit",
+                    self.host,
+                ],
+                capture_output=True,
+                timeout=5.0,
+            )
+        except Exception:
+            pass
+        # Remove socket file if still present
+        try:
+            Path(self._control_path).unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def _cleanup_temp_dir(self):
         """Clean up the temporary cache directory"""
@@ -869,11 +1081,12 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Alias for disconnect() for compatibility with WorkspaceStateProvider"""
         self.disconnect()
 
-    def _read_loop(self):
-        """Read responses and notifications from SSH stdout"""
-        while self._running:
+    def _read_loop(self, session: int, stdout):
+        """Read responses and notifications from SSH stdout (of a session)"""
+        error = "the SSH connection was closed"
+        while True:
             try:
-                line = self._stdout.readline()
+                line = stdout.readline()
                 if not line:
                     # EOF - connection closed
                     logger.debug("SSH stdout closed")
@@ -886,20 +1099,18 @@ class SSHStateProviderClient(OfflineStateProvider):
                 self._process_message(line_str)
 
             except Exception as e:
-                if self._running:
+                if self._session_open and session == self._session:
                     logger.exception("Error in read loop: %s", e)
+                error = str(e)
                 break
 
-        # Connection lost
-        if self._running:
-            logger.warning("Connection to %s lost", self.host)
-            self._connected = False
+        self._connection_lost(session, error)
 
-    def _stderr_loop(self):
+    def _stderr_loop(self, stderr):
         """Read and display SSH stderr output with colored prefix"""
-        while self._running:
+        while True:
             try:
-                line = self._stderr.readline()
+                line = stderr.readline()
                 if not line:
                     # EOF - stderr closed
                     logger.debug("SSH stderr closed")
@@ -919,8 +1130,7 @@ class SSHStateProviderClient(OfflineStateProvider):
                     print(f"{prefix}{line_str}", file=sys.stderr)  # noqa: T201
 
             except Exception as e:
-                if self._running:
-                    logger.debug("Error reading stderr: %s", e)
+                logger.debug("Error reading stderr: %s", e)
                 break
 
     def _process_message(self, line: str):
@@ -996,8 +1206,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Handle shutdown notification immediately
         if method == NotificationMethod.SHUTDOWN.value:
             reason = params.get("reason", "unknown")
+            # The connection is then closed (and the client reconnects)
             logger.info("Server shutdown: %s", reason)
-            self._connected = False
 
     def _notify_loop(self):
         """Background thread that delivers pending events to listeners periodically
@@ -1086,9 +1296,15 @@ class SSHStateProviderClient(OfflineStateProvider):
             future.set_exception(RemoteMethodNotSupported(method, self.remote_version))
             return future
 
-        if not self._running:
+        with self._state_lock:
+            stdin = self._stdin if self._session_open else None
+        if stdin is None:
             future = Future()
-            future.set_exception(ConnectionError("Not connected"))
+            future.set_exception(
+                ConnectionError(
+                    f"Not connected to {self.host} ({self._connection_state.value})"
+                )
+            )
             return future
 
         with self._response_lock:
@@ -1100,8 +1316,8 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         request_json = create_request(method, params, request_id)
         try:
-            self._stdin.write((request_json + "\n").encode("utf-8"))
-            self._stdin.flush()
+            stdin.write((request_json + "\n").encode("utf-8"))
+            stdin.flush()
         except Exception as e:
             with self._response_lock:
                 self._response_handlers.pop(request_id, None)
@@ -1129,7 +1345,8 @@ class SSHStateProviderClient(OfflineStateProvider):
 
             self._query_cache.drop_if(unwatched)
 
-        if self._running:
+        if self._session_open:
+            # Sent again on reconnection otherwise
             self._send_watch(after)
 
     #: Queries whose answers depend on job events
@@ -1789,7 +2006,10 @@ class SSHStateProviderClient(OfflineStateProvider):
         Returns:
             Local path where the files were synced to, or None if sync failed
         """
-        if not self._connected or not self.local_cache_dir:
+        if (
+            self._connection_state != ConnectionState.CONNECTED
+            or not self.local_cache_dir
+        ):
             logger.warning("Cannot sync: not connected")
             return None
 

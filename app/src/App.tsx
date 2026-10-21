@@ -12,6 +12,7 @@ import TaskGraph from "./TaskGraph";
 import Experiments from "./Experiments";
 import Services from "./Services";
 import ActiveServices from "./ActiveServices";
+import ProviderConnection from "./ProviderConnection";
 import Warnings from "./Warnings";
 import Actions from "./Actions";
 import Orphans from "./Orphans";
@@ -244,6 +245,7 @@ export default () => {
           </Navbar.Collapse>
         </Container>
       </Navbar>
+      <ProviderConnection />
       <ActiveServices />
 
       <Container

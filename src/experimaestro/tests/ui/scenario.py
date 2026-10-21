@@ -23,7 +23,11 @@ from experimaestro.scheduler.interfaces import (
     JobState,
 )
 from experimaestro.scheduler.services import WebService
-from experimaestro.scheduler.state_status import JobSubmittedEvent
+from experimaestro.scheduler.state_status import (
+    ConnectionState,
+    ConnectionStateEvent,
+    JobSubmittedEvent,
+)
 from experimaestro.scheduler.state_provider import (
     MockExperiment,
     MockJob,
@@ -233,6 +237,7 @@ class ScenarioProvider(OfflineStateProvider):
 
         self.killed: list[str] = []
         self.partials_cleanups = 0
+        self._connection_state = ConnectionState.CONNECTED
 
         for xp in EXPERIMENTS:
             self.runs[xp.experiment_id] = []
@@ -318,6 +323,19 @@ class ScenarioProvider(OfflineStateProvider):
                 experiment_id=experiment_id,
                 run_id=run.run_id,
             )
+        )
+
+    @property
+    def connection_state(self) -> ConnectionState:
+        return self._connection_state
+
+    def set_connection_state(self, state: ConnectionState, **details) -> None:
+        """Change the connection state, as a remote provider does when its
+        connection drops (call it from another thread: it notifies the
+        listeners synchronously)"""
+        self._connection_state = state
+        self._notify_state_listeners(
+            ConnectionStateEvent(state=state.value, host="remote-host", **details)
         )
 
     def _run(self, experiment_id: str, run_id: str | None) -> MockExperiment | None:
