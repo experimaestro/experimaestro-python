@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useAppSelector, useNavigate } from "./store";
 import JobModal from "./JobModal";
@@ -8,6 +8,26 @@ import { ViewParams } from "./dag/types";
 
 // Delay (ms) without new jobs before the graph is requested again
 const GRAPH_UPDATE_DELAY = 1000;
+
+// Space (px) kept below the graph
+const BOTTOM_MARGIN = 16;
+
+/** Height filling the window below the element (updated on resize) */
+function useRemainingHeight(): [React.RefObject<HTMLDivElement>, string] {
+  const ref = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState("75vh");
+  useLayoutEffect(() => {
+    const update = () => {
+      if (!ref.current) return;
+      const top = ref.current.getBoundingClientRect().top + window.scrollY;
+      setHeight(`max(20rem, calc(100vh - ${top + BOTTOM_MARGIN}px))`);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  });
+  return [ref, height];
+}
 
 // Dependency graph of the selected experiment run: the graph and its views
 // are computed by the server, the job statuses come from the store
@@ -28,6 +48,7 @@ export default () => {
   // later requests are shown as they arrive (the latest may take a while)
   const firstRequest = useRef(1);
   const shownRequest = useRef(0);
+  const [container, height] = useRemainingHeight();
 
   useEffect(() => {
     client.onExperimentGraph = (payload) => {
@@ -90,8 +111,9 @@ export default () => {
   }
 
   return (
-    <>
+    <div ref={container}>
       <DagView
+        height={height}
         graph={result.graph}
         view={result.view ?? null}
         params={params}
@@ -108,6 +130,6 @@ export default () => {
         }}
       />
       <JobModal />
-    </>
+    </div>
   );
 };

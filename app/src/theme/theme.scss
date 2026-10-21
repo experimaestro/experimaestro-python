@@ -61,7 +61,7 @@ body {
 
 span.clipboard {
   border: none;
-  background: inherit;
+  background: transparent;
   position: relative;
   cursor: pointer;
   &:hover::before {

@@ -241,7 +241,12 @@ export default () => {
         </Container>
       </Navbar>
 
-      <Container className="mt-2" style={{ paddingLeft: 80 }}>
+      <Container
+        className="mt-2"
+        // The graph uses the whole width of the page
+        fluid={view === "graph"}
+        style={{ paddingLeft: view === "graph" ? undefined : 80 }}
+      >
         {view === "experiments" && <Experiments onOpen={openExperiment} />}
         {isScoped(view) && breadcrumb}
         {view === "tasks" && <Tasks />}

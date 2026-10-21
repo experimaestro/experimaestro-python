@@ -18,10 +18,17 @@ const DARK_TEXT = new Set(["warning", "info", "light"]);
 export const StatusBadge = ({
   status,
   progress,
+  compact = false,
 }: {
   status: string;
   progress?: number;
+  // A single small badge (without the progress bar)
+  compact?: boolean;
 }) => {
+  if (status === "running" && compact) {
+    const pct = Math.round((progress ?? 0) * 100);
+    return <Badge bg="primary">running {pct}%</Badge>;
+  }
   if (status === "running") {
     const pct = Math.round((progress ?? 0) * 100);
     return (

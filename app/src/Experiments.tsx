@@ -7,6 +7,7 @@ import { formatShortDate, formatDuration, formatCO2 } from "./format";
 import client from "./client";
 import { useMessages } from "./ui/messages";
 import { clearOnEscape, useShortcuts } from "./shortcuts";
+import { KeyHints, SortHeader, sortedMessage } from "./ui/sorting";
 
 // Status computed by the server, shared with the TUI (status_category)
 const STATUS_INFO: { [key: string]: { icon: string; color: string } } = {
@@ -97,14 +98,19 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
   const searchInput = useRef<HTMLInputElement>(null);
   const { info } = useMessages();
 
-  // The same key again reverses the order; dates start with the newest
-  function sortBy(column: SortColumn) {
-    const next =
-      sort.column === column
-        ? { column, reverse: !sort.reverse }
-        : { column, reverse: column === "started" };
+  function changeSort(next: Sort) {
     setSort(next);
     saveSort(next);
+    info(sortedMessage(SORT_HEADERS[next.column].label, !next.reverse));
+  }
+
+  // The same key again reverses the order; dates start with the newest
+  function sortBy(column: SortColumn) {
+    changeSort(
+      sort.column === column
+        ? { column, reverse: !sort.reverse }
+        : { column, reverse: column === "started" },
+    );
   }
 
   useShortcuts({
@@ -143,34 +149,63 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
     setConfirm(undefined);
   }
 
-  const sortHeader = (column: SortColumn) => {
-    const { label, key } = SORT_HEADERS[column];
-    return (
-      <th
-        role="button"
-        data-sort={column}
-        title={`Sort by ${label.toLowerCase()} (${key})`}
-        onClick={() => sortBy(column)}
-      >
-        {label}
-        {sort.column === column && (sort.reverse ? " ▼" : " ▲")}
-      </th>
-    );
-  };
+  const sortHeader = (column: SortColumn) => (
+    <SortHeader
+      column={column}
+      label={SORT_HEADERS[column].label}
+      shortcut={SORT_HEADERS[column].key}
+      active={sort.column === column}
+      ascending={!sort.reverse}
+      onClick={() => sortBy(column)}
+    />
+  );
 
   return (
     <div className="mt-3">
       <h5 className="mb-3">Experiments</h5>
 
-      <Form.Control
-        id="searchexperiments"
-        ref={searchInput}
-        className="mb-3"
-        style={{ maxWidth: "24rem" }}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        onKeyDown={clearOnEscape(() => setSearch(""))}
-        placeholder="Search experiments (/)"
+      <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
+        <Form.Control
+          id="searchexperiments"
+          ref={searchInput}
+          style={{ maxWidth: "24rem" }}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={clearOnEscape(() => setSearch(""))}
+          placeholder="Search experiments (/)"
+        />
+        <Form.Label htmlFor="sortexperiments" className="mb-0 ms-2">
+          Sort
+        </Form.Label>
+        <Form.Select
+          id="sortexperiments"
+          size="sm"
+          style={{ width: "auto" }}
+          value={sort.column}
+          onChange={(e) => sortBy(e.target.value as SortColumn)}
+        >
+          {(["started", "status", "id"] as SortColumn[]).map((column) => (
+            <option key={column} value={column}>
+              {SORT_HEADERS[column].label} ({SORT_HEADERS[column].key})
+            </option>
+          ))}
+        </Form.Select>
+        <Button
+          size="sm"
+          variant="outline-secondary"
+          title="Toggle sort direction"
+          onClick={() => changeSort({ ...sort, reverse: !sort.reverse })}
+        >
+          <i className={`fas fa-arrow-${sort.reverse ? "down" : "up"}`} />
+        </Button>
+      </div>
+      <KeyHints
+        hints={[
+          ["/", "search"],
+          ["S", "sort by status"],
+          ["O", "sort by name"],
+          ["D", "sort by date"],
+        ]}
       />
 
       {confirm && (
@@ -247,7 +282,7 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
                 <td>
                   <span className="fw-semibold">{exp.experiment_id}</span>
                   {exp.current_run_id && (
-                    <div className="text-muted small">{exp.current_run_id}</div>
+                    <span className="text-muted small ms-2">{exp.current_run_id}</span>
                   )}
                 </td>
                 <td>

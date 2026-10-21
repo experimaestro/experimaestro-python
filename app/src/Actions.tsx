@@ -5,6 +5,7 @@ import { useAppSelector } from "./store";
 import { useMessages } from "./ui/messages";
 import client from "./client";
 import { DocLink } from "./ui/DocLink";
+import { copyToClibpoard } from "./clipboard";
 
 type PromptField = {
   key: string;
@@ -86,7 +87,18 @@ const Actions: React.FC = () => {
               return (
                 <tr key={id}>
                   <td>
-                    <code>{a.actionId}</code>
+                    {/* Identifiers are hashes: the start is enough, as for jobs */}
+                    <code
+                      className="clipboard"
+                      title={a.actionId}
+                      onClick={() =>
+                        copyToClibpoard(a.actionId)
+                          .then(() => success("Action id copied"))
+                          .catch((e) => error("Error when copying: " + e))
+                      }
+                    >
+                      {a.actionId.substring(0, 12)}
+                    </code>
                   </td>
                   <td className="small">{a.description}</td>
                   <td className="text-muted small">{a.actionClass}</td>

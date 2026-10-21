@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Badge, Button, Modal, Form, Table } from "react-bootstrap";
 
-import TaskJobs from "./TaskJobs";
+import TaskJobs, { JOB_COLUMNS } from "./TaskJobs";
 import JobModal, { JobTab } from "./JobModal";
 import client, { JobsFilterResult } from "./client";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
 import { useAppSelector, useNavigate } from "./store";
 import { clearOnEscape, useShortcuts } from "./shortcuts";
+import { KeyHints, SortHeader, SortLabel, sortedMessage } from "./ui/sorting";
 
 type SortKey = "status" | "task" | "date" | "name";
 
@@ -20,6 +21,13 @@ const SORT_ASC: { [key in SortKey]: boolean } = {
   name: true,
 };
 type GroupKey = "none" | "status" | "task" | "tag";
+
+const SORT_LABELS: { [key in SortKey]: { label: string; shortcut: string } } = {
+  status: { label: "Status", shortcut: "S" },
+  task: { label: "Task", shortcut: "T" },
+  date: { label: "Submitted", shortcut: "D" },
+  name: { label: "Job ID", shortcut: "O" },
+};
 
 // Same hint as the TUI search bar (FILTER_SYNTAX_HINT in cli/filter.py)
 const FILTER_SYNTAX_HINT =
@@ -121,15 +129,36 @@ export default () => {
   const navigate = useNavigate();
   const searchInput = useRef<HTMLInputElement>(null);
 
+  function changeSort(key: SortKey, ascending: boolean) {
+    setSortKey(key);
+    setSortAsc(ascending);
+    info(sortedMessage(SORT_LABELS[key].label, ascending));
+  }
+
   // The key of the current sort reverses it
   function sortBy(key: SortKey) {
-    if (key === sortKey) {
-      setSortAsc((v) => !v);
-    } else {
-      setSortKey(key);
-      setSortAsc(SORT_ASC[key]);
-    }
+    changeSort(key, key === sortKey ? !sortAsc : SORT_ASC[key]);
   }
+
+  const sortProps = (key: SortKey) => ({
+    column: key,
+    label: SORT_LABELS[key].label,
+    shortcut: SORT_LABELS[key].shortcut,
+    active: sortKey === key,
+    ascending: sortAsc,
+    onClick: () => sortBy(key),
+  });
+
+  const sortHeader = (key: SortKey) => (
+    <SortHeader
+      column={key}
+      label={SORT_LABELS[key].label}
+      shortcut={SORT_LABELS[key].shortcut}
+      active={sortKey === key}
+      ascending={sortAsc}
+      onClick={() => sortBy(key)}
+    />
+  );
 
   useShortcuts({
     "/": () => searchInput.current?.focus(),
@@ -322,19 +351,20 @@ export default () => {
                 id="sortkey"
                 size="sm"
                 value={sortKey}
-                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                onChange={(e) => sortBy(e.target.value as SortKey)}
               >
-                <option value="status">Status (S)</option>
-                <option value="task">Task (T)</option>
-                <option value="date">Submitted (D)</option>
-                <option value="name">Job ID (O)</option>
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                  <option key={key} value={key}>
+                    {SORT_LABELS[key].label} ({SORT_LABELS[key].shortcut})
+                  </option>
+                ))}
               </Form.Select>
             </Form.Group>
             <Button
               size="sm"
               variant="outline-secondary"
               title="Toggle sort direction"
-              onClick={() => setSortAsc((v) => !v)}
+              onClick={() => changeSort(sortKey, !sortAsc)}
             >
               <i className={`fas fa-arrow-${sortAsc ? "up" : "down"}`} />
             </Button>
@@ -400,6 +430,15 @@ export default () => {
           ) : (
             <div className="small text-muted mt-1">{FILTER_SYNTAX_HINT}</div>
           )}
+          <KeyHints
+            hints={[
+              ["/", "filter"],
+              ["S", "sort by status"],
+              ["T", "sort by task"],
+              ["D", "sort by date"],
+              ["O", "sort by job ID"],
+            ]}
+          />
         </div>
 
         {confirm && (
@@ -433,11 +472,13 @@ export default () => {
         <Table hover responsive className="align-middle jobs-table">
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Task</th>
-              <th>Tags</th>
-              <th>Submitted</th>
-              <th>Duration</th>
+              {sortHeader("task")}
+              {sortHeader("status")}
+              {/* The duration is below the submission date */}
+              <th>
+                <SortLabel {...sortProps("date")} />
+                {" · Duration"}
+              </th>
               <th>CO₂</th>
               <th></th>
             </tr>
@@ -454,7 +495,7 @@ export default () => {
                     onClick={() => toggleGroup(group.key)}
                     title={isCollapsed ? "Expand" : "Collapse"}
                   >
-                    <td colSpan={7}>
+                    <td colSpan={JOB_COLUMNS}>
                       <i
                         className={`fas fa-chevron-${isCollapsed ? "right" : "down"} me-2`}
                       />

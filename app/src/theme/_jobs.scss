@@ -24,7 +24,7 @@
 }
 
 .jobs-table .job-id {
-  color: #999;
+  color: #000;
   cursor: pointer;
 }
 .jobs-table .job-id:hover {
@@ -33,6 +33,65 @@
 
 .jobs-table .task-id {
   cursor: pointer;
+}
+
+/* Compact rows; the tags of a job are on a line below its main line */
+.jobs-table .job-row td {
+  padding-top: 0.3rem;
+}
+// Cells spanning the two lines keep their bottom border
+.jobs-table .job-row td:not([rowspan]) {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+/* A job (its two lines) is highlighted as a whole */
+.jobs-table.table-hover > tbody > tr.job-row:hover + tr.job-tags-row > *,
+.jobs-table.table-hover > tbody > tr.job-row:has(+ tr.job-tags-row:hover) > * {
+  --bs-table-color-state: var(--bs-table-hover-color);
+  --bs-table-bg-state: var(--bs-table-hover-bg);
+}
+.jobs-table .job-tags-row td {
+  padding-top: 0;
+  padding-bottom: 0.3rem;
+  // Do not widen the table: the tags line scrolls instead
+  max-width: 0;
+}
+.jobs-table .job-tags-line {
+  // The height of a line of tags, even when there are none
+  min-height: 1rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  line-height: 1;
+
+  .tag {
+    margin: 0 4px 0 0;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+  .tag .name,
+  .tag .value {
+    padding: 1px 4px;
+  }
+}
+
+/* Sort headers */
+.jobs-table thead th[data-sort],
+.jobs-table thead .sort-label,
+.experiments-table thead th[data-sort] {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Keys of a view, as in the TUI footer */
+.key-hints {
+  margin: 0.25rem 0 0.5rem;
+  kbd {
+    font-size: 0.7rem;
+    padding: 0.05rem 0.3rem;
+    background: #e9ecef;
+    color: #333;
+  }
 }
 
 .job-actions .action {
@@ -96,8 +155,7 @@
   padding: 3px;
   margin-left: 0em;
   margin-right: 0.5em;
-  color: #777;
-  // color: white;
+  color: #000;
   font-weight: bold;
   border-radius: 3px;
 }
