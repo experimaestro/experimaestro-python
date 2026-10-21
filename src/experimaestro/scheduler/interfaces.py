@@ -1563,6 +1563,15 @@ class BaseExperiment:
         """Tags assigned to this run (as sorted list for JSON serialization)"""
         return sorted(self._run_tags)
 
+    # Tags of the experiment (stored with each run), to group experiments
+    _experiment_tags: list[str]
+
+    @property
+    def experiment_tags(self) -> list[str]:
+        """Tags of the experiment (``experiment(..., tags=[...])``), used to
+        group and search experiments in the UIs"""
+        return self._experiment_tags
+
     # Computed properties
 
     @property
@@ -1654,6 +1663,7 @@ class BaseExperiment:
             "services": {k: v.full_state_dict() for k, v in self.services.items()},
             "actions": {k: _action_to_dict(k, v) for k, v in self.actions.items()},
             "run_tags": self.run_tags,
+            "experiment_tags": self.experiment_tags,
         }
         if self.runs_count is not None:
             result["runs_count"] = self.runs_count

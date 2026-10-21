@@ -83,8 +83,19 @@ class UIDriver(Protocol):
         ...
 
     async def search_experiments(self, text: str) -> None:
-        """Show the experiments whose ID contains a text (all of them when
-        empty)"""
+        """Show the experiments whose ID or one of whose tags contains a text
+        (all of them when empty)"""
+        ...
+
+    async def experiment_tags(self) -> dict[str, set[str]]:
+        """Tags shown for each listed experiment"""
+        ...
+
+    async def group_experiments(
+        self, grouping: Literal["none", "prefix", "tag"]
+    ) -> dict[str, set[str]]:
+        """Group the experiment list; returns the experiments of each group (a
+        single group named "" when not grouped)"""
         ...
 
     async def runs(self, experiment_id: str) -> list[str]:
@@ -111,6 +122,11 @@ class UIDriver(Protocol):
 
     async def group_by(self, key: Literal["status", "task"]) -> dict[str, set[str]]:
         """Group the job list; returns the jobs of each group (by its label)"""
+        ...
+
+    async def hide_tags(self, keys: set[str]) -> dict[str, set[str]]:
+        """Hide the tags with these keys (and show the others) in the job list;
+        returns the tag keys shown for each listed job"""
         ...
 
     async def set_filter(self, query: str) -> str | None:

@@ -9,14 +9,24 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Literal
 
+from rich.text import Text
 from textual.pilot import Pilot
-from textual.widgets import DataTable, Input, RichLog, Static, TabbedContent, Tree
+from textual.widgets import (
+    DataTable,
+    Input,
+    RichLog,
+    SelectionList,
+    Static,
+    TabbedContent,
+    Tree,
+)
 
 from experimaestro.scheduler.state_provider import StateProvider
 import experimaestro.tui.app
 from experimaestro.tui.app import ExperimaestroUI
 from experimaestro.tui.dialogs import DeleteConfirmScreen, KillConfirmScreen
 from experimaestro.tui.log_viewer import LogViewerScreen, LogWidget
+from experimaestro.tui.widgets.experiments import ExperimentsList
 from experimaestro.tui.widgets.jobs import (
     DependencyList,
     JobDetailView,
@@ -157,6 +167,38 @@ class TuiDriver:
             await self.pilot.press("escape")
         await self.settle()
 
+    async def experiment_tags(self) -> dict[str, set[str]]:
+        await self._show_experiments()
+        table = self._table("#experiments-table")
+        tags = {}
+        for key in table.rows:
+            # The ID followed by "#tag" for each tag
+            exp_id, *words = Text.from_markup(
+                str(table.get_cell(key, "id"))
+            ).plain.split()
+            tags[exp_id] = {word[1:] for word in words if word.startswith("#")}
+        return tags
+
+    async def group_experiments(
+        self, grouping: Literal["none", "prefix", "tag"]
+    ) -> dict[str, set[str]]:
+        await self._show_experiments()
+        widget = self.app.query_one(ExperimentsList)
+        while widget.grouping != grouping:
+            await self.pilot.press("g")
+            await self.settle()
+        groups: dict[str, set[str]] = {}
+        name = ""
+        for key in self._table("#experiments-table").rows:
+            exp_id = widget.row_experiments[str(key.value)]
+            if exp_id is None:
+                # Group header ("\0" + name)
+                name = str(key.value)[1:]
+                groups[name] = set()
+            else:
+                groups.setdefault(name, set()).add(exp_id)
+        return groups
+
     async def runs(self, experiment_id: str) -> list[str]:
         await self._show_experiments()
         await self._select_row(self._table("#experiments-table"), experiment_id)
@@ -229,6 +271,32 @@ class TuiDriver:
         if self.app.query_one(JobsTable)._sort_reverse:
             await self.pilot.press(key)
             await self.settle()
+
+    async def hide_tags(self, keys: set[str]) -> dict[str, set[str]]:
+        await self._show_jobs()
+        await self.pilot.press("number_sign")
+        await self.settle()
+        selection = self.app.screen.query_one("#tag-visibility-list", SelectionList)
+        for index in range(selection.option_count):
+            value = selection.get_option_at_index(index).value
+            if value in keys:
+                selection.deselect(value)
+            else:
+                selection.select(value)
+        await self.pilot.press("escape")
+        await self.settle()
+
+        table = self._table("#jobs-table")
+        shown = {}
+        for key in table.rows:
+            # "key=value, key=value" or "-"
+            text = str(table.get_cell(key, "tags"))
+            shown[str(key.value)] = (
+                set()
+                if text == "-"
+                else {tag.split("=", 1)[0] for tag in text.split(", ")}
+            )
+        return shown
 
     async def group_by(self, key: Literal["status", "task"]) -> dict[str, set[str]]:
         await self._show_jobs()

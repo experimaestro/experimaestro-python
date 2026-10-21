@@ -503,6 +503,7 @@ def experiments_cli(  # noqa: C901
                 project_paths=project_paths,
                 dirty_git=xp_configuration.dirty_git,
                 no_db=no_db,
+                tags=xp_configuration.tags,
             ) as xp:
                 if xp_holder is not None:
                     xp_holder["xp"] = xp

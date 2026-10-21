@@ -120,6 +120,8 @@ class ExperimaestroUI(App):
         self.show_logs = show_logs
         self._listener_registered = False
         self._monitor_mounted = False
+        #: Tag keys not shown in the job lists
+        self.hidden_tags: set[str] = set()
 
         # Initialize state provider before compose
         if state_provider:

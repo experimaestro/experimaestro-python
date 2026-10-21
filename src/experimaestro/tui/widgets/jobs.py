@@ -1097,9 +1097,11 @@ class JobsTreeView(Widget):
             if not grouped_by_task:
                 label.append(f"{j['task_id']} ", style="cyan")
 
-            # Tags not already used for grouping
+            # Tags not already used for grouping (nor hidden)
             remaining_tags = {
-                k: v for k, v in j["tags"].items() if k not in ancestor_tag_keys
+                k: v
+                for k, v in j["tags"].items()
+                if k not in ancestor_tag_keys and k not in self.app.hidden_tags
             }
             if remaining_tags:
                 tag_parts = [f"{k}={v}" for k, v in remaining_tags.items()]
@@ -1216,6 +1218,7 @@ class JobsTable(Vertical):
         Binding("D", "sort_by_submitted", "Sort Date", show=False),
         Binding("O", "sort_alphabetical", "Sort Name", show=False),
         Binding("t", "toggle_tree_view", "Tree"),
+        Binding("number_sign", "choose_tags", "Tags", key_display="#"),
         Binding("escape", "clear_search", show=False, priority=True),
     ]
 
@@ -1265,6 +1268,25 @@ class JobsTable(Vertical):
         else:
             table.focus()
             self.notify("Table view", severity="information")
+
+    def action_choose_tags(self) -> None:
+        """Choose the tag keys shown (for all the experiments)"""
+        from experimaestro.tui.dialogs import TagVisibilityScreen
+
+        keys = {key for tags in self.tags_map.values() for key in tags}
+        keys |= self.app.hidden_tags
+
+        def apply(hidden: set[str] | None) -> None:
+            if hidden is None or hidden == self.app.hidden_tags:
+                return
+            self.app.hidden_tags = hidden
+            self._needs_rebuild = True
+            self.refresh_jobs()
+            self._update_tree_view()
+
+        self.app.push_screen(
+            TagVisibilityScreen(sorted(keys), self.app.hidden_tags), apply
+        )
 
     def _update_tree_view(self) -> None:
         """Update the tree view with current data"""
@@ -1799,7 +1821,11 @@ class JobsTable(Vertical):
                 status_text = f"{conflict_state.icon}/{resolved_state.icon if resolved_state else '❓'}"
 
             # Tags are stored in JobTagModel, accessed via tags_map
-            job_tags = self.tags_map.get(job.identifier, {})
+            job_tags = {
+                k: v
+                for k, v in self.tags_map.get(job.identifier, {}).items()
+                if k not in self.app.hidden_tags
+            }
             if job_tags:
                 tags_text = Text()
                 for i, (k, v) in enumerate(job_tags.items()):

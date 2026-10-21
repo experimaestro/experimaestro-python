@@ -31,3 +31,18 @@ export const TagBadges = ({ tags }: { tags: Array<[string, any]> }) => {
     </>
   );
 };
+
+/** Tags of an experiment (plain names), coloured as the job tag keys */
+export const ExperimentTags = ({ tags }: { tags: string[] }) => (
+  <>
+    {tags.map((tag) => (
+      <span
+        key={tag}
+        className="experiment-tag"
+        style={{ background: `hsl(${hueOf(tag)} 55% 42%)` }}
+      >
+        {tag}
+      </span>
+    ))}
+  </>
+);

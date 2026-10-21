@@ -175,6 +175,18 @@ class WebDriver:
     async def search_experiments(self, text: str) -> None:
         raise NotImplementedError("searching is done by the browser client")
 
+    async def experiment_tags(self) -> dict[str, set[str]]:
+        await self._request("experiments")
+        return {
+            xp_id: set(payload["tags"])
+            for xp_id, payload in self.experiment_list.items()
+        }
+
+    async def group_experiments(
+        self, grouping: Literal["none", "prefix", "tag"]
+    ) -> dict[str, set[str]]:
+        raise NotImplementedError("grouping is done by the browser client")
+
     async def job_order(self) -> list[str]:
         raise NotImplementedError("job order is set by the browser client")
 
@@ -183,6 +195,9 @@ class WebDriver:
 
     async def group_by(self, key: Literal["status", "task"]) -> dict[str, set[str]]:
         raise NotImplementedError("grouping is done by the browser client")
+
+    async def hide_tags(self, keys: set[str]) -> dict[str, set[str]]:
+        raise NotImplementedError("the tags shown are chosen by the browser client")
 
     async def set_filter(self, query: str) -> str | None:
         request_id = next(self._request_ids)

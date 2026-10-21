@@ -16,6 +16,8 @@ export type Experiment = {
   // Displayed status, shared with the TUI: failed, running, done, stopped or empty
   statusCategory: string;
   hostname?: string | null;
+  // Tags of the experiment (experiment(..., tags=[...]))
+  tags: string[];
   started_at?: string | null;
   ended_at?: string | null;
   total_jobs: number;

@@ -31,7 +31,7 @@ export const RunSelector: React.FC = () => {
     <Form.Select
       value={currentRun || ""}
       onChange={handleChange}
-      style={{ width: "auto", marginLeft: "0.5rem" }}
+      style={{ width: "auto" }}
       size="sm"
       title="Run"
     >

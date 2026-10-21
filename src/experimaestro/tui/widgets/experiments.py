@@ -20,6 +20,15 @@ from experimaestro.tui.messages import (
     ShowRunsRequest,
 )
 from experimaestro.carbon.utils import format_co2_kg
+from experimaestro.ui.experiments import (
+    EXPERIMENT_GROUPINGS,
+    ExperimentGrouping,
+    experiment_matches,
+    group_experiments,
+)
+
+#: Icons of the experiment statuses (see BaseExperiment.status_category)
+STATUS_ICONS = {"failed": "❌", "running": "🏃", "done": "✓", "stopped": "⏹"}
 
 
 class ExperimentsList(Widget):
@@ -33,6 +42,7 @@ class ExperimentsList(Widget):
         Binding("S", "sort_by_status", "Sort ⚑", show=False),
         Binding("D", "sort_by_date", "Sort Date", show=False),
         Binding("O", "sort_alphabetical", "Sort Name", show=False),
+        Binding("g", "cycle_grouping", "Group"),
         Binding("/", "toggle_search", "Search"),
         Binding("escape", "clear_search", show=False, priority=True),
     ]
@@ -77,12 +87,40 @@ class ExperimentsList(Widget):
         super().__init__()
         self.state_provider = state_provider
         self.experiments = []
-        #: Text searched in the experiment IDs (case-insensitive)
+        #: Text searched in the experiment IDs and tags (case-insensitive)
         self.search = ""
+        #: How the experiments are grouped
+        self.grouping: ExperimentGrouping = "none"
+        #: Names of the collapsed groups
+        self.collapsed_groups: set[str] = set()
+        #: Experiment of each row (None for a group header): rows are keyed by
+        #: the experiment ID, or by group and experiment ID when grouped (an
+        #: experiment can be in several groups); group headers by "\0" + name
+        self.row_experiments: dict[str, str | None] = {}
+        self._runs_counts: dict[str, str] = {}
 
-    def _matches(self, experiment_id: str) -> bool:
+    def _matches(self, experiment) -> bool:
         """Whether an experiment is shown with the current search"""
-        return self.search.lower() in experiment_id.lower()
+        return experiment_matches(experiment, self.search)
+
+    def action_cycle_grouping(self) -> None:
+        """Group the experiments by nothing, prefix, or tag (in turn)"""
+        index = EXPERIMENT_GROUPINGS.index(self.grouping)
+        self.grouping = EXPERIMENT_GROUPINGS[(index + 1) % len(EXPERIMENT_GROUPINGS)]
+        self.collapsed_groups.clear()
+        self._update_title()
+        self._show_experiments()
+        self.notify(
+            "Not grouped" if self.grouping == "none" else f"Grouped by {self.grouping}",
+            severity="information",
+        )
+
+    def _update_title(self) -> None:
+        title = self.query_one("#experiments-title", Label)
+        if self.grouping == "none":
+            title.update("Experiments")
+        else:
+            title.update(f"Experiments (grouped by {self.grouping})")
 
     def action_toggle_search(self) -> None:
         """Show the search field and give it the focus"""
@@ -119,7 +157,7 @@ class ExperimentsList(Widget):
             return None
         row_key = list(table.rows.keys())[table.cursor_row]
         if row_key:
-            return str(row_key.value)
+            return self.row_experiments.get(str(row_key.value))
         return None
 
     def action_copy_path(self) -> None:
@@ -293,7 +331,7 @@ class ExperimentsList(Widget):
 
         # Full experiments table
         with Container(id="experiments-table-container"):
-            yield Label("Experiments", classes="section-title")
+            yield Label("Experiments", classes="section-title", id="experiments-title")
             yield Static("Loading experiments...", id="experiments-loading")
             yield Input(
                 placeholder="Search experiments (ID contains…)",
@@ -374,7 +412,7 @@ class ExperimentsList(Widget):
 
         self.app.call_from_thread(self._on_experiments_loaded, experiments, runs_counts)
 
-    def _on_experiments_loaded(  # noqa: C901
+    def _on_experiments_loaded(
         self, experiments: list, runs_counts: dict[str, str]
     ) -> None:
         """Handle loaded experiments on main thread"""
@@ -385,130 +423,8 @@ class ExperimentsList(Widget):
             pass
 
         self.experiments = experiments
-
-        try:
-            table = self.query_one("#experiments-table", DataTable)
-        except Exception:
-            return
-
-        # Guard: ensure columns have been added (on_mount may not have run yet)
-        if len(table.columns) == 0:
-            return
-
-        # Sort the experiments matching the search based on selected column
-        experiments_sorted = self._sort_experiments(
-            [exp for exp in self.experiments if self._matches(exp.experiment_id)]
-        )
-
-        # Get existing row keys
-        existing_keys = set(table.rows.keys())
-        current_exp_ids = set()
-
-        # Check if we need to rebuild (sort order may have changed)
-        current_order = [e.experiment_id for e in experiments_sorted]
-        existing_order = [str(k.value) for k in table.rows.keys()]
-        needs_rebuild = current_order != existing_order
-
-        # Build row data for all experiments
-        rows_data = {}
-        for exp in experiments_sorted:
-            exp_id = exp.experiment_id
-            current_exp_ids.add(exp_id)
-
-            status = self._format_experiment_status(exp)
-
-            # Format started time
-            if exp.started_at:
-                started = exp.started_at.strftime("%Y-%m-%d %H:%M")
-            else:
-                started = "-"
-
-            # Calculate duration
-            duration = "-"
-            if exp.started_at:
-                if exp.ended_at:
-                    elapsed = (exp.ended_at - exp.started_at).total_seconds()
-                else:
-                    # Still running - show elapsed time
-                    elapsed = (datetime.now() - exp.started_at).total_seconds()
-                # Format duration
-                duration = format_duration(elapsed)
-
-            # Get hostname (may be None for older experiments)
-            hostname = getattr(exp, "hostname", None) or "-"
-
-            # Get run_id
-            run_id = getattr(exp, "current_run_id", None) or "-"
-
-            # Get runs count (already fetched in background)
-            runs_count = runs_counts.get(exp_id, "-")
-
-            # CO2 impact (latest run of each job if known)
-            carbon = exp.carbon_summary
-            co2_text = (
-                format_co2_kg(carbon.co2_kg) if carbon and carbon.co2_kg > 0 else "-"
-            )
-
-            rows_data[exp_id] = (
-                exp_id,
-                run_id,
-                runs_count,
-                hostname,
-                status,
-                started,
-                duration,
-                co2_text,
-            )
-
-        if needs_rebuild:
-            # Full rebuild needed - save selection, clear, rebuild
-            selected_key = None
-            if table.cursor_row is not None and table.row_count > 0:
-                try:
-                    row_keys = list(table.rows.keys())
-                    if table.cursor_row < len(row_keys):
-                        selected_key = str(row_keys[table.cursor_row].value)
-                except (IndexError, KeyError):
-                    pass
-
-            table.clear()
-            new_cursor_row = None
-            for idx, exp in enumerate(experiments_sorted):
-                exp_id = exp.experiment_id
-                table.add_row(*rows_data[exp_id], key=exp_id)
-                if selected_key == exp_id:
-                    new_cursor_row = idx
-
-            if new_cursor_row is not None and table.row_count > 0:
-                table.move_cursor(row=new_cursor_row)
-        else:
-            # Update cells in place (no reordering needed)
-            for exp_id, row_data in rows_data.items():
-                if exp_id in existing_keys:
-                    (
-                        _,
-                        run_id,
-                        runs_count,
-                        hostname,
-                        status,
-                        started,
-                        duration,
-                        co2_text,
-                    ) = row_data
-                    table.update_cell(exp_id, "id", exp_id, update_width=True)
-                    table.update_cell(exp_id, "run", run_id, update_width=True)
-                    table.update_cell(exp_id, "runs", runs_count, update_width=True)
-                    table.update_cell(exp_id, "host", hostname, update_width=True)
-                    table.update_cell(exp_id, "status", status, update_width=True)
-                    table.update_cell(exp_id, "started", started, update_width=True)
-                    table.update_cell(exp_id, "duration", duration, update_width=True)
-                    table.update_cell(exp_id, "co2", co2_text, update_width=True)
-                else:
-                    table.add_row(*row_data, key=exp_id)
-
-            # Remove rows for experiments that no longer exist
-            for old_exp_id in existing_keys - current_exp_ids:
-                table.remove_row(old_exp_id)
+        self._runs_counts = runs_counts
+        self._show_experiments()
 
         # Update collapsed header if viewing an experiment
         if self.collapsed and self.current_experiment:
@@ -524,40 +440,8 @@ class ExperimentsList(Widget):
             self.collapse_to_experiment(exp_id)
             self.post_message(ExperimentSelected(exp_id, run_id))
 
-    def update_experiment_stats(self, experiment_id: str) -> None:
-        """Update stats for a single experiment without full list refresh.
-
-        Reloads just one experiment from the state provider and updates
-        its row in the DataTable in-place. Falls back to full refresh
-        if the experiment is not found in the table.
-        """
-        try:
-            table = self.query_one("#experiments-table", DataTable)
-        except Exception:
-            return
-
-        # Check if this experiment has a row in the table
-        existing_keys = {str(k.value) for k in table.rows.keys()}
-        if experiment_id not in existing_keys:
-            # Experiment not in table yet — need full refresh (unless hidden by
-            # the search)
-            if self._matches(experiment_id):
-                self.refresh_experiments()
-            return
-
-        # Load single experiment
-        exp = self.state_provider.get_experiment(experiment_id)
-        if exp is None:
-            return
-
-        # Update the cached experiments list in-place
-        for i, cached_exp in enumerate(self.experiments):
-            if cached_exp.experiment_id == experiment_id:
-                self.experiments[i] = exp
-                break
-
-        status = self._format_experiment_status(exp)
-
+    def _experiment_row(self, exp) -> tuple[str, ...]:
+        """Cells of the row of an experiment"""
         if exp.started_at:
             started = exp.started_at.strftime("%Y-%m-%d %H:%M")
         else:
@@ -568,32 +452,146 @@ class ExperimentsList(Widget):
             if exp.ended_at:
                 elapsed = (exp.ended_at - exp.started_at).total_seconds()
             else:
+                # Still running - show elapsed time
                 elapsed = (datetime.now() - exp.started_at).total_seconds()
             duration = format_duration(elapsed)
 
-        hostname = getattr(exp, "hostname", None) or "-"
-        run_id = getattr(exp, "current_run_id", None) or "-"
+        # CO2 impact (latest run of each job if known)
+        carbon = exp.carbon_summary
+        co2_text = format_co2_kg(carbon.co2_kg) if carbon and carbon.co2_kg > 0 else "-"
 
-        co2_text = "-"
-        carbon_impact = getattr(exp, "carbon_impact", None)
-        if carbon_impact:
-            if hasattr(carbon_impact, "latest"):
-                latest = carbon_impact.latest
-                co2_kg = latest.co2_kg if latest else 0
-            else:
-                latest = carbon_impact.get("latest", {})
-                co2_kg = latest.get("co2_kg", 0) if latest else 0
-            if co2_kg > 0:
-                co2_text = format_co2_kg(co2_kg)
+        tags = "".join(f" [dim]#{tag}[/dim]" for tag in exp.experiment_tags)
+        return (
+            f"{exp.experiment_id}{tags}",
+            getattr(exp, "current_run_id", None) or "-",
+            self._runs_counts.get(exp.experiment_id, "-"),
+            getattr(exp, "hostname", None) or "-",
+            self._format_experiment_status(exp),
+            started,
+            duration,
+            co2_text,
+        )
 
-        # Update cells in place
-        table.update_cell(experiment_id, "id", experiment_id, update_width=True)
-        table.update_cell(experiment_id, "run", run_id, update_width=True)
-        table.update_cell(experiment_id, "host", hostname, update_width=True)
-        table.update_cell(experiment_id, "status", status, update_width=True)
-        table.update_cell(experiment_id, "started", started, update_width=True)
-        table.update_cell(experiment_id, "duration", duration, update_width=True)
-        table.update_cell(experiment_id, "co2", co2_text, update_width=True)
+    def _group_row(self, name: str, experiments: list) -> tuple[str, ...]:
+        """Cells of the header row of a group"""
+        arrow = "▶" if name in self.collapsed_groups else "▼"
+        counts: dict[str, int] = {}
+        for exp in experiments:
+            counts[exp.status_category] = counts.get(exp.status_category, 0) + 1
+        summary = " ".join(
+            f"{STATUS_ICONS.get(status, '∅')}{count}"
+            for status, count in sorted(
+                counts.items(), key=lambda item: self.STATUS_ORDER.get(item[0], 99)
+            )
+        )
+        return (
+            f"[b]{arrow} {name}[/b] ({len(experiments)})",
+            "",
+            "",
+            "",
+            summary,
+            "",
+            "",
+            "",
+        )
+
+    def _show_experiments(self) -> None:
+        """Fill the table with the experiments matching the search, sorted and
+        grouped"""
+        try:
+            table = self.query_one("#experiments-table", DataTable)
+        except Exception:
+            return
+
+        # Guard: ensure columns have been added (on_mount may not have run yet)
+        if len(table.columns) == 0:
+            return
+
+        experiments_sorted = self._sort_experiments(
+            [exp for exp in self.experiments if self._matches(exp)]
+        )
+
+        # Rows (key, experiment ID or None for a group, cells)
+        rows: list[tuple[str, str | None, tuple[str, ...]]] = []
+        if self.grouping == "none":
+            for exp in experiments_sorted:
+                exp_id = exp.experiment_id
+                rows.append((exp_id, exp_id, self._experiment_row(exp)))
+        else:
+            for name, group in group_experiments(experiments_sorted, self.grouping):
+                rows.append((f"\0{name}", None, self._group_row(name, group)))
+                if name in self.collapsed_groups:
+                    continue
+                for exp in group:
+                    exp_id = exp.experiment_id
+                    rows.append(
+                        (f"{name}\t{exp_id}", exp_id, self._experiment_row(exp))
+                    )
+
+        selected_key, selected_exp = None, None
+        if table.cursor_row is not None and table.row_count > 0:
+            try:
+                row_keys = list(table.rows.keys())
+                if table.cursor_row < len(row_keys):
+                    selected_key = str(row_keys[table.cursor_row].value)
+                    selected_exp = self.row_experiments.get(selected_key)
+            except (IndexError, KeyError):
+                pass
+
+        self.row_experiments = {key: exp_id for key, exp_id, _ in rows}
+        existing_order = [str(k.value) for k in table.rows.keys()]
+        if existing_order == [key for key, _, _ in rows]:
+            # Same rows: update the cells in place
+            columns = list(table.columns)
+            for key, _, cells in rows:
+                for column, value in zip(columns, cells):
+                    table.update_cell(key, column, value, update_width=True)
+            return
+
+        # Rebuild, keeping the selected row (or experiment)
+        table.clear()
+        new_cursor_row = None
+        for idx, (key, exp_id, cells) in enumerate(rows):
+            table.add_row(*cells, key=key)
+            if key == selected_key or (
+                new_cursor_row is None and exp_id and exp_id == selected_exp
+            ):
+                new_cursor_row = idx
+        if new_cursor_row is not None and table.row_count > 0:
+            table.move_cursor(row=new_cursor_row)
+
+    def update_experiment_stats(self, experiment_id: str) -> None:
+        """Update stats for a single experiment without full list refresh.
+
+        Reloads just one experiment from the state provider and updates
+        its rows in the DataTable in-place. Falls back to full refresh
+        if the experiment is not found in the table.
+        """
+        try:
+            self.query_one("#experiments-table", DataTable)
+        except Exception:
+            return
+
+        # Load single experiment
+        exp = self.state_provider.get_experiment(experiment_id)
+        if exp is None:
+            return
+
+        if experiment_id not in self.row_experiments.values():
+            # Experiment not in table yet — need full refresh (unless hidden by
+            # the search or a collapsed group)
+            if self._matches(exp):
+                self.refresh_experiments()
+            return
+
+        # Update the cached experiments list in-place
+        for i, cached_exp in enumerate(self.experiments):
+            if cached_exp.experiment_id == experiment_id:
+                self.experiments[i] = exp
+                break
+
+        # Updates its rows (and the group summaries)
+        self._show_experiments()
 
         # Update collapsed header if viewing this experiment
         if self.collapsed and self.current_experiment == experiment_id:
@@ -602,7 +600,14 @@ class ExperimentsList(Widget):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle experiment selection"""
         if event.row_key:
-            exp_id = str(event.row_key.value)
+            key = str(event.row_key.value)
+            exp_id = self.row_experiments.get(key)
+            if exp_id is None:
+                # Group header: collapse or expand the group
+                name = key[1:]
+                self.collapsed_groups.symmetric_difference_update({name})
+                self._show_experiments()
+                return
             self.current_experiment = exp_id
             self.collapse_to_experiment(self.current_experiment)
             # Find run_id from experiments list

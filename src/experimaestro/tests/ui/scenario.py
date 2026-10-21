@@ -59,6 +59,8 @@ class ExperimentSpec:
     experiment_id: str
     #: Runs, oldest first: the last one is the current run
     runs: list[RunSpec]
+    #: Tags of the experiment
+    tags: list[str] = field(default_factory=list)
 
 
 # --- The scenario -----------------------------------------------------------
@@ -111,6 +113,7 @@ EXPERIMENTS = [
                 ],
             ),
         ],
+        tags=["paper", "bm25"],
     ),
     ExperimentSpec(
         "sweep",
@@ -136,6 +139,7 @@ EXPERIMENTS = [
                 ],
             )
         ],
+        tags=["paper"],
     ),
     # Stopped (e.g. interrupted) before all its jobs could run
     ExperimentSpec(
@@ -233,7 +237,7 @@ class ScenarioProvider(OfflineStateProvider):
         for xp in EXPERIMENTS:
             self.runs[xp.experiment_id] = []
             for run in xp.runs:
-                self._add_run(xp.experiment_id, run)
+                self._add_run(xp.experiment_id, run, xp.tags)
         for spec in ORPHANS:
             self._add_job(spec)
             self.orphans.append(spec.identifier)
@@ -271,7 +275,7 @@ class ScenarioProvider(OfflineStateProvider):
         self.jobs[spec.identifier] = job
         return job
 
-    def _add_run(self, experiment_id: str, run: RunSpec) -> None:
+    def _add_run(self, experiment_id: str, run: RunSpec, tags: list[str]) -> None:
         start = _run_start(run.run_id)
         job_infos = {}
         for spec in run.jobs:
@@ -297,6 +301,7 @@ class ScenarioProvider(OfflineStateProvider):
                 dependencies={s.identifier: s.depends_on for s in run.jobs},
                 finished_jobs=states.count("done"),
                 failed_jobs=states.count("error"),
+                experiment_tags=tags,
             )
         )
         self.run_jobs[(experiment_id, run.run_id)] = [s.identifier for s in run.jobs]

@@ -15,14 +15,18 @@ export default ({
   onDelete,
   onShow,
   onLogs,
+  hiddenTags,
 }: {
   job: Job;
   onKill: () => void;
   onDelete: () => void;
   onShow: () => void;
   onLogs: () => void;
+  // Keys of the tags not shown
+  hiddenTags: Set<string>;
 }) => {
   const { success, error } = useMessages();
+  const tags = job.tags.filter(([key]) => !hiddenTags.has(key));
   const progress = job.progress.length > 0 ? job.progress[0].progress : 0;
   return (
     <>
@@ -73,7 +77,7 @@ export default ({
         <td>
           {/* One line, scrolling when the tags do not fit */}
           <div className="job-tags-line">
-            {job.tags.length > 0 && <TagBadges tags={job.tags} />}
+            {tags.length > 0 && <TagBadges tags={tags} />}
           </div>
         </td>
         <td className="text-muted small text-nowrap">

@@ -168,6 +168,7 @@ class experiment(BaseExperiment):
         dirty_git: DirtyGitAction = DirtyGitAction.WARN,
         no_db: bool = False,
         no_environmental_impact: bool = False,
+        tags: list[str] | None = None,
     ):
         """
         :param env: an environment -- or a working directory for a local
@@ -213,6 +214,9 @@ class experiment(BaseExperiment):
 
         :param no_environmental_impact: Disable carbon tracking and the warning
             shown when CodeCarbon is not installed. Default: False.
+
+        :param tags: Tags of the experiment (e.g. ``["eval", "mice"]``), stored
+            with the run: the UIs can group and search experiments by tag.
 
         .. deprecated::
             The ``host``, ``port``, ``token``, and ``wait_for_quit`` parameters are
@@ -288,6 +292,7 @@ class experiment(BaseExperiment):
         self._job_listener: Optional[Listener] = None
         self._register_signals = register_signals
         self._dirty_git = dirty_git
+        self._experiment_tags: list[str] = list(tags or [])
         self._no_db = no_db
         self._no_environmental_impact = no_environmental_impact
 

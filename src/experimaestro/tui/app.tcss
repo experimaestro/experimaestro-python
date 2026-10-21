@@ -609,3 +609,27 @@ ParamsTree {
     height: 100%;
     color: $error;
 }
+
+TagVisibilityScreen {
+    align: center middle;
+}
+
+#tag-visibility-dialog {
+    width: 50;
+    height: auto;
+    max-height: 80%;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+#tag-visibility-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#tag-visibility-list {
+    height: auto;
+    max-height: 20;
+}

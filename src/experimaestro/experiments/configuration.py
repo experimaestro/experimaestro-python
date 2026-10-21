@@ -91,6 +91,10 @@ class ConfigurationBase:
     description: str = ""
     """Description of the experiment"""
 
+    tags: Optional[List[str]] = None
+    """Tags of the experiment (e.g. ``[eval, mice]``): the UIs can group and
+    search experiments by tag"""
+
     add_timestamp: bool = False
     """Adds a timestamp YYYY_MM_DD-HH_MM to the experiment ID"""
 

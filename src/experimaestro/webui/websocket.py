@@ -245,6 +245,8 @@ def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
         # Displayed status, shared with the TUI (BaseExperiment.status_category)
         "statusCategory": exp.status_category,
         "hostname": d.get("hostname"),
+        # Tags of the experiment (experiment(..., tags=[...]))
+        "tags": exp.experiment_tags,
         "started_at": d.get("started_at"),
         "ended_at": d.get("ended_at"),
         "total_jobs": _count("total_jobs"),

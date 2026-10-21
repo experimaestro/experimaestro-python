@@ -30,7 +30,7 @@ export const ExperimentSelector: React.FC = () => {
     <Form.Select
       value={currentExperiment || ""}
       onChange={handleChange}
-      style={{ width: "auto", marginLeft: "1rem" }}
+      style={{ width: "auto" }}
       size="sm"
     >
       <option value="">All Experiments</option>

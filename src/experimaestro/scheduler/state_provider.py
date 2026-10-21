@@ -1918,6 +1918,7 @@ class MockExperiment(BaseExperiment):
         finished_jobs: int = 0,
         failed_jobs: int = 0,
         run_tags: Optional[set[str]] = None,
+        experiment_tags: Optional[list[str]] = None,
         carbon_impact: Optional["CarbonImpactData"] = None,
         job_states: Optional[Dict[str, JobState]] = None,
         total_jobs: int = 0,
@@ -1937,6 +1938,7 @@ class MockExperiment(BaseExperiment):
         self._finished_jobs = finished_jobs
         self._failed_jobs = failed_jobs
         self._run_tags = run_tags or set()
+        self._experiment_tags = experiment_tags or []
         self._carbon_impact = carbon_impact
         # Track job states from experiment events
         self._job_states: Dict[str, JobState] = job_states or {}
@@ -2331,6 +2333,7 @@ class MockExperiment(BaseExperiment):
             finished_jobs=finished_jobs,
             failed_jobs=failed_jobs,
             run_tags=set(d.get("run_tags", [])),
+            experiment_tags=d.get("experiment_tags", []),
             carbon_impact=CarbonImpactData.from_dict(d.get("carbon_impact")),
             total_jobs=d.get("total_jobs", 0),
             job_states=job_states,

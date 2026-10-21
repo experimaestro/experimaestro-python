@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Badge, Button, Modal, Form, Table } from "react-bootstrap";
+import { Badge, Button, Dropdown, Modal, Form, Table } from "react-bootstrap";
 
 import TaskJobs, { JOB_COLUMNS } from "./TaskJobs";
 import JobModal, { JobTab } from "./JobModal";
@@ -101,6 +101,27 @@ function statusCounts(jobs: Job[]): Array<[string, number]> {
   );
 }
 
+// Tag keys hidden in the job list (for all the experiments)
+const HIDDEN_TAGS_STORAGE_KEY = "experimaestro.jobs.hiddenTags";
+
+function loadHiddenTags(): Set<string> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HIDDEN_TAGS_STORAGE_KEY) ?? "[]");
+    if (Array.isArray(saved)) return new Set(saved.map(String));
+  } catch {
+    // Storage unavailable or invalid content: show all the tags
+  }
+  return new Set();
+}
+
+function saveHiddenTags(keys: Set<string>) {
+  try {
+    localStorage.setItem(HIDDEN_TAGS_STORAGE_KEY, JSON.stringify(Array.from(keys)));
+  } catch {
+    // Storage unavailable: the hidden tags are not remembered
+  }
+}
+
 const STATUS_COLOR: { [key: string]: string } = {
   running: "primary",
   done: "success",
@@ -121,6 +142,7 @@ export default () => {
   const [groupBy, setGroupBy] = useState<GroupKey>("none");
   const [tagKey, setTagKey] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [hiddenTags, setHiddenTags] = useState<Set<string>>(loadHiddenTags);
   const { info } = useMessages();
   const jobs = useAppSelector((state) => state.db.jobs);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
@@ -255,6 +277,28 @@ export default () => {
     sortAsc,
   ]);
 
+  // --- Tags shown
+
+  // Keys of the tags of the experiment jobs (and those hidden)
+  const allTagKeys = useMemo(() => {
+    const keys = new Set<string>(hiddenTags);
+    for (const id of jobs.ids) {
+      const job = jobs.byId[id];
+      if (currentExperiment !== null && !job.experimentIds?.includes(currentExperiment))
+        continue;
+      for (const [k] of job.tags) keys.add(k);
+    }
+    return Array.from(keys).sort();
+  }, [jobs.ids, jobs.byId, currentExperiment, hiddenTags]);
+
+  function toggleTag(key: string) {
+    const next = new Set(hiddenTags);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setHiddenTags(next);
+    saveHiddenTags(next);
+  }
+
   // --- Grouping
 
   const tagKeys = useMemo(() => {
@@ -313,6 +357,7 @@ export default () => {
       onDelete={() => setConfirm({ job, kind: "delete" })}
       onShow={() => showJob(job, "details")}
       onLogs={() => showJob(job, "logs")}
+      hiddenTags={hiddenTags}
     />
   );
 
@@ -368,6 +413,31 @@ export default () => {
             >
               <i className={`fas fa-arrow-${sortAsc ? "up" : "down"}`} />
             </Button>
+            <Form.Group>
+              <Form.Label htmlFor="tagvisibility">Tags</Form.Label>
+              <Dropdown autoClose="outside">
+                <Dropdown.Toggle id="tagvisibility" size="sm" variant="outline-secondary">
+                  {hiddenTags.size > 0 ? `${hiddenTags.size} hidden` : "All shown"}
+                </Dropdown.Toggle>
+                <Dropdown.Menu className="tag-visibility-menu">
+                  {allTagKeys.length === 0 && (
+                    <Dropdown.ItemText className="text-muted">No tags</Dropdown.ItemText>
+                  )}
+                  {allTagKeys.map((k) => (
+                    <Dropdown.ItemText key={k}>
+                      <Form.Check
+                        type="checkbox"
+                        id={`tag-visible-${k}`}
+                        data-tag-key={k}
+                        label={k}
+                        checked={!hiddenTags.has(k)}
+                        onChange={() => toggleTag(k)}
+                      />
+                    </Dropdown.ItemText>
+                  ))}
+                </Dropdown.Menu>
+              </Dropdown>
+            </Form.Group>
             <Form.Group>
               <Form.Label htmlFor="groupby">Group by</Form.Label>
               <Form.Select

@@ -205,6 +205,32 @@ class BrowserDriver:
             await search.press("Escape")
         await self.settle()
 
+    async def experiment_tags(self) -> dict[str, set[str]]:
+        await self._show_experiments()
+        tags = {}
+        for row in await self.page.locator("tr[data-experiment-id]").all():
+            exp_id = await row.get_attribute("data-experiment-id")
+            tags[exp_id] = set(await row.locator(".experiment-tag").all_inner_texts())
+        return tags
+
+    async def group_experiments(
+        self, grouping: Literal["none", "prefix", "tag"]
+    ) -> dict[str, set[str]]:
+        await self._show_experiments()
+        await self.page.locator("#groupexperiments").select_option(grouping)
+        await self.settle()
+        groups: dict[str, set[str]] = {}
+        for body in await self.page.locator("table.experiments-table tbody").all():
+            header = body.locator("tr.experiment-group-row")
+            name = (
+                await header.get_attribute("data-group") if await header.count() else ""
+            )
+            for row in await body.locator("tr[data-experiment-id]").all():
+                groups.setdefault(name, set()).add(
+                    await row.get_attribute("data-experiment-id")
+                )
+        return groups
+
     async def runs(self, experiment_id: str) -> list[str]:
         await self.open_experiment(experiment_id)
         selector = self.page.locator("select[title='Run']")
@@ -265,6 +291,22 @@ class BrowserDriver:
         await self.settle()
         rows = self.page.locator("tr.job-row[data-job-id]")
         return [await row.get_attribute("data-job-id") for row in await rows.all()]
+
+    async def hide_tags(self, keys: set[str]) -> dict[str, set[str]]:
+        await self._close_modals()
+        await self.page.locator("#tagvisibility").click()
+        for check in await self.page.locator("[data-tag-key]").all():
+            await check.set_checked(
+                await check.get_attribute("data-tag-key") not in keys
+            )
+        await self.page.keyboard.press("Escape")
+        await self.settle()
+
+        shown = {}
+        for row in await self.page.locator("tr.job-tags-row[data-tags-of]").all():
+            names = await row.locator(".tag .name").all_inner_texts()
+            shown[await row.get_attribute("data-tags-of")] = set(names)
+        return shown
 
     async def sort_by(self, column: Literal["task", "status"]) -> None:
         await self._close_modals()

@@ -63,6 +63,58 @@ async def test_experiment_search(ui):
     assert set(await ui.experiment_order()) == {"baseline", "sweep", "ablation"}
 
 
+@pytest.mark.ui("tui", "browser")
+async def test_experiment_search_tags(ui):
+    """The search also keeps the experiments with a tag containing the text"""
+    await ui.search_experiments("BM2")
+    assert await ui.experiment_order() == ["baseline"]
+
+    await ui.search_experiments("pap")
+    assert await ui.experiment_order() == ["sweep", "baseline"]
+
+
+async def test_experiment_tags(ui):
+    assert await ui.experiment_tags() == {
+        "baseline": {"paper", "bm25"},
+        "sweep": {"paper"},
+        "ablation": set(),
+    }
+
+
+@pytest.mark.ui("tui", "browser")
+async def test_hide_tags(ui):
+    """Hidden tag keys are not shown for any job, until shown again"""
+    await ui.open_experiment("baseline")
+    assert await ui.hide_tags({"model"}) == {
+        LEARN_DONE: set(),
+        LEARN_ERROR: set(),
+        EVAL_DONE: set(),
+    }
+    assert await ui.hide_tags(set()) == {
+        LEARN_DONE: {"model"},
+        LEARN_ERROR: {"model"},
+        EVAL_DONE: {"model"},
+    }
+
+
+@pytest.mark.ui("tui", "browser")
+async def test_experiment_grouping(ui):
+    """An experiment is in the group of each of its tags, or in the untagged
+    group"""
+    assert await ui.group_experiments("tag") == {
+        "bm25": {"baseline"},
+        "paper": {"baseline", "sweep"},
+        "(untagged)": {"ablation"},
+    }
+    # No separator in the IDs: each experiment is its own prefix
+    assert await ui.group_experiments("prefix") == {
+        "ablation": {"ablation"},
+        "baseline": {"baseline"},
+        "sweep": {"sweep"},
+    }
+    assert await ui.group_experiments("none") == {"": {"baseline", "sweep", "ablation"}}
+
+
 async def test_jobs_of_current_run(ui):
     await ui.open_experiment("baseline")
     assert await ui.visible_jobs() == {LEARN_DONE, LEARN_ERROR, EVAL_DONE}

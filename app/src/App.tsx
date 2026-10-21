@@ -214,8 +214,11 @@ export default () => {
               </Nav.Link>
               <Warnings />
             </Nav>
-            {isScoped(view) && <ExperimentSelector />}
-            {(view === "tasks" || view === "graph") && <RunSelector />}
+            {/* The run below the experiment, so that both have room */}
+            <div className="d-flex flex-column gap-1 ms-3">
+              {isScoped(view) && <ExperimentSelector />}
+              {(view === "tasks" || view === "graph") && <RunSelector />}
+            </div>
             <Button
               variant="outline-light"
               size="sm"

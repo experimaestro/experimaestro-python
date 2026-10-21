@@ -3,7 +3,7 @@
 from typing import Optional
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Static
+from textual.widgets import Button, SelectionList, Static
 from textual.screen import ModalScreen
 from textual.binding import Binding
 
@@ -106,6 +106,36 @@ class KillConfirmScreen(ModalScreen[bool]):
             self.dismiss(False)
 
 
+class TagVisibilityScreen(ModalScreen[set[str]]):
+    """Choose the tag keys shown in the job list; returns the hidden ones"""
+
+    BINDINGS = [Binding("escape", "close", "Close")]
+
+    def __init__(self, keys: list[str], hidden: set[str]) -> None:
+        super().__init__()
+        self.keys = keys
+        self.hidden = hidden
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="tag-visibility-dialog"):
+            yield Static("Tags shown", id="tag-visibility-title")
+            if self.keys:
+                yield SelectionList[str](
+                    *((key, key, key not in self.hidden) for key in self.keys),
+                    id="tag-visibility-list",
+                )
+            else:
+                yield Static("No tags", id="tag-visibility-empty")
+            yield Static("[dim]Space: show/hide · Esc: close[/dim]")
+
+    def action_close(self) -> None:
+        if not self.keys:
+            self.dismiss(self.hidden)
+            return
+        shown = set(self.query_one("#tag-visibility-list", SelectionList).selected)
+        self.dismiss(set(self.keys) - shown)
+
+
 class HelpScreen(ModalScreen[None]):
     """Modal screen showing keyboard shortcuts"""
 
@@ -131,10 +161,11 @@ class HelpScreen(ModalScreen[None]):
   d         Show experiment runs
   Ctrl+d    Delete experiment
   Ctrl+k    Kill all running jobs
-  /         Search (in the IDs)
+  /         Search (in the IDs and tags)
   S         Sort by status
   D         Sort by date (default)
   O         Sort alphabetically
+  g         Group by nothing, prefix or tag
 
 [bold cyan]Jobs[/bold cyan]
   l         View job logs
@@ -147,6 +178,7 @@ class HelpScreen(ModalScreen[None]):
   T         Sort by task
   D         Sort by date
   O         Sort alphabetically
+  #         Choose the tags shown
   f         Copy folder path
   t         Toggle tree view
   g         Cycle tree grouping (in tree view)

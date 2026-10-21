@@ -385,3 +385,31 @@
     }
   }
 }
+
+/* Tags of an experiment */
+.experiment-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: white;
+  font-size: 0.7rem;
+  line-height: 1rem;
+  vertical-align: middle;
+}
+
+/* Group header rows of the experiment list */
+.experiments-table .experiment-group-row td {
+  background: #f1f3f5;
+  cursor: pointer;
+  user-select: none;
+}
+.experiments-table .experiment-group-row:hover td {
+  background: #e7eaee;
+}
+
+/* Menu choosing the tags shown in the job list */
+.tag-visibility-menu {
+  max-height: 60vh;
+  overflow-y: auto;
+}
