@@ -5,6 +5,7 @@ only when an event says it changed, when a mutation occurs, or when the caller
 asks for a full refresh (``refresh=True``).
 """
 
+import threading
 from collections import Counter
 from datetime import datetime
 
@@ -341,6 +342,29 @@ def test_none_is_a_cacheable_value():
     assert provider.get_experiment("exp1") is None
     assert provider.get_experiment("exp1") is None
     assert provider.calls["experiment:exp1"] == 1
+
+
+def test_concurrent_misses_fetch_once():
+    """A query asked while it is being fetched waits for that fetch (e.g. the
+    web UI warming its cache when a client connects)"""
+    started, release = threading.Event(), threading.Event()
+
+    class SlowProvider(CountingProvider):
+        def _fetch_experiments(self, since=None, *, refresh=False):
+            started.set()
+            release.wait(5)
+            return super()._fetch_experiments(since, refresh=refresh)
+
+    provider = SlowProvider()
+    first = threading.Thread(target=provider.get_experiments)
+    first.start()
+    assert started.wait(5)
+    second = threading.Thread(target=provider.get_experiments)
+    second.start()
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert provider.calls["experiments"] == 1
 
 
 class TestQueryCache:

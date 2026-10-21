@@ -5,6 +5,7 @@ Creates the FastAPI app with WebSocket endpoint and routes.
 
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 from importlib.resources import files
 from typing import TYPE_CHECKING
@@ -55,6 +56,13 @@ def login_redirect(request: Request) -> RedirectResponse:
     )
 
 
+def _warm_cache(server: "WebUIServer") -> None:
+    try:
+        server.state_provider.get_experiments()
+    except Exception:
+        logger.exception("Could not read the experiments")
+
+
 def create_app(server: "WebUIServer") -> FastAPI:
     """Create FastAPI application
 
@@ -72,6 +80,11 @@ def create_app(server: "WebUIServer") -> FastAPI:
         # uvicorn serves on. Capture that loop here so the bridge can hand
         # broadcasts to it via run_coroutine_threadsafe.
         app.state.state_bridge.set_loop(asyncio.get_running_loop())
+        # Read the experiments now rather than when the first client connects
+        # (a file system scan, or RPC round-trips for a remote workspace)
+        threading.Thread(
+            target=_warm_cache, args=(server,), name="webui-warm-cache", daemon=True
+        ).start()
         yield
 
     app = FastAPI(

@@ -782,6 +782,9 @@ class OfflineStateProvider(StateProvider):
         self._init_job_cache()
         self._init_experiment_cache()
         self._query_cache = QueryCache()
+        # One lock per query key, so that concurrent misses fetch only once
+        self._fetch_locks: Dict[tuple, threading.RLock] = {}
+        self._fetch_locks_lock = threading.Lock()
 
     # =========================================================================
     # Cached read queries
@@ -816,8 +819,16 @@ class OfflineStateProvider(StateProvider):
             if value is not MISSING:
                 return value
 
-        value = fetch()
-        self._query_cache.put(key, value, experiment_id=experiment_id)
+        with self._fetch_locks_lock:
+            fetch_lock = self._fetch_locks.setdefault(key, threading.RLock())
+        with fetch_lock:
+            # Answered while waiting for another thread fetching it
+            if not refresh:
+                value = self._query_cache.get(key, copy)
+                if value is not MISSING:
+                    return value
+            value = fetch()
+            self._query_cache.put(key, value, experiment_id=experiment_id)
         return copy(value) if copy is not None else value
 
     def invalidate_caches(self, experiment_id: Optional[str] = None) -> None:
