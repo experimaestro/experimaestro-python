@@ -23,7 +23,7 @@ from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from datetime import datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Callable, Dict, Hashable, List, Optional, Set
 
 from termcolor import colored
 
@@ -34,7 +34,16 @@ from experimaestro.scheduler.state_provider import (
     MockExperiment,
     MockService,
 )
-from experimaestro.scheduler.state_status import EventBase
+from experimaestro.scheduler.state_status import (
+    CarbonMetricsEvent,
+    EventBase,
+    ExperimentJobStateEvent,
+    ExperimentUpdatedEvent,
+    JobProgressEvent,
+    JobStateChangedEvent,
+    RunUpdatedEvent,
+    ServiceStateChangedEvent,
+)
 from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseExperiment,
@@ -71,6 +80,57 @@ logger = logging.getLogger("xpm.remote.client")
 
 # Default timeout for RPC requests (seconds)
 DEFAULT_TIMEOUT = 30.0
+
+
+def coalesce_key(event: EventBase) -> Hashable | None:
+    """The entity whose state an event updates, if a later event supersedes it
+
+    Two events with the same key tell the new state of the same entity: only
+    the latest needs to be delivered (listeners read the state from the
+    provider, whose cache all the events were applied to). Events that are not
+    a state update (a job submitted, a service or action added, a warning, a
+    run completed, ...) have no key: they are all delivered.
+    """
+    match event:
+        case ExperimentJobStateEvent():
+            # A submission tells the job joined the experiment (job.add)
+            if event.scheduler_state == "submitted":
+                return None
+            return (
+                ExperimentJobStateEvent,
+                event.experiment_id,
+                event.run_id,
+                event.job_id,
+            )
+        case JobStateChangedEvent() | JobProgressEvent() | CarbonMetricsEvent():
+            return (type(event), event.job_id)
+        case ServiceStateChangedEvent():
+            return (ServiceStateChangedEvent, event.experiment_id, event.service_id)
+        case RunUpdatedEvent():
+            return (RunUpdatedEvent, event.experiment_id, event.run_id)
+        case ExperimentUpdatedEvent():
+            return (ExperimentUpdatedEvent, event.experiment_id)
+    return None
+
+
+def coalesce_events(events: List[EventBase]) -> List[EventBase]:
+    """Keep the latest event of each entity (see :func:`coalesce_key`)
+
+    The events keep their relative order; a superseded event is removed, so
+    the latest one stays after everything that was notified before it (e.g. a
+    job state change after the job submission).
+    """
+    seen: set[Hashable] = set()
+    kept: List[EventBase] = []
+    for event in reversed(events):
+        key = coalesce_key(event)
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(event)
+    kept.reverse()
+    return kept
 
 
 def _strip_dev_version(version: str) -> str:
@@ -945,35 +1005,30 @@ class SSHStateProviderClient(OfflineStateProvider):
         This throttles notification delivery to avoid flooding the UI with
         rapid state changes.
         """
-        import time
-
         while self._running:
             time.sleep(self._notify_interval)
 
             if not self._running:
                 break
 
-            # Get and clear pending events atomically
-            with self._pending_events_lock:
-                if not self._pending_events:
-                    continue
-                events = self._pending_events.copy()
-                self._pending_events.clear()
+            self._deliver_pending_events()
 
-            # Deduplicate events by type (keep latest of each type)
-            # This prevents redundant refreshes for rapidly changing state
-            seen_types = set()
-            unique_events = []
-            for event in reversed(events):
-                event_type = type(event)
-                if event_type not in seen_types:
-                    seen_types.add(event_type)
-                    unique_events.append(event)
-            unique_events.reverse()
+    def _deliver_pending_events(self) -> None:
+        """Notify the listeners of the events received since the last batch
 
-            # Notify listeners
-            for event in unique_events:
-                self._notify_listeners(event)
+        Only the latest event about each entity is delivered (see
+        :func:`coalesce_events`): the events were already applied to the cache
+        on reception, the listeners only need to know what to redraw.
+        """
+        # Get and clear pending events atomically
+        with self._pending_events_lock:
+            if not self._pending_events:
+                return
+            events = self._pending_events
+            self._pending_events = []
+
+        for event in coalesce_events(events):
+            self._notify_listeners(event)
 
     def _notification_to_event(self, method: str, params: Dict) -> Optional[EventBase]:
         """Convert a notification to a EventBase"""
