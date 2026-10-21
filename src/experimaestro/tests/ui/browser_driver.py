@@ -486,6 +486,20 @@ class BrowserDriver:
         await button.click()
         return await self._expect_toast(start, None)
 
+    async def active_services(self) -> dict[str, str]:
+        await self._close_modals()
+        await self.settle()
+        active = {}
+        for item in await self.page.locator(".active-services .active-service").all():
+            key = "/".join(
+                [
+                    await item.get_attribute("data-experiment-id"),
+                    await item.get_attribute("data-service-id"),
+                ]
+            )
+            active[key] = (await item.locator(".badge").inner_text()).lower()
+        return active
+
     async def start_service(
         self, experiment_id: str, service_id: str
     ) -> Notification | None:

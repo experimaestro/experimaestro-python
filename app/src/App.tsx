@@ -11,6 +11,7 @@ import Tasks from "./Tasks";
 import TaskGraph from "./TaskGraph";
 import Experiments from "./Experiments";
 import Services from "./Services";
+import ActiveServices from "./ActiveServices";
 import Warnings from "./Warnings";
 import Actions from "./Actions";
 import Orphans from "./Orphans";
@@ -243,6 +244,7 @@ export default () => {
           </Navbar.Collapse>
         </Container>
       </Navbar>
+      <ActiveServices />
 
       <Container
         className="mt-2"

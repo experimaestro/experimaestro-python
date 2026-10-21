@@ -308,6 +308,9 @@ class WebDriver:
             if service["experimentId"] == experiment_id
         }
 
+    async def active_services(self) -> dict[str, str]:
+        raise NotImplementedError("the services strip is shown by the browser client")
+
     async def start_service(self, experiment_id: str, service_id: str) -> Notification:
         return await self._notification(
             "service.start", experimentId=experiment_id, id=service_id

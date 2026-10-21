@@ -73,6 +73,9 @@ Then open `http://localhost:12345` in your browser.
 - **Services**: The services of the selected experiment (of all experiments by
   default), also when the experiment is not running; start, stop and open
   them (through `/services/<experiment>/<service>/`), or view their logs
+- **Active Services**: The services starting or running, of all the
+  experiments, are listed under the navigation bar on every page (with their
+  experiment), with links to open them, see their logs or stop them
 - **Links**: Each page has its own URL, which can be bookmarked or shared, and
   the browser's back and forward buttons move between the pages (see below)
 

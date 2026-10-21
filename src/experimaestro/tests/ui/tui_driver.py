@@ -487,6 +487,9 @@ class TuiDriver:
         await self.pilot.press(key)
         return await self._expect_notification(start, None)
 
+    async def active_services(self) -> dict[str, str]:
+        raise NotImplementedError("the TUI lists the services in its Services tab")
+
     async def start_service(self, experiment_id: str, service_id: str) -> Notification:
         return await self._service_action(experiment_id, service_id, "ctrl+s")
 

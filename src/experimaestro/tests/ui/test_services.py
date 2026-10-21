@@ -43,3 +43,15 @@ async def test_stop_refuses_stopped_service(ui):
         await ui.stop_service("sweep", "tensorboard"),
         "Service 'tensorboard' is not running",
     )
+
+
+@pytest.mark.ui("browser")
+async def test_active_services_shown_everywhere(ui):
+    """Running services are shown with their experiment, whatever the page"""
+    assert await ui.active_services() == {}
+    await ui.start_service("sweep", "tensorboard")
+    await ui.open_experiment("baseline")
+    assert await ui.active_services() == {"sweep/tensorboard": "running"}
+
+    await ui.stop_service("sweep", "tensorboard")
+    assert await ui.active_services() == {}

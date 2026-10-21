@@ -184,6 +184,11 @@ class UIDriver(Protocol):
         of the nodes stacked in each)"""
         ...
 
+    async def active_services(self) -> dict[str, str]:
+        """Services starting or running, shown whatever the page, as
+        ``experiment/service`` with their (lowercase) state"""
+        ...
+
     async def start_service(
         self, experiment_id: str, service_id: str
     ) -> Notification | None:
