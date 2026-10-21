@@ -509,3 +509,10 @@ class BrowserDriver:
         self, experiment_id: str, service_id: str
     ) -> Notification | None:
         return await self._service_action(experiment_id, service_id, "Stop")
+
+    async def connection_state(self) -> str | None:
+        await self.settle()
+        banner = self.page.locator(".provider-connection")
+        if await banner.count() == 0:
+            return None
+        return await banner.get_attribute("data-state")

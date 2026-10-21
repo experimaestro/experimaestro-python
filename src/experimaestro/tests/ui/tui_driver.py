@@ -495,3 +495,11 @@ class TuiDriver:
 
     async def stop_service(self, experiment_id: str, service_id: str) -> Notification:
         return await self._service_action(experiment_id, service_id, "ctrl+k")
+
+    async def connection_state(self) -> str | None:
+        await self.settle()
+        status = self.app.query_one("#connection-status", Static)
+        if status.has_class("hidden"):
+            return None
+        (state,) = {"reconnecting", "disconnected"} & set(status.classes)
+        return state

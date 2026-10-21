@@ -369,6 +369,29 @@ The SSH options (`--remote-xpm`, `-o`, …) are given before the command, see
    (and for the started services, shown on every page). The same applies to
    the web UI, for each browser page.
 
+### Lost Connections
+
+When the SSH connection drops (network loss, laptop sleep, the remote server
+exiting), the monitor reconnects on its own: it starts a new remote server,
+declares again the experiments shown, and reads the state again (the events
+sent while disconnected were missed). Both interfaces show the connection
+state on every page — the TUI below its header, the web UI below its
+navigation bar:
+
+- **reconnecting**: the connection was lost, with the number of the attempt
+  (e.g. `attempt 2/5`) and why the connection was lost or the last attempt
+  failed;
+- **disconnected**: all the attempts failed; restart the monitor to try
+  again.
+
+Nothing is shown while connected. The reconnection policy — at most
+`max_retries` attempts within `window` seconds, with a delay doubling from
+`delay` up to `max_delay` — is set in `settings.yaml`, see
+[Reconnection](settings.md#reconnection). SSH is run with
+`ServerAliveInterval=15` and `ServerAliveCountMax=3`, so that a dead
+connection is detected within a minute (your own `-o` options take
+precedence).
+
 ### Shared Workspaces
 
 Like local monitoring, remote monitoring runs the workspace cleanup, so that

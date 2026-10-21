@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import click
 from termcolor import cprint
 
-from experimaestro.settings import WorkspaceSettings
+from experimaestro.settings import ReconnectSettings, WorkspaceSettings, get_settings
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.remote.client import SSHStateProviderClient
@@ -152,6 +152,7 @@ class RemoteWorkspace:
     force_version: bool = False
     request_timeout: float = 60.0
     log_levels: str | None = None
+    reconnect: ReconnectSettings = field(default_factory=ReconnectSettings)
 
     @staticmethod
     def resolve(
@@ -183,6 +184,7 @@ class RemoteWorkspace:
             force_version=options.force_version,
             request_timeout=options.request_timeout,
             log_levels=options.remote_log_levels or (ssh.log_levels if ssh else None),
+            reconnect=(ssh.reconnect if ssh else None) or get_settings().reconnect,
         )
 
     def __str__(self):
@@ -237,6 +239,7 @@ class RemoteWorkspace:
             force_version=self.force_version,
             request_timeout=self.request_timeout,
             remote_log_levels=self.log_levels,
+            reconnect=self.reconnect,
         )
         try:
             provider.connect()

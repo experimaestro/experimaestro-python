@@ -16,9 +16,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import psutil
 import pytest
 
 from experimaestro import Param, Task
+from experimaestro.scheduler.state_status import ConnectionState, ConnectionStateEvent
+from experimaestro.settings import ReconnectSettings
 from experimaestro.scheduler.remote.sync import RemoteFileSynchronizer
 from experimaestro.scheduler.service_operations import find_service
 from experimaestro.scheduler.services import WebService
@@ -379,3 +382,104 @@ def test_process_service_stopped_while_starting(tmp_path):
     assert urls == [None]
     assert service.state == ServiceState.STOPPED
     assert service.error is None
+
+
+# --- Reconnection
+
+
+def kill_connection(provider: SSHStateProviderClient) -> None:
+    """Kill the SSH process (and the remote server it runs): the connection
+    drops"""
+    process = psutil.Process(provider._process.pid)
+    for child in process.children(recursive=True):
+        child.kill()
+    process.kill()
+
+
+def wait_for(predicate, timeout: float = 30.0) -> None:
+    deadline = time.time() + timeout
+    while not predicate():
+        assert time.time() < deadline, "timed out"
+        time.sleep(0.05)
+
+
+def record_connection_events(
+    provider: SSHStateProviderClient,
+) -> list[ConnectionStateEvent]:
+    events = []
+
+    def listener(event):
+        if isinstance(event, ConnectionStateEvent):
+            events.append(event)
+
+    provider.add_listener(listener)
+    return events
+
+
+def test_reconnect(remote_workspace, fake_ssh):
+    """The client reconnects when the connection drops: the watched
+    experiments are sent again, and the cached answers dropped (events were
+    missed) while keeping the cached objects"""
+    provider = connect(
+        remote_workspace,
+        "-m",
+        "experimaestro",
+        reconnect=ReconnectSettings(max_retries=3, delay=0.1),
+    )
+    events = record_connection_events(provider)
+    watches = []
+    send_watch = provider._send_watch
+
+    def record_watch(experiments):
+        watches.append(experiments)
+        send_watch(experiments)
+
+    provider._send_watch = record_watch
+    try:
+        provider.watch("ui", {"greetings"})
+        (experiment,) = provider.get_experiments()
+        watches.clear()
+
+        kill_connection(provider)
+        wait_for(lambda: events and events[-1].state == "connected")
+
+        assert [event.state for event in events] == ["reconnecting", "connected"]
+        assert events[0].attempt == 1 and events[0].max_retries == 3
+        assert provider.connection_state == ConnectionState.CONNECTED
+        assert watches == [frozenset({"greetings"})]
+        assert ("experiments", None) not in dict(provider._query_cache.entries())
+        # Read again, into the same object
+        (again,) = provider.get_experiments()
+        assert again is experiment
+    finally:
+        provider.disconnect()
+    assert provider.connection_state == ConnectionState.DISCONNECTED
+
+
+def test_reconnect_gives_up(remote_workspace, fake_ssh):
+    """At most max_retries attempts are made within the time window: the
+    client is then disconnected"""
+    provider = connect(
+        remote_workspace,
+        "-m",
+        "experimaestro",
+        reconnect=ReconnectSettings(max_retries=2, delay=0.1),
+    )
+    events = record_connection_events(provider)
+    try:
+        # The remote server cannot be started anymore
+        provider.remote_xpm_path = "false"
+        kill_connection(provider)
+        wait_for(lambda: events and events[-1].state == "disconnected")
+
+        assert [(event.state, event.attempt) for event in events] == [
+            ("reconnecting", 1),
+            ("reconnecting", 2),
+            ("disconnected", 2),
+        ]
+        assert events[-1].error
+        assert provider.connection_state == ConnectionState.DISCONNECTED
+        with pytest.raises(ConnectionError, match="disconnected"):
+            provider._call_sync(RPCMethod.GET_EXPERIMENTS, {})
+    finally:
+        provider.disconnect()

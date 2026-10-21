@@ -103,6 +103,24 @@ JobsTreeView {
     display: none;
 }
 
+/* Connection state of a remote (SSH) workspace, shown when not connected */
+#connection-status {
+    width: 100%;
+    height: auto;
+    padding: 0 1;
+    text-style: bold;
+}
+
+#connection-status.reconnecting {
+    background: $warning;
+    color: $text;
+}
+
+#connection-status.disconnected {
+    background: $error;
+    color: $text;
+}
+
 .section-title {
     background: $boost;
     padding: 1;

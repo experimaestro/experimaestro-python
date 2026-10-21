@@ -45,7 +45,7 @@ from experimaestro.notifications import (
     get_progress_information_from_dict,
 )
 from experimaestro.scheduler.query_cache import MISSING, QueryCache, freeze
-from experimaestro.scheduler.state_status import EventBase
+from experimaestro.scheduler.state_status import ConnectionState, EventBase
 
 logger = logging.getLogger("xpm.state")
 
@@ -776,6 +776,16 @@ class StateProvider(ABC):
     def read_only(self) -> bool:
         """Whether this provider is read-only"""
         return True
+
+    @property
+    def connection_state(self) -> ConnectionState:
+        """State of the connection to the source of the state
+
+        Local providers are always connected. A remote one (SSH) reconnects
+        when its connection drops; its changes are notified to the listeners
+        with a :class:`~experimaestro.scheduler.state_status.ConnectionStateEvent`.
+        """
+        return ConnectionState.CONNECTED
 
     @property
     def is_remote(self) -> bool:

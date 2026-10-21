@@ -200,3 +200,9 @@ class UIDriver(Protocol):
     ) -> Notification | None:
         """Stop a service (None if not offered)"""
         ...
+
+    async def connection_state(self) -> str | None:
+        """Connection state shown, whatever the page, when the state provider
+        is not connected (``reconnecting`` or ``disconnected``; None when
+        nothing is shown)"""
+        ...

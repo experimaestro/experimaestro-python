@@ -21,7 +21,7 @@ from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import display_state, status_rank
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported
 from experimaestro.scheduler.state_provider import StateProvider
-from experimaestro.scheduler.state_status import EventBase
+from experimaestro.scheduler.state_status import ConnectionStateEvent, EventBase
 from experimaestro.scheduler.base import Scheduler, Job
 from experimaestro.scheduler.jobs import JobDependency
 from experimaestro.scheduler.interfaces import BaseJob, BaseExperiment, BaseService
@@ -296,6 +296,19 @@ def serialize_warning(event: Any) -> Dict[str, Any]:
     }
 
 
+def serialize_connection_state(event: ConnectionStateEvent) -> Dict[str, Any]:
+    """Serialize the connection state of the state provider (remote ones
+    reconnect when their connection drops)"""
+    return {
+        "state": event.state,
+        "host": event.host,
+        "attempt": event.attempt,
+        "maxRetries": event.max_retries,
+        "delay": event.delay,
+        "error": event.error,
+    }
+
+
 def serialize_action(action: Any, experiment_id: str = "") -> Dict[str, Any]:
     """Serialize a BaseAction (live or mock) to the frontend format."""
     return {
@@ -364,6 +377,10 @@ class WebSocketHandler:
             {"type": "experiment.removed", "payload": {"experimentId": "..."}}
             {"type": "notify", "payload": {"severity": "...", "message": "..."}}
             {"type": "error", "payload": {"message": "..."}}
+            {"type": "connection.state", "payload": {"state": "...", ...}}
+                (connection of the state provider: connected, reconnecting or
+                disconnected; sent on connection and when it changes; the
+                state must be requested again once reconnected)
     """
 
     def __init__(self, state_provider: StateProvider, token: str):
@@ -418,6 +435,18 @@ class WebSocketHandler:
         async with self._lock:
             self.connections.add(websocket)
             self.filters[websocket] = event_filter
+
+        # The connection state of the provider (remote ones can be reconnecting)
+        await websocket.send_json(
+            {
+                "type": "connection.state",
+                "payload": serialize_connection_state(
+                    ConnectionStateEvent(
+                        state=self.state_provider.connection_state.value
+                    )
+                ),
+            }
+        )
 
         logger.debug("WebSocket client connected (total: %d)", len(self.connections))
 
