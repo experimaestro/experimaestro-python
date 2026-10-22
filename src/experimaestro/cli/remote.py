@@ -12,8 +12,10 @@ Commands reach a remote workspace in one of two ways:
   for the commands that read or modify the workspace files directly.
 """
 
+import signal
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
@@ -265,7 +267,21 @@ class RemoteWorkspace:
             cprint(f"Failed to connect to {self.host}: {e}", "red", file=sys.stderr)
             raise click.Abort()
         cprint(f"Connected to {self.host}", "green", file=sys.stderr)
+        exit_on_signals()
         return provider
+
+
+def exit_on_signals() -> None:
+    """Exit normally on SIGTERM and SIGHUP (unless handled otherwise), so that
+    the exit handlers run: the SSH client then removes its local cache"""
+    if threading.current_thread() is not threading.main_thread():
+        return
+    signals = [signal.SIGTERM]
+    if sys.platform != "win32":
+        signals.append(signal.SIGHUP)
+    for signum in signals:
+        if signal.getsignal(signum) == signal.SIG_DFL:
+            signal.signal(signum, lambda signum, frame: sys.exit(128 + signum))
 
 
 class RemoteCommand(click.Command):

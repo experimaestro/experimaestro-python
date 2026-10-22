@@ -33,6 +33,7 @@ from experimaestro.scheduler.state_status import (
     ConnectionState,
     ConnectionStateEvent,
 )
+from experimaestro.logs.source import LocalLogSource
 from experimaestro.tui.log_viewer import LogViewerScreen
 from experimaestro.tui.utils import (  # noqa: F401
     format_duration,
@@ -754,17 +755,15 @@ class ExperimaestroUI(App):
         from experimaestro.tui.log_viewer import LogViewerScreen
 
         viewer = LogViewerScreen(
-            log_files=[str(log_file)],
-            job_id="workspace",
-            sync_func=None,
+            [(str(log_file), LocalLogSource(log_file))], job_id="workspace"
         )
         self.push_screen(viewer)
 
     def on_view_job_logs(self, message: ViewJobLogs) -> None:
         """Handle request to view job logs - push LogViewerScreen
 
-        For remote monitoring, switches to log viewer immediately with loading state,
-        then starts adaptive sync in background.
+        The logs are read from the state provider's log sources: for remote
+        monitoring, they are fetched while the viewer shows that they load.
         """
         from experimaestro.scheduler.interfaces import JobState
 
@@ -777,45 +776,20 @@ class ExperimaestroUI(App):
             return
 
         job_path = Path(message.job_path)
-        job_id = job_path.name
-
-        # For remote monitoring, switch screen immediately with loading state
-        if self.state_provider.is_remote:
-            # Push screen immediately - it will handle sync and show loading state
-            self.push_screen(
-                LogViewerScreen(
-                    log_files=[],  # Will be populated after sync
-                    job_id=job_id,
-                    sync_func=self.state_provider.sync_path,
-                    remote_path=str(job_path),
-                    task_id=message.task_id,
-                    job_state=message.job_state,
-                )
-            )
-            return
-
-        # Local monitoring - no sync needed
         task_name = message.task_id.split(".")[-1]
-        stdout_path = job_path / f"{task_name}.out"
-        stderr_path = job_path / f"{task_name}.err"
-
-        # Collect existing log files
         # stderr first (shown on opening): errors and progress bars go there
-        log_files = []
-        if stderr_path.exists():
-            log_files.append(str(stderr_path))
-        if stdout_path.exists():
-            log_files.append(str(stdout_path))
+        paths = [job_path / f"{task_name}.err", job_path / f"{task_name}.out"]
+        if not self.state_provider.is_remote:
+            paths = [path for path in paths if path.exists()]
+            if not paths:
+                self.notify(
+                    f"No log files found: {task_name}.out/.err in {job_path}",
+                    severity="warning",
+                )
+                return
 
-        if not log_files:
-            self.notify(
-                f"No log files found: {task_name}.out/.err in {job_path}",
-                severity="warning",
-            )
-            return
-
-        # Push the log viewer screen
-        self.push_screen(LogViewerScreen(log_files, job_id))
+        logs = [(str(path), self.state_provider.log_source(path)) for path in paths]
+        self.push_screen(LogViewerScreen(logs, job_path.name))
 
     def on_view_job_logs_request(self, message: ViewJobLogsRequest) -> None:
         """Handle log viewing request from jobs table"""

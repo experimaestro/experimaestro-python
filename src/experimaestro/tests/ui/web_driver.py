@@ -308,6 +308,21 @@ class WebDriver:
         content += data["partial"]
         return [line.rstrip() for line in content.splitlines()]
 
+    async def read_whole_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"]
+    ) -> list[str]:
+        url = f"/api/jobs/{self._task_id(job_id)}/{job_id}/logs/{stream}"
+        # As the React client does: the end of the log, then the lines before
+        # what is shown
+        data = self.client.get(url).json()
+        content, start = data["content"] + data["partial"], data["start"]
+        while start > 0:
+            earlier = self.client.get(
+                url, params={"before": start, "generation": data["generation"]}
+            ).json()
+            content, start = earlier["content"] + content, earlier["start"]
+        return [line.rstrip() for line in content.splitlines()]
+
     async def log_streams(self, job_id: str) -> list[str]:
         raise NotImplementedError("the log tabs are shown by the browser client")
 

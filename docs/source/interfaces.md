@@ -76,7 +76,10 @@ Then open `http://localhost:12345` in your browser.
   copies the job folder (for a workspace monitored over SSH, the remote
   folder); a notification at the top right tells what was copied
 - **Experiment Filtering**: Filter jobs by experiment ID and run
-- **Log Viewing**: View stdout/stderr logs directly in the browser
+- **Log Viewing**: View stdout/stderr logs directly in the browser (stderr
+  first). The end of a log is shown first and followed as it grows; earlier
+  lines are loaded when scrolling to the top. Progress bars (tqdm, nested ones
+  included) are shown as in a terminal, on one line
 - **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
   usage; kill or delete them one by one, or all at once (with confirmation)
 - **Services**: The services of the selected experiment (of all experiments by
@@ -211,9 +214,9 @@ Pressing the key of the current sort again reverses the order.
 | Key | Action |
 |-----|--------|
 | `f` | Toggle follow mode |
-| `g` | Go to top |
+| `g` | Go to top (earlier lines are loaded at the top) |
 | `G` | Go to bottom |
-| `r` | Sync now (remote) |
+| `r` | Check the logs for changes now |
 | `Esc`/`q` | Close viewer |
 
 **Services:**
@@ -370,9 +373,16 @@ The SSH options (`--remote-xpm`, `-o`, …) are given before the command, see
 2. **Server Start**: On the remote host, experimaestro starts in server mode,
    reading commands from stdin and writing responses to stdout
 3. **JSON-RPC Protocol**: Commands and responses are exchanged using JSON-RPC 2.0
-4. **File Sync**: When needed (e.g., for TensorBoard logs), files are synchronized
+4. **Job logs**: The logs are read by blocks through the same connection (the
+   end of a log first, earlier blocks when scrolling up, the new content while
+   following), into a local copy that lasts as long as the monitor. The size of
+   an open log is checked every second, less and less often (up to every 30 s)
+   while it does not change. A log rewritten by a restarted job is detected and
+   read again. With a remote experimaestro too old to send blocks, logs are
+   copied with rsync.
+5. **File Sync**: When needed (e.g., for TensorBoard logs), files are synchronized
    on-demand using rsync over SSH
-5. **Real-time Updates**: The server sends notifications when job states change
+6. **Real-time Updates**: The server sends notifications when job states change
    — only for what the UI shows: the experiment list is always kept up to date,
    but job, action and service events are only sent for the experiment shown
    (and for the started services, shown on every page). The same applies to
@@ -518,6 +528,15 @@ The `xpm.remote.payload` logger shows the messages themselves (very verbose).
 - Verify SSH access: `ssh user@host echo "connected"`
 - Check if the remote workspace exists
 - Ensure experimaestro is accessible on the remote host
+
+**Local copies:** each monitor keeps its copies of the remote files in a
+temporary directory (`xpm_remote_*`, marked by a `.experimaestro-remote-cache`
+file), removed when it stops. The directories left by monitors that did not
+stop normally are removed by the next monitor started on the same host.
+
+**Slow logs:** to see how the interfaces behave on a slow network, set
+`XPM_LOG_READ_DELAY` to a delay (in seconds) added to each read of a log file,
+e.g. `XPM_LOG_READ_DELAY=1 experimaestro --ssh host:/path monitor --web`.
 
 **Services not working (e.g., TensorBoard):**
 - Services are recreated locally from saved state

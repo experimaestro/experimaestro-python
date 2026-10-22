@@ -422,6 +422,18 @@ class TuiDriver:
                 raise AssertionError(f"log display unchanged after {chunk!r}")
         return self._log_lines(widget)
 
+    async def read_whole_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"]
+    ) -> list[str]:
+        widget = await self._show_log(job_id, stream)
+        for _ in range(200):
+            if widget.log_file.start == 0:
+                await self.settle()
+                return self._log_lines(widget)
+            widget.scroll_to_top()
+            await self.pilot.pause(0.05)
+        raise AssertionError("the start of the log was not loaded")
+
     async def log_streams(self, job_id: str) -> tuple[list[str], str]:
         screen = await self._open_log(job_id)
         streams = {ext: stream for stream, ext in LOG_EXTENSIONS.items()}

@@ -426,8 +426,10 @@ class BrowserDriver:
         await modal.get_by_role("tab", name=stream, exact=True).click()
         log = modal.locator("pre.log-viewer-content:visible")
         await log.wait_for()
+        # Placeholders when there is no output, or nothing while loading
         await self.page.wait_for_function(
-            "el => el.textContent !== '(no output)'", arg=await log.element_handle()
+            "el => el.textContent && !/^\\(.*\\)$/.test(el.textContent)",
+            arg=await log.element_handle(),
         )
         return log
 
@@ -451,6 +453,27 @@ class BrowserDriver:
                 arg=[await log.element_handle(), before],
                 timeout=10_000,
             )
+        text = await log.text_content()
+        await self._close_modals()
+        return [line.rstrip() for line in text.splitlines()]
+
+    async def read_whole_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"]
+    ) -> list[str]:
+        log = await self._show_log(job_id, stream)
+        for _ in range(100):
+            if await log.get_attribute("data-start") == "0":
+                break
+            start = await log.get_attribute("data-start")
+            # Scrolling to the top loads the earlier lines
+            await log.evaluate("el => { el.scrollTop = 0; }")
+            await self.page.wait_for_function(
+                "([el, start]) => el.dataset.start !== start",
+                arg=[await log.element_handle(), start],
+                timeout=10_000,
+            )
+        else:
+            raise AssertionError("the start of the log was not loaded")
         text = await log.text_content()
         await self._close_modals()
         return [line.rstrip() for line in text.splitlines()]

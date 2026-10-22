@@ -179,6 +179,14 @@ class UIDriver(Protocol):
         (the line being written included, trailing spaces removed)"""
         ...
 
+    async def read_whole_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"]
+    ) -> list[str]:
+        """Open a job log and scroll back to its start (its earlier content is
+        loaded while scrolling); returns the lines displayed (trailing spaces
+        removed)"""
+        ...
+
     async def log_streams(self, job_id: str) -> tuple[list[str], str]:
         """Log streams of a job (``stdout``, ``stderr``) in the order they are
         shown, and the one displayed when opening the logs"""

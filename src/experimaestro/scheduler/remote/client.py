@@ -47,6 +47,13 @@ from experimaestro.scheduler.state_status import (
     RunUpdatedEvent,
     ServiceStateChangedEvent,
 )
+from experimaestro.logs.source import (
+    LocalLogSource,
+    LogSource,
+    RemoteLogSource,
+    RsyncLogSource,
+)
+from experimaestro.scheduler.remote.cache_dir import create_cache_dir
 from experimaestro.scheduler.remote.reconnect import ReconnectPolicy
 from experimaestro.settings import ReconnectSettings
 from experimaestro.scheduler.interfaces import (
@@ -655,6 +662,9 @@ class SSHStateProviderClient(OfflineStateProvider):
         self.remote_version: str | None = None
 
         self._synchronizer: "RemoteFileSynchronizer" | None = None
+        #: Log sources, by local path (see log_source)
+        self._log_sources: dict[Path, LogSource] = {}
+        self._log_sources_lock = threading.Lock()
         self._control_path: str | None = None
 
         # Throttled notification delivery to avoid flooding UI
@@ -684,8 +694,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             return
 
         # Create session-specific temporary cache directory
-        self._temp_dir = tempfile.mkdtemp(prefix="xpm_remote_")
-        self.local_cache_dir = Path(self._temp_dir)
+        self.local_cache_dir = create_cache_dir()
+        self._temp_dir = str(self.local_cache_dir)
         self.workspace_path = self.local_cache_dir
         logger.debug("Created temporary cache directory: %s", self._temp_dir)
 
@@ -2053,6 +2063,55 @@ class SSHStateProviderClient(OfflineStateProvider):
         except Exception as e:
             logger.warning("Failed to sync path %s: %s", remote_path, e)
             return None
+
+    def read_file(
+        self,
+        path: str,
+        offset: int,
+        length: int,
+        fingerprint_length: int,
+        unless_size: int | None,
+    ) -> dict:
+        """Read a range of a file of the remote workspace (see the server's
+        ``read_file``)"""
+        return self._call_sync(
+            RPCMethod.READ_FILE,
+            {
+                "path": path,
+                "offset": offset,
+                "length": length,
+                "fingerprint_length": fingerprint_length,
+                "unless_size": unless_size,
+            },
+        )
+
+    def log_source(self, path: Path) -> LogSource:
+        """Source of a log file of the remote workspace (given by its path in
+        the local cache, or remote): read by blocks, or copied with rsync by
+        older remote servers"""
+        if self.local_cache_dir is None:
+            return LocalLogSource(path)
+        if path.is_relative_to(self.local_cache_dir):
+            remote_path = path.relative_to(self.local_cache_dir).as_posix()
+        else:
+            # A remote path the server reported outside of the workspace
+            # path given (e.g. the workspace through a symbolic link)
+            remote_path = path.as_posix()
+        with self._log_sources_lock:
+            if (source := self._log_sources.get(path)) is None:
+                if self.supports(RPCMethod.READ_FILE):
+                    source = RemoteLogSource(
+                        self,
+                        remote_path,
+                        self.local_cache_dir / ".logs" / remote_path.lstrip("/"),
+                    )
+                else:
+                    source = RsyncLogSource(
+                        path,
+                        lambda: self.sync_path(str(path.parent), include=[path.name]),
+                    )
+                self._log_sources[path] = source
+            return source
 
     @property
     def read_only(self) -> bool:

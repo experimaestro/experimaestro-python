@@ -2,6 +2,7 @@
 
 import pytest
 
+from .drivers import log_file
 from .scenario import LEARN_DONE, LEARN_RUNNING
 
 pytestmark = pytest.mark.anyio
@@ -50,3 +51,16 @@ async def test_nested_progress_folded(ui):
         "Epoch 1: 100%|██████████|",
         "done",
     ]
+
+
+#: A log longer than what is read when opening it
+LONG_LOG = [f"line {i:05d} {'x' * 10}" for i in range(20_000)]
+
+
+async def test_earlier_lines_loaded(ui, provider):
+    """The end of a log is shown first; scrolling up loads the earlier lines,
+    up to the start of the log"""
+    path = log_file(provider, "pkg.Learn", LEARN_DONE, "stderr")
+    path.write_text("".join(f"{line}\n" for line in LONG_LOG))
+    await ui.open_experiment("baseline")
+    assert await ui.read_whole_log(LEARN_DONE, "stderr") == LONG_LOG

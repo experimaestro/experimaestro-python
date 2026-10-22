@@ -26,6 +26,7 @@ from collections.abc import Callable
 
 if TYPE_CHECKING:
     from experimaestro.core.serialization import ExperimentInfo
+    from experimaestro.logs.source import LogSource
     from experimaestro.scheduler.state_status import ExperimentEventBase, WarningEvent
 
 from experimaestro.scheduler.interfaces import (
@@ -621,6 +622,13 @@ class StateProvider(ABC):
         Returns None when the provider cannot locate a scheduler log.
         """
         return None
+
+    def log_source(self, path: Path) -> "LogSource":
+        """Source of a log file (see :mod:`~experimaestro.logs.source`),
+        given by its local path (in the local cache for remote workspaces)"""
+        from experimaestro.logs.source import LocalLogSource
+
+        return LocalLogSource(path)
 
     def sync_path(self, path: str, include: list[str] | None = None) -> Path | None:
         """Sync a specific path from remote (remote providers only)

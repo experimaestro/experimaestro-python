@@ -27,6 +27,8 @@ from experimaestro.scheduler.service_operations import find_service
 from experimaestro.scheduler.services import WebService
 from experimaestro.scheduler.remote.client import SSHStateProviderClient
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported, RPCMethod
+from experimaestro.logs.reader import LogFile
+from experimaestro.logs.source import RemoteLogSource, RsyncLogSource
 from experimaestro.tests.utils import TemporaryExperiment
 
 from .conftest import DRIVERS, INTERFACES, _browser_driver
@@ -82,6 +84,9 @@ class RemoteWorkspace:
     path: Path
     #: Job identifiers by greeted name
     jobs: dict[str, str]
+    #: The lines of a long log (alice's stdout), longer than what is read
+    #: when opening it
+    long_log: list[str]
 
 
 @pytest.fixture(scope="module")
@@ -94,9 +99,14 @@ def remote_workspace(tmp_path_factory) -> RemoteWorkspace:
             name: Greet.C(name=name).tag("who", name).submit()
             for name in ("alice", "bob")
         }
+    long_log = [f"hello alice, line {i:05d}" for i in range(20_000)]
+    alice = tasks["alice"].__xpm__.job
+    with alice.stdout.open("a") as out:
+        out.write("".join(f"{line}\n" for line in long_log))
     return RemoteWorkspace(
         workdir,
         {name: task.__xpm__.job.identifier for name, task in tasks.items()},
+        ["hello alice", *long_log],
     )
 
 
@@ -205,6 +215,38 @@ async def test_job_log(ui, remote_workspace):
     await ui.open_experiment("greetings")
     log = await ui.job_log(remote_workspace.jobs["bob"], "stdout")
     assert "hello bob" in log
+
+
+async def test_job_log_earlier_lines(ui, remote_workspace):
+    """A remote log is read by blocks: its end first, then its earlier lines
+    when scrolling up"""
+    await ui.open_experiment("greetings")
+    lines = await ui.read_whole_log(remote_workspace.jobs["alice"], "stdout")
+    assert lines == remote_workspace.long_log
+
+
+def test_job_log_read_by_blocks(ssh_provider, remote_workspace):
+    """Only the end of a log is fetched when opening it"""
+    job = ssh_provider.get_job(
+        f"{Greet.__module__}.greet", remote_workspace.jobs["alice"]
+    )
+    source = ssh_provider.log_source(job.path / "greet.out")
+    assert isinstance(source, RemoteLogSource)
+    reader = LogFile(source)
+    lines, _ = reader.read_tail()
+    assert lines == remote_workspace.long_log[-len(lines) :]
+    assert 0 < len(lines) < len(remote_workspace.long_log)
+
+
+def test_job_log_old_server(old_ssh_provider, remote_workspace):
+    """Remote servers that do not send files by blocks: the logs are copied
+    with rsync"""
+    job = old_ssh_provider.get_job(
+        f"{Greet.__module__}.greet", remote_workspace.jobs["bob"]
+    )
+    source = old_ssh_provider.log_source(job.path / "greet.out")
+    assert isinstance(source, RsyncLogSource)
+    assert LogFile(source).read_tail() == (["hello bob"], "")
 
 
 async def test_job_path(ui, remote_workspace):

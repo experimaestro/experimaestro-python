@@ -1,11 +1,11 @@
 """Tests for the TUI log viewer's carriage-return handling"""
 
-from experimaestro.scheduler.logs import (
+from experimaestro.logs.reader import (
     apply_carriage_returns,
     read_log_slice,
     render_terminal,
 )
-from experimaestro.tui.log_viewer import LogFile, _apply_carriage_returns
+from experimaestro.logs.reader import LogFile, _apply_carriage_returns
 
 
 def test_apply_carriage_returns_keeps_last_segment():
@@ -70,7 +70,7 @@ def test_log_file_truncation_resets_partial(tmp_path):
     complete, partial = reader.read_new_content()
     assert complete == []
     assert partial == ""
-    assert reader._pending == b""
+    assert reader.position == 0
 
 
 def test_log_file_partial_within_chunk(tmp_path):
@@ -90,7 +90,7 @@ def test_log_file_partial_within_chunk(tmp_path):
     assert partial == "C"
 
 
-# --- Shared log reading (scheduler/logs.py)
+# --- Shared log reading (logs/reader.py)
 
 
 def test_apply_carriage_returns_trailing_cr():

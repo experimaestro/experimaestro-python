@@ -302,9 +302,5 @@ class ServicesList(Vertical):
 
         from experimaestro.tui.log_viewer import create_service_log_viewer
 
-        sync_func = None
-        if self.state_provider.is_remote:
-            sync_func = self.state_provider.sync_path
-
-        viewer = create_service_log_viewer(live_service, sync_func)
+        viewer = create_service_log_viewer(live_service)
         self.app.push_screen(viewer)

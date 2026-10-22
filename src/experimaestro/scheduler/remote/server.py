@@ -7,12 +7,15 @@ Usage:
     experimaestro experiments monitor-server --workdir /path/to/workspace
 """
 
+import base64
+import hashlib
 import logging
+import os
 import sys
 import threading
 import time
 from importlib.metadata import version as get_package_version
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import IO
 from collections.abc import Callable
 
@@ -36,6 +39,8 @@ from experimaestro.scheduler.remote.protocol import (
     INTERNAL_ERROR,
     WORKSPACE_NOT_FOUND,
     PROTOCOL_VERSION,
+    READ_FILE_HEAD_SIZE,
+    READ_FILE_MAX_SIZE,
     format_size,
     notification_kind,
     trace,
@@ -104,6 +109,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_ORPHAN_JOBS.value: self._handle_get_orphan_jobs,
             RPCMethod.GET_STRAY_JOBS.value: self._handle_get_stray_jobs,
             RPCMethod.WATCH.value: self._handle_watch,
+            RPCMethod.READ_FILE.value: self._handle_read_file,
         }
 
     def start(self):
@@ -637,3 +643,60 @@ class SSHStateProviderServer:
             return {"success": success, "message": message}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    def _handle_read_file(self, params: dict) -> dict:
+        """Read a range of a file of the workspace (job logs are read by blocks)
+
+        Params: ``path`` (relative to the workspace, or absolute within it),
+        ``offset``, ``length``,
+        ``fingerprint_length`` and ``unless_size`` (no data is sent when the
+        file has this size: it did not change).
+
+        Returns whether the file exists, its size and inode, the data read
+        (base64), the hash of its first ``fingerprint_length`` bytes (None
+        when it is shorter) and the hash of its head (first
+        :data:`READ_FILE_HEAD_SIZE` bytes at most, ``head_length`` bytes):
+        the client tells a file rewritten in place (job restarted) by its
+        start.
+        """
+        relative = PurePosixPath(params["path"])
+        if relative.is_absolute():
+            # A path given as reported by the server (e.g. through a
+            # symbolic link to the workspace)
+            try:
+                relative = PurePosixPath(
+                    Path(relative).resolve().relative_to(self.workspace_path.resolve())
+                )
+            except ValueError:
+                raise PermissionError(f"{relative} is not a path in the workspace")
+        if ".." in relative.parts:
+            raise PermissionError(f"{relative} is not a path in the workspace")
+        offset = int(params.get("offset", 0))
+        length = min(int(params.get("length", 0)), READ_FILE_MAX_SIZE)
+        fingerprint_length = int(params.get("fingerprint_length", 0))
+        try:
+            f = open(self.workspace_path / relative, "rb")
+        except FileNotFoundError:
+            return {"exists": False}
+
+        with f:
+            stat = os.fstat(f.fileno())
+            size = stat.st_size
+            head = f.read(READ_FILE_HEAD_SIZE)
+            fingerprint = None
+            if fingerprint_length and len(head) >= fingerprint_length:
+                fingerprint = hashlib.sha256(head[:fingerprint_length]).hexdigest()
+            data = b""
+            if length and size != params.get("unless_size"):
+                f.seek(offset)
+                data = f.read(length)
+        return {
+            "exists": True,
+            # The file may have grown while being read
+            "size": max(size, offset + len(data)),
+            "inode": stat.st_ino,
+            "data": base64.b64encode(data).decode("ascii"),
+            "fingerprint": fingerprint,
+            "head": hashlib.sha256(head).hexdigest(),
+            "head_length": len(head),
+        }

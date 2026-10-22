@@ -1,6 +1,6 @@
 """Tests for the WebUI serialization layer and the shared log reader."""
 
-from experimaestro.scheduler.logs import read_log_slice
+from experimaestro.logs.reader import empty_log_slice, read_log_slice
 from experimaestro.webui.websocket import (
     _job_dict_to_frontend,
     serialize_warning,
@@ -119,4 +119,4 @@ def test_read_log_slice_collapses_carriage_returns(tmp_path):
 
 def test_read_log_slice_missing_file(tmp_path):
     out = read_log_slice(tmp_path / "nope.out")
-    assert out == {"content": "", "partial": "", "offset": 0, "size": 0}
+    assert out == empty_log_slice()

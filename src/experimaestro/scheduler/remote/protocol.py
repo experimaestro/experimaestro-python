@@ -48,6 +48,12 @@ JSONRPC_VERSION = "2.0"
 # to call the others (see RemoteMethodNotSupported)
 PROTOCOL_VERSION = "2.0"
 
+#: Largest range of a file sent by ``read_file``
+READ_FILE_MAX_SIZE = 1024 * 1024
+#: Size of the start of a file whose hash ``read_file`` sends (to tell a file
+#: rewritten in place)
+READ_FILE_HEAD_SIZE = 4096
+
 # Standard JSON-RPC error codes
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -98,6 +104,7 @@ class RPCMethod(str, Enum):
     GET_ORPHAN_JOBS = "get_orphan_jobs"
     GET_STRAY_JOBS = "get_stray_jobs"
     WATCH = "watch"
+    READ_FILE = "read_file"
 
 
 #: Methods handled by the servers that do not list theirs (experimaestro 2.7.0)

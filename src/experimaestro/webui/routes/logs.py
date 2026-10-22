@@ -2,7 +2,13 @@
 
 Exposes job and service stdout/stderr for the frontend log viewer. The frontend
 polls with a byte ``offset`` and receives the new content plus the next offset,
-mirroring the TUI log viewer (shared logic in ``scheduler/logs.py``).
+or asks for the lines ``before`` what it shows, mirroring the TUI log viewer
+(shared logic in ``logs/reader.py``).
+
+The logs are read from the state provider's log source (for remote
+workspaces, by blocks from the remote host): the routes are synchronous
+functions, run by FastAPI in a thread pool, so that waiting for the network
+does not block the server.
 """
 
 import logging
@@ -12,7 +18,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from experimaestro.scheduler.service_operations import find_service
-from experimaestro.scheduler.logs import read_log_slice
+from experimaestro.logs.reader import empty_log_slice, read_log_slice
 
 logger = logging.getLogger("xpm.webui.logs")
 
@@ -27,8 +33,8 @@ def _check_auth(request: Request) -> bool:
     return request.cookies.get("experimaestro_token") == server.token
 
 
-def _parse_offset(request: Request) -> int | None:
-    raw = request.query_params.get("offset")
+def _int_param(request: Request, name: str) -> int | None:
+    raw = request.query_params.get(name)
     if raw is None or raw == "":
         return None
     try:
@@ -37,31 +43,33 @@ def _parse_offset(request: Request) -> int | None:
         return None
 
 
-def _maybe_sync(state_provider, path: Path, include: list[str]) -> Path:
-    """For remote providers, sync the file locally before reading."""
-    if getattr(state_provider, "is_remote", False):
-        try:
-            local = state_provider.sync_path(str(path), include=include)
-            if local is not None:
-                return Path(local)
-        except TypeError:
-            # Base signature without ``include``
-            local = state_provider.sync_path(str(path))
-            if local is not None:
-                return Path(local)
-        except Exception as e:  # pragma: no cover - best effort
-            logger.warning("Failed to sync %s: %s", path, e)
-    return path
-
-
-def _maybe_sync_file(state_provider, path: Path) -> Path:
-    """For remote providers, sync a file (through its directory) before
-    reading it"""
-    return _maybe_sync(state_provider, path.parent, include=[path.name]) / path.name
+def _read_log(request: Request, path: Path, remote: bool = True) -> JSONResponse:
+    """Read a slice of a log file (from the state provider's log source,
+    unless the file is local)"""
+    server = request.app.state.server
+    source = server.state_provider.log_source(path) if remote else path
+    try:
+        data = read_log_slice(
+            source,
+            _int_param(request, "offset"),
+            before=_int_param(request, "before"),
+            generation=_int_param(request, "generation"),
+        )
+    except Exception as e:
+        logger.warning("Cannot read the log %s: %s", path, e)
+        return JSONResponse({"error": str(e)}, status_code=502)
+    logger.debug(
+        "Log %s: %d bytes, read from %d to %d",
+        path,
+        data["size"],
+        data["start"],
+        data["offset"],
+    )
+    return JSONResponse(data)
 
 
 @router.get("/api/jobs/{task_id}/{job_id}/logs/{stream}")
-async def job_logs(request: Request, task_id: str, job_id: str, stream: str):
+def job_logs(request: Request, task_id: str, job_id: str, stream: str):
     """Return a slice of a job's stdout/stderr log."""
     if not _check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -75,21 +83,15 @@ async def job_logs(request: Request, task_id: str, job_id: str, stream: str):
 
     job = state_provider.get_job(task_id, job_id)
     if job is None or job.path is None:
+        logger.warning("Log of %s/%s: job not found", task_id, job_id)
         return JSONResponse({"error": "job not found"}, status_code=404)
 
     scriptname = task_id.rsplit(".", 1)[-1]
-    job_dir = _maybe_sync(
-        state_provider,
-        Path(job.path),
-        include=[f"{scriptname}.out", f"{scriptname}.err"],
-    )
-    log_path = job_dir / f"{scriptname}.{ext}"
-
-    return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
+    return _read_log(request, Path(job.path) / f"{scriptname}.{ext}")
 
 
 @router.get("/api/logs/experimaestro")
-async def experimaestro_logs(request: Request):
+def experimaestro_logs(request: Request):
     """Return a slice of the experimaestro scheduler log."""
     if not _check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -99,16 +101,13 @@ async def experimaestro_logs(request: Request):
 
     log_path = state_provider.get_scheduler_log_path()
     if log_path is None:
-        return JSONResponse({"content": "", "partial": "", "offset": 0, "size": 0})
+        return JSONResponse(empty_log_slice())
 
-    log_path = _maybe_sync_file(state_provider, Path(log_path))
-    return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
+    return _read_log(request, Path(log_path))
 
 
 @router.get("/api/services/{experiment_id}/{service_id}/logs/{stream}")
-async def service_logs(
-    request: Request, experiment_id: str, service_id: str, stream: str
-):
+def service_logs(request: Request, experiment_id: str, service_id: str, stream: str):
     """Return a slice of a service's stdout/stderr log."""
     if not _check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -126,8 +125,8 @@ async def service_logs(
     attr = "stdout" if stream in ("stdout", "out") else "stderr"
     log_path = getattr(service, attr, None)
     if log_path is None:
-        return JSONResponse({"content": "", "partial": "", "offset": 0, "size": 0})
+        return JSONResponse(empty_log_slice())
 
-    # Not synchronized: the logs are those of the live service, which runs on
+    # Read locally: the logs are those of the live service, which runs on
     # this machine (also when monitoring a remote workspace)
-    return JSONResponse(read_log_slice(Path(log_path), _parse_offset(request)))
+    return _read_log(request, Path(log_path), remote=False)
