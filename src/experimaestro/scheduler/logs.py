@@ -18,8 +18,10 @@ def apply_carriage_returns(line: str) -> str:
     """Collapse a line as a terminal would: keep only content after the last ``\\r``.
 
     tqdm-like progress bars rewrite the same line via ``\\r``; treat that as an
-    overwrite rather than as a new line.
+    overwrite rather than as a new line. Trailing ``\\r`` only move the cursor
+    back (e.g. ``\\r\\n`` line ends), so the text before them is kept.
     """
+    line = line.rstrip("\r")
     if "\r" in line:
         return line.rsplit("\r", 1)[-1]
     return line
@@ -36,8 +38,8 @@ class LogFile:
         self.path = Path(path)
         self.position = 0
         self.size = 0
-        # Buffer for the last incomplete line (no trailing \n yet).
-        # Stored already collapsed for any \r updates seen so far.
+        # Buffer for the last incomplete line (no trailing \n yet), from
+        # its last \r update (see _process_content).
         self._partial_line = ""
         self._update_size()
 
@@ -58,9 +60,11 @@ class LogFile:
         parts = combined.split("\n")
         # parts[-1] is the partial trailing line (empty if combined ended in \n)
         complete = [apply_carriage_returns(line) for line in parts[:-1]]
-        partial = apply_carriage_returns(parts[-1])
-        self._partial_line = partial
-        return complete, partial
+        # Keep the partial line from its last rewrite, with its trailing \r
+        # (the next update overwrites the text before them)
+        partial = parts[-1]
+        self._partial_line = partial[partial.rstrip("\r").rfind("\r") + 1 :]
+        return complete, apply_carriage_returns(partial)
 
     def read_tail(self, max_bytes: int = INITIAL_TAIL_SIZE) -> tuple[list[str], str]:
         """Read the last N bytes of the file.
@@ -101,7 +105,7 @@ class LogFile:
         complete lines were produced).
         """
         if not self.path.exists():
-            return [], self._partial_line
+            return [], apply_carriage_returns(self._partial_line)
 
         self._update_size()
 
@@ -111,7 +115,7 @@ class LogFile:
             self._partial_line = ""
 
         if self.position >= self.size:
-            return [], self._partial_line
+            return [], apply_carriage_returns(self._partial_line)
 
         try:
             with open(self.path, "r", errors="replace", newline="") as f:
@@ -120,7 +124,7 @@ class LogFile:
                 self.position = f.tell()
                 return self._process_content(content)
         except Exception:
-            return [], self._partial_line
+            return [], apply_carriage_returns(self._partial_line)
 
     def has_new_content(self) -> bool:
         """Check if there's new content without reading it"""
@@ -141,24 +145,32 @@ def read_log_slice(
             "tail": read the last ``tail_bytes`` (aligned to a line boundary).
         tail_bytes: how many bytes to read when tailing.
 
-    Returns a dict ``{content, offset, size}`` where ``content`` is the decoded
-    text (with ``\\r`` progress lines collapsed) and ``offset`` is the byte
-    offset to pass on the next poll.
+    Returns a dict ``{content, partial, offset, size}``:
+
+    - ``content`` holds the completed lines (each ending with ``\\n``, with
+      ``\\r`` progress lines collapsed): clients append it to what they show;
+    - ``partial`` is the line still being written (no ``\\n`` yet), collapsed:
+      clients show it after the content and *replace* it on each poll, since a
+      progress bar keeps rewriting it;
+    - ``offset`` is the byte offset to pass on the next poll. It stops at the
+      start of the partial line, which is read again (and collapsed with its
+      new updates) by the next poll.
     """
+    empty = {"content": "", "partial": "", "offset": 0, "size": 0}
     p = Path(path)
     if not p.exists():
-        return {"content": "", "offset": 0, "size": 0}
+        return empty
 
     try:
         size = p.stat().st_size
     except OSError:
-        return {"content": "", "offset": 0, "size": 0}
+        return empty
 
     # Handle truncation/rotation: an offset past EOF restarts from the tail.
     tail = offset is None or offset < 0 or offset > size
 
     try:
-        with open(p, "r", errors="replace", newline="") as f:
+        with open(p, "rb") as f:
             if tail:
                 start = max(0, size - tail_bytes)
                 f.seek(start)
@@ -166,12 +178,19 @@ def read_log_slice(
                     f.readline()  # align to a line boundary
             else:
                 f.seek(offset)
-            content = f.read()
-            new_offset = f.tell()
+            start = f.tell()
+            data = f.read()
     except Exception:
-        return {"content": "", "offset": offset or 0, "size": size}
+        return {**empty, "offset": offset or 0, "size": size}
 
-    # Collapse \r progress lines per completed line, preserve a trailing partial.
-    lines = content.split("\n")
-    collapsed = "\n".join(apply_carriage_returns(line) for line in lines)
-    return {"content": collapsed, "offset": new_offset, "size": size}
+    # Only completed lines move the offset forward
+    complete_end = data.rfind(b"\n") + 1
+    complete = data[:complete_end].decode(errors="replace")
+    partial = data[complete_end:].decode(errors="replace")
+    lines = complete.split("\n")
+    return {
+        "content": "\n".join(apply_carriage_returns(line) for line in lines),
+        "partial": apply_carriage_returns(partial),
+        "offset": start + complete_end,
+        "size": size,
+    }

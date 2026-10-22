@@ -1,7 +1,5 @@
 """Tests for the TUI log viewer's carriage-return handling"""
 
-import pytest
-
 from experimaestro.scheduler.logs import apply_carriage_returns, read_log_slice
 from experimaestro.tui.log_viewer import LogFile, _apply_carriage_returns
 
@@ -91,7 +89,6 @@ def test_log_file_partial_within_chunk(tmp_path):
 # --- Shared log reading (scheduler/logs.py)
 
 
-@pytest.mark.xfail(strict=True, reason="a trailing \\r erases the line")
 def test_apply_carriage_returns_trailing_cr():
     """``\\r`` only moves the cursor: a terminal still shows the text before it
     (e.g. ``\\r\\n`` line ends, or a progress bar ending its updates with ``\\r``)"""
@@ -99,18 +96,37 @@ def test_apply_carriage_returns_trailing_cr():
     assert apply_carriage_returns("done\r") == "done"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="each poll is collapsed on its own: the line being written at the "
-    "end of one poll is repeated by the next one",
-)
 def test_read_log_slice_progress_across_polls(tmp_path):
     """Polls read from the returned offset can be appended (as the web client
-    does) and show a rewritten line once"""
+    does) and show a rewritten line once: the line being written is returned
+    apart (``partial``, replaced by the next poll) and read again next time"""
     log = tmp_path / "task.err"
     log.write_text("start\n\r 10%")
     first = read_log_slice(log)
+    assert (first["content"], first["partial"]) == ("start\n", " 10%")
     with log.open("a", newline="") as out:
-        out.write("\r 20%\r 30%\ndone\n")
+        out.write("\r 20%\r 30%")
     second = read_log_slice(log, first["offset"])
-    assert first["content"] + second["content"] == "start\n 30%\ndone\n"
+    assert (second["content"], second["partial"]) == ("", " 30%")
+    with log.open("a", newline="") as out:
+        out.write("\ndone\n")
+    third = read_log_slice(log, second["offset"])
+    assert first["content"] + second["content"] + third["content"] == (
+        "start\n 30%\ndone\n"
+    )
+    assert third["partial"] == ""
+
+
+def test_log_file_progress_ending_with_cr(tmp_path):
+    """A progress bar ending its updates with ``\\r`` (instead of starting
+    them with it) is overwritten by the next update, also across reads"""
+    log = tmp_path / "task.err"
+    log.write_text(" 10%\r")
+    reader = LogFile(str(log))
+    assert reader.read_tail() == ([], " 10%")
+    with log.open("a", newline="") as out:
+        out.write(" 20%\r")
+    assert reader.read_new_content() == ([], " 20%")
+    with log.open("a", newline="") as out:
+        out.write("\n")
+    assert reader.read_new_content() == ([" 20%"], "")

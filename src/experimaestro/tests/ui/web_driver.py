@@ -296,7 +296,8 @@ class WebDriver:
         path = log_file(self.provider, task_id, job_id, stream)
         url = f"/api/jobs/{task_id}/{job_id}/logs/{stream}"
         # As the React client does: the first poll reads the tail of the log,
-        # the next ones read from the offset returned and are appended
+        # the next ones read from the offset returned; the completed lines
+        # are appended, the line being written (partial) is replaced
         data = self.client.get(url).json()
         content, offset = data["content"], data["offset"]
         for chunk in chunks:
@@ -304,6 +305,7 @@ class WebDriver:
             data = self.client.get(url, params={"offset": offset}).json()
             content += data["content"]
             offset = data["offset"]
+        content += data["partial"]
         return [line.rstrip() for line in content.splitlines()]
 
     async def log_streams(self, job_id: str) -> list[str]:

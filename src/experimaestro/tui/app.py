@@ -800,11 +800,12 @@ class ExperimaestroUI(App):
         stderr_path = job_path / f"{task_name}.err"
 
         # Collect existing log files
+        # stderr first (shown on opening): errors and progress bars go there
         log_files = []
-        if stdout_path.exists():
-            log_files.append(str(stdout_path))
         if stderr_path.exists():
             log_files.append(str(stderr_path))
+        if stdout_path.exists():
+            log_files.append(str(stdout_path))
 
         if not log_files:
             self.notify(

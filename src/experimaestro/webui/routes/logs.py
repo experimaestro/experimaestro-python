@@ -99,7 +99,7 @@ async def experimaestro_logs(request: Request):
 
     log_path = state_provider.get_scheduler_log_path()
     if log_path is None:
-        return JSONResponse({"content": "", "offset": 0, "size": 0})
+        return JSONResponse({"content": "", "partial": "", "offset": 0, "size": 0})
 
     log_path = _maybe_sync_file(state_provider, Path(log_path))
     return JSONResponse(read_log_slice(log_path, _parse_offset(request)))
@@ -126,7 +126,7 @@ async def service_logs(
     attr = "stdout" if stream in ("stdout", "out") else "stderr"
     log_path = getattr(service, attr, None)
     if log_path is None:
-        return JSONResponse({"content": "", "offset": 0, "size": 0})
+        return JSONResponse({"content": "", "partial": "", "offset": 0, "size": 0})
 
     # Not synchronized: the logs are those of the live service, which runs on
     # this machine (also when monitoring a remote workspace)

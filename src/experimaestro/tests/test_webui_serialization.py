@@ -119,4 +119,4 @@ def test_read_log_slice_collapses_carriage_returns(tmp_path):
 
 def test_read_log_slice_missing_file(tmp_path):
     out = read_log_slice(tmp_path / "nope.out")
-    assert out == {"content": "", "offset": 0, "size": 0}
+    assert out == {"content": "", "partial": "", "offset": 0, "size": 0}

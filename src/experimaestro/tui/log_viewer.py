@@ -294,11 +294,12 @@ class LogViewerScreen(Screen, inherit_bindings=False):
 
             logger.info(f"Looking for log files: {stdout_path}, {stderr_path}")
 
+            # stderr first (shown on opening): errors and progress bars go there
             log_files = []
-            if stdout_path.exists():
-                log_files.append(str(stdout_path))
             if stderr_path.exists():
                 log_files.append(str(stderr_path))
+            if stdout_path.exists():
+                log_files.append(str(stdout_path))
 
             if not log_files:
                 try:
@@ -440,10 +441,10 @@ def create_service_log_viewer(
         LogViewerScreen configured for service logs
     """
     log_files = []
-    if service.stdout and service.stdout.exists():
-        log_files.append(str(service.stdout))
     if service.stderr and service.stderr.exists():
         log_files.append(str(service.stderr))
+    if service.stdout and service.stdout.exists():
+        log_files.append(str(service.stdout))
 
     remote_path = str(service.log_directory) if sync_func else None
 

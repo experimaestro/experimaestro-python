@@ -33,7 +33,10 @@ const StreamView = ({
   stream: Stream;
   follow: boolean;
 }) => {
+  // Completed lines (appended at each poll) and the line being written
+  // (replaced at each poll: progress bars keep rewriting it)
   const [content, setContent] = useState("");
+  const [partial, setPartial] = useState("");
   const offsetRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLPreElement>(null);
 
@@ -51,6 +54,7 @@ const StreamView = ({
       } else if (data.content) {
         setContent((prev) => prev + data.content);
       }
+      setPartial(data.partial || "");
       offsetRef.current = data.offset ?? offsetRef.current;
     } catch (e) {
       // ignore transient fetch errors
@@ -61,6 +65,7 @@ const StreamView = ({
   useEffect(() => {
     offsetRef.current = null;
     setContent("");
+    setPartial("");
     poll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [poll]);
@@ -75,7 +80,7 @@ const StreamView = ({
     if (follow && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [content, follow]);
+  }, [content, partial, follow]);
 
   return (
     <pre
@@ -93,13 +98,14 @@ const StreamView = ({
         wordBreak: "break-all",
       }}
     >
-      {content || "(no output)"}
+      {content + partial || "(no output)"}
     </pre>
   );
 };
 
 export const LogPanel = ({ target }: { target: LogTarget }) => {
-  const [stream, setStream] = useState<Stream>("stdout");
+  // stderr first and shown by default: errors and progress bars go there
+  const [stream, setStream] = useState<Stream>("stderr");
   const [follow, setFollow] = useState(true);
 
   const singleStream = target.kind === "experimaestro";
@@ -118,12 +124,12 @@ export const LogPanel = ({ target }: { target: LogTarget }) => {
       {singleStream ? (
         <StreamView target={target} stream="stdout" follow={follow} />
       ) : (
-        <Tabs activeKey={stream} onSelect={(k) => setStream((k as Stream) || "stdout")}>
-          <Tab eventKey="stdout" title="stdout">
-            <StreamView target={target} stream="stdout" follow={follow} />
-          </Tab>
+        <Tabs activeKey={stream} onSelect={(k) => setStream((k as Stream) || "stderr")}>
           <Tab eventKey="stderr" title="stderr">
             <StreamView target={target} stream="stderr" follow={follow} />
+          </Tab>
+          <Tab eventKey="stdout" title="stdout">
+            <StreamView target={target} stream="stdout" follow={follow} />
           </Tab>
         </Tabs>
       )}
