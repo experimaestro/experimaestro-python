@@ -37,6 +37,7 @@ from experimaestro.scheduler.state_provider import (
     MockService,
 )
 from experimaestro.notifications import LevelInformation
+from experimaestro.scheduler.interfaces import JobState
 
 # Mark all tests in this module as state tests
 pytestmark = [pytest.mark.state]
@@ -354,6 +355,11 @@ class MockSSHClient:
         """Mock implementation of inherited method"""
         with self._experiment_cache_lock:
             self._experiment_cache[(experiment_id, run_id)] = exp
+
+    def _translate_job_path(self, d: dict) -> None:
+        from experimaestro.scheduler.remote.client import SSHStateProviderClient
+
+        SSHStateProviderClient._translate_job_path(self, d)
 
     def _update_job_from_dict(self, job: MockJob, d: dict) -> None:
         """Mock implementation - does nothing for tests"""
@@ -1108,6 +1114,67 @@ class TestClientDataConversion:
         assert job.task_id == "task.MyTask"
         # Path should be mapped to local cache
         assert job.path == tmp_path / "jobs/job123"
+
+    def test_job_events_update_fetched_jobs(self, client):
+        """The jobs answered by the server are the ones the events update
+
+        Otherwise the progress (and state) pushed by the server never reaches
+        the jobs the UIs display.
+        """
+        from experimaestro.scheduler.state_status import (
+            JobProgressEvent,
+            JobStateChangedEvent,
+        )
+
+        def job_dict():
+            return {
+                "job_id": "job123",
+                "task_id": "task.MyTask",
+                "path": "/remote/workspace/jobs/task.MyTask/job123",
+                "state": "running",
+                "progress": [{"level": 0, "progress": 0.2, "desc": None}],
+            }
+
+        job = client._get_or_load_job(job_dict())
+        assert client._get_or_load_job(job_dict()) is job
+
+        client.apply_event(JobProgressEvent(job_id="job123", level=0, progress=0.5))
+        assert [p.progress for p in job.progress] == [0.5]
+        client.apply_event(JobStateChangedEvent(job_id="job123", state="done"))
+        assert job.state == JobState.DONE
+
+    def test_cached_job_follows_a_new_run(self, client):
+        """A job read again after it was relaunched shows the new run"""
+        failed = {
+            "job_id": "job123",
+            "task_id": "task.MyTask",
+            "path": "/remote/workspace/jobs/task.MyTask/job123",
+            "state": "error",
+            "failure_reason": "FAILED",
+            "started_time": "2024-01-01T10:01:00",
+            "ended_time": "2024-01-01T10:05:00",
+            "exit_code": 1,
+            "progress": [{"level": 0, "progress": 0.6, "desc": None}],
+            "process": {"type": "local", "pid": 1000},
+        }
+        job = client._get_or_load_job(dict(failed))
+        assert job.state.is_error()
+
+        relaunched = dict(
+            failed,
+            state="running",
+            failure_reason=None,
+            started_time="2024-01-01T11:00:00",
+            ended_time=None,
+            exit_code=None,
+            progress=[{"level": 0, "progress": 0.1, "desc": None}],
+            process={"type": "local", "pid": 2000},
+        )
+        assert client._get_or_load_job(relaunched) is job
+        assert job.state == JobState.RUNNING
+        assert [p.progress for p in job.progress] == [0.1]
+        assert job.endtime is None and job.exit_code is None
+        assert job.state_dict()["process"]["pid"] == 2000
 
     def test_get_or_load_experiment(self, client, tmp_path):
         """Test converting dictionary to MockExperiment"""

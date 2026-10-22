@@ -1784,16 +1784,21 @@ class SSHStateProviderClient(OfflineStateProvider):
     # -------------------------------------------------------------------------
 
     def _get_or_load_job(self, d: dict) -> MockJob:
-        """Get or load job from dict (uses base class caching)"""
-        job_id = d.get("identifier", "")
-        task_id = d.get("task_id", "")
-        full_id = BaseJob.make_full_id(task_id, job_id) if task_id and job_id else ""
+        """Get or load job from dict (uses base class caching)
 
-        if not full_id:
+        Jobs are cached under the same key as the one the events and the job
+        submissions use (:attr:`MockJob.cache_key`), so that the events
+        received from the server update the instances the UIs hold.
+        """
+        from experimaestro.scheduler.state_status import task_id_hash
+
+        job_id = d.get("job_id", "")
+        task_id = d.get("task_id", "")
+        if not task_id or not job_id:
             # Can't cache without identifiers, just create
             return self._create_job_from_dict(d)
 
-        return super()._get_or_load_job(full_id, d=d)
+        return super()._get_or_load_job(f"{task_id_hash(task_id)}:{job_id}", d=d)
 
     def _create_job(self, full_id: str, *, d: dict) -> MockJob:
         """Create job from server dict"""
@@ -1803,49 +1808,31 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Update cached job with fresh data from server"""
         self._update_job_from_dict(job, d)
 
-    def _create_job_from_dict(self, d: dict) -> MockJob:
-        """Internal: create MockJob from dict with path translation"""
-        # Translate remote path to local cache path
-        if d.get("path"):
-            remote_path = d["path"]
-            if remote_path.startswith(self.remote_workspace):
+    def _translate_job_path(self, d: dict) -> None:
+        """Translate the remote job path of a server dict to the local cache"""
+        if remote_path := d.get("path"):
+            if isinstance(remote_path, str) and remote_path.startswith(
+                self.remote_workspace
+            ):
                 relative = remote_path[len(self.remote_workspace) :].lstrip("/")
                 d["path"] = self.local_cache_dir / relative
             else:
                 d["path"] = Path(remote_path)
 
+    def _create_job_from_dict(self, d: dict) -> MockJob:
+        """Internal: create MockJob from dict with path translation"""
+        self._translate_job_path(d)
         return MockJob.from_state_dict(d, self.local_cache_dir)
 
     def _update_job_from_dict(self, job: MockJob, d: dict) -> None:
         """Update a cached MockJob with fresh data from server
 
-        This updates the job's state from server data while preserving
-        any event-driven state updates that may have arrived since.
+        The answer of the server is the current state of the job (possibly a
+        new run of it, e.g. a failed job submitted again): it replaces the
+        state, the progress and the process of the cached instance.
         """
-        from experimaestro.scheduler.interfaces import (
-            STATE_NAME_TO_JOBSTATE,
-            deserialize_to_datetime,
-        )
-
-        # Only update state from server if we don't have event-driven state
-        # (event state takes priority over server snapshot)
-        if not job._has_event_state:
-            state_str = d.get("state", "unscheduled")
-            job._state = STATE_NAME_TO_JOBSTATE.get(state_str, job._state)
-
-        # Update timestamps (these don't conflict with events)
-        if d.get("starttime"):
-            job.starttime = deserialize_to_datetime(d["starttime"])
-        if d.get("endtime"):
-            job.endtime = deserialize_to_datetime(d["endtime"])
-
-        # Update progress if provided
-        if d.get("progress"):
-            from experimaestro.notifications import get_progress_information_from_dict
-
-            job.progress = [
-                get_progress_information_from_dict(p) for p in d["progress"]
-            ]
+        self._translate_job_path(d)
+        job.update_from_state_dict(d)
 
     def _get_or_load_experiment(self, d: dict) -> MockExperiment:
         """Get or load experiment from dict (uses base class caching)"""
