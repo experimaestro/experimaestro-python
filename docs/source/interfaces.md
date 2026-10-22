@@ -497,6 +497,15 @@ The `xpm.remote.payload` logger shows the messages themselves (very verbose).
 - Use `uv_offline: true` in workspace SSH settings or `--uv-offline` CLI flag
 - Ensure the package is already cached: `ssh host "uv tool install experimaestro==X.Y.Z"` (run once with network access)
 
+**Connection times out on a cluster:**
+- Starting Python can take tens of seconds on a shared file system (Lustre,
+  GPFS, NFS) when its cache is cold
+- Increase `connect_timeout` in the workspace SSH settings (or use
+  `--connect-timeout`), 60 seconds by default
+- Keep the bytecode cache on a local disk with
+  `export PYTHONPYCACHEPREFIX=/tmp/$USER/pycache` (in `shell_init`)
+- With Python 3.15+, the command line loads far fewer modules (lazy imports)
+
 **Wrong Python version or missing modules:**
 - Non-interactive SSH skips `.profile`/`.bash_profile`
 - Use `shell_init` in workspace SSH settings or `--remote-shell-init` to run setup commands (e.g., `source /etc/profile; module load python/3.10`)

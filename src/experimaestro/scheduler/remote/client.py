@@ -86,6 +86,10 @@ logger = logging.getLogger("xpm.remote.client")
 # Default timeout for RPC requests (seconds)
 DEFAULT_TIMEOUT = 30.0
 
+# Default time (seconds) for the remote server to start and answer: starting
+# Python can be slow on the shared file systems of clusters
+DEFAULT_CONNECT_TIMEOUT = 60.0
+
 
 def coalesce_key(event: EventBase) -> Hashable | None:
     """The entity whose state an event updates, if a later event supersedes it
@@ -568,6 +572,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         request_timeout: float = DEFAULT_TIMEOUT,
         remote_log_levels: str | None = None,
         reconnect: ReconnectSettings | None = None,
+        connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
     ):
         """Initialize the client
 
@@ -590,6 +595,8 @@ class SSHStateProviderClient(OfflineStateProvider):
                 logs are shown locally
             reconnect: Reconnection policy when the connection drops
                 (defaults to :class:`ReconnectSettings` defaults)
+            connect_timeout: Time (in seconds) for the remote server to start
+                and answer, for the connection and each reconnection
         """
         # Initialize base class (includes service cache)
         super().__init__()
@@ -639,7 +646,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         #: Set by disconnect(), to stop reconnecting
         self._closing = threading.Event()
         self._reconnect_thread: threading.Thread | None = None
-        self._connect_timeout = 30.0
+        self._connect_timeout = connect_timeout
         self.reconnect_policy = ReconnectPolicy(reconnect)
 
         #: Methods the server handles, and its experimaestro version (both
@@ -661,7 +668,7 @@ class SSHStateProviderClient(OfflineStateProvider):
     def connection_state(self) -> ConnectionState:
         return self._connection_state
 
-    def connect(self, timeout: float = 30.0):
+    def connect(self, timeout: float | None = None):
         """Establish SSH connection and start remote server
 
         When the connection drops afterwards, the client reconnects on its
@@ -669,7 +676,8 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         Args:
             timeout: Connection timeout in seconds (of each reconnection
-                attempt as well)
+                attempt as well), overrides the ``connect_timeout`` given at
+                creation
         """
         if self._running:
             logger.warning("Already connected")
@@ -688,12 +696,13 @@ class SSHStateProviderClient(OfflineStateProvider):
         # This allows rsync and other SSH commands to reuse the same connection
         # Use a short temp path to stay under Unix socket path limit (104 bytes)
         self._control_path = tempfile.mktemp(prefix="xpm-", dir="/tmp")
-        self._connect_timeout = timeout
+        if timeout is not None:
+            self._connect_timeout = timeout
         self._closing.clear()
         self._running = True
 
         try:
-            self._open_session(timeout)
+            self._open_session(self._connect_timeout)
         except Exception:
             self.disconnect()
             raise

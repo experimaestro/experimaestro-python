@@ -70,6 +70,7 @@ the command, and override the workspace SSH settings:
 | `--remote-python NAME` | Python interpreter for `uv tool run --python` |
 | `--force-version` | Run exactly the local experimaestro version (instead of the same minor version) |
 | `--request-timeout SECS` | Timeout for remote RPC requests (default: 60) |
+| `--connect-timeout SECS` | Time for the remote server to start and answer (default: the `ssh.connect_timeout` setting, or 60) |
 | `--remote-logging LEVELS` | Logging levels of the remote server, shown locally (e.g. `xpm.remote.trace=DEBUG`) |
 
 Examples:

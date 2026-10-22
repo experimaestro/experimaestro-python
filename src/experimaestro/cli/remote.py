@@ -20,7 +20,12 @@ from typing import TYPE_CHECKING
 import click
 from termcolor import cprint
 
-from experimaestro.settings import ReconnectSettings, WorkspaceSettings, get_settings
+from experimaestro.settings import (
+    ReconnectSettings,
+    SSHSettings,
+    WorkspaceSettings,
+    get_settings,
+)
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.remote.client import SSHStateProviderClient
@@ -43,6 +48,7 @@ class SSHOptions:
     force_version: bool = False
     request_timeout: float = 60.0
     remote_log_levels: str | None = None
+    connect_timeout: float | None = None
 
     @property
     def is_set(self) -> bool:
@@ -120,6 +126,14 @@ def ssh_options(f=None, *, hidden: bool = False):
             help="Timeout in seconds for remote RPC requests (default: 60)",
         ),
         click.option(
+            "--connect-timeout",
+            type=float,
+            default=None,
+            hidden=hidden,
+            help="Time in seconds for the remote server to start and answer "
+            "(default: the workspace ssh.connect_timeout setting, or 60)",
+        ),
+        click.option(
             "--remote-logging",
             "remote_log_levels",
             type=str,
@@ -153,6 +167,7 @@ class RemoteWorkspace:
     request_timeout: float = 60.0
     log_levels: str | None = None
     reconnect: ReconnectSettings = field(default_factory=ReconnectSettings)
+    connect_timeout: float = 60.0
 
     @staticmethod
     def resolve(
@@ -185,6 +200,8 @@ class RemoteWorkspace:
             request_timeout=options.request_timeout,
             log_levels=options.remote_log_levels or (ssh.log_levels if ssh else None),
             reconnect=(ssh.reconnect if ssh else None) or get_settings().reconnect,
+            connect_timeout=options.connect_timeout
+            or (ssh.connect_timeout if ssh else SSHSettings.connect_timeout),
         )
 
     def __str__(self):
@@ -240,6 +257,7 @@ class RemoteWorkspace:
             request_timeout=self.request_timeout,
             remote_log_levels=self.log_levels,
             reconnect=self.reconnect,
+            connect_timeout=self.connect_timeout,
         )
         try:
             provider.connect()

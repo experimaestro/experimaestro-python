@@ -190,6 +190,10 @@ class SSHSettings:
     """Reconnection policy of this workspace (defaults to the global
     ``reconnect`` settings)"""
 
+    connect_timeout: float = 60.0
+    """Time (in seconds) for the remote experimaestro server to start and
+    answer (Python can be slow to start on shared file systems)"""
+
 
 @dataclass
 class WorkspaceSettings:

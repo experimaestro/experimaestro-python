@@ -146,3 +146,21 @@ def test_remote_workspace_options_override_settings():
         "cluster",
         "module load python; /opt/xpm --workdir /remote/ws jobs list",
     ]
+
+
+def test_remote_workspace_connect_timeout():
+    """The connection timeout comes from the option, then the settings"""
+    settings = WorkspaceSettings(
+        "cluster",
+        Path("/remote/ws"),
+        ssh=SSHSettings(host="cluster", connect_timeout=120.0),
+    )
+    assert RemoteWorkspace.resolve(SSHOptions(), settings).connect_timeout == 120.0
+
+    options = SSHOptions()
+    options.update(connect_timeout=90.0)
+    assert RemoteWorkspace.resolve(options, settings).connect_timeout == 90.0
+
+    options = SSHOptions()
+    options.set_target("cluster:/remote/ws")
+    assert RemoteWorkspace.resolve(options, None).connect_timeout == 60.0

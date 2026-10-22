@@ -260,6 +260,7 @@ workspaces:
 | `xpm_path` | Path to experimaestro on remote host (bypasses `uv tool run` entirely) |
 | `options` | Additional SSH options (e.g., `["-p", "2222"]`) |
 | `log_levels` | Logging levels of the remote server, shown locally (e.g., `xpm.remote.trace=DEBUG`) |
+| `connect_timeout` | Time (in seconds) for the remote server to start and answer (default: 60). Increase it when starting Python is slow on the cluster's shared file system. |
 | `reconnect` | Reconnection policy of this workspace (overrides the global `reconnect` settings, see [Reconnection](#reconnection)) |
 
 ### Reconnection
