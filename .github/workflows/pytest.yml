@@ -75,9 +75,28 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: |
-          uv sync --all-extras --group browser
-          uv run --group browser playwright install --with-deps chromium
+        run: uv sync --all-extras --group browser
+
+      # The browsers depend on the Playwright version (from uv.lock)
+      - name: Get the Playwright version
+        id: playwright
+        run: echo "version=$(uv run --group browser python -c 'import importlib.metadata as m; print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Install Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: uv run --group browser playwright install --with-deps chromium
+
+      # System libraries are not cached
+      - name: Install Chromium system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: uv run --group browser playwright install-deps chromium
 
       - name: Test the UIs in a browser
         timeout-minutes: 15
