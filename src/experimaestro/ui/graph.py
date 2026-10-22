@@ -680,21 +680,52 @@ def run_statuses(
     }
 
 
-def export_state(graph: ExperimentGraph, statuses: dict[str, str]) -> dict[str, Any]:
+def run_progress(
+    provider: StateProvider, experiment_id: str, run_id: str | None = None
+) -> dict[str, float]:
+    """Progress (between 0 and 1) of the running jobs of a run that report one
+
+    This is the top level progress, as displayed in the job lists.
+    """
+    from experimaestro.scheduler.interfaces import JobState
+
+    progress: dict[str, float] = {}
+    for job in provider.get_jobs(experiment_id, run_id):
+        if job.state == JobState.RUNNING and job.progress:
+            # Progress information, or its serialized form
+            top = job.progress[0]
+            progress[job.identifier] = (
+                top["progress"] if isinstance(top, dict) else top.progress
+            )
+    return progress
+
+
+def export_state(
+    graph: ExperimentGraph,
+    statuses: dict[str, str],
+    progress: dict[str, float] | None = None,
+) -> dict[str, Any]:
     """What the standalone page displays: the graph with all its views"""
     index = graph.index()
     return {
         "graph": graph.state_dict(),
         "views": {key: view.state_dict(index) for key, view in graph.views().items()},
         "statuses": statuses,
+        "progress": progress or {},
     }
 
 
-def standalone_html(graph: ExperimentGraph, statuses: dict[str, str]) -> str:
+def standalone_html(
+    graph: ExperimentGraph,
+    statuses: dict[str, str],
+    progress: dict[str, float] | None = None,
+) -> str:
     """A self-contained HTML page displaying the graph
 
     The page embeds the web UI graph bundle (``webui/data/dag.{js,css}``) and
     the graph data, and needs no server.
+
+    :param progress: Progress of the running jobs (see :func:`run_progress`)
     """
     from importlib.resources import files
 
@@ -704,7 +735,9 @@ def standalone_html(graph: ExperimentGraph, statuses: dict[str, str]) -> str:
     )
     style = (data / "dag.css").read_text(encoding="utf-8")
     # "<" is escaped so that the data cannot close the script element
-    payload = json.dumps(export_state(graph, statuses)).replace("<", "\\u003c")
+    payload = json.dumps(export_state(graph, statuses, progress)).replace(
+        "<", "\\u003c"
+    )
     title = html.escape(f"{graph.experiment_id} ({graph.run_id})")
     return f"""<!doctype html>
 <html lang="en">

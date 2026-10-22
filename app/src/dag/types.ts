@@ -50,4 +50,6 @@ export interface ExportState {
   graph: ExperimentGraph;
   views: { [key: string]: GraphView };
   statuses: { [jobId: string]: string };
+  // Progress (between 0 and 1) of the running jobs that report one
+  progress?: { [jobId: string]: number };
 }

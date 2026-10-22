@@ -28,6 +28,7 @@ const Page = () => {
         params={params}
         onParamsChange={setParams}
         statusOf={(jobId) => state.statuses[jobId]}
+        progressOf={(jobId) => state.progress?.[jobId]}
         height="calc(100vh - 3.5rem)"
       />
     </div>

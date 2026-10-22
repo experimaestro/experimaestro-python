@@ -24,6 +24,7 @@ from experimaestro.ui.graph import (
     build_experiment_graph,
     detect_grid_configs,
     load_experiment_graph,
+    run_progress,
     standalone_html,
     transitive_reduction,
 )
@@ -230,13 +231,49 @@ def test_transitive_reduction():
 
 def test_standalone_html(graph):
     graph.nodes[h("learn-0.1")].tags["note"] = "</script><b>"
-    page = standalone_html(graph, {h("learn-0.1"): "done"})
+    page = standalone_html(
+        graph,
+        {h("learn-0.1"): "done", h("learn-0.2"): "running"},
+        {h("learn-0.2"): 0.5},
+    )
     data = page.split('<script id="xpm-graph" type="application/json">')[1]
     data = data.split("</script>")[0]
     state = json.loads(data)
-    assert state["statuses"] == {h("learn-0.1"): "done"}
+    assert state["statuses"] == {h("learn-0.1"): "done", h("learn-0.2"): "running"}
+    assert state["progress"] == {h("learn-0.2"): 0.5}
     assert set(state["views"]) == set(graph.views())
     assert "</script><b>" not in page
+
+
+def test_run_progress():
+    """The top level progress of the running jobs that report one"""
+    from experimaestro.notifications import LevelInformation
+    from experimaestro.scheduler.state_provider import MockJob
+
+    def job(name: str, state: str, progress: list) -> MockJob:
+        return MockJob(
+            identifier=h(name),
+            task_id="pkg.Task",
+            path=None,
+            state=state,
+            starttime=None,
+            endtime=None,
+            progress=progress,
+            updated_at="",
+        )
+
+    jobs = [
+        job("running", "running", [LevelInformation(0, None, 0.25)]),
+        job("serialized", "running", [{"level": 0, "progress": 0.5, "desc": None}]),
+        job("silent", "running", []),
+        job("done", "done", [LevelInformation(0, None, 1.0)]),
+    ]
+
+    class Provider:
+        def get_jobs(self, experiment_id, run_id=None):
+            return jobs
+
+    assert run_progress(Provider(), "xp") == {h("running"): 0.25, h("serialized"): 0.5}
 
 
 # --- Through a workspace

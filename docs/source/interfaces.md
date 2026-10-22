@@ -527,10 +527,12 @@ The `xpm.remote.payload` logger shows the messages themselves (very verbose).
 ## Experiment DAG Visualization
 
 The *Graph* tab of the web UI shows the dependency graph of the selected
-experiment run: jobs coloured by status, the configurations linking them
-(optional), stacks of similar nodes, and a grid search configuration selector.
-Clicking a node highlights its lineage and lists its jobs, whose details can
-be opened.
+experiment run: jobs coloured by status (with the progress of the running
+ones), init tasks (thin solid border, tinted background), the configurations
+linking them (optional, dashed border), stacks of similar nodes, and a grid
+search configuration selector. The graph follows the run: jobs submitted while
+it runs are added. Clicking a node highlights its lineage and lists its jobs,
+whose details can be opened.
 
 ```{figure} img/DAG_example.png
 :alt: Experimaestro DAG Web Viewer

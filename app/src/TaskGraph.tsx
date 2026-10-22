@@ -30,7 +30,8 @@ function useRemainingHeight(): [React.RefObject<HTMLDivElement>, string] {
 }
 
 // Dependency graph of the selected experiment run: the graph and its views
-// are computed by the server, the job statuses come from the store
+// are computed by the server, the job statuses and progress come from the
+// store (updated as the jobs change, without requesting the graph again)
 export default () => {
   const jobs = useAppSelector((state) => state.db.jobs);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
@@ -119,6 +120,7 @@ export default () => {
         params={params}
         onParamsChange={setParams}
         statusOf={(jobId) => jobs.byId[jobId]?.status}
+        progressOf={(jobId) => jobs.byId[jobId]?.progress[0]?.progress}
         onOpenJob={(node) => {
           const job = jobs.byId[node.id];
           if (job) {

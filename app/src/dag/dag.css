@@ -62,6 +62,11 @@
   border: 2px dashed #90a4ae;
 }
 
+.xpm-dag-swatch-init {
+  border: 2px solid #9e9e9e;
+  background: #f3f5fa;
+}
+
 .xpm-dag-body {
   flex: 1;
   min-height: 0;
@@ -94,10 +99,16 @@
   overflow: hidden;
 }
 
-.xpm-dag-config,
-.xpm-dag-init {
+.xpm-dag-config {
   border: 2px dashed #90a4ae;
   background: #fafbfc;
+}
+
+/* Init tasks are lightweight tasks run before a task: drawn as tasks (solid,
+   status-coloured border), with a thinner border and a tinted background */
+.xpm-dag-init {
+  border-width: 2px;
+  background: #f3f5fa;
 }
 
 .xpm-dag-action {
@@ -169,12 +180,22 @@
   text-overflow: ellipsis;
 }
 
-.xpm-dag-statusbar {
+.xpm-dag-statusbar,
+.xpm-dag-progress {
   display: flex;
   height: 4px;
   margin-top: 4px;
   border-radius: 2px;
   overflow: hidden;
+}
+
+/* Progress of the running jobs (in place of the status bar) */
+.xpm-dag-progress {
+  background: #dbe5f1;
+}
+
+.xpm-dag-progress > span {
+  transition: width 0.3s;
 }
 
 /* Details panel */

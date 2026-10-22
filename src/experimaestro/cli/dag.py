@@ -132,6 +132,7 @@ def dag(
     from experimaestro.ui.graph import (
         export_state,
         load_experiment_graph,
+        run_progress,
         run_statuses,
         standalone_html,
     )
@@ -147,6 +148,7 @@ def dag(
             cprint(f"No dependency graph for this run: {e}", "red")
             raise click.exceptions.Exit(1)
         statuses = run_statuses(provider, exp.experiment_id, run_id)
+        progress = run_progress(provider, exp.experiment_id, run_id)
     finally:
         provider.close()
 
@@ -159,10 +161,12 @@ def dag(
 
     if json_path is not None:
         with click.open_file(str(json_path), "w") as out:
-            json.dump(export_state(graph, statuses), out)
+            json.dump(export_state(graph, statuses, progress), out)
 
     if html_path is not None:
-        html_path.write_text(standalone_html(graph, statuses), encoding="utf-8")
+        html_path.write_text(
+            standalone_html(graph, statuses, progress), encoding="utf-8"
+        )
         cprint(f"Graph saved to {html_path}", "green")
 
     if tree:
@@ -191,6 +195,6 @@ def dag(
         with tempfile.NamedTemporaryFile(
             "w", suffix=".html", prefix="xpm-dag-", delete=False, encoding="utf-8"
         ) as out:
-            out.write(standalone_html(graph, statuses))
+            out.write(standalone_html(graph, statuses, progress))
         cprint(f"Opening {out.name}", "green")
         webbrowser.open(Path(out.name).as_uri())

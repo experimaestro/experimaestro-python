@@ -56,6 +56,8 @@ type NodeData = {
   tags: Array<[string, string]>;
   // Number of members per status (jobs only)
   statuses: Array<[string, number]>;
+  // Mean progress (between 0 and 1) of the running members reporting one
+  progress: number | null;
   orientation: Orientation;
   dimmed: boolean;
   selected: boolean;
@@ -74,6 +76,36 @@ const statusColor = (status: string | undefined) =>
 
 const nodeHeight = (tagCount: number, job: boolean) =>
   34 + Math.ceil(Math.min(tagCount, MAX_TAGS + 1) / 2) * 20 + (job ? 8 : 0);
+
+// Progress of the running jobs of a node, in place of its status bar
+const ProgressBar = ({ value }: { value: number }) => {
+  const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100);
+  return (
+    <div
+      className="xpm-dag-progress"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct}
+      title={`${pct}%`}
+    >
+      <span style={{ width: `${pct}%`, background: statusColor("running") }} />
+    </div>
+  );
+};
+
+// Mean progress of the running members that report one (null if none does)
+const meanProgress = (
+  members: string[],
+  statusOf: (jobId: string) => string | undefined,
+  progressOf: (jobId: string) => number | undefined,
+): number | null => {
+  const values = members
+    .filter((m) => statusOf(m) === "running")
+    .map(progressOf)
+    .filter((p): p is number => p !== undefined);
+  return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+};
 
 const DagNode = ({ data }: NodeProps<NodeData>) => {
   const horizontal = data.orientation === "LR";
@@ -111,16 +143,20 @@ const DagNode = ({ data }: NodeProps<NodeData>) => {
           )}
         </div>
       )}
-      {total > 0 && (
-        <div className="xpm-dag-statusbar">
-          {data.statuses.map(([status, n]) => (
-            <span
-              key={status}
-              title={`${n} ${status}`}
-              style={{ flexGrow: n, background: statusColor(status) }}
-            />
-          ))}
-        </div>
+      {data.progress !== null ? (
+        <ProgressBar value={data.progress} />
+      ) : (
+        total > 0 && (
+          <div className="xpm-dag-statusbar">
+            {data.statuses.map(([status, n]) => (
+              <span
+                key={status}
+                title={`${n} ${status}`}
+                style={{ flexGrow: n, background: statusColor(status) }}
+              />
+            ))}
+          </div>
+        )
       )}
       <Handle
         type="source"
@@ -188,6 +224,8 @@ export type DagViewProps = {
   params: ViewParams;
   onParamsChange: (params: ViewParams) => void;
   statusOf: (jobId: string) => string | undefined;
+  // Progress (between 0 and 1) of a running job, if it reports one
+  progressOf?: (jobId: string) => number | undefined;
   // Opens the details of a job (web UI only)
   onOpenJob?: (node: GraphNode) => void;
   error?: string | null;
@@ -319,6 +357,10 @@ const Toolbar = ({
         </span>
       ))}
       <span>
+        <span className="xpm-dag-swatch xpm-dag-swatch-init" />
+        init task
+      </span>
+      <span>
         <span className="xpm-dag-swatch xpm-dag-swatch-config" />
         configuration
       </span>
@@ -326,10 +368,13 @@ const Toolbar = ({
   </div>
 );
 
+const noProgress = () => undefined;
+
 const GraphCanvas = ({
   graph,
   view,
   statusOf,
+  progressOf,
   selected,
   setSelected,
   orientation,
@@ -337,6 +382,7 @@ const GraphCanvas = ({
   graph: ExperimentGraph;
   view: GraphView;
   statusOf: (jobId: string) => string | undefined;
+  progressOf: (jobId: string) => number | undefined;
   selected: number | null;
   setSelected: (rep: number | null) => void;
   orientation: Orientation;
@@ -364,18 +410,20 @@ const GraphCanvas = ({
       const i = STATUSES.findIndex(([name]) => name === s);
       return i < 0 ? STATUSES.length : i;
     };
+    const members = vn.members.map((m) => graph.nodes[m].id);
     return {
       id: String(rep),
       type: "dag",
       position: { x: positions[ix].x, y: positions[ix].y },
       style: { width: NODE_W },
       data: {
-        members: vn.members.map((m) => graph.nodes[m].id),
+        members,
         name: node.name,
         kind: node.kind,
         count: vn.members.length,
         tags: tagList(vn.tags ?? node.tags),
         statuses: [...counts.entries()].sort((a, b) => order(a[0]) - order(b[0])),
+        progress: isJob(node) ? meanProgress(members, statusOf, progressOf) : null,
         orientation,
         dimmed: highlighted !== null && !highlighted.has(rep),
         selected: rep === selected,
@@ -430,6 +478,7 @@ export const DagView = ({
   params,
   onParamsChange,
   statusOf,
+  progressOf = noProgress,
   onOpenJob,
   error,
   height = "75vh",
@@ -471,6 +520,7 @@ export const DagView = ({
                 graph={graph}
                 view={view}
                 statusOf={statusOf}
+                progressOf={progressOf}
                 selected={selected}
                 setSelected={setSelected}
                 orientation={orientation}

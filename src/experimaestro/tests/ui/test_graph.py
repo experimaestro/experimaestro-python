@@ -3,6 +3,7 @@
 import pytest
 
 from experimaestro.notifications import LevelInformation
+from experimaestro.scheduler.state_status import JobProgressEvent
 
 from .scenario import EVAL_DONE, LEARN_DONE, LEARN_ERROR, LEARN_RUNNING, JobSpec
 
@@ -67,7 +68,6 @@ def with_init_task(provider, monkeypatch):
 
 
 @pytest.mark.ui("browser")
-@pytest.mark.ui_gap("browser", reason="init tasks are drawn as configurations")
 async def test_graph_init_task_style(ui, with_init_task):
     """Init tasks are not drawn as configurations (dashed border)"""
     await ui.graph("baseline", tasks_only=False, stack=False)
@@ -85,8 +85,9 @@ async def test_graph_init_task_style(ui, with_init_task):
 
 
 @pytest.mark.ui("browser")
-@pytest.mark.ui_gap("browser", reason="the progress of running jobs is not shown")
 async def test_graph_progress(ui, provider):
+    from playwright.async_api import expect
+
     """The node of a running job shows its progress (in place of the status
     bar)"""
     provider.jobs[LEARN_RUNNING].progress = [LevelInformation(0, None, 0.4)]
@@ -95,3 +96,13 @@ async def test_graph_progress(ui, provider):
     bar = node.get_by_role("progressbar")
     assert await bar.count() == 1
     assert float(await bar.get_attribute("aria-valuenow")) == pytest.approx(40)
+
+    # Progress updates reach the graph without requesting it again
+    start = len(ui.requests("experiment.graph"))
+    job = provider.jobs[LEARN_RUNNING]
+    job.progress = [LevelInformation(0, None, 0.7)]
+    provider._notify_state_listeners(
+        JobProgressEvent(job_id=job.identifier, task_id=job.task_id, progress=0.7)
+    )
+    await expect(bar).to_have_attribute("aria-valuenow", "70")
+    assert ui.requests("experiment.graph")[start:] == []
