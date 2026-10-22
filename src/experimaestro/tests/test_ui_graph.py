@@ -330,11 +330,6 @@ def reachable(view, source: str) -> set[str]:
 
 
 @pytest.mark.dynamic
-@pytest.mark.xfail(
-    strict=True,
-    reason="the graph read before the evaluation was submitted is kept "
-    "(cached run objects)",
-)
 def test_graph_of_running_experiment(tmp_path):
     """Jobs submitted on the outputs of a running task depend on it in the
     graph a monitor reads while the experiment runs"""

@@ -15,6 +15,7 @@ from experimaestro.scheduler.query_cache import MISSING, QueryCache
 from experimaestro.scheduler.state_provider import MockExperiment, MockJob
 from experimaestro.scheduler.state_provider import OfflineStateProvider
 from experimaestro.scheduler.state_status import (
+    ActionAddedEvent,
     ExperimentJobStateEvent,
     ExperimentUpdatedEvent,
     JobStateChangedEvent,
@@ -96,6 +97,10 @@ class CountingProvider(OfflineStateProvider):
     def _fetch_experiment_job_info(self, experiment_id, run_id=None, *, refresh=False):
         self.calls[f"job_info:{experiment_id}"] += 1
         return {}
+
+    def _fetch_run_objects(self, experiment_id, run_id):
+        self.calls[f"objects:{experiment_id}:{run_id}"] += 1
+        return []
 
     def _fetch_orphan_jobs(self, *, refresh=False, **kwargs):
         self.calls["orphans"] += 1
@@ -275,6 +280,28 @@ def test_job_of_another_run_is_ignored(provider):
         j.identifier for j in provider.get_jobs("exp1", run_id="run1")
     ]
     assert provider.calls["jobs:exp1"] == 1
+
+
+def test_run_objects_follow_the_run(provider):
+    """New jobs and actions add objects to a run: they are read again"""
+
+    def read_all():
+        for experiment_id in ("exp1", "exp2"):
+            for run_id in ("run1", "run2"):
+                provider.get_run_objects(experiment_id, run_id)
+
+    read_all()
+    provider.apply_event(submitted(run_id="run1"))
+    provider.apply_event(
+        ActionAddedEvent(experiment_id="exp2", run_id="run2", action_id="a1")
+    )
+    read_all()
+
+    assert provider.calls["objects:exp1:run1"] == 2
+    assert provider.calls["objects:exp2:run2"] == 2
+    # The other runs keep their cached objects
+    assert provider.calls["objects:exp1:run2"] == 1
+    assert provider.calls["objects:exp2:run1"] == 1
 
 
 def test_services_use_the_same_cache(provider):

@@ -1350,6 +1350,8 @@ class OfflineStateProvider(StateProvider):
         - JobSubmittedEvent: Adds new job to cache
         - ExperimentJobStateEvent / JobSubmittedEvent: also applied to the
           cached experiments (job counts)
+        - ActionAddedEvent: applied to the cached experiments, drops the
+          cached objects of the run
         - ExperimentUpdatedEvent: Invalidates experiment cache
 
         Cached queries are invalidated for the events that change *which*
@@ -1359,6 +1361,7 @@ class OfflineStateProvider(StateProvider):
         Subclasses may override this for additional logic.
         """
         from experimaestro.scheduler.state_status import (
+            ActionAddedEvent,
             CarbonMetricsEvent,
             ExperimentJobStateEvent,
             JobStateChangedEvent,
@@ -1384,18 +1387,14 @@ class OfflineStateProvider(StateProvider):
                         )
                         break
 
-        # Handle ExperimentJobStateEvent with scheduler_state="submitted"
-        # (supersedes JobSubmittedEvent)
-        elif isinstance(event, ExperimentJobStateEvent):
+        # Job submissions (ExperimentJobStateEvent with
+        # scheduler_state="submitted", or the legacy JobSubmittedEvent) and
+        # actions change the run's content
+        elif isinstance(
+            event, (ExperimentJobStateEvent, JobSubmittedEvent, ActionAddedEvent)
+        ):
             self._apply_to_cached_experiments(event)
-            if event.scheduler_state == "submitted" and event.task_id:
-                self._add_submitted_job(event)
-
-        # Legacy: handle old JobSubmittedEvent from event files
-        elif isinstance(event, JobSubmittedEvent):
-            self._apply_to_cached_experiments(event)
-            if event.task_id:
-                self._add_submitted_job(event)
+            self._update_cached_queries(event)
 
         # Handle experiment events - invalidate cache to force refresh
         elif isinstance(event, ExperimentUpdatedEvent):
@@ -1423,6 +1422,44 @@ class OfflineStateProvider(StateProvider):
             ]
             for exp in experiments:
                 exp.apply_event(event)
+
+    def _update_cached_queries(self, event: "EventBase") -> None:
+        """Update the cached answers that a run event changes
+
+        Called for the job submissions and the actions added to a run (see
+        :meth:`apply_event`), and by the providers that update their cached
+        experiments themselves.
+        """
+        from experimaestro.scheduler.state_status import (
+            ActionAddedEvent,
+            ExperimentJobStateEvent,
+            JobSubmittedEvent,
+        )
+
+        match event:
+            case ExperimentJobStateEvent(scheduler_state="submitted", task_id=task_id):
+                if task_id:
+                    self._add_submitted_job(event)
+            case JobSubmittedEvent(task_id=task_id):
+                if task_id:
+                    self._add_submitted_job(event)
+            case ActionAddedEvent():
+                self._drop_run_objects(event.experiment_id, event.run_id or None)
+
+    def _drop_run_objects(self, experiment_id: str, run_id: str | None) -> None:
+        """Drop the cached objects of a run, which got new ones
+
+        The new objects are only in the run's ``objects.jsonl``: they are read
+        again on the next request.
+        """
+        for key, _ in self._query_cache.entries():
+            if key[0] != "run_objects":
+                continue
+            _, exp_id, cached_run_id = key
+            if exp_id == experiment_id and (
+                cached_run_id is None or run_id is None or cached_run_id == run_id
+            ):
+                self._query_cache.drop(key)
 
     def _add_submitted_job(self, event: "EventBase") -> None:
         """Register a newly submitted job in the caches
@@ -1504,17 +1541,11 @@ class OfflineStateProvider(StateProvider):
                     key, lambda mapping, v=value: mapping.setdefault(event.job_id, v)
                 )
 
-            elif name == "run_objects":
-                # The objects of the new job are only in objects.jsonl
-                _, exp_id, run_id = key
-                if exp_id == event.experiment_id and (
-                    run_id is None or not event_run_id or run_id == event_run_id
-                ):
-                    self._query_cache.drop(key)
-
             # Experiment queries are unaffected: a new job does not change the
             # experiment list, and the counts come from the cached experiment
             # objects, which the event updates in place
+
+        self._drop_run_objects(event.experiment_id, event_run_id)
 
     @staticmethod
     def _event_timestamp(value: str | None) -> float | None:

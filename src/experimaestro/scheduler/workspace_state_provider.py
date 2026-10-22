@@ -1118,6 +1118,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         Called by EventReader when experiment events are received.
         For ExperimentJobStateEvent, updates _experiment_status on the cached job.
+        The cached answers about the run are updated as well (submitted jobs,
+        objects of the new jobs and actions).
         """
         from experimaestro.scheduler.state_status import (
             ExperimentJobStateEvent,
@@ -1138,6 +1140,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
             job_id = event.job_id
             task_id = event.task_id
             if task_id and job_id:
+                if event.scheduler_state == "submitted":
+                    # Cached from disk, so that the job queries get it
+                    self._get_or_load_job(job_id, task_id)
                 job_cache_key = f"{task_id_hash(task_id)}:{job_id}"
                 new_state = STATE_NAME_TO_JOBSTATE.get(event.scheduler_state)
                 if new_state is not None:
@@ -1152,6 +1157,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
                         job = self._job_cache.get(job_cache_key)
                         if job is not None:
                             job._experiment_status = new_state
+
+        if isinstance(event, ExperimentEventBase):
+            self._update_cached_queries(event)
 
     def _load_carbon_metrics_for_job(self, job_id: str) -> CarbonMetricsData | None:
         """Load carbon metrics from carbon storage for a job.
