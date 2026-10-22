@@ -71,6 +71,10 @@ Then open `http://localhost:12345` in your browser.
 - **Real-time Updates**: WebSocket-based updates as job states change
 - **Job Details**: Click on a job to view parameters, logs, output paths and its
   dependencies with their status
+- **Copying**: In the job list, a click on the task name copies it, a click on
+  the job hash copies `<task id>/<job id>` and a shift-click on the job hash
+  copies the job folder (for a workspace monitored over SSH, the remote
+  folder); a notification at the top right tells what was copied
 - **Experiment Filtering**: Filter jobs by experiment ID and run
 - **Log Viewing**: View stdout/stderr logs directly in the browser
 - **Orphan & Stray Jobs**: Jobs no experiment references, with their disk

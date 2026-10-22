@@ -81,7 +81,7 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
               className="clipboard"
               onClick={() =>
                 copyToClibpoard(job.locator)
-                  .then(() => success("Job path copied"))
+                  .then(() => success(`Job folder copied: ${job.locator}`))
                   .catch(() => error("Error when copying job path"))
               }
             >

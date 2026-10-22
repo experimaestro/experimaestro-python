@@ -112,9 +112,8 @@ const useStyles = createUseStyles({
   container: {
     position: "fixed",
     top: "10px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    zIndex: 100,
+    right: "10px",
+    zIndex: 1100,
   },
   body: {
     ".bg-danger &": {

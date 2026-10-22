@@ -36,7 +36,7 @@ export default ({
             className="clipboard task-id"
             onClick={() =>
               copyToClibpoard(job.taskId)
-                .then(() => success("Task id copied"))
+                .then(() => success(`Task id copied: ${job.taskId}`))
                 .catch((e) => error("Error when copying: " + e))
             }
           >
@@ -44,12 +44,15 @@ export default ({
           </span>
           <span
             className="clipboard job-id ms-2"
-            title={job.locator}
-            onClick={() =>
-              copyToClibpoard(job.locator)
-                .then(() => success("Job path copied"))
-                .catch((e) => error("Error when copying job path: " + e))
-            }
+            title={`Click to copy the job id (${job.taskId}/${job.jobId}), shift+click to copy the job folder (${job.locator})`}
+            onClick={(event) => {
+              const [what, content] = event.shiftKey
+                ? ["Job folder", job.locator]
+                : ["Job id", `${job.taskId}/${job.jobId}`];
+              copyToClibpoard(content)
+                .then(() => success(`${what} copied: ${content}`))
+                .catch((e) => error(`Error when copying the ${what.toLowerCase()}: ${e}`));
+            }}
           >
             {job.jobId.substring(0, 12)}
           </span>

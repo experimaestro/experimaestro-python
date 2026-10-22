@@ -7,7 +7,6 @@ from .scenario import LEARN_DONE
 pytestmark = [pytest.mark.anyio, pytest.mark.ui("browser")]
 
 
-@pytest.mark.ui_gap("browser", reason="a click on the job hash copies the job path")
 async def test_copy_job_id(ui):
     """A click on the job hash copies ``task id/job id``"""
     await ui.open_experiment("baseline")
@@ -21,7 +20,6 @@ async def test_copy_job_path(ui, provider):
     assert await ui.copy_job_id(LEARN_DONE, shift=True) == path
 
 
-@pytest.mark.ui_gap("browser", reason="the tooltip shows the job path only")
 async def test_copy_job_id_help(ui):
     """Hovering the job hash tells what a click and a shift-click copy"""
     await ui.open_experiment("baseline")

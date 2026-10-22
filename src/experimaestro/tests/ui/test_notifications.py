@@ -7,7 +7,6 @@ from .scenario import LEARN_DONE
 pytestmark = [pytest.mark.anyio, pytest.mark.ui("browser")]
 
 
-@pytest.mark.ui_gap("browser", reason="notifications are shown in the middle")
 async def test_notifications_top_right(ui):
     """Notifications are shown at the top right, out of the way of the lists"""
     await ui.open_experiment("baseline")
