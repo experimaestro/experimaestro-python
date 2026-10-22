@@ -1730,6 +1730,9 @@ class MockJob(BaseJob):
         self.retry_count = retry_count
         self._process_dict = process
         self._process = None  # Cached Process handle (avoids repeated fromDefinition)
+        # Whether _process_dict must be read again from the pid file: set when
+        # the state changes, as the pid file may describe a new run (set_state)
+        self._process_dict_stale = False
         self.carbon_metrics = carbon_metrics
         self.run_group_id = run_group_id
         self._previous_carbon_metrics = previous_carbon_metrics
@@ -1791,7 +1794,15 @@ class MockJob(BaseJob):
         State loaded from status.json (via _load_from_status_dict) is NOT
         considered reliable since it may be stale from a previous run.
         This ensures experiment events can override stale status.json state.
+
+        A state change can mean a new run (a failed job resubmitted, a
+        resumable job retried): the cached process handle is dropped, and
+        the process definition of an unfinished job is read again from the
+        pid file the next time it is needed.
         """
+        if new_state != self._state:
+            self._process = None
+            self._process_dict_stale = not new_state.finished()
         super().set_state(new_state, loading=loading)
 
     def load_from_disk(self):
@@ -1839,9 +1850,11 @@ class MockJob(BaseJob):
         # as fallback when status.json didn't provide a state.
         elif self.pidfile.exists():
             try:
-                self._process_dict = json.loads(self.pidfile.read_text())
+                process_dict = json.loads(self.pidfile.read_text())
                 if self._state.is_unscheduled():
                     self.set_state(JobState.RUNNING, loading=True)
+                self._process_dict = process_dict
+                self._process_dict_stale = False
             except Exception:
                 pass
 
@@ -1863,7 +1876,23 @@ class MockJob(BaseJob):
 
     def process_state_dict(self) -> dict | None:
         """Get process state as dictionary."""
+        if self._process_dict_stale:
+            self._reload_process_dict()
         return self._process_dict
+
+    def _reload_process_dict(self) -> None:
+        """Read the process definition of the current run from the pid file
+
+        Until the pid file is read, the previous definition is kept (e.g. the
+        pid file is not written yet, or the job directory is a remote one).
+        """
+        if self.path is None or not self.pidfile.exists():
+            return
+        try:
+            self._process_dict = json.loads(self.pidfile.read_text())
+            self._process_dict_stale = False
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("Could not read the pid file of %s: %s", self.path, e)
 
     def getprocess(self):
         """Get process handle for running job
@@ -1956,6 +1985,43 @@ class MockJob(BaseJob):
         )
         job.resumable = d.get("resumable", False)
         return job
+
+    def update_from_state_dict(self, d: dict) -> None:
+        """Update this job from a fresher state dictionary
+
+        Used to update a cached job with a snapshot read again (e.g. by the
+        SSH client after a reconnection, or when a query is answered again):
+        the snapshot is the current state, possibly of a new run of the job
+        (a failed job resubmitted), so it replaces the state, the progress
+        and the process.
+
+        Args:
+            d: Dictionary from state_dict() (path already translated)
+        """
+        state = STATE_NAME_TO_JOBSTATE.get(d.get("state") or "", self._state)
+        if d.get("failure_reason"):
+            state = JobStateError(JobFailureStatus[d["failure_reason"]])
+        self._has_event_state = not state.is_unscheduled()
+        self.set_state(state, loading=True)
+
+        self.starttime = deserialize_to_datetime(d.get("started_time"))
+        self.endtime = deserialize_to_datetime(d.get("ended_time"))
+        self.exit_code = d.get("exit_code")
+        self.retry_count = d.get("retry_count", 0)
+        self.resumable = d.get("resumable", self.resumable)
+        self.progress = get_progress_information_from_dict(d.get("progress", []))
+
+        if (process := d.get("process")) != self._process_dict:
+            self._process = None
+        self._process_dict = process
+        self._process_dict_stale = False
+
+        if carbon_dict := d.get("carbon_metrics"):
+            self.carbon_metrics = CarbonMetricsData(**carbon_dict)
+        if run_group_id := d.get("run_group_id"):
+            self.run_group_id = run_group_id
+        if self.path is None and (path := d.get("path")) is not None:
+            self.path = Path(path)
 
     @classmethod
     def from_disk(

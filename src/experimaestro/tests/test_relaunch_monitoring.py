@@ -54,11 +54,6 @@ def pid(job) -> int:
     return json.loads(pid_file.read_text())["pid"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the monitor keeps the process of the failed run (MockJob.getprocess "
-    "caches it)",
-)
 def test_relaunched_job_is_followed(tmp_path):
     workdir, control = tmp_path / "workdir", tmp_path / "control"
     workdir.mkdir()
@@ -82,6 +77,8 @@ def test_relaunched_job_is_followed(tmp_path):
         info = provider.get_process_info(monitored())
         assert info is not None and info.pid == expected_pid and info.running
         assert monitored().getprocess().tospec()["pid"] == expected_pid
+        # The serialized job (web UI updates, SSH answers) has the same process
+        assert monitored().state_dict()["process"]["pid"] == expected_pid
 
     try:
         # The monitor follows the first run (as a user looking at the job)
