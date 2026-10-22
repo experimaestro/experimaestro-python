@@ -5,6 +5,7 @@ import json
 import os
 import socket
 
+import psutil
 import pytest
 
 from experimaestro.logs.reader import LogFile
@@ -162,11 +163,7 @@ def test_stale_cache_dirs_removed(tmp_path):
         return path
 
     # A process id that is not running
-    gone = (
-        max(int(p) for p in os.listdir("/proc")) + 1
-        if os.path.isdir("/proc")
-        else 99999
-    )
+    gone = max(psutil.pids()) + 1
     stale = cache("gone", gone)
     kept = [
         cache("running", os.getppid()),

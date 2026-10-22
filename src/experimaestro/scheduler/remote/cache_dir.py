@@ -18,6 +18,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import psutil
+
 logger = logging.getLogger("xpm.remote.client")
 
 PREFIX = "xpm_remote_"
@@ -38,17 +40,6 @@ def create_cache_dir() -> Path:
     return path
 
 
-def _running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Another user's process
-        return True
-    return True
-
-
 def _stale(path: Path) -> bool:
     """Whether a directory is the cache of a monitor of this host that is gone"""
     if path.is_symlink() or not path.is_dir() or path.stat().st_uid != os.getuid():
@@ -59,7 +50,11 @@ def _stale(path: Path) -> bool:
     except (OSError, ValueError, KeyError, TypeError):
         # Not a monitor cache (or not readable): left alone
         return False
-    return host == socket.gethostname() and pid != os.getpid() and not _running(pid)
+    return (
+        host == socket.gethostname()
+        and pid != os.getpid()
+        and not psutil.pid_exists(pid)
+    )
 
 
 def remove_stale_cache_dirs(directory: Path | None = None) -> list[Path]:
