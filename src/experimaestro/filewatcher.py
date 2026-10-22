@@ -402,7 +402,9 @@ class AsyncEventBridge:
 
     def __init__(self):
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._lock = threading.Lock()
+        # Reentrant: a finalizer (e.g. a lock manager's __del__ closing its
+        # watcher) may run while this thread holds the lock and unregister
+        self._lock = threading.RLock()
         self._handlers: dict[str, list[AsyncEventHandler]] = {}
 
     def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -446,9 +448,9 @@ class AsyncEventBridge:
         event: FileSystemEvent,
     ) -> None:
         """Post a filesystem event from watchdog thread to asyncio loop."""
+        watched_path_str = str(Path(watched_path).absolute())
         with self._lock:
             loop = self._loop
-            watched_path_str = str(Path(watched_path).absolute())
             handlers = self._handlers.get(watched_path_str, [])[:]
 
         if not handlers:
@@ -1564,7 +1566,9 @@ class FileWatcherService:
         # Watchdog watches queued for unscheduling by the poll thread.
         # See _defer_unschedule for why this indirection exists.
         self._pending_unschedule: list[ObservedWatch] = []
-        self._pending_lock = threading.Lock()
+        # Reentrant: _defer_unschedule may run from a finalizer triggered
+        # while _drain_pending_unschedule holds the lock
+        self._pending_lock = threading.RLock()
 
         # Start the poll thread eagerly so deferred unschedules are always
         # drained, even when only async_watch()/fswatch() are used.

@@ -10,6 +10,7 @@ Tests the centralized file watching service including:
 
 import asyncio
 import gc
+import threading
 import time
 import weakref
 from threading import Event
@@ -731,6 +732,32 @@ class TestResourceManagement:
 
         watch.close()
         follower.close()
+
+    def test_close_from_finalizer_while_locks_held(self, tmp_path):
+        """Closing an async watch while the same thread holds the bridge or
+        pending-unschedule lock (as a finalizer triggered by GC does) must
+        not deadlock"""
+        svc = FileWatcherService.instance()
+        bridge = AsyncEventBridge.instance()
+        for i in range(2):
+            (tmp_path / str(i)).mkdir()
+        watchers = [
+            svc.async_watch(object(), tmp_path / str(i), recursive=False)
+            for i in range(2)
+        ]
+
+        done = Event()
+
+        def close_under_locks():
+            with bridge._lock:
+                watchers[0].close()
+            with svc._pending_lock:
+                watchers[1].close()
+            done.set()
+
+        thread = threading.Thread(target=close_under_locks, daemon=True)
+        thread.start()
+        assert done.wait(5), "close() deadlocked on a lock held by its thread"
 
 
 # =============================================================================
