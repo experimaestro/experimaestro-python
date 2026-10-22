@@ -28,7 +28,14 @@ from playwright.async_api import Locator, Page, WebSocket, async_playwright
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.webui.app import create_app
 
-from .drivers import SEVERITIES, JobDetail, Notification, OrphanRow
+from .drivers import (
+    SEVERITIES,
+    JobDetail,
+    Notification,
+    OrphanRow,
+    append,
+    log_file,
+)
 
 TOKEN = "test-token"
 
@@ -407,20 +414,91 @@ class BrowserDriver:
         await self._close_modals()
         return detail
 
-    async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
+    async def _open_log(self, job_id: str) -> Locator:
         await self._close_modals()
         await self._job_row(job_id).locator("i[title='Logs']").click()
         modal = self.page.locator(".modal.show")
         await modal.wait_for()
+        return modal
+
+    async def _show_log(self, job_id: str, stream: str) -> Locator:
+        modal = await self._open_log(job_id)
         await modal.get_by_role("tab", name=stream, exact=True).click()
         log = modal.locator("pre.log-viewer-content:visible")
         await log.wait_for()
         await self.page.wait_for_function(
             "el => el.textContent !== '(no output)'", arg=await log.element_handle()
         )
-        text = await log.text_content()
+        return log
+
+    async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
+        text = await (await self._show_log(job_id, stream)).text_content()
         await self._close_modals()
         return text
+
+    async def follow_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"], chunks: list[str]
+    ) -> list[str]:
+        task_id = (await self.job_detail(job_id)).task_id
+        path = log_file(self.provider, task_id, job_id, stream)
+        log = await self._show_log(job_id, stream)
+        for chunk in chunks:
+            before = await log.text_content()
+            append(path, chunk)
+            # The page polls the log (every 1.5s)
+            await self.page.wait_for_function(
+                "([el, before]) => el.textContent !== before",
+                arg=[await log.element_handle(), before],
+                timeout=10_000,
+            )
+        text = await log.text_content()
+        await self._close_modals()
+        return [line.rstrip() for line in text.splitlines()]
+
+    async def log_streams(self, job_id: str) -> tuple[list[str], str]:
+        modal = await self._open_log(job_id)
+        order, shown = [], None
+        for tab in await modal.get_by_role("tab").all():
+            name = (await tab.inner_text()).strip()
+            if name in ("stdout", "stderr"):
+                order.append(name)
+                if await tab.get_attribute("aria-selected") == "true":
+                    shown = name
+        await self._close_modals()
+        return order, shown
+
+    async def job_path(self, job_id: str) -> str:
+        await self._close_modals()
+        await self._job_row(job_id).locator("i[title='Details']").click()
+        modal = self.page.locator(".modal.show")
+        await modal.wait_for()
+        await self.settle()
+        path = modal.locator(
+            "xpath=.//span[normalize-space()='Path']/following-sibling::div[1]"
+        )
+        text = (await path.inner_text()).strip()
+        await self._close_modals()
+        return text
+
+    async def copy_job_id(self, job_id: str, *, shift: bool = False) -> str | None:
+        await self._close_modals()
+        # Records what is written to the clipboard
+        await self.page.evaluate(
+            """() => {
+                window.__xpmCopied = null;
+                Object.defineProperty(navigator, "clipboard", {
+                    configurable: true,
+                    value: { writeText: async (text) => { window.__xpmCopied = text; } },
+                });
+            }"""
+        )
+        await (
+            self._job_row(job_id)
+            .locator(".job-id")
+            .click(modifiers=["Shift"] if shift else [])
+        )
+        await self.settle()
+        return await self.page.evaluate("() => window.__xpmCopied")
 
     async def kill_job(self, job_id: str) -> Notification | None:
         return await self._job_action(job_id, "Kill", "Kill")

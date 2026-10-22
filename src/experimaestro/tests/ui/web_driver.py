@@ -21,7 +21,14 @@ from starlette.testclient import TestClient
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.webui.app import create_app
 
-from .drivers import SEVERITIES, JobDetail, Notification, OrphanRow
+from .drivers import (
+    SEVERITIES,
+    JobDetail,
+    Notification,
+    OrphanRow,
+    append,
+    log_file,
+)
 
 TOKEN = "test-token"
 
@@ -281,6 +288,33 @@ class WebDriver:
         )
         response.raise_for_status()
         return response.json()["content"]
+
+    async def follow_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"], chunks: list[str]
+    ) -> list[str]:
+        task_id = self._task_id(job_id)
+        path = log_file(self.provider, task_id, job_id, stream)
+        url = f"/api/jobs/{task_id}/{job_id}/logs/{stream}"
+        # As the React client does: the first poll reads the tail of the log,
+        # the next ones read from the offset returned and are appended
+        data = self.client.get(url).json()
+        content, offset = data["content"], data["offset"]
+        for chunk in chunks:
+            append(path, chunk)
+            data = self.client.get(url, params={"offset": offset}).json()
+            content += data["content"]
+            offset = data["offset"]
+        return [line.rstrip() for line in content.splitlines()]
+
+    async def log_streams(self, job_id: str) -> list[str]:
+        raise NotImplementedError("the log tabs are shown by the browser client")
+
+    async def job_path(self, job_id: str) -> str:
+        await self._request("job.details", jobId=job_id, taskId=self._task_id(job_id))
+        return self.jobs[job_id]["locator"]
+
+    async def copy_job_id(self, job_id: str, *, shift: bool = False) -> str | None:
+        raise NotImplementedError("copying is done by the browser client")
 
     async def kill_job(self, job_id: str) -> Notification:
         return await self._notification(

@@ -1,5 +1,8 @@
 """Tests for the TUI log viewer's carriage-return handling"""
 
+import pytest
+
+from experimaestro.scheduler.logs import apply_carriage_returns, read_log_slice
 from experimaestro.tui.log_viewer import LogFile, _apply_carriage_returns
 
 
@@ -83,3 +86,31 @@ def test_log_file_partial_within_chunk(tmp_path):
     complete, partial = reader.read_new_content()
     assert complete == []
     assert partial == "C"
+
+
+# --- Shared log reading (scheduler/logs.py)
+
+
+@pytest.mark.xfail(strict=True, reason="a trailing \\r erases the line")
+def test_apply_carriage_returns_trailing_cr():
+    """``\\r`` only moves the cursor: a terminal still shows the text before it
+    (e.g. ``\\r\\n`` line ends, or a progress bar ending its updates with ``\\r``)"""
+    assert apply_carriage_returns(" 50%\r") == " 50%"
+    assert apply_carriage_returns("done\r") == "done"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="each poll is collapsed on its own: the line being written at the "
+    "end of one poll is repeated by the next one",
+)
+def test_read_log_slice_progress_across_polls(tmp_path):
+    """Polls read from the returned offset can be appended (as the web client
+    does) and show a rewritten line once"""
+    log = tmp_path / "task.err"
+    log.write_text("start\n\r 10%")
+    first = read_log_slice(log)
+    with log.open("a", newline="") as out:
+        out.write("\r 20%\r 30%\ndone\n")
+    second = read_log_slice(log, first["offset"])
+    assert first["content"] + second["content"] == "start\n 30%\ndone\n"

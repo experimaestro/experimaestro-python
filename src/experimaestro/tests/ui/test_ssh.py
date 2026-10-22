@@ -173,6 +173,11 @@ async def ui(request, ssh_provider):
     names = {request.param, INTERFACES[request.param]}
     if marker is not None and not names & set(marker.args):
         pytest.skip(f"not available through the {request.param} driver")
+    for gap in request.node.iter_markers("ui_gap"):
+        if names & set(gap.args):
+            request.node.add_marker(
+                pytest.mark.xfail(reason=gap.kwargs["reason"], strict=True)
+            )
     driver_class = (
         _browser_driver() if request.param == "browser" else DRIVERS[request.param]
     )
@@ -200,6 +205,26 @@ async def test_job_log(ui, remote_workspace):
     await ui.open_experiment("greetings")
     log = await ui.job_log(remote_workspace.jobs["bob"], "stdout")
     assert "hello bob" in log
+
+
+@pytest.mark.ui_gap("web", reason="the web UI shows the path of the local copy")
+async def test_job_path(ui, remote_workspace):
+    """The job folder shown is the remote one"""
+    await ui.open_experiment("greetings")
+    job_id = remote_workspace.jobs["alice"]
+    path = await ui.job_path(job_id)
+    assert path.startswith(f"{remote_workspace.path}/jobs/")
+    assert path.endswith(job_id)
+
+
+@pytest.mark.ui("browser")
+@pytest.mark.ui_gap("browser", reason="the web UI copies the path of the local copy")
+async def test_copy_job_path(ui, remote_workspace):
+    """The job folder copied is the remote one"""
+    await ui.open_experiment("greetings")
+    job_id = remote_workspace.jobs["alice"]
+    path = await ui.copy_job_id(job_id, shift=True)
+    assert path.startswith(f"{remote_workspace.path}/jobs/")
 
 
 @pytest.mark.ui("web", "browser")

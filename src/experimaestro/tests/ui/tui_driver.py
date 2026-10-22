@@ -41,7 +41,14 @@ from experimaestro.tui.widgets.stray_jobs import (
     StrayJobsPanel,
 )
 
-from .drivers import SEVERITIES, JobDetail, Notification, OrphanRow
+from .drivers import (
+    LOG_EXTENSIONS,
+    SEVERITIES,
+    JobDetail,
+    Notification,
+    OrphanRow,
+    append,
+)
 
 
 #: Experiment status category, from the first word of the TUI status column
@@ -365,23 +372,74 @@ class TuiDriver:
             dependencies=dependencies,
         )
 
-    async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
+    async def _open_log(self, job_id: str) -> LogViewerScreen:
         await self._show_jobs()
         await self._select_row(self._table("#jobs-table"), job_id)
         await self.pilot.press("l")
         await self.settle()
         assert isinstance(self.app.screen, LogViewerScreen)
-        extension = {"stdout": ".out", "stderr": ".err"}[stream]
-        for widget in self.app.screen.query(LogWidget):
-            if widget.file_path.endswith(extension):
+        return self.app.screen
+
+    async def _show_log(self, job_id: str, stream: str) -> LogWidget:
+        screen = await self._open_log(job_id)
+        for widget in screen.query(LogWidget):
+            if widget.file_path.endswith(LOG_EXTENSIONS[stream]):
                 # Several files are shown in tabs; a hidden RichLog does not
                 # render what it is given
-                for tabs in self.app.screen.query(TabbedContent):
+                for tabs in screen.query(TabbedContent):
                     tabs.active = widget.parent.id
                 await self.settle()
-                log = widget.query_one(RichLog)
-                return "".join(f"{strip.text}\n" for strip in log.lines)
+                return widget
         raise AssertionError(f"no {stream} log displayed")
+
+    @staticmethod
+    def _log_lines(widget: LogWidget) -> list[str]:
+        lines = [strip.text for strip in widget.query_one(RichLog).lines]
+        partial = widget.query_one(f"#{widget.id}-partial", Static)
+        if partial.display:
+            lines.append(str(partial.render()))
+        return [line.rstrip() for line in lines]
+
+    async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
+        widget = await self._show_log(job_id, stream)
+        log = widget.query_one(RichLog)
+        return "".join(f"{strip.text}\n" for strip in log.lines)
+
+    async def follow_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"], chunks: list[str]
+    ) -> list[str]:
+        widget = await self._show_log(job_id, stream)
+        path = Path(widget.file_path)
+        for chunk in chunks:
+            before = self._log_lines(widget)
+            append(path, chunk)
+            # The viewer polls its files (every 0.5s)
+            for _ in range(50):
+                await self.pilot.pause(0.1)
+                if self._log_lines(widget) != before:
+                    break
+            else:
+                raise AssertionError(f"log display unchanged after {chunk!r}")
+        return self._log_lines(widget)
+
+    async def log_streams(self, job_id: str) -> tuple[list[str], str]:
+        screen = await self._open_log(job_id)
+        streams = {ext: stream for stream, ext in LOG_EXTENSIONS.items()}
+        widgets = list(screen.query(LogWidget))
+        order = [streams[Path(w.file_path).suffix] for w in widgets]
+        shown = order[0]
+        for tabs in screen.query(TabbedContent):
+            (active,) = [w for w in widgets if w.parent.id == tabs.active]
+            shown = streams[Path(active.file_path).suffix]
+        return order, shown
+
+    async def job_path(self, job_id: str) -> str:
+        await self.job_detail(job_id)
+        label = str(self.app.query_one("#job-path-label", Static).render())
+        return label.removeprefix("Path: ")
+
+    async def copy_job_id(self, job_id: str, *, shift: bool = False) -> str | None:
+        raise NotImplementedError("the job identifier is clicked in the web UI")
 
     async def kill_job(self, job_id: str) -> Notification:
         await self._show_jobs()

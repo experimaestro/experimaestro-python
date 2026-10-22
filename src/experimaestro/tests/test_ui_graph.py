@@ -1,12 +1,23 @@
 """Experiment dependency graph (experimaestro.ui.graph)"""
 
+from functools import partial
 import json
 from pathlib import Path
+import time
 
 import pytest
 
-from experimaestro import Config, Meta, Param, PathGenerator, Task, field
+from experimaestro import (
+    Config,
+    Meta,
+    Param,
+    PathGenerator,
+    ResumableTask,
+    Task,
+    field,
+)
 from experimaestro.scheduler.interfaces import ExperimentJobInformation
+from experimaestro.tests.tasks.test_dynamic import Model, Validation, evaluate
 from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
 from experimaestro.ui.graph import (
     NodeKind,
@@ -281,3 +292,96 @@ def test_load_from_workspace():
     assert by_name["Trained"].kind == NodeKind.CONFIG
     assert graph.job_dependencies()[by_name["Score"].id] == [by_name["Train"].id]
     assert by_name["Encoder"].tags == {"dim": 4}
+
+
+class WaitingLearn(ResumableTask):
+    """Outputs a checkpoint when told to, then runs until released"""
+
+    model: Param[Model]
+    validation: Param[Validation]
+    control: Meta[Path]
+
+    def execute(self):
+        (self.control / "started").touch()
+        while not (self.control / "checkpoint").exists():
+            time.sleep(0.05)
+        self.validation.compute(15)
+        while not (self.control / "release").exists():
+            time.sleep(0.05)
+
+
+def wait_for(condition, message: str, timeout: float = 30) -> None:
+    deadline = time.time() + timeout
+    while not condition():
+        assert time.time() < deadline, f"timeout: {message}"
+        time.sleep(0.1)
+
+
+def reachable(view, source: str) -> set[str]:
+    """Nodes reachable from a node through the edges of a view"""
+    found, queue = set(), [source]
+    while queue:
+        node = queue.pop()
+        for s, t in view.edges:
+            if s == node and t not in found:
+                found.add(t)
+                queue.append(t)
+    return found
+
+
+@pytest.mark.dynamic
+@pytest.mark.xfail(
+    strict=True,
+    reason="the graph read before the evaluation was submitted is kept "
+    "(cached run objects)",
+)
+def test_graph_of_running_experiment(tmp_path):
+    """Jobs submitted on the outputs of a running task depend on it in the
+    graph a monitor reads while the experiment runs"""
+    from experimaestro.scheduler.workspace_state_provider import (
+        WorkspaceStateProvider,
+    )
+
+    workdir, control = tmp_path / "workdir", tmp_path / "control"
+    workdir.mkdir()
+    control.mkdir()
+    evaluations = []
+    provider = WorkspaceStateProvider(workdir, no_cleanup=True)
+    try:
+        with TemporaryExperiment(
+            "running-graph", workdir=workdir, timeout_multiplier=6
+        ):
+            model = Model.C()
+            validation = Validation.C(model=model)
+            learn = WaitingLearn.C(model=model, validation=validation, control=control)
+            learn.watch_output(validation.checkpoint, partial(evaluate, evaluations))
+            learn.submit()
+            try:
+                learn_id = learn.__xpm__.job.identifier
+                wait_for((control / "started").exists, "learner started")
+                # The monitor shows the graph before the checkpoint
+                assert (
+                    learn_id in load_experiment_graph(provider, "running-graph").nodes
+                )
+
+                (control / "checkpoint").touch()
+                wait_for(lambda: evaluations, "evaluation submitted")
+                eval_id = evaluations[0].__xpm__.job.identifier
+                wait_for(
+                    lambda: (
+                        eval_id in provider.get_experiment_job_info("running-graph")
+                    ),
+                    "evaluation seen by the monitor",
+                )
+                graph = load_experiment_graph(provider, "running-graph")
+            finally:
+                (control / "release").touch()
+    finally:
+        provider.close()
+
+    assert eval_id in graph.nodes
+    # In the jobs-only views, the evaluation comes after the learner (through
+    # the init task loading the checkpoint)
+    for stack in (False, True):
+        view = graph.view(tasks_only=True, stack=stack)
+        assert eval_id in reachable(view, learn_id), f"{view.edges=} ({stack=})"

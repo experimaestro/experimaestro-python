@@ -18,7 +18,11 @@ user, that is another way of refusing them.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, Protocol
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_provider import StateProvider
 
 Severity = Literal["info", "warning", "error"]
 
@@ -39,6 +43,22 @@ SEVERITIES: dict[str, Severity] = {
 class Notification:
     severity: Severity
     message: str
+
+
+#: Log file extension of each stream
+LOG_EXTENSIONS = {"stdout": ".out", "stderr": ".err"}
+
+
+def log_file(provider: "StateProvider", task_id: str, job_id: str, stream: str) -> Path:
+    """Log file of a job stream"""
+    job = provider.get_job(task_id, job_id)
+    assert job is not None and job.path is not None
+    return job.path / f"{task_id.rsplit('.', 1)[-1]}{LOG_EXTENSIONS[stream]}"
+
+
+def append(path: Path, text: str) -> None:
+    with path.open("a", newline="") as out:
+        out.write(text)
 
 
 def refused(result: Notification | None, message: str) -> bool:
@@ -149,6 +169,28 @@ class UIDriver(Protocol):
 
     async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
         """Text of a job log, as displayed"""
+        ...
+
+    async def follow_log(
+        self, job_id: str, stream: Literal["stdout", "stderr"], chunks: list[str]
+    ) -> list[str]:
+        """Open a job log, then append each chunk to its file, waiting for the
+        display to change after each; returns the lines displayed at the end
+        (the line being written included, trailing spaces removed)"""
+        ...
+
+    async def log_streams(self, job_id: str) -> tuple[list[str], str]:
+        """Log streams of a job (``stdout``, ``stderr``) in the order they are
+        shown, and the one displayed when opening the logs"""
+        ...
+
+    async def job_path(self, job_id: str) -> str:
+        """Folder of a job, as shown in its detail view"""
+        ...
+
+    async def copy_job_id(self, job_id: str, *, shift: bool = False) -> str | None:
+        """Click (with shift if asked) the identifier of a job in the job list;
+        returns what was copied to the clipboard (None if nothing)"""
         ...
 
     async def kill_job(self, job_id: str) -> Notification | None:
