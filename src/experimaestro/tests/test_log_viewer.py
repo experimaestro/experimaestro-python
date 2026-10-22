@@ -1,6 +1,10 @@
 """Tests for the TUI log viewer's carriage-return handling"""
 
-from experimaestro.scheduler.logs import apply_carriage_returns, read_log_slice
+from experimaestro.scheduler.logs import (
+    apply_carriage_returns,
+    read_log_slice,
+    render_terminal,
+)
 from experimaestro.tui.log_viewer import LogFile, _apply_carriage_returns
 
 
@@ -59,14 +63,14 @@ def test_log_file_truncation_resets_partial(tmp_path):
 
     reader = LogFile(str(log))
     reader.read_tail()
-    assert reader._partial_line == "prog 10%"
+    assert reader._partial == "prog 10%"
 
     # Truncate
     log.write_text("")
     complete, partial = reader.read_new_content()
     assert complete == []
     assert partial == ""
-    assert reader._partial_line == ""
+    assert reader._pending == b""
 
 
 def test_log_file_partial_within_chunk(tmp_path):
@@ -130,3 +134,62 @@ def test_log_file_progress_ending_with_cr(tmp_path):
     with log.open("a", newline="") as out:
         out.write("\n")
     assert reader.read_new_content() == ([" 20%"], "")
+
+
+def test_render_terminal_cursor_up():
+    """Nested tqdm bars: the inner bar goes back up after each update, the
+    outer one is rewritten from there with ``\\r``"""
+    data = (
+        "start\nouter:   0%\n"
+        "inner:  50%\x1b[A\n"
+        "inner: 100%\x1b[A\router:  50%\n"
+        "\x1b[Kinner:  50%\x1b[A"
+    ).encode()
+    completed, pending, offset = render_terminal(data)
+    assert completed == ["start"]
+    assert pending == ["outer:  50%", "inner:  50%"]
+    assert data[offset:].startswith(b"outer:   0%")
+
+
+def test_render_terminal_drops_escape_sequences():
+    """Colors are dropped, an escape sequence cut by a read is not shown"""
+    assert render_terminal(b"\x1b[31mred\x1b[0m\ncut\x1b[") == (
+        ["red"],
+        ["cut"],
+        13,
+    )
+
+
+def test_read_log_slice_nested_progress_across_polls(tmp_path):
+    """The lines a progress bar goes back to are read again by the next poll"""
+    log = tmp_path / "task.err"
+    log.write_text("start\n")
+    first = read_log_slice(log)
+    contents = [first["content"]]
+    offset = first["offset"]
+    for update in ("10", "20", "30"):
+        with log.open("a", newline="") as out:
+            out.write(f"\nEpoch: {update}%\x1b[A")
+        poll = read_log_slice(log, offset)
+        contents.append(poll["content"])
+        offset = poll["offset"]
+        assert poll["partial"] == f"\nEpoch: {update}%"
+    with log.open("a", newline="") as out:
+        out.write("\n\ndone\n")
+    last = read_log_slice(log, offset)
+    assert "".join(contents) + last["content"] == "start\n\nEpoch: 30%\ndone\n"
+    assert last["partial"] == ""
+
+
+def test_log_file_nested_progress(tmp_path):
+    """The TUI reader shows the lines a progress bar goes back to as pending"""
+    log = tmp_path / "task.err"
+    log.write_text("start\n\nEpoch: 10%\x1b[A")
+    reader = LogFile(str(log))
+    assert reader.read_tail() == (["start"], "\nEpoch: 10%")
+    with log.open("a", newline="") as out:
+        out.write("\nEpoch: 20%\x1b[A")
+    assert reader.read_new_content() == ([], "\nEpoch: 20%")
+    with log.open("a", newline="") as out:
+        out.write("\n\ndone\n")
+    assert reader.read_new_content() == (["", "Epoch: 20%", "done"], "")

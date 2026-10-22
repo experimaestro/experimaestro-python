@@ -397,7 +397,7 @@ class TuiDriver:
         lines = [strip.text for strip in widget.query_one(RichLog).lines]
         partial = widget.query_one(f"#{widget.id}-partial", Static)
         if partial.display:
-            lines.append(str(partial.render()))
+            lines.extend(str(partial.render()).split("\n"))
         return [line.rstrip() for line in lines]
 
     async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:

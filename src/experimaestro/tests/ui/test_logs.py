@@ -28,3 +28,25 @@ async def test_stderr_first(ui):
     """stderr (where errors and progress bars go) is the first log shown"""
     await ui.open_experiment("baseline")
     assert await ui.log_streams(LEARN_DONE) == (["stderr", "stdout"], "stderr")
+
+
+async def test_nested_progress_folded(ui):
+    """A nested progress bar (tqdm ``position=1``) goes back to its line with
+    ``ESC[A`` after each update: it shows its last state only, as in a
+    terminal"""
+    await ui.open_experiment("sweep")
+    lines = await ui.follow_log(
+        LEARN_RUNNING,
+        "stderr",
+        [
+            "\nEpoch 1:  10%|█         |\x1b[A",
+            "\nEpoch 1:  20%|██        |\x1b[A",
+            "\nEpoch 1: 100%|██████████|\x1b[A\n\ndone\n",
+        ],
+    )
+    assert lines == [
+        f"stderr of {LEARN_RUNNING}",
+        "",
+        "Epoch 1: 100%|██████████|",
+        "done",
+    ]
