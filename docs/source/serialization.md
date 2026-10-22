@@ -52,8 +52,10 @@ can use methods from the experiment objects as follows:
 ```python
 from experimaestro import experiment, Param, Config
 
+
 class MyConfig(Config):
     a: Param[int]
+
 
 if __name__ == "__main__":
     # Saving configurations
@@ -61,11 +63,10 @@ if __name__ == "__main__":
         cfg = MyConfig.C(a=1)
         xp.save([cfg])
 
-
     # Loading configurations
     with experiment("/tmp/load_save", "xp2", port=-1) as xp:
         # Loads MyConfig(a=1)
-        cfg, = xp.load("xp1")
+        (cfg,) = xp.load("xp1")
 ```
 
 
@@ -80,6 +81,7 @@ should be copied into the save directory during serialization:
 
 ```python
 from experimaestro import Config, DataPath
+
 
 class MyConfig(Config):
     to_serialize: DataPath
@@ -111,11 +113,14 @@ from pathlib import Path
 from experimaestro import Config, Param, DataPath
 from experimaestro.core.context import SerializationContext, SerializedPath
 
+
 class MyModel(Config):
     name: Param[str]
     weights: DataPath
 
-    def __xpm_serialize__(self, context: SerializationContext) -> dict[str, SerializedPath]:
+    def __xpm_serialize__(
+        self, context: SerializationContext
+    ) -> dict[str, SerializedPath]:
         # Call super() for default DataPath handling
         result = super().__xpm_serialize__(context)
 
@@ -182,7 +187,9 @@ ExperimaestroHFHub.from_pretrained(hf_id_or_folder, as_instance=as_instance)
 
 # Save and load a configuration (with a variant)
 ExperimaestroHFHub(config).push_to_hub(hf_id, variant)
-ExperimaestroHFHub.from_pretrained(hf_id_or_folder, variant=variant, as_instance=as_instance)
+ExperimaestroHFHub.from_pretrained(
+    hf_id_or_folder, variant=variant, as_instance=as_instance
+)
 ```
 
 {py:class}`~experimaestro.huggingface.ExperimaestroHFHub` - HuggingFace Hub integration for experimaestro configurations. Key methods: `from_pretrained()`, `push_to_hub()`.
@@ -195,6 +202,7 @@ or the serialization context:
 ```python
 from experimaestro.huggingface import ExperimaestroHFHub
 from experimaestro.core.context import SerializationContext
+
 
 class MyHFHub(ExperimaestroHFHub):
     # Use a custom filename for the definition JSON

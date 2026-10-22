@@ -359,9 +359,11 @@ class Training(ResumableTask):
             if step % 10 == 0:
                 self.validation.compute(step)  # Calls register_task_output
 
+
 # Usage
 def on_checkpoint(checkpoint):
     Evaluate.C(checkpoint=checkpoint).submit()
+
 
 training = Training.C(...)
 training.watch_output(validation.checkpoint, on_checkpoint)

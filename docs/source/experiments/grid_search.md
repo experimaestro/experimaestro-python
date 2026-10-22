@@ -10,6 +10,7 @@ To enable grid search for a configuration field, use the `GridSearch[T]` type hi
 from experimaestro.experiments import ConfigurationBase, configuration
 from experimaestro.experiments.grid import GridSearch
 
+
 @configuration
 class MyConfig(ConfigurationBase):
     learning_rate: GridSearch[float] = 0.001
@@ -133,9 +134,11 @@ The `generate_grid` function returns two lists:
 from experimaestro.experiments import ExperimentHelper, ConfigurationBase, configuration
 from experimaestro.experiments.grid import GridSearch, generate_grid
 
+
 @configuration
 class MyConfig(ConfigurationBase):
     learning_rate: GridSearch[float] = 0.001
+
 
 def run(helper: ExperimentHelper, cfg: MyConfig):
     # Generate all permutations and their corresponding tags

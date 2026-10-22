@@ -53,6 +53,7 @@ it is possible to shorten the definition using the `Config` class as a base clas
 ```python
 from experimaestro import Param, Config
 
+
 class MyModel(Config):
     __xpmid__ = "my.model"
 
@@ -91,11 +92,14 @@ can use `@` instead of explicitly naming the parameter.
 ```python
 from experimaestro import Config, Param
 
+
 class Inner(Config):
     x: Param[int]
 
+
 class Outer(Config):
     inner: Param[Inner]
+
 
 # These two are equivalent:
 outer1 = Outer.C(inner=Inner.C(x=42))
@@ -115,15 +119,19 @@ When chaining multiple `@` operations, each configuration is added to the
 ```python
 from experimaestro import Config, Param
 
+
 class TypeA(Config):
     pass
+
 
 class TypeB(Config):
     pass
 
+
 class Multi(Config):
     a: Param[TypeA]
     b: Param[TypeB]
+
 
 # Adds both TypeA and TypeB to Multi
 result = Multi.C() @ TypeA.C() @ TypeB.C()
@@ -134,14 +142,18 @@ For **nested** structures, use parentheses to compose from inside out:
 ```python
 from experimaestro import Config, Param
 
+
 class Inner(Config):
     x: Param[int]
+
 
 class Middle(Config):
     inner: Param[Inner]
 
+
 class Outer(Config):
     middle: Param[Middle]
+
 
 # Creates Outer(middle=Middle(inner=Inner(x=1)))
 result = Outer.C() @ (Middle.C() @ Inner.C(x=1))
@@ -158,12 +170,15 @@ The composition operator raises {py:exc}`ValueError` in two cases:
 ```python
 from experimaestro import Config, Param
 
+
 class Inner(Config):
     x: Param[int]
+
 
 class Ambiguous(Config):
     a1: Param[Inner]
     a2: Param[Inner]  # Same type as a1
+
 
 # Raises ValueError: ambiguous - both a1 and a2 accept Inner
 Ambiguous.C() @ Inner.C(x=1)
@@ -188,8 +203,10 @@ For simple cases where the old and new configurations have the same parameters, 
 ```python
 from experimaestro import Param, Config, deprecate
 
+
 class NewConfiguration(Config):
     pass
+
 
 @deprecate
 class OldConfiguration(NewConfiguration):
@@ -210,13 +227,17 @@ method:
 ```python
 from experimaestro import Param, Config, deprecate
 
+
 class NewConfig(Config):
     """New configuration with a list of values."""
+
     values: Param[list[int]]
+
 
 @deprecate(NewConfig)
 class OldConfig(Config):
     """Old configuration with a single value."""
+
     value: Param[int]
 
     def __convert__(self):
@@ -239,12 +260,14 @@ This also supports chained deprecation for multiple version migrations:
 class ConfigV2(Config):
     values: Param[list[int]]
 
+
 @deprecate(ConfigV2)
 class ConfigV1(Config):
     value: Param[int]
 
     def __convert__(self):
         return ConfigV2(values=[self.value])
+
 
 @deprecate(ConfigV1)
 class ConfigV0(Config):
@@ -266,8 +289,10 @@ by the new one during creation. Use `replace=True` for this behavior:
 ```python
 from experimaestro import Param, Config, deprecate
 
+
 class NewConfig(Config):
     values: Param[list[int]]
+
 
 @deprecate(NewConfig, replace=True)
 class OldConfig(Config):
@@ -276,10 +301,11 @@ class OldConfig(Config):
     def __convert__(self):
         return NewConfig(values=[self.value])
 
+
 # Creating OldConfig actually returns a NewConfig instance
 result = OldConfig.C(value=42)
 print(type(result).__name__)  # "NewConfig.XPMConfig"
-print(result.values)          # [42]
+print(result.values)  # [42]
 ```
 :::
 
@@ -302,6 +328,7 @@ It is possible to deprecate a parameter or option:
 ```python
 from typing import List
 from experimaestro import Param, Config, deprecate
+
 
 class Learning(Config):
     losses: Param[List[Loss]] = []
@@ -346,6 +373,7 @@ be used:
 ```python
 from experimaestro import Config, initializer
 
+
 class MyConfig(Config):
     # The decorator ensures the initializer can only be called once
     @initializer
@@ -377,8 +405,10 @@ For **primitive types** (int, str, float, enum), sets work directly:
 ```python
 from experimaestro import Config, Param
 
+
 class MyConfig(Config):
     tags: Param[set[str]]
+
 
 # Order does not matter for identifiers
 c1 = MyConfig.C(tags={"a", "b", "c"})
@@ -394,11 +424,14 @@ in one step:
 ```python
 from experimaestro import Config, Param, sealed_set
 
+
 class Model(Config):
     lr: Param[float]
 
+
 class Ensemble(Config):
     models: Param[set[Model]]
+
 
 m1 = Model.C(lr=0.01)
 m2 = Model.C(lr=0.02)
@@ -426,6 +459,7 @@ a `TypeError`. Always use `sealed_set()` or call `.seal()` on each element first
 ```python
 from experimaestro import Config, Param, field
 
+
 class MyConfig(Config):
     """My configuration
 
@@ -435,6 +469,7 @@ class MyConfig(Config):
         x: The parameter x
         y: The parameter y
     """
+
     # Default value ignored in identifier computation (backwards-compatible behavior)
     # If value == 1, it won't be included in identifier
     x: Param[int] = field(default=1, ignore_default=True)
@@ -500,10 +535,12 @@ For instance, if the original class is:
 ```python
 from experimaestro import Config, Param
 
+
 class MyConfig(Config):
     a: Param[int]
 
-obj = MyConfig.C(a = 2)
+
+obj = MyConfig.C(a=2)
 id_old = obj.__identifier__()
 ```
 
@@ -513,18 +550,19 @@ same identifier when using the default value:
 ```python
 from experimaestro import Config, Param, field
 
+
 class MyConfig(Config):
     a: Param[int]
     b: Param[int] = field(default=4, ignore_default=True)
 
 
 # When not setting `b`, the identifier is the same
-obj = MyConfig.C(a = 2)
+obj = MyConfig.C(a=2)
 new_id = obj.__identifier__()
 assert new_id == old_id
 
 # When setting `b` to the default value, still the same
-obj = MyConfig.C(a = 2, b = 4)
+obj = MyConfig.C(a=2, b=4)
 new_id = obj.__identifier__()
 assert new_id == old_id
 ```
@@ -536,12 +574,14 @@ if the default value is 2 (and not 4)
 ```python
 from experimaestro import Config, Param, field
 
+
 class MyConfig(Config):
     a: Param[int]
     b: Param[int] = field(default=2, ignore_default=True)
 
+
 # Here, `b` is not the default value
-obj = MyConfig.C(a = 4, b = 4)
+obj = MyConfig.C(a=4, b=4)
 new_id = obj.__identifier__()
 assert new_id != old_id
 ```
@@ -567,11 +607,14 @@ The same applies to `default_factory`:
 ```python
 from experimaestro import Config, Param, field
 
+
 class ConfigA(Config):
-    x: Param[int] = field(default=1)      # Always in identifier
+    x: Param[int] = field(default=1)  # Always in identifier
+
 
 class ConfigB(Config):
     x: Param[int] = field(default=1, ignore_default=True)  # Ignored if x==1
+
 
 # These will have DIFFERENT identifiers
 a = ConfigA.C(x=1)
@@ -594,12 +637,15 @@ override a parent parameter, use `field(overrides=True)`:
 ```python
 from experimaestro import Param, Config, field
 
+
 class Parent(Config):
     value: Param[int]
+
 
 class Child(Parent):
     # This will produce a warning about overriding 'value'
     value: Param[int]
+
 
 class ChildWithOverride(Parent):
     # This explicitly marks the override as intentional - no warning
@@ -616,18 +662,23 @@ When overriding a parameter, the new type must be compatible with the parent typ
 ```python
 from experimaestro import Param, Config, field
 
+
 class BaseModel(Config):
     pass
+
 
 class AdvancedModel(BaseModel):
     pass
 
+
 class Parent(Config):
     model: Param[BaseModel]
+
 
 # OK - AdvancedModel is a subtype of BaseModel
 class Child(Parent):
     model: Param[AdvancedModel] = field(overrides=True)
+
 
 # ERROR - str is not compatible with int (raises TypeError)
 class BadChild(Parent):
@@ -642,6 +693,7 @@ same (as the result of the processing will differ).
 
 ```python
 from experimaestro import Config, Constant
+
 
 class MyConfig(Config):
     # Constant
@@ -659,11 +711,13 @@ Example
 ```python
 from experimaestro import Config, Meta
 
+
 class MyConfig(Config):
     """
     Attributes:
         count: The number of documents in the collection
     """
+
     count: Meta[type]
 ```
 
@@ -677,7 +731,6 @@ a = setmeta(A(), True)
 
 # Forces the parameter to be a meta-parameter
 a = setmeta(A(), False)
-
 ```
 
 ### Path option
@@ -688,6 +741,7 @@ to paths relative to the task directory using {py:class}`~experimaestro.PathGene
 ```python
 from experimaestro import Config, Meta, PathGenerator, field
 from pathlib import Path
+
 
 class MyConfig(Config):
     output: Meta[Path] = field(default_factory=PathGenerator("output.txt"))
@@ -735,6 +789,7 @@ from experimaestro import Task, Param, Meta, field, PathGenerator, partial, para
 from pathlib import Path
 
 iter_group = param_group("iter")
+
 
 class Learn(Task):
     # Define a partial identifier that excludes iteration-related parameters
@@ -812,6 +867,7 @@ from experimaestro import Task, Param, field, partial, param_group
 iter_group = param_group("iter")
 model_group = param_group("model")
 
+
 class MyTask(Task):
     checkpoints = partial(exclude_groups=[iter_group])
 
@@ -830,6 +886,7 @@ are not valid.
 
 ```python
 from experimaestro import Param, Config
+
 
 class ModelLearn(Config):
     batch_size: Param[int] = 100
@@ -854,9 +911,11 @@ The `@Config.value_class()` decorator allows registering an external value class
 ```python
 from experimaestro import Config, Param
 
+
 class Model(Config):
     hidden_size: Param[int]
     num_layers: Param[int] = 3
+
 
 @Model.value_class()
 class TorchModel(Model):
@@ -864,11 +923,14 @@ class TorchModel(Model):
 
     def __post_init__(self):
         import torch.nn as nn
+
         # Now we can safely import PyTorch
-        self.layers = nn.ModuleList([
-            nn.Linear(self.hidden_size, self.hidden_size)
-            for _ in range(self.num_layers)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                nn.Linear(self.hidden_size, self.hidden_size)
+                for _ in range(self.num_layers)
+            ]
+        )
 
     def forward(self, x):
         for layer in self.layers:
@@ -887,16 +949,20 @@ The value class must:
 ```python
 from experimaestro import Config, Param
 
+
 class BaseModel(Config):
     base_param: Param[int]
+
 
 @BaseModel.value_class()
 class BaseModelImpl(BaseModel):
     def base_method(self):
         return self.base_param * 2
 
+
 class ChildModel(BaseModel):
     child_param: Param[int]
+
 
 # Must inherit from BOTH ChildModel AND BaseModelImpl
 @ChildModel.value_class()
@@ -928,18 +994,23 @@ child classes can still define their own:
 ```python
 from experimaestro import Config, Param
 
+
 class Base(Config):
     x: Param[int]
+
 
 @Base.value_class()
 class BaseImpl(Base):
     pass
 
+
 class Middle(Base):  # No value class defined
     y: Param[int]
 
+
 class Leaf(Middle):
     z: Param[int]
+
 
 # LeafImpl must inherit from BaseImpl (skipping Middle which has no impl)
 @Leaf.value_class()
@@ -1015,14 +1086,19 @@ Use {py:class}`~experimaestro.InstanceConfig` when:
 ```python
 from experimaestro import Param, Config, InstanceConfig
 
+
 class SubModel(InstanceConfig):  # Use InstanceConfig instead of Config
     """A model component that can be shared or separate"""
+
     hidden_size: Param[int] = 128
+
 
 class Ensemble(Config):
     """An ensemble using multiple models"""
+
     model1: Param[SubModel]
     model2: Param[SubModel]
+
 
 # Create two instances with identical parameters
 sm1 = SubModel.C(hidden_size=128)
@@ -1079,6 +1155,7 @@ identifier. A heavy preparation can instead run **as a job** — see
 ```python
 from experimaestro import Prepare, Task, Param
 
+
 class DatasetPrep(Prepare):
     name: Param[str]
 
@@ -1086,11 +1163,12 @@ class DatasetPrep(Prepare):
         # Idempotent: the underlying tool should no-op if the cache is warm.
         actually_fetch_huggingface(self.name)
 
+
 class Train(Task):
     dataset: Param[DatasetPrep]
 
-    def execute(self):
-        ...
+    def execute(self): ...
+
 
 # Submitting the task auto-attaches a dependency on the Prepare:
 Train.C(dataset=DatasetPrep.C(name="hf:foo")).submit()

@@ -196,8 +196,8 @@ event cannot be applied to it, when a mutation is performed through the provider
 or when the caller asks for a full re-read:
 
 ```python
-jobs = provider.get_jobs(experiment_id)                 # cached
-jobs = provider.get_jobs(experiment_id, refresh=True)   # re-read the state
+jobs = provider.get_jobs(experiment_id)  # cached
+jobs = provider.get_jobs(experiment_id, refresh=True)  # re-read the state
 ```
 
 `refresh=True` is meant for an explicit user action (the `r` key in the TUI, the

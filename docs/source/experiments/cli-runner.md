@@ -24,10 +24,12 @@ The configuration class must derive from
 # experiment.py
 from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
 
+
 @configuration
 class Configuration(ConfigurationBase):
     #: Default learning rate
     learning_rate: float = 1e-3
+
 
 def run(helper: ExperimentHelper, cfg: Configuration):
     # Experimental code
@@ -136,7 +138,7 @@ from experimaestro.experiments import mock_modules
 os.environ["OMP_NUM_THREADS"] = "4"
 
 # Submodules are automatically included
-mock_modules(['torch', 'pytorch_lightning', 'transformers', 'huggingface_hub'])
+mock_modules(["torch", "pytorch_lightning", "transformers", "huggingface_hub"])
 ```
 
 ```yaml

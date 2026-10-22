@@ -133,7 +133,9 @@ can be used to store additional experimental results as shown in the example bel
 ```python
 from experimaestro import tag, tagspath
 
-with experiment("...main experimental folder path...", "experiment ID", port=12346) as xp:
+with experiment(
+    "...main experimental folder path...", "experiment ID", port=12346
+) as xp:
     model = Model.C()
 
     # Experimental plan
@@ -144,19 +146,16 @@ with experiment("...main experimental folder path...", "experiment ID", port=123
         learn.add_dependencies(token.dependency(1))
         models[tagspath(learn)] = learn.submit().jobpath
 
-
     # Build a central "runs" directory to plot easily the metrics
     runpath = xp.resultspath / "runs"
     runpath.mkdir(exist_ok=True, parents=True)
     for key, learn in models.items():
         (runpath / key).symlink_to(learn.jobpath / "runs")
 
-
     # Wait until experiment completes
     xp.wait()
     for key, learn in models.items():
         process(models)
-
 ```
 
 ## Event handlers
@@ -180,9 +179,11 @@ from experimaestro import Config, Param
 from experimaestro.click import forwardoption, arguments
 import click
 
+
 class MyModel(Config):
     epochs: Param[int] = 100
     "Number of learning epochs"
+
 
 @forwardoption(arguments(MyModel).epochs)
 @click.command()

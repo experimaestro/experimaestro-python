@@ -11,6 +11,7 @@ A task ({py:class}`~experimaestro.Task`) is a special [configuration](./config.m
 ```python
 from experimaestro import Config, Task, Param, Meta, PathGenerator, field
 
+
 class ModelLearn(Task):
     epochs: Param[int] = 100
     model: Param[Model]
@@ -45,6 +46,7 @@ By default, the task configuration is marked as a dependency as follows:
 ```python
 from experimaestro import Task
 
+
 class MyTask(Task):
     # (by default)
     def task_outputs(self, dep) -> Task:
@@ -71,6 +73,7 @@ from pathlib import Path
 from experimaestro import Task, Param, field
 from experimaestro.generators import PathGenerator
 
+
 class RandomFold(Task):
     dataset: Param[Dataset]
     """The source dataset"""
@@ -79,10 +82,12 @@ class RandomFold(Task):
     """Generated topics"""
 
     def task_outputs(self, dep) -> Adhoc:
-        return dep(Dataset.C(
-            topics=dep(Topics.C(path=self.topics)),
-            documents=self.dataset.documents,
-        ))
+        return dep(
+            Dataset.C(
+                topics=dep(Topics.C(path=self.topics)),
+                documents=self.dataset.documents,
+            )
+        )
 ```
 :::
 
@@ -106,12 +111,15 @@ configuration. There are two ways to do so:
 from pathlib import Path
 from experimaestro import Config, Task, Param, Meta
 
+
 class TaskA_Output(Config):
     path: Meta[Path]
+
 
 class TaskA(Task):
     def task_outputs(self, dep) -> Task:
         return dep(MyTaskOutput.C(path=self.jobpath))
+
 
 class TaskB(Task):
     task_a: Param[TaskA_Output]
@@ -130,21 +138,22 @@ subclassed) can be used.
 from pathlib import Path
 from experimaestro import Config, Param, Task, Meta, LightweightTask
 
-class Model(Config):
-    ...
+
+class Model(Config): ...
+
 
 class ModelLoader(LightweightTask):
     path: Meta[Path]
     model: Param[Model]
 
-    def execute(self):
-        ...
+    def execute(self): ...
+
 
 class Evaluate(Task):
     model: Param[Model]
 
-    def execute(self):
-        ...
+    def execute(self): ...
+
 
 class ModelLearner(Task):
     model: Param[Model]
@@ -152,8 +161,7 @@ class ModelLearner(Task):
     def task_outputs(self, dep):
         return dep(ModelLoader.C(model=model, path=path))
 
-    def execute(self):
-        ...
+    def execute(self): ...
 
 
 # We learn the model...
@@ -187,11 +195,13 @@ class needs_java(SubmitHook):
     def process(self, job: Job, launcher: Launcher):
         """Apply the hook for a given job/launcher"""
         job.environ["JAVA_HOME"] = "THE_JAVA_HOME"
+
+
 ...
 
+
 @needs_java(11)
-class IndexCollection(Config):
-    ...
+class IndexCollection(Config): ...
 ```
 
 (resumable-tasks)=
@@ -205,6 +215,7 @@ For long-running tasks that may be interrupted by scheduler timeouts (e.g., SLUR
 ```python
 from experimaestro import ResumableTask, Param, Meta, PathGenerator, field
 from pathlib import Path
+
 
 class LongTraining(ResumableTask):
     epochs: Param[int] = 1000
@@ -255,8 +266,16 @@ Resumable tasks can query the remaining time before a job timeout using the {py:
 :class: example
 
 ```python
-from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+from experimaestro import (
+    ResumableTask,
+    GracefulTimeout,
+    Param,
+    Meta,
+    PathGenerator,
+    field,
+)
 from pathlib import Path
+
 
 class LongTraining(ResumableTask):
     epochs: Param[int] = 1000
@@ -301,8 +320,16 @@ Sometimes a task knows it won't have enough time to complete another processing 
 :class: example
 
 ```python
-from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+from experimaestro import (
+    ResumableTask,
+    GracefulTimeout,
+    Param,
+    Meta,
+    PathGenerator,
+    field,
+)
 from pathlib import Path
+
 
 class LongTraining(ResumableTask):
     epochs: Param[int] = 1000
@@ -351,6 +378,7 @@ Tasks can catch this exception to perform custom cleanup before termination:
 ```python
 from experimaestro import Task, TaskCancelled
 
+
 class LongRunningTask(Task):
     def execute(self):
         try:
@@ -395,9 +423,11 @@ For tasks that produce outputs during execution (e.g., checkpoints during traini
 ```python
 from experimaestro import ResumableTask, Config, Param, DependentMarker
 
+
 class Checkpoint(Config):
     step: Param[int]
     model: Param[Model]
+
 
 class Validation(Config):
     model: Param[Model]
@@ -412,6 +442,7 @@ class Validation(Config):
     def compute(self, step: int):
         """Called during task execution to register an output"""
         self.register_task_output(self.checkpoint, step=step)
+
 
 class Learn(ResumableTask):
     model: Param[Model]
@@ -433,6 +464,7 @@ class Learn(ResumableTask):
 def on_checkpoint(checkpoint: Checkpoint):
     # Called when a checkpoint is produced
     Evaluate.C(checkpoint=checkpoint).submit()
+
 
 learn = Learn.C(model=model, validation=validation)
 learn.watch_output(validation.checkpoint, on_checkpoint)
@@ -464,6 +496,7 @@ from pathlib import Path
 import pickle
 import numpy as np
 from experimaestro import Config, cache
+
 
 class Terms(Config):
     @cache("terms.npy")

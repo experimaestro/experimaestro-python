@@ -25,6 +25,7 @@ Configurations inherit from `Config` and use `Param[T]` for parameters:
 ```python
 from experimaestro import Config, Param, field
 
+
 class MyModel(Config):
     """A model configuration.
 
@@ -32,6 +33,7 @@ class MyModel(Config):
         hidden_size: Size of hidden layers
         num_layers: Number of transformer layers
     """
+
     hidden_size: Param[int]
     num_layers: Param[int] = field(default=6, ignore_default=True)
 ```
@@ -49,6 +51,7 @@ Always use `field()` for defaults:
 
 ```python
 from experimaestro import Config, Param, field
+
 
 class MyConfig(Config):
     # Default always included in identifier computation
@@ -76,6 +79,7 @@ Use `Meta[T]` for parameters ignored during identifier computation:
 ```python
 from experimaestro import Config, Meta
 
+
 class MyConfig(Config):
     name: Meta[str]  # Not included in identifier
 ```
@@ -88,6 +92,7 @@ For output paths relative to the task directory:
 from experimaestro import Task, Meta, PathGenerator, field
 from pathlib import Path
 
+
 class MyTask(Task):
     output: Meta[Path] = field(default_factory=PathGenerator("output.txt"))
 ```
@@ -98,6 +103,7 @@ Use `Constant[T]` for values that signal behavior changes:
 
 ```python
 from experimaestro import Config, Constant
+
 
 class MyConfig(Config):
     version: Constant[str] = "2.1"
@@ -112,11 +118,14 @@ For `Config` objects in sets, elements must be sealed first:
 ```python
 from experimaestro import Config, Param, sealed_set
 
+
 class Model(Config):
     lr: Param[float]
 
+
 class Ensemble(Config):
     models: Param[set[Model]]
+
 
 m1 = Model.C(lr=0.01)
 m2 = Model.C(lr=0.02)
@@ -131,8 +140,10 @@ The `@` operator composes configurations when the target parameter type is unamb
 class Inner(Config):
     x: Param[int]
 
+
 class Outer(Config):
     inner: Param[Inner]
+
 
 # These are equivalent:
 outer1 = Outer.C(inner=Inner.C(x=42))
@@ -170,6 +181,7 @@ Tasks inherit from `Task` and implement `execute()`:
 from experimaestro import Task, Param, Meta, PathGenerator, field
 from pathlib import Path
 
+
 class ModelLearn(Task):
     """Train a model.
 
@@ -177,6 +189,7 @@ class ModelLearn(Task):
         epochs: Number of training epochs
         model: The model to train
     """
+
     epochs: Param[int] = field(default=100, ignore_default=True)
     model: Param[Model]
     parameters: Meta[Path] = field(default_factory=PathGenerator("parameters.pth"))
@@ -202,10 +215,12 @@ class RandomFold(Task):
     topics: Param[Path] = field(default_factory=PathGenerator("topics.tsv"))
 
     def __submit__(self, dep, add_action, **kwargs) -> Dataset:
-        return dep(Dataset.C(
-            topics=dep(Topics.C(path=self.topics)),
-            documents=self.dataset.documents,  # No dep() = no dependency
-        ))
+        return dep(
+            Dataset.C(
+                topics=dep(Topics.C(path=self.topics)),
+                documents=self.dataset.documents,  # No dep() = no dependency
+            )
+        )
 ```
 
 Legacy `task_outputs(self, dep)` still works for backward compatibility.
@@ -228,9 +243,9 @@ Use `__identifier__()` to retrieve it:
 ```python
 task = MyTask.C(x=1, y="a")
 
-ident = task.__identifier__()    # Identifier object
-hexid = ident.all.hex()          # hex hash that names the job directory
-str(ident)                       # same hex string
+ident = task.__identifier__()  # Identifier object
+hexid = ident.all.hex()  # hex hash that names the job directory
+str(ident)  # same hex string
 
 # Task class id (the __xpmid__ / type name)
 type_id = str(task.__xpmtype__.identifier)
@@ -245,8 +260,16 @@ time), so changing a parameter afterwards is not allowed.
 For long-running tasks that may timeout (e.g., SLURM walltime):
 
 ```python
-from experimaestro import ResumableTask, GracefulTimeout, Param, Meta, PathGenerator, field
+from experimaestro import (
+    ResumableTask,
+    GracefulTimeout,
+    Param,
+    Meta,
+    PathGenerator,
+    field,
+)
 from pathlib import Path
+
 
 class LongTraining(ResumableTask):
     epochs: Param[int] = field(default=1000, ignore_default=True)
@@ -281,6 +304,7 @@ Catch `TaskCancelled` for custom cleanup:
 ```python
 from experimaestro import Task, TaskCancelled
 
+
 class MyTask(Task):
     def execute(self):
         try:
@@ -307,9 +331,11 @@ with experiment(workdir, "my-experiment", port=12345) as xp:
 # experiment.py
 from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
 
+
 @configuration
 class Configuration(ConfigurationBase):
     learning_rate: float = 1e-3
+
 
 def run(helper: ExperimentHelper, cfg: Configuration):
     with helper.experiment() as xp:
@@ -361,10 +387,16 @@ with experiment(workdir, "my-experiment", launcher=launcher) as xp:
 Define how requirements map to launchers in `~/.config/experimaestro/launchers.py`:
 
 ```python
-from experimaestro.launcherfinder import HostRequirement, HostSpecification, CudaSpecification, CPUSpecification
+from experimaestro.launcherfinder import (
+    HostRequirement,
+    HostSpecification,
+    CudaSpecification,
+    CPUSpecification,
+)
 from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
 from experimaestro.launchers.direct import DirectLauncher
 from experimaestro.connectors.local import LocalConnector
+
 
 def find_launcher(requirements: HostRequirement, tags: set[str] = set()):
     if match := requirements.match(HostSpecification(accelerators=[])):
@@ -413,9 +445,11 @@ For tasks producing outputs during execution (e.g., checkpoints):
 ```python
 from experimaestro import ResumableTask, Config, Param, DependentMarker
 
+
 class Checkpoint(Config):
     step: Param[int]
     model: Param[Model]
+
 
 class Validation(Config):
     model: Param[Model]
@@ -425,6 +459,7 @@ class Validation(Config):
 
     def compute(self, step: int):
         self.register_task_output(self.checkpoint, step=step)
+
 
 class Learn(ResumableTask):
     model: Param[Model]
@@ -436,9 +471,11 @@ class Learn(ResumableTask):
             if step % 10 == 0:
                 self.validation.compute(step)
 
+
 # Watch outputs
 def on_checkpoint(checkpoint: Checkpoint):
     Evaluate.C(checkpoint=checkpoint).submit()
+
 
 learn = Learn.C(model=model, validation=validation)
 learn.watch_output(validation.checkpoint, on_checkpoint)
@@ -454,6 +491,7 @@ Subclass it and override `prepare()`:
 ```python
 from experimaestro import Prepare, Task, Param
 
+
 class DatasetPrep(Prepare):
     name: Param[str]
 
@@ -461,11 +499,12 @@ class DatasetPrep(Prepare):
         # Must be idempotent: the underlying tool should no-op when cache is warm
         actually_fetch_dataset(self.name)
 
+
 class Train(Task):
     dataset: Param[DatasetPrep]
 
-    def execute(self):
-        ...
+    def execute(self): ...
+
 
 # Referencing a Prepare in a task's params auto-attaches an in-memory dependency
 Train.C(dataset=DatasetPrep.C(name="foo")).submit()
@@ -494,8 +533,10 @@ When renaming or restructuring a config, use `@deprecate` to preserve identifier
 ```python
 from experimaestro import Config, Param, deprecate
 
+
 class NewConfig(Config):
     values: Param[list[int]]
+
 
 @deprecate(NewConfig)
 class OldConfig(Config):
@@ -530,13 +571,16 @@ Separate configuration from implementation (e.g., avoid importing PyTorch at con
 ```python
 from experimaestro import Config, Param
 
+
 class Model(Config):
     hidden_size: Param[int]
+
 
 @Model.value_class()
 class TorchModel(Model):
     def __post_init__(self):
         import torch.nn as nn
+
         self.layers = nn.Linear(self.hidden_size, self.hidden_size)
 
     def forward(self, x):
@@ -551,6 +595,7 @@ For lightweight computations worth caching without a full task:
 from experimaestro import Config, cache
 from pathlib import Path
 import numpy as np
+
 
 class Terms(Config):
     @cache("terms.npy")
@@ -600,6 +645,7 @@ submission and executable after completion. They support interactive user input.
 
 ```python
 from experimaestro import Action, Interaction, Param
+
 
 class ExportToHub(Action):
     model: Param[Model]
@@ -657,6 +703,7 @@ Via `WorkspaceStateProvider` (lookup by experiment name):
 
 ```python
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+
 provider = WorkspaceStateProvider(workspace_path)
 info = provider.load_xp_info("my-experiment")
 ```

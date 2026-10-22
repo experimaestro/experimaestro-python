@@ -35,7 +35,6 @@ It is possible to use different settings for different jobs by using the `config
 method of the launcher
 
 ```python
-
 from experimaestro.launchers.slurm import SlurmLauncher
 
 launcher = SlurmLauncher(nodes=1)
@@ -67,12 +66,10 @@ from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
 
 # Create launchers with different priorities
 fast_partition = SlurmLauncher(
-    options=SlurmOptions(partition="fast", time="1:00:00"),
-    priority=10
+    options=SlurmOptions(partition="fast", time="1:00:00"), priority=10
 )
 slow_partition = SlurmLauncher(
-    options=SlurmOptions(partition="slow", time="24:00:00"),
-    priority=1
+    options=SlurmOptions(partition="slow", time="24:00:00"), priority=1
 )
 
 # By default, selects highest priority (fast_partition)
@@ -81,10 +78,7 @@ dynamic = DynamicLauncher([fast_partition, slow_partition])
 
 # With sample=True, samples proportionally to priority
 # fast_partition has 10/(10+1) ≈ 91% chance of being selected
-dynamic_sampled = DynamicLauncher(
-    [fast_partition, slow_partition],
-    sample=True
-)
+dynamic_sampled = DynamicLauncher([fast_partition, slow_partition], sample=True)
 
 with experiment(launcher=dynamic):
     mytask().submit()
@@ -260,7 +254,9 @@ Tags can be used to filter out some launchers
 ```python
 from experimaestro.launcherfinder import find_launcher
 
-find_launcher("""duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""", tags=["slurm"])
+find_launcher(
+    """duration=4 days & cuda(mem=4G) * 2 & cpu(mem=400M, cores=4)""", tags=["slurm"]
+)
 ```
 will search for a launcher that has the tag `slurm` (see example below).
 
@@ -326,5 +322,6 @@ its score) and enable debug logging when querying:
 
 ```python
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 ```

@@ -84,9 +84,11 @@ print(df)
 ```python
 from experimaestro import Config, Task, Param, experiment
 
+
 class Model(Config):
     name: Param[str]
     hidden_size: Param[int]
+
 
 class Train(Task):
     model: Param[Model]
@@ -122,11 +124,13 @@ tags_map = ...  # from provider.get_tags_map()
 rows = []
 for job_id, config in info.jobs.items():
     tags = tags_map.get(job_id, {})
-    rows.append({
-        "lr": tags.get("learning_rate"),
-        "hidden_size": tags.get("hidden_size"),
-        "model": config.model.name,
-    })
+    rows.append(
+        {
+            "lr": tags.get("learning_rate"),
+            "hidden_size": tags.get("hidden_size"),
+            "model": config.model.name,
+        }
+    )
 
 df = pd.DataFrame(rows)
 print(df)

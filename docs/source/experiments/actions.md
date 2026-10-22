@@ -16,6 +16,7 @@ Actions are `Config` subclasses that implement `describe()` and `execute()`:
 ```python
 from experimaestro import Action, Interaction, Param
 
+
 class ExportToHub(Action):
     model: Param[Model]
     default_name: Param[str] = field(default="my-model", ignore_default=True)
@@ -26,7 +27,9 @@ class ExportToHub(Action):
     def execute(self, interaction: Interaction) -> None:
         target = interaction.choice("target", "Export to:", ["HF Hub", "Local folder"])
         if target == "HF Hub":
-            name = interaction.text("name", "Hub model name:", default=self.default_name)
+            name = interaction.text(
+                "name", "Hub model name:", default=self.default_name
+            )
             private = interaction.checkbox("private", "Private repo?", default=False)
             self.model.push_to_hub(name, private=private)
         else:
@@ -41,6 +44,7 @@ The `add_action` callable is passed as a parameter:
 
 ```python
 from experimaestro import Task, Param
+
 
 class TrainModel(Task):
     model: Param[Model]
@@ -66,6 +70,7 @@ continue to work — the default `__submit__` calls them automatically. To migra
 class MyTask(Task):
     def task_outputs(self, dep):
         return dep(OutputConfig(...))
+
 
 # After (new style):
 class MyTask(Task):
@@ -113,16 +118,15 @@ Each question has a `key` used for pre-filling answers via CLI `--set key=value`
 ```python
 from experimaestro import Interaction
 
+
 class WebInteraction(Interaction):
     def choice(self, key, label, choices):
         # Show web form, wait for response
         ...
 
-    def checkbox(self, key, label, *, default=False):
-        ...
+    def checkbox(self, key, label, *, default=False): ...
 
-    def text(self, key, label, *, default=""):
-        ...
+    def text(self, key, label, *, default=""): ...
 ```
 
 ## Serialization
@@ -136,7 +140,7 @@ loads both jobs and actions:
 from experimaestro import load_xp_info
 
 info = load_xp_info("/path/to/workspace/experiments/my-experiment/20260325_120000")
-print(info.jobs)     # dict[str, Config]
+print(info.jobs)  # dict[str, Config]
 print(info.actions)  # dict[str, Action]
 ```
 

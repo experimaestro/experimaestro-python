@@ -77,16 +77,20 @@ call:
 from pathlib import Path
 from experimaestro import Prepare, Param
 
+
 class HFModelPrep(Prepare):
     model_id: Param[str]
 
     def is_prepared(self) -> bool:
         from huggingface_hub import try_to_load_from_cache
+
         return try_to_load_from_cache(self.model_id, "config.json") is not None
 
     def prepare(self) -> None:
         from huggingface_hub import snapshot_download
+
         snapshot_download(self.model_id)  # idempotent
+
 
 def prepare_model(model_id: str) -> HFModelPrep:
     return HFModelPrep.C(model_id=model_id)
@@ -129,6 +133,7 @@ Register an Action with the experiment during submission:
 ```python
 from experimaestro import Action, Interaction, Param
 
+
 class CopyResults(Action):
     runs: Param[list[MyEvalTask]]
 
@@ -138,6 +143,7 @@ class CopyResults(Action):
     def execute(self, interaction: Interaction) -> None:
         dest = interaction.text("dest", "Destination folder:", default="./results")
         # ... copy logic
+
 
 # in experiment.py
 helper.xp.add_action(CopyResults.C(runs=evaluations))

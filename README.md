@@ -122,6 +122,7 @@ Under the curtain,
 # --- Task and types definitions
 
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 from pathlib import Path
 from experimaestro import Task, Param, experiment, progress
@@ -132,14 +133,16 @@ from typing import List
 
 # --- Just to be able to monitor the tasks
 
+
 def slowdown(sleeptime: int, N: int):
     logging.info("Sleeping %ds after each step", sleeptime)
     for i in range(N):
         time.sleep(sleeptime)
-        progress((i+1)/N)
+        progress((i + 1) / N)
 
 
 # --- Define the tasks
+
 
 class Say(Task):
     word: Param[str]
@@ -147,7 +150,10 @@ class Say(Task):
 
     def execute(self):
         slowdown(self.sleeptime, len(self.word))
-        print(self.word.upper(),)
+        print(
+            self.word.upper(),
+        )
+
 
 class Concat(Task):
     strings: Param[List[Say]]
@@ -163,6 +169,7 @@ class Concat(Task):
 
 
 # --- Defines the experiment
+
 
 @click.option("--port", type=int, default=12345, help="Port for monitoring")
 @click.option("--sleeptime", type=float, default=2, help="Sleep time")

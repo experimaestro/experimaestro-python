@@ -43,7 +43,6 @@ class CSV:
 
         Returns: List of fields
         """
-
 ```
 
 ## Writing subpackage documentation
@@ -114,9 +113,7 @@ def test_documented():
     # - modules: set of module names to check for Config subclasses
     # - excluded: set of module prefixes to skip (e.g., test modules)
     analyzer = DocumentationAnalyzer(
-        doc_path,
-        modules={"mypackage"},
-        excluded={"mypackage.test", "mypackage.tests"}
+        doc_path, modules={"mypackage"}, excluded={"mypackage.test", "mypackage.tests"}
     )
 
     analyzer.analyze()
@@ -169,9 +166,7 @@ from experimaestro.tools.documentation import DocumentationAnalyzer
 def test_all_configs_documented():
     doc_path = Path(__file__).parents[2] / "docs" / "source" / "index.rst"
     analyzer = DocumentationAnalyzer(
-        doc_path,
-        modules={"mypackage"},
-        excluded={"mypackage.tests"}
+        doc_path, modules={"mypackage"}, excluded={"mypackage.tests"}
     )
     analyzer.analyze()
     analyzer.report()

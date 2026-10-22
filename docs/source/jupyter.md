@@ -11,9 +11,11 @@ experimaestro server
 ```python
 from experimaestro.utils.jupyter import serverwidget
 
+
 def settoken(xp):
     # Set some useful variables
     xp.token = xp.current.token("main", 1)
+
 
 xp = serverwidget("ri/intro", port=12500)
 ```
@@ -25,5 +27,6 @@ information is provided by the task) and wait for the job to complete.
 
 ```python
 from experimaestro.utils.jupyter import jobmonitor
+
 jobmonitor(myjob.submit())
 ```

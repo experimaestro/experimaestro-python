@@ -51,6 +51,7 @@ via CLI (rich prompts) and TUI (modal dialogs).
 ```python
 from experimaestro import Task, Action, Interaction, Param
 
+
 class ExportToHub(Action):
     model: Param[Model]
 
@@ -60,6 +61,7 @@ class ExportToHub(Action):
     def execute(self, interaction: Interaction) -> None:
         name = interaction.text("name", "Hub model name:")
         self.model.push_to_hub(name)
+
 
 class TrainModel(Task):
     model: Param[Model]
@@ -85,7 +87,7 @@ Use `load_xp_info()` to load experiment data:
 from experimaestro import load_xp_info
 
 info = load_xp_info("/path/to/run_dir")
-info.jobs     # dict[str, Config]
+info.jobs  # dict[str, Config]
 info.actions  # dict[str, Action]
 ```
 
@@ -148,12 +150,15 @@ Tasks can now handle timeouts gracefully and resume from where they left off:
 ```python
 from experimaestro import ResumableTask, GracefulTimeout, Meta, PathGenerator, field
 
+
 class LongTraining(ResumableTask):
     epochs: Param[int] = 1000
     checkpoint: Meta[Path] = field(default_factory=PathGenerator("checkpoint.pth"))
 
     def execute(self):
-        start_epoch = load_checkpoint(self.checkpoint) if self.checkpoint.exists() else 0
+        start_epoch = (
+            load_checkpoint(self.checkpoint) if self.checkpoint.exists() else 0
+        )
 
         for epoch in range(start_epoch, self.epochs):
             remaining = self.remaining_time()  # Query remaining walltime (SLURM)
@@ -180,6 +185,7 @@ Tasks can now produce outputs *during* execution with callback support, useful f
 ```python
 from experimaestro import ResumableTask, Config, Param, DependentMarker
 
+
 class Validation(Config):
     model: Param[Model]
 
@@ -191,6 +197,7 @@ class Validation(Config):
     def compute(self, step: int):
         self.register_task_output(self.checkpoint, step=step)
 
+
 class Learn(ResumableTask):
     validation: Param[Validation]
 
@@ -200,9 +207,11 @@ class Learn(ResumableTask):
             if step % 10 == 0:
                 self.validation.compute(step)  # Signals output, triggers callbacks
 
+
 # Register a callback and submit
 def on_checkpoint(checkpoint: Checkpoint):
     Evaluate.C(checkpoint=checkpoint).submit()
+
 
 learn = Learn.C(model=model, validation=validation)
 learn.watch_output(validation.checkpoint, on_checkpoint)
@@ -249,8 +258,7 @@ class Learn(Task):
     learning_rate: Param[float]
 
     checkpoints_path: Meta[Path] = field(
-        default_factory=PathGenerator(),
-        partial=checkpoints
+        default_factory=PathGenerator(), partial=checkpoints
     )
 ```
 
@@ -264,8 +272,10 @@ Compose configurations using the `@` operator. The operator automatically finds 
 class Encoder(Config):
     hidden_size: Param[int]
 
+
 class Model(Config):
     encoder: Param[Encoder]
+
 
 # These two are equivalent:
 model1 = Model.C(encoder=Encoder.C(hidden_size=256))
@@ -280,8 +290,7 @@ Deprecate and redirect configurations with automatic migration:
 
 ```python
 @deprecate(NewConfig, replace=True)
-class OldConfig(Config):
-    ...
+class OldConfig(Config): ...
 ```
 
 [Read more about deprecation...](experiments/config.md#deprecating-a-configuration-or-attributes)
@@ -294,13 +303,17 @@ Distinguish between *shared* and *separate* instances with identical parameters 
 class Encoder(InstanceConfig):
     hidden_size: Param[int]
 
+
 class DualEncoderModel(Config):
     query_encoder: Param[Encoder]
     doc_encoder: Param[Encoder]
 
+
 enc = Encoder.C(hidden_size=128)
-shared = DualEncoderModel.C(query_encoder=enc, doc_encoder=enc)      # tied weights
-separate = DualEncoderModel.C(query_encoder=enc, doc_encoder=Encoder.C(hidden_size=128))  # independent
+shared = DualEncoderModel.C(query_encoder=enc, doc_encoder=enc)  # tied weights
+separate = DualEncoderModel.C(
+    query_encoder=enc, doc_encoder=Encoder.C(hidden_size=128)
+)  # independent
 # shared and separate have different identifiers
 ```
 
@@ -435,6 +448,7 @@ Bare default values are deprecated:
 # Deprecated (warning)
 class MyConfig(Config):
     x: Param[int] = 23
+
 
 # Correct
 class MyConfig(Config):
