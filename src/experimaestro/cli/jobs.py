@@ -1,4 +1,6 @@
 # flake8: noqa: T201
+__lazy_modules__ = ["experimaestro.scheduler"]  # PEP 810 (Python 3.15+)
+
 import subprocess
 from typing import TYPE_CHECKING
 import click

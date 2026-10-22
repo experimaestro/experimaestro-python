@@ -20,7 +20,7 @@ from termcolor import cprint
 from experimaestro.exceptions import HandledException
 from experimaestro.experiments.configuration import ConfigurationBase
 from experimaestro.launcherfinder.registry import LauncherRegistry
-from experimaestro.scheduler.workspace import RunMode
+from experimaestro.run_mode import RunMode
 from experimaestro.settings import find_workspace
 from experimaestro.utils.config import deep_merge, from_dotlist, validate_attrs
 from experimaestro.utils.logging import setup_logging

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+__lazy_modules__ = ["experimaestro.scheduler.state_provider"]  # PEP 810 (Python 3.15+)
+
 import json
 import tempfile
 import webbrowser

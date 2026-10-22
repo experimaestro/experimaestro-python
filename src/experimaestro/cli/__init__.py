@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 from termcolor import cprint
 from importlib.metadata import entry_points
 
-import experimaestro
 from experimaestro.experiments.cli import experiments_cli
 from experimaestro.settings import WorkspaceSettings, find_workspace, get_workspace
 
@@ -251,7 +250,12 @@ def cli(
 
 @cli.command(help="Get version")
 def version():
-    print(experimaestro.__version__)
+    # Not through ``experimaestro``, which imports the whole framework
+    try:
+        from experimaestro.version import __version__
+    except ImportError:
+        __version__ = "0.0.0"
+    print(__version__)
 
 
 # --- Run an experiment

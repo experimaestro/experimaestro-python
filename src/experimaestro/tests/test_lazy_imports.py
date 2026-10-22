@@ -12,7 +12,15 @@ import sys
 ALWAYS_LAZY = ["fabric", "paramiko", "mkdocs", "requests"]
 
 # Deferred with ``__lazy_modules__`` (PEP 810)
-PEP810_LAZY = ["pydantic", "yaml", "psutil", "humanfriendly"]
+PEP810_LAZY = [
+    "pydantic",
+    "yaml",
+    "psutil",
+    "humanfriendly",
+    "tqdm",
+    "experimaestro.scheduler",
+    "experimaestro.core.objects",
+]
 
 
 def loaded_modules(statement: str) -> set[str]:
@@ -38,3 +46,18 @@ def test_lazy_reexports():
     )
     assert "experimaestro.experiments.grid" in loaded
     assert "experimaestro.connectors.ssh" in loaded
+
+
+def test_lazy_names_collide_with_submodules():
+    """Lazy names keep their value when a submodule with the same name is
+    imported (it would replace them)"""
+    loaded = loaded_modules(
+        "import experimaestro.progress, experimaestro.notifications\n"
+        "import experimaestro.scheduler.experiment\n"
+        "from experimaestro import progress, experiment\n"
+        "from experimaestro.scheduler import experiment as scheduler_experiment\n"
+        "assert callable(progress) and not isinstance(progress, type(sys))\n"
+        "assert isinstance(experiment, type), experiment\n"
+        "assert scheduler_experiment is experiment"
+    )
+    assert "experimaestro.notifications" in loaded

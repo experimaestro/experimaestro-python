@@ -1,3 +1,29 @@
+# PEP 810 (Python 3.15+): submodules are only loaded when a name is used
+__lazy_modules__ = [
+    "experimaestro.actions",
+    "experimaestro.annotations",
+    "experimaestro.checkers",
+    "experimaestro.core.arguments",
+    "experimaestro.core.context",
+    "experimaestro.core.objects",
+    "experimaestro.core.partial",
+    "experimaestro.core.serialization",
+    "experimaestro.core.serializers",
+    "experimaestro.core.types",
+    "experimaestro.exceptions",
+    "experimaestro.experiments.configuration",
+    "experimaestro.generators",
+    "experimaestro.launcherfinder.registry",
+    "experimaestro.launchers",
+    "experimaestro.mkdocs.annotations",
+    "experimaestro.notifications",
+    "experimaestro.scheduler",
+    "experimaestro.scheduler.base",
+    "experimaestro.scheduler.transient",
+    "experimaestro.scheduler.workspace",
+    "experimaestro.xpmutils",
+]
+
 # Annotations
 from pathlib import Path
 from .annotations import (
@@ -73,6 +99,10 @@ from .scheduler import (
 from .exceptions import GracefulTimeout, TaskCancelled
 from .scheduler.workspace import Workspace, RunMode
 from .scheduler.transient import TransientMode
+
+# `progress` is also a submodule: it is loaded first, otherwise importing it
+# later would replace the lazy `progress` function by the module
+from . import progress as _progress_module  # noqa: F401
 from .notifications import progress, tqdm
 from .checkers import Choices
 from .xpmutils import DirectoryContext
@@ -81,8 +111,11 @@ from .scheduler.base import Job
 from .launcherfinder.registry import LauncherRegistry
 from .experiments.configuration import DirtyGitAction
 
-# Re-export set_launcher for backwards compatibility
-set_launcher = Workspace.set_launcher
+
+def set_launcher(launcher) -> None:
+    """Re-exported for backwards compatibility, see :meth:`Workspace.set_launcher`"""
+    Workspace.set_launcher(launcher)
+
 
 # Get version
 try:

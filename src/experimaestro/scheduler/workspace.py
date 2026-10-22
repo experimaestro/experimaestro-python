@@ -1,9 +1,9 @@
 from collections import ChainMap
-from enum import Enum
 from functools import cached_property
 import logging
 import warnings
 from pathlib import Path
+from experimaestro.run_mode import RunMode  # noqa: F401
 from experimaestro.locking import (
     create_async_file_lock,
     create_file_lock,
@@ -24,20 +24,6 @@ WORKSPACE_VERSION = 0
 
 # Default service log retention period
 DEFAULT_SERVICE_LOG_RETENTION_DAYS = 15
-
-
-class RunMode(str, Enum):
-    NORMAL = "normal"
-    """Normal run"""
-
-    GENERATE_ONLY = "generate"
-    """Do not run, but generate the params.json file"""
-
-    DRY_RUN = "dry-run"
-    """Do not run"""
-
-    PREPARE = "prepare"
-    """Only run discovered Prepare configs; skip Task execution"""
 
 
 class Workspace:
