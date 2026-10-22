@@ -2,7 +2,6 @@
 from copy import copy
 from pathlib import Path
 import time
-from typing import List, Tuple, Union
 
 from experimaestro.locking import create_file_lock
 
@@ -56,7 +55,7 @@ def writeprogress(path: Path, progress, level=0, desc=None):
 class ProgressListener(Listener):
     def __init__(self):
         self.current = []
-        self.progresses: Queue[List[LevelInformation]] = Queue()
+        self.progresses: Queue[list[LevelInformation]] = Queue()
 
     def on_job_state_changed(self, job: Job):
         if (len(self.current) != len(job.progress)) or any(
@@ -94,7 +93,7 @@ def test_progress_basic():
                 assert info.progress == v
 
 
-NestedTasks = Tuple[str, Union[int, List["NestedTasks"]]]
+NestedTasks = tuple[str, int | list["NestedTasks"]]
 
 
 class NestedProgressingTask(Task):

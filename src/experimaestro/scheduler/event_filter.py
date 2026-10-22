@@ -24,7 +24,7 @@ What a client watching some experiments receives:
 """
 
 import threading
-from typing import Iterable
+from collections.abc import Iterable
 
 from experimaestro.scheduler.interfaces import STATE_NAME_TO_JOBSTATE, JobState
 from experimaestro.scheduler.state_status import (

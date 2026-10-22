@@ -1,7 +1,6 @@
 from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
-from typing import Union
 from importlib import resources
 from functools import cached_property
 
@@ -16,7 +15,7 @@ class ResourcePathWrapper(PathLike):
     def create(package: str, path: Path):
         return ResourcePathWrapper(Path(*package.split(".")) / path)
 
-    def __truediv__(self, subpath: Union[str, Path]):
+    def __truediv__(self, subpath: str | Path):
         return ResourcePathWrapper(self.path / subpath)
 
     @cached_property

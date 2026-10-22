@@ -7,13 +7,12 @@ which code version was used.
 
 import subprocess
 from pathlib import Path
-from typing import Optional
 import logging
 
 logger = logging.getLogger("xpm.git")
 
 
-def get_git_info(cwd: Optional[Path] = None) -> Optional[dict]:
+def get_git_info(cwd: Path | None = None) -> dict | None:
     """Get git repository information for a directory
 
     Args:

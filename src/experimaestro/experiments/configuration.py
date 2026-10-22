@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List, Any, Dict
+from typing import Any
 import attr
 
 
@@ -55,20 +55,20 @@ class ConfigurationBase:
     file: str = "experiment"
     """Relative path of the file containing a run function"""
 
-    module: Optional[str] = None
+    module: str | None = None
     """Relative path of the file containing a run function"""
 
-    pythonpath: Optional[List[str]] = None
+    pythonpath: list[str] | None = None
     """Python path relative to the parent directory of the YAML file"""
 
-    parent: Optional[str] = None
+    parent: str | None = None
     """(Deprecated) Relative path of a YAML file that should be merged.
     Use ``imports`` instead."""
 
-    imports: Optional[List[str]] = None
+    imports: list[str] | None = None
     """List of YAML file paths to import (merged in order, current file wins)"""
 
-    pre_experiment: Optional[str] = None
+    pre_experiment: str | None = None
     """Python file path or module name to execute before importing the experiment.
 
     Can be either:
@@ -91,7 +91,7 @@ class ConfigurationBase:
     description: str = ""
     """Description of the experiment"""
 
-    tags: Optional[List[str]] = None
+    tags: list[str] | None = None
     """Tags of the experiment (e.g. ``[eval, mice]``): the UIs can group and
     search experiments by tag"""
 
@@ -101,7 +101,7 @@ class ConfigurationBase:
     dirty_git: DirtyGitAction = DirtyGitAction.WARN
     """Action when git repository has uncommitted changes: ignore, warn (default), error"""
 
-    grid_search: Optional[Dict[str, Any]] = None
+    grid_search: dict[str, Any] | None = None
     """Optional grid search parameters.
 
     A dictionary where keys are dot-separated paths to configuration fields,

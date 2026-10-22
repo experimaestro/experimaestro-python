@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import threading
-from typing import Union
 import logging
 import shutil
 import inspect
@@ -31,7 +30,7 @@ def get_caller_location(skip_frames: int = 1) -> str:
     return "<unknown>"
 
 
-def aspath(path: Union[str, Path]):
+def aspath(path: str | Path):
     if isinstance(path, Path):
         return path
     return Path(path)

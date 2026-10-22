@@ -19,7 +19,7 @@ from pathlib import Path
 
 from experimaestro.locking import create_file_lock
 from experimaestro.utils.atomic import atomic_write_json
-from typing import Iterator
+from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 

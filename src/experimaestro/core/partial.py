@@ -21,7 +21,6 @@ Example:
 """
 
 from dataclasses import dataclass, field as dataclass_field
-from typing import Set, Optional
 
 
 @dataclass(frozen=True)
@@ -78,10 +77,10 @@ class Partial:
     """
 
     #: Set of group names to exclude from identifier computation
-    exclude_groups: Set[ParameterGroup] = dataclass_field(default_factory=set)
+    exclude_groups: set[ParameterGroup] = dataclass_field(default_factory=set)
 
     #: Set of group names to always include (overrides exclusion)
-    include_groups: Set[ParameterGroup] = dataclass_field(default_factory=set)
+    include_groups: set[ParameterGroup] = dataclass_field(default_factory=set)
 
     #: If True, exclude parameters with no group assigned
     exclude_no_group: bool = False
@@ -90,7 +89,7 @@ class Partial:
     exclude_all: bool = False
 
     #: Name of this parameter set (auto-set from class attribute)
-    name: Optional[ParameterGroup] = None
+    name: ParameterGroup | None = None
 
     def __post_init__(self):
         # Ensure groups are sets
@@ -99,7 +98,7 @@ class Partial:
         if not isinstance(self.include_groups, set):
             self.include_groups = set(self.include_groups)
 
-    def is_excluded(self, groups: Set[ParameterGroup]) -> bool:
+    def is_excluded(self, groups: set[ParameterGroup]) -> bool:
         """Check if a parameter with the given groups should be excluded.
 
         Args:

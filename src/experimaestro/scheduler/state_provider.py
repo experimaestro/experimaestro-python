@@ -21,7 +21,8 @@ from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
+from collections.abc import Callable
 
 if TYPE_CHECKING:
     from experimaestro.core.serialization import ExperimentInfo
@@ -68,13 +69,13 @@ class ProcessInfo:
     running: bool = False
     """Whether the process is currently running"""
 
-    cpu_percent: Optional[float] = None
+    cpu_percent: float | None = None
     """CPU usage percentage (if available)"""
 
-    memory_mb: Optional[float] = None
+    memory_mb: float | None = None
     """Memory usage in MB (if available)"""
 
-    num_threads: Optional[int] = None
+    num_threads: int | None = None
     """Number of threads (if available)"""
 
 
@@ -108,15 +109,15 @@ class StateProvider(ABC):
 
     def __init__(self) -> None:
         """Initialize state listener management and warning action cache"""
-        self._state_listeners: Set[StateListener] = set()
+        self._state_listeners: set[StateListener] = set()
         self._state_listener_lock = threading.Lock()
         # Cache for warning action callbacks: warning_key -> {action_key -> callback}
-        self._warning_actions: Dict[str, Dict[str, Callable[[], None]]] = {}
+        self._warning_actions: dict[str, dict[str, Callable[[], None]]] = {}
         # Cache for warning metadata: warning_key -> WarningEvent
-        self._warning_metadata: Dict[str, "WarningEvent"] = {}
+        self._warning_metadata: dict[str, "WarningEvent"] = {}
         self._warning_actions_lock = threading.Lock()
         # What each UI watches (see watch); None watches every experiment
-        self._watchers: Dict[Any, frozenset[str] | None] = {}
+        self._watchers: dict[Any, frozenset[str] | None] = {}
         self._watchers_lock = threading.Lock()
 
     def watch(self, owner: Any, experiments: set[str] | None) -> None:
@@ -233,7 +234,7 @@ class StateProvider(ABC):
     def register_warning_actions(
         self,
         warning_key: str,
-        actions: Dict[str, Callable[[], None]],
+        actions: dict[str, Callable[[], None]],
         warning_event: Optional["WarningEvent"] = None,
     ) -> None:
         """Register action callbacks for a warning
@@ -331,7 +332,7 @@ class StateProvider(ABC):
             )
             raise
 
-    def get_unresolved_warnings(self) -> List["WarningEvent"]:
+    def get_unresolved_warnings(self) -> list["WarningEvent"]:
         """Get all unresolved warnings
 
         Returns:
@@ -437,22 +438,22 @@ class StateProvider(ABC):
 
     @abstractmethod
     def get_experiments(
-        self, since: Optional[datetime] = None, *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+        self, since: datetime | None = None, *, refresh: bool = False
+    ) -> list[BaseExperiment]:
         """Get list of all experiments"""
         ...
 
     @abstractmethod
     def get_experiment(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[BaseExperiment]:
+    ) -> BaseExperiment | None:
         """Get a specific experiment by ID"""
         ...
 
     @abstractmethod
     def get_experiment_runs(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+    ) -> list[BaseExperiment]:
         """Get all runs for an experiment
 
         Returns:
@@ -464,29 +465,29 @@ class StateProvider(ABC):
     @abstractmethod
     def get_current_run(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get the current run ID for an experiment"""
         ...
 
     @abstractmethod
     def get_jobs(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
+        task_id: str | None = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Query jobs with optional filters"""
         ...
 
     @abstractmethod
     def get_job(
         self, task_id: str, job_id: str, *, refresh: bool = False
-    ) -> Optional[BaseJob]:
+    ) -> BaseJob | None:
         """Get a job directly by task_id and job_id
 
         Jobs are stored independently in workspace/jobs/task_id/job_id/,
@@ -505,12 +506,12 @@ class StateProvider(ABC):
     @abstractmethod
     def get_all_jobs(
         self,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Get all jobs across all experiments"""
         ...
 
@@ -518,10 +519,10 @@ class StateProvider(ABC):
     def get_tags_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         """Get tags map for jobs in an experiment/run
 
         Tags are stored per (job_id, experiment_id, run_id) in JobTagModel.
@@ -540,10 +541,10 @@ class StateProvider(ABC):
     def get_dependencies_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, List[str]]:
+    ) -> dict[str, list[str]]:
         """Get dependencies map for jobs in an experiment/run
 
         Dependencies are stored per (job_id, experiment_id, run_id) in JobDependenciesModel.
@@ -562,10 +563,10 @@ class StateProvider(ABC):
     def get_experiment_job_info(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, ExperimentJobInformation]:
+    ) -> dict[str, ExperimentJobInformation]:
         """Get experiment-level job info (submittime, transient) for jobs
 
         Returns:
@@ -576,15 +577,15 @@ class StateProvider(ABC):
     @abstractmethod
     def get_services(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseService]:
+    ) -> list[BaseService]:
         """Get services for an experiment"""
         ...
 
-    def get_started_services(self) -> List[BaseService]:
+    def get_started_services(self) -> list[BaseService]:
         """The started services (starting, running or stopping), of all the
         experiments — shown by the UIs on every page"""
         from experimaestro.scheduler.event_filter import STARTED_SERVICE_STATES
@@ -614,14 +615,14 @@ class StateProvider(ABC):
 
     # Optional methods with default implementations
 
-    def get_scheduler_log_path(self) -> Optional[Path]:
+    def get_scheduler_log_path(self) -> Path | None:
         """Return the path to the experimaestro scheduler log, if available.
 
         Returns None when the provider cannot locate a scheduler log.
         """
         return None
 
-    def sync_path(self, path: str, include: list[str] | None = None) -> Optional[Path]:
+    def sync_path(self, path: str, include: list[str] | None = None) -> Path | None:
         """Sync a specific path from remote (remote providers only)
 
         Returns None for local providers or if sync fails.
@@ -638,7 +639,7 @@ class StateProvider(ABC):
             job.path / "experimaestro.json"
         ).is_file()
 
-    def get_job_params_file(self, job: BaseJob) -> Optional[Path]:
+    def get_job_params_file(self, job: BaseJob) -> Path | None:
         """Get the local path to a job's parameters file (params.json or experimaestro.json).
 
         For local providers, checks the job directory on disk.
@@ -665,11 +666,11 @@ class StateProvider(ABC):
                 return cand
         return None
 
-    def get_orphan_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+    def get_orphan_jobs(self, *, refresh: bool = False) -> list[BaseJob]:
         """Get orphan jobs (jobs not associated with any experiment run)"""
         return []
 
-    def get_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+    def get_stray_jobs(self, *, refresh: bool = False) -> list[BaseJob]:
         """Get stray jobs (running jobs not associated with any active experiment)
 
         Stray jobs are a subset of orphan jobs - they are orphan jobs that are
@@ -686,7 +687,7 @@ class StateProvider(ABC):
             if j.state and j.state.running()
         ]
 
-    def delete_job_safely(self, job: BaseJob, perform: bool = True) -> Tuple[bool, str]:
+    def delete_job_safely(self, job: BaseJob, perform: bool = True) -> tuple[bool, str]:
         """Safely delete a job and its data
 
         Only deletes jobs that are finished (not running). Uses clean_job
@@ -724,7 +725,7 @@ class StateProvider(ABC):
 
     def delete_experiment(
         self, experiment_id: str, delete_jobs: bool = False, perform: bool = True
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Delete an experiment and optionally its job data
 
         Args:
@@ -749,7 +750,7 @@ class StateProvider(ABC):
         except (NotImplementedError, AttributeError):
             return False
 
-    def get_running_jobs(self, experiment_id: str) -> List[BaseJob]:
+    def get_running_jobs(self, experiment_id: str) -> list[BaseJob]:
         """Jobs of an experiment that are currently running"""
         return [
             job
@@ -757,18 +758,18 @@ class StateProvider(ABC):
             if job.state and job.state.running()
         ]
 
-    def cleanup_orphan_partials(self, perform: bool = False) -> List[str]:
+    def cleanup_orphan_partials(self, perform: bool = False) -> list[str]:
         """Clean up orphan partial directories"""
         return []
 
-    def get_process_info(self, job: BaseJob) -> Optional[ProcessInfo]:
+    def get_process_info(self, job: BaseJob) -> ProcessInfo | None:
         """Get process information for a job
 
         Returns a ProcessInfo dataclass or None if not available.
         """
         return None
 
-    def get_last_sync_time(self) -> Optional[datetime]:
+    def get_last_sync_time(self) -> datetime | None:
         """Get the last sync time (for incremental updates)"""
         return None
 
@@ -855,7 +856,7 @@ class OfflineStateProvider(StateProvider):
         self._init_experiment_cache()
         self._query_cache = QueryCache()
         # One lock per query key, so that concurrent misses fetch only once
-        self._fetch_locks: Dict[tuple, threading.RLock] = {}
+        self._fetch_locks: dict[tuple, threading.RLock] = {}
         self._fetch_locks_lock = threading.Lock()
 
     # =========================================================================
@@ -868,8 +869,8 @@ class OfflineStateProvider(StateProvider):
         fetch: Callable[[], Any],
         *,
         refresh: bool,
-        experiment_id: Optional[str] = None,
-        copy: Optional[Callable[[Any], Any]] = None,
+        experiment_id: str | None = None,
+        copy: Callable[[Any], Any] | None = None,
     ) -> Any:
         """Answer a read query from the cache, calling `fetch` when needed
 
@@ -903,7 +904,7 @@ class OfflineStateProvider(StateProvider):
             self._query_cache.put(key, value, experiment_id=experiment_id)
         return copy(value) if copy is not None else value
 
-    def invalidate_caches(self, experiment_id: Optional[str] = None) -> None:
+    def invalidate_caches(self, experiment_id: str | None = None) -> None:
         """Drop cached queries, and the cached objects they are built from
 
         Called on a forced refresh, and by mutating operations. Subclasses
@@ -921,8 +922,8 @@ class OfflineStateProvider(StateProvider):
             self._clear_experiment_cache(experiment_id)
 
     def get_experiments(
-        self, since: Optional[datetime] = None, *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+        self, since: datetime | None = None, *, refresh: bool = False
+    ) -> list[BaseExperiment]:
         return self._cached_query(
             ("experiments", since),
             lambda: self._fetch_experiments(since, refresh=refresh),
@@ -932,7 +933,7 @@ class OfflineStateProvider(StateProvider):
 
     def get_experiment(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[BaseExperiment]:
+    ) -> BaseExperiment | None:
         return self._cached_query(
             ("experiment", experiment_id),
             lambda: self._fetch_experiment(experiment_id, refresh=refresh),
@@ -942,7 +943,7 @@ class OfflineStateProvider(StateProvider):
 
     def get_experiment_runs(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+    ) -> list[BaseExperiment]:
         return self._cached_query(
             ("experiment_runs", experiment_id),
             lambda: self._fetch_experiment_runs(experiment_id, refresh=refresh),
@@ -953,7 +954,7 @@ class OfflineStateProvider(StateProvider):
 
     def get_current_run(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[str]:
+    ) -> str | None:
         return self._cached_query(
             ("current_run", experiment_id),
             lambda: self._fetch_current_run(experiment_id, refresh=refresh),
@@ -963,15 +964,15 @@ class OfflineStateProvider(StateProvider):
 
     def get_jobs(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
+        task_id: str | None = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         return self._cached_query(
             ("jobs", experiment_id, run_id, task_id, state, freeze(tags), since),
             lambda: self._fetch_jobs(
@@ -984,7 +985,7 @@ class OfflineStateProvider(StateProvider):
 
     def get_job(
         self, task_id: str, job_id: str, *, refresh: bool = False
-    ) -> Optional[BaseJob]:
+    ) -> BaseJob | None:
         return self._cached_query(
             ("job", task_id, job_id),
             lambda: self._fetch_job(task_id, job_id, refresh=refresh),
@@ -993,12 +994,12 @@ class OfflineStateProvider(StateProvider):
 
     def get_all_jobs(
         self,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         return self._cached_query(
             ("all_jobs", state, freeze(tags), since),
             lambda: self._fetch_all_jobs(state, tags, since, refresh=refresh),
@@ -1009,10 +1010,10 @@ class OfflineStateProvider(StateProvider):
     def get_tags_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         return self._cached_query(
             ("tags_map", experiment_id, run_id),
             lambda: self._fetch_tags_map(experiment_id, run_id, refresh=refresh),
@@ -1024,10 +1025,10 @@ class OfflineStateProvider(StateProvider):
     def get_dependencies_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, List[str]]:
+    ) -> dict[str, list[str]]:
         return self._cached_query(
             ("dependencies_map", experiment_id, run_id),
             lambda: self._fetch_dependencies_map(
@@ -1041,10 +1042,10 @@ class OfflineStateProvider(StateProvider):
     def get_experiment_job_info(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, ExperimentJobInformation]:
+    ) -> dict[str, ExperimentJobInformation]:
         return self._cached_query(
             ("experiment_job_info", experiment_id, run_id),
             lambda: self._fetch_experiment_job_info(
@@ -1058,7 +1059,7 @@ class OfflineStateProvider(StateProvider):
     def get_run_objects(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
     ) -> list[dict[str, Any]]:
@@ -1070,7 +1071,7 @@ class OfflineStateProvider(StateProvider):
             copy=list,
         )
 
-    def get_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
+    def get_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> list[BaseJob]:
         return self._cached_query(
             ("orphan_jobs", freeze(kwargs)),
             lambda: self._fetch_orphan_jobs(refresh=refresh, **kwargs),
@@ -1080,100 +1081,100 @@ class OfflineStateProvider(StateProvider):
 
     @abstractmethod
     def _fetch_experiments(
-        self, since: Optional[datetime], *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+        self, since: datetime | None, *, refresh: bool = False
+    ) -> list[BaseExperiment]:
         """Read the experiment list from storage (filesystem or remote)"""
         ...
 
     @abstractmethod
     def _fetch_experiment(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[BaseExperiment]:
+    ) -> BaseExperiment | None:
         """Read one experiment from storage"""
         ...
 
     @abstractmethod
     def _fetch_experiment_runs(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+    ) -> list[BaseExperiment]:
         """Read the runs of an experiment from storage"""
         ...
 
     @abstractmethod
     def _fetch_current_run(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[str]:
+    ) -> str | None:
         """Read the current run identifier from storage"""
         ...
 
     @abstractmethod
     def _fetch_jobs(
         self,
-        experiment_id: Optional[str],
-        run_id: Optional[str],
-        task_id: Optional[str],
-        state: Optional[str],
-        tags: Optional[Dict[str, str]],
-        since: Optional[datetime],
+        experiment_id: str | None,
+        run_id: str | None,
+        task_id: str | None,
+        state: str | None,
+        tags: dict[str, str] | None,
+        since: datetime | None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Read the jobs of an experiment from storage"""
         ...
 
     @abstractmethod
     def _fetch_job(
         self, task_id: str, job_id: str, *, refresh: bool = False
-    ) -> Optional[BaseJob]:
+    ) -> BaseJob | None:
         """Read one job from storage"""
         ...
 
     @abstractmethod
     def _fetch_all_jobs(
         self,
-        state: Optional[str],
-        tags: Optional[Dict[str, str]],
-        since: Optional[datetime],
+        state: str | None,
+        tags: dict[str, str] | None,
+        since: datetime | None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Read all the jobs of the workspace from storage"""
         ...
 
     @abstractmethod
     def _fetch_tags_map(
-        self, experiment_id: str, run_id: Optional[str], *, refresh: bool = False
-    ) -> Dict[str, Dict[str, str]]:
+        self, experiment_id: str, run_id: str | None, *, refresh: bool = False
+    ) -> dict[str, dict[str, str]]:
         """Read the job tags of an experiment from storage"""
         ...
 
     @abstractmethod
     def _fetch_dependencies_map(
-        self, experiment_id: str, run_id: Optional[str], *, refresh: bool = False
-    ) -> Dict[str, List[str]]:
+        self, experiment_id: str, run_id: str | None, *, refresh: bool = False
+    ) -> dict[str, list[str]]:
         """Read the job dependencies of an experiment from storage"""
         ...
 
     @abstractmethod
     def _fetch_experiment_job_info(
-        self, experiment_id: str, run_id: Optional[str], *, refresh: bool = False
-    ) -> Dict[str, ExperimentJobInformation]:
+        self, experiment_id: str, run_id: str | None, *, refresh: bool = False
+    ) -> dict[str, ExperimentJobInformation]:
         """Read the experiment-level job information from storage"""
         ...
 
     def _fetch_run_objects(
-        self, experiment_id: str, run_id: Optional[str]
+        self, experiment_id: str, run_id: str | None
     ) -> list[dict[str, Any]]:
         """Read the serialized objects of a run (providers that support it)"""
         raise NotImplementedError(
             f"{type(self).__name__} does not support get_run_objects"
         )
 
-    def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
+    def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> list[BaseJob]:
         """Read the orphan jobs from storage (providers that support it)"""
         return []
 
-    def get_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+    def get_stray_jobs(self, *, refresh: bool = False) -> list[BaseJob]:
         return self._cached_query(
             ("stray_jobs",),
             lambda: self._fetch_stray_jobs(refresh=refresh),
@@ -1181,7 +1182,7 @@ class OfflineStateProvider(StateProvider):
             copy=list,
         )
 
-    def _fetch_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+    def _fetch_stray_jobs(self, *, refresh: bool = False) -> list[BaseJob]:
         """Read the stray jobs from storage
 
         The default derives them from the orphan jobs; providers that can
@@ -1201,7 +1202,7 @@ class OfflineStateProvider(StateProvider):
         """Initialize job cache - call from subclass __init__"""
         # Job cache: keyed by "{hash8}:{job_id}" where hash8 = task_id_hash(task_id)
         # This matches the entity_id format from job_entity_id_extractor / EventReader
-        self._job_cache: Dict[str, "MockJob"] = {}
+        self._job_cache: dict[str, "MockJob"] = {}
         self._job_cache_lock = threading.Lock()
 
     def _clear_job_cache(self) -> None:
@@ -1255,7 +1256,7 @@ class OfflineStateProvider(StateProvider):
     def _init_experiment_cache(self) -> None:
         """Initialize experiment cache - call from subclass __init__"""
         # Experiment cache: (experiment_id, run_id) -> MockExperiment
-        self._experiment_cache: Dict[tuple[str, str], "MockExperiment"] = {}
+        self._experiment_cache: dict[tuple[str, str], "MockExperiment"] = {}
         self._experiment_cache_lock = threading.Lock()
 
     def _clear_experiment_cache_all(self) -> None:
@@ -1461,7 +1462,7 @@ class OfflineStateProvider(StateProvider):
         )
         event_run_id = getattr(event, "run_id", "") or None
 
-        def append(jobs: List[BaseJob]) -> None:
+        def append(jobs: list[BaseJob]) -> None:
             if not any(j.identifier == job.identifier for j in jobs):
                 jobs.append(job)
 
@@ -1516,7 +1517,7 @@ class OfflineStateProvider(StateProvider):
             # objects, which the event updates in place
 
     @staticmethod
-    def _event_timestamp(value: Optional[str]) -> Optional[float]:
+    def _event_timestamp(value: str | None) -> float | None:
         """Convert an ISO timestamp carried by an event to a POSIX timestamp"""
         if not value:
             return None
@@ -1526,12 +1527,12 @@ class OfflineStateProvider(StateProvider):
     @staticmethod
     def _job_matches_query(
         job: "MockJob",
-        tags: Dict[str, str],
+        tags: dict[str, str],
         *,
-        task_id: Optional[str],
-        state: Optional[str],
-        tags_filter: Optional[tuple],
-    ) -> Optional[bool]:
+        task_id: str | None,
+        state: str | None,
+        tags_filter: tuple | None,
+    ) -> bool | None:
         """Whether a newly submitted job belongs to a cached job query
 
         Returns None when the answer cannot be determined.
@@ -1566,11 +1567,11 @@ class OfflineStateProvider(StateProvider):
 
     def get_services(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> List["BaseService"]:
+    ) -> list["BaseService"]:
         """Get services for an experiment
 
         Uses caching to preserve service instances (and their URLs) across calls.
@@ -1606,7 +1607,7 @@ class OfflineStateProvider(StateProvider):
             copy=list,
         )
 
-    def get_started_services(self) -> List["BaseService"]:
+    def get_started_services(self) -> list["BaseService"]:
         """The started services, among the cached ones
 
         Without reading the services of every experiment: the services are
@@ -1623,8 +1624,8 @@ class OfflineStateProvider(StateProvider):
         ]
 
     def _get_live_services(
-        self, experiment_id: Optional[str], run_id: Optional[str]
-    ) -> Optional[List["BaseService"]]:
+        self, experiment_id: str | None, run_id: str | None
+    ) -> list["BaseService"] | None:
         """Get live services if available (e.g., from scheduler).
 
         Returns None if no live services are available (default).
@@ -1634,8 +1635,8 @@ class OfflineStateProvider(StateProvider):
 
     @abstractmethod
     def _fetch_services_from_storage(
-        self, experiment_id: Optional[str], run_id: Optional[str]
-    ) -> List["BaseService"]:
+        self, experiment_id: str | None, run_id: str | None
+    ) -> list["BaseService"]:
         """Fetch services from persistent storage (filesystem or remote).
 
         Called when no live services and cache is empty.
@@ -1689,13 +1690,13 @@ class MockJob(BaseJob):
         task_id: str,
         path: Path,
         state: str,  # State name string from DB
-        starttime: Optional[datetime],
-        endtime: Optional[datetime],
+        starttime: datetime | None,
+        endtime: datetime | None,
         progress: ProgressInformation,
         updated_at: str,
-        exit_code: Optional[int] = None,
+        exit_code: int | None = None,
         retry_count: int = 0,
-        failure_reason: Optional[JobFailureStatus] = None,
+        failure_reason: JobFailureStatus | None = None,
         process: dict | None = None,
         carbon_metrics: CarbonMetricsData | None = None,
         run_group_id: str | None = None,
@@ -1897,7 +1898,7 @@ class MockJob(BaseJob):
             return None
 
     @classmethod
-    def from_state_dict(cls, d: Dict, workspace_path: Path) -> "MockJob":
+    def from_state_dict(cls, d: dict, workspace_path: Path) -> "MockJob":
         """Create MockJob from state dictionary
 
         Args:
@@ -2017,19 +2018,19 @@ class MockExperiment(BaseExperiment):
         *,
         status: ExperimentStatus = ExperimentStatus.RUNNING,
         events_count: int = 0,
-        hostname: Optional[str] = None,
-        started_at: Optional[datetime] = None,
-        ended_at: Optional[datetime] = None,
-        job_infos: Optional[Dict[str, "ExperimentJobInformation"]] = None,
-        services: Optional[Dict[str, "MockService"]] = None,
-        dependencies: Optional[Dict[str, List[str]]] = None,
-        experiment_id_override: Optional[str] = None,
+        hostname: str | None = None,
+        started_at: datetime | None = None,
+        ended_at: datetime | None = None,
+        job_infos: dict[str, "ExperimentJobInformation"] | None = None,
+        services: dict[str, "MockService"] | None = None,
+        dependencies: dict[str, list[str]] | None = None,
+        experiment_id_override: str | None = None,
         finished_jobs: int = 0,
         failed_jobs: int = 0,
-        run_tags: Optional[set[str]] = None,
-        experiment_tags: Optional[list[str]] = None,
+        run_tags: set[str] | None = None,
+        experiment_tags: list[str] | None = None,
         carbon_impact: Optional["CarbonImpactData"] = None,
-        job_states: Optional[Dict[str, JobState]] = None,
+        job_states: dict[str, JobState] | None = None,
         total_jobs: int = 0,
     ):
         self.workdir = workdir
@@ -2041,7 +2042,7 @@ class MockExperiment(BaseExperiment):
         self._ended_at = ended_at
         self._job_infos = job_infos or {}
         self._services = services or {}
-        self._actions: Dict[str, "BaseAction"] = {}
+        self._actions: dict[str, "BaseAction"] = {}
         self._dependencies = dependencies or {}
         self._experiment_id_override = experiment_id_override
         self._finished_jobs = finished_jobs
@@ -2050,20 +2051,20 @@ class MockExperiment(BaseExperiment):
         self._experiment_tags = experiment_tags or []
         self._carbon_impact = carbon_impact
         # Track job states from experiment events
-        self._job_states: Dict[str, JobState] = job_states or {}
+        self._job_states: dict[str, JobState] = job_states or {}
         # total_jobs from status.json (0 means use len(_job_infos) fallback)
         self._total_jobs = total_jobs
         # Lazy loading support for jobs.jsonl
-        self._jobs_jsonl_path: Optional[Path] = None
+        self._jobs_jsonl_path: Path | None = None
         self._jobs_jsonl_loaded: bool = True
 
     @property
-    def runs_count(self) -> Optional[int]:
+    def runs_count(self) -> int | None:
         """Return number of runs for this experiment if known"""
         return getattr(self, "_runs_count", None)
 
     @runs_count.setter
-    def runs_count(self, value: Optional[int]) -> None:
+    def runs_count(self, value: int | None) -> None:
         self._runs_count = value
 
     @property
@@ -2084,7 +2085,7 @@ class MockExperiment(BaseExperiment):
         self._status = value
 
     @property
-    def job_infos(self) -> Dict[str, "ExperimentJobInformation"]:
+    def job_infos(self) -> dict[str, "ExperimentJobInformation"]:
         """Lightweight job info from jobs.jsonl (job_id, task_id, tags, timestamp)
 
         Lazy-loaded: when created from from_disk() with status.json, the
@@ -2095,15 +2096,15 @@ class MockExperiment(BaseExperiment):
         return self._job_infos
 
     @property
-    def services(self) -> Dict[str, "BaseService"]:
+    def services(self) -> dict[str, "BaseService"]:
         return self._services
 
     @property
-    def actions(self) -> Dict[str, "BaseAction"]:
+    def actions(self) -> dict[str, "BaseAction"]:
         return self._actions
 
     @property
-    def tags(self) -> Dict[str, Dict[str, str]]:
+    def tags(self) -> dict[str, dict[str, str]]:
         """Build tags dict from job_infos"""
         return {
             job_id: job_info.tags
@@ -2112,7 +2113,7 @@ class MockExperiment(BaseExperiment):
         }
 
     @property
-    def dependencies(self) -> Dict[str, List[str]]:
+    def dependencies(self) -> dict[str, list[str]]:
         return self._dependencies
 
     @property
@@ -2120,15 +2121,15 @@ class MockExperiment(BaseExperiment):
         return self._events_count
 
     @property
-    def hostname(self) -> Optional[str]:
+    def hostname(self) -> str | None:
         return self._hostname
 
     @property
-    def started_at(self) -> Optional[datetime]:
+    def started_at(self) -> datetime | None:
         return self._started_at
 
     @property
-    def ended_at(self) -> Optional[datetime]:
+    def ended_at(self) -> datetime | None:
         return self._ended_at
 
     @property
@@ -2350,7 +2351,7 @@ class MockExperiment(BaseExperiment):
         return exp
 
     @classmethod
-    def from_state_dict(cls, d: Dict, workspace_path: Path) -> "MockExperiment":
+    def from_state_dict(cls, d: dict, workspace_path: Path) -> "MockExperiment":
         """Create MockExperiment from state dictionary
 
         Args:
@@ -2447,7 +2448,7 @@ class MockExperiment(BaseExperiment):
         return exp
 
     @staticmethod
-    def parse_job_states(raw: Dict[str, str]) -> Dict[str, JobState]:
+    def parse_job_states(raw: dict[str, str]) -> dict[str, JobState]:
         """Parse the job states of a state dictionary (``job_states``)"""
         job_states = {}
         for job_id, state_str in raw.items():
@@ -2464,13 +2465,13 @@ class MockExperiment(BaseExperiment):
         return job_states
 
     @staticmethod
-    def _count_job_states(job_states: Dict[str, JobState]) -> tuple[int, int]:
+    def _count_job_states(job_states: dict[str, JobState]) -> tuple[int, int]:
         """The numbers of finished and failed jobs"""
         finished = sum(1 for s in job_states.values() if s == JobState.DONE)
         failed = sum(1 for s in job_states.values() if s.is_error())
         return finished, failed
 
-    def set_job_states(self, job_states: Dict[str, JobState]) -> None:
+    def set_job_states(self, job_states: dict[str, JobState]) -> None:
         """Replace the tracked job states (and the counters derived from them)"""
         self._job_states = job_states
         self._finished_jobs, self._failed_jobs = self._count_job_states(job_states)
@@ -2651,12 +2652,12 @@ class MockService(BaseService):
         service_id: str,
         description_text: str,
         state_dict_data: dict,
-        service_class: Optional[str] = None,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        url: Optional[str] = None,
-        state: Optional[str] = None,
-        subservices: Optional[list[dict]] = None,
+        service_class: str | None = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
+        url: str | None = None,
+        state: str | None = None,
+        subservices: list[dict] | None = None,
     ):
         self.id = service_id
         self._description = description_text
@@ -2667,11 +2668,11 @@ class MockService(BaseService):
         self._experiment_id = experiment_id or ""
         self._run_id = run_id or ""
         self._url = url
-        self._live_service: Optional["BaseService"] = None  # Cached live service
-        self._error: Optional[str] = None  # Error message if start failed
+        self._live_service: "BaseService" | None = None  # Cached live service
+        self._error: str | None = None  # Error message if start failed
         # Stored sub-services (Service.subservices_state), None if unknown
         self._subservices_data = subservices
-        self._subservices: Optional[list[BaseService]] = None
+        self._subservices: list[BaseService] | None = None
 
     @property
     def experiment_id(self) -> str:
@@ -2684,7 +2685,7 @@ class MockService(BaseService):
         return self._run_id
 
     @property
-    def url(self) -> Optional[str]:
+    def url(self) -> str | None:
         """Return service URL.
 
         Delegates to live service if available (URL is set when service is started).
@@ -2721,25 +2722,25 @@ class MockService(BaseService):
         return self._description
 
     @property
-    def log_directory(self) -> Optional[Path]:
+    def log_directory(self) -> Path | None:
         if self._live_service is not None:
             return self._live_service.log_directory
         return None
 
     @property
-    def stdout(self) -> Optional[Path]:
+    def stdout(self) -> Path | None:
         if self._live_service is not None:
             return self._live_service.stdout
         return None
 
     @property
-    def stderr(self) -> Optional[Path]:
+    def stderr(self) -> Path | None:
         if self._live_service is not None:
             return self._live_service.stderr
         return None
 
     @property
-    def sync_status(self) -> Optional[str]:
+    def sync_status(self) -> str | None:
         """Return sync status for display.
 
         Delegates to live service if available.
@@ -2749,7 +2750,7 @@ class MockService(BaseService):
         return None
 
     @property
-    def error(self) -> Optional[str]:
+    def error(self) -> str | None:
         """Return error message if service failed to start.
 
         Delegates to live service if available.
@@ -2758,7 +2759,7 @@ class MockService(BaseService):
             return self._live_service.error
         return self._error
 
-    def set_error(self, error: Optional[str]) -> None:
+    def set_error(self, error: str | None) -> None:
         """Set error message and update state to ERROR."""
         self._error = error
         if error:
@@ -2794,12 +2795,12 @@ class MockService(BaseService):
         }
 
     @property
-    def service_class(self) -> Optional[str]:
+    def service_class(self) -> str | None:
         """Return service class name"""
         return self._service_class
 
     @classmethod
-    def from_full_state_dict(cls, d: Dict) -> "MockService":
+    def from_full_state_dict(cls, d: dict) -> "MockService":
         """Create MockService from full state dictionary
 
         Args:
@@ -2820,7 +2821,7 @@ class MockService(BaseService):
             subservices=d.get("subservices"),
         )
 
-    def subservices(self) -> List["BaseService"]:
+    def subservices(self) -> list["BaseService"]:
         """Sub-services, listed from the stored data when available so that
         listing services does not import their modules"""
         if self._subservices is None:
@@ -2882,8 +2883,8 @@ class MockSubService(BaseService):
         self._description = data.get("description", "")
         # Not started (a stored state or URL comes from another process)
         self._state_name = "STOPPED"
-        self._url: Optional[str] = None
-        self._error: Optional[str] = None
+        self._url: str | None = None
+        self._error: str | None = None
 
     def _live(self) -> Optional["BaseService"]:
         if self.parent._live_service is None:
@@ -2910,34 +2911,34 @@ class MockSubService(BaseService):
         return self._description
 
     @property
-    def url(self) -> Optional[str]:
+    def url(self) -> str | None:
         if (live := self._live()) is not None:
             return getattr(live, "url", None)
         return self._url
 
     @property
-    def log_directory(self) -> Optional[Path]:
+    def log_directory(self) -> Path | None:
         return live.log_directory if (live := self._live()) is not None else None
 
     @property
-    def stdout(self) -> Optional[Path]:
+    def stdout(self) -> Path | None:
         return live.stdout if (live := self._live()) is not None else None
 
     @property
-    def stderr(self) -> Optional[Path]:
+    def stderr(self) -> Path | None:
         return live.stderr if (live := self._live()) is not None else None
 
     @property
-    def sync_status(self) -> Optional[str]:
+    def sync_status(self) -> str | None:
         return live.sync_status if (live := self._live()) is not None else None
 
     @property
-    def error(self) -> Optional[str]:
+    def error(self) -> str | None:
         if (live := self._live()) is not None and live.error:
             return live.error
         return self._error
 
-    def set_error(self, error: Optional[str]) -> None:
+    def set_error(self, error: str | None) -> None:
         self._error = error
         if error:
             self._state_name = "ERROR"

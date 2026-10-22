@@ -18,18 +18,14 @@ import inspect
 import importlib
 from typing import (
     Any,
-    Callable,
     ClassVar,
-    Dict,
-    List,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
     Union,
     overload,
     TYPE_CHECKING,
 )
+from collections.abc import Callable
 import sys
 import experimaestro
 from experimaestro.utils import get_caller_location
@@ -53,6 +49,7 @@ from .config_utils import (
     ObjectStore,
     classproperty,
 )
+import builtins
 
 T = TypeVar("T", bound="Config")
 
@@ -82,7 +79,7 @@ Example::
 
 
 def updatedependencies(
-    dependencies, value: "Config", path: List[str], taskids: Set[int]
+    dependencies, value: "Config", path: list[str], taskids: set[int]
 ):
     """Search recursively jobs to add them as dependencies
 
@@ -112,9 +109,9 @@ def updatedependencies(
 def _collect_prepares(
     value,
     *,
-    visited: Optional[Set[int]] = None,
-    out: Optional[List["Prepare"]] = None,
-) -> List["Prepare"]:
+    visited: set[int] | None = None,
+    out: list["Prepare"] | None = None,
+) -> list["Prepare"]:
     """Recursively yield every ``Prepare`` instance reachable through ``value``.
 
     Walks Config params (and the containers list/set/tuple/dict). Stops at
@@ -252,7 +249,7 @@ class SetInfo:
 class ConfigInformation:
     """Holds experimaestro information for a config (or task) instance"""
 
-    _meta: Optional[bool]
+    _meta: bool | None
     """Forces this configuration to be a meta-parameter"""
 
     # Set to true when loading from JSON
@@ -265,7 +262,7 @@ class ConfigInformation:
     PARAMS_JSON_VERSION: ClassVar[int] = 3
 
     @staticmethod
-    def check_params_version(params: Dict, source: str = "params.json") -> None:
+    def check_params_version(params: dict, source: str = "params.json") -> None:
         """Refuse to load a params.json written by a newer experimaestro.
 
         Older versions are loaded transparently (the deserializer handles
@@ -306,10 +303,10 @@ class ConfigInformation:
         self._taskoutput = None
         """Task output (caches the value of a submit)"""
 
-        self.task: Optional["Config"] = None
+        self.task: "Config" | None = None
         """The task this configuration depends upon (or None)"""
 
-        self._prepare_task: Optional["Config"] = None
+        self._prepare_task: "Config" | None = None
         """For a ``Prepare``, the ``PrepareTask`` submitted to prepare it
 
         Kept apart from ``task`` on purpose: ``task`` feeds the identifier.
@@ -332,24 +329,24 @@ class ConfigInformation:
 
         # Concrete type variables resolutions
         # This is used to check typevars coherence
-        self.concrete_typevars: Dict[TypeVar, type] = {}
+        self.concrete_typevars: dict[TypeVar, type] = {}
 
         # Initialization tasks
-        self.init_tasks: List["LightweightTask"] = []
+        self.init_tasks: list["LightweightTask"] = []
 
         # Identifiers of the initialization tasks whose tags should not
         # propagate to this configuration (set through ``stop_tags``)
-        self._stop_tags_init_tasks: Set[int] = set()
+        self._stop_tags_init_tasks: set[int] = set()
 
         # Watched outputs
-        self.watched_outputs: List[WatchedOutput] = []
+        self.watched_outputs: list[WatchedOutput] = []
 
         # Cached information
 
         self._identifier = None
         """The configuration identifier (cached when sealed)"""
 
-        self._partial_identifiers: Dict[str, "Identifier"] = {}
+        self._partial_identifiers: dict[str, "Identifier"] = {}
         """Cached partial identifiers (keyed by partial name)"""
 
         self._validated = False
@@ -361,7 +358,7 @@ class ConfigInformation:
         # problem when a configuration with generated values is re-used.
         self._generated_values = []
 
-    def set_meta(self, value: Optional[bool]):
+    def set_meta(self, value: bool | None):
         """Sets the meta flag"""
         assert not self._sealed, "Configuration is sealed"
         self._meta = value
@@ -476,7 +473,7 @@ class ConfigInformation:
         """
         return self.provenance.get(name)
 
-    def fuse_concrete_typevars(self, typevars: Dict[TypeVar, type]):
+    def fuse_concrete_typevars(self, typevars: dict[TypeVar, type]):
         """Fuses concrete type variables with the current ones"""
         for typevar, v in typevars.items():
             self.check_typevar(typevar, v)
@@ -765,9 +762,9 @@ class ConfigInformation:
 
     def updatedependencies(
         self,
-        dependencies: Set["experimaestro.dependencies.Dependency"],
-        path: List[str],
-        taskids: Set[int],
+        dependencies: builtins.set["experimaestro.dependencies.Dependency"],
+        path: list[str],
+        taskids: builtins.set[int],
     ):
         # Add initialization tasks
         for init_task in self.init_tasks:
@@ -804,7 +801,7 @@ class ConfigInformation:
                 super().__init__(*args, **kwargs)
                 self.hooks = set()
 
-            def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
+            def postprocess(self, stub, config: "Config", values: dict[str, Any]):
                 self.hooks.update(config.__xpmtype__.submit_hooks)
 
         gatherer = HookGatherer(context, recurse_task=False)
@@ -861,7 +858,7 @@ class ConfigInformation:
         else:
             self.on_completed_callbacks.append(callback)
 
-    def set_init_tasks(self, init_tasks: List["LightweightTask"]):
+    def set_init_tasks(self, init_tasks: list["LightweightTask"]):
         """Set the initialization tasks, unwrapping :class:`ConfigWrapper`
 
         ``stop_tags(init_task)`` marks the initialization task so that its tags
@@ -889,10 +886,10 @@ class ConfigInformation:
         launcher: "Launcher",
         *,
         run_mode=None,
-        init_tasks: List["LightweightTask"] = [],
-        max_retries: Optional[int] = None,
+        init_tasks: list["LightweightTask"] = [],
+        max_retries: int | None = None,
         transient: "TransientMode" = None,
-        backup: Optional[bool] = None,
+        backup: bool | None = None,
     ):
         from experimaestro.scheduler import experiment, JobContext
         from experimaestro.scheduler.workspace import RunMode
@@ -1084,7 +1081,7 @@ class ConfigInformation:
 
             print(file=sys.stderr)  # noqa: T201
 
-    def _prepare_configs(self, run_mode) -> List["Prepare"]:
+    def _prepare_configs(self, run_mode) -> list["Prepare"]:
         """The ``Prepare`` configs this task must depend on."""
         from experimaestro.scheduler.prepare import PrepareTask
         from experimaestro.scheduler.workspace import RunMode
@@ -1108,9 +1105,9 @@ class ConfigInformation:
         launcher: "Launcher",
         *,
         run_mode=None,
-        max_retries: Optional[int] = None,
+        max_retries: int | None = None,
         transient: "TransientMode" = None,
-        backup: Optional[bool] = None,
+        backup: bool | None = None,
     ):
         """Submit a :class:`Prepare` config, running it as a job.
 
@@ -1262,9 +1259,9 @@ class ConfigInformation:
 
     def __get_objects__(
         self,
-        objects: List[Dict],
+        objects: list[dict],
         context: SerializationContext,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Returns the list of objects necessary to deserialize ourself
 
         :param objects: the already output objects
@@ -1337,7 +1334,7 @@ class ConfigInformation:
         return objects
 
     @staticmethod
-    def __collect_objects__(value, objects: List[Dict], context: SerializationContext):
+    def __collect_objects__(value, objects: list[dict], context: SerializationContext):
         """Serialize all needed configuration objects, looking at sub
         configurations if necessary"""
         if value is None:
@@ -1453,10 +1450,10 @@ class ConfigInformation:
 
     @staticmethod
     def deserialize(
-        path: Union[str, Path, SerializedPathLoader],
+        path: str | Path | SerializedPathLoader,
         as_instance: bool = False,
         return_tasks: bool = False,
-        partial_loading: Optional[bool] = None,
+        partial_loading: bool | None = None,
         definition_filename: str | None = None,
     ) -> "Config":
         """Deserialize a configuration
@@ -1483,7 +1480,7 @@ class ConfigInformation:
         else:
             path = Path(path)
 
-            def data_loader(s: Union[Path, str, SerializedPath]):
+            def data_loader(s: Path | str | SerializedPath):
                 if isinstance(s, SerializedPath):
                     return path / Path(s.path)
                 return path / Path(s)
@@ -1508,7 +1505,7 @@ class ConfigInformation:
         )
 
     @staticmethod
-    def _objectFromParameters(value: Any, objects: Dict[str, Any]):
+    def _objectFromParameters(value: Any, objects: dict[str, Any]):
         # A list
         if isinstance(value, list):
             return [ConfigInformation._objectFromParameters(x, objects) for x in value]
@@ -1571,38 +1568,38 @@ class ConfigInformation:
     @overload
     @staticmethod
     def fromParameters(
-        definitions: List[Dict],
+        definitions: list[dict],
         as_instance=True,
-        save_directory: Optional[Path] = None,
+        save_directory: Path | None = None,
         discard_id: bool = False,
-        partial_loading: Optional[bool] = None,
+        partial_loading: bool | None = None,
     ) -> "ConfigMixin": ...
 
     @overload
     @staticmethod
     def fromParameters(
-        definitions: List[Dict],
+        definitions: list[dict],
         as_instance=False,
         return_tasks=True,
-        save_directory: Optional[Path] = None,
+        save_directory: Path | None = None,
         discard_id: bool = False,
-        partial_loading: Optional[bool] = None,
-    ) -> Tuple["Config", List["LightweightTask"]]: ...
+        partial_loading: bool | None = None,
+    ) -> tuple["Config", list["LightweightTask"]]: ...
 
     @overload
     @staticmethod
     def fromParameters(
-        definitions: List[Dict],
+        definitions: list[dict],
         as_instance=False,
-        save_directory: Optional[Path] = None,
+        save_directory: Path | None = None,
         discard_id: bool = False,
-        partial_loading: Optional[bool] = None,
+        partial_loading: bool | None = None,
     ) -> "Config": ...
 
     @staticmethod
-    def _get_field_refs(value: Any) -> Set[int]:
+    def _get_field_refs(value: Any) -> builtins.set[int]:
         """Recursively extract object references from a serialized field value"""
-        refs: Set[int] = set()
+        refs: set[int] = set()
         if isinstance(value, dict):
             if value.get("type") == "python":
                 refs.add(value["value"])
@@ -1615,7 +1612,7 @@ class ConfigInformation:
         return refs
 
     @staticmethod
-    def _compute_skipped_ids(definitions: List[Dict]) -> Set[int]:
+    def _compute_skipped_ids(definitions: list[dict]) -> builtins.set[int]:
         """Compute IDs of objects only reachable through task references.
 
         When partial_loading is enabled, we skip loading task references and
@@ -1633,7 +1630,7 @@ class ConfigInformation:
         # without going through task references
         main_defn = definitions[-1]
         main_id = main_defn["id"]
-        reachable: Set[int] = set()
+        reachable: set[int] = set()
         to_visit = [main_id]
 
         # Also include init-tasks as reachable (needed for as_instance/return_tasks)
@@ -1664,9 +1661,9 @@ class ConfigInformation:
 
     @staticmethod
     def load_objects(  # noqa: C901
-        definitions: List[Dict],
+        definitions: list[dict],
         as_instance=True,
-        data_loader: Optional[SerializedPathLoader] = None,
+        data_loader: SerializedPathLoader | None = None,
         discard_id: bool = False,
         partial_loading: bool = False,
     ):
@@ -1838,12 +1835,12 @@ class ConfigInformation:
 
     @staticmethod
     def fromParameters(  # noqa: C901
-        definitions: List[Dict],
+        definitions: list[dict],
         as_instance=True,
-        data_loader: Optional[SerializedPathLoader] = None,
+        data_loader: SerializedPathLoader | None = None,
         discard_id: bool = False,
         return_tasks: bool = False,
-        partial_loading: Optional[bool] = None,
+        partial_loading: bool | None = None,
     ):
         # Determine effective partial_loading: as_instance implies partial_loading
         effective_partial_loading = (
@@ -1908,7 +1905,7 @@ class ConfigInformation:
 
             return o
 
-        def postprocess(self, stub, config: "Config", values: Dict[str, Any]):
+        def postprocess(self, stub, config: "Config", values: dict[str, Any]):
             # Copy values from the
             for key, value in values.items():
                 setattr(stub, key, value)
@@ -2266,8 +2263,8 @@ class ConfigMixin:
         workspace=None,
         launcher=None,
         run_mode: "experimaestro.scheduler.workspace.RunMode" = None,
-        init_tasks: List["LightweightTask"] = [],
-        max_retries: Optional[int] = None,
+        init_tasks: list["LightweightTask"] = [],
+        max_retries: int | None = None,
         transient: "TransientMode" = None,
     ):
         """Submit this task
@@ -2391,7 +2388,7 @@ class ConfigMixin:
 class Config:
     """Base type for all objects in python interface"""
 
-    __xpmid__: ClassVar[Optional[str]]
+    __xpmid__: ClassVar[str | None]
     """Optional configuration ID, mostly useful when moving a class to another
     package to avoid changes in computed task identifiers"""
 
@@ -2422,7 +2419,7 @@ class Config:
                 )
         return result
 
-    def __xpm_output_valid__(self) -> Optional[bool]:
+    def __xpm_output_valid__(self) -> bool | None:
         """Whether this job's real output is present, ignoring marker files.
 
         The ``.done``/``.failed`` markers live in the job directory, which is
@@ -2672,7 +2669,7 @@ class LightweightTask(Config):
 class Task(LightweightTask):
     """Base class for tasks"""
 
-    __tags__: Dict[str, str]
+    __tags__: dict[str, str]
     """Tags associated with class"""
 
     def submit(self):
@@ -2782,7 +2779,7 @@ class ResumableTask(Task):
     preserved across restarts to allow checkpoint recovery.
     """
 
-    def remaining_time(self) -> Optional[float]:
+    def remaining_time(self) -> float | None:
         """Returns the remaining time in seconds before the job times out.
 
         This is useful for checkpointing before hitting a time limit

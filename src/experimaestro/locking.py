@@ -8,7 +8,8 @@ import os
 import os.path
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Callable, Optional, Any
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 import weakref
 
 import filelock
@@ -626,7 +627,7 @@ class JobDependencyLock:
     """
 
     #: Path to the lock file to delete on release (set from JSON data)
-    lock_file_path: Optional[Path] = None
+    lock_file_path: Path | None = None
 
     def verify_lock_file(self) -> None:
         """Verify the lock file exists.
@@ -748,9 +749,9 @@ class DynamicLockFile(ABC):
     """
 
     path: Path
-    job_uri: Optional[str]
-    process: Optional[Process]
-    process_future: Optional[asyncio.Future]
+    job_uri: str | None
+    process: Process | None
+    process_future: asyncio.Future | None
     timestamp: float
     resource: "TrackedDynamicResource"
     _accounted: bool
@@ -1011,7 +1012,7 @@ class DynamicLockFile(ABC):
 
     async def async_watch(
         self,
-        on_released: Optional[Callable[[], None]] = None,
+        on_released: Callable[[], None] | None = None,
     ) -> None:
         """Watch a process and call callback when it finishes.
 
@@ -1080,7 +1081,7 @@ class EventLoopThread(threading.Thread):
     The thread is started automatically on first access.
     """
 
-    _instance: Optional["EventLoopThread"] = None
+    _instance: "EventLoopThread" | None = None
     _instance_lock = threading.Lock()
 
     @classmethod
@@ -1104,7 +1105,7 @@ class EventLoopThread(threading.Thread):
 
     def __init__(self):
         super().__init__(name="EventLoop", daemon=True)
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._ready = threading.Event()
         self._stopping = False
 

@@ -6,14 +6,15 @@ tags, and other attributes.
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterable
 import pyparsing as pp
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.state_provider import MockJob
 
 # Type alias for tags map: job_id -> {tag_key: tag_value}
-TagsMap = Dict[str, Dict[str, str]]
+TagsMap = dict[str, dict[str, str]]
 
 
 @dataclass

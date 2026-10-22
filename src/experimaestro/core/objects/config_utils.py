@@ -3,7 +3,7 @@ import importlib.util
 from pathlib import Path
 import sys
 from types import ModuleType
-from typing import Any, Dict, Set
+from typing import Any
 
 
 def getqualattr(module, qualname):
@@ -87,8 +87,8 @@ def add_to_path(p):
 
 class ObjectStore:
     def __init__(self):
-        self.store: Dict[int, Any] = {}
-        self.constructed: Set[int] = set()
+        self.store: dict[int, Any] = {}
+        self.constructed: set[int] = set()
 
     def set_constructed(self, identifier: int):
         self.constructed.add(identifier)

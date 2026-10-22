@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 import sys
-from typing import Callable
+from collections.abc import Callable
 from experimaestro import Task, Meta, field, PathGenerator
 import psutil
 import logging

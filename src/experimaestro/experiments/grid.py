@@ -1,12 +1,7 @@
 from typing import (
     Any,
-    Dict,
-    List,
-    Optional,
-    Tuple,
     TypeVar,
     Union,
-    Type,
     get_args,
     get_origin,
     get_type_hints,
@@ -28,16 +23,16 @@ class GenericParams:
     """A class to represent a parameter that can be a single value, a list of values, or a range of values."""
 
     value: Any = None
-    values_list: Optional[List[Any]] = None
-    values_range: Optional[Tuple[int, ...]] = None
-    values_mult: Optional[Tuple[Any, ...]] = None
+    values_list: list[Any] | None = None
+    values_range: tuple[int, ...] | None = None
+    values_mult: tuple[Any, ...] | None = None
 
     @property
     def is_grid(self) -> bool:
         """Returns True if this parameter represents a search space."""
         return len(self.as_list()) > 1
 
-    def as_list(self) -> List[Any]:
+    def as_list(self) -> list[Any]:
         """Returns the search space as a list of values."""
         if self.values_list:
             return list(self.values_list)
@@ -69,7 +64,7 @@ class GenericParams:
         return [self.value]
 
     @classmethod
-    def from_any(cls, obj: Any, target_type: Type = Any) -> "GenericParams":
+    def from_any(cls, obj: Any, target_type: type = Any) -> "GenericParams":
         """Coerces a value into a GenericParams object."""
 
         def converter(value: Any) -> Any:
@@ -158,7 +153,7 @@ def _coerce_to_generic_params(v: Any) -> Any:
 
 
 GridSearch = Annotated[
-    Union[T, GenericParams],
+    T | GenericParams,
     BeforeValidator(_coerce_to_generic_params),
 ]
 """
@@ -206,7 +201,7 @@ def get_nested_attr_type(obj: Any, path: str) -> Any:
         return Any
 
 
-def discover_grid_params(obj: Any, prefix: str = "") -> Dict[str, GenericParams]:
+def discover_grid_params(obj: Any, prefix: str = "") -> dict[str, GenericParams]:
     """Recursively find all GenericParams instances in an attrs object"""
     found = {}
     if attr.has(type(obj)):
@@ -271,9 +266,9 @@ def _get_type_converter(target_type: Any):
 def _validate_and_convert_config_dicts(
     cfg: Any,
     config_dicts: Any,
-    grid_params: Dict[str, GenericParams],
+    grid_params: dict[str, GenericParams],
     explicit_keys: set[str],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Validates config_dicts structure, checks for key consistency across all dictionaries,
     prevents key collisions with independent grid parameters, and converts values to target types.
@@ -339,7 +334,7 @@ def _validate_and_convert_config_dicts(
     return converted_config_dicts
 
 
-def generate_grid(cfg: Any) -> Tuple[List[Any], List[dict]]:
+def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
     """
     Generates a list of configuration permutations for a grid search, based
     on a `grid_search` dictionary in the main configuration object or inline definitions.

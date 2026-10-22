@@ -20,7 +20,7 @@ Or in pyproject.toml:
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 from mypy.nodes import (
     TypeInfo,
@@ -118,7 +118,7 @@ def _is_config_class(base: TypeInfo) -> bool:
     return False
 
 
-def _get_annotation_type_str(name: str, base: TypeInfo) -> Optional[str]:
+def _get_annotation_type_str(name: str, base: TypeInfo) -> str | None:
     """Get the type annotation string for a field.
 
     Tries multiple sources to find the original annotation:
@@ -197,7 +197,7 @@ def _is_meta_field(name: str, base: TypeInfo) -> bool:
     return False
 
 
-def _get_param_fields(info: TypeInfo) -> List[tuple]:
+def _get_param_fields(info: TypeInfo) -> list[tuple]:
     """Extract Param and Meta fields from a class and its bases.
 
     Returns list of (name, type, has_default) tuples.
@@ -288,7 +288,7 @@ def _add_init_method(ctx: ClassDefContext) -> None:
         )
 
 
-def _get_task_outputs_return_type(info: TypeInfo) -> Optional[Instance]:
+def _get_task_outputs_return_type(info: TypeInfo) -> Instance | None:
     """Check if the class has a task_outputs method and return its return type.
 
     If the class defines task_outputs, submit() should return that type instead

@@ -28,7 +28,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
 
 from experimaestro.utils.atomic import atomic_write_json
 from experimaestro.filewatcher import (
@@ -236,7 +237,7 @@ class ProgressLevel:
 
     level: int = 0
     progress: float = 0.0
-    desc: Optional[str] = None
+    desc: str | None = None
 
     def to_dict(self) -> dict:
         return {"level": self.level, "progress": self.progress, "desc": self.desc}
@@ -274,7 +275,7 @@ class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
     run_id: str = ""
     tags: list[JobTag] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
-    submitted_time: Optional[str] = None  # ISO format timestamp
+    submitted_time: str | None = None  # ISO format timestamp
 
 
 @dataclass
@@ -287,10 +288,10 @@ class JobStateChangedEvent(JobEventBase):
     """
 
     state: str = ""
-    failure_reason: Optional[str] = None
-    started_time: Optional[str] = None  # ISO format timestamp
-    ended_time: Optional[str] = None  # ISO format timestamp
-    exit_code: Optional[int] = None
+    failure_reason: str | None = None
+    started_time: str | None = None  # ISO format timestamp
+    ended_time: str | None = None  # ISO format timestamp
+    exit_code: int | None = None
     retry_count: int = 0
     progress: list[ProgressLevel] = field(default_factory=list)
 
@@ -311,11 +312,11 @@ class ExperimentJobStateEvent(ExperimentEventBase, JobEventBase):
     """
 
     scheduler_state: str = ""
-    failure_reason: Optional[str] = None
+    failure_reason: str | None = None
     run_id: str = ""
     tags: list[JobTag] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
-    submitted_time: Optional[str] = None  # ISO format timestamp
+    submitted_time: str | None = None  # ISO format timestamp
 
 
 @dataclass
@@ -327,7 +328,7 @@ class JobProgressEvent(JobEventBase):
 
     level: int = 0
     progress: float = 0.0
-    desc: Optional[str] = None
+    desc: str | None = None
 
 
 @dataclass
@@ -1063,10 +1064,10 @@ EntityEventCallback = Callable[[str, EventBase], None]
 # (entity_id,) - called when event files are deleted
 EntityDeletedCallback = Callable[[str], None]
 # Extracts entity_id from path
-EntityIdExtractor = Callable[[Path], Optional[str]]
+EntityIdExtractor = Callable[[Path], str | None]
 
 
-def default_entity_id_extractor(path: Path) -> Optional[str]:
+def default_entity_id_extractor(path: Path) -> str | None:
     """Default: entity_id is the parent directory name
 
     Path format: {base_dir}/{entity_id}/events-{count}.jsonl
@@ -1223,7 +1224,7 @@ class EventReader:
         # All watches (for finding the right one per path)
         self._all_watchers: list[DirectoryWatch] = []
 
-    def _extract_entity_id(self, path: Path) -> Optional[str]:
+    def _extract_entity_id(self, path: Path) -> str | None:
         """Extract entity ID from event file path"""
         dir_config = self._find_dir_config(path)
         if dir_config:
@@ -1938,7 +1939,7 @@ class EventReader:
         return events
 
     def read_events_since_count(
-        self, entity_id: str, start_count: int, base_dir: Optional[Path] = None
+        self, entity_id: str, start_count: int, base_dir: Path | None = None
     ) -> list[EventBase]:
         """Read events for an entity starting from a specific file count
 

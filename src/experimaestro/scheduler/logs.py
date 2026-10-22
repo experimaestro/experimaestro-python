@@ -6,7 +6,6 @@ so that ``\\r``/tqdm collapsing and tailing behave identically everywhere.
 """
 
 from pathlib import Path
-from typing import Optional
 
 
 # Default chunk size for reading file (64KB)
@@ -131,7 +130,7 @@ class LogFile:
 
 def read_log_slice(
     path: Path | str,
-    offset: Optional[int] = None,
+    offset: int | None = None,
     tail_bytes: int = INITIAL_TAIL_SIZE,
 ) -> dict:
     """Stateless log read suitable for HTTP polling.

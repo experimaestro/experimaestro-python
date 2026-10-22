@@ -15,7 +15,7 @@ class LauncherInformation:
     Python script that runs the task.
     """
 
-    def remaining_time(self) -> Optional[float]:
+    def remaining_time(self) -> float | None:
         """Returns the remaining time in seconds before the job times out.
 
         Returns:
@@ -28,13 +28,13 @@ class Env:
     _instance = None
 
     # The working directory path
-    wspath: Optional[Path] = None
+    wspath: Path | None = None
 
     # The current task path
-    taskpath: Optional[Path] = None
+    taskpath: Path | None = None
 
     # Launcher information (only set when running a task)
-    launcher_info: Optional[LauncherInformation] = None
+    launcher_info: LauncherInformation | None = None
 
     # Carbon tracker (only set when carbon tracking is enabled)
     carbon_tracker: Optional["BaseCarbonTracker"] = None

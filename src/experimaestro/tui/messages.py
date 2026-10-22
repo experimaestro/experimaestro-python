@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 class ExperimentSelected(Message):
     """Message sent when an experiment is selected"""
 
-    def __init__(self, experiment_id: str, run_id: Optional[str] = None) -> None:
+    def __init__(self, experiment_id: str, run_id: str | None = None) -> None:
         super().__init__()
         self.experiment_id = experiment_id
         self.run_id = run_id
@@ -141,7 +141,7 @@ class SizeCalculated(Message):
 class ShowRunsRequest(Message):
     """Message sent when user wants to see experiment runs"""
 
-    def __init__(self, experiment_id: str, current_run_id: Optional[str]) -> None:
+    def __init__(self, experiment_id: str, current_run_id: str | None) -> None:
         super().__init__()
         self.experiment_id = experiment_id
         self.current_run_id = current_run_id

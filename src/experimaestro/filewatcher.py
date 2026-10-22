@@ -33,7 +33,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from io import TextIOWrapper
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer

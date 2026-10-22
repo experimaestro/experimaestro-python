@@ -5,10 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import (
-    Dict,
-    List,
     Optional,
-    Set,
     ClassVar,
     TYPE_CHECKING,
 )
@@ -136,25 +133,25 @@ class Scheduler(StateProvider, threading.Thread):
         self.name = name
 
         # Track experiments (simple dict for now)
-        self.experiments: Dict[str, "experiment"] = {}
+        self.experiments: dict[str, "experiment"] = {}
 
         # Exit mode activated
         self.exitmode = False
 
         # List of all jobs
-        self.jobs: Dict[str, "Job"] = {}
+        self.jobs: dict[str, "Job"] = {}
 
         # Services: (experiment_id, run_id) -> {service_id -> Service}
-        self.services: Dict[tuple[str, str], Dict[str, Service]] = {}
+        self.services: dict[tuple[str, str], dict[str, Service]] = {}
 
         # Per-(experiment, run) metadata
         self._run_infos: dict[tuple[str, str], SchedulerExperimentRunInfo] = {}
 
         # List of jobs
-        self.waitingjobs: Set[Job] = set()
+        self.waitingjobs: set[Job] = set()
 
         # Legacy listeners with thread-safe access
-        self._listeners: Set[Listener] = set()
+        self._listeners: set[Listener] = set()
         self._listeners_lock = threading.Lock()
 
         # Hooks run on each job (see scheduler/hooks.py)
@@ -171,11 +168,11 @@ class Scheduler(StateProvider, threading.Thread):
         )
 
         # Server (managed by scheduler)
-        self.server: Optional["WebUIServer"] = None
+        self.server: "WebUIServer" | None = None
 
         # Job event readers per workspace
         # Uses EventReader to watch .events/jobs/ directory
-        self._job_event_readers: Dict[Path, EventReader] = {}
+        self._job_event_readers: dict[Path, EventReader] = {}
         self._job_event_readers_lock = threading.Lock()
 
         # Track which workspaces have logging setup
@@ -187,8 +184,8 @@ class Scheduler(StateProvider, threading.Thread):
         # writes in notify_job_state (avoids huge logs when notify_job_state
         # is called repeatedly without an actual scheduler_state change, e.g.
         # on every JobProgressEvent from the job process).
-        self._last_written_scheduler_state: Dict[
-            tuple[str, str, str], tuple[str, Optional[str]]
+        self._last_written_scheduler_state: dict[
+            tuple[str, str, str], tuple[str, str | None]
         ] = {}
 
     @staticmethod
@@ -403,7 +400,7 @@ class Scheduler(StateProvider, threading.Thread):
     async def aio_getjobstate(self, job: Job):
         return job.state
 
-    def submit(self, job: Job) -> Optional[Job]:
+    def submit(self, job: Job) -> Job | None:
         if self.exitmode:
             from experimaestro.exceptions import ExperimentStopped
 
@@ -459,7 +456,7 @@ class Scheduler(StateProvider, threading.Thread):
         logger.info("Preparing job %s", job.path)
         job.prepare(overwrite=True)
 
-    async def aio_registerJob(self, job: Job) -> "tuple[Optional[Job], bool]":
+    async def aio_registerJob(self, job: Job) -> "tuple[Job | None, bool]":
         """Register a job by adding it to the list, and checks
         whether the job has already been submitted
 
@@ -609,7 +606,7 @@ class Scheduler(StateProvider, threading.Thread):
             self._job_event_readers[workspace_path] = reader
             logger.debug("Started job event reader for %s", jobs_dir)
 
-    def _stop_job_event_reader(self, workspace_path: Optional[Path] = None) -> None:
+    def _stop_job_event_reader(self, workspace_path: Path | None = None) -> None:
         """Stop watching job events
 
         Args:
@@ -1102,7 +1099,7 @@ class Scheduler(StateProvider, threading.Thread):
         # costs nothing at all.
         _validity: list = []
 
-        def output_valid() -> Optional[bool]:
+        def output_valid() -> bool | None:
             if not _validity:
                 try:
                     _validity.append(job.is_output_valid())
@@ -1312,7 +1309,7 @@ class Scheduler(StateProvider, threading.Thread):
         job.set_scheduler_state(state)
         self.notify_job_state(job)  # Notify listeners of final state
 
-    async def aio_start(self, job: Job) -> Optional[JobState]:  # noqa: C901
+    async def aio_start(self, job: Job) -> JobState | None:  # noqa: C901
         """Start a job with full job starting logic
 
         This method handles job locking, dependency acquisition, directory setup,
@@ -1640,10 +1637,10 @@ class Scheduler(StateProvider, threading.Thread):
 
     def get_experiments(
         self,
-        since: Optional[datetime] = None,  # noqa: ARG002
+        since: datetime | None = None,  # noqa: ARG002
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> List[BaseExperiment]:
+    ) -> list[BaseExperiment]:
         """Get list of all live experiments"""
         # Note: 'since' filter not applicable for live scheduler
         return list(self.experiments.values())
@@ -1653,7 +1650,7 @@ class Scheduler(StateProvider, threading.Thread):
         experiment_id: str,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> Optional[BaseExperiment]:
+    ) -> BaseExperiment | None:
         """Get a specific experiment by ID"""
         return self.experiments.get(experiment_id)
 
@@ -1662,7 +1659,7 @@ class Scheduler(StateProvider, threading.Thread):
         experiment_id: str,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> List[BaseExperiment]:
+    ) -> list[BaseExperiment]:
         """Get all runs for an experiment
 
         For a live scheduler, returns the live experiment directly.
@@ -1679,24 +1676,24 @@ class Scheduler(StateProvider, threading.Thread):
         experiment_id: str,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get the current run ID for an experiment"""
         exp = self.experiments.get(experiment_id)
         return exp.run_id if exp else None
 
     def get_jobs(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,  # noqa: ARG002 - not used in live scheduler
-        task_id: Optional[str] = None,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,  # noqa: ARG002 - not used in live scheduler
+        experiment_id: str | None = None,
+        run_id: str | None = None,  # noqa: ARG002 - not used in live scheduler
+        task_id: str | None = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,  # noqa: ARG002 - not used in live scheduler
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Query jobs with optional filters"""
-        jobs: List[BaseJob] = list(self.jobs.values())
+        jobs: list[BaseJob] = list(self.jobs.values())
 
         # Filter by experiment
         if experiment_id:
@@ -1726,20 +1723,20 @@ class Scheduler(StateProvider, threading.Thread):
         job_id: str,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> Optional[BaseJob]:
+    ) -> BaseJob | None:
         """Get a specific job"""
         return self.jobs.get(job_id)
 
     def get_all_jobs(
         self,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,  # noqa: ARG002 - not used in live scheduler
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,  # noqa: ARG002 - not used in live scheduler
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Get all jobs across all experiments"""
-        jobs: List[BaseJob] = list(self.jobs.values())
+        jobs: list[BaseJob] = list(self.jobs.values())
 
         if state:
             jobs = [j for j in jobs if j.scheduler_state.name.lower() == state.lower()]
@@ -1751,11 +1748,11 @@ class Scheduler(StateProvider, threading.Thread):
 
     def get_services(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
-    ) -> List[BaseService]:
+    ) -> list[BaseService]:
         """Get services for an experiment
 
         Services are stored in the scheduler and persist after experiments finish.
@@ -1789,7 +1786,7 @@ class Scheduler(StateProvider, threading.Thread):
         return services
 
     def _get_run_info(
-        self, experiment_id: str, run_id: Optional[str] = None
+        self, experiment_id: str, run_id: str | None = None
     ) -> SchedulerExperimentRunInfo | None:
         """Get the run info for an experiment/run, or None if not found."""
         exp = self.experiments.get(experiment_id)
@@ -1802,7 +1799,7 @@ class Scheduler(StateProvider, threading.Thread):
     def get_tags_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> dict[str, dict[str, str]]:
@@ -1812,7 +1809,7 @@ class Scheduler(StateProvider, threading.Thread):
     def get_dependencies_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> dict[str, list[str]]:
@@ -1822,7 +1819,7 @@ class Scheduler(StateProvider, threading.Thread):
     def get_experiment_job_info(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> dict[str, "ExperimentJobInformation"]:
@@ -1832,7 +1829,7 @@ class Scheduler(StateProvider, threading.Thread):
     def get_run_objects(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,  # noqa: ARG002 - live state is never stale
     ) -> list[dict]:

@@ -3,7 +3,6 @@
 __lazy_modules__ = ["filelock", "psutil"]  # PEP 810 (Python 3.15+)
 
 import subprocess
-from typing import Optional
 from pathlib import Path, WindowsPath, PosixPath
 import os
 import threading
@@ -32,7 +31,7 @@ class PsutilProcess(Process):
     def __init__(self, pid: int):
         self._process = psutil.Process(pid)
 
-    def wait(self) -> Optional[int]:
+    def wait(self) -> int | None:
         logger.debug("Waiting (psutil) for process with PID %s", self._process.pid)
         code = self._process.wait()
         logger.debug(

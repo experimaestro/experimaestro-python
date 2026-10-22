@@ -13,7 +13,8 @@ import threading
 import time
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import IO, Callable, Dict, Optional
+from typing import IO
+from collections.abc import Callable
 
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from dataclasses import asdict
@@ -73,7 +74,7 @@ class SSHStateProviderServer:
         self.workspace_path = workspace_path
         self.stdin = stdin if stdin is not None else sys.stdin.buffer
         self.stdout = stdout if stdout is not None else sys.stdout.buffer
-        self._state_provider: Optional[WorkspaceStateProvider] = None
+        self._state_provider: WorkspaceStateProvider | None = None
         self._running = False
         self._write_lock = threading.Lock()
         #: Events the client watches (all of them until it says otherwise);
@@ -81,7 +82,7 @@ class SSHStateProviderServer:
         self._event_filter = EventFilter(job_counts=True)
 
         # Map of method names to handler functions
-        self._handlers: Dict[str, Callable] = {
+        self._handlers: dict[str, Callable] = {
             RPCMethod.GET_EXPERIMENTS.value: self._handle_get_experiments,
             RPCMethod.GET_EXPERIMENT.value: self._handle_get_experiment,
             RPCMethod.GET_EXPERIMENT_RUNS.value: self._handle_get_experiment_runs,
@@ -238,7 +239,7 @@ class SSHStateProviderServer:
             self.stdout.write((response + "\n").encode("utf-8"))
             self.stdout.flush()
 
-    def _send_notification(self, method: NotificationMethod, params: Dict):
+    def _send_notification(self, method: NotificationMethod, params: dict):
         """Send a JSON-RPC notification (thread-safe)"""
         notification = create_notification(method, params)
         trace.debug(
@@ -294,7 +295,7 @@ class SSHStateProviderServer:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def _experiment_to_dict(exp, job_infos: bool = True) -> Dict:
+    def _experiment_to_dict(exp, job_infos: bool = True) -> dict:
         """Serialize experiment with job_infos for RPC transmission
 
         Without job_infos (a summary, much smaller), the number of jobs (which
@@ -312,7 +313,7 @@ class SSHStateProviderServer:
             }
         return data
 
-    def _handle_get_experiments(self, params: Dict) -> list:
+    def _handle_get_experiments(self, params: dict) -> list:
         """Handle get_experiments request"""
         since = deserialize_datetime(params.get("since"))
         experiments = self._state_provider.get_experiments(
@@ -331,7 +332,7 @@ class SSHStateProviderServer:
             results.append(data)
         return results
 
-    def _handle_get_experiment(self, params: Dict) -> Optional[Dict]:
+    def _handle_get_experiment(self, params: dict) -> dict | None:
         """Handle get_experiment request"""
         experiment_id = params.get("experiment_id")
         if not experiment_id:
@@ -344,7 +345,7 @@ class SSHStateProviderServer:
             return None
         return self._experiment_to_dict(experiment)
 
-    def _handle_get_experiment_runs(self, params: Dict) -> list:
+    def _handle_get_experiment_runs(self, params: dict) -> list:
         """Handle get_experiment_runs request"""
         experiment_id = params.get("experiment_id")
         if not experiment_id:
@@ -355,7 +356,7 @@ class SSHStateProviderServer:
         )
         return [self._experiment_to_dict(run) for run in runs]
 
-    def _handle_get_jobs(self, params: Dict) -> list:
+    def _handle_get_jobs(self, params: dict) -> list:
         """Handle get_jobs request"""
         since = deserialize_datetime(params.get("since"))
         jobs = self._state_provider.get_jobs(
@@ -369,7 +370,7 @@ class SSHStateProviderServer:
         )
         return [job.state_dict() for job in jobs]
 
-    def _handle_get_job(self, params: Dict) -> Optional[Dict]:
+    def _handle_get_job(self, params: dict) -> dict | None:
         """Handle get_job request"""
         task_id = params.get("task_id")
         job_id = params.get("job_id")
@@ -383,7 +384,7 @@ class SSHStateProviderServer:
             return None
         return job.state_dict()
 
-    def _handle_get_all_jobs(self, params: Dict) -> list:
+    def _handle_get_all_jobs(self, params: dict) -> list:
         """Handle get_all_jobs request"""
         since = deserialize_datetime(params.get("since"))
         jobs = self._state_provider.get_all_jobs(
@@ -394,17 +395,17 @@ class SSHStateProviderServer:
         )
         return [job.state_dict() for job in jobs]
 
-    def _handle_get_orphan_jobs(self, params: Dict) -> list:
+    def _handle_get_orphan_jobs(self, params: dict) -> list:
         """Handle get_orphan_jobs request"""
         jobs = self._state_provider.get_orphan_jobs(refresh=bool(params.get("refresh")))
         return [job.state_dict() for job in jobs]
 
-    def _handle_get_stray_jobs(self, params: Dict) -> list:
+    def _handle_get_stray_jobs(self, params: dict) -> list:
         """Handle get_stray_jobs request"""
         jobs = self._state_provider.get_stray_jobs(refresh=bool(params.get("refresh")))
         return [job.state_dict() for job in jobs]
 
-    def _handle_watch(self, params: Dict) -> None:
+    def _handle_watch(self, params: dict) -> None:
         """Handle watch request: the experiments whose events the client needs
 
         ``experiments`` is the list of watched experiment IDs, or null for all
@@ -419,7 +420,7 @@ class SSHStateProviderServer:
         ]
         self._event_filter.watch(experiments, jobs)
 
-    def _handle_get_services(self, params: Dict) -> list:
+    def _handle_get_services(self, params: dict) -> list:
         """Handle get_services request
 
         Returns serialized service data using full_state_dict().
@@ -431,7 +432,7 @@ class SSHStateProviderServer:
         )
         return [svc.full_state_dict() for svc in services]
 
-    def _handle_get_tags_map(self, params: Dict) -> Dict[str, Dict[str, str]]:
+    def _handle_get_tags_map(self, params: dict) -> dict[str, dict[str, str]]:
         """Handle get_tags_map request
 
         Returns tags map for jobs in an experiment/run.
@@ -446,7 +447,7 @@ class SSHStateProviderServer:
             refresh=bool(params.get("refresh")),
         )
 
-    def _handle_get_dependencies_map(self, params: Dict) -> dict[str, list[str]]:
+    def _handle_get_dependencies_map(self, params: dict) -> dict[str, list[str]]:
         """Handle get_dependencies_map request
 
         Returns dependencies map for jobs in an experiment/run.
@@ -461,7 +462,7 @@ class SSHStateProviderServer:
             refresh=bool(params.get("refresh")),
         )
 
-    def _handle_get_run_objects(self, params: Dict) -> list[dict]:
+    def _handle_get_run_objects(self, params: dict) -> list[dict]:
         """Handle get_run_objects request (serialized objects of a run)"""
         experiment_id = params.get("experiment_id")
         if not experiment_id:
@@ -473,7 +474,7 @@ class SSHStateProviderServer:
             refresh=bool(params.get("refresh")),
         )
 
-    def _handle_kill_job(self, params: Dict) -> Dict:
+    def _handle_kill_job(self, params: dict) -> dict:
         """Handle kill_job request"""
         task_id = params.get("task_id")
         job_id = params.get("job_id")
@@ -493,7 +494,7 @@ class SSHStateProviderServer:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _handle_clean_job(self, params: Dict) -> Dict:
+    def _handle_clean_job(self, params: dict) -> dict:
         """Handle clean_job request"""
         task_id = params.get("task_id")
         job_id = params.get("job_id")
@@ -513,7 +514,7 @@ class SSHStateProviderServer:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _handle_get_sync_info(self, params: Dict) -> Dict:
+    def _handle_get_sync_info(self, params: dict) -> dict:
         """Handle get_sync_info request - includes protocol version for compatibility check"""
         return {
             "protocol_version": PROTOCOL_VERSION,
@@ -528,7 +529,7 @@ class SSHStateProviderServer:
             ),
         }
 
-    def _handle_get_process_info(self, params: Dict) -> Optional[Dict]:
+    def _handle_get_process_info(self, params: dict) -> dict | None:
         """Handle get_process_info request"""
         task_id = params.get("task_id")
         job_id = params.get("job_id")
@@ -556,7 +557,7 @@ class SSHStateProviderServer:
             "num_threads": pinfo.num_threads,
         }
 
-    def _handle_execute_warning_action(self, params: Dict) -> None:
+    def _handle_execute_warning_action(self, params: dict) -> None:
         """Handle execute_warning_action request"""
         warning_key = params.get("warning_key")
         action_key = params.get("action_key")
@@ -575,7 +576,7 @@ class SSHStateProviderServer:
         )
         # No return value - success is indicated by not raising
 
-    def _handle_get_unresolved_warnings(self, params: Dict) -> Dict:
+    def _handle_get_unresolved_warnings(self, params: dict) -> dict:
         """Handle get_unresolved_warnings request"""
         warnings = self._state_provider.get_unresolved_warnings()
 
@@ -596,7 +597,7 @@ class SSHStateProviderServer:
 
         return {"warnings": warnings_data}
 
-    def _handle_delete_job_safely(self, params: Dict) -> Dict:
+    def _handle_delete_job_safely(self, params: dict) -> dict:
         """Handle delete_job_safely request"""
         task_id = params.get("task_id")
         job_id = params.get("job_id")
@@ -619,7 +620,7 @@ class SSHStateProviderServer:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    def _handle_delete_experiment(self, params: Dict) -> Dict:
+    def _handle_delete_experiment(self, params: dict) -> dict:
         """Handle delete_experiment request"""
         experiment_id = params.get("experiment_id")
         delete_jobs = params.get("delete_jobs", False)

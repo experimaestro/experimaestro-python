@@ -16,7 +16,8 @@ import logging
 import os
 import socket
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from experimaestro.scheduler import job_operations
 from experimaestro.utils.atomic import atomic_write_json

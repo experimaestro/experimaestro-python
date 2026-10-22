@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Union
 from experimaestro.core.context import SerializationContext, SerializedPath
 from experimaestro.core.objects import ConfigInformation, ConfigMixin
 import os
@@ -31,7 +30,7 @@ class ExperimaestroHFHub(ModelHubMixin):
     def __init__(self, config: ConfigMixin):
         self.config = config
 
-    def _save_pretrained(self, save_directory: Union[str, Path]):
+    def _save_pretrained(self, save_directory: str | Path):
         save_directory = Path(save_directory)
         assert self.config is not None
         context = self.serialization_context_class(save_directory=save_directory)
@@ -59,7 +58,7 @@ class ExperimaestroHFHub(ModelHubMixin):
         if os.path.isdir(model_id):
             save_directory = Path(model_id)
 
-            def data_loader(path: Union[Path, str, SerializedPath]):
+            def data_loader(path: Path | str | SerializedPath):
                 if isinstance(path, SerializedPath):
                     path = path.path
                 else:
@@ -68,7 +67,7 @@ class ExperimaestroHFHub(ModelHubMixin):
 
         else:
 
-            def data_loader(s_path: Union[Path, str, SerializedPath]):
+            def data_loader(s_path: Path | str | SerializedPath):
                 if not isinstance(s_path, SerializedPath):
                     s_path = SerializedPath(Path(s_path), False)
                 path = s_path.path

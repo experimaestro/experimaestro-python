@@ -1,6 +1,6 @@
 # flake8: noqa: T201
 import subprocess
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 import click
 from pathlib import Path
 from termcolor import colored, cprint
@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 @click.pass_obj
 def jobs(
     cfg: RunConfig,
-    workdir: Optional[Path],
-    workspace: Optional[str],
+    workdir: Path | None,
+    workspace: str | None,
 ):
     """Jobs: list, kill, clean, inspect, logs
 

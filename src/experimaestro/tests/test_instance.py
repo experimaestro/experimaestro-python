@@ -1,5 +1,3 @@
-from typing import Optional
-
 import pytest
 
 from experimaestro import field, Param, Config
@@ -54,7 +52,7 @@ class LoadModel(SerializationLWTask):
 
 class ConfigWithOptional(Config):
     x: Param[int] = field(default=1, ignore_default=True)
-    y: Param[Optional[int]]
+    y: Param[int | None]
 
 
 def test_instance_optional():

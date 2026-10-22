@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 import sys
-from typing import Any, Optional, Union
+from typing import Any
 
 from experimaestro.utils.remote import (
     clean_job_target,
@@ -23,8 +23,8 @@ logger = logging.getLogger("experimaestro")
 
 
 def resolve_workspace(
-    workspace: Optional[str] = None,
-) -> Union[Path, Any]:
+    workspace: str | None = None,
+) -> Path | Any:
     """Resolve workspace directory from an explicit name/path or Experimaestro default.
 
     Resolution order:
@@ -141,7 +141,7 @@ def find_workspace_file(
     ws_or_path: Any,
     target: str,
     filename: str = "params.json",
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
 ) -> Path:
     """Find or fetch a file from either a local or remote Experimaestro workspace.
 
@@ -169,7 +169,7 @@ def find_workspace_file(
     return find_local_workspace_file(ws_dir, target, filename=filename)
 
 
-def _find_params_in_path(p: Path) -> Optional[Path]:
+def _find_params_in_path(p: Path) -> Path | None:
     """Check if a path points directly to, or contains, a parameters JSON file.
 
     Checks if `p` is a file directly, or if it is a directory containing
@@ -198,9 +198,7 @@ def _find_params_in_path(p: Path) -> Optional[Path]:
     return None
 
 
-def find_params_file(
-    target: Optional[str] = None, workspace: Optional[str] = None
-) -> Path:
+def find_params_file(target: str | None = None, workspace: str | None = None) -> Path:
     """Find and resolve the path to a params.json or experimaestro.json file.
 
     Search resolution order:

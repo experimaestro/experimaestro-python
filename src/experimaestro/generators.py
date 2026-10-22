@@ -1,7 +1,8 @@
 import inspect
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Callable, Union, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
 from experimaestro.core.objects import ConfigWalkContext, Config
 
@@ -54,7 +55,7 @@ class PathGenerator(Generator):
 
     def __init__(
         self,
-        path: Union[str, Path, Callable[[ConfigWalkContext, Config], Path]] = "",
+        path: str | Path | Callable[[ConfigWalkContext, Config], Path] = "",
         *,
         partial: "Partial" = None,
     ):
@@ -81,7 +82,7 @@ class PathGenerator(Generator):
 
 
 class pathgenerator(TypeAnnotation):
-    def __init__(self, value: Union[str, Callable[[ConfigWalkContext, Config], str]]):
+    def __init__(self, value: str | Callable[[ConfigWalkContext, Config], str]):
         self.value = value
 
     def annotate(self, options: ArgumentOptions):

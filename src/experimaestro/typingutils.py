@@ -57,7 +57,7 @@ def get_list_component(typehint):
     Uses get_origin so both typing.List[...] and the builtin list[...] alias
     are detected.
     """
-    if get_origin(typehint) in (typing.List, list):
+    if get_origin(typehint) in (list, list):
         args = get_args(typehint)
         if len(args) == 1:
             return args[0]
@@ -72,7 +72,7 @@ get_list = get_list_component
 
 def get_set(typehint):
     """Returns the set component (or None if not a set)."""
-    if get_origin(typehint) in (typing.Set, set):
+    if get_origin(typehint) in (set, set):
         args = get_args(typehint)
         if len(args) == 1:
             return args[0]
@@ -96,7 +96,7 @@ def get_type(typehint):
 
 
 def get_dict(typehint):
-    if get_origin(typehint) in (typing.Dict, dict):
+    if get_origin(typehint) in (dict, dict):
         args = get_args(typehint)
         if len(args) == 2:
             return args
@@ -112,7 +112,7 @@ def get_tuple(typehint):
     """
     # Use get_origin so both typing.Tuple[...] (typing._GenericAlias) and the
     # builtin tuple[...] (types.GenericAlias) are detected.
-    if get_origin(typehint) in (typing.Tuple, tuple):
+    if get_origin(typehint) in (tuple, tuple):
         args = get_args(typehint)
         if not args:
             return None

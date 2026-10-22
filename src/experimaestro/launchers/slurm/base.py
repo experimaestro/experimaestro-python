@@ -5,10 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import (
     Any,
-    Dict,
-    List,
-    Optional,
-    Tuple,
     TYPE_CHECKING,
     get_type_hints,
 )
@@ -41,7 +37,7 @@ logger = logging.getLogger("xpm.slurm")
 
 # Cached job end time (absolute timestamp).
 # Only used when a task is running within a SLURM job.
-_slurm_job_end_time: Optional[float] = None
+_slurm_job_end_time: float | None = None
 
 
 class SlurmLauncherInformation:
@@ -50,7 +46,7 @@ class SlurmLauncherInformation:
     def __init__(self, binpath: str = "/usr/bin"):
         self.binpath = Path(binpath)
 
-    def remaining_time(self) -> Optional[float]:
+    def remaining_time(self) -> float | None:
         """Returns the remaining time in seconds before the SLURM job times out.
 
         Uses the SLURM_JOB_ID environment variable to query squeue for the
@@ -83,7 +79,7 @@ class SlurmLauncherInformation:
         _slurm_job_end_time = time.time() + remaining_seconds
         return remaining_seconds
 
-    def _query_remaining_time(self, job_id: str) -> Optional[float]:
+    def _query_remaining_time(self, job_id: str) -> float | None:
         """Query SLURM for remaining time of a job."""
         import subprocess
 
@@ -125,7 +121,7 @@ class SlurmLauncherInformation:
             return None
 
     @staticmethod
-    def _parse_slurm_time(time_str: str) -> Optional[float]:
+    def _parse_slurm_time(time_str: str) -> float | None:
         """Parse SLURM time format to seconds.
 
         SLURM time format can be:
@@ -233,14 +229,14 @@ class SlurmJobState:
 class SlurmProcessWatcher(threading.Thread):
     """Process that calls sacct at regular interval to check job status"""
 
-    WATCHERS: Dict[Tuple[Tuple[str, Any]], "SlurmProcessWatcher"] = {}
+    WATCHERS: dict[tuple[tuple[str, Any]], "SlurmProcessWatcher"] = {}
     WATCHERS_LOCK = threading.Lock()
 
     def __init__(self, launcher: "SlurmLauncher"):
         super().__init__(daemon=True)
         self.launcher = launcher
         self.count = 0  # Will be incremented to 1 by first get() call
-        self.jobs: Dict[str, SlurmJobState] = {}
+        self.jobs: dict[str, SlurmJobState] = {}
 
         self.cv = ThreadingCondition()
         self.fetched_event = threading.Event()
@@ -248,18 +244,18 @@ class SlurmProcessWatcher(threading.Thread):
         self.last_check_time: datetime | None = None
 
         # Async waiters for job completion: jobid -> list of (asyncio.Future, event_loop)
-        self.async_waiters: Dict[
-            str, List[Tuple[asyncio.Future, asyncio.AbstractEventLoop]]
+        self.async_waiters: dict[
+            str, list[tuple[asyncio.Future, asyncio.AbstractEventLoop]]
         ] = {}
         # Async waiters for state change: jobid -> list of (asyncio.Future, event_loop)
-        self.async_state_waiters: Dict[
-            str, List[Tuple[asyncio.Future, asyncio.AbstractEventLoop]]
+        self.async_state_waiters: dict[
+            str, list[tuple[asyncio.Future, asyncio.AbstractEventLoop]]
         ] = {}
         self.async_waiters_lock = threading.Lock()
 
         # Async waiters for first fetch: list of (asyncio.Future, event_loop)
-        self.async_fetched_waiters: List[
-            Tuple[asyncio.Future, asyncio.AbstractEventLoop]
+        self.async_fetched_waiters: list[
+            tuple[asyncio.Future, asyncio.AbstractEventLoop]
         ] = []
         # Note: start() is called by get() after incrementing count
 
@@ -322,7 +318,7 @@ class SlurmProcessWatcher(threading.Thread):
         with self.updating_jobs:
             return self.jobs.get(jobid)
 
-    async def aio_getjob(self, jobid) -> Optional[SlurmJobState]:
+    async def aio_getjob(self, jobid) -> SlurmJobState | None:
         """Get job state from the watcher (async, non-blocking).
 
         Waits asynchronously for the first fetch if needed, then returns
@@ -568,8 +564,8 @@ class BatchSlurmProcess(Process):
     ):
         self.launcher = launcher
         self.jobid = jobid
-        self._last_state: Optional[SlurmJobState] = None
-        self._watcher: Optional[SlurmProcessWatcher] = None
+        self._last_state: SlurmJobState | None = None
+        self._watcher: SlurmProcessWatcher | None = None
 
         # Optionally acquire a watcher reference to keep it alive
         if hold_watcher:
@@ -712,7 +708,7 @@ class BatchSlurmProcess(Process):
         return {"type": "slurm", "pid": self.jobid, "options": self.launcher.key}
 
     @classmethod
-    def fromspec(cls, connector: Connector, spec: Dict[str, Any]):
+    def fromspec(cls, connector: Connector, spec: dict[str, Any]):
         options = {k: v for k, v in spec.get("options", ())}
         launcher = SlurmLauncher(connector=connector, **options)
 
@@ -733,7 +729,7 @@ class BatchSlurmProcess(Process):
         return None
 
 
-def addstream(command: List[str], option: str, redirect: Redirect):
+def addstream(command: list[str], option: str, redirect: Redirect):
     if redirect.type == RedirectType.FILE:
         command.extend([option, redirect.path])
     elif redirect.type == RedirectType.INHERIT:
@@ -806,50 +802,50 @@ class SlurmProcessBuilder(ProcessBuilder):
 @dataclass
 class SlurmOptions:
     # Options
-    nodes: Optional[int] = 1
+    nodes: int | None = 1
     """Number of requested nodes"""
 
-    time: Optional[str] = None
+    time: str | None = None
     """Requested time"""
 
-    account: Optional[str] = None
+    account: str | None = None
     """The account for launching the job"""
 
-    qos: Optional[str] = None
+    qos: str | None = None
     """The requested Quality of Service"""
 
-    partition: Optional[str] = None
+    partition: str | None = None
     """The requested partition"""
 
-    constraint: Optional[str] = None
+    constraint: str | None = None
     """Logic expression on node features (as defined by the administator)"""
 
-    mem: Optional[str] = None
+    mem: str | None = None
     """Requested memory on the node (in megabytes by default)"""
 
-    exclude: Optional[str] = None
+    exclude: str | None = None
     """List of hosts to exclude"""
 
-    mem_per_gpu: Optional[str] = None
+    mem_per_gpu: str | None = None
     """Requested memory per allocated GPU (size with units: K, M, G, or T)"""
 
-    cpus_per_task: Optional[str] = None
+    cpus_per_task: str | None = None
     """Number of cpus requested per task"""
 
-    nodelist: Optional[str] = None
+    nodelist: str | None = None
     """Request a specific list of hosts"""
 
-    ntasks_per_node: Optional[int] = None
+    ntasks_per_node: int | None = None
     """Number of tasks to run on each node"""
 
     # GPU-related
-    gpus: Optional[int] = None
+    gpus: int | None = None
     """Number of GPUs"""
 
-    gpus_per_node: Optional[int] = None
+    gpus_per_node: int | None = None
     """Number of GPUs per node"""
 
-    def args(self) -> List[str]:
+    def args(self) -> list[str]:
         """Returns the corresponding options"""
         options = []
         for key in get_type_hints(SlurmOptions).keys():
@@ -899,7 +895,7 @@ class SlurmLauncher(Launcher):
         options: SlurmOptions = None,
         interval: float = 60,
         main=None,
-        launcherenv: Dict[str, str] = None,
+        launcherenv: dict[str, str] = None,
         binpath="/usr/bin",
     ):
         """

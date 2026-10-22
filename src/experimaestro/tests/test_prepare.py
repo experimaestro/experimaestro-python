@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 
@@ -25,10 +24,10 @@ pytestmark = pytest.mark.tasks
 # --- Test-state shared across processes within one test ---------------------
 
 #: Module-level call counter for FakePrep.prepare(), keyed by ``name``.
-PREP_CALLS: Dict[str, int] = {}
+PREP_CALLS: dict[str, int] = {}
 
 #: Module-level call timestamps for concurrency tests.
-PREP_TIMES: Dict[str, tuple[float, float]] = {}
+PREP_TIMES: dict[str, tuple[float, float]] = {}
 
 #: Lock to protect counter mutations across threads.
 _PREP_LOCK = threading.Lock()
@@ -137,7 +136,7 @@ class OuterTaskWithPrepAndTask(Task):
 # --- Helpers ----------------------------------------------------------------
 
 
-def _prepare_deps(task: Task) -> List[PrepareDependency]:
+def _prepare_deps(task: Task) -> list[PrepareDependency]:
     return [
         dep
         for dep in task.__xpm__.job.dependencies
@@ -145,7 +144,7 @@ def _prepare_deps(task: Task) -> List[PrepareDependency]:
     ]
 
 
-def _job_deps(task: Task) -> List[JobDependency]:
+def _job_deps(task: Task) -> list[JobDependency]:
     return [
         dep for dep in task.__xpm__.job.dependencies if isinstance(dep, JobDependency)
     ]

@@ -5,7 +5,7 @@ from inspect import Parameter, Signature
 from pathlib import Path
 from sphinx.util.fileutil import copy_asset
 import experimaestro
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from docutils import nodes
 from sphinx.application import Sphinx
 from sphinx import addnodes
@@ -45,7 +45,7 @@ class XPMConfigDirective(PyClasslike):
         }
     )
 
-    def get_signature_prefix(self, sig: str) -> List[nodes.Node]:
+    def get_signature_prefix(self, sig: str) -> list[nodes.Node]:
         """May return a prefix to put before the object name in the
         signature.
         """
@@ -65,7 +65,7 @@ class XPMParamDirective(PyAttribute):
         }
     )
 
-    def handle_signature(self, sig: str, signode: desc_signature) -> Tuple[str, str]:
+    def handle_signature(self, sig: str, signode: desc_signature) -> tuple[str, str]:
         fullname, prefix = super().handle_signature(sig, signode)
 
         if self.options.get("constant") is not None:
@@ -104,7 +104,7 @@ class ConfigDocumenter(ClassDocumenter):
 
     def _get_signature(
         self,
-    ) -> Tuple[Optional[Any], Optional[str], Optional[Signature]]:
+    ) -> tuple[Any | None, str | None, Signature | None]:
         r = super()._get_signature()
 
         xpminfo = getxpminfo(self.object)
@@ -192,7 +192,7 @@ class ConfigDocumenter(ClassDocumenter):
             # annotations = _parse_annotation(str(xpminfo.returntype), self.env)
 
     def add_content(
-        self, more_content: Optional[StringList], no_docstring: bool = False
+        self, more_content: StringList | None, no_docstring: bool = False
     ) -> None:
         xpminfo = getxpminfo(self.object)
         source_name = self.get_sourcename()
@@ -226,7 +226,7 @@ RE_ATTRIBUTE = re.compile(r"""^.. attribute:: (.*)""")
 
 
 def _process_docstring(
-    app: Sphinx, what: str, name: str, obj: Any, options: Any, lines: List[str]
+    app: Sphinx, what: str, name: str, obj: Any, options: Any, lines: list[str]
 ) -> None:
     """Removes already documented (by XPM) attributes from docstring
 
@@ -262,7 +262,7 @@ def copy_asset_files(app, exc):
             copy_asset(str(path.absolute()), os.path.join(app.outdir, "_static"))
 
 
-def setup(app: Sphinx) -> Dict[str, Any]:
+def setup(app: Sphinx) -> dict[str, Any]:
     """Setup experimaestro for Sphinx documentation"""
 
     # Adds our stylesheet

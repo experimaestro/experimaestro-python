@@ -5,7 +5,7 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import List, Optional, Union, Callable, Dict
+from collections.abc import Callable
 import itertools
 from experimaestro.core.context import SerializationContext
 from experimaestro.scheduler.workspace import RunMode
@@ -26,8 +26,8 @@ class NamedPipeRedirections:
     """List of named pipes"""
 
     def __init__(self):
-        self.outputRedirections: List[Path] = []
-        self.errorRedirections: List[Path] = []
+        self.outputRedirections: list[Path] = []
+        self.errorRedirections: list[Path] = []
 
     def redirections(self):
         return itertools.chain(self.outputRedirections, self.errorRedirections)
@@ -68,8 +68,8 @@ class CommandContext(SerializationContext):
         self.path = path
         self.name = name
         self.config = config
-        self.namedPipeRedirectionsMap: Dict["CommandPart", NamedPipeRedirections] = {}
-        self.auxiliary: Dict[str, int] = {}
+        self.namedPipeRedirectionsMap: dict["CommandPart", NamedPipeRedirections] = {}
+        self.auxiliary: dict[str, int] = {}
 
         # Anchors used by ``_outputjsonvalue`` to encode paths relatively
         self.job_path = path
@@ -109,7 +109,7 @@ class CommandContext(SerializationContext):
 
 
 class CommandPath(AbstractCommandComponent):
-    def __init__(self, path: Union[Path, str]):
+    def __init__(self, path: Path | str):
         super().__init__()
         self.path = Path(path)
 
@@ -236,7 +236,7 @@ class CommandLineJob(Job):
         self,
         commandline: CommandLine,
         parameters,
-        workspace: Optional[Workspace] = None,
+        workspace: Workspace | None = None,
         launcher=None,
         run_mode: RunMode = None,
         max_retries=None,

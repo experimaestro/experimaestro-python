@@ -1,4 +1,3 @@
-from typing import List, Optional
 from experimaestro.experiments.grid import GridSearch, GenericParams
 from experimaestro.experiments.configuration import ConfigurationBase, configuration
 from experimaestro.utils.config import validate_attrs
@@ -13,8 +12,8 @@ class SubConfig:
 @configuration()
 class MainConfig(ConfigurationBase):
     lr: GridSearch[float] = 0.01
-    tags: Optional[List[str]] = None
-    sub: Optional[SubConfig] = None
+    tags: list[str] | None = None
+    sub: SubConfig | None = None
 
 
 def test_validate_attrs_grid_search():
@@ -137,14 +136,14 @@ def test_validate_attrs_with_config_dicts():
 
 def test_validate_attrs_with_grid_search_annotation():
     import attr
-    from typing import Dict, Any
+    from typing import Any
     from experimaestro.experiments.grid import generate_grid
 
     @configuration()
     class CustomConfig(ConfigurationBase):
-        grid_search: Dict[str, GridSearch[Any]] = attr.field(factory=dict)
-        lr: Optional[float] = 0.01
-        batch_size: Optional[int] = 32
+        grid_search: dict[str, GridSearch[Any]] = attr.field(factory=dict)
+        lr: float | None = 0.01
+        batch_size: int | None = 32
 
     data = {
         "id": "test",

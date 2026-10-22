@@ -4,7 +4,6 @@ from functools import cached_property
 import logging
 import warnings
 from pathlib import Path
-from typing import List, Optional
 from experimaestro.locking import (
     create_async_file_lock,
     create_file_lock,
@@ -75,7 +74,7 @@ class Workspace:
         self.workspace_settings = workspace_settings
 
         path = self.workspace_settings.path
-        self.notificationURL: Optional[str] = None
+        self.notificationURL: str | None = None
         if isinstance(path, Path):
             path = path.absolute()
         else:
@@ -94,7 +93,7 @@ class Workspace:
         self._ref_count = 0
 
         # Scheduler run ID (set when first used)
-        self._scheduler_run_id: Optional[str] = None
+        self._scheduler_run_id: str | None = None
 
         # Mode of the lock files created within this workspace: registering it
         # makes every lock below the workspace path use it, even when created
@@ -152,13 +151,13 @@ class Workspace:
             Workspace.CURRENT = self.old_workspace
 
     @cached_property
-    def folders(self) -> List[FolderSettings]:
+    def folders(self) -> list[FolderSettings]:
         """Auxiliary folders attached to this workspace.
 
         Includes both the new ``folders`` setting and the deprecated
         ``alt_workspaces`` field (treated as ``mode=use``). **Beta**.
         """
-        resolved: List[FolderSettings] = []
+        resolved: list[FolderSettings] = []
 
         # Deprecated alt_workspaces -> FolderMode.USE
         if self.workspace_settings.alt_workspaces:

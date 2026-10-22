@@ -7,7 +7,7 @@ action asks for a field it doesn't yet have, we raise :class:`ActionInputRequire
 carrying the field spec so the frontend can prompt for it and re-submit.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from experimaestro.actions import Interaction
 
@@ -15,7 +15,7 @@ from experimaestro.actions import Interaction
 class ActionInputRequired(Exception):
     """Raised when an action needs an input the frontend hasn't provided yet."""
 
-    def __init__(self, field: Dict[str, Any]):
+    def __init__(self, field: dict[str, Any]):
         super().__init__(f"input required: {field.get('key')}")
         self.field = field
 
@@ -27,10 +27,10 @@ class WebInteraction(Interaction):
     raises :class:`ActionInputRequired` for the first missing field.
     """
 
-    def __init__(self, prefill: Optional[Dict[str, str]] = None):
+    def __init__(self, prefill: dict[str, str] | None = None):
         self._prefill = prefill or {}
 
-    def choice(self, key: str, label: str, choices: List[str]) -> str:
+    def choice(self, key: str, label: str, choices: list[str]) -> str:
         if key in self._prefill:
             value = self._prefill[key]
             if value in choices:

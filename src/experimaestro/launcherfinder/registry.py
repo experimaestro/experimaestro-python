@@ -3,7 +3,7 @@
 __lazy_modules__ = ["yaml", "pydantic"]  # PEP 810 (Python 3.15+)
 
 from contextlib import contextmanager
-from typing import ClassVar, Dict, Optional, Set, Type, Union
+from typing import ClassVar, Optional
 
 from pathlib import Path
 import typing
@@ -23,11 +23,11 @@ class LauncherNotFoundError(Exception):
     pass
 
 
-Connectors = Dict[str, Dict[str, ConnectorConfiguration]]
-Tokens = Dict[str, Dict[str, TokenConfiguration]]
+Connectors = dict[str, dict[str, ConnectorConfiguration]]
+Tokens = dict[str, dict[str, TokenConfiguration]]
 
 
-def load_yaml(schema_map: Dict[str, Type], path: Path):
+def load_yaml(schema_map: dict[str, type], path: Path):
     if not path.is_file():
         return {}
 
@@ -56,8 +56,8 @@ def ensure_enter(fp):
 
 
 class LauncherRegistry:
-    INSTANCES: ClassVar[Dict[Path, "LauncherRegistry"]] = {}
-    CURRENT_CONFIG_DIR: ClassVar[Optional[Path]] = None
+    INSTANCES: ClassVar[dict[Path, "LauncherRegistry"]] = {}
+    CURRENT_CONFIG_DIR: ClassVar[Path | None] = None
 
     @staticmethod
     def instance():
@@ -81,8 +81,8 @@ class LauncherRegistry:
     def __init__(self, basepath: Path):
         self.basepath = basepath
         self.launchers_py = basepath / "launchers.py"
-        self.connectors_schema: Dict[str, Type] = {}
-        self.tokens_schema: Dict[str, Type] = {}
+        self.connectors_schema: dict[str, type] = {}
+        self.tokens_schema: dict[str, type] = {}
         self.find_launcher_fn = None
 
         # Use entry points for connectors and launchers
@@ -115,10 +115,10 @@ class LauncherRegistry:
         )
         self.tokens = load_yaml(self.tokens_schema, basepath / "tokens.yaml")
 
-    def register_connector(self, identifier: str, cls: Type):
+    def register_connector(self, identifier: str, cls: type):
         self.connectors_schema[identifier] = cls
 
-    def register_token(self, identifier: str, cls: Type):
+    def register_token(self, identifier: str, cls: type):
         self.tokens_schema[identifier] = cls
 
     def getToken(self, identifier: str) -> "Token":
@@ -141,7 +141,7 @@ class LauncherRegistry:
         raise AssertionError(f"No connector with identifier {identifier}")
 
     def find(
-        self, *input_specs: Union[HostRequirement, str], tags: Set[str] = set()
+        self, *input_specs: HostRequirement | str, tags: set[str] = set()
     ) -> Optional["Launcher"]:
         """ "
         Arguments:
@@ -187,9 +187,7 @@ class LauncherRegistry:
         return None
 
 
-def find_launcher(
-    *specs: Union[HostRequirement, str], tags: Set[str] = set()
-) -> "Launcher":
+def find_launcher(*specs: HostRequirement | str, tags: set[str] = set()) -> "Launcher":
     """Find a launcher matching a given specification"""
     registry = LauncherRegistry.instance()
     launcher = registry.find(*specs, tags=tags)

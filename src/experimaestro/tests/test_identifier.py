@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import pytest
 
@@ -230,7 +229,7 @@ def test_identifier_dict():
         x: Param[int]
 
     class A(Config):
-        bs: Param[Dict[str, B]]
+        bs: Param[dict[str, B]]
 
     assert_equal(A.C(bs={"b1": B.C(x=1)}), A.C(bs={"b1": B.C(x=1)}))
     assert_equal(
@@ -297,7 +296,7 @@ def test_identifier_addnone():
 
     class A_with_b(Config):
         __xpmid__ = "defaultnone"
-        b: Param[Optional[B]] = None
+        b: Param[B | None] = None
 
     class A(Config):
         __xpmid__ = "defaultnone"
@@ -379,10 +378,10 @@ def test_identifier_meta():
         a: Meta[MetaA]
 
     class ArrayConfig(Config):
-        array: Param[List[MetaA]]
+        array: Param[list[MetaA]]
 
     class DictConfig(Config):
-        params: Param[Dict[str, MetaA]]
+        params: Param[dict[str, MetaA]]
 
     # As meta
     assert_notequal(B.C(a=MetaA.C(x=1)), B.C(a=MetaA.C(x=2)))
@@ -414,7 +413,7 @@ def test_identifier_meta():
 
 def test_identifier_meta_default_dict():
     class DictConfig(Config):
-        params: Param[Dict[str, MetaA]] = field(default={}, ignore_default=True)
+        params: Param[dict[str, MetaA]] = field(default={}, ignore_default=True)
 
     assert_equal(
         DictConfig.C(params={}),
@@ -430,7 +429,7 @@ def test_identifier_meta_default_dict():
 
 def test_identifier_meta_default_array():
     class ArrayConfigWithDefault(Config):
-        array: Param[List[MetaA]] = field(default=[], ignore_default=True)
+        array: Param[list[MetaA]] = field(default=[], ignore_default=True)
 
     # Array (with default) with mixed
     assert_equal(

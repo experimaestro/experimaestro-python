@@ -1,4 +1,3 @@
-from typing import Dict
 from pathlib import Path
 import logging
 
@@ -53,7 +52,7 @@ def test_inneroutput():
 
     class MyTask(Task):
         mainoutput: Param[Output]
-        outputs: Param[Dict[str, Output]]
+        outputs: Param[dict[str, Output]]
 
     class Evaluate(Task):
         task: Param[MyTask]

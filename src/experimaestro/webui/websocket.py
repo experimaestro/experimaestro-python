@@ -11,7 +11,7 @@ methods, then transformed into the frontend (camelCase) format.
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from fastapi import WebSocket
 
@@ -44,7 +44,7 @@ _TOAST_SEVERITY = {"info": "success", "warning": "warning", "error": "danger"}
 # =============================================================================
 
 
-def serialize_progress(progress: List) -> List[Dict[str, Any]]:
+def serialize_progress(progress: list) -> list[dict[str, Any]]:
     """Convert progress list to JSON-serializable format.
 
     Handles both LevelInformation objects and plain dicts (state_dict() already
@@ -65,7 +65,7 @@ def serialize_progress(progress: List) -> List[Dict[str, Any]]:
     return result
 
 
-def _carbon_to_frontend(carbon: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _carbon_to_frontend(carbon: dict[str, Any] | None) -> dict[str, Any] | None:
     """Map a carbon_metrics dict (from state_dict()) to the frontend format."""
     if not carbon:
         return None
@@ -81,7 +81,7 @@ def _carbon_to_frontend(carbon: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     }
 
 
-def _process_to_frontend(process: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _process_to_frontend(process: dict[str, Any] | None) -> dict[str, Any] | None:
     """Map a process dict (from state_dict()/get_process_info) to frontend format."""
     if not process:
         return None
@@ -95,7 +95,7 @@ def _process_to_frontend(process: Optional[Dict[str, Any]]) -> Optional[Dict[str
     }
 
 
-def _job_dict_to_frontend(d: Dict[str, Any]) -> Dict[str, Any]:
+def _job_dict_to_frontend(d: dict[str, Any]) -> dict[str, Any]:
     """Transform a job ``state_dict()`` into the frontend (camelCase) format.
 
     state_dict() schema (snake_case):
@@ -128,13 +128,13 @@ def _job_dict_to_frontend(d: Dict[str, Any]) -> Dict[str, Any]:
 
 def serialize_job(
     job: BaseJob,
-    tags: List = None,
-    depends_on: List = None,
-    experiment_ids: List = None,
+    tags: list = None,
+    depends_on: list = None,
+    experiment_ids: list = None,
     submitted: str = None,
     process_info: Any = None,
     experiment: BaseExperiment | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Serialize a job using ``state_dict()`` and transform to frontend format.
 
     Args:
@@ -185,7 +185,7 @@ def serialize_job_update(
     job: BaseJob,
     process_info: Any = None,
     experiment: BaseExperiment | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Serialize the execution state of a job, for ``job.update`` messages
 
     Experiment-specific fields (tags, dependencies, experiments, submit time)
@@ -198,7 +198,7 @@ def serialize_job_update(
     return payload
 
 
-def serialize_live_job(job: Job) -> Dict[str, Any]:
+def serialize_live_job(job: Job) -> dict[str, Any]:
     """Serialize a live Job from scheduler with full metadata"""
     # Get experiment IDs (must match serialize_experiment's experiment_id, which
     # is exp.experiment_id — NOT workdir.name, which is the run_id).
@@ -222,7 +222,7 @@ def serialize_live_job(job: Job) -> Dict[str, Any]:
     )
 
 
-def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
+def serialize_experiment(exp: BaseExperiment) -> dict[str, Any]:
     """Serialize an experiment using ``state_dict()`` plus aggregate counts."""
     d = exp.state_dict()
 
@@ -258,7 +258,7 @@ def serialize_experiment(exp: BaseExperiment) -> Dict[str, Any]:
     }
 
 
-def serialize_service(service: BaseService) -> Dict[str, Any]:
+def serialize_service(service: BaseService) -> dict[str, Any]:
     """Serialize a service using ``full_state_dict()`` to frontend format."""
     d = service.full_state_dict()
     return {
@@ -282,7 +282,7 @@ def _safe_attr(obj: Any, name: str) -> Any:
         return None
 
 
-def serialize_warning(event: Any) -> Dict[str, Any]:
+def serialize_warning(event: Any) -> dict[str, Any]:
     """Serialize a WarningEvent to the frontend format."""
     return {
         "warningKey": getattr(event, "warning_key", ""),
@@ -296,7 +296,7 @@ def serialize_warning(event: Any) -> Dict[str, Any]:
     }
 
 
-def serialize_connection_state(event: ConnectionStateEvent) -> Dict[str, Any]:
+def serialize_connection_state(event: ConnectionStateEvent) -> dict[str, Any]:
     """Serialize the connection state of the state provider (remote ones
     reconnect when their connection drops)"""
     return {
@@ -309,7 +309,7 @@ def serialize_connection_state(event: ConnectionStateEvent) -> Dict[str, Any]:
     }
 
 
-def serialize_action(action: Any, experiment_id: str = "") -> Dict[str, Any]:
+def serialize_action(action: Any, experiment_id: str = "") -> dict[str, Any]:
     """Serialize a BaseAction (live or mock) to the frontend format."""
     return {
         "actionId": getattr(action, "action_id", ""),
@@ -319,7 +319,7 @@ def serialize_action(action: Any, experiment_id: str = "") -> Dict[str, Any]:
     }
 
 
-def serialize_run(run: BaseExperiment, current_run_id: Optional[str]) -> Dict[str, Any]:
+def serialize_run(run: BaseExperiment, current_run_id: str | None) -> dict[str, Any]:
     """Serialize one experiment run for the run-history view."""
     payload = serialize_experiment(run)
     run_id = payload.get("current_run_id")
@@ -328,7 +328,7 @@ def serialize_run(run: BaseExperiment, current_run_id: Optional[str]) -> Dict[st
     return payload
 
 
-def serialize_orphan_job(job: BaseJob, is_stray: bool) -> Dict[str, Any]:
+def serialize_orphan_job(job: BaseJob, is_stray: bool) -> dict[str, Any]:
     """Serialize an orphan/stray job with its on-disk size."""
     payload = serialize_job(job)
     payload["isStray"] = is_stray
@@ -400,15 +400,15 @@ class WebSocketHandler:
         """
         self.state_provider = state_provider
         self.token = token
-        self.connections: Set[WebSocket] = set()
+        self.connections: set[WebSocket] = set()
         #: Events each connection watches (set by its jobs requests)
-        self.filters: Dict[WebSocket, EventFilter] = {}
+        self.filters: dict[WebSocket, EventFilter] = {}
         self._lock = asyncio.Lock()
         #: Background tasks (kept so that they are not garbage collected)
-        self._tasks: Set[asyncio.Task] = set()
+        self._tasks: set[asyncio.Task] = set()
 
         # Check if we have a scheduler (active experiment mode)
-        self._scheduler: Optional[Scheduler] = None
+        self._scheduler: Scheduler | None = None
         if isinstance(state_provider, Scheduler):
             self._scheduler = state_provider
 
@@ -467,7 +467,7 @@ class WebSocketHandler:
 
         logger.debug("WebSocket client disconnected (total: %d)", len(self.connections))
 
-    async def handle_message(self, websocket: WebSocket, message: Dict[str, Any]):
+    async def handle_message(self, websocket: WebSocket, message: dict[str, Any]):
         """Route incoming message to appropriate handler
 
         Args:
@@ -517,7 +517,7 @@ class WebSocketHandler:
         else:
             logger.warning("Unknown message type: %s", msg_type)
 
-    async def broadcast(self, msg_type: str, payload: Dict[str, Any]):
+    async def broadcast(self, msg_type: str, payload: dict[str, Any]):
         """Broadcast message to all connected clients
 
         Args:
@@ -538,7 +538,7 @@ class WebSocketHandler:
             for ws in disconnected:
                 self.connections.discard(ws)
 
-    def recipients(self, event: EventBase) -> List[WebSocket]:
+    def recipients(self, event: EventBase) -> list[WebSocket]:
         """The connections that watch an event (see EventFilter)"""
         return [
             websocket
@@ -550,8 +550,8 @@ class WebSocketHandler:
         self,
         event: EventBase,
         msg_type: str,
-        payload: Dict[str, Any],
-        recipients: List[WebSocket] | None = None,
+        payload: dict[str, Any],
+        recipients: list[WebSocket] | None = None,
     ):
         """Send the message of a state event to the connections watching it
 
@@ -586,10 +586,10 @@ class WebSocketHandler:
     def _serialize_jobs_for_experiment(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Serialize jobs of an experiment, enriched with tags/deps/submit time.
 
         Used for offline (MockJob) providers, where the state_dict alone does not
@@ -650,7 +650,7 @@ class WebSocketHandler:
 
     def _jobs_payloads(
         self, experiment_id: str | None, run_id: str | None, refresh: bool
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Jobs of an experiment run (or of all the experiments)"""
         if experiment_id:
             return self._serialize_jobs_for_experiment(
@@ -669,7 +669,7 @@ class WebSocketHandler:
         ]
 
     async def _send_jobs(
-        self, websocket: WebSocket, payload: Dict[str, Any], *, refresh: bool
+        self, websocket: WebSocket, payload: dict[str, Any], *, refresh: bool
     ):
         # The connection now watches this experiment (all without one); set
         # first, so that a remote provider receives its events when reading
@@ -690,7 +690,7 @@ class WebSocketHandler:
         for job in jobs:
             await websocket.send_json({"type": "job.add", "payload": job})
 
-    async def _handle_jobs(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_jobs(self, websocket: WebSocket, payload: dict[str, Any]):
         """Send the jobs of an experiment run (all experiments by default)
 
         Answered from the state provider cache: the client asks for the jobs of
@@ -698,7 +698,7 @@ class WebSocketHandler:
         """
         await self._send_jobs(websocket, payload, refresh=False)
 
-    async def _handle_refresh(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_refresh(self, websocket: WebSocket, payload: dict[str, Any]):
         """Handle refresh request - send all jobs for experiment(s)
 
         This is an explicit client refresh: the state provider re-reads the
@@ -706,7 +706,7 @@ class WebSocketHandler:
         """
         await self._send_jobs(websocket, payload, refresh=True)
 
-    async def _handle_experiments(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_experiments(self, websocket: WebSocket, payload: dict[str, Any]):
         """Handle experiments request - send all experiments
 
         The list ends with ``experiments.loaded``, so that the client can tell
@@ -722,7 +722,7 @@ class WebSocketHandler:
             await websocket.send_json({"type": "experiment.add", "payload": experiment})
         await websocket.send_json({"type": "experiments.loaded"})
 
-    async def _handle_services(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_services(self, websocket: WebSocket, payload: dict[str, Any]):
         """Send the services of an experiment (the started ones by default)
 
         Read through the state provider, as the TUI does, so that services are
@@ -741,7 +741,7 @@ class WebSocketHandler:
                 {"type": "service.add", "payload": serialize_service(service)}
             )
 
-    async def _handle_job_details(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_job_details(self, websocket: WebSocket, payload: dict[str, Any]):
         """Handle job details request"""
         job_id = payload.get("jobId")
 
@@ -781,7 +781,7 @@ class WebSocketHandler:
         )
         return outcome
 
-    async def _handle_job_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_job_kill(self, websocket: WebSocket, payload: dict[str, Any]):
         """Kill a job"""
         job = self._lookup_job(payload)
         if job is None:
@@ -791,7 +791,7 @@ class WebSocketHandler:
             websocket, lambda: job_operations.kill_job(self.state_provider, job)
         )
 
-    async def _handle_job_delete(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_job_delete(self, websocket: WebSocket, payload: dict[str, Any]):
         """Delete a job (removes the job directory from disk)"""
         job = self._lookup_job(payload)
         if job is None:
@@ -804,8 +804,8 @@ class WebSocketHandler:
             await self.broadcast("job.removed", {"jobId": job.identifier})
 
     def _filter_scopes(
-        self, experiment_id: Optional[str], run_id: Optional[str]
-    ) -> List[tuple[str, Optional[str]]]:
+        self, experiment_id: str | None, run_id: str | None
+    ) -> list[tuple[str, str | None]]:
         """(experiment, run) pairs a filter applies to: the displayed run, or
         the current run of every experiment"""
         if experiment_id:
@@ -815,8 +815,8 @@ class WebSocketHandler:
         ]
 
     def _filter_job_ids(
-        self, query: str, experiment_id: Optional[str], run_id: Optional[str]
-    ) -> List[str]:
+        self, query: str, experiment_id: str | None, run_id: str | None
+    ) -> list[str]:
         """Identifiers of the jobs matching a filter expression
 
         Uses the same filter DSL (and the same per-run tags) as the TUI search
@@ -832,8 +832,8 @@ class WebSocketHandler:
         ctx = FilterContext()
         filter_fn = createFilter(query, ctx)
 
-        matched: List[str] = []
-        seen: Set[str] = set()
+        matched: list[str] = []
+        seen: set[str] = set()
         for exp_id, scope_run_id in self._filter_scopes(experiment_id, run_id):
             ctx.tags_map = self.state_provider.get_tags_map(exp_id, scope_run_id) or {}
             for job in self.state_provider.get_jobs(exp_id, run_id=scope_run_id):
@@ -842,10 +842,10 @@ class WebSocketHandler:
                     matched.append(job.identifier)
         return matched
 
-    async def _handle_jobs_filter(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_jobs_filter(self, websocket: WebSocket, payload: dict[str, Any]):
         """Evaluate a job filter expression server-side (shared DSL with the TUI)"""
         query = (payload.get("query") or "").strip()
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "requestId": payload.get("requestId"),
             "query": query,
             "jobIds": None,
@@ -868,10 +868,10 @@ class WebSocketHandler:
     def _complete_filter(
         self,
         query: str,
-        cursor: Optional[int],
-        experiment_id: Optional[str],
-        run_id: Optional[str],
-    ) -> Dict[str, Any]:
+        cursor: int | None,
+        experiment_id: str | None,
+        run_id: str | None,
+    ) -> dict[str, Any]:
         """Completions of a filter expression, with the task identifiers and
         tags of the displayed jobs (from the provider's query cache)"""
         from experimaestro.cli.filter import FilterVocabulary, complete_filter
@@ -885,12 +885,12 @@ class WebSocketHandler:
         return complete_filter(query, cursor, vocabulary).to_dict()
 
     async def _handle_jobs_complete(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Completions of a filter expression at the cursor position"""
         query = payload.get("query") or ""
         cursor = payload.get("cursor")
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "requestId": payload.get("requestId"),
             "start": cursor or 0,
             "end": cursor or 0,
@@ -912,7 +912,7 @@ class WebSocketHandler:
             logger.exception("Error while completing the filter %r", query)
         await websocket.send_json({"type": "jobs.complete", "payload": response})
 
-    def _experiment_graph(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _experiment_graph(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Graph of an experiment run with the requested view"""
         from experimaestro.ui.graph import load_experiment_graph
 
@@ -930,10 +930,10 @@ class WebSocketHandler:
         return {"graph": graph.state_dict(), "view": view.state_dict(graph.index())}
 
     async def _handle_experiment_graph(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Dependency graph of an experiment run (see experimaestro.ui.graph)"""
-        response: Dict[str, Any] = {"requestId": payload.get("requestId")}
+        response: dict[str, Any] = {"requestId": payload.get("requestId")}
         loop = asyncio.get_running_loop()
         try:
             response.update(
@@ -956,7 +956,7 @@ class WebSocketHandler:
         )
 
     async def _handle_experiment_kill(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Kill all the running jobs of an experiment"""
         experiment_id = payload.get("experimentId")
@@ -968,7 +968,7 @@ class WebSocketHandler:
         )
 
     async def _handle_experiment_delete(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Delete an experiment (its job directories are kept)"""
         experiment_id = payload.get("experimentId")
@@ -984,7 +984,7 @@ class WebSocketHandler:
             await self.broadcast("experiment.removed", {"experimentId": experiment_id})
 
     async def _handle_experiment_runs(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Handle run-history request for an experiment."""
         experiment_id = payload.get("experimentId")
@@ -1005,7 +1005,7 @@ class WebSocketHandler:
         )
 
     async def _handle_service_start(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Start a service (see scheduler/service_operations.py)"""
         service = await self._lookup_service(websocket, payload)
@@ -1045,7 +1045,7 @@ class WebSocketHandler:
             logger.warning("Service %s start: %s", service.id, e)
         await self.broadcast("service.update", serialize_service(service))
 
-    async def _handle_service_stop(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_service_stop(self, websocket: WebSocket, payload: dict[str, Any]):
         """Stop a service (see scheduler/service_operations.py)"""
         service = await self._lookup_service(websocket, payload)
         if service is None:
@@ -1056,7 +1056,7 @@ class WebSocketHandler:
         await self.broadcast("service.update", serialize_service(service))
 
     async def _lookup_service(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ) -> BaseService | None:
         """Service designated by a request (``experimentId`` and ``id``)"""
         service = service_operations.find_service(
@@ -1068,7 +1068,7 @@ class WebSocketHandler:
             )
         return service
 
-    async def _handle_warnings(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_warnings(self, websocket: WebSocket, payload: dict[str, Any]):
         """Send all unresolved warnings."""
         warnings = await self._in_thread(self.state_provider.get_unresolved_warnings)
         for warning in warnings:
@@ -1077,7 +1077,7 @@ class WebSocketHandler:
             )
 
     async def _handle_warning_action(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Execute a warning action."""
         await self._in_thread(
@@ -1094,7 +1094,7 @@ class WebSocketHandler:
             }
         )
 
-    async def _handle_actions(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_actions(self, websocket: WebSocket, payload: dict[str, Any]):
         """Send the actions declared by the (selected) experiment(s)."""
         experiment_id = payload.get("experimentId")
         if experiment_id:
@@ -1115,7 +1115,7 @@ class WebSocketHandler:
                 )
 
     async def _handle_action_execute(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Execute an action, prompting the frontend for any missing inputs."""
         from experimaestro.webui.actions import WebInteraction, ActionInputRequired
@@ -1176,7 +1176,7 @@ class WebSocketHandler:
                 }
             )
 
-    async def _handle_orphans(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_orphans(self, websocket: WebSocket, payload: dict[str, Any]):
         """Send orphan/stray jobs with their on-disk sizes."""
         loop = asyncio.get_running_loop()
 
@@ -1190,12 +1190,12 @@ class WebSocketHandler:
         jobs = await loop.run_in_executor(None, gather)
         await websocket.send_json({"type": "orphans", "payload": {"jobs": jobs}})
 
-    async def _handle_orphan_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_orphan_kill(self, websocket: WebSocket, payload: dict[str, Any]):
         """Kill an orphan/stray job"""
         await self._handle_job_kill(websocket, payload)
 
     async def _handle_orphan_delete(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Delete an orphan job from disk"""
         job = self._lookup_job(payload)
@@ -1210,7 +1210,7 @@ class WebSocketHandler:
                 {"type": "orphan.removed", "payload": {"jobId": job.identifier}}
             )
 
-    async def _handle_orphans_kill(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_orphans_kill(self, websocket: WebSocket, payload: dict[str, Any]):
         """Kill every stray (running orphan) job, then send the updated list"""
         await self._notify_outcome(
             websocket,
@@ -1223,7 +1223,7 @@ class WebSocketHandler:
         await self._handle_orphans(websocket, payload)
 
     async def _handle_orphans_delete(
-        self, websocket: WebSocket, payload: Dict[str, Any]
+        self, websocket: WebSocket, payload: dict[str, Any]
     ):
         """Delete every finished orphan job, then send the updated list"""
         await self._notify_outcome(
@@ -1236,14 +1236,14 @@ class WebSocketHandler:
         )
         await self._handle_orphans(websocket, payload)
 
-    def _lookup_job(self, payload: Dict[str, Any]):
+    def _lookup_job(self, payload: dict[str, Any]):
         task_id = payload.get("taskId")
         job_id = payload.get("jobId")
         if not task_id or not job_id:
             return None
         return self.state_provider.get_job(task_id, job_id)
 
-    async def _handle_quit(self, websocket: WebSocket, payload: Dict[str, Any]):
+    async def _handle_quit(self, websocket: WebSocket, payload: dict[str, Any]):
         """Handle quit request from web interface"""
         # Get server reference to trigger quit
         # This is called from app context where server is available

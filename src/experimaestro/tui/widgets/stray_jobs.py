@@ -6,7 +6,6 @@ Displays two sub-tabs:
 """
 
 import logging
-from typing import Optional
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
@@ -37,7 +36,7 @@ class _JobListPanel(Vertical):
         self.state_provider = state_provider
         self.jobs: list = []
         self._pending_jobs: list = []
-        self._sort_column: Optional[str] = None
+        self._sort_column: str | None = None
         self._sort_reverse: bool = False
         self._panel_id = panel_id
 

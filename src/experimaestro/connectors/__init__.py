@@ -13,7 +13,8 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, Mapping, Type, Union, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
+from collections.abc import Mapping
 from pathlib import Path
 from experimaestro.utils import logger
 from experimaestro.locking import Lock, SyncLock
@@ -122,16 +123,16 @@ class Process:
     host_dependent: bool = True
 
     @classmethod
-    def fromspec(cls, connector: "Connector", definition: Dict[str, Any]) -> "Process":
+    def fromspec(cls, connector: "Connector", definition: dict[str, Any]) -> "Process":
         """Rebuild a process from a specification"""
         raise NotImplementedError(f"fromspec for {cls}")
 
-    def tospec(self) -> Dict[str, Any]:
+    def tospec(self) -> dict[str, Any]:
         """Outputs a process specification"""
         raise NotImplementedError(f"tospec for {self.__class__}")
 
     @staticmethod
-    def fromDefinition(connector: "Connector", definition: Dict[str, Any]) -> "Process":
+    def fromDefinition(connector: "Connector", definition: dict[str, Any]) -> "Process":
         """Retrieves a process from a serialized definition"""
         handler_type = definition["type"]
         handler = Process.handler(handler_type)
@@ -143,7 +144,7 @@ class Process:
             raise e
 
     @staticmethod
-    def handler(key: str) -> Type["Process"]:
+    def handler(key: str) -> type["Process"]:
         """Get a handler"""
         if Process.HANDLERS is None:
             Process.HANDLERS = {}
@@ -201,7 +202,7 @@ class Process:
                 return state
             await asyncio.sleep(poll_interval)
 
-    async def aio_code(self) -> Optional[int]:
+    async def aio_code(self) -> int | None:
         """Returns a future containing the returned code
 
         Returns None if the process has already finished – and no information is
@@ -329,7 +330,7 @@ class Locator:
     pass
 
 
-def parsepath(path: Union[str, Path]) -> Path:
+def parsepath(path: str | Path) -> Path:
     """Parse a path
 
     Returns a local path or a SshPath

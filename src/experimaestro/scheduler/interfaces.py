@@ -20,7 +20,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Callable
 from experimaestro.locking import create_file_lock
 from experimaestro.utils.atomic import atomic_write_json
 
@@ -46,11 +47,11 @@ class ExperimentJobInformation:
 
     job_id: str
     task_id: str
-    tags: Dict[str, str] = field(default_factory=dict)
-    timestamp: Optional[float] = None
+    tags: dict[str, str] = field(default_factory=dict)
+    timestamp: float | None = None
     transient: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON"""
         result = {
             "job_id": self.job_id,
@@ -63,7 +64,7 @@ class ExperimentJobInformation:
         return result
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ExperimentJobInformation":
+    def from_dict(cls, d: dict[str, Any]) -> "ExperimentJobInformation":
         """Create from dictionary"""
         return cls(
             job_id=d["job_id"],
@@ -73,7 +74,7 @@ class ExperimentJobInformation:
         )
 
 
-def serialize_timestamp(ts: Optional[Union[float, datetime, str]]) -> Optional[str]:
+def serialize_timestamp(ts: float | datetime | str | None) -> str | None:
     """Serialize timestamp to ISO format string for DB/network storage
 
     Handles:
@@ -93,7 +94,7 @@ def serialize_timestamp(ts: Optional[Union[float, datetime, str]]) -> Optional[s
     return str(ts)
 
 
-def deserialize_timestamp(ts: Optional[Union[float, str]]) -> Optional[float]:
+def deserialize_timestamp(ts: float | str | None) -> float | None:
     """Deserialize timestamp from ISO format string to Unix timestamp
 
     Handles:
@@ -114,8 +115,8 @@ def deserialize_timestamp(ts: Optional[Union[float, str]]) -> Optional[float]:
 
 
 def deserialize_to_datetime(
-    ts: Optional[Union[float, int, str, datetime]],
-) -> Optional[datetime]:
+    ts: float | int | str | datetime | None,
+) -> datetime | None:
     """Deserialize timestamp to datetime object (backward-compatible)
 
     Handles:
@@ -441,7 +442,7 @@ class JobStateError(JobState):
         "DELETED": "🗑",
     }
 
-    def __init__(self, failure_reason: Optional[JobFailureStatus] = None):
+    def __init__(self, failure_reason: JobFailureStatus | None = None):
         """Create an error state, optionally with failure details
 
         Args:
@@ -542,16 +543,16 @@ class BaseJob:
     task_id: str
     path: Path
     _state: JobState
-    starttime: Optional[datetime]
-    endtime: Optional[datetime]
-    exit_code: Optional[int]
+    starttime: datetime | None
+    endtime: datetime | None
+    exit_code: int | None
     retry_count: int
     resumable: bool
     carbon_metrics: Optional["CarbonMetricsData"]
-    run_group_id: Optional[str]
+    run_group_id: str | None
     _previous_carbon_metrics: Optional["CarbonMetricsData"]
     _progress: list
-    events_count: Optional[int]  # None = all events processed
+    events_count: int | None  # None = all events processed
 
     #: The process
     _process: Optional["Process"]
@@ -764,7 +765,7 @@ class BaseJob:
     # State I/O (unified state_dict pattern)
     # -------------------------------------------------------------------------
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Get job state as dictionary (single source of truth)
 
         This is the canonical representation of job state used for both
@@ -1240,7 +1241,7 @@ class BaseJob:
                     JobStateError(JobFailureStatus.MISSING_OUTPUTS), loading=True
                 )
 
-    def _load_from_status_dict(self, status_dict: Dict[str, Any]) -> None:
+    def _load_from_status_dict(self, status_dict: dict[str, Any]) -> None:
         """Load fields from status.json dictionary
 
         Timestamps are loaded and preserved when calling set_state() with the
@@ -1394,7 +1395,7 @@ class BaseJob:
         self.endtime = None
         self.starttime = None
 
-    def _set_progress(self, progress_list: List) -> None:
+    def _set_progress(self, progress_list: list) -> None:
         """Set progress from a list. Override in subclasses if needed."""
         from experimaestro.notifications import get_progress_information_from_dict
 
@@ -1521,27 +1522,27 @@ class BaseExperiment:
     # State tracking properties (abstract - must be implemented by subclasses)
 
     @property
-    def jobs(self) -> Dict[str, "BaseJob"]:
+    def jobs(self) -> dict[str, "BaseJob"]:
         """Jobs in this experiment"""
         raise NotImplementedError
 
     @property
-    def services(self) -> Dict[str, "BaseService"]:
+    def services(self) -> dict[str, "BaseService"]:
         """Services in this experiment"""
         raise NotImplementedError
 
     @property
-    def actions(self) -> Dict[str, "BaseAction"]:
+    def actions(self) -> dict[str, "BaseAction"]:
         """Actions in this experiment"""
         return {}
 
     @property
-    def tags(self) -> Dict[str, Dict[str, str]]:
+    def tags(self) -> dict[str, dict[str, str]]:
         """Tags for jobs"""
         raise NotImplementedError
 
     @property
-    def dependencies(self) -> Dict[str, List[str]]:
+    def dependencies(self) -> dict[str, list[str]]:
         """Job dependencies"""
         raise NotImplementedError
 
@@ -1551,17 +1552,17 @@ class BaseExperiment:
         raise NotImplementedError
 
     @property
-    def hostname(self) -> Optional[str]:
+    def hostname(self) -> str | None:
         """Hostname where experiment runs"""
         raise NotImplementedError
 
     @property
-    def started_at(self) -> Optional[datetime]:
+    def started_at(self) -> datetime | None:
         """Start datetime"""
         raise NotImplementedError
 
     @property
-    def ended_at(self) -> Optional[datetime]:
+    def ended_at(self) -> datetime | None:
         """End datetime (None if running)"""
         raise NotImplementedError
 
@@ -1571,7 +1572,7 @@ class BaseExperiment:
         return None  # Default: no carbon metrics
 
     @property
-    def runs_count(self) -> Optional[int]:
+    def runs_count(self) -> int | None:
         """Number of runs in this experiment, if known"""
         return None
 
@@ -1649,7 +1650,7 @@ class BaseExperiment:
         """
         raise NotImplementedError
 
-    def get_services(self) -> List["BaseService"]:
+    def get_services(self) -> list["BaseService"]:
         """Get services for this experiment as a list"""
         return list(self.services.values())
 
@@ -1658,7 +1659,7 @@ class BaseExperiment:
         """Get status file path for a run directory"""
         return run_dir / "status.json"
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Get experiment state as dictionary (single source of truth)
 
         This is the canonical representation of experiment state used for both
@@ -1692,7 +1693,7 @@ class BaseExperiment:
             result["carbon_impact"] = self.carbon_impact.to_dict()
         return result
 
-    def _serialize_job_states(self) -> Dict[str, str]:
+    def _serialize_job_states(self) -> dict[str, str]:
         """Serialize per-job states for status.json.
 
         Error states include the failure reason (e.g., "error:DEPENDENCY").
@@ -2061,13 +2062,13 @@ class BaseService(ABC):
         return {}
 
     @property
-    def sync_include_patterns(self) -> Optional[List[str]]:
+    def sync_include_patterns(self) -> list[str] | None:
         """Optional list of glob patterns to include when syncing files for this service"""
         if getattr(self, "id", None) == "tensorboard":
             return ["*events.out.tfevents*"]
         return None
 
-    def full_state_dict(self) -> Dict[str, Any]:
+    def full_state_dict(self) -> dict[str, Any]:
         """Get service state as dictionary for JSON serialization.
 
         This method properly serializes Path objects and other non-JSON types.
@@ -2096,7 +2097,7 @@ class BaseService(ABC):
         """
         return self  # Default: return self (for live services)
 
-    def subservices(self) -> List["BaseService"]:
+    def subservices(self) -> list["BaseService"]:
         """Startable sub-services, addressed as ``<service id>/<sub id>``
 
         The sub-service that is the service itself (by default, the only one)
@@ -2105,7 +2106,7 @@ class BaseService(ABC):
         return [self]
 
     @property
-    def sync_status(self) -> Optional[str]:
+    def sync_status(self) -> str | None:
         """Return sync status for display.
 
         Override in subclasses that manage file synchronization (e.g., SSHLocalService).
@@ -2116,7 +2117,7 @@ class BaseService(ABC):
         return None
 
     @property
-    def error(self) -> Optional[str]:
+    def error(self) -> str | None:
         """Return error message if service failed to start.
 
         Override in subclasses to provide error information.

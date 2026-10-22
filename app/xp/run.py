@@ -4,7 +4,6 @@ import tempfile
 import logging
 from pathlib import Path
 import threading
-from typing import Optional
 import click
 import os
 import time
@@ -111,7 +110,7 @@ class TensorboardService(WebService):
 @click.option("--port", type=int, default=12345, help="Port for experimaestro server")
 @click.option("--token", type=str, default=None, help="Token for experimaestro server")
 @click.command()
-def cli(keep: bool, debug: bool, port: int, tensorboard: bool, token: Optional[str]):
+def cli(keep: bool, debug: bool, port: int, tensorboard: bool, token: str | None):
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
     maindir = tempfile.TemporaryDirectory()

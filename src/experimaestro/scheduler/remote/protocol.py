@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 logger = logging.getLogger("xpm.remote.protocol")
 
@@ -145,16 +145,16 @@ class RPCError:
 
     code: int
     message: str
-    data: Optional[Any] = None
+    data: Any | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         result = {"code": self.code, "message": self.message}
         if self.data is not None:
             result["data"] = self.data
         return result
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "RPCError":
+    def from_dict(cls, d: dict) -> "RPCError":
         return cls(code=d["code"], message=d["message"], data=d.get("data"))
 
 
@@ -163,10 +163,10 @@ class RPCRequest:
     """JSON-RPC request message"""
 
     method: str
-    params: Dict = field(default_factory=dict)
-    id: Optional[int] = None  # None for notifications
+    params: dict = field(default_factory=dict)
+    id: int | None = None  # None for notifications
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         result = {"jsonrpc": JSONRPC_VERSION, "method": self.method}
         if self.params:
             result["params"] = self.params
@@ -178,7 +178,7 @@ class RPCRequest:
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "RPCRequest":
+    def from_dict(cls, d: dict) -> "RPCRequest":
         return cls(method=d["method"], params=d.get("params", {}), id=d.get("id"))
 
 
@@ -187,10 +187,10 @@ class RPCResponse:
     """JSON-RPC response message"""
 
     id: int
-    result: Optional[Any] = None
-    error: Optional[RPCError] = None
+    result: Any | None = None
+    error: RPCError | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         d = {"jsonrpc": JSONRPC_VERSION, "id": self.id}
         if self.error is not None:
             d["error"] = self.error.to_dict()
@@ -202,7 +202,7 @@ class RPCResponse:
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "RPCResponse":
+    def from_dict(cls, d: dict) -> "RPCResponse":
         error = None
         if "error" in d:
             error = RPCError.from_dict(d["error"])
@@ -214,9 +214,9 @@ class RPCNotification:
     """JSON-RPC notification (no id, no response expected)"""
 
     method: str
-    params: Dict = field(default_factory=dict)
+    params: dict = field(default_factory=dict)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         result = {"jsonrpc": JSONRPC_VERSION, "method": self.method}
         if self.params:
             result["params"] = self.params
@@ -226,11 +226,11 @@ class RPCNotification:
         return json.dumps(self.to_dict())
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "RPCNotification":
+    def from_dict(cls, d: dict) -> "RPCNotification":
         return cls(method=d["method"], params=d.get("params", {}))
 
 
-def parse_message(line: str) -> Union[RPCRequest, RPCResponse, RPCNotification]:
+def parse_message(line: str) -> RPCRequest | RPCResponse | RPCNotification:
     """Parse a JSON-RPC message from a line of text
 
     Args:
@@ -294,7 +294,7 @@ def create_success_response(id: int, result: Any) -> str:
     return response.to_json()
 
 
-def create_notification(method: Union[str, NotificationMethod], params: Dict) -> str:
+def create_notification(method: str | NotificationMethod, params: dict) -> str:
     """Create a JSON-RPC notification
 
     Args:
@@ -310,7 +310,7 @@ def create_notification(method: Union[str, NotificationMethod], params: Dict) ->
     return notification.to_json()
 
 
-def create_request(method: Union[str, RPCMethod], params: Dict, id: int) -> str:
+def create_request(method: str | RPCMethod, params: dict, id: int) -> str:
     """Create a JSON-RPC request
 
     Args:
@@ -330,7 +330,7 @@ def create_request(method: Union[str, RPCMethod], params: Dict, id: int) -> str:
 # Serialization helpers for data types
 
 
-def serialize_datetime(dt) -> Optional[str]:
+def serialize_datetime(dt) -> str | None:
     """Serialize datetime or timestamp to ISO format string
 
     Handles:
@@ -352,7 +352,7 @@ def serialize_datetime(dt) -> Optional[str]:
     return str(dt)
 
 
-def deserialize_datetime(s: Optional[str]) -> Optional[datetime]:
+def deserialize_datetime(s: str | None) -> datetime | None:
     """Deserialize ISO format string to datetime"""
     if s is None:
         return None

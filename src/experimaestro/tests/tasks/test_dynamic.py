@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 import sys
 import time
-from typing import Optional
 
 import pytest
 
@@ -49,7 +48,7 @@ class CheckpointLoader(LightweightTask):
 
 class Evaluate(Task):
     model: Param[Model]
-    signal_file: Meta[Optional[Path]] = None
+    signal_file: Meta[Path | None] = None
 
     def execute(self):
         # If a signal file is provided, touch it to indicate we're running

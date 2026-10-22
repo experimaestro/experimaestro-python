@@ -10,7 +10,6 @@ Tests cover:
 """
 
 import logging
-from typing import List
 
 import pytest
 
@@ -70,7 +69,7 @@ def test_deprecated_attribute():
 
     class Values(Config):
         __xpmid__ = "test.deprecated.attribute"
-        values: Param[List[int]] = field(default=[], ignore_default=True)
+        values: Param[list[int]] = field(default=[], ignore_default=True)
 
         @deprecate
         def value(self, x):
@@ -111,7 +110,7 @@ def test_deprecate_with_parameter_transformation():
 
     class NewConfig(Config):
         __xpmid__ = "test.deprecate.transform.new"
-        values: Param[List[int]]
+        values: Param[list[int]]
 
     @deprecate(NewConfig)
     class OldConfig(Config):
@@ -140,12 +139,12 @@ def test_deprecate_chained_versions():
 
     class A(Config):
         __xpmid__ = "test.deprecate.chained.a"
-        data: Param[List[str]]
+        data: Param[list[str]]
 
     @deprecate(A)
     class A_v1(Config):
         __xpmid__ = "test.deprecate.chained.a_v1"
-        items: Param[List[str]]
+        items: Param[list[str]]
 
         def __convert__(self):
             return A.C(data=self.items)
@@ -527,7 +526,7 @@ class NewTaskWithConvert(Task):
     """New task with different parameter structure."""
 
     __xpmid__ = "test.deprecated.task.convert.new"
-    values: Param[List[int]]
+    values: Param[list[int]]
 
     def execute(self):
         pass

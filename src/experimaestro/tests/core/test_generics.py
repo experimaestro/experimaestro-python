@@ -1,6 +1,6 @@
 """Tests for the use of generics in configurations"""
 
-from typing import Generic, List, Optional, Tuple, TypeVar, Union
+from typing import Generic, Optional, TypeVar
 
 import pytest
 from experimaestro import field, Config, Param
@@ -477,7 +477,7 @@ class Converter(Config, Generic[V, W]):
     pass
 
 
-HFTokenizerInput = Union[str, List[str], List[Tuple[str, str]]]
+HFTokenizerInput = str | list[str] | list[tuple[str, str]]
 
 
 class TopicTextConverter(Converter[str, str]):

@@ -1,6 +1,5 @@
 from pathlib import Path
 import time
-from typing import List
 from experimaestro import (
     Meta,
     Param,
@@ -36,7 +35,7 @@ class Say(Task):
 
 
 class Concat(Task):
-    strings: Param[List[Say]]
+    strings: Param[list[Say]]
 
     def execute(self):
         # We access the file where standard output was stored

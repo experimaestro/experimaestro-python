@@ -24,7 +24,7 @@ import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import filelock
 
@@ -189,7 +189,7 @@ def _rewrite_legacy_params_json(dest: Path, src_workspace: Path) -> None:
     atomic_write_json(params, data, fsync=True)
 
 
-def _archive_job(job: _Job, folder: FolderSettings) -> Optional[Path]:
+def _archive_job(job: _Job, folder: FolderSettings) -> Path | None:
     """Perform a single archive operation. Returns the final dest path."""
     dest_root = folder.path / "jobs" / job.rel
     if dest_root.exists():
@@ -266,8 +266,8 @@ class _FolderWorker:
     """Background thread that processes archive requests."""
 
     def __init__(self) -> None:
-        self._queue: "queue.Queue[Optional[_Request]]" = queue.Queue()
-        self._thread: Optional[threading.Thread] = None
+        self._queue: "queue.Queue[_Request | None]" = queue.Queue()
+        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._pending: dict[tuple[Path, Path], concurrent.futures.Future] = {}
 
@@ -310,7 +310,7 @@ class _FolderWorker:
         self._queue.put(_Request(job=job, folder=folder, future=future))
         return future
 
-    def wait(self, timeout: Optional[float] = None) -> bool:
+    def wait(self, timeout: float | None = None) -> bool:
         """Block until all queued requests are processed (test helper)."""
         # queue.Queue has no timeout on join; emulate it with a poll loop
         if timeout is None:
@@ -372,7 +372,7 @@ def archive_job_async(
     return [_WORKER.submit(reduced, folder) for folder in eligible]
 
 
-def wait_for_pending(timeout: Optional[float] = None) -> bool:
+def wait_for_pending(timeout: float | None = None) -> bool:
     """Test helper: block until all background work is done."""
     return _WORKER.wait(timeout=timeout)
 
@@ -380,7 +380,7 @@ def wait_for_pending(timeout: Optional[float] = None) -> bool:
 def find_in_folders(
     rel: Path,
     folders: list[FolderSettings],
-) -> Optional[tuple[FolderSettings, Path]]:
+) -> tuple[FolderSettings, Path] | None:
     """Look up a relative job path (<task_id>/<hash>) across attached folders.
 
     Returns the matching (FolderSettings, job_path) tuple for the first
@@ -415,7 +415,7 @@ def recover_from_folders(
     rel: Path,
     primary_jobs: Path,
     folders: list[FolderSettings],
-) -> Optional[Path]:
+) -> Path | None:
     """Copy a job back from a backup folder into the primary workspace.
 
     Looks up ``rel`` (``<task_id>/<hash>``) in each attached folder; if

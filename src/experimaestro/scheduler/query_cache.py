@@ -20,7 +20,8 @@ span the whole workspace (experiment list, orphan jobs, ...) are tagged with
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Hashable, Optional
+from typing import Any
+from collections.abc import Callable, Hashable
 
 #: Returned by :meth:`QueryCache.get` when there is no usable entry — ``None``
 #: cannot be used since it is a legitimate cached value (e.g. ``get_experiment``)
@@ -34,7 +35,7 @@ class CacheEntry:
     value: Any
     """The value returned by the query"""
 
-    experiment_id: Optional[str]
+    experiment_id: str | None
     """Experiment this entry derives from (None for workspace-wide queries)"""
 
     timestamp: float
@@ -51,14 +52,14 @@ class QueryCache:
             reported by an event.
     """
 
-    def __init__(self, ttl: Optional[float] = None):
+    def __init__(self, ttl: float | None = None):
         self.ttl = ttl
         self._entries: dict[Hashable, CacheEntry] = {}
         self._lock = threading.Lock()
         self.hits = 0
         self.misses = 0
 
-    def get(self, key: Hashable, copy: Optional[Callable[[Any], Any]] = None) -> Any:
+    def get(self, key: Hashable, copy: Callable[[Any], Any] | None = None) -> Any:
         """Return the cached value for `key`, or :data:`MISSING`
 
         Args:
@@ -102,14 +103,14 @@ class QueryCache:
         with self._lock:
             self._entries.pop(key, None)
 
-    def put(self, key: Hashable, value: Any, *, experiment_id: Optional[str]) -> None:
+    def put(self, key: Hashable, value: Any, *, experiment_id: str | None) -> None:
         """Store `value` for `key`, tagged with the experiment it derives from"""
         with self._lock:
             self._entries[key] = CacheEntry(
                 value=value, experiment_id=experiment_id, timestamp=time.monotonic()
             )
 
-    def invalidate(self, experiment_id: Optional[str] = None) -> None:
+    def invalidate(self, experiment_id: str | None = None) -> None:
         """Drop cached queries
 
         Args:

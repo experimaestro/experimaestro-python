@@ -9,7 +9,6 @@ import logging
 import subprocess
 import threading
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger("xpm.remote.sync")
 
@@ -30,9 +29,9 @@ class RemoteFileSynchronizer:
         host: str,
         remote_workspace: Path,
         local_cache: Path,
-        ssh_options: Optional[List[str]] = None,
+        ssh_options: list[str] | None = None,
         compress: bool = False,
-        bwlimit: Optional[int] = None,
+        bwlimit: int | None = None,
     ):
         """Initialize the synchronizer
 
@@ -78,7 +77,7 @@ class RemoteFileSynchronizer:
         self,
         remote_path: str,
         include: list[str] | None = None,
-        compress: Optional[bool] = None,
+        compress: bool | None = None,
     ) -> Path:
         """Sync a specific path from remote
 

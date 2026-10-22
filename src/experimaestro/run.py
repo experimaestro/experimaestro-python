@@ -7,7 +7,7 @@ import signal
 import sys
 import json
 import threading
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
 from experimaestro.exceptions import GracefulTimeout, TaskCancelled
@@ -368,7 +368,7 @@ except ImportError:
 class TaskRunner:
     """Runs a task, after locking"""
 
-    def __init__(self, scriptpath: str, lockfiles: List[str]):
+    def __init__(self, scriptpath: str, lockfiles: list[str]):
         # Sets the working directory
         self.scriptpath = Path(scriptpath)
         self.pidfile = self.scriptpath.with_suffix(".pid")

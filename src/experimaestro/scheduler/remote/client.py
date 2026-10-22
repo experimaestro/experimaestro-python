@@ -23,7 +23,8 @@ from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from datetime import datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, Hashable, List, Optional, Set
+from typing import TYPE_CHECKING, Optional
+from collections.abc import Callable, Hashable
 
 from termcolor import colored
 
@@ -117,7 +118,7 @@ def coalesce_key(event: EventBase) -> Hashable | None:
     return None
 
 
-def coalesce_events(events: List[EventBase]) -> List[EventBase]:
+def coalesce_events(events: list[EventBase]) -> list[EventBase]:
     """Keep the latest event of each entity (see :func:`coalesce_key`)
 
     The events keep their relative order; a superseded event is removed, so
@@ -125,7 +126,7 @@ def coalesce_events(events: List[EventBase]) -> List[EventBase]:
     job state change after the job submission).
     """
     seen: set[Hashable] = set()
-    kept: List[EventBase] = []
+    kept: list[EventBase] = []
     for event in reversed(events):
         key = coalesce_key(event)
         if key is not None:
@@ -167,12 +168,12 @@ def _version_minor_constraint(version: str) -> str:
 
 
 def remote_xpm_command(
-    remote_xpm_path: Optional[str] = None,
+    remote_xpm_path: str | None = None,
     *,
     uv_offline: bool = False,
-    remote_python: Optional[str] = None,
+    remote_python: str | None = None,
     force_version: bool = False,
-) -> List[str]:
+) -> list[str]:
     """The command running experimaestro on the remote host
 
     Either ``remote_xpm_path`` (which may contain arguments), or ``uv tool run``
@@ -201,7 +202,7 @@ def remote_xpm_command(
     return parts
 
 
-def remote_shell_command(args: List[str], shell_init: Optional[str] = None) -> str:
+def remote_shell_command(args: list[str], shell_init: str | None = None) -> str:
     """The shell command line running ``args`` on the remote host
 
     SSH joins its arguments with spaces and passes them to the remote shell,
@@ -226,8 +227,8 @@ class SSHLocalService(BaseService):
         self,
         inner_service: "BaseService",
         state_provider: "SSHStateProviderClient",
-        remote_paths: List[str],
-        on_status_change: Optional[Callable[[], None]] = None,
+        remote_paths: list[str],
+        on_status_change: Callable[[], None] | None = None,
     ):
         """Initialize SSH local service wrapper.
 
@@ -240,7 +241,7 @@ class SSHLocalService(BaseService):
         self._inner = inner_service
         self._state_provider = state_provider
         self._remote_paths = remote_paths
-        self._synchronizers: List["AdaptiveSynchronizer"] = []
+        self._synchronizers: list["AdaptiveSynchronizer"] = []
         self._on_status_change = on_status_change
         self._start_lock = threading.Lock()
         self._starting = False
@@ -266,19 +267,19 @@ class SSHLocalService(BaseService):
         return self._inner.state
 
     @property
-    def url(self) -> Optional[str]:
+    def url(self) -> str | None:
         return getattr(self._inner, "url", None)
 
     @property
-    def log_directory(self) -> Optional[Path]:
+    def log_directory(self) -> Path | None:
         return self._inner.log_directory
 
     @property
-    def stdout(self) -> Optional[Path]:
+    def stdout(self) -> Path | None:
         return self._inner.stdout
 
     @property
-    def stderr(self) -> Optional[Path]:
+    def stderr(self) -> Path | None:
         return self._inner.stderr
 
     def description(self) -> str:
@@ -288,7 +289,7 @@ class SSHLocalService(BaseService):
         return self._inner.state_dict()
 
     @property
-    def sync_include_patterns(self) -> Optional[List[str]]:
+    def sync_include_patterns(self) -> list[str] | None:
         return self._inner.sync_include_patterns
 
     def _notify_status_change(self) -> None:
@@ -365,7 +366,7 @@ class SSHLocalService(BaseService):
             self._notify_status_change()
 
     @property
-    def sync_status(self) -> Optional[str]:
+    def sync_status(self) -> str | None:
         """Return sync status for display."""
         if not self._synchronizers:
             return None
@@ -383,7 +384,7 @@ class SSHLocalService(BaseService):
         return None
 
     @property
-    def error(self) -> Optional[str]:
+    def error(self) -> str | None:
         """Return error message if service failed to start."""
         return self._inner.error
 
@@ -421,11 +422,11 @@ class SSHMockService(MockService):
         description_text: str,
         state_dict_data: dict,
         state_provider: "SSHStateProviderClient",
-        service_class: Optional[str] = None,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        url: Optional[str] = None,
-        state: Optional[str] = None,
+        service_class: str | None = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
+        url: str | None = None,
+        state: str | None = None,
     ):
         super().__init__(
             service_id=service_id,
@@ -438,15 +439,13 @@ class SSHMockService(MockService):
             state=state,
         )
         self._state_provider = state_provider
-        self._on_status_change: Optional[Callable[[], None]] = None
+        self._on_status_change: Callable[[], None] | None = None
 
-    def subservices(self) -> List[BaseService]:
+    def subservices(self) -> list[BaseService]:
         # SSHLocalService does not expose sub-services (no import to list them)
         return [self]
 
-    def set_status_change_callback(
-        self, callback: Optional[Callable[[], None]]
-    ) -> None:
+    def set_status_change_callback(self, callback: Callable[[], None] | None) -> None:
         """Set callback to be invoked when sync status changes.
 
         This should be called before to_service() to enable dynamic UI updates.
@@ -459,7 +458,7 @@ class SSHMockService(MockService):
         ):
             self._live_service._on_status_change = callback
 
-    def _extract_paths(self) -> List[str]:
+    def _extract_paths(self) -> list[str]:
         """Extract path strings from state_dict for syncing
 
         The log directory of the service is left out: the live service writes
@@ -559,15 +558,15 @@ class SSHStateProviderClient(OfflineStateProvider):
         self,
         host: str,
         remote_workspace: str,
-        ssh_options: Optional[List[str]] = None,
-        remote_xpm_path: Optional[str] = None,
-        output_callback: Optional[Callable[[str], None]] = None,
-        remote_shell_init: Optional[str] = None,
+        ssh_options: list[str] | None = None,
+        remote_xpm_path: str | None = None,
+        output_callback: Callable[[str], None] | None = None,
+        remote_shell_init: str | None = None,
         uv_offline: bool = False,
-        remote_python: Optional[str] = None,
+        remote_python: str | None = None,
         force_version: bool = False,
         request_timeout: float = DEFAULT_TIMEOUT,
-        remote_log_levels: Optional[str] = None,
+        remote_log_levels: str | None = None,
         reconnect: ReconnectSettings | None = None,
     ):
         """Initialize the client
@@ -608,27 +607,27 @@ class SSHStateProviderClient(OfflineStateProvider):
         self.remote_log_levels = remote_log_levels
 
         # Session-specific temporary cache directory (created on connect)
-        self._temp_dir: Optional[str] = None
-        self.local_cache_dir: Optional[Path] = None
-        self.workspace_path: Optional[Path] = None  # For compatibility
+        self._temp_dir: str | None = None
+        self.local_cache_dir: Path | None = None
+        self.workspace_path: Path | None = None  # For compatibility
 
-        self._process: Optional[subprocess.Popen] = None
+        self._process: subprocess.Popen | None = None
         self._stdin = None
         self._stdout = None
         self._stderr = None
 
-        self._listeners: Set[StateListener] = set()
+        self._listeners: set[StateListener] = set()
         self._listener_lock = threading.Lock()
 
-        self._response_handlers: Dict[int, Future] = {}
+        self._response_handlers: dict[int, Future] = {}
         #: Method and start time of the pending requests (for the trace)
-        self._pending_calls: Dict[int, tuple[RPCMethod, float]] = {}
+        self._pending_calls: dict[int, tuple[RPCMethod, float]] = {}
         self._response_lock = threading.Lock()
         self._request_id = 0
 
-        self._read_thread: Optional[threading.Thread] = None
-        self._notify_thread: Optional[threading.Thread] = None
-        self._stderr_thread: Optional[threading.Thread] = None
+        self._read_thread: threading.Thread | None = None
+        self._notify_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
         #: Between connect() and disconnect()
         self._running = False
         #: Whether the SSH process of the current session can be used
@@ -639,7 +638,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._state_lock = threading.Lock()
         #: Set by disconnect(), to stop reconnecting
         self._closing = threading.Event()
-        self._reconnect_thread: Optional[threading.Thread] = None
+        self._reconnect_thread: threading.Thread | None = None
         self._connect_timeout = 30.0
         self.reconnect_policy = ReconnectPolicy(reconnect)
 
@@ -648,11 +647,11 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._server_methods: frozenset[str] = BASE_METHODS
         self.remote_version: str | None = None
 
-        self._synchronizer: Optional["RemoteFileSynchronizer"] = None
-        self._control_path: Optional[str] = None
+        self._synchronizer: "RemoteFileSynchronizer" | None = None
+        self._control_path: str | None = None
 
         # Throttled notification delivery to avoid flooding UI
-        self._pending_events: List[EventBase] = []
+        self._pending_events: list[EventBase] = []
         self._pending_events_lock = threading.Lock()
         self._notify_interval = 2.0  # Seconds between notification batches
 
@@ -713,7 +712,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             self.disconnect()
             raise ConnectionError(f"Connection to {self.host} lost while connecting")
 
-    def _ssh_command(self) -> List[str]:
+    def _ssh_command(self) -> list[str]:
         """The SSH command running the remote server"""
         cmd = [
             "ssh",
@@ -1240,7 +1239,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         for event in coalesce_events(events):
             self._notify_listeners(event)
 
-    def _notification_to_event(self, method: str, params: Dict) -> Optional[EventBase]:
+    def _notification_to_event(self, method: str, params: dict) -> EventBase | None:
         """Convert a notification to a EventBase"""
         if method != NotificationMethod.STATE_EVENT.value:
             # Don't warn for known control notifications (handled elsewhere)
@@ -1281,7 +1280,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             except Exception as e:
                 logger.exception("Error in listener: %s", e)
 
-    def _call(self, method: RPCMethod, params: Dict) -> Future:
+    def _call(self, method: RPCMethod, params: dict) -> Future:
         """Send an RPC request and return a Future for the response
 
         Args:
@@ -1387,9 +1386,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Whether the remote server handles a method (older ones lack some)"""
         return method in self._server_methods
 
-    def _call_sync(
-        self, method: RPCMethod, params: Dict, timeout: Optional[float] = None
-    ):
+    def _call_sync(self, method: RPCMethod, params: dict, timeout: float | None = None):
         """Send an RPC request and wait for the response
 
         Args:
@@ -1427,8 +1424,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             self._listeners.discard(listener)
 
     def _fetch_experiments(
-        self, since: Optional[datetime] = None, *, refresh: bool = False
-    ) -> List[BaseExperiment]:
+        self, since: datetime | None = None, *, refresh: bool = False
+    ) -> list[BaseExperiment]:
         """Get list of all experiments
 
         Their summaries only: the job information of an experiment run is read
@@ -1445,7 +1442,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
     def _fetch_experiment(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[BaseExperiment]:
+    ) -> BaseExperiment | None:
         """Get a specific experiment by ID"""
         params = {"experiment_id": experiment_id, "refresh": refresh}
         result = self._call_sync(RPCMethod.GET_EXPERIMENT, params)
@@ -1463,7 +1460,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
     def _fetch_current_run(
         self, experiment_id: str, *, refresh: bool = False
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get the current run ID for an experiment"""
         exp = self.get_experiment(experiment_id, refresh=refresh)
         if exp is None:
@@ -1472,15 +1469,15 @@ class SSHStateProviderClient(OfflineStateProvider):
 
     def _fetch_jobs(
         self,
-        experiment_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,
+        experiment_id: str | None = None,
+        run_id: str | None = None,
+        task_id: str | None = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Query jobs with optional filters"""
         params = {
             "experiment_id": experiment_id,
@@ -1496,7 +1493,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
     def _fetch_job(
         self, task_id: str, job_id: str, *, refresh: bool = False
-    ) -> Optional[BaseJob]:
+    ) -> BaseJob | None:
         """Get a specific job"""
         params = {
             "task_id": task_id,
@@ -1510,12 +1507,12 @@ class SSHStateProviderClient(OfflineStateProvider):
 
     def _fetch_all_jobs(
         self,
-        state: Optional[str] = None,
-        tags: Optional[Dict[str, str]] = None,
-        since: Optional[datetime] = None,
+        state: str | None = None,
+        tags: dict[str, str] | None = None,
+        since: datetime | None = None,
         *,
         refresh: bool = False,
-    ) -> List[BaseJob]:
+    ) -> list[BaseJob]:
         """Get all jobs across all experiments"""
         params = {
             "state": state,
@@ -1526,7 +1523,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_ALL_JOBS, params)
         return [self._get_or_load_job(d) for d in result]
 
-    def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> List[BaseJob]:
+    def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> list[BaseJob]:
         """Get orphan jobs (not referenced by any experiment)"""
         try:
             result = self._call_sync(
@@ -1537,7 +1534,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             # Server may not support this method (old version)
             return []
 
-    def _fetch_stray_jobs(self, *, refresh: bool = False) -> List[BaseJob]:
+    def _fetch_stray_jobs(self, *, refresh: bool = False) -> list[BaseJob]:
         """Get stray jobs (running jobs not in latest run)"""
         try:
             result = self._call_sync(RPCMethod.GET_STRAY_JOBS, {"refresh": refresh})
@@ -1549,10 +1546,10 @@ class SSHStateProviderClient(OfflineStateProvider):
     def _fetch_tags_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         """Get tags map for jobs in an experiment/run"""
         params = {
             "experiment_id": experiment_id,
@@ -1565,7 +1562,7 @@ class SSHStateProviderClient(OfflineStateProvider):
     def _fetch_dependencies_map(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
     ) -> dict[str, list[str]]:
@@ -1578,9 +1575,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         result = self._call_sync(RPCMethod.GET_DEPENDENCIES_MAP, params)
         return result or {}
 
-    def _fetch_run_objects(
-        self, experiment_id: str, run_id: Optional[str]
-    ) -> list[dict]:
+    def _fetch_run_objects(self, experiment_id: str, run_id: str | None) -> list[dict]:
         result = self._call_sync(
             RPCMethod.GET_RUN_OBJECTS,
             {"experiment_id": experiment_id, "run_id": run_id},
@@ -1590,10 +1585,10 @@ class SSHStateProviderClient(OfflineStateProvider):
     def _fetch_experiment_job_info(
         self,
         experiment_id: str,
-        run_id: Optional[str] = None,
+        run_id: str | None = None,
         *,
         refresh: bool = False,
-    ) -> Dict[str, "ExperimentJobInformation"]:
+    ) -> dict[str, "ExperimentJobInformation"]:
         """Get experiment-level job info for jobs in an experiment/run
 
         Read from the run (experiments are sent with their job_infos) — not from
@@ -1607,8 +1602,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         return exp.job_infos if exp is not None else {}
 
     def _fetch_services_from_storage(
-        self, experiment_id: Optional[str], run_id: Optional[str]
-    ) -> List[BaseService]:
+        self, experiment_id: str | None, run_id: str | None
+    ) -> list[BaseService]:
         """Fetch services from remote server.
 
         Called by base class get_services when cache is empty.
@@ -1751,7 +1746,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         }
         self._call_sync(RPCMethod.EXECUTE_WARNING_ACTION, params)
 
-    def get_unresolved_warnings(self) -> List["WarningEvent"]:
+    def get_unresolved_warnings(self) -> list["WarningEvent"]:
         """Get all unresolved warnings from the remote server
 
         Returns:
@@ -1779,7 +1774,7 @@ class SSHStateProviderClient(OfflineStateProvider):
     # Data Conversion
     # -------------------------------------------------------------------------
 
-    def _get_or_load_job(self, d: Dict) -> MockJob:
+    def _get_or_load_job(self, d: dict) -> MockJob:
         """Get or load job from dict (uses base class caching)"""
         job_id = d.get("identifier", "")
         task_id = d.get("task_id", "")
@@ -1791,15 +1786,15 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         return super()._get_or_load_job(full_id, d=d)
 
-    def _create_job(self, full_id: str, *, d: Dict) -> MockJob:
+    def _create_job(self, full_id: str, *, d: dict) -> MockJob:
         """Create job from server dict"""
         return self._create_job_from_dict(d)
 
-    def _on_cached_job_found(self, job: MockJob, *, d: Dict) -> None:
+    def _on_cached_job_found(self, job: MockJob, *, d: dict) -> None:
         """Update cached job with fresh data from server"""
         self._update_job_from_dict(job, d)
 
-    def _create_job_from_dict(self, d: Dict) -> MockJob:
+    def _create_job_from_dict(self, d: dict) -> MockJob:
         """Internal: create MockJob from dict with path translation"""
         # Translate remote path to local cache path
         if d.get("path"):
@@ -1812,7 +1807,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         return MockJob.from_state_dict(d, self.local_cache_dir)
 
-    def _update_job_from_dict(self, job: MockJob, d: Dict) -> None:
+    def _update_job_from_dict(self, job: MockJob, d: dict) -> None:
         """Update a cached MockJob with fresh data from server
 
         This updates the job's state from server data while preserving
@@ -1843,7 +1838,7 @@ class SSHStateProviderClient(OfflineStateProvider):
                 get_progress_information_from_dict(p) for p in d["progress"]
             ]
 
-    def _get_or_load_experiment(self, d: Dict) -> MockExperiment:
+    def _get_or_load_experiment(self, d: dict) -> MockExperiment:
         """Get or load experiment from dict (uses base class caching)"""
         experiment_id = d.get("experiment_id", "")
         run_id = d.get("run_id", "")
@@ -1855,16 +1850,16 @@ class SSHStateProviderClient(OfflineStateProvider):
         return super()._get_or_load_experiment(experiment_id, run_id, d=d)
 
     def _create_experiment(
-        self, experiment_id: str, run_id: str, *, d: Dict
+        self, experiment_id: str, run_id: str, *, d: dict
     ) -> MockExperiment:
         """Create experiment from server dict"""
         return self._create_experiment_from_dict(d)
 
-    def _on_cached_experiment_found(self, exp: MockExperiment, *, d: Dict) -> None:
+    def _on_cached_experiment_found(self, exp: MockExperiment, *, d: dict) -> None:
         """Update cached experiment with fresh data from server"""
         self._update_experiment_from_dict(exp, d)
 
-    def _create_experiment_from_dict(self, d: Dict) -> MockExperiment:
+    def _create_experiment_from_dict(self, d: dict) -> MockExperiment:
         """Internal: create MockExperiment from dict with path translation"""
         # Translate remote workdir to local cache path
         if d.get("workdir"):
@@ -1877,7 +1872,7 @@ class SSHStateProviderClient(OfflineStateProvider):
 
         return MockExperiment.from_state_dict(d, self.local_cache_dir)
 
-    def _update_experiment_from_dict(self, exp: MockExperiment, d: Dict) -> None:
+    def _update_experiment_from_dict(self, exp: MockExperiment, d: dict) -> None:
         """Update a cached MockExperiment with fresh data from server"""
         from experimaestro.scheduler.interfaces import (
             ExperimentStatus,
@@ -1925,7 +1920,7 @@ class SSHStateProviderClient(OfflineStateProvider):
                         timestamp=info_dict.get("timestamp"),
                     )
 
-    def _dict_to_service(self, d: Dict) -> SSHMockService:
+    def _dict_to_service(self, d: dict) -> SSHMockService:
         """Convert a dictionary to an SSHMockService
 
         Returns SSHMockService which handles:
@@ -1954,7 +1949,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             # The remote state and URL are ignored: the service runs locally
         )
 
-    def _parse_datetime_to_timestamp(self, value) -> Optional[float]:
+    def _parse_datetime_to_timestamp(self, value) -> float | None:
         """Convert datetime value to Unix timestamp
 
         Handles: None, ISO string, float timestamp, datetime object
@@ -1989,7 +1984,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         if self._synchronizer is not None:
             self._synchronizer.cancel(remote_path)
 
-    def sync_path(self, path: str, include: list[str] | None = None) -> Optional[Path]:
+    def sync_path(self, path: str, include: list[str] | None = None) -> Path | None:
         """Sync a specific path from remote on-demand
 
         Used by services (e.g., TensorboardService) that need access to

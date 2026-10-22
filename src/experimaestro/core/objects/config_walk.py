@@ -2,8 +2,6 @@ from pathlib import Path
 from enum import Enum
 from typing import (
     Any,
-    Dict,
-    Tuple,
 )
 from contextlib import contextmanager
 
@@ -76,7 +74,7 @@ class ConfigWalk:
         # Stores already visited nodes
         self.visited = {}
 
-    def preprocess(self, config) -> Tuple[bool, Any]:
+    def preprocess(self, config) -> tuple[bool, Any]:
         """Returns a tuple boolean/value
 
         The boolean value is used to stop the processing if False.
@@ -84,7 +82,7 @@ class ConfigWalk:
         """
         return True, None
 
-    def postprocess(self, stub, config, values: Dict[str, Any]):
+    def postprocess(self, stub, config, values: dict[str, Any]):
         return stub
 
     def list(self, i: int):

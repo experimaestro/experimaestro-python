@@ -6,7 +6,6 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
-from typing import List, Optional, Set, Tuple, Union, Dict, Type
 from dataclasses import dataclass
 
 import docutils.nodes as nodes
@@ -35,7 +34,7 @@ except ImportError:  # pragma: no cover - exercised only on old docutils
         return _OptionParser(components=components).get_default_values()
 
 
-def documented_from_objects(objects_inv: Path) -> Set[str]:
+def documented_from_objects(objects_inv: Path) -> set[str]:
     inv = sphobjinv.Inventory(objects_inv)
     return set(
         obj.name
@@ -47,18 +46,18 @@ def documented_from_objects(objects_inv: Path) -> Set[str]:
 @dataclass
 class DocumentationReport:
     #: Errors while parsing
-    errors: List[str]
+    errors: list[str]
 
     #: Undocumented
-    undocumented: List[Config]
+    undocumented: list[Config]
 
     #: Documented but non existing
-    falsy_documented: List[Config]
+    falsy_documented: list[Config]
 
 
 def analyze(
-    packages: Union[str, List[str]], documented: Set[str], skip_packages: Set[str]
-) -> Tuple[bool, List[Config]]:
+    packages: str | list[str], documented: set[str], skip_packages: set[str]
+) -> tuple[bool, list[Config]]:
     """Returns the list of undocumented configurations
 
     :param package: package(s) to explore
@@ -68,7 +67,7 @@ def analyze(
         files and the list of undocumented configurations
     """
 
-    def process(parent_mod: ModuleType, configurations: Dict[str, Type[Config]]):
+    def process(parent_mod: ModuleType, configurations: dict[str, type[Config]]):
         errors = []
         for info in pkgutil.iter_modules(
             parent_mod.__path__, prefix=f"{parent_mod.__name__}."
@@ -144,7 +143,7 @@ class AutoXPMDirective(Directive):
 
 
 class currentmodule(nodes.Node):
-    def __init__(self, modname: Optional[str]) -> None:
+    def __init__(self, modname: str | None) -> None:
         super().__init__()
         self.modname = modname
         self.children = []
@@ -176,7 +175,7 @@ def get_parser():
 class MyVisitor(nodes.NodeVisitor):
     def __init__(self, document: document):
         super().__init__(document)
-        self.toc: Set[str] = set()
+        self.toc: set[str] = set()
         self.currentmodule = None
         self.documented = set()
 
@@ -232,7 +231,7 @@ class DocumentVisitor:
 class DocumentationAnalyzer:
     """Returns a report on the documented files"""
 
-    def __init__(self, doc_path: Path, modules: List[str], excluded: Set[str]):
+    def __init__(self, doc_path: Path, modules: list[str], excluded: set[str]):
         assert doc_path.is_file()
 
         self.doc_path = doc_path

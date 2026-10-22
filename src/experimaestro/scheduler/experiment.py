@@ -8,7 +8,8 @@ from datetime import datetime
 from pathlib import Path
 import time
 from shutil import rmtree
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Optional, TypeVar
+from collections.abc import Callable
 
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
@@ -153,16 +154,16 @@ class experiment(BaseExperiment):
 
     def __init__(
         self,
-        env: Union[Path, str, WorkspaceSettings],
+        env: Path | str | WorkspaceSettings,
         name: str,
         *,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        token: Optional[str] = None,
-        run_mode: Optional[RunMode] = None,
+        host: str | None = None,
+        port: int | None = None,
+        token: str | None = None,
+        run_mode: RunMode | None = None,
         launcher=None,
         register_signals: bool = True,
-        project_paths: Optional[list[Path]] = None,
+        project_paths: list[Path] | None = None,
         python_path: list[Path | str] | None = None,
         wait_for_quit: bool = False,
         dirty_git: DirtyGitAction = DirtyGitAction.WARN,
@@ -286,10 +287,10 @@ class experiment(BaseExperiment):
         self.workdir = None
         self.xplock = None
         self.old_experiment = None
-        self._services: Dict[str, Service] = {}
-        self._actions: Dict[str, Any] = {}  # action_id -> Action
+        self._services: dict[str, Service] = {}
+        self._actions: dict[str, Any] = {}  # action_id -> Action
         self._objects_writer = None
-        self._job_listener: Optional[Listener] = None
+        self._job_listener: Listener | None = None
         self._register_signals = register_signals
         self._dirty_git = dirty_git
         self._experiment_tags: list[str] = list(tags or [])
@@ -455,7 +456,7 @@ class experiment(BaseExperiment):
         return getattr(self, "_status", ExperimentStatus.RUNNING)
 
     @property
-    def jobs(self) -> Dict[str, "Job"]:
+    def jobs(self) -> dict[str, "Job"]:
         """Jobs in this experiment"""
         return {
             job.identifier: job
@@ -471,12 +472,12 @@ class experiment(BaseExperiment):
         return None
 
     @property
-    def tags(self) -> Dict[str, Dict[str, str]]:
+    def tags(self) -> dict[str, dict[str, str]]:
         """Tags for jobs - tracked directly in experiment"""
         return self._tags
 
     @property
-    def dependencies(self) -> Dict[str, List[str]]:
+    def dependencies(self) -> dict[str, list[str]]:
         """Job dependencies - tracked directly in experiment"""
         return self._dependencies
 
@@ -488,27 +489,27 @@ class experiment(BaseExperiment):
         return 0
 
     @property
-    def started_at(self) -> Optional[datetime]:
+    def started_at(self) -> datetime | None:
         """Datetime when experiment started"""
         return self._started_at
 
     @property
-    def ended_at(self) -> Optional[datetime]:
+    def ended_at(self) -> datetime | None:
         """Datetime when experiment ended (None if still running)"""
         return self._ended_at
 
     @property
-    def hostname(self) -> Optional[str]:
+    def hostname(self) -> str | None:
         """Hostname where experiment is running"""
         return self._hostname
 
     @property
-    def services(self) -> Dict[str, "BaseService"]:
+    def services(self) -> dict[str, "BaseService"]:
         """Services in this experiment"""
         return self._services
 
     @property
-    def actions(self) -> Dict[str, Any]:
+    def actions(self) -> dict[str, Any]:
         """Actions in this experiment"""
         return self._actions
 
@@ -588,7 +589,7 @@ class experiment(BaseExperiment):
         """Return the path to the jobs.jsonl file for this experiment"""
         return self.workdir / "jobs.jsonl"
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """Get experiment state as dictionary (extends BaseExperiment.state_dict).
 
         Includes carbon impact metrics if available.
@@ -988,11 +989,11 @@ class experiment(BaseExperiment):
         self._state_listener = None
 
         # Track job tags and dependencies directly (no more StatusData)
-        self._tags: Dict[str, Dict[str, str]] = {}
-        self._dependencies: Dict[str, List[str]] = {}
-        self._hostname: Optional[str] = None
-        self._started_at: Optional[datetime] = None
-        self._ended_at: Optional[datetime] = None
+        self._tags: dict[str, dict[str, str]] = {}
+        self._dependencies: dict[str, list[str]] = {}
+        self._hostname: str | None = None
+        self._started_at: datetime | None = None
+        self._ended_at: datetime | None = None
         self._run_tags: set[str] = set()
 
         if is_normal_mode:
@@ -1045,7 +1046,7 @@ class experiment(BaseExperiment):
         self._task_outputs: dict[Path, "TaskOutputsReader"] = {}
 
         # List of failed jobs
-        self.failedJobs: Dict[str, Job] = {}
+        self.failedJobs: dict[str, Job] = {}
 
         # Exit mode when catching signals
         self.exitMode = False
@@ -1382,7 +1383,7 @@ class experiment(BaseExperiment):
         return settings.history
 
 
-def get_run_status(run_dir: Path) -> Optional[str]:
+def get_run_status(run_dir: Path) -> str | None:
     """Get the status of a run from its status.json or environment.json.
 
     Args:
@@ -1430,9 +1431,9 @@ def get_run_status(run_dir: Path) -> Optional[str]:
 def cleanup_experiment_history(
     experiment_base: Path,
     *,
-    current_run_id: Optional[str] = None,
-    current_status: Optional[str] = None,
-    history: Optional[HistorySettings] = None,
+    current_run_id: str | None = None,
+    current_status: str | None = None,
+    history: HistorySettings | None = None,
 ) -> list[Path]:
     """Clean up old experiment runs based on history settings.
 

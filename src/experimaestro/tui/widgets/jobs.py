@@ -4,7 +4,6 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -246,10 +245,10 @@ class JobDetailView(Widget):
     def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
-        self.current_job_id: Optional[str] = None
-        self.current_task_id: Optional[str] = None
-        self.current_experiment_id: Optional[str] = None
-        self.job_data: Optional[dict] = None
+        self.current_job_id: str | None = None
+        self.current_task_id: str | None = None
+        self.current_experiment_id: str | None = None
+        self.job_data: dict | None = None
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
         self.dependencies_map: dict[
             str, list[str]
@@ -1223,7 +1222,7 @@ class JobsTable(Vertical):
     ]
 
     # Track current sort state
-    _sort_column: Optional[str] = None
+    _sort_column: str | None = None
     _sort_reverse: bool = False
     _needs_rebuild: bool = True  # Start with rebuild needed
     _tree_mode: bool = False
@@ -1234,8 +1233,8 @@ class JobsTable(Vertical):
         self.filter_fn = None
         # Filter context shared with the search bar (tags of the current run)
         self.filter_ctx = FilterContext()
-        self.current_experiment: Optional[str] = None
-        self.current_run_id: Optional[str] = None
+        self.current_experiment: str | None = None
+        self.current_run_id: str | None = None
         self.is_past_run: bool = False
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
         self.dependencies_map: dict[
@@ -1413,7 +1412,7 @@ class JobsTable(Vertical):
         """Focus jobs table when search is applied"""
         self.query_one("#jobs-table", DataTable).focus()
 
-    def _get_selected_job_id(self) -> Optional[str]:
+    def _get_selected_job_id(self) -> str | None:
         """Get the job ID from the currently selected row"""
         table = self.query_one("#jobs-table", DataTable)
         if table.cursor_row is None:
@@ -1593,8 +1592,8 @@ class JobsTable(Vertical):
 
     def set_experiment(
         self,
-        experiment_id: Optional[str],
-        run_id: Optional[str] = None,
+        experiment_id: str | None,
+        run_id: str | None = None,
         is_past_run: bool = False,
     ) -> None:
         """Set the current experiment and refresh jobs
@@ -1628,8 +1627,8 @@ class JobsTable(Vertical):
     @work(thread=True, exclusive=True, group="jobs_load")
     def _load_experiment_data(
         self,
-        experiment_id: Optional[str],
-        run_id: Optional[str],
+        experiment_id: str | None,
+        run_id: str | None,
         refresh: bool = False,
     ) -> None:
         """Load experiment data in background thread"""

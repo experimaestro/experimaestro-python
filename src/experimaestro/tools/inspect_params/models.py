@@ -12,7 +12,8 @@ import importlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any
+from collections.abc import Mapping
 
 from experimaestro.core.identifier import Identifier
 
@@ -80,12 +81,12 @@ class ResolvedPath:
     resolved: Path
     exists: bool = False
     is_dir: bool = False
-    size_bytes: Optional[int] = None
-    mtime: Optional[datetime] = None
+    size_bytes: int | None = None
+    mtime: datetime | None = None
 
     @classmethod
     def resolve(
-        cls, raw_val: str, base: str, job_dir: Optional[Path], ws_dir: Optional[Path]
+        cls, raw_val: str, base: str, job_dir: Path | None, ws_dir: Path | None
     ) -> ResolvedPath:
         """Resolve a raw path string relative to job or workspace directory.
 
@@ -143,17 +144,17 @@ class ObjectNode:
     identifier: str
     is_task: bool
     is_root_task: bool
-    init_tasks: List[int]
-    fields: Dict[str, Any]
-    incoming_refs: List[Tuple[int, str]] = field(default_factory=list)
-    outgoing_refs: List[Tuple[str, int]] = field(default_factory=list)
-    docstring: Optional[str] = None
-    task_id: Optional[int] = None
+    init_tasks: list[int]
+    fields: dict[str, Any]
+    incoming_refs: list[tuple[int, str]] = field(default_factory=list)
+    outgoing_refs: list[tuple[str, int]] = field(default_factory=list)
+    docstring: str | None = None
+    task_id: int | None = None
     is_init_task: bool = False
 
     @classmethod
     def from_definition(
-        cls, o: Dict[str, Any], *, load_docstring: bool = True
+        cls, o: dict[str, Any], *, load_docstring: bool = True
     ) -> ObjectNode:
         """Create an ObjectNode from a raw serialized definition dictionary."""
         oid = int(o["id"])
@@ -208,13 +209,13 @@ class ParamsGraph:
         carbon: Carbon emission tracking configuration dictionary.
     """
 
-    workspace_path: Optional[Path]
+    workspace_path: Path | None
 
     def __init__(
         self,
-        data: Union[Dict[str, Any], List[Dict[str, Any]]],
-        job_path: Optional[Path] = None,
-        workspace_path: Optional[Path] = None,
+        data: dict[str, Any] | list[dict[str, Any]],
+        job_path: Path | None = None,
+        workspace_path: Path | None = None,
         *,
         load_docstrings: bool = True,
     ):
@@ -248,14 +249,14 @@ class ParamsGraph:
             if workspace_path
             else self._find_ws(self.job_path)
         )
-        self.objects: Dict[int, ObjectNode] = {}
-        self.task_object_ids: Set[int] = set()
-        self.init_task_object_ids: Set[int] = set()
-        self.root_task_id: Optional[int] = None
+        self.objects: dict[int, ObjectNode] = {}
+        self.task_object_ids: set[int] = set()
+        self.init_task_object_ids: set[int] = set()
+        self.root_task_id: int | None = None
         self._parse(raw_objs, load_docstrings=load_docstrings)
 
     @staticmethod
-    def _find_ws(path: Optional[Path]) -> Optional[Path]:
+    def _find_ws(path: Path | None) -> Path | None:
         """Search upwards from a directory for the nearest `.experimaestro` root."""
         if not path:
             return None
@@ -288,7 +289,7 @@ class ParamsGraph:
 
         text = f.read_text(encoding="utf-8")
         if f.suffix == ".jsonl" or f.name == "objects.jsonl":
-            payload: Union[Dict[str, Any], List[Dict[str, Any]]] = [
+            payload: dict[str, Any] | list[dict[str, Any]] = [
                 json.loads(line) for line in text.splitlines() if line.strip()
             ]
         else:
@@ -296,7 +297,7 @@ class ParamsGraph:
         return cls(payload, job_path=f.parent, load_docstrings=load_docstrings)
 
     def _parse(
-        self, raw_objs: List[Dict[str, Any]], *, load_docstrings: bool = True
+        self, raw_objs: list[dict[str, Any]], *, load_docstrings: bool = True
     ) -> None:
         """Construct ObjectNode instances and resolve reference graphs."""
         target_hash = self.job_path.name if self.job_path else None
@@ -327,8 +328,8 @@ class ParamsGraph:
             self.objects[self.root_task_id].is_root_task = True
             self.objects[self.root_task_id].is_task = True
 
-        def _extract_refs(val: Any, prefix: str = "") -> List[Tuple[str, int]]:
-            refs: List[Tuple[str, int]] = []
+        def _extract_refs(val: Any, prefix: str = "") -> list[tuple[str, int]]:
+            refs: list[tuple[str, int]] = []
             if isinstance(val, dict):
                 if val.get("type") == "python" and "value" in val:
                     refs.append((prefix, int(val["value"])))
@@ -353,7 +354,7 @@ class ParamsGraph:
                         n.outgoing_refs.append((rk, tid))
                         self.objects[tid].incoming_refs.append((oid, rk))
 
-    def resolve_path(self, spec: Any) -> Optional[ResolvedPath]:
+    def resolve_path(self, spec: Any) -> ResolvedPath | None:
         """Attempt to resolve a parameter value as a path specification."""
         if isinstance(spec, dict) and spec.get("type") in ("path", "path.serialized"):
             return ResolvedPath.resolve(
@@ -365,7 +366,7 @@ class ParamsGraph:
         return None
 
     def to_python_snippet(
-        self, oid: int, indent: int = 0, seen: Optional[Set[int]] = None
+        self, oid: int, indent: int = 0, seen: set[int] | None = None
     ) -> str:
         """Synthesize a reproducible Python `.C(...)` configuration snippet."""
         seen = seen or set()
@@ -383,7 +384,7 @@ class ParamsGraph:
         ]
         return f"{node.type_name}.C(\n" + "\n".join(args) + f"\n{sp})"
 
-    def _fmt_py(self, v: Any, indent: int, seen: Set[int]) -> str:
+    def _fmt_py(self, v: Any, indent: int, seen: set[int]) -> str:
         """Format an individual field value for Python code synthesis."""
         if isinstance(v, dict):
             t = v.get("type")

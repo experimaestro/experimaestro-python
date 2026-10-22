@@ -1,7 +1,6 @@
 """Experiments list widget for the TUI"""
 
 from datetime import datetime
-from typing import Optional
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
@@ -47,11 +46,11 @@ class ExperimentsList(Widget):
         Binding("escape", "clear_search", show=False, priority=True),
     ]
 
-    current_experiment: reactive[Optional[str]] = reactive(None)
+    current_experiment: reactive[str | None] = reactive(None)
     collapsed: reactive[bool] = reactive(False)
 
     # Track current sort state (newest first by default)
-    _sort_column: Optional[str] = "started"
+    _sort_column: str | None = "started"
     _sort_reverse: bool = True
 
     # Status sort order (for sorting by status)
@@ -150,7 +149,7 @@ class ExperimentsList(Widget):
                 event.input.display = False
             self.query_one("#experiments-table", DataTable).focus()
 
-    def _get_selected_experiment_id(self) -> Optional[str]:
+    def _get_selected_experiment_id(self) -> str | None:
         """Get the experiment ID from the currently selected row"""
         table = self.query_one("#experiments-table", DataTable)
         if table.cursor_row is None:

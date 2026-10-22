@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from experimaestro.core.context import (
     SerializationContext,
     SerializedPath,
@@ -54,7 +54,7 @@ def save_definition(obj: Any, context: SerializationContext, path: Path):
 
 def save(
     obj: Any,
-    save_directory: Optional[Path],
+    save_directory: Path | None,
     definition_filename: str = "experimaestro.json",
 ):
     """Save a configuration to a directory.
@@ -81,10 +81,10 @@ def save(
     )
 
 
-def get_data_loader(path: Union[str, Path, SerializedPathLoader]):
+def get_data_loader(path: str | Path | SerializedPathLoader):
     if path is None:
 
-        def data_loader(_: Union[str, Path, SerializedPathLoader]):
+        def data_loader(_: str | Path | SerializedPathLoader):
             # Just raise an exception
             raise RuntimeError("No serialization path was given")
 
@@ -95,7 +95,7 @@ def get_data_loader(path: Union[str, Path, SerializedPathLoader]):
 
     path = Path(path)
 
-    def data_loader(s: Union[Path, str, SerializedPath]):
+    def data_loader(s: Path | str | SerializedPath):
         if isinstance(s, SerializedPath):
             return path / Path(s.path)
         return path / Path(s)
@@ -104,11 +104,11 @@ def get_data_loader(path: Union[str, Path, SerializedPathLoader]):
 
 
 def from_state_dict(
-    state: Dict[str, Any],
-    path: Union[None, str, Path, SerializedPathLoader] = None,
+    state: dict[str, Any],
+    path: None | str | Path | SerializedPathLoader = None,
     *,
     as_instance: bool = False,
-    partial_loading: Optional[bool] = None,
+    partial_loading: bool | None = None,
 ):
     """Load an object from a state dictionary.
 
@@ -149,11 +149,11 @@ def _resolve_definition_filename(data_loader, definition_filename: str | None) -
 
 
 def load(
-    path: Union[str, Path, SerializedPathLoader],
+    path: str | Path | SerializedPathLoader,
     as_instance: bool = False,
-    partial_loading: Optional[bool] = None,
+    partial_loading: bool | None = None,
     definition_filename: str | None = None,
-) -> Tuple[Any, List["LightweightTask"]]:
+) -> tuple[Any, list["LightweightTask"]]:
     """Load a configuration from a directory.
 
     Restores a configuration previously saved with :func:`save`.
@@ -182,9 +182,9 @@ def load(
 
 
 def from_task_dir(
-    path: Union[str, Path, SerializedPathLoader],
+    path: str | Path | SerializedPathLoader,
     as_instance: bool = False,
-    partial_loading: Optional[bool] = None,
+    partial_loading: bool | None = None,
 ):
     """Load a task configuration from a task directory.
 
@@ -244,11 +244,11 @@ def serialize(
 
 
 def deserialize(
-    path: Union[str, Path, SerializedPathLoader],
+    path: str | Path | SerializedPathLoader,
     as_instance: bool = False,
-    partial_loading: Optional[bool] = None,
+    partial_loading: bool | None = None,
     definition_filename: str | None = None,
-) -> tuple[Any, List["LightweightTask"]] | Any:
+) -> tuple[Any, list["LightweightTask"]] | Any:
     """Deserialize a configuration from a directory.
 
     Restores a configuration previously saved with :func:`serialize`.
@@ -290,15 +290,15 @@ class ExperimentInfo:
     Contains deserialized job configs and actions from an experiment run.
     """
 
-    jobs: Dict[str, Any]
+    jobs: dict[str, Any]
     """Mapping of job_id to Config objects"""
 
-    actions: Dict[str, Any]
+    actions: dict[str, Any]
     """Mapping of action_id to Action objects"""
 
 
 def load_xp_info(
-    path: Union[str, Path],
+    path: str | Path,
 ) -> ExperimentInfo:
     """Load all serialized objects from an experiment run directory.
 
@@ -378,8 +378,8 @@ def _load_from_objects_jsonl(run_dir: Path) -> ExperimentInfo:
             identifier_to_python_id[obj["identifier"]] = obj["id"]
 
     # Classify by matching identifiers to job_ids and action_ids
-    jobs: Dict[str, Any] = {}
-    actions: Dict[str, Any] = {}
+    jobs: dict[str, Any] = {}
+    actions: dict[str, Any] = {}
 
     for identifier, python_id in identifier_to_python_id.items():
         data_ref = {"type": "python", "value": python_id}
@@ -409,8 +409,8 @@ def _load_from_configs_json(configs_path: Path) -> ExperimentInfo:
 
 
 def load_configs(
-    path: Union[str, Path],
-) -> Dict[str, Any]:
+    path: str | Path,
+) -> dict[str, Any]:
     """Load all job configs from an experiment run directory.
 
     .. deprecated::

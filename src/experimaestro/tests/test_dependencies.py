@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 import pytest
 from experimaestro import Config, Param, Task, RunMode
 from experimaestro.scheduler.jobs import JobDependency

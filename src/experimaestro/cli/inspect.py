@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from typing import Optional
 
 import click
 
@@ -18,7 +17,7 @@ from .remote import RemoteCommand
     default=None,
     help="Workspace ID or directory path (defaults to current Experimaestro workspace; supports remote SSH workspaces).",
 )
-def inspect_command(target: str, workspace: Optional[str]) -> None:
+def inspect_command(target: str, workspace: str | None) -> None:
     """Interactive TUI Parameters Inspector for Experimaestro jobs.
 
     TARGET can be a Job ID or hash prefix (e.g., `mymodule.MyTask/1822b2b`),

@@ -1,7 +1,7 @@
 # ruff: noqa: T201 - This is a CLI diff tool that uses print for output
 import importlib
 from itertools import chain
-from typing import Dict, Any
+from typing import Any
 from pathlib import Path
 import json
 from experimaestro.core.objects.config_utils import getqualattr
@@ -16,9 +16,9 @@ class ObjectProxy:
 
     ignored: set[str]
     ignore: bool
-    fields: Dict[str, Any]
+    fields: dict[str, Any]
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: dict[str, Any]):
         self.id = data["id"]
         self.module = data["module"]
         self.type = data["type"]
@@ -31,7 +31,7 @@ class ObjectProxy:
         return f"{self.module}.{self.type}({self.identifier})"
 
 
-Store = Dict[str, ObjectProxy]
+Store = dict[str, ObjectProxy]
 
 
 def build_value(data, store: Store):
@@ -59,7 +59,7 @@ def build_value(data, store: Store):
     return data
 
 
-def build_object(data: Dict[str, Any], store: Store) -> ObjectProxy:
+def build_object(data: dict[str, Any], store: Store) -> ObjectProxy:
     object = ObjectProxy(data)
     store[data["id"]] = object
 

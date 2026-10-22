@@ -1,4 +1,3 @@
-from typing import List
 from .objects import Task
 from .arguments import Param
 
@@ -6,7 +5,7 @@ from .arguments import Param
 class TaskSequence(Task):
     """Multiple task execution, the main one being the last"""
 
-    tasks: Param[List[Task]]
+    tasks: Param[list[Task]]
 
     @property
     def __identifier__(self):

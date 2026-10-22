@@ -6,7 +6,6 @@ Test annotation handling for configurations and tasks
 # Annotation specific tests
 
 from pathlib import Path
-from typing import Dict, Optional, List
 from experimaestro.core.context import SerializationContext
 from experimaestro.core.types import DictType, IntType, StrType
 from enum import Enum
@@ -86,10 +85,10 @@ def test_type_hinting():
         x: Param[int]
         y: Param[float] = field(default=2.3, ignore_default=True)
         y2: Param[float] = field(default=2.3, ignore_default=True)
-        z: Param[Optional[float]]
-        t: Param[List[float]]
+        z: Param[float | None]
+        t: Param[list[float]]
         w: Param[int]
-        opt: Param[Optional[int]]
+        opt: Param[int | None]
         path: Annotated[Path, pathgenerator("world")]
         option: Option[str]
 
@@ -243,7 +242,7 @@ def test_redefined_param():
 
 def test_param_dict():
     class A(Config):
-        x: Param[Dict[str, int]]
+        x: Param[dict[str, int]]
 
     xpmA = A.__getxpmtype__()
     xarg = xpmA.getArgument("x").type

@@ -4,7 +4,7 @@ import ast
 import re
 import sys
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 import click
 from termcolor import cprint

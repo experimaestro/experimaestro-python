@@ -2,7 +2,6 @@
 
 import logging
 from experimaestro import Config, Param, field
-from typing import Union
 
 import pytest
 from experimaestro.core.objects import ConfigMixin
@@ -63,7 +62,7 @@ def test_missing_hierarchy():
 
 def test_types_union():
     class A(Config):
-        x: Param[Union[int, str]]
+        x: Param[int | str]
 
     A.C(x=1)
     A.C(x="hello")

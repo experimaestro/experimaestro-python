@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -53,9 +52,9 @@ class SubConfig(Config):
 
 
 class MultiParamObject(Config):
-    opt_a: Param[Optional[int]]
+    opt_a: Param[int | None]
 
-    x: Param[dict[str, Optional[SubConfig]]]
+    x: Param[dict[str, SubConfig | None]]
 
 
 def test_serializers_types():

@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import (
@@ -100,9 +99,9 @@ class ExperimaestroUI(App):
 
     def __init__(
         self,
-        workdir: Optional[Path] = None,
+        workdir: Path | None = None,
         watch: bool = True,
-        state_provider: Optional[StateProvider] = None,
+        state_provider: StateProvider | None = None,
         show_logs: bool = False,
     ):
         """Initialize the TUI

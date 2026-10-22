@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 from experimaestro.core.types import ObjectType
 import mkdocs
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Set, Tuple, Type as TypingType
+from collections.abc import Iterator
 import importlib
 import logging
 import itertools
@@ -55,8 +55,8 @@ def relativepath(source: str, target: str):
 
 class ObjectLatticeNode:
     objecttype: ObjectType
-    parents: Set["ObjectLatticeNode"]
-    children: Set["ObjectLatticeNode"]
+    parents: set["ObjectLatticeNode"]
+    children: set["ObjectLatticeNode"]
 
     def __init__(self, objecttype):
         self.objecttype = objecttype
@@ -127,7 +127,7 @@ class ObjectLatticeNode:
                 return node
 
     def topologicalOrder(
-        self, current: List["ObjectLatticeNode"], cover: Set["ObjectLatticeNode"]
+        self, current: list["ObjectLatticeNode"], cover: set["ObjectLatticeNode"]
     ):
         for child in self.children:
             current.append(child)
@@ -138,7 +138,7 @@ class ObjectLatticeNode:
     def iter_all(self):
         return self._iter_all(set())
 
-    def _iter_all(self, processed: Set):
+    def _iter_all(self, processed: set):
         if id(self) not in processed:
             yield self
             processed.add(id(self))
@@ -159,7 +159,7 @@ class ObjectLattice:
             self.node.add(node)
         return node
 
-    def topologicalOrder(self) -> List[ObjectLatticeNode]:
+    def topologicalOrder(self) -> list[ObjectLatticeNode]:
         current = []
         self.node.topologicalOrder(current, set())
         return current
@@ -198,7 +198,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # path to sets of XPM types
-        self.configurations: Dict[str, Configurations] = defaultdict(
+        self.configurations: dict[str, Configurations] = defaultdict(
             lambda: Configurations()
         )
 
@@ -368,7 +368,7 @@ class Documentation(mkdocs.plugins.BasePlugin):
         self.build_doc(page, lines, nodes)
         return "".join(lines)
 
-    def _getlink(self, url, qualname: str) -> Tuple[str, Optional[str]]:
+    def _getlink(self, url, qualname: str) -> tuple[str, str | None]:
         """Get a link given a qualified name"""
 
         # Use an internal reference
@@ -389,11 +389,11 @@ class Documentation(mkdocs.plugins.BasePlugin):
             return f"[{qualname}]({href})"
         return qualname
 
-    def getConfigLink(self, pageURL: str, config: TypingType):
+    def getConfigLink(self, pageURL: str, config: type):
         return self._getlink(pageURL, f"{config.__module__}.{config.__qualname__}")
 
     def build_doc(
-        self, page: MkdocPage, lines: List[str], nodes: List[ObjectLatticeNode]
+        self, page: MkdocPage, lines: list[str], nodes: list[ObjectLatticeNode]
     ):
         """Build the documentation for a list of configurations"""
 

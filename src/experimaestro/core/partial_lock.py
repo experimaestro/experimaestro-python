@@ -8,7 +8,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Type
 import filelock
 import logging
 
@@ -68,10 +67,10 @@ class PartialJobResource(Resource, TrackedDynamicResource):
     """
 
     #: Lock file class for partial lock files
-    lock_file_class: Type[DynamicLockFile] = PartialLockFile
+    lock_file_class: type[DynamicLockFile] = PartialLockFile
 
     #: Maps partial paths to PartialJobResource instances (singleton pattern)
-    RESOURCES: Dict[str, "PartialJobResource"] = {}
+    RESOURCES: dict[str, "PartialJobResource"] = {}
 
     @staticmethod
     def forkhandler():

@@ -202,7 +202,7 @@ browser = [
     "playwright>=1.50",
 ]
 dev = [
-    "ruff>=0.8",
+    "ruff>=0.17",
     "mkdocs>=1.6.1",
     "vulture>=2.14",
 ]
@@ -232,6 +232,10 @@ select = [
     "W",      # pycodestyle warnings
     "C90",    # mccabe complexity
     "T20",    # flake8-print
+    "UP006",  # list[int], not List[int]
+    "UP007",  # X | Y, not Union[X, Y]
+    "UP035",  # no deprecated typing imports
+    "UP045",  # X | None, not Optional[X]
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
@@ -241,6 +245,8 @@ ignore = [
 # Standalone helper scripts are CLIs: printing to stdout is intended.
 "scripts/*" = ["T20"]
 "dev/*" = ["T20"]
+# Checks that the legacy typing forms (List, Optional, ...) still work
+"src/experimaestro/tests/core/test_legacy_typing.py" = ["UP006", "UP007", "UP035", "UP045"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 25

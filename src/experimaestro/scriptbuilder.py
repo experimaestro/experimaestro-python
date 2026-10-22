@@ -1,6 +1,5 @@
 from pathlib import Path
 import sys
-from typing import Optional, List
 import os
 from experimaestro.utils import logger
 from .connectors import RedirectType, Redirect
@@ -47,9 +46,9 @@ class PythonScriptBuilder:
 
     def __init__(self, pythonpath: Path = None):
         self.pythonpath = pythonpath or Path(sys.executable)
-        self.lockfiles: List[Path] = []
-        self.notificationURL: Optional[str] = None
-        self.command: Optional[AbstractCommand] = None
+        self.lockfiles: list[Path] = []
+        self.notificationURL: str | None = None
+        self.command: AbstractCommand | None = None
 
         # This is used to serialize the full process identifier on disk
         self.processtype = "local"

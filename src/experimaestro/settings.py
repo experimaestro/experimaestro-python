@@ -9,7 +9,6 @@ from pydantic import TypeAdapter
 from dataclasses import field, dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Optional, List
 import logging
 import fnmatch
 
@@ -57,16 +56,16 @@ class FolderSettings:
 
 @dataclass
 class ServerSettings:
-    port: Optional[int] = None
+    port: int | None = None
     """Port for the server"""
 
-    host: Optional[str] = None
+    host: str | None = None
     """Hostname for the server"""
 
-    autohost: Optional[str] = None
+    autohost: str | None = None
     """Automatic hostname: values can be `fqdn` or `name`"""
 
-    token: Optional[str] = None
+    token: str | None = None
     """Token for the server"""
 
 
@@ -88,10 +87,10 @@ class CarbonSettings:
     provider: str = "codecarbon"
     """Carbon tracking provider (currently only 'codecarbon' supported)."""
 
-    country_iso_code: Optional[str] = None
+    country_iso_code: str | None = None
     """Override auto-detected country (ISO 3166-1 alpha-3 code, e.g., 'FRA')."""
 
-    region: Optional[str] = None
+    region: str | None = None
     """Override auto-detected region."""
 
     report_interval_s: float = 60.0
@@ -167,27 +166,27 @@ class SSHSettings:
     """SSH host (e.g., 'user@cluster' or SSH config alias).
     Marks the workspace as remote."""
 
-    shell_init: Optional[str] = None
+    shell_init: str | None = None
     """Shell commands to run before the remote experimaestro command
     (e.g., 'source /etc/profile; module load python/3.10.4')"""
 
     uv_offline: bool = False
     """Pass --offline to uv tool run (use cached packages, no network)"""
 
-    python: Optional[str] = None
+    python: str | None = None
     """Python interpreter for uv tool run --python"""
 
-    xpm_path: Optional[str] = None
+    xpm_path: str | None = None
     """Path to experimaestro on remote host (bypasses uv tool run entirely)"""
 
-    options: List[str] = field(default_factory=list)
+    options: list[str] = field(default_factory=list)
     """Additional SSH options (e.g., ['-p', '2222'])"""
 
-    log_levels: Optional[str] = None
+    log_levels: str | None = None
     """Logging levels of the remote server, shown locally (as ``--logging``,
     e.g. ``xpm.remote.trace=DEBUG`` to trace the requests)"""
 
-    reconnect: Optional[ReconnectSettings] = None
+    reconnect: ReconnectSettings | None = None
     """Reconnection policy of this workspace (defaults to the global
     ``reconnect`` settings)"""
 
@@ -202,10 +201,10 @@ class WorkspaceSettings:
     path: Path = field()
     """The workspace path"""
 
-    env: Dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
     """Workspace specific environment variables"""
 
-    alt_workspaces: List[str] = field(default_factory=list)
+    alt_workspaces: list[str] = field(default_factory=list)
     """Alternative workspaces to find jobs or experiments.
 
     .. deprecated::
@@ -214,7 +213,7 @@ class WorkspaceSettings:
         :attr:`folders` at load time.
     """
 
-    folders: List[FolderSettings] = field(default_factory=list)
+    folders: list[FolderSettings] = field(default_factory=list)
     """**Beta**: auxiliary folders for jobs (archival / read-through /
     migration). See :class:`FolderSettings` and :class:`FolderMode`."""
 
@@ -234,13 +233,13 @@ class WorkspaceSettings:
     :ref:`sharing-a-workspace` for shared workspaces.
     """
 
-    triggers: List[str] = field(default_factory=list)
+    triggers: list[str] = field(default_factory=list)
     """Glob patterns to automatically select this workspace based on experiment ID"""
 
     history: HistorySettings = field(default_factory=HistorySettings)
     """Settings for experiment history cleanup"""
 
-    ssh: Optional[SSHSettings] = None
+    ssh: SSHSettings | None = None
     """SSH settings for remote workspace access"""
 
     @property
@@ -259,9 +258,9 @@ class WorkspaceSettings:
 @dataclass
 class Settings:
     server: ServerSettings = field(default_factory=ServerSettings)
-    workspaces: List[WorkspaceSettings] = field(default_factory=list)
+    workspaces: list[WorkspaceSettings] = field(default_factory=list)
 
-    env: Dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
     """Default environment variables"""
 
     history: HistorySettings = field(default_factory=HistorySettings)
@@ -296,7 +295,7 @@ def _interpolate(obj, is_env=False):
 
 
 @lru_cache()
-def get_settings(path: Optional[Path] = None) -> Settings:
+def get_settings(path: Path | None = None) -> Settings:
     if getattr(sys, "_called_from_test", False):
         settings = Settings()
         settings.carbon.enabled = False
@@ -319,8 +318,8 @@ def get_settings(path: Optional[Path] = None) -> Settings:
 
 
 def get_workspace(
-    id: Optional[str] = None, *, include_remote: bool = False
-) -> Optional[WorkspaceSettings]:
+    id: str | None = None, *, include_remote: bool = False
+) -> WorkspaceSettings | None:
     """Return the workspace settings given an id (or None for the default one)
 
     Args:
@@ -343,7 +342,7 @@ def get_workspace(
     return None
 
 
-def get_workspace_by_path(path: Path) -> Optional[WorkspaceSettings]:
+def get_workspace_by_path(path: Path) -> WorkspaceSettings | None:
     """Return the settings of the (local) workspace located at a given path"""
     path = Path(path).expanduser().resolve()
 
@@ -362,9 +361,9 @@ def get_workspace_by_path(path: Path) -> Optional[WorkspaceSettings]:
 
 def find_workspace(
     *,
-    workspace: Optional[str] = None,
-    workdir: Optional[Path] = None,
-    experiment_id: Optional[str] = None,
+    workspace: str | None = None,
+    workdir: Path | None = None,
+    experiment_id: str | None = None,
 ) -> WorkspaceSettings:
     """Find workspace
 

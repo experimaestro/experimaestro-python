@@ -8,7 +8,7 @@ import threading
 import time
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from weakref import WeakSet
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ class ResourcePoller:
     ensuring all locking operations happen in the same context.
     """
 
-    _instance: Optional["ResourcePoller"] = None
+    _instance: "ResourcePoller" | None = None
     _instance_lock = threading.Lock()
 
     @classmethod
@@ -270,7 +270,7 @@ class DynamicDependency(ABC):
     """
 
     origin: DynamicResource
-    target: Optional["Job"]
+    target: "Job" | None
 
     def __init__(self, origin: DynamicResource):
         self.origin = origin

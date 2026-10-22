@@ -6,7 +6,8 @@ by monitors (TUI, web UI) via file watching.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Dict, Iterator, Optional, TypeVar, overload
+from typing import ClassVar, Optional, TypeVar, overload
+from collections.abc import Iterator
 import sys
 from tqdm.auto import tqdm as std_tqdm
 
@@ -22,10 +23,10 @@ class LevelInformation:
     """Progress information for a single nesting level"""
 
     level: int
-    desc: Optional[str]
+    desc: str | None
     progress: float
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to a dictionary for JSON serialization."""
         return {
             "level": self.level,
@@ -34,7 +35,7 @@ class LevelInformation:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> "LevelInformation":
+    def from_dict(cls, d: dict) -> "LevelInformation":
         """Create LevelInformation from a dictionary (e.g., from JSON).
 
         Args:
@@ -96,7 +97,7 @@ class Reporter:
         self.file_reporter.eoj(state)
 
     def set_progress(
-        self, progress: float, level: int, desc: Optional[str], console=False
+        self, progress: float, level: int, desc: str | None, console=False
     ):
         """Set progress for a specific level.
 
@@ -133,7 +134,7 @@ class Reporter:
         return Reporter.INSTANCE
 
 
-def progress(value: float, level=0, desc: Optional[str] = None, console=False):
+def progress(value: float, level=0, desc: str | None = None, console=False):
     """Report task progress.
 
     Call this function from within a running task to report progress.
@@ -214,7 +215,7 @@ def tqdm(**kwargs) -> xpm_tqdm: ...
 
 
 @overload
-def tqdm(iterable: Optional[Iterator[T]] = None, **kwargs) -> Iterator[T]: ...
+def tqdm(iterable: Iterator[T] | None = None, **kwargs) -> Iterator[T]: ...
 
 
 def tqdm(*args, **kwargs):

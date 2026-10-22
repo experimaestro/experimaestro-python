@@ -2,7 +2,6 @@
 
 import logging
 import threading
-from typing import Optional
 
 from textual import work
 from textual.app import ComposeResult
@@ -185,8 +184,8 @@ class ActionsList(Vertical):
     def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
-        self.current_experiment: Optional[str] = None
-        self.current_run_id: Optional[str] = None
+        self.current_experiment: str | None = None
+        self.current_run_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -203,7 +202,7 @@ class ActionsList(Vertical):
         table.cursor_type = "row"
 
     def set_experiment(
-        self, experiment_id: Optional[str], run_id: Optional[str] = None
+        self, experiment_id: str | None, run_id: str | None = None
     ) -> None:
         """Set the current experiment and refresh actions"""
         self.current_experiment = experiment_id
@@ -236,7 +235,7 @@ class ActionsList(Vertical):
             action_class = getattr(action, "action_class", "")
             table.add_row(action_id, desc, action_class, key=action_id)
 
-    def _get_selected_action_id(self) -> Optional[str]:
+    def _get_selected_action_id(self) -> str | None:
         """Get the action_id of the currently selected row."""
         table = self.query_one("#actions-table", DataTable)
         if table.cursor_row is not None and table.row_count > 0:

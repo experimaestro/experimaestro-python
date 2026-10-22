@@ -11,7 +11,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Any, Protocol
 
 import click
 import yaml
@@ -45,7 +45,7 @@ class ExperimentHelper:
 
     """Handles extra arguments"""
 
-    def run(self, args: List[str], configuration: ConfigurationBase):
+    def run(self, args: list[str], configuration: ConfigurationBase):
         assert len(args) == 0
         self.callable(self, configuration)
 
@@ -253,15 +253,15 @@ def experiments_cli(  # noqa: C901
     no_progress: bool,
     no_db: bool,
     xpm_config_dir: Path,
-    workdir: Optional[Path],
-    workspace: Optional[str],
-    env: List[Tuple[str, str]],
+    workdir: Path | None,
+    workspace: str | None,
+    env: list[tuple[str, str]],
     run_mode: RunMode,
-    extra_conf: List[str],
-    pre_yaml: List[str],
-    post_yaml: List[str],
-    module_name: Optional[str],
-    args: List[str],
+    extra_conf: list[str],
+    pre_yaml: list[str],
+    post_yaml: list[str],
+    module_name: str | None,
+    args: list[str],
     show: bool,
     watcher: str,
     polling_interval: float,

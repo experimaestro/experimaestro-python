@@ -1,4 +1,4 @@
-from typing import List, TypeVar
+from typing import TypeVar
 from experimaestro import Param
 
 from .objects import Config, LightweightTask
@@ -15,7 +15,7 @@ class SerializationLWTask(LightweightTask):
     value: Param[Config]
     """The configuration that will be serialized"""
 
-    registered: List[Config]
+    registered: list[Config]
     """(execution only) List of configurations that use this serialized config"""
 
     def __post_init__(self):

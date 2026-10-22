@@ -5,7 +5,8 @@ import logging
 import subprocess
 import threading
 from pathlib import Path
-from typing import Callable, List, Mapping, Optional, Set, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
+from collections.abc import Callable, Mapping
 
 from experimaestro.scheduler.interfaces import BaseService
 
@@ -76,13 +77,13 @@ class Service(BaseService):
     id: str
     _state: ServiceState = ServiceState.STOPPED
     _experiment: Optional["Experiment"] = None
-    _error: Optional[str] = None
+    _error: str | None = None
 
-    def __init__(self, log_directory: Optional[Path] = None):
-        self._listeners: Set[ServiceListener] = set()
+    def __init__(self, log_directory: Path | None = None):
+        self._listeners: set[ServiceListener] = set()
         self._listeners_lock = threading.Lock()
         self._error = None
-        self.log_directory: Optional[Path] = log_directory
+        self.log_directory: Path | None = log_directory
 
     def set_experiment(self, xp: "Experiment") -> None:
         """Called when the service is added to an experiment.
@@ -116,14 +117,14 @@ class Service(BaseService):
         return ""
 
     @property
-    def stdout(self) -> Optional[Path]:
+    def stdout(self) -> Path | None:
         """Return path to stdout log file"""
         if self.log_directory is None:
             return None
         return self.log_directory / "logs.out"
 
     @property
-    def stderr(self) -> Optional[Path]:
+    def stderr(self) -> Path | None:
         """Return path to stderr log file"""
         if self.log_directory is None:
             return None
@@ -211,7 +212,7 @@ class Service(BaseService):
     def from_state_dict(
         service_class: str,
         data: dict,
-        path_translator: Optional[Callable[[str], Path]] = None,
+        path_translator: Callable[[str], Path] | None = None,
     ) -> "Service":
         """Recreate a service from a state dictionary.
 
@@ -291,7 +292,7 @@ class Service(BaseService):
     def description(self):
         return ""
 
-    def subservices(self) -> List["Service"]:
+    def subservices(self) -> list["Service"]:
         """Return the startable sub-services exposed by this service.
 
         By default a service is its own single sub-service. Composite services
@@ -317,7 +318,7 @@ class Service(BaseService):
 
     def setup_logging(
         self,
-    ) -> tuple[Optional[logging.FileHandler], Optional[logging.FileHandler]]:
+    ) -> tuple[logging.FileHandler | None, logging.FileHandler | None]:
         """Setup logging handlers for service output
 
         Returns tuple of (stdout_handler, stderr_handler) for cleanup.
@@ -383,11 +384,11 @@ class Service(BaseService):
                 logger.exception("Error notifying listener %s", listener)
 
     @property
-    def error(self) -> Optional[str]:
+    def error(self) -> str | None:
         """Return error message if service failed to start"""
         return self._error
 
-    def set_error(self, error: Optional[str]) -> None:
+    def set_error(self, error: str | None) -> None:
         """Set error message and update state to ERROR"""
         self._error = error
         if error:
@@ -434,13 +435,13 @@ class WebService(Service):
                     time.sleep(1)
     """
 
-    def __init__(self, log_directory: Optional[Path] = None):
+    def __init__(self, log_directory: Path | None = None):
         super().__init__(log_directory=log_directory)
         self.url = None
         self.thread = None
         self._stop_event = threading.Event()
         self._start_lock = threading.Lock()
-        self._running_event: Optional[threading.Event] = None
+        self._running_event: threading.Event | None = None
 
     def should_stop(self) -> bool:
         """Check if the service should stop.
@@ -649,12 +650,12 @@ class ProcessWebService(Service):
                     time.sleep(0.1)
     """
 
-    def __init__(self, log_directory: Optional[Path] = None):
+    def __init__(self, log_directory: Path | None = None):
         super().__init__(log_directory=log_directory)
         self.url = None
-        self.process: Optional[subprocess.Popen] = None
+        self.process: subprocess.Popen | None = None
         self._start_lock = threading.Lock()
-        self._running_event: Optional[threading.Event] = None
+        self._running_event: threading.Event | None = None
 
     def get_url(self):
         """Get the URL of this web service, starting it if needed.

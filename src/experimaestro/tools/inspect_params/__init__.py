@@ -6,7 +6,6 @@ configuration tree, cycle detection, path resolution, and Python code synthesis.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from experimaestro.tools.inspect_params.app import (
     NodeData,
@@ -66,9 +65,7 @@ __all__ = [
 ]
 
 
-def run_inspector(
-    target: Optional[str] = None, workspace: Optional[str] = None
-) -> None:
+def run_inspector(target: str | None = None, workspace: str | None = None) -> None:
     """Find parameters file and launch the interactive Textual inspector app."""
     params_path = find_params_file(target, workspace)
     app = ParamsInspectorApp(params_path)

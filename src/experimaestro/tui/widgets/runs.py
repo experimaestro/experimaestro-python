@@ -1,7 +1,6 @@
 """Runs list widget for the TUI"""
 
 from datetime import datetime
-from typing import Optional
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -29,8 +28,8 @@ class RunsList(Widget):
     def __init__(self, state_provider: StateProvider) -> None:
         super().__init__()
         self.state_provider = state_provider
-        self.experiment_id: Optional[str] = None
-        self.current_run_id: Optional[str] = None
+        self.experiment_id: str | None = None
+        self.current_run_id: str | None = None
         self.runs = []
 
     def compose(self) -> ComposeResult:
@@ -57,7 +56,7 @@ class RunsList(Widget):
             self.display = False
             self.add_class("hidden")
 
-    def set_experiment(self, experiment_id: str, current_run_id: Optional[str]) -> None:
+    def set_experiment(self, experiment_id: str, current_run_id: str | None) -> None:
         """Set the experiment and refresh runs"""
         self.experiment_id = experiment_id
         self.current_run_id = current_run_id
@@ -144,7 +143,7 @@ class RunsList(Widget):
                 key=run.run_id,
             )
 
-    def _get_selected_run_id(self) -> Optional[str]:
+    def _get_selected_run_id(self) -> str | None:
         """Get the run_id from the currently selected row"""
         table = self.query_one("#runs-table", DataTable)
         if table.cursor_row is None:

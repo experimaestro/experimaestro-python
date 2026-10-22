@@ -7,7 +7,6 @@ mirroring the TUI log viewer (shared logic in ``scheduler/logs.py``).
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -28,7 +27,7 @@ def _check_auth(request: Request) -> bool:
     return request.cookies.get("experimaestro_token") == server.token
 
 
-def _parse_offset(request: Request) -> Optional[int]:
+def _parse_offset(request: Request) -> int | None:
     raw = request.query_params.get("offset")
     if raw is None or raw == "":
         return None

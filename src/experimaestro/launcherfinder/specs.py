@@ -9,7 +9,6 @@ from attr import Factory
 from attrs import define
 from copy import copy, deepcopy
 from dataclasses import dataclass
-from typing import List, Optional, Union
 from humanfriendly import parse_size, format_size, parse_timespan
 
 
@@ -195,10 +194,10 @@ class HostSpecification:
         host = HostSpecification(cuda=[CudaSpecification(memory=24*1024**3)])
     """
 
-    accelerators: List[AcceleratorSpecification] = Factory(list)
+    accelerators: list[AcceleratorSpecification] = Factory(list)
     """All accelerators (GPUs) available on this host"""
 
-    cuda: List[CudaSpecification] = Factory(list)
+    cuda: list[CudaSpecification] = Factory(list)
     """CUDA GPUs (backwards compatibility, merged into accelerators)"""
 
     cpu: CPUSpecification = Factory(CPUSpecification)
@@ -235,7 +234,7 @@ class MatchRequirement:
 class HostRequirement(ABC):
     """A requirement must be a disjunction of host requirements"""
 
-    requirements: List["HostSimpleRequirement"]
+    requirements: list["HostSimpleRequirement"]
     """List of requirements (by order of priority)"""
 
     def __init__(self) -> None:
@@ -244,7 +243,7 @@ class HostRequirement(ABC):
     def __or__(self, other: "HostRequirement"):
         return RequirementUnion(self, other)
 
-    def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
+    def match(self, host: HostSpecification) -> MatchRequirement | None:
         raise NotImplementedError()
 
     @abstractmethod
@@ -257,7 +256,7 @@ class HostRequirement(ABC):
 class RequirementUnion(HostRequirement):
     """Ordered list of simple host requirements -- the first one is the priority"""
 
-    requirements: List["HostSimpleRequirement"]
+    requirements: list["HostSimpleRequirement"]
 
     def __init__(self, *requirements: "HostSimpleRequirement"):
         self.requirements = list(requirements)
@@ -272,10 +271,10 @@ class RequirementUnion(HostRequirement):
                 raise RuntimeError("Cannot handle type %s", type(requirement))
         return self
 
-    def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
+    def match(self, host: HostSpecification) -> MatchRequirement | None:
         """Returns the matched requirement (if any)"""
 
-        argmax: Optional[MatchRequirement] = None
+        argmax: MatchRequirement | None = None
 
         for req in self.requirements:
             max_score = float("-inf") if argmax is None else argmax.score
@@ -298,7 +297,7 @@ class RequirementUnion(HostRequirement):
 class HostSimpleRequirement(HostRequirement):
     """Simple host requirement"""
 
-    accelerators: List["AcceleratorSpecification"]
+    accelerators: list["AcceleratorSpecification"]
     """Specification for accelerators (GPUs)"""
 
     cpu: "CPUSpecification"
@@ -335,14 +334,14 @@ class HostSimpleRequirement(HostRequirement):
         self.accelerators.sort(key=lambda a: -a.memory)
 
     @property
-    def cuda_gpus(self) -> List["CudaSpecification"]:
+    def cuda_gpus(self) -> list["CudaSpecification"]:
         """CUDA GPUs (backwards compatibility alias).
 
         Returns only CUDA accelerators from the accelerators list.
         """
         return [a for a in self.accelerators if isinstance(a, CudaSpecification)]
 
-    def match(self, host: HostSpecification) -> Optional[MatchRequirement]:
+    def match(self, host: HostSpecification) -> MatchRequirement | None:
         if self.accelerators:
             if len(host.accelerators) < len(self.accelerators):
                 logging.debug(
@@ -410,14 +409,14 @@ class HostSimpleRequirement(HostRequirement):
         return _self
 
 
-def cpu(*, mem: Optional[str] = None, cores: int = 1):
+def cpu(*, mem: str | None = None, cores: int = 1):
     """CPU requirement"""
     r = HostSimpleRequirement()
     r.cpu = CPUSpecification(parse_memory(mem) if mem else 0, cores)
     return r
 
 
-def cuda_gpu(*, mem: Optional[str] = None):
+def cuda_gpu(*, mem: str | None = None):
     """CUDA GPU requirement (NVIDIA only).
 
     Use this when you specifically need NVIDIA CUDA support.
@@ -429,7 +428,7 @@ def cuda_gpu(*, mem: Optional[str] = None):
     return r
 
 
-def mps_gpu(*, mem: Optional[str] = None):
+def mps_gpu(*, mem: str | None = None):
     """Apple MPS GPU requirement (Apple Silicon only).
 
     MPS uses unified memory - the GPU shares RAM with the CPU.
@@ -442,7 +441,7 @@ def mps_gpu(*, mem: Optional[str] = None):
     return r
 
 
-def gpu(*, mem: Optional[str] = None):
+def gpu(*, mem: str | None = None):
     """Generic GPU/accelerator requirement.
 
     Matches any accelerator type (CUDA, MPS, ROCm, etc.) that satisfies
@@ -454,7 +453,7 @@ def gpu(*, mem: Optional[str] = None):
     return r
 
 
-def duration(timespec: Union[str, int]):
+def duration(timespec: str | int):
     """Request a given time duration
 
 

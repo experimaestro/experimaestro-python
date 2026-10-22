@@ -11,7 +11,6 @@ import json
 import pytest
 import time
 from pathlib import Path
-from typing import Optional
 
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from experimaestro.scheduler.state_status import (
@@ -76,7 +75,7 @@ def create_v2_experiment(
     workspace: Path,
     experiment_id: str,
     runs: list[tuple[str, str, list[tuple[str, str, str]]]],  # (run_id, status, jobs)
-    current_run: Optional[str] = None,
+    current_run: str | None = None,
 ) -> Path:
     """Create a v2 layout experiment with multiple runs.
 

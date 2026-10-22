@@ -104,7 +104,7 @@ class WebUIServer:
         self._has_active_experiment = isinstance(state_provider, Scheduler)
 
         # Threading state
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._running = False
         self._cv_running = threading.Condition()
         self._quit_event = threading.Event()

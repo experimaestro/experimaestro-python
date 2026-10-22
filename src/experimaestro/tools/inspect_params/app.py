@@ -8,7 +8,7 @@ from enum import Enum
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 import pyperclip  # type: ignore[import-untyped]
 from rich.console import Group
@@ -71,12 +71,12 @@ class NodeData:
 
     kind: NodeKind
     title: str
-    object_id: Optional[int] = None
-    field_name: Optional[str] = None
+    object_id: int | None = None
+    field_name: str | None = None
     field_value: Any = None
-    resolved_path: Optional[ResolvedPath] = None
-    target_object_id: Optional[int] = None
-    cycle_chain: Optional[List[int]] = None
+    resolved_path: ResolvedPath | None = None
+    target_object_id: int | None = None
+    cycle_chain: list[int] | None = None
     is_shared: bool = False
 
 
@@ -99,8 +99,8 @@ class ParamsTree(Tree[NodeData]):
         self.group_fields: bool = True
         self.filter_query: str = ""
         self.show_absolute_paths: bool = False
-        self.primary_nodes: Dict[int, TreeNode[NodeData]] = {}
-        self.matched_nodes: List[TreeNode[NodeData]] = []
+        self.primary_nodes: dict[int, TreeNode[NodeData]] = {}
+        self.matched_nodes: list[TreeNode[NodeData]] = []
         self.match_count: int = 0
 
     def on_mount(self) -> None:
@@ -177,7 +177,7 @@ class ParamsTree(Tree[NodeData]):
             )
 
         # Root task
-        seen: Set[int] = set()
+        seen: set[int] = set()
         rid = self.graph.root_task_id
         if rid and rid in self.graph.objects:
             self._render_obj(
@@ -247,7 +247,7 @@ class ParamsTree(Tree[NodeData]):
                 c.expand()
 
     @staticmethod
-    def _order_fields(fields: Dict[str, Any]) -> List[Tuple[str, Any]]:
+    def _order_fields(fields: dict[str, Any]) -> list[tuple[str, Any]]:
         """Order fields prioritizing core payload components over auxiliary metadata."""
         CORE_KEYS = {
             "model": 0,
@@ -276,8 +276,8 @@ class ParamsTree(Tree[NodeData]):
         self,
         parent: TreeNode[NodeData],
         oid: int,
-        ancestors: Tuple[int, ...],
-        seen: Set[int],
+        ancestors: tuple[int, ...],
+        seen: set[int],
         label: str = "",
     ) -> TreeNode[NodeData]:
         """Render an ObjectNode into the tree.
@@ -432,8 +432,8 @@ class ParamsTree(Tree[NodeData]):
         parent: TreeNode[NodeData],
         fn: str,
         v: Any,
-        anc: Tuple[int, ...],
-        seen: Set[int],
+        anc: tuple[int, ...],
+        seen: set[int],
     ) -> None:
         """Render an individual field value (sub-object, path, collection, or primitive).
 
@@ -586,7 +586,7 @@ class NodeDetailPane(VerticalScroll):
         """
         super().__init__(id="detail-pane")
         self.graph = graph
-        self.current_data: Optional[NodeData] = None
+        self.current_data: NodeData | None = None
         self.show_raw_json: bool = False
 
     def compose(self) -> ComposeResult:
@@ -598,7 +598,7 @@ class NodeDetailPane(VerticalScroll):
         self.show_raw_json = not self.show_raw_json
         self.update_detail(self.current_data)
 
-    def update_detail(self, data: Optional[NodeData]) -> None:
+    def update_detail(self, data: NodeData | None) -> None:
         """Update displayed card or raw JSON based on selected tree node data.
 
         Args:
@@ -708,7 +708,7 @@ class NodeDetailPane(VerticalScroll):
             ("Identifier", f"[bold yellow]{node.identifier}[/bold yellow] ('c')"),
             ("Fields", f"{len(node.fields)} fields"),
         ]
-        parts: List[Any] = [self._make_table(rows)]
+        parts: list[Any] = [self._make_table(rows)]
 
         if d.kind == NodeKind.CYCLE:
             parts.insert(
@@ -758,7 +758,7 @@ class NodeDetailPane(VerticalScroll):
             if rp.mtime:
                 rows.append(("Modified", rp.mtime.strftime("%Y-%m-%d %H:%M:%S")))
 
-        parts: List[Any] = [self._make_table(rows)]
+        parts: list[Any] = [self._make_table(rows)]
         if rp.exists and not rp.is_dir and (rp.size_bytes or 0) < 500_000:
             try:
                 txt = "\n".join(
@@ -774,7 +774,7 @@ class NodeDetailPane(VerticalScroll):
         w.update(Group(*parts))
 
     @staticmethod
-    def _make_table(rows: List[Tuple[str, str]], title: Optional[str] = None) -> Any:
+    def _make_table(rows: list[tuple[str, str]], title: str | None = None) -> Any:
         """Construct a formatted two-column table or panel.
 
         Args:
@@ -829,9 +829,9 @@ class ParamsInspectorScreen(Screen, inherit_bindings=False):
     def __init__(
         self,
         params_target: Path | str | ParamsGraph | None = None,
-        job: Optional["BaseJob"] = None,
-        state_provider: Optional["StateProvider"] = None,
-        title: Optional[str] = None,
+        job: "BaseJob" | None = None,
+        state_provider: "StateProvider" | None = None,
+        title: str | None = None,
     ):
         """Initialize the parameters inspector screen.
 
@@ -845,8 +845,8 @@ class ParamsInspectorScreen(Screen, inherit_bindings=False):
         self.job = job
         self.state_provider = state_provider
         self.custom_title = title
-        self.params_path: Optional[Path] = None
-        self.graph: Optional[ParamsGraph] = None
+        self.params_path: Path | None = None
+        self.graph: ParamsGraph | None = None
         self._loading = False
 
         if isinstance(params_target, ParamsGraph):
@@ -1193,7 +1193,7 @@ class ParamsInspectorApp(App):
         return self.inspector_screen
 
     @property
-    def graph(self) -> Optional[ParamsGraph]:
+    def graph(self) -> ParamsGraph | None:
         """Accessor for the underlying ParamsGraph."""
         return self.inspector_screen.graph
 

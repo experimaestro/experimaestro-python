@@ -11,7 +11,6 @@ import time
 import logging
 from pathlib import Path
 from dataclasses import dataclass, field as dataclass_field
-from typing import List
 
 import pytest
 
@@ -36,7 +35,7 @@ class TokenUsageTracker:
     cpu_used: int = 0
     max_memory_used: int = 0
     max_cpu_used: int = 0
-    violations: List[str] = dataclass_field(default_factory=list)
+    violations: list[str] = dataclass_field(default_factory=list)
     lock: threading.Lock = dataclass_field(default_factory=threading.Lock)
 
     def acquire(self, memory: int, cpu: int, task_id: str):

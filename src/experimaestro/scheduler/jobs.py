@@ -6,7 +6,8 @@ import itertools
 import json
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Set
+from typing import TYPE_CHECKING, Optional
+from collections.abc import Callable, Iterator
 
 import concurrent
 
@@ -160,9 +161,9 @@ class Job(BaseJob, Resource):
         workspace: Workspace = None,
         launcher: "Launcher" = None,
         run_mode: RunMode = RunMode.NORMAL,
-        max_retries: Optional[int] = None,
+        max_retries: int | None = None,
         transient: TransientMode = TransientMode.NONE,
-        backup: Optional[bool] = None,
+        backup: bool | None = None,
     ):
         from experimaestro.scheduler.base import Scheduler
 
@@ -186,12 +187,12 @@ class Job(BaseJob, Resource):
         self.type = config.__xpmtype__
         self.name = str(self.type.identifier).rsplit(".", 1)[-1]
 
-        self.scheduler: Optional["Scheduler"] = None
-        self.experiments: List["experiment"] = []  # Experiments this job belongs to
+        self.scheduler: "Scheduler" | None = None
+        self.experiments: list["experiment"] = []  # Experiments this job belongs to
         self.config = config
 
         # Dependencies
-        self.dependencies: Set[Dependency] = set()  # as target
+        self.dependencies: set[Dependency] = set()  # as target
 
         # Check if this is a resumable task
         from experimaestro.core.objects import ResumableTask
@@ -214,7 +215,7 @@ class Job(BaseJob, Resource):
         self._needed_transient = False
 
         # Watched outputs (stored for deferred registration with scheduler)
-        self.watched_outputs: List["WatchedOutput"] = list(
+        self.watched_outputs: list["WatchedOutput"] = list(
             config.__xpm__.watched_outputs
         )
 
@@ -365,7 +366,7 @@ class Job(BaseJob, Resource):
         if self.scheduler:
             self.scheduler.notify_job_state(self)
 
-    def find_done_in_folders(self) -> Optional[str]:
+    def find_done_in_folders(self) -> str | None:
         """Check if job has finished in any attached workspace folder.
 
         Uses shared find_in_folders detection. Returns the workspace/folder
@@ -411,7 +412,7 @@ class Job(BaseJob, Resource):
             self.workspace.env if self.workspace else {},
         )
 
-    def set_progress(self, level: int, value: float, desc: Optional[str]):
+    def set_progress(self, level: int, value: float, desc: str | None):
         if value < 0:
             logger.warning(f"Progress value out of bounds ({value})")
             value = 0
@@ -515,7 +516,7 @@ class Job(BaseJob, Resource):
         code inside"""
         return self.jobpath / ("%s.failed" % self.name)
 
-    def is_output_valid(self) -> Optional[bool]:
+    def is_output_valid(self) -> bool | None:
         """Whether the job output is present, independently of marker files.
 
         See :meth:`experimaestro.Config.__xpm_output_valid__`. None — the

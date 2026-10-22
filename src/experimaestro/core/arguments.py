@@ -1,7 +1,8 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
 import warnings
-from typing import Optional, TypeVar, TYPE_CHECKING, Callable, Any
+from typing import Optional, TypeVar, TYPE_CHECKING, Any
+from collections.abc import Callable
 from experimaestro.typingutils import get_optional
 from pathlib import Path
 from typing import Annotated
@@ -218,7 +219,7 @@ class ArgumentOptions:
 
 
 class TypeAnnotation:
-    def __call__(self, options: Optional[ArgumentOptions]):
+    def __call__(self, options: ArgumentOptions | None):
         if options is None:
             options = ArgumentOptions()
         self.annotate(options)
@@ -290,7 +291,7 @@ Example::
         model_weights: DataPath
 """
 
-OptionalDataPath = Annotated[Optional[Path], dataHint]
+OptionalDataPath = Annotated[Path | None, dataHint]
 """Optional version of DataPath"""
 
 

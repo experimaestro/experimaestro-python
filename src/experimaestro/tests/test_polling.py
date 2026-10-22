@@ -3,7 +3,6 @@
 import time
 from pathlib import Path
 from threading import Event, Lock
-from typing import List
 
 
 from experimaestro.filewatcher import FileWatcherService, PolledFile
@@ -192,7 +191,7 @@ class TestDirectoryWatch:
 
     def test_polling_detects_changes(self, tmp_path):
         """Test that polling detects file changes"""
-        changes: List[Path] = []
+        changes: list[Path] = []
         change_event = Event()
 
         def on_change(path):
@@ -272,7 +271,7 @@ class TestDirectoryWatch:
 
     def test_on_deleted_callback(self, tmp_path):
         """Test that on_deleted callback is called"""
-        deleted: List[Path] = []
+        deleted: list[Path] = []
         delete_event = Event()
 
         def on_deleted(path):

@@ -21,7 +21,8 @@ import asyncio
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from watchdog.events import FileSystemEventHandler
 

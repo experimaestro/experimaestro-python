@@ -4,7 +4,6 @@
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 
@@ -84,28 +83,28 @@ class ConfigList(Config):
     """Config with list parameter"""
 
     __xpmid__ = "test.stability.ConfigList"
-    items: Param[List[int]]
+    items: Param[list[int]]
 
 
 class ConfigDict(Config):
     """Config with dict parameter"""
 
     __xpmid__ = "test.stability.ConfigDict"
-    mapping: Param[Dict[str, int]]
+    mapping: Param[dict[str, int]]
 
 
 class ConfigNestedList(Config):
     """Config with nested list of configs"""
 
     __xpmid__ = "test.stability.ConfigNestedList"
-    configs: Param[List[ConfigInt]]
+    configs: Param[list[ConfigInt]]
 
 
 class ConfigNestedDict(Config):
     """Config with nested dict of configs"""
 
     __xpmid__ = "test.stability.ConfigNestedDict"
-    configs: Param[Dict[str, ConfigInt]]
+    configs: Param[dict[str, ConfigInt]]
 
 
 # --- Nested configs ---
@@ -462,7 +461,7 @@ def save_reference(output_file: Path, overwrite: bool = False):
     return reference
 
 
-def load_reference(reference_file: Path) -> Dict[str, str]:
+def load_reference(reference_file: Path) -> dict[str, str]:
     """Load reference identifiers from JSON file
 
     Args:

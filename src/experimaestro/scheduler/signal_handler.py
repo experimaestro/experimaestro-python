@@ -1,5 +1,5 @@
 import signal
-from typing import Set, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from experimaestro.utils import logger
 
 if TYPE_CHECKING:
@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 class SignalHandler:
     def __init__(self):
-        self.experiments: Set["Experiment"] = set()
+        self.experiments: set["Experiment"] = set()
         self.original_sigint_handler = None
 
     def add(self, xp: "Experiment"):

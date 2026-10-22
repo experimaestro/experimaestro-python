@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
 import uuid
 import ipywidgets as widgets
 from experimaestro import experiment
@@ -15,7 +15,7 @@ class serverwidget:
         *,
         port=12345,
         hook: Callable[["serverwidget"], None] = None,
-        environment: Optional[Dict[str, str]] = None,
+        environment: dict[str, str] | None = None,
     ):
         self.name = name
 

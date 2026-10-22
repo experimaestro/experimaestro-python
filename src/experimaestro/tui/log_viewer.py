@@ -1,7 +1,7 @@
 """Log viewer screen for viewing job logs efficiently"""
 
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -141,10 +141,10 @@ class LogViewerScreen(Screen, inherit_bindings=False):
         self,
         log_files: list[str],
         job_id: str,
-        sync_func: Optional[Callable[[str], Optional[Path]]] = None,
-        remote_path: Optional[str] = None,
-        task_id: Optional[str] = None,
-        job_state: Optional[JobState] = None,
+        sync_func: Callable[[str], Path | None] | None = None,
+        remote_path: str | None = None,
+        task_id: str | None = None,
+        job_state: JobState | None = None,
     ):
         """Initialize the log viewer
 
@@ -428,7 +428,7 @@ class LogViewerScreen(Screen, inherit_bindings=False):
 
 def create_service_log_viewer(
     service,
-    sync_func: Optional[Callable[[str], Optional[Path]]] = None,
+    sync_func: Callable[[str], Path | None] | None = None,
 ) -> LogViewerScreen:
     """Create a log viewer for a service
 

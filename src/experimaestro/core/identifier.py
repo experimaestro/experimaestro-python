@@ -5,7 +5,7 @@ import hashlib
 import logging
 import os
 import struct
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from experimaestro.core.objects import Config, ConfigMixin
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ class ConfigPath:
         self.instance_order: dict[bytes, list[int]] = {}
         """Maps InstanceConfig base identifier to list of object ids in encounter order"""
 
-    def detect_loop(self, config) -> Optional[int]:
+    def detect_loop(self, config) -> int | None:
         """If there is a loop, return the relative index and update the path"""
         index = self.config2index.get(id(config), None)
         if index is not None:

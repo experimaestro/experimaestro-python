@@ -2,7 +2,6 @@
 
 import threading
 from pathlib import Path
-from typing import Optional
 
 
 class FileBasedProgressReporter:
@@ -37,7 +36,7 @@ class FileBasedProgressReporter:
         self.current_progress: dict[int, tuple[float | None, str | None]] = {}
         self.lock = threading.Lock()
 
-    def set_progress(self, progress: float, level: int = 0, desc: Optional[str] = None):
+    def set_progress(self, progress: float, level: int = 0, desc: str | None = None):
         """Set progress for a specific level
 
         Args:

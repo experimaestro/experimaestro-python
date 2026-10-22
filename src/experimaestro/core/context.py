@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Protocol, Set, Union
+from typing import TYPE_CHECKING, Protocol
 
 try:
     from pathlib import UnsupportedOperation
@@ -34,7 +34,7 @@ def shallow_copy(src_path: Path, dest_path: Path):
 class SerializedPath:
     """Just a container for a path that has been serialized"""
 
-    def __init__(self, path: Path, is_folder: Optional[bool] = None):
+    def __init__(self, path: Path, is_folder: bool | None = None):
         self.path = path
         self.is_folder = path.is_dir() if is_folder is None else is_folder
 
@@ -42,17 +42,17 @@ class SerializedPath:
 class SerializationContext:
     """Context when serializing experimaestro configurations"""
 
-    save_directory: Optional[Path]
-    var_path: List[str]
-    serialized: Set[int]
-    serialized_paths: Set[str]
+    save_directory: Path | None
+    var_path: list[str]
+    serialized: set[int]
+    serialized_paths: set[str]
 
     # Optional anchors used to encode ``Path`` values relatively when possible.
     # Subclasses with workspace/job knowledge (e.g. ``CommandContext``) set them.
-    job_path: Optional[Path] = None
-    workspace_path: Optional[Path] = None
+    job_path: Path | None = None
+    workspace_path: Path | None = None
 
-    def __init__(self, *, save_directory: Optional[Path] = None):
+    def __init__(self, *, save_directory: Path | None = None):
         """Creates a new serialization context
 
         :param save_directory: Defines the directory where `SerializedPath` are
@@ -64,7 +64,7 @@ class SerializationContext:
         self.serialized_paths = set()
 
     def serialize(
-        self, var_path: List[str], data_path: Path, config: ConfigMixin
+        self, var_path: list[str], data_path: Path, config: ConfigMixin
     ) -> SerializedPath:
         """Serialize data files into the save directory
 
@@ -107,7 +107,7 @@ class SerializationContext:
 
 
 class SerializedPathLoader(Protocol):
-    def __call__(self, path: Union[Path, str, SerializedPath]) -> Path:
+    def __call__(self, path: Path | str | SerializedPath) -> Path:
         """Get a filesystem path from a relative path
 
         :param path: The relative path

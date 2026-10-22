@@ -4,7 +4,6 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Set
 
 import click
 from termcolor import cprint
@@ -54,7 +53,7 @@ def diff(path: Path):
     _, job = load_job(path / "params.json", discard_id=False)
     _, new_job = load_job(path / "params.json")
 
-    def check(path: str, value, new_value, done: Set[int]):
+    def check(path: str, value, new_value, done: set[int]):
         if isinstance(value, Config):
             if id(value) in done:
                 return
@@ -113,7 +112,7 @@ def check_documentation(objects, package, skip):
 )
 @click.argument("spec", type=str)
 @tools.command()
-def find_launchers(config: Optional[Path], spec: str):
+def find_launchers(config: Path | None, spec: str):
     """Find launchers matching a specification"""
     if config is not None:
         launcher_registry.LauncherRegistry.set_config_dir(config)

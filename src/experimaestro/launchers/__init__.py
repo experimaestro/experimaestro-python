@@ -1,6 +1,6 @@
 from pathlib import Path, PosixPath, WindowsPath
 import random
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
 from experimaestro.commandline import AbstractCommand, Job, CommandLineJob
 from experimaestro.connectors import Connector
 from experimaestro.connectors.local import ProcessBuilder, LocalConnector
@@ -21,7 +21,7 @@ class ScriptBuilder(ABC):
     """A script builder is responsible for generating the script
     used to launch a command line job"""
 
-    lockfiles: List[Path]
+    lockfiles: list[Path]
     """The files that must be locked before starting the job"""
 
     command: "AbstractCommand"
@@ -56,21 +56,21 @@ class Launcher(ABC):
     :param priority: Priority for launcher selection in DynamicLauncher (higher = preferred)
     """
 
-    submit_listeners: List[SubmitListener]
+    submit_listeners: list[SubmitListener]
     priority: float
     """Priority for launcher selection (higher values = higher priority)"""
 
     def __init__(self, connector: Connector, *, priority: float = 0):
         self.connector = connector
-        self.environ: Dict[str, str] = {}
-        self.notificationURL: Optional[str] = None
+        self.environ: dict[str, str] = {}
+        self.notificationURL: str | None = None
         self.submit_listeners = []
         self.priority = priority
 
     def setenv(self, key: str, value: str):
         self.environ[key] = value
 
-    def setNotificationURL(self, url: Optional[str]):
+    def setNotificationURL(self, url: str | None):
         self.notificationURL = url
 
     @abstractmethod
@@ -166,10 +166,10 @@ class DynamicLauncher(Launcher):
 
     def __init__(
         self,
-        launchers: List[Launcher],
+        launchers: list[Launcher],
         *,
         sample: bool = False,
-        connector: Optional[Connector] = None,
+        connector: Connector | None = None,
         priority: float = 0,
     ):
         if not launchers:
@@ -182,10 +182,10 @@ class DynamicLauncher(Launcher):
         super().__init__(connector, priority=priority)
         self._launchers = launchers
         self._sample = sample
-        self._selected_launcher: Optional[Launcher] = None
+        self._selected_launcher: Launcher | None = None
 
     @property
-    def launchers(self) -> List[Launcher]:
+    def launchers(self) -> list[Launcher]:
         """Returns launchers sorted by priority (highest first)."""
         return sorted(self._launchers, key=lambda x: x.priority, reverse=True)
 

@@ -1,7 +1,6 @@
 """Tests for transient task functionality"""
 
 from tempfile import TemporaryDirectory
-from typing import List, Optional
 
 import pytest
 
@@ -26,7 +25,7 @@ class TransientTask(Task):
 class DependentTask(Task):
     """A task that depends on TransientTask"""
 
-    deps: Param[List[TransientTask]]
+    deps: Param[list[TransientTask]]
 
     def execute(self):
         print(f"DependentTask with {len(self.deps)} deps")  # noqa: T201
@@ -44,7 +43,7 @@ class SingleDependentTask(Task):
 class ChainableTask(Task):
     """A task that can depend on any Config (for chain testing)"""
 
-    dep: Param[Optional[Config]]
+    dep: Param[Config | None]
 
     def execute(self):
         print("ChainableTask executed")  # noqa: T201

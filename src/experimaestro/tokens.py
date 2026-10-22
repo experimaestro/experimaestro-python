@@ -8,7 +8,6 @@ import os
 import sys
 from pathlib import Path
 import threading
-from typing import Dict, Type
 
 from experimaestro.core.objects import Config
 from experimaestro.launcherfinder.base import TokenConfiguration
@@ -199,10 +198,10 @@ class CounterToken(Token, TrackedDynamicResource):
     """
 
     #: Lock file class for token files
-    lock_file_class: Type[DynamicLockFile] = TokenLockFile
+    lock_file_class: type[DynamicLockFile] = TokenLockFile
 
     #: Maps token keys to CounterToken instances
-    TOKENS: Dict[str, "CounterToken"] = {}
+    TOKENS: dict[str, "CounterToken"] = {}
 
     @staticmethod
     def forkhandler():
@@ -222,7 +221,7 @@ class CounterToken(Token, TrackedDynamicResource):
     def init_registry(registry: LauncherRegistry):
         registry.register_token(
             "countertoken",
-            Dict[str, CounterConfiguration],
+            dict[str, CounterConfiguration],
         )
 
     @property

@@ -2,7 +2,6 @@
 
 import logging
 from urllib.parse import urlencode
-from typing import Optional
 from fastapi import APIRouter, Request, Response, Query
 from fastapi.responses import RedirectResponse
 
@@ -14,8 +13,8 @@ router = APIRouter()
 @router.get("/auth")
 async def auth(
     request: Request,
-    xpm_token: Optional[str] = Query(None, alias="xpm-token"),
-    next_page: Optional[str] = Query(None, alias="next"),
+    xpm_token: str | None = Query(None, alias="xpm-token"),
+    next_page: str | None = Query(None, alias="next"),
 ):
     """Authenticate with token and set cookie
 
@@ -47,7 +46,7 @@ async def auth(
 @router.get("/stop")
 async def stop(
     request: Request,
-    xpm_token: Optional[str] = Query(None, alias="xpm-token"),
+    xpm_token: str | None = Query(None, alias="xpm-token"),
 ):
     """Stop the server (requires authentication)"""
     server = request.app.state.server

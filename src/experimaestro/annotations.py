@@ -1,7 +1,8 @@
 # Import Python modules
 
 import inspect
-from typing import Callable, Type as TypingType, TypeVar, Union
+from typing import TypeVar
+from collections.abc import Callable
 from sortedcontainers import SortedDict
 import experimaestro.core.objects as objects
 import experimaestro.core.types as types
@@ -194,7 +195,7 @@ def tagspath(value: Config) -> str:
 
 
 def deprecate(
-    config_or_target: Union[TypingType[Config], Callable, None] = None,
+    config_or_target: type[Config] | Callable | None = None,
     *,
     replace: bool = False,
 ):
@@ -272,7 +273,7 @@ def deprecate(
         # Otherwise, this is the new pattern: @deprecate(TargetConfig)
         target = config_or_target
 
-        def decorator(deprecated_class: TypingType[Config]):
+        def decorator(deprecated_class: type[Config]):
             deprecated_class.__getxpmtype__().deprecate(target=target, replace=replace)
             return deprecated_class
 
@@ -281,7 +282,7 @@ def deprecate(
     # Case 3: @deprecate() with parentheses but no arguments (legacy, uses parent class)
     if config_or_target is None:
 
-        def decorator(deprecated_class: TypingType[Config]):
+        def decorator(deprecated_class: type[Config]):
             deprecated_class.__getxpmtype__().deprecate()
             return deprecated_class
 

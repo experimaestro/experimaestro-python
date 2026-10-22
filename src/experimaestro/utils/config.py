@@ -3,14 +3,10 @@ from enum import Enum
 from functools import partial
 from typing import (
     Any,
-    Dict,
-    List,
-    Type,
     TypeVar,
     Annotated,
     get_origin,
     get_args,
-    Set,
     Union,
 )
 import attr
@@ -27,7 +23,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def _suggest_enum(enum_cls: Type[Enum], value: Any) -> Any:
+def _suggest_enum(enum_cls: type[Enum], value: Any) -> Any:
     """Give a helpful error for near-miss enum strings (e.g. ``WARN`` -> ``warn``).
 
     Valid inputs are passed through to Pydantic's enum validation untouched.
@@ -52,7 +48,7 @@ def _suggest_enum(enum_cls: Type[Enum], value: Any) -> Any:
     return value
 
 
-def deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+def deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge two dictionaries"""
     for key, value in overrides.items():
         if isinstance(value, dict) and key in base and isinstance(base[key], dict):
@@ -64,7 +60,7 @@ def deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any
     return base
 
 
-def from_dotlist(dotlist: List[str]) -> Dict[str, Any]:
+def from_dotlist(dotlist: list[str]) -> dict[str, Any]:
     """Convert a dotlist (key=value) to a nested dictionary"""
     result = {}
     for item in dotlist:
@@ -80,7 +76,7 @@ def from_dotlist(dotlist: List[str]) -> Dict[str, Any]:
     return result
 
 
-def validate_attrs(cls: Type[T], data: Any) -> T:
+def validate_attrs(cls: type[T], data: Any) -> T:
     """Validate data against an attrs class using Pydantic"""
 
     if isinstance(data, cls):
@@ -113,19 +109,19 @@ def validate_attrs(cls: Type[T], data: Any) -> T:
 
         # Handle Optional/Union
         if union_args := get_union(t):
-            return Union[tuple(wrap_type(arg) for arg in union_args)]
+            return Union[tuple(wrap_type(arg) for arg in union_args)]  # noqa: UP007
 
         # Handle List
         if list_arg := get_list_component(t):
-            return List[wrap_type(list_arg)]
+            return list[wrap_type(list_arg)]
 
         # Handle Dict
         if dict_args := get_dict(t):
-            return Dict[wrap_type(dict_args[0]), wrap_type(dict_args[1])]
+            return dict[wrap_type(dict_args[0]), wrap_type(dict_args[1])]
 
         # Handle Set
         if set_arg := get_set(t):
-            return Set[wrap_type(set_arg)]
+            return set[wrap_type(set_arg)]
 
         if attr.has(t):
             return Annotated[t, BeforeValidator(partial(validate_attrs, t))]

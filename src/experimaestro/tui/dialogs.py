@@ -1,6 +1,5 @@
 """Modal dialog screens for the TUI"""
 
-from typing import Optional
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, SelectionList, Static
@@ -46,7 +45,7 @@ class DeleteConfirmScreen(ModalScreen[bool]):
     """Modal screen for delete confirmation"""
 
     def __init__(
-        self, item_type: str, item_name: str, warning: Optional[str] = None
+        self, item_type: str, item_name: str, warning: str | None = None
     ) -> None:
         super().__init__()
         self.item_type = item_type

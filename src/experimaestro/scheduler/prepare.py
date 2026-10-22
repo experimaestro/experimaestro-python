@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING
 
 from experimaestro.locking import Lock
 from ..core.arguments import Param
@@ -48,7 +48,7 @@ class PrepareTask(ResumableTask):
     target: Param[Prepare]
     """The configuration to prepare"""
 
-    def __xpm_output_valid__(self) -> Optional[bool]:
+    def __xpm_output_valid__(self) -> bool | None:
         return bool(self.target.is_prepared())
 
     def execute(self):
@@ -86,7 +86,7 @@ class PrepareResource(Resource):
     """
 
     #: identifier hex (``config.__xpm__.identifier.main.hex()``) → singleton
-    RESOURCES: Dict[str, "PrepareResource"] = {}
+    RESOURCES: dict[str, "PrepareResource"] = {}
 
     def __init__(self, config: "Prepare"):
         super().__init__()
@@ -94,7 +94,7 @@ class PrepareResource(Resource):
         self._executed = False
 
         #: The job preparing this config, when it was submitted
-        self.job: Optional["Job"] = None
+        self.job: "Job" | None = None
         # asyncio.Lock is created lazily — at first await — so it binds to the
         # event loop that's actually running prepare(), not whatever loop
         # happened to exist at construction time.

@@ -12,7 +12,7 @@ import sys
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from importlib.metadata import distributions
 
@@ -26,12 +26,12 @@ logger = logging.getLogger("xpm.environment")
 class ExperimentRunInfo:
     """Information about a single experiment run"""
 
-    hostname: Optional[str] = None
-    started_at: Optional[str] = None
-    ended_at: Optional[str] = None
-    status: Optional[str] = None  # 'completed' or 'failed'
+    hostname: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    status: str | None = None  # 'completed' or 'failed'
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             "hostname": self.hostname,
@@ -41,7 +41,7 @@ class ExperimentRunInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExperimentRunInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "ExperimentRunInfo":
         """Create from dictionary"""
         return cls(
             hostname=data.get("hostname"),
@@ -58,17 +58,17 @@ class ExperimentEnvironment:
     This combines Python environment info with experiment run metadata.
     """
 
-    python_version: Optional[str] = None
-    packages: Dict[str, str] = field(default_factory=dict)
-    editable_packages: Dict[str, Any] = field(default_factory=dict)
-    run: Optional[ExperimentRunInfo] = None
-    projects: list[Dict[str, Any]] = field(
+    python_version: str | None = None
+    packages: dict[str, str] = field(default_factory=dict)
+    editable_packages: dict[str, Any] = field(default_factory=dict)
+    run: ExperimentRunInfo | None = None
+    projects: list[dict[str, Any]] = field(
         default_factory=list
     )  # Git info for projects
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "python_version": self.python_version,
             "packages": self.packages,
             "editable_packages": self.editable_packages,
@@ -80,7 +80,7 @@ class ExperimentEnvironment:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExperimentEnvironment":
+    def from_dict(cls, data: dict[str, Any]) -> "ExperimentEnvironment":
         """Create from dictionary"""
         run_data = data.get("run")
         run = ExperimentRunInfo.from_dict(run_data) if run_data else None
@@ -217,7 +217,7 @@ def get_current_environment() -> ExperimentEnvironment:
     )
 
 
-def load_environment_info(path: Path) -> Optional[ExperimentEnvironment]:
+def load_environment_info(path: Path) -> ExperimentEnvironment | None:
     """Load environment information from a JSON file
 
     Args:

@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 logger = logging.getLogger("xpm.remote.sync")
 
@@ -33,13 +33,13 @@ class AdaptiveSynchronizer:
 
     def __init__(
         self,
-        sync_func: Callable[..., Optional[Path]],
+        sync_func: Callable[..., Path | None],
         remote_path: str,
         name: str = "",
-        on_sync_start: Optional[Callable[[], None]] = None,
-        on_sync_complete: Optional[Callable[[Path], None]] = None,
-        on_sync_error: Optional[Callable[[str], None]] = None,
-        on_give_up: Optional[Callable[[str], None]] = None,
+        on_sync_start: Callable[[], None] | None = None,
+        on_sync_complete: Callable[[Path], None] | None = None,
+        on_sync_error: Callable[[str], None] | None = None,
+        on_give_up: Callable[[str], None] | None = None,
         max_retries: int = 3,
         include: list[str] | None = None,
         initial_sync: bool = True,
@@ -75,12 +75,12 @@ class AdaptiveSynchronizer:
 
         self._interval = INITIAL_SYNC_INTERVAL
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
         # Track file modification times to detect changes
         self._last_mtimes: dict[str, float] = {}
-        self._local_path: Optional[Path] = None
+        self._local_path: Path | None = None
 
     @property
     def interval(self) -> float:
@@ -88,7 +88,7 @@ class AdaptiveSynchronizer:
         return self._interval
 
     @property
-    def local_path(self) -> Optional[Path]:
+    def local_path(self) -> Path | None:
         """Local path after sync (None if not synced yet)"""
         return self._local_path
 
@@ -135,7 +135,7 @@ class AdaptiveSynchronizer:
 
         logger.info("[%s] Stopped adaptive sync", self.name)
 
-    def sync_now(self) -> Optional[Path]:
+    def sync_now(self) -> Path | None:
         """Perform an immediate sync (blocking)
 
         Returns:
@@ -169,7 +169,7 @@ class AdaptiveSynchronizer:
 
             self._do_sync()
 
-    def _do_sync(self) -> Optional[Path]:
+    def _do_sync(self) -> Path | None:
         """Perform a single sync operation"""
         try:
             self._syncing = True

@@ -14,11 +14,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger("experimaestro")
 
-_SESSION_REMOTE_CACHE_DIR: Optional[Path] = None
+_SESSION_REMOTE_CACHE_DIR: Path | None = None
 
 
 def get_session_cache_dir() -> Path:
@@ -38,9 +38,7 @@ def get_session_cache_dir() -> Path:
     return _SESSION_REMOTE_CACHE_DIR
 
 
-def clean_job_target(
-    raw: str, ws_base: str = "", filename: Optional[str] = None
-) -> str:
+def clean_job_target(raw: str, ws_base: str = "", filename: str | None = None) -> str:
     """Normalize a target job locator, prefix, or path.
 
     Strips surrounding slashes, explicit file names, workspace root prefixes,
@@ -97,7 +95,7 @@ def resolve_job_file_pattern(clean_target: str, filename: str) -> str:
     return f"jobs/*/{clean_target}*/{filename}"
 
 
-def build_ssh_cmd(ssh_settings: Any, remote_command: str) -> List[str]:
+def build_ssh_cmd(ssh_settings: Any, remote_command: str) -> list[str]:
     """Construct an SSH command list respecting options and shell initialization.
 
     Args:
@@ -178,7 +176,7 @@ def fetch_remote_files_rsync(
     ssh_settings: Any,
     remote_src_dir: str,
     local_dest_dir: Path,
-    includes: List[str],
+    includes: list[str],
 ) -> None:
     """Transfer specific files matching includes from remote directory using rsync.
 
@@ -217,7 +215,7 @@ def find_remote_workspace_file(
     ws: Any,
     target: str,
     filename: str = "params.json",
-    cache_dir: Optional[Path] = None,
+    cache_dir: Path | None = None,
 ) -> Path:
     """Fetch a file from a remote workspace job directory using SSH and Rsync.
 
@@ -300,9 +298,9 @@ fetch_remote_workspace_file = find_remote_workspace_file
 def find_remote_workspace_experiment_run(
     ws: Any,
     experiment_id: str,
-    run_id: Optional[str] = None,
-    cache_dir: Optional[Path] = None,
-) -> Tuple[str, Path]:
+    run_id: str | None = None,
+    cache_dir: Path | None = None,
+) -> tuple[str, Path]:
     """Find and synchronize an experiment run's metadata from a remote workspace.
 
     Queries the remote workspace for available runs in `experiments/<experiment_id>/`,

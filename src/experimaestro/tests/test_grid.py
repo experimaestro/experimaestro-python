@@ -1,4 +1,3 @@
-from typing import Optional
 from experimaestro.experiments.grid import (
     GenericParams,
     GridSearch,
@@ -17,7 +16,7 @@ class MySubConfig:
 class MyConfig(ConfigurationBase):
     lr: GridSearch[float] = 0.001
     batch_size: GridSearch[int] = 32
-    sub: Optional[MySubConfig] = None
+    sub: MySubConfig | None = None
 
 
 def test_generic_params_coercion():

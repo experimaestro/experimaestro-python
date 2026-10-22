@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import pytest
 from experimaestro import Config, Task, Annotated, copyconfig, field
@@ -399,7 +398,7 @@ def test_value_decorator_skip_intermediate():
 
 class DummyFieldConfig(Config):
     existing: Param[int] = field(default=10)
-    new_param: Param[Optional[int]] = field(default=None, ignore_default=True)
+    new_param: Param[int | None] = field(default=None, ignore_default=True)
     items: Param[list[str]] = field(default_factory=list)
 
 

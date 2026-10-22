@@ -6,16 +6,12 @@ from functools import cached_property
 import inspect
 import sys
 from typing import (
-    Set,
     TypeVar,
-    Union,
-    Dict,
-    Iterator,
-    List,
     Optional,
     get_args,
     get_origin,
 )
+from collections.abc import Iterator
 from collections import ChainMap
 from pathlib import Path
 import typing
@@ -84,7 +80,7 @@ class Identifier:
         return self.name
 
 
-def identifier(name: Union[str, Identifier]):
+def identifier(name: str | Identifier):
     if isinstance(name, Identifier):
         return name
     return Identifier(str(name))
@@ -93,7 +89,7 @@ def identifier(name: Union[str, Identifier]):
 class Type:
     """Any experimaestro type is a child class"""
 
-    DEFINED: Dict[type, "Type"] = {}
+    DEFINED: dict[type, "Type"] = {}
 
     def __core_schema__(self):
         """Return a pydantic-core schema for validating a value of this type.
@@ -128,7 +124,7 @@ class Type:
         """
         return self._schema_validator.validate_python(value)
 
-    def __init__(self, tn: Union[str, Identifier], description=None):
+    def __init__(self, tn: str | Identifier, description=None):
         if tn is None:
             pass
         elif isinstance(tn, str):
@@ -250,7 +246,7 @@ class SubmitHook(ABC):
     This allows modifying e.g. the run environnement
     """
 
-    def __call__(self, cls: typing.Type["Config"]):
+    def __call__(self, cls: type["Config"]):
         """Decorates a an XPM configuration"""
         cls.__getxpmtype__().submit_hooks.add(self)
         return cls
@@ -281,7 +277,7 @@ class XPMValue:
 
 
 class ObjectType(Type):
-    submit_hooks: Set[SubmitHook]
+    submit_hooks: set[SubmitHook]
     """Hooks associated with this configuration"""
 
     """ObjectType contains class-level information about
@@ -294,7 +290,7 @@ class ObjectType(Type):
     def __init__(
         self,
         tp: type,
-        identifier: Union[str, Identifier, None] = None,
+        identifier: str | Identifier | None = None,
     ):
         """Creates a type"""
         from .objects import Config, ConfigMixin
@@ -366,13 +362,13 @@ class ObjectType(Type):
         self.__initialized__ = False
         self._runtype = None
         self.annotations = []
-        self._deprecation: Optional[DeprecationInfo] = None
+        self._deprecation: DeprecationInfo | None = None
 
         # --- Value class (for external value types, e.g., nn.Module subclasses)
         self._original_type: type = tp  # Keep reference to original config class
 
         # --- Partial for partial identifier computation
-        self._partials: Dict[str, "Partial"] = {}
+        self._partials: dict[str, "Partial"] = {}
 
     def set_value_type(self, value_class: type) -> None:
         """Register an explicit value class for this configuration.
@@ -580,7 +576,7 @@ class ObjectType(Type):
         return self._title or str(self.identifier)
 
     @property
-    def arguments(self) -> Dict[str, Argument]:
+    def arguments(self) -> dict[str, Argument]:
         self.__initialize__()
         return self._arguments
 
@@ -893,7 +889,7 @@ class SetType(Type):
 
 
 class EnumType(Type):
-    def __init__(self, type: typing.Type[Enum]):
+    def __init__(self, type: type[Enum]):
         self.type = type
 
     def name(self):
@@ -910,7 +906,7 @@ class EnumType(Type):
 
 
 class UnionType(Type):
-    def __init__(self, types: List[Type]):
+    def __init__(self, types: list[Type]):
         self.types = types
 
     def name(self):
@@ -944,7 +940,7 @@ class TupleType(Type):
     element values or arity.
     """
 
-    def __init__(self, types: List["Type"], variadic: bool):
+    def __init__(self, types: list["Type"], variadic: bool):
         self.types = types
         self.variadic = variadic
 
@@ -1005,16 +1001,17 @@ def _is_type_arg_compatible(actual, expected) -> bool:
     if isinstance(expected, type) and isinstance(actual, type):
         return issubclass(actual, expected)
 
-    # Expected is a Union: actual must be compatible with at least one member
-    if get_origin(expected) is typing.Union:
-        return any(
-            _is_type_arg_compatible(actual, member) for member in get_args(expected)
-        )
-
     # Actual is a Union: each member of actual must be compatible with expected
-    if get_origin(actual) is typing.Union:
+    # (checked first, so that a union is compatible with a wider union)
+    if typingutils._is_union(actual):
         return all(
             _is_type_arg_compatible(member, expected) for member in get_args(actual)
+        )
+
+    # Expected is a Union: actual must be compatible with at least one member
+    if typingutils._is_union(expected):
+        return any(
+            _is_type_arg_compatible(actual, member) for member in get_args(expected)
         )
 
     # For generic types (e.g., List[str]), check origin and args recursively
@@ -1037,7 +1034,7 @@ def _is_type_arg_compatible(actual, expected) -> bool:
 
 
 class GenericType(Type):
-    def __init__(self, type: typing.Type):
+    def __init__(self, type: type):
         self.type = type
         self.origin = get_origin(type)
 
