@@ -134,6 +134,7 @@ def serialize_job(
     submitted: str = None,
     process_info: Any = None,
     experiment: BaseExperiment | None = None,
+    provider: StateProvider | None = None,
 ) -> dict[str, Any]:
     """Serialize a job using ``state_dict()`` and transform to frontend format.
 
@@ -147,6 +148,9 @@ def serialize_job(
             enrich the static process dict with cpu/memory/threads
         experiment: Optional experiment the status is resolved against (see
             :func:`~experimaestro.scheduler.job_status.display_state`)
+        provider: Optional state provider the job comes from, giving the path
+            shown and copied (``locator``): for a remote workspace, the remote
+            path and not the one of its local copy
     """
     d = job.state_dict()
     # Show the same (resolved) status as the TUI, with its shared sort rank
@@ -173,6 +177,8 @@ def serialize_job(
         }
 
     payload = _job_dict_to_frontend(d)
+    if provider is not None:
+        payload["locator"] = provider.get_display_path(job)
     payload["statusRank"] = status_rank(state)
     return payload
 
@@ -185,6 +191,7 @@ def serialize_job_update(
     job: BaseJob,
     process_info: Any = None,
     experiment: BaseExperiment | None = None,
+    provider: StateProvider | None = None,
 ) -> dict[str, Any]:
     """Serialize the execution state of a job, for ``job.update`` messages
 
@@ -192,7 +199,9 @@ def serialize_job_update(
     are left out: the client merges updates into the job it received with
     ``job.add``, and empty values would overwrite the ones it has.
     """
-    payload = serialize_job(job, process_info=process_info, experiment=experiment)
+    payload = serialize_job(
+        job, process_info=process_info, experiment=experiment, provider=provider
+    )
     for name in _EXPERIMENT_JOB_FIELDS:
         del payload[name]
     return payload
@@ -328,9 +337,11 @@ def serialize_run(run: BaseExperiment, current_run_id: str | None) -> dict[str, 
     return payload
 
 
-def serialize_orphan_job(job: BaseJob, is_stray: bool) -> dict[str, Any]:
+def serialize_orphan_job(
+    job: BaseJob, is_stray: bool, provider: StateProvider | None = None
+) -> dict[str, Any]:
     """Serialize an orphan/stray job with its on-disk size."""
-    payload = serialize_job(job)
+    payload = serialize_job(job, provider=provider)
     payload["isStray"] = is_stray
     payload["sizeBytes"] = folder_size(job.path) if job.path else 0
     return payload
@@ -635,6 +646,7 @@ class WebSocketHandler:
                     experiment_ids=[experiment_id],
                     submitted=submitted,
                     experiment=experiment,
+                    provider=self.state_provider,
                 )
             )
         return payloads
@@ -766,7 +778,9 @@ class WebSocketHandler:
                         process_info = self.state_provider.get_process_info(job)
                     except Exception:
                         process_info = None
-                    return serialize_job_update(job, process_info=process_info)
+                    return serialize_job_update(
+                        job, process_info=process_info, provider=self.state_provider
+                    )
 
                 update = await self._in_thread(details)
                 if update is not None:
@@ -1185,7 +1199,12 @@ class WebSocketHandler:
             stray_ids = {
                 j.identifier for j in (self.state_provider.get_stray_jobs() or [])
             }
-            return [serialize_orphan_job(j, j.identifier in stray_ids) for j in orphans]
+            return [
+                serialize_orphan_job(
+                    j, j.identifier in stray_ids, provider=self.state_provider
+                )
+                for j in orphans
+            ]
 
         jobs = await loop.run_in_executor(None, gather)
         await websocket.send_json({"type": "orphans", "payload": {"jobs": jobs}})

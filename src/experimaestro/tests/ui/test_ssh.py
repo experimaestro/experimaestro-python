@@ -207,7 +207,6 @@ async def test_job_log(ui, remote_workspace):
     assert "hello bob" in log
 
 
-@pytest.mark.ui_gap("web", reason="the web UI shows the path of the local copy")
 async def test_job_path(ui, remote_workspace):
     """The job folder shown is the remote one"""
     await ui.open_experiment("greetings")
@@ -218,7 +217,6 @@ async def test_job_path(ui, remote_workspace):
 
 
 @pytest.mark.ui("browser")
-@pytest.mark.ui_gap("browser", reason="the web UI copies the path of the local copy")
 async def test_copy_job_path(ui, remote_workspace):
     """The job folder copied is the remote one"""
     await ui.open_experiment("greetings")

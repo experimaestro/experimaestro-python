@@ -177,7 +177,9 @@ class StateBridge:
             await self.ws_handler.send_event(
                 event,
                 "job.update",
-                serialize_job_update(job, experiment=experiment),
+                serialize_job_update(
+                    job, experiment=experiment, provider=self.state_provider
+                ),
                 recipients,
             )
 
@@ -203,6 +205,7 @@ class StateBridge:
                     if event.experiment_id
                     else None
                 ),
+                provider=self.state_provider,
             )
             await self.ws_handler.send_event(event, "job.add", payload, recipients)
 
