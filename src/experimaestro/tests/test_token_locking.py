@@ -13,9 +13,8 @@ import time
 import hashlib
 
 from experimaestro.tokens import CounterToken
-from experimaestro.locking import LockError
+from experimaestro.locking import EventLoopThread, LockError
 from experimaestro.filewatcher import AsyncEventBridge
-from experimaestro.tests._flaky import retry_on_flake
 
 # Mark all tests in this module as token tests
 pytestmark = [pytest.mark.anyio, pytest.mark.tokens]
@@ -183,7 +182,38 @@ async def test_token_notification():
         await lock2.aio_release()
 
 
-@retry_on_flake(max_attempts=3)
+async def test_token_release_during_acquire():
+    """A release while a waiter's acquisition attempt is in flight wakes it up
+
+    The release happens after the attempt failed but before the waiter starts
+    waiting: the notification must not be lost.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        token = CounterToken("test-release-acquire", Path(tmpdir) / "token", count=1)
+
+        dep1 = token.dependency(1)
+        dep1.target = create_mock_job("1", tmpdir)
+        dep2 = token.dependency(1)
+        dep2.target = create_mock_job("2", tmpdir)
+
+        async def scenario():
+            lock1 = await dep1.aio_lock(timeout=1.0)
+            waiter = asyncio.create_task(dep2.aio_lock(timeout=5.0))
+            # Let the waiter enter aio_acquire (it holds the token's lock)
+            await asyncio.sleep(0)
+            start = time.time()
+            await lock1.aio_release()
+            lock2 = await waiter
+            elapsed = time.time() - start
+            await lock2.aio_release()
+            return elapsed
+
+        # Both on the lock event loop, so that the interleaving is deterministic
+        elt = EventLoopThread.instance()
+        elapsed = await asyncio.wrap_future(elt.run_coroutine(scenario()))
+        assert elapsed < 1.0  # Woken up by the release, not by the timeout
+
+
 async def test_token_multiple_waiting():
     """Test multiple tasks waiting for tokens"""
     with tempfile.TemporaryDirectory() as tmpdir:

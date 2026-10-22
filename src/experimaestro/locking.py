@@ -1265,6 +1265,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
         self.__primitives_lock = threading.Lock()
         self.__async_lock: asyncio.Lock | None = None
         self.__available_event: asyncio.Event | None = None
+        self._state_version = 0
 
         self.timestamp = os.path.getmtime(self.lock_folder)
 
@@ -1323,12 +1324,19 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
     @property
     def _available_event(self) -> asyncio.Event:
-        """Return asyncio.Event, creating it if needed.
+        """Return the event of the current state version, creating it if needed.
+
+        The event is set (and replaced by a new one) when the state changes,
+        and never cleared: a waiter holding it cannot miss the change.
 
         Must be called from within the EventLoopThread's event loop.
         """
         self._ensure_primitives()
         return self.__available_event
+
+    @property
+    def state_version(self) -> int:
+        return self._state_version
 
     # --- IPC-locked methods for reading state ---
 
@@ -1492,11 +1500,14 @@ class TrackedDynamicResource(DynamicResource, ABC):
     def _notify_async_waiters(self) -> None:
         """Notify async waiters that resource state has changed.
 
-        Sets the async event and then clears it (pulse notification).
+        Sets the event of the current version and starts a new version. The
+        event is not cleared (a pulse would be missed by a waiter whose wait
+        task has not started yet).
         """
-        self._available_event.set()
-        # Reset for next wait - waiters that were waiting will have been notified
-        self._available_event.clear()
+        event = self._available_event
+        self._state_version += 1
+        self.__available_event = asyncio.Event()
+        event.set()
 
     async def refresh_state(self) -> bool:
         """Refresh state from disk.
@@ -1535,19 +1546,15 @@ class TrackedDynamicResource(DynamicResource, ABC):
             self._last_jobs_folder_mtime = current_mtime
 
             # Check if state changed
-            new_cache_keys = set(self.cache.keys())
-            if old_cache_keys != new_cache_keys:
-                return True
+            changed = set(self.cache.keys()) != old_cache_keys or any(
+                key in old_valid_states and old_valid_states[key] != lf.valid_state
+                for key, lf in self.cache.items()
+            )
+            if changed:
+                self._notify_async_waiters()
+            return changed
 
-            # Check if any lock file's valid_state changed
-            for key, lf in self.cache.items():
-                if key in old_valid_states:
-                    if old_valid_states[key] != lf.valid_state:
-                        return True
-
-            return False
-
-    async def async_wait(self, timeout: float = 0) -> bool:
+    async def async_wait(self, timeout: float = 0, version: int | None = None) -> bool:
         """Wait asynchronously until the resource state may have changed.
 
         Uses both AsyncEventBridge notifications and ResourcePoller for fallback.
@@ -1555,12 +1562,19 @@ class TrackedDynamicResource(DynamicResource, ABC):
 
         Args:
             timeout: Maximum time to wait in seconds (0 = wait indefinitely)
+            version: The state version the caller last saw; returns
+                immediately if the state has changed since
 
         Returns:
             True if notified of a change, False if timed out
         """
         from experimaestro.dynamic import ResourcePoller
 
+        if version is not None and version != self._state_version:
+            return True
+
+        # Taken now (before any await): set on the next change, never cleared
+        available_event = self._available_event
         poller = ResourcePoller.instance()
 
         # Register with ResourcePoller as fallback
@@ -1571,7 +1585,7 @@ class TrackedDynamicResource(DynamicResource, ABC):
             # Wait for either the async event or the poller event
             done, pending = await asyncio.wait(
                 [
-                    asyncio.create_task(self._available_event.wait()),
+                    asyncio.create_task(available_event.wait()),
                     asyncio.create_task(poller_event.wait()),
                 ],
                 return_when=asyncio.FIRST_COMPLETED,

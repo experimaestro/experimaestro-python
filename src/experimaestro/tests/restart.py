@@ -28,7 +28,7 @@ TERMINATES_FUNC = [terminate]
 if is_posix():
     TERMINATES_FUNC.append(sigint)
 
-MAX_RESTART_WAIT = 50  # 5 seconds
+MAX_RESTART_WAIT = 300  # 30 seconds (an upper bound: slow CI runners)
 
 
 class Restart(Task):

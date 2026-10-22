@@ -30,12 +30,21 @@ class DynamicResource(ABC):
     state may have changed.
     """
 
+    @property
     @abstractmethod
-    async def async_wait(self, timeout: float = 0) -> bool:
+    def state_version(self) -> int:
+        """Counter incremented each time the resource state changes"""
+        ...
+
+    @abstractmethod
+    async def async_wait(self, timeout: float = 0, version: int | None = None) -> bool:
         """Wait asynchronously until the resource state may have changed.
 
         Args:
             timeout: Maximum time to wait in seconds (0 = wait indefinitely)
+            version: The state version the caller last saw (read before
+                trying to acquire the resource); returns immediately if the
+                state has changed since, so that no change is missed
 
         Returns:
             True if notified of a change, False if timed out
@@ -328,6 +337,8 @@ class DynamicDependency(ABC):
         start_time = time.time()
 
         while True:
+            # Read before trying: a release during the attempt is not missed
+            version = self.origin.state_version
             try:
                 lock = self._create_lock()
                 await lock.aio_acquire()
@@ -343,7 +354,7 @@ class DynamicDependency(ABC):
                     remaining = 0  # Wait indefinitely
 
                 # Wait for resource state to change
-                await self.origin.async_wait(timeout=remaining)
+                await self.origin.async_wait(timeout=remaining, version=version)
 
     def __repr__(self) -> str:
         return f"DynamicDep[{self.origin}]"
