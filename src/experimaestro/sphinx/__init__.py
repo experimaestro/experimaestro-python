@@ -253,6 +253,43 @@ def _process_docstring(
         lines[:] = newlines[:]
 
 
+CONFIG_MODULE_ALIASES = {
+    "experimaestro.core.objects.config.": "experimaestro.core.objects."
+}
+"""Runtime module prefixes mapped to the prefix they are documented under"""
+
+
+def _map_codeautolink_names(app: Sphinx, env) -> list[str]:
+    """Maps runtime names to documented ones for sphinx-codeautolink
+
+    ``SomeConfig.C(...)`` resolves to the generated ``SomeConfig.XPMConfig``
+    class, and methods like ``submit`` to ``ConfigMixin`` in its runtime
+    module: both are mapped to their documented counterparts so that code
+    blocks link to the API documentation.
+    """
+    if "codeautolink_inventory_map" not in app.config:
+        return []
+
+    mapping = app.config.codeautolink_inventory_map
+    names = set()
+    for name, obj in env.get_domain("py").objects.items():
+        names.add(name)
+        if obj.objtype == "xpmconfig":
+            mapping.setdefault(f"{name}.XPMConfig", name)
+
+    for objtype, entries in getattr(env, "intersphinx_inventory", {}).items():
+        if objtype.startswith("py:"):
+            names.update(entries.keys())
+
+    for name in names:
+        for runtime, documented in CONFIG_MODULE_ALIASES.items():
+            if name.startswith(documented):
+                runtime_name = runtime + name[len(documented) :]
+                mapping.setdefault(runtime_name, name)
+
+    return []
+
+
 def copy_asset_files(app, exc):
     import os
 
@@ -282,5 +319,8 @@ def setup(app: Sphinx) -> dict[str, Any]:
 
     app.add_directive("py:xpmparam", XPMParamDirective)
     app.connect("autodoc-process-docstring", _process_docstring, 600)
+
+    # Must run before sphinx-codeautolink creates its references (priority 500)
+    app.connect("env-updated", _map_codeautolink_names, 400)
 
     return {"version": experimaestro.__version__, "parallel_read_safe": True}
