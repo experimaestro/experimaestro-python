@@ -107,6 +107,29 @@ def test_override_no_warning_with_flag(caplog):
     assert "overrides parent parameter" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    "spec",
+    [
+        field(overrides=True),
+        field(ignore_generated=True),
+        field(groups=[]),
+    ],
+)
+def test_field_without_default_is_required(spec):
+    """A field without default keeps the parameter required"""
+
+    class Parent(Config):
+        value: Param[int]
+
+    class Child(Parent):
+        value: Param[int] = spec
+
+    assert Child.__getxpmtype__().arguments["value"].required
+
+    with pytest.raises(ValueError, match="value"):
+        Child.C().instance()
+
+
 def test_override_type_check_subtype_config():
     """Test that overriding Config type with subtype is allowed"""
 

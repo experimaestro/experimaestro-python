@@ -74,8 +74,9 @@ class Argument:
             belongs to. Used with partial to compute partial identifiers.
             Defaults to None (empty set).
         """
-        required = (field_or_default is None) if required is None else required
-        if field_or_default is not None and required is not None and required:
+        has_default = has_default_value(field_or_default)
+        required = (not has_default) if required is None else required
+        if has_default and required:
             raise Exception(
                 "argument '%s' is required but default value is given" % name
             )
@@ -211,8 +212,8 @@ class ArgumentOptions:
                         stacklevel=6,
                     )
 
-        self.kwargs["required"] = (optionaltype is None) and (
-            self.kwargs["field_or_default"] is None
+        self.kwargs["required"] = (optionaltype is None) and not has_default_value(
+            self.kwargs["field_or_default"]
         )
 
         return Argument(name, type, **self.kwargs)
@@ -415,6 +416,22 @@ class field:
         self.ignore_generated = ignore_generated
         self.overrides = overrides
         self.groups = set(groups) if groups else set()
+
+    @property
+    def has_default(self) -> bool:
+        """True if this field provides a default value (or a factory)"""
+        return (self.default is not None) or (self.default_factory is not None)
+
+
+def has_default_value(field_or_default) -> bool:
+    """True if a bare default or a field with a default is given
+
+    A field without default (e.g. ``field(overrides=True)``) does not make
+    the parameter optional.
+    """
+    if isinstance(field_or_default, field):
+        return field_or_default.has_default
+    return field_or_default is not None
 
 
 class help(TypeAnnotation):
