@@ -364,3 +364,43 @@ def test_config_dicts_with_none_scalar_field():
     assert configs[1].lr == 0.001
     assert configs[1].batch_size == 64
     assert configs[1].sub is None
+
+
+def test_config_dicts_duplicate_error():
+    """Verify that duplicate dictionaries in config_dicts raise a ValueError."""
+    import pytest
+
+    cfg = MyConfig(id="test", lr=0.1, batch_size=32)
+    cfg.lr = GenericParams.from_any(cfg.lr)
+    cfg.batch_size = GenericParams.from_any(cfg.batch_size)
+
+    cfg.grid_search = {
+        "config_dicts": [
+            {"lr": 0.01, "batch_size": 16},
+            {"lr": 0.01, "batch_size": 16},
+        ]
+    }
+    with pytest.raises(
+        ValueError,
+        match=r"Duplicate dictionary found in 'config_dicts' at index 1 \(identical to index 0\)",
+    ):
+        generate_grid(cfg)
+
+
+def test_grid_search_duplicate_param_error():
+    """Verify that duplicate values in an independent parameter list raise a ValueError."""
+    import pytest
+
+    cfg = MyConfig(id="test", lr=0.1, batch_size=32)
+    cfg.lr = GenericParams.from_any(cfg.lr)
+    cfg.batch_size = GenericParams.from_any(cfg.batch_size)
+
+    cfg.grid_search = {
+        "lr": [0.01, 0.05, 0.01],
+    }
+    with pytest.raises(
+        ValueError,
+        match=r"Duplicate value '0.01' for parameter 'lr' in grid search \(at index 2 and 0\)",
+    ):
+        generate_grid(cfg)
+

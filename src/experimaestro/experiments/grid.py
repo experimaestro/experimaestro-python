@@ -331,6 +331,15 @@ def _validate_and_convert_config_dicts(
         converted_item = {key: converters[key](val) for key, val in item.items()}
         converted_config_dicts.append(converted_item)
 
+    # Check for duplicate dictionaries in config_dicts
+    for idx, item in enumerate(converted_config_dicts):
+        for prev_idx in range(idx):
+            if item == converted_config_dicts[prev_idx]:
+                raise ValueError(
+                    f"Duplicate dictionary found in 'config_dicts' at index {idx} "
+                    f"(identical to index {prev_idx}): {config_dicts[idx]}"
+                )
+
     return converted_config_dicts
 
 
@@ -389,6 +398,15 @@ def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
         )
         raw_values = gp_from_framework.as_list()
         converted_values = [converter(v) for v in raw_values]
+
+        for idx, val in enumerate(converted_values):
+            for prev_idx in range(idx):
+                if val == converted_values[prev_idx]:
+                    raise ValueError(
+                        f"Duplicate value '{raw_values[idx]}' for parameter '{path}' in grid search "
+                        f"(at index {idx} and {prev_idx})"
+                    )
+
         value_options.append(converted_values)
 
     # Generate combinations
