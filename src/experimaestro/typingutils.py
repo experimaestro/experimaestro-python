@@ -40,14 +40,17 @@ def get_union(typehint):
 
 
 def get_optional(typehint):
+    """Returns the non-None part of an optional type (or None if not optional)
+
+    ``X | None`` gives ``X``, and ``X | Y | None`` gives ``X | Y``.
+    """
     if _is_union(typehint):
         args = get_args(typehint)
-        if len(args) == 2:
-            for ix in (0, 1):
-                argtype = args[ix]
-                origin = get_origin(argtype) or argtype
-                if issubclass(origin, type(None)):
-                    return args[1 - ix]
+        non_none = tuple(arg for arg in args if arg is not type(None))
+        if len(non_none) < len(args):
+            if len(non_none) == 1:
+                return non_none[0]
+            return typing.Union[non_none]  # noqa: UP007
     return None
 
 
