@@ -1300,7 +1300,9 @@ class ConfigInformation:
 
             # Add pre/init tasks
             if self.init_tasks:
-                state_dict["init-tasks"] = [id(init_task) for init_task in self.init_tasks]
+                state_dict["init-tasks"] = [
+                    id(init_task) for init_task in self.init_tasks
+                ]
 
             if self.meta:
                 state_dict["meta"] = self.meta
@@ -1337,7 +1339,8 @@ class ConfigInformation:
             context.serialized.discard(id(self.pyobject))
             path_str = ".".join(context.var_path) if context.var_path else "<root>"
             logger.warning(
-                "Failed to serialize config object of type '%s' at path '%s': %s",
+                "Failed to serialize config object of type '%s' at path '%s': %s "
+                "(deprecated: ignoring serialization errors will become a blocking error in Experimaestro 3.0)",
                 self.xpmtype.name(),
                 path_str,
                 e,
