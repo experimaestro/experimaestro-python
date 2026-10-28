@@ -357,11 +357,11 @@ cli.add_command(tools)
 # Short names
 cli.add_command(hidden_alias(experiments), "xp")
 cli.add_command(hidden_alias(workspace), "ws")
+cli.add_command(hidden_alias(jobs.commands["inspect"]), "inspect")
 
 # Old names
 for old_name, group, name in [
     ("dag", experiments, "dag"),
-    ("inspect", jobs, "inspect"),
     ("parameters-difference", jobs, "diff"),
     ("workspaces", workspace, None),
     ("cleanup", workspace, "cleanup"),

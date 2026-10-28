@@ -31,8 +31,9 @@ experimaestro --ssh user@cluster:/scratch/experiments jobs list
 :::{note}
 Commands were reorganized in experimaestro 2.x. The old names
 (`run-experiment`, `experiments ssh-monitor`, `experiments history`,
-`orphans`, `cleanup`, `dag`, `inspect`, `workspaces`, `migrate`,
+`orphans`, `cleanup`, `dag`, `workspaces`, `migrate`,
 `refactor`, …) still work but print a deprecation warning.
+`experimaestro inspect` is kept as a shortcut for `experimaestro jobs inspect`.
 `experimaestro run PARAMS.json` (running a single task from its
 `params.json`) is also still supported.
 :::
@@ -153,7 +154,7 @@ status and control jobs.
 | `experimaestro jobs log JOBID` | View job log (stderr by default) |
 | `experimaestro jobs path JOBID` | Print the path to a job directory |
 | `experimaestro jobs recover JOBID` | Recover a job from a backup folder |
-| `experimaestro jobs inspect [TARGET]` | Inspect job parameters (interactive TUI) |
+| `experimaestro jobs inspect [TARGET]` | Inspect job parameters (interactive TUI; shortcut: `experimaestro inspect`) |
 | `experimaestro jobs diff PATH1 PATH2` | Difference between two job configurations |
 
 ### Common Options
@@ -600,28 +601,38 @@ experimaestro experiments dag my_experiment --json -
 
 ## Job Parameters Inspector (`experimaestro jobs inspect`)
 
-Experimaestro provides an interactive terminal-based (TUI) parameters inspector built with Textual. It visualizes the hierarchical configuration graph of jobs, with support for cycle detection, relative path resolution, Python code synthesis, and remote workspace job inspection via SSH.
+Experimaestro provides an interactive terminal-based (TUI) parameters inspector built with Textual. It visualizes the hierarchical configuration graph of jobs and serialized objects, with support for cycle detection, relative path resolution, Python code synthesis, and remote workspace job inspection via SSH.
+
+It can inspect jobs of a workspace, standalone `params.json` files, or serialized objects (such as `experimaestro.json` in exported models, or `objects.jsonl`). `experimaestro inspect` is a shortcut for `experimaestro jobs inspect`.
 
 ```bash
 # Inspect current directory / job
-experimaestro jobs inspect
+experimaestro inspect
 
 # Inspect a specific job by task name or hash prefix
-experimaestro jobs inspect mymodule.MyTask/1822b2b
+experimaestro inspect mymodule.MyTask/1822b2b
 
-# Inspect a specific params.json directly
-experimaestro jobs inspect /path/to/params.json
+# Inspect a specific params.json or exported model config directly
+experimaestro inspect /path/to/experimaestro.json
 
 # Inspect a job in a remote SSH workspace
-experimaestro jobs inspect -w my_cluster mymodule.MyTask/1822b2b
+experimaestro -w my_cluster inspect mymodule.MyTask/1822b2b
+experimaestro --ssh user@cluster:/scratch/experiments inspect 1822b2b
 ```
+
+For a remote workspace, the inspector runs locally: the job is looked up
+through the remote state (as with `monitor`) and its parameters file is
+copied into a local cache for the duration of the command.
 
 ### Options
 
+The workspace is selected with the root options
+`experimaestro [-w WORKSPACE | --workdir PATH | --ssh HOST:PATH] jobs inspect [TARGET]`
+(the former `jobs inspect -w WORKSPACE` still works but is deprecated).
+
 | Option | Description |
 |--------|-------------|
-| `TARGET` | Job ID or hash prefix, path to `params.json` / `experimaestro.json`, or job directory (default: `.`) |
-| `-w, --workspace` | Workspace ID or directory path (defaults to current Experimaestro workspace; supports remote SSH workspaces) |
+| `TARGET` | Job ID or hash prefix (`[task/]hash`), path to `params.json` / `experimaestro.json` / `objects.jsonl`, or job directory (default: `.`) |
 
 ### Keybindings
 

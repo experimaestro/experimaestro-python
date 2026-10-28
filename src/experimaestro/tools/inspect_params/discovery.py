@@ -11,13 +11,16 @@ import logging
 import os
 from pathlib import Path
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from experimaestro.utils.remote import (
     clean_job_target,
     find_remote_workspace_file,
     resolve_job_file_pattern,
 )
+
+if TYPE_CHECKING:
+    from experimaestro.scheduler.state_provider import StateProvider
 
 logger = logging.getLogger("experimaestro")
 
@@ -167,6 +170,60 @@ def find_workspace_file(
         else Path(ws_or_path)
     )
     return find_local_workspace_file(ws_dir, target, filename=filename)
+
+
+def find_job_params_file(
+    provider: "StateProvider", target: str, ws_base: str = ""
+) -> Path:
+    """Find the parameters file of a job through a state provider.
+
+    Used for remote workspaces: the job is looked up in the provider state,
+    and its parameters file is fetched into the provider's local cache.
+
+    Args:
+        provider: State provider of the workspace.
+        target: Job ID / hash prefix (``[task/]hash``) or job directory path.
+        ws_base: Workspace path, stripped from the target if it starts with it.
+
+    Returns:
+        Local Path to the parameters file.
+
+    Raises:
+        FileNotFoundError: If no job matches, or if it has no parameters file.
+    """
+    try:
+        clean = clean_job_target(target, ws_base, filename="params.json")
+    except ValueError as e:
+        raise FileNotFoundError("Please specify a job ID or path.") from e
+
+    task_prefix, _, job_prefix = clean.replace(":", "/").rpartition("/")
+
+    def matching(jobs):
+        return sorted(
+            (
+                job
+                for job in jobs
+                if job.identifier.startswith(job_prefix)
+                and job.task_id.startswith(task_prefix)
+            ),
+            key=lambda job: job.locator,
+        )
+
+    # Jobs of experiments first, then jobs that do not belong to any
+    matches = matching(provider.get_all_jobs()) or matching(provider.get_orphan_jobs())
+    if not matches:
+        raise FileNotFoundError(f"No job matching '{clean}' found in workspace")
+
+    if len(matches) > 1:
+        print(
+            f"Warning: Multiple jobs ({len(matches)}) matched '{clean}'. "
+            f"Using the first match: {matches[0].locator}",
+            file=sys.stderr,
+        )
+
+    if params_file := provider.get_job_params_file(matches[0]):
+        return params_file
+    raise FileNotFoundError(f"No parameters file found for job {matches[0].locator}")
 
 
 def _find_params_in_path(p: Path) -> Path | None:

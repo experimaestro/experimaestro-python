@@ -963,7 +963,9 @@ def test_cli_inspect_help():
     res = runner.invoke(cli, ["jobs", "inspect", "--help"])
     assert res.exit_code == 0
     assert "Interactive TUI Parameters Inspector" in res.output
-    assert "--workspace" in res.output
+    assert "shortcut `experimaestro inspect`" in " ".join(res.output.split())
+    # Deprecated (the workspace is selected with the root options)
+    assert "--workspace" not in res.output
 
 
 def test_params_graph_objects_jsonl_and_value_resolution(tmp_path):

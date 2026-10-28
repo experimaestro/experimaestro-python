@@ -650,12 +650,20 @@ class StateProvider(ABC):
     def get_job_params_file(self, job: BaseJob) -> Path | None:
         """Get the local path to a job's parameters file (params.json or experimaestro.json).
 
-        For local providers, checks the job directory on disk.
-        For remote providers, synchronizes params.json or experimaestro.json to the local
-        cache directory using sync_path and returns the local Path.
+        Checks the job directory on disk first (for remote providers, the job
+        path is in the local cache). Otherwise, remote providers synchronize
+        params.json or experimaestro.json to the local cache directory using
+        sync_path and return the local Path.
         """
         if not job or not job.path:
             return None
+
+        # Local job, or remote job already in the local cache (the parameters
+        # of a job never change, so the cached copy does not go stale)
+        for filename in ("params.json", "experimaestro.json"):
+            cand = job.path / filename
+            if cand.is_file():
+                return cand
 
         if self.is_remote:
             local_dir = self.sync_path(
@@ -666,12 +674,6 @@ class StateProvider(ABC):
                     cand = local_dir / filename
                     if cand.is_file():
                         return cand
-            return None
-
-        for filename in ("params.json", "experimaestro.json"):
-            cand = job.path / filename
-            if cand.is_file():
-                return cand
         return None
 
     def get_orphan_jobs(self, *, refresh: bool = False) -> list[BaseJob]:

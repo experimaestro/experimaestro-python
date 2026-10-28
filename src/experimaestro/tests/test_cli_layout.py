@@ -28,6 +28,18 @@ def test_hidden_aliases_not_in_help():
         assert f"  {name} " in result.output
     for name in ["run-experiment", "orphans", "rpyc-server", "parameters-difference"]:
         assert name not in result.output
+    assert "  inspect " not in result.output
+
+
+def test_inspect_shortcut():
+    """`inspect` is a (hidden, not deprecated) shortcut for `jobs inspect`"""
+    shortcut, command = invoke("inspect", "--help"), invoke("jobs", "inspect", "--help")
+    assert shortcut.exit_code == 0, shortcut.output
+    assert shortcut.output.startswith("Usage: cli inspect ")
+    # Same help, but for the usage line
+    assert shortcut.output.splitlines()[1:] == command.output.splitlines()[1:]
+    assert "Deprecated" not in shortcut.output
+    assert "  inspect " in invoke("jobs", "--help").output
 
 
 @pytest.mark.parametrize(
@@ -35,7 +47,6 @@ def test_hidden_aliases_not_in_help():
     [
         (["run-experiment"], ["run"]),
         (["dag"], ["experiments", "dag"]),
-        (["inspect"], ["jobs", "inspect"]),
         (["parameters-difference"], ["jobs", "diff"]),
         (["cleanup"], ["workspace", "cleanup"]),
         (["workspaces", "list"], ["workspace", "list"]),
