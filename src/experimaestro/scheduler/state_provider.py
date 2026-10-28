@@ -657,6 +657,12 @@ class StateProvider(ABC):
         if not job or not job.path:
             return None
 
+        # Check local disk first (for local provider, or if already synced in remote cache)
+        for filename in ("params.json", "experimaestro.json"):
+            cand = job.path / filename
+            if cand.is_file():
+                return cand
+
         if self.is_remote:
             local_dir = self.sync_path(
                 str(job.path), include=["params.json", "experimaestro.json"]
@@ -668,10 +674,6 @@ class StateProvider(ABC):
                         return cand
             return None
 
-        for filename in ("params.json", "experimaestro.json"):
-            cand = job.path / filename
-            if cand.is_file():
-                return cand
         return None
 
     def get_orphan_jobs(self, *, refresh: bool = False) -> list[BaseJob]:

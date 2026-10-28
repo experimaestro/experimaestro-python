@@ -1,7 +1,7 @@
 """Remote workspace utilities via SSH and Rsync.
 
 Provides lightweight remote querying, pattern matching, and file synchronization
-to support tools like `experimaestro jobs inspect` and `experimaestro experiments dag` on remote SSH workspaces.
+to support tools like `experimaestro inspect` and `experimaestro experiments dag` on remote SSH workspaces.
 """
 
 from __future__ import annotations
@@ -245,6 +245,20 @@ def find_remote_workspace_file(
         ) from e
 
     pattern = resolve_job_file_pattern(clean_target, filename)
+    dest_cache = cache_dir or get_session_cache_dir()
+
+    # Check if target file is already cached locally
+    if dest_cache.exists():
+        local_matches = sorted(list(dest_cache.glob(pattern)))
+        if local_matches and local_matches[0].is_file():
+            logger.debug(
+                "Found cached %s for '%s': %s",
+                filename,
+                clean_target,
+                local_matches[0],
+            )
+            return local_matches[0].resolve()
+
     remote_pattern = f"{ws._raw_path}/{pattern}"
 
     logger.info(
@@ -278,7 +292,6 @@ def find_remote_workspace_file(
 
     remote_file_path = matches[0]
     rel_path = remote_file_path[len(ws._raw_path) :].lstrip("/")
-    dest_cache = cache_dir or get_session_cache_dir()
     local_dest = dest_cache / rel_path
 
     logger.info("Synchronizing %s from %s into %s...", rel_path, ws.id, local_dest)

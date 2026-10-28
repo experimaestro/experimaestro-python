@@ -6,6 +6,7 @@
 experimaestro [-w WORKSPACE | --workdir PATH | --ssh HOST:PATH] COMMAND
   run           Run an experiment
   monitor       Monitor the experiments of a workspace (local or SSH)
+  inspect       Interactive TUI Parameters Inspector for jobs and serialized objects
   experiments   Experiments (alias: xp): list, dag, copy, runs, services, actions, carbon
   jobs          Jobs: list, kill, clean, log, path, recover, inspect, diff
   workspace     Workspaces (alias: ws): list, cleanup, orphans, stray, migrate
@@ -31,7 +32,7 @@ experimaestro --ssh user@cluster:/scratch/experiments jobs list
 :::{note}
 Commands were reorganized in experimaestro 2.x. The old names
 (`run-experiment`, `experiments ssh-monitor`, `experiments history`,
-`orphans`, `cleanup`, `dag`, `inspect`, `workspaces`, `migrate`,
+`orphans`, `cleanup`, `dag`, `workspaces`, `migrate`,
 `refactor`, …) still work but print a deprecation warning.
 `experimaestro run PARAMS.json` (running a single task from its
 `params.json`) is also still supported.
@@ -153,7 +154,7 @@ status and control jobs.
 | `experimaestro jobs log JOBID` | View job log (stderr by default) |
 | `experimaestro jobs path JOBID` | Print the path to a job directory |
 | `experimaestro jobs recover JOBID` | Recover a job from a backup folder |
-| `experimaestro jobs inspect [TARGET]` | Inspect job parameters (interactive TUI) |
+| `experimaestro jobs inspect [TARGET]` | Inspect job parameters (alias for `experimaestro inspect`) |
 | `experimaestro jobs diff PATH1 PATH2` | Difference between two job configurations |
 
 ### Common Options
@@ -217,8 +218,8 @@ experimaestro jobs log -f mymodule.MyTask/abc123def
 # Get job directory path
 experimaestro jobs path mymodule.MyTask/abc123def
 
-# Inspect job parameters in interactive TUI
-experimaestro jobs inspect mymodule.MyTask/abc123def
+# Inspect job parameters in interactive TUI (or use `experimaestro jobs inspect`)
+experimaestro inspect mymodule.MyTask/abc123def
 ```
 
 ## Filter Expressions
@@ -598,30 +599,37 @@ experimaestro experiments dag my_experiment --json -
 | `--all-nodes` | With `--tree`, also show configurations (not only jobs) |
 | `--stack / --no-stack` | With `--tree`, stack similar nodes (default: stacked) |
 
-## Job Parameters Inspector (`experimaestro jobs inspect`)
+## Parameters Inspector (`experimaestro inspect`)
 
-Experimaestro provides an interactive terminal-based (TUI) parameters inspector built with Textual. It visualizes the hierarchical configuration graph of jobs, with support for cycle detection, relative path resolution, Python code synthesis, and remote workspace job inspection via SSH.
+Experimaestro provides an interactive terminal-based (TUI) parameters inspector built with Textual. It visualizes the hierarchical configuration graph of jobs and serialized objects, with support for cycle detection, relative path resolution, Python code synthesis, and remote workspace job inspection via SSH.
+
+It can inspect jobs within a workspace, standalone `params.json` files, or serialized objects (such as `experimaestro.json` in exported models or `objects.jsonl`).
 
 ```bash
 # Inspect current directory / job
-experimaestro jobs inspect
+experimaestro inspect
 
 # Inspect a specific job by task name or hash prefix
-experimaestro jobs inspect mymodule.MyTask/1822b2b
+experimaestro inspect mymodule.MyTask/1822b2b
 
-# Inspect a specific params.json directly
-experimaestro jobs inspect /path/to/params.json
+# Inspect a specific params.json or exported model config directly
+experimaestro inspect /path/to/experimaestro.json
 
 # Inspect a job in a remote SSH workspace
-experimaestro jobs inspect -w my_cluster mymodule.MyTask/1822b2b
+experimaestro -w my_cluster inspect mymodule.MyTask/1822b2b
 ```
+
+:::{note}
+`experimaestro jobs inspect [TARGET]` is also supported as an alias.
+:::
 
 ### Options
 
+The workspace is selected with the root option `experimaestro [-w WORKSPACE | --workdir PATH | --ssh HOST:PATH] inspect [TARGET]`.
+
 | Option | Description |
 |--------|-------------|
-| `TARGET` | Job ID or hash prefix, path to `params.json` / `experimaestro.json`, or job directory (default: `.`) |
-| `-w, --workspace` | Workspace ID or directory path (defaults to current Experimaestro workspace; supports remote SSH workspaces) |
+| `TARGET` | Job ID or hash prefix, path to `params.json` / `experimaestro.json` / `objects.jsonl`, or job directory (default: `.`) |
 
 ### Keybindings
 

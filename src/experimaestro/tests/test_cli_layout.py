@@ -24,7 +24,15 @@ def invoke(*args):
 def test_hidden_aliases_not_in_help():
     result = invoke("--help")
     assert result.exit_code == 0, result.output
-    for name in ["run", "monitor", "experiments", "jobs", "workspace", "tools"]:
+    for name in [
+        "run",
+        "monitor",
+        "experiments",
+        "jobs",
+        "workspace",
+        "tools",
+        "inspect",
+    ]:
         assert f"  {name} " in result.output
     for name in ["run-experiment", "orphans", "rpyc-server", "parameters-difference"]:
         assert name not in result.output

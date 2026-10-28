@@ -347,12 +347,14 @@ from .experiments import experiments  # noqa: E402
 from .jobs import jobs  # noqa: E402
 from .workspace import workspace  # noqa: E402
 from .tools import tools  # noqa: E402
+from .inspect import inspect_command  # noqa: E402
 
 cli.add_command(monitor)
 cli.add_command(experiments)
 cli.add_command(jobs)
 cli.add_command(workspace)
 cli.add_command(tools)
+cli.add_command(inspect_command, "inspect")
 
 # Short names
 cli.add_command(hidden_alias(experiments), "xp")
@@ -361,7 +363,6 @@ cli.add_command(hidden_alias(workspace), "ws")
 # Old names
 for old_name, group, name in [
     ("dag", experiments, "dag"),
-    ("inspect", jobs, "inspect"),
     ("parameters-difference", jobs, "diff"),
     ("workspaces", workspace, None),
     ("cleanup", workspace, "cleanup"),

@@ -571,6 +571,88 @@ def test_fetch_remote_workspace_file_success(tmp_path, monkeypatch):
     assert result_path.is_file()
 
 
+def test_fetch_remote_workspace_file_caches_and_syncs_once(tmp_path, monkeypatch):
+    """Verify that remote file is only synced once and subsequent queries use local cache."""
+    ws = make_mock_remote_workspace()
+    target_job = "ee76fb8f"
+    remote_matched_path = f"{ws._raw_path}/jobs/my_task/{target_job}12345/params.json"
+    cache_dir = tmp_path / "cache"
+
+    call_count = {"ssh": 0, "rsync": 0}
+
+    def mock_subprocess_run(cmd, capture_output, text):
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        if cmd[0] == "ssh":
+            call_count["ssh"] += 1
+            res = Result()
+            res.stdout = f"{remote_matched_path}\n"
+            return res
+        elif cmd[0] == "rsync":
+            call_count["rsync"] += 1
+            dest_file = Path(cmd[-1])
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            dest_file.write_text(
+                '{"workspace": "/remote/workspace/path"}', encoding="utf-8"
+            )
+            return Result()
+        return Result()
+
+    monkeypatch.setattr("subprocess.run", mock_subprocess_run)
+
+    # First call: triggers SSH + rsync
+    res1 = fetch_remote_workspace_file(ws, target_job, cache_dir=cache_dir)
+    assert res1.is_file()
+    assert call_count == {"ssh": 1, "rsync": 1}
+
+    # Second call for the same target: served from local cache with 0 SSH/rsync calls!
+    res2 = fetch_remote_workspace_file(ws, target_job, cache_dir=cache_dir)
+    assert res2 == res1
+    assert call_count == {"ssh": 1, "rsync": 1}
+
+    # Verify default get_session_cache_dir() behavior when cache_dir is None
+    session_cache = tmp_path / "session_cache"
+    monkeypatch.setattr(
+        "experimaestro.utils.remote.get_session_cache_dir", lambda: session_cache
+    )
+    target_job2 = "abc12345"
+    remote_matched_path2 = f"{ws._raw_path}/jobs/my_task/{target_job2}/params.json"
+
+    def mock_subprocess_run_session(cmd, capture_output, text):
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        if cmd[0] == "ssh":
+            call_count["ssh"] += 1
+            res = Result()
+            res.stdout = f"{remote_matched_path2}\n"
+            return res
+        elif cmd[0] == "rsync":
+            call_count["rsync"] += 1
+            dest_file = Path(cmd[-1])
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            dest_file.write_text('{"workspace": "/remote"}', encoding="utf-8")
+            return Result()
+        return Result()
+
+    monkeypatch.setattr("subprocess.run", mock_subprocess_run_session)
+    call_count["ssh"] = 0
+    call_count["rsync"] = 0
+
+    res3 = fetch_remote_workspace_file(ws, target_job2)
+    assert res3.is_file()
+    assert call_count == {"ssh": 1, "rsync": 1}
+
+    res4 = fetch_remote_workspace_file(ws, target_job2)
+    assert res4 == res3
+    assert call_count == {"ssh": 1, "rsync": 1}
+
+
 def test_fetch_remote_workspace_file_custom_filename(tmp_path, monkeypatch):
     """Verify fetching custom file (experimaestro.json) from remote workspace."""
     ws = make_mock_remote_workspace()
@@ -955,15 +1037,28 @@ async def test_root_model_primary_placement(tmp_path):
 
 
 def test_cli_inspect_help():
-    """Verify experimaestro jobs inspect --help CLI command."""
+    """Verify experimaestro inspect and experimaestro jobs inspect CLI commands."""
     from click.testing import CliRunner
     from experimaestro.cli import cli
 
     runner = CliRunner()
-    res = runner.invoke(cli, ["jobs", "inspect", "--help"])
-    assert res.exit_code == 0
-    assert "Interactive TUI Parameters Inspector" in res.output
-    assert "--workspace" in res.output
+
+    # 1. Main experimaestro --help lists inspect command
+    res_main = runner.invoke(cli, ["--help"])
+    assert res_main.exit_code == 0
+    assert "inspect" in res_main.output
+
+    # 2. Top-level experimaestro inspect --help has no deprecation warning and documents root -w
+    res_inspect = runner.invoke(cli, ["inspect", "--help"])
+    assert res_inspect.exit_code == 0
+    assert "Interactive TUI Parameters Inspector" in res_inspect.output
+    assert "Deprecated" not in res_inspect.output
+    assert "experimaestro -w my_workspace inspect" in res_inspect.output
+
+    # 3. Subcommand experimaestro jobs inspect --help also works
+    res_jobs = runner.invoke(cli, ["jobs", "inspect", "--help"])
+    assert res_jobs.exit_code == 0
+    assert "Interactive TUI Parameters Inspector" in res_jobs.output
 
 
 def test_params_graph_objects_jsonl_and_value_resolution(tmp_path):
