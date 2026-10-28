@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 import os
+import warnings
 from datetime import datetime
 from pathlib import Path
 import time
@@ -637,11 +638,21 @@ class experiment(BaseExperiment):
 
         # Stream job config to objects.jsonl
         if self._objects_writer is not None:
+            # DEPRECATED: in Experimaestro 3.0, do not catch serialization errors (make them blocking)
             try:
                 self._objects_writer.write(job.config)
             except Exception as e:
                 logger.warning(
-                    "Failed to serialize config for job %s: %s", job.identifier, e
+                    "Failed to serialize config for job %s: %s "
+                    "(deprecated: ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0)",
+                    job.identifier,
+                    e,
+                )
+                warnings.warn(
+                    f"Failed to serialize config for job {job.identifier}: {e}. "
+                    "Ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0.",
+                    DeprecationWarning,
+                    stacklevel=2,
                 )
 
         # Write initial ExperimentJobStateEvent to filesystem (only in NORMAL mode)
@@ -1284,10 +1295,22 @@ class experiment(BaseExperiment):
 
         # Stream serialized action to objects.jsonl
         if self._objects_writer is not None:
+            # DEPRECATED: in Experimaestro 3.0, do not catch serialization errors (make them blocking)
             try:
                 self._objects_writer.write(action)
             except Exception as e:
-                logger.warning("Failed to serialize action %s: %s", action_id, e)
+                logger.warning(
+                    "Failed to serialize action %s: %s "
+                    "(deprecated: ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0)",
+                    action_id,
+                    e,
+                )
+                warnings.warn(
+                    f"Failed to serialize action {action_id}: {e}. "
+                    "Ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         # Emit event for live monitoring
         if self._event_writer is not None:

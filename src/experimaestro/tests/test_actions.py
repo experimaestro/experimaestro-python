@@ -58,6 +58,29 @@ class TaskWithSubmit(Task):
         pass
 
 
+class FailingSerializationAction(Action):
+    label: Param[str]
+
+    def __xpm_serialize__(self, context):
+        raise RuntimeError("Simulated action serialization failure for testing")
+
+    def describe(self) -> str:
+        return f"Failing action: {self.label}"
+
+    def execute(self, interaction: Interaction) -> None:
+        pass
+
+
+class FailingSerializationTask(Task):
+    label: Param[str]
+
+    def __xpm_serialize__(self, context):
+        raise RuntimeError("Simulated task serialization failure for testing")
+
+    def execute(self):
+        pass
+
+
 class TaskWithTaskOutputs(Task):
     shared: Param[SharedConfig]
 
@@ -383,3 +406,28 @@ def test_cli_interaction_prefill_boolean_variants():
     for false_val in ["false", "no", "0", "n", "False", "NO"]:
         interaction = CLIInteraction(prefill={"flag": false_val})
         assert interaction.checkbox("flag", "Enable?") is False
+
+
+def test_action_serialization_failure_deprecated_warning():
+    """Serialization failures when adding actions emit a DeprecationWarning and warning log, but do not crash."""
+    with TemporaryDirectory(prefix="xpm") as workdir:
+        with TemporaryExperiment("test-action-fail-warning", workdir=workdir) as xp:
+            action = FailingSerializationAction.C(label="fail-test")
+            with pytest.deprecated_call(
+                match="Ignoring serialization errors is deprecated"
+            ):
+                action_id = xp.add_action(action)
+
+            assert action_id is not None
+            assert action_id in xp.actions
+
+
+def test_job_serialization_failure_deprecated_warning():
+    """Serialization failures when registering jobs emit a DeprecationWarning and warning log, but do not crash."""
+    with TemporaryDirectory(prefix="xpm") as workdir:
+        with TemporaryExperiment("test-job-fail-warning", workdir=workdir):
+            task = FailingSerializationTask.C(label="fail-job")
+            with pytest.deprecated_call(
+                match="Ignoring serialization errors is deprecated"
+            ):
+                task.submit()
