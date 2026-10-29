@@ -6,6 +6,7 @@ Test annotation handling for configurations and tasks
 # Annotation specific tests
 
 from pathlib import Path
+from typing import Optional, Union
 from experimaestro.core.context import SerializationContext
 from experimaestro.core.types import DictType, IntType, StrType
 from enum import Enum
@@ -238,6 +239,28 @@ def test_redefined_param():
     assert atx.required
 
     assert not btx.required
+
+
+def test_param_optional_union():
+    """Optional unions with several non-None members are optional (#303)"""
+
+    class A(Config):
+        x: Param[dict[str, str] | bool | None] = field(default=None)
+        y: Param[Optional[Union[dict[str, str], bool]]] = field(default=None)  # noqa: UP007, UP045
+        z: Param[int | str | None]
+
+    xpmA = A.__getxpmtype__()
+    for name in "xyz":
+        arg = xpmA.getArgument(name)
+        assert not arg.required
+        assert isinstance(arg.type, types.UnionType)
+        assert len(arg.type.types) == 2
+
+    a = A.C(x=None, y=None)
+    assert a.x is None and a.y is None and a.z is None
+
+    a = A.C(x={"key": "value"}, y=True, z="text")
+    assert a.x == {"key": "value"} and a.y is True and a.z == "text"
 
 
 def test_param_dict():

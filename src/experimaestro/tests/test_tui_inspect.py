@@ -146,6 +146,85 @@ def test_state_provider_job_params_remote(tmp_path: Path):
     assert result_path == cached_params
 
 
+def test_state_provider_job_params_remote_cached(tmp_path: Path):
+    """A remote job whose params are already in the local cache is not synced."""
+    sp = DummyRemoteStateProvider()
+    job_dir = tmp_path / "cache" / "jobs" / "task_a" / "12345678"
+    job_dir.mkdir(parents=True)
+    (job_dir / "params.json").write_text('{"version": 1}')
+    job = DummyJob("12345678", "task_a", job_dir)
+
+    sp.sync_path = MagicMock()
+    assert sp.get_job_params_file(job) == job_dir / "params.json"
+    sp.sync_path.assert_not_called()
+
+
+def make_jobs_provider(tmp_path: Path, jobs, orphans=()):
+    """A remote provider with the given jobs, whose params are synced on demand"""
+
+    def sync_path(path, include=None):
+        local = tmp_path / "synced" / Path(path).name
+        local.mkdir(parents=True, exist_ok=True)
+        (local / "params.json").write_text("{}")
+        return local
+
+    sp = DummyRemoteStateProvider()
+    sp.get_all_jobs = MagicMock(return_value=list(jobs))
+    sp.get_orphan_jobs = MagicMock(return_value=list(orphans))
+    sp.sync_path = MagicMock(side_effect=sync_path)
+    return sp
+
+
+def remote_job(identifier: str, task_id: str) -> DummyJob:
+    return DummyJob(
+        identifier, task_id, Path(f"/remote/ws/jobs/{task_id}/{identifier}")
+    )
+
+
+@pytest.mark.parametrize(
+    "target,expected",
+    [
+        ("abc1", "abc123"),
+        ("pkg.TaskB/ab", "abd456"),
+        ("pkg.TaskB:abd", "abd456"),
+        ("/remote/ws/jobs/pkg.TaskB/abd456/params.json", "abd456"),
+        ("jobs/pkg.TaskA/abc123", "abc123"),
+    ],
+)
+def test_find_job_params_file(tmp_path: Path, target: str, expected: str):
+    """Jobs are matched by [task prefix/]hash prefix through the state provider"""
+    from experimaestro.tools.inspect_params import find_job_params_file
+
+    sp = make_jobs_provider(
+        tmp_path, [remote_job("abc123", "pkg.TaskA"), remote_job("abd456", "pkg.TaskB")]
+    )
+    path = find_job_params_file(sp, target, "/remote/ws")
+    assert path == tmp_path / "synced" / expected / "params.json"
+    sp.get_orphan_jobs.assert_not_called()
+
+
+def test_find_job_params_file_orphans_and_ambiguity(tmp_path: Path, capsys):
+    from experimaestro.tools.inspect_params import find_job_params_file
+
+    sp = make_jobs_provider(
+        tmp_path,
+        [remote_job("abc123", "pkg.TaskA"), remote_job("abd456", "pkg.TaskB")],
+        orphans=[remote_job("fed789", "pkg.TaskA")],
+    )
+
+    # Jobs outside any experiment are found too
+    assert find_job_params_file(sp, "fed").parent.name == "fed789"
+
+    # Several matches: the first one (by locator) is used, with a warning
+    assert find_job_params_file(sp, "ab").parent.name == "abc123"
+    assert "Multiple jobs (2) matched 'ab'" in capsys.readouterr().err
+
+    with pytest.raises(FileNotFoundError, match="No job matching"):
+        find_job_params_file(sp, "0000")
+    with pytest.raises(FileNotFoundError):
+        find_job_params_file(sp, ".")
+
+
 def test_job_detail_view_hints_and_actions(tmp_path: Path):
     """Verify JobDetailView updates the hint and posts InspectJobParams."""
     sp = DummyLocalStateProvider()

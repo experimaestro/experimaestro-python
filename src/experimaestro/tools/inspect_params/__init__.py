@@ -16,6 +16,7 @@ from experimaestro.tools.inspect_params.app import (
     ParamsTree,
 )
 from experimaestro.tools.inspect_params.discovery import (
+    find_job_params_file,
     find_local_workspace_file,
     find_params_file,
     find_workspace_file,
@@ -51,6 +52,7 @@ __all__ = [
     "clean_job_target",
     "fetch_remote_file_rsync",
     "fetch_remote_workspace_file",
+    "find_job_params_file",
     "find_local_workspace_file",
     "find_params_file",
     "find_remote_workspace_file",
