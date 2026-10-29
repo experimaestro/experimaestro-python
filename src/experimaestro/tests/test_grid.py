@@ -1,3 +1,4 @@
+import logging
 from experimaestro.experiments.grid import (
     GenericParams,
     GridSearch,
@@ -366,10 +367,8 @@ def test_config_dicts_with_none_scalar_field():
     assert configs[1].sub is None
 
 
-def test_config_dicts_duplicate_error():
-    """Verify that duplicate dictionaries in config_dicts raise a ValueError."""
-    import pytest
-
+def test_config_dicts_duplicates_are_ignored(caplog):
+    """Duplicate dictionaries in config_dicts are ignored, with a warning"""
     cfg = MyConfig(id="test", lr=0.1, batch_size=32)
     cfg.lr = GenericParams.from_any(cfg.lr)
     cfg.batch_size = GenericParams.from_any(cfg.batch_size)
@@ -377,30 +376,27 @@ def test_config_dicts_duplicate_error():
     cfg.grid_search = {
         "config_dicts": [
             {"lr": 0.01, "batch_size": 16},
+            {"lr": 0.02, "batch_size": 16},
             {"lr": 0.01, "batch_size": 16},
         ]
     }
-    with pytest.raises(
-        ValueError,
-        match=r"Duplicate dictionary found in 'config_dicts' at index 1 \(identical to index 0\)",
-    ):
-        generate_grid(cfg)
+    with caplog.at_level(logging.WARNING):
+        configs, _ = generate_grid(cfg)
+
+    assert [(c.lr, c.batch_size) for c in configs] == [(0.01, 16), (0.02, 16)]
+    assert "(at index 2, same as index 0)" in caplog.text
 
 
-def test_grid_search_duplicate_param_error():
-    """Verify that duplicate values in an independent parameter list raise a ValueError."""
-    import pytest
-
+def test_grid_search_duplicate_values_are_ignored(caplog):
+    """Duplicate values of a grid parameter are ignored, with a warning"""
     cfg = MyConfig(id="test", lr=0.1, batch_size=32)
     cfg.lr = GenericParams.from_any(cfg.lr)
     cfg.batch_size = GenericParams.from_any(cfg.batch_size)
 
-    cfg.grid_search = {
-        "lr": [0.01, 0.05, 0.01],
-    }
-    with pytest.raises(
-        ValueError,
-        match=r"Duplicate value '0.01' for parameter 'lr' in grid search \(at index 2 and 0\)",
-    ):
-        generate_grid(cfg)
+    # Compared after conversion: "0.01" is the same value as 0.01
+    cfg.grid_search = {"lr": [0.01, 0.05, "0.01"]}
+    with caplog.at_level(logging.WARNING):
+        configs, _ = generate_grid(cfg)
 
+    assert [c.lr for c in configs] == [0.01, 0.05]
+    assert "parameter 'lr' in grid search (at index 2, same as index 0)" in caplog.text

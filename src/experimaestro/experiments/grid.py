@@ -331,16 +331,29 @@ def _validate_and_convert_config_dicts(
         converted_item = {key: converters[key](val) for key, val in item.items()}
         converted_config_dicts.append(converted_item)
 
-    # Check for duplicate dictionaries in config_dicts
-    for idx, item in enumerate(converted_config_dicts):
-        for prev_idx in range(idx):
-            if item == converted_config_dicts[prev_idx]:
-                raise ValueError(
-                    f"Duplicate dictionary found in 'config_dicts' at index {idx} "
-                    f"(identical to index {prev_idx}): {config_dicts[idx]}"
-                )
+    return _without_duplicates(converted_config_dicts, config_dicts, "'config_dicts'")
 
-    return converted_config_dicts
+
+def _without_duplicates(values: list, raw_values: list, what: str) -> list:
+    """Removes the duplicate values (keeping the first one), with a warning
+
+    Duplicates would only generate the same configurations twice. Values are
+    compared after conversion (they are not necessarily hashable).
+    """
+    unique, indices = [], []
+    for idx, value in enumerate(values):
+        if value in unique:
+            logger.warning(
+                "Ignoring duplicate value %s for %s (at index %d, same as index %d)",
+                raw_values[idx],
+                what,
+                idx,
+                indices[unique.index(value)],
+            )
+        else:
+            unique.append(value)
+            indices.append(idx)
+    return unique
 
 
 def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
@@ -398,16 +411,11 @@ def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
         )
         raw_values = gp_from_framework.as_list()
         converted_values = [converter(v) for v in raw_values]
-
-        for idx, val in enumerate(converted_values):
-            for prev_idx in range(idx):
-                if val == converted_values[prev_idx]:
-                    raise ValueError(
-                        f"Duplicate value '{raw_values[idx]}' for parameter '{path}' in grid search "
-                        f"(at index {idx} and {prev_idx})"
-                    )
-
-        value_options.append(converted_values)
+        value_options.append(
+            _without_duplicates(
+                converted_values, raw_values, f"parameter '{path}' in grid search"
+            )
+        )
 
     # Generate combinations
     grid_combinations = list(product(*value_options)) if value_options else [()]

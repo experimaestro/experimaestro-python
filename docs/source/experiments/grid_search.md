@@ -77,6 +77,11 @@ grid_search:
 
 The keys in the `grid_search` block are dot-separated paths to the fields in your configuration.
 
+Duplicate values (e.g. `lr: [0.1, 0.01, 0.1]`), and duplicate dictionaries in
+`config_dicts`, are ignored with a warning: only the first occurrence is used.
+Values are compared after conversion to the field type, so `"0.1"` and `0.1`
+are duplicates.
+
 ### Coupled Parameters (`config_dicts`)
 
 When you want to evaluate specific combinations of parameters together rather than computing their full Cartesian product, you can use `config_dicts` inside the `grid_search` block:
