@@ -192,3 +192,46 @@ def test_load_xp_info_backward_compat_configs_json():
         assert len(info.jobs) == 1
         assert "job1" in info.jobs
         assert len(info.actions) == 0
+
+
+class FailingConfig(Config):
+    value: Param[str]
+
+    def __xpm_serialize__(self, context):
+        raise RuntimeError("Simulated serialization failure")
+
+
+class Outer(Config):
+    shared: Param[SharedConfig]
+    other: Param[Config]
+
+
+def test_objects_jsonl_shared_object_after_failure(tmp_path):
+    """A failed write must not leave its sub-objects marked as written
+
+    The first config fails to serialize (the error is only a warning when
+    adding a job), after its shared sub-object was serialized: the second
+    config, which uses the same sub-object, must still be loadable.
+    """
+    from experimaestro.core.objects import ConfigInformation
+    from experimaestro.scheduler.objects_writer import ObjectsWriter, read_objects
+
+    shared = SharedConfig.C(value="shared")
+    path = tmp_path / "objects.jsonl"
+    with ObjectsWriter(path) as writer:
+        with pytest.raises(RuntimeError, match="Simulated"):
+            writer.write(Outer.C(shared=shared, other=FailingConfig.C(value="x")))
+        writer.write(Outer.C(shared=shared, other=SharedConfig.C(value="other")))
+
+    objects = read_objects(path)
+    written = {obj["id"] for obj in objects}
+    referenced = {
+        field["value"]
+        for obj in objects
+        for field in obj["fields"].values()
+        if isinstance(field, dict) and field.get("type") == "python"
+    }
+    assert referenced <= written, "objects.jsonl refers to objects it does not contain"
+
+    # ... so that it can be loaded back
+    ConfigInformation.load_objects(objects, as_instance=False)

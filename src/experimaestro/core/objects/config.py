@@ -1274,78 +1274,64 @@ class ConfigInformation:
 
         context.serialized.add(id(self.pyobject))
 
-        try:
-            # Serialize sub-objects (push field names and dict/list keys
-            # so that DataPath serialization gets unique var_paths)
-            for argument, value in self.xpmvalues():
-                if value is not None:
-                    with context.push(argument.name):
-                        ConfigInformation.__collect_objects__(value, objects, context)
-
-            # Adds task
-            if self.task is not None and self.task is not self:
-                ConfigInformation.__collect_objects__(self.task, objects, context)
-
-            # Serialize initialization tasks
-            ConfigInformation.__collect_objects__(self.init_tasks, objects, context)
-
-            # Serialize ourselves
-            state_dict = {
-                "id": id(self.pyobject),
-                "module": self.xpmtype._module,
-                "type": self.xpmtype.value_type.__qualname__,
-                "typename": self.xpmtype.name(),
-                "identifier": self.identifier.state_dict(),
-            }
-
-            # Add pre/init tasks
-            if self.init_tasks:
-                state_dict["init-tasks"] = [
-                    id(init_task) for init_task in self.init_tasks
-                ]
-
-            if self.meta:
-                state_dict["meta"] = self.meta
-
-            if self.task is not None:
-                state_dict["task"] = id(self.task)
-
-            if not self.xpmtype._package:
-                state_dict["file"] = str(self.xpmtype._file)
-
-            # Serialize data files via the config's __xpm_serialize__ method
-            serialized_data = self.pyobject.__xpm_serialize__(context)
-
-            # Serialize identifier and typename
-            jsonfields = state_dict["fields"] = {}
-            for argument, value in self.xpmvalues():
+        # Serialize sub-objects (push field names and dict/list keys
+        # so that DataPath serialization gets unique var_paths)
+        for argument, value in self.xpmvalues():
+            if value is not None:
                 with context.push(argument.name):
-                    if argument.name in serialized_data:
-                        value = serialized_data.pop(argument.name)
+                    ConfigInformation.__collect_objects__(value, objects, context)
 
-                    jsonfields[argument.name] = ConfigInformation._outputjsonvalue(
-                        value, context
-                    )
+        # Adds task
+        if self.task is not None and self.task is not self:
+            ConfigInformation.__collect_objects__(self.task, objects, context)
 
-            # Add any extra data entries not corresponding to fields
-            for name, serialized_path in serialized_data.items():
-                jsonfields[name] = ConfigInformation._outputjsonvalue(
-                    serialized_path, context
+        # Serialize initialization tasks
+        ConfigInformation.__collect_objects__(self.init_tasks, objects, context)
+
+        # Serialize ourselves
+        state_dict = {
+            "id": id(self.pyobject),
+            "module": self.xpmtype._module,
+            "type": self.xpmtype.value_type.__qualname__,
+            "typename": self.xpmtype.name(),
+            "identifier": self.identifier.state_dict(),
+        }
+
+        # Add pre/init tasks
+        if self.init_tasks:
+            state_dict["init-tasks"] = [id(init_task) for init_task in self.init_tasks]
+
+        if self.meta:
+            state_dict["meta"] = self.meta
+
+        if self.task is not None:
+            state_dict["task"] = id(self.task)
+
+        if not self.xpmtype._package:
+            state_dict["file"] = str(self.xpmtype._file)
+
+        # Serialize data files via the config's __xpm_serialize__ method
+        serialized_data = self.pyobject.__xpm_serialize__(context)
+
+        # Serialize identifier and typename
+        jsonfields = state_dict["fields"] = {}
+        for argument, value in self.xpmvalues():
+            with context.push(argument.name):
+                if argument.name in serialized_data:
+                    value = serialized_data.pop(argument.name)
+
+                jsonfields[argument.name] = ConfigInformation._outputjsonvalue(
+                    value, context
                 )
 
-            objects.append(state_dict)
-            return objects
-        except Exception as e:
-            context.serialized.discard(id(self.pyobject))
-            path_str = ".".join(context.var_path) if context.var_path else "<root>"
-            logger.warning(
-                "Failed to serialize config object of type '%s' at path '%s': %s "
-                "(deprecated: ignoring serialization errors will become a blocking error in Experimaestro 3.0)",
-                self.xpmtype.name(),
-                path_str,
-                e,
+        # Add any extra data entries not corresponding to fields
+        for name, serialized_path in serialized_data.items():
+            jsonfields[name] = ConfigInformation._outputjsonvalue(
+                serialized_path, context
             )
-            raise
+
+        objects.append(state_dict)
+        return objects
 
     @staticmethod
     def __collect_objects__(value, objects: list[dict], context: SerializationContext):

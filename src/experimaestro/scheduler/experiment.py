@@ -39,6 +39,21 @@ ServiceClass = TypeVar("ServiceClass", bound=Service)
 logger = logging.getLogger("xpm.experiment")
 
 
+def _serialization_failed(what: str, error: Exception) -> None:
+    """Reports a config that could not be written to objects.jsonl
+
+    The error is only a warning for now (the experiment goes on, and the
+    objects.jsonl file stays consistent); it will be raised in experimaestro 3.0.
+    """
+    # Compatibility: becomes an error in experimaestro 3.0
+    message = (
+        f"Failed to serialize {what}: {error}. "
+        "Serialization errors will be raised in experimaestro 3.0"
+    )
+    logger.warning(message)
+    warnings.warn(message, FutureWarning, stacklevel=3)
+
+
 class FailedExperiment(HandledException):
     """Raised when an experiment failed"""
 
@@ -638,22 +653,10 @@ class experiment(BaseExperiment):
 
         # Stream job config to objects.jsonl
         if self._objects_writer is not None:
-            # DEPRECATED: in Experimaestro 3.0, do not catch serialization errors (make them blocking)
             try:
                 self._objects_writer.write(job.config)
             except Exception as e:
-                logger.warning(
-                    "Failed to serialize config for job %s: %s "
-                    "(deprecated: ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0)",
-                    job.identifier,
-                    e,
-                )
-                warnings.warn(
-                    f"Failed to serialize config for job {job.identifier}: {e}. "
-                    "Ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+                _serialization_failed(f"config for job {job.identifier}", e)
 
         # Write initial ExperimentJobStateEvent to filesystem (only in NORMAL mode)
         if self._event_writer is not None:
@@ -1295,22 +1298,10 @@ class experiment(BaseExperiment):
 
         # Stream serialized action to objects.jsonl
         if self._objects_writer is not None:
-            # DEPRECATED: in Experimaestro 3.0, do not catch serialization errors (make them blocking)
             try:
                 self._objects_writer.write(action)
             except Exception as e:
-                logger.warning(
-                    "Failed to serialize action %s: %s "
-                    "(deprecated: ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0)",
-                    action_id,
-                    e,
-                )
-                warnings.warn(
-                    f"Failed to serialize action {action_id}: {e}. "
-                    "Ignoring serialization errors is deprecated and will become a blocking error in Experimaestro 3.0.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+                _serialization_failed(f"action {action_id}", e)
 
         # Emit event for live monitoring
         if self._event_writer is not None:

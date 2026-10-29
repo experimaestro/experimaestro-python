@@ -61,7 +61,16 @@ class ObjectsWriter:
         # Each call gets a fresh objects list; context.serialized ensures
         # shared objects are only serialized once across all writes
         objects: list[dict[str, Any]] = []
-        json_object(self._context, config, objects)
+        serialized = set(self._context.serialized)
+        serialized_paths = set(self._context.serialized_paths)
+        try:
+            json_object(self._context, config, objects)
+        except Exception:
+            # Nothing is written: forget the objects serialized during this
+            # call, so that later configs sharing them write them
+            self._context.serialized = serialized
+            self._context.serialized_paths = serialized_paths
+            raise
 
         # Write each object as a separate line
         for obj in objects:

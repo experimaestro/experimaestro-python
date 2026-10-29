@@ -408,13 +408,13 @@ def test_cli_interaction_prefill_boolean_variants():
         assert interaction.checkbox("flag", "Enable?") is False
 
 
-def test_action_serialization_failure_deprecated_warning():
-    """Serialization failures when adding actions emit a DeprecationWarning and warning log, but do not crash."""
+def test_action_serialization_failure_warning():
+    """Serialization failures when adding actions emit a FutureWarning and a warning log, but do not crash."""
     with TemporaryDirectory(prefix="xpm") as workdir:
         with TemporaryExperiment("test-action-fail-warning", workdir=workdir) as xp:
             action = FailingSerializationAction.C(label="fail-test")
-            with pytest.deprecated_call(
-                match="Ignoring serialization errors is deprecated"
+            with pytest.warns(
+                FutureWarning, match="will be raised in experimaestro 3.0"
             ):
                 action_id = xp.add_action(action)
 
@@ -422,12 +422,12 @@ def test_action_serialization_failure_deprecated_warning():
             assert action_id in xp.actions
 
 
-def test_job_serialization_failure_deprecated_warning():
-    """Serialization failures when registering jobs emit a DeprecationWarning and warning log, but do not crash."""
+def test_job_serialization_failure_warning():
+    """Serialization failures when registering jobs emit a FutureWarning and a warning log, but do not crash."""
     with TemporaryDirectory(prefix="xpm") as workdir:
         with TemporaryExperiment("test-job-fail-warning", workdir=workdir):
             task = FailingSerializationTask.C(label="fail-job")
-            with pytest.deprecated_call(
-                match="Ignoring serialization errors is deprecated"
+            with pytest.warns(
+                FutureWarning, match="will be raised in experimaestro 3.0"
             ):
                 task.submit()
