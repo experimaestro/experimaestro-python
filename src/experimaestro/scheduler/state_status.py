@@ -15,6 +15,7 @@ File structure:
 - workspace/jobs/{task-id}/{job-id}/.experimaestro/information.json
 """
 
+import functools
 import hashlib
 import json
 import logging
@@ -30,6 +31,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
+
+from pydantic import TypeAdapter, ValidationError
 
 from experimaestro.utils.atomic import atomic_write_json
 from experimaestro.filewatcher import (
@@ -143,6 +146,21 @@ def safe_link_or_copy(src: Path, dst: Path, use_hardlinks: bool = True) -> bool:
 EVENT_TYPES: dict[str, type["EventBase"]] = {}
 
 
+#: Timestamps in events: ISO format string, or a Unix timestamp (older
+#: writers); read with ``deserialize_to_datetime``
+Timestamp = str | float | None
+
+
+class InvalidEventError(ValueError):
+    """An event whose fields do not match its type"""
+
+
+@functools.cache
+def _event_adapter(event_class: type["EventBase"]) -> TypeAdapter:
+    """Validator of an event class (built once per class)"""
+    return TypeAdapter(event_class)
+
+
 @dataclass
 class EventBase:
     """Base class for all events
@@ -175,23 +193,20 @@ class EventBase:
 
     @classmethod
     def from_dict(cls, d: dict) -> "EventBase":
-        """Deserialize event from dictionary"""
-        event_type = d.get("event_type")
-        event_class = EVENT_TYPES.get(event_type, EventBase)
-        # Filter to only known fields for the event class
-        valid_fields = {f for f in event_class.__dataclass_fields__}
+        """Deserialize (and validate) an event from a dictionary
+
+        Unknown keys are ignored (events written by other versions); nested
+        dataclasses (tags, progress) are rebuilt.
+
+        :raises InvalidEventError: if a field has an invalid value
+        """
+        event_class = EVENT_TYPES.get(d.get("event_type", ""), EventBase)
+        valid_fields = event_class.__dataclass_fields__
         filtered = {k: v for k, v in d.items() if k in valid_fields}
-        # Convert nested dataclass fields
-        if "tags" in filtered and filtered["tags"]:
-            filtered["tags"] = [
-                JobTag(**t) if isinstance(t, dict) else t for t in filtered["tags"]
-            ]
-        if "progress" in filtered and isinstance(filtered["progress"], list):
-            filtered["progress"] = [
-                ProgressLevel.from_dict(p) if isinstance(p, dict) else p
-                for p in filtered["progress"]
-            ]
-        return event_class(**filtered)
+        try:
+            return _event_adapter(event_class).validate_python(filtered)
+        except ValidationError as e:
+            raise InvalidEventError(f"Invalid {event_class.__name__}: {e}") from e
 
     @classmethod
     def get_class(cls, name: str) -> "type[EventBase] | None":
@@ -275,7 +290,7 @@ class JobSubmittedEvent(JobEventBase, ExperimentEventBase):
     run_id: str = ""
     tags: list[JobTag] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
-    submitted_time: str | None = None  # ISO format timestamp
+    submitted_time: Timestamp = None
 
 
 @dataclass
@@ -289,8 +304,8 @@ class JobStateChangedEvent(JobEventBase):
 
     state: str = ""
     failure_reason: str | None = None
-    started_time: str | None = None  # ISO format timestamp
-    ended_time: str | None = None  # ISO format timestamp
+    started_time: Timestamp = None
+    ended_time: Timestamp = None
     exit_code: int | None = None
     retry_count: int = 0
     progress: list[ProgressLevel] = field(default_factory=list)
@@ -316,7 +331,7 @@ class ExperimentJobStateEvent(ExperimentEventBase, JobEventBase):
     run_id: str = ""
     tags: list[JobTag] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
-    submitted_time: str | None = None  # ISO format timestamp
+    submitted_time: Timestamp = None
 
 
 @dataclass
@@ -1309,7 +1324,7 @@ class EventReader:
                             event_dict = json.loads(line)
                             event = EventBase.from_dict(event_dict)
                             results.append((entity_id, event))
-                        except json.JSONDecodeError:
+                        except ValueError:  # invalid JSON or event
                             pass
                     self._file_positions[event_file] = f.tell()
             except OSError:
@@ -1641,7 +1656,7 @@ class EventReader:
                     try:
                         event_dict = json.loads(line)
                         events.append(EventBase.from_dict(event_dict))
-                    except json.JSONDecodeError:
+                    except ValueError:  # invalid JSON or event
                         pass
                 # Mark file as fully read
                 end_pos = f.tell()
@@ -1798,7 +1813,7 @@ class EventReader:
                             dir_config.on_event(entity_id, event)
                         except Exception:
                             logger.exception("Error in on_event callback")
-                except json.JSONDecodeError:
+                except ValueError:  # invalid JSON or event
                     pass
         else:
             # Fallback: open/seek/read/close (for standalone read_new_events)
@@ -1824,7 +1839,7 @@ class EventReader:
                                     dir_config.on_event(entity_id, event)
                                 except Exception:
                                     logger.exception("Error in on_event callback")
-                        except json.JSONDecodeError:
+                        except ValueError:  # invalid JSON or event
                             pass
                         last_pos = f.tell()
                     self._file_positions[path] = last_pos
@@ -1923,7 +1938,7 @@ class EventReader:
                             event_dict = json.loads(line)
                             event = EventBase.from_dict(event_dict)
                             events.append(event)
-                        except json.JSONDecodeError:
+                        except ValueError:  # invalid JSON or event
                             pass
             except OSError as e:
                 logger.warning(
@@ -1982,7 +1997,7 @@ class EventReader:
                                 event_dict = json.loads(line)
                                 event = EventBase.from_dict(event_dict)
                                 events.append(event)
-                            except json.JSONDecodeError:
+                            except ValueError:  # invalid JSON or event
                                 pass
             except OSError:
                 pass

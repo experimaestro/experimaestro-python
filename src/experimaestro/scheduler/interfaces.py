@@ -1003,7 +1003,7 @@ class BaseJob:
                                         type(event).__name__,
                                         self.identifier,
                                     )
-                                except (json.JSONDecodeError, KeyError) as e:
+                                except (ValueError, KeyError) as e:
                                     logger.warning(
                                         "Failed to parse event from %s: %s",
                                         event_file,
