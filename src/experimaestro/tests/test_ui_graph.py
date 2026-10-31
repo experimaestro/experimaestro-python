@@ -396,11 +396,14 @@ def test_graph_of_running_experiment(tmp_path):
                 (control / "checkpoint").touch()
                 wait_for(lambda: evaluations, "evaluation submitted")
                 eval_id = evaluations[0].__xpm__.job.identifier
+                # submit() records the job (jobs.jsonl) before its objects
+                # (objects.jsonl), from which the graph is built
                 wait_for(
                     lambda: (
-                        eval_id in provider.get_experiment_job_info("running-graph")
+                        eval_id
+                        in load_experiment_graph(provider, "running-graph").nodes
                     ),
-                    "evaluation seen by the monitor",
+                    "evaluation in the graph read by the monitor",
                 )
                 graph = load_experiment_graph(provider, "running-graph")
             finally:
