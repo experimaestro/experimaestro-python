@@ -58,7 +58,7 @@ jobs:
         env:
           XPM_TEST_TIMEOUT_MULTIPLIER: "10"
         run: |
-          uv run pytest
+          uv run pytest -n auto
 
   # UI feature tests in a real browser (the other jobs run them with the TUI
   # and WebSocket drivers only). Uses the committed frontend build.

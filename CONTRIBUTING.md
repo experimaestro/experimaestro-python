@@ -75,7 +75,8 @@ uv run mypy src/experimaestro
 ## Tests
 
 ```bash
-uv run pytest                                   # all tests
+uv run pytest -n auto                           # all tests, in parallel
+uv run pytest                                   # all tests, sequentially
 uv run pytest src/experimaestro/tests/test_identifier.py   # one file
 ```
 

@@ -285,13 +285,13 @@ def test_slurm_watcher_reuse_after_cleanup(slurmlauncher: SlurmLauncher):
     with SlurmProcessWatcher.get(slurmlauncher) as watcher1:
         _ = watcher1.getjob("test-job", timeout=0.01)
 
-    # Wait for cleanup
+    # Wait for the cleanup
     import time
 
-    time.sleep(0.2)
-
-    # Verify cleanup happened
-    assert slurmlauncher.key not in SlurmProcessWatcher.WATCHERS
+    deadline = time.time() + 5
+    while slurmlauncher.key in SlurmProcessWatcher.WATCHERS:
+        assert time.time() < deadline, "the watcher was not cleaned up"
+        time.sleep(0.01)
 
     # Now get a new watcher - should work without issues
     with SlurmProcessWatcher.get(slurmlauncher) as watcher2:

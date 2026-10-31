@@ -34,8 +34,9 @@ def get_test_timeout(multiplier: float = 1.0) -> int:
         Timeout in seconds
 
     Environment variables:
-        XPM_TEST_TIMEOUT: Base timeout in seconds (default: 20)
-        XPM_TEST_TIMEOUT_MULTIPLIER: Global multiplier, useful for CI (default: 1.0)
+        XPM_TEST_TIMEOUT: Base timeout in seconds (default: 3)
+        XPM_TEST_TIMEOUT_MULTIPLIER: Global multiplier, useful for CI (default:
+            3.0 in parallel runs (pytest -n), 1.0 otherwise)
     """
     # Get base timeout
     env_timeout = os.environ.get(ENV_TEST_TIMEOUT)
@@ -65,6 +66,9 @@ def get_test_timeout(multiplier: float = 1.0) -> int:
                 env_multiplier,
             )
             global_multiplier = 1.0
+    elif "PYTEST_XDIST_WORKER" in os.environ:
+        # Parallel runs (pytest -n): the machine is loaded, tests are slower
+        global_multiplier = 3.0
     else:
         global_multiplier = 1.0
 
