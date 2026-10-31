@@ -100,6 +100,8 @@ class Actors:
         self.crashdir = root / "crashpoints"
         self.crashdir.mkdir()
         self.processes: list[subprocess.Popen] = []
+        #: Job processes to kill at the end (their pid file may be deleted)
+        self.job_pids: set[int] = set()
 
     def experiment(
         self,
@@ -184,8 +186,13 @@ class Actors:
                 process.wait()
         for pidfile in self.workdir.glob("jobs/*/*/*.pid"):
             try:
-                os.kill(json.loads(pidfile.read_text())["pid"], signal.SIGKILL)
+                self.job_pids.add(json.loads(pidfile.read_text())["pid"])
             except (OSError, ValueError, KeyError):
+                pass
+        for pid in self.job_pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
                 pass
 
 

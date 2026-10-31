@@ -55,6 +55,7 @@ def test_orphan_clean_spares_running_job(actors):
 
     xp = actors.experiment(task)
     wait_for(job.touch_path().exists, "the task to start")
+    actors.job_pids.add(job.process_pid())
     xp.kill()
     xp.wait()
     shutil.rmtree(actors.workdir / "experiments" / XP_NAME)
