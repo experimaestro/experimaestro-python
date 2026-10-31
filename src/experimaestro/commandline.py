@@ -12,6 +12,7 @@ from experimaestro.scheduler.workspace import RunMode
 
 from experimaestro.utils import logger
 from experimaestro.utils.atomic import atomic_open, atomic_write_json
+from experimaestro.utils.crashpoints import crashpoint
 from .scheduler import Job, JobState
 from .connectors import Redirect, RedirectType, Connector
 from .scheduler import Workspace
@@ -307,12 +308,14 @@ class CommandLineJob(Job):
         processbuilder.stderr = Redirect.file(self.stderr)
         processbuilder.stdout = Redirect.file(self.stdout)
         self._process = processbuilder.start(True)
+        crashpoint("scheduler.process_started")
 
         # The host is recorded so that a monitor running elsewhere knows that
         # it cannot check a host-dependent process identifier (see #270)
         spec = self._process.tospec()
         spec.setdefault("host", socket.gethostname())
         atomic_write_json(self.pidpath, spec)
+        crashpoint("scheduler.pid_written")
 
         # Write status with process info
         self.state = JobState.SCHEDULED

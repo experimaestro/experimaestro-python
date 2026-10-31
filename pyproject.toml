@@ -195,6 +195,8 @@ markers = [
     "slow: Long-running tests",
     "ui(*interfaces): UI feature test restricted to these interfaces (tui, web)",
     "ui_gap(*interfaces, reason): known defect of these interfaces (strict xfail)",
+    "protocol: Filesystem protocol tests (crash points, concurrent actors)",
+    "deviation(id): reproduces a known deviation (D-xx) of the filesystem protocol spec",
 ]
 
 [dependency-groups]

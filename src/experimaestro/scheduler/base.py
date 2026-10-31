@@ -14,6 +14,7 @@ import asyncio
 
 from experimaestro.exceptions import GracefulTimeout
 from experimaestro.utils.atomic import atomic_write_json
+from experimaestro.utils.crashpoints import crashpoint
 from experimaestro.scheduler import experiment
 from experimaestro.scheduler.jobs import (
     Job,
@@ -1355,6 +1356,7 @@ class Scheduler(StateProvider, threading.Thread):
             logger.debug("[starting] Locking job %s", job)
             async with job.launcher.connector.async_lock(job.lockpath):
                 logger.debug("[starting] Locked job %s", job)
+                crashpoint("scheduler.job_lock_acquired")
 
                 state = None
                 try:
@@ -1465,6 +1467,7 @@ class Scheduler(StateProvider, threading.Thread):
 
                     # Clean up old marker files (.done/.failed) from previous runs
                     self._cleanup_job_marker_files(job)
+                    crashpoint("scheduler.markers_cleared")
 
                     # Generate run_group_id on first run (preserved across retries)
                     if job.run_group_id is None:
@@ -1495,6 +1498,7 @@ class Scheduler(StateProvider, threading.Thread):
 
                     # Runs the job
                     process = await job.aio_run()
+                    crashpoint("scheduler.job_launched")
 
                     # Notify locks that job has started
                     await locks.aio_job_started(job, process)
@@ -1529,6 +1533,7 @@ class Scheduler(StateProvider, threading.Thread):
                 logger.debug("Waiting for job %s process to end", job)
 
                 code = await process.aio_code()
+                crashpoint("scheduler.job_exited")
                 logger.debug("Got return code %s for %s", code, job)
 
                 # Record exit code if available

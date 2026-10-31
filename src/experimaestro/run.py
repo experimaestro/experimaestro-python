@@ -15,6 +15,7 @@ from experimaestro.locking import JobDependencyLocks, create_file_lock
 from .core.types import ObjectType
 from experimaestro.utils import logger
 from experimaestro.utils.atomic import atomic_write_json
+from experimaestro.utils.crashpoints import crashpoint
 from experimaestro.core.objects import ConfigInformation
 import experimaestro.taskglobals as taskglobals
 import atexit
@@ -449,6 +450,7 @@ class TaskRunner:
             {"task_outputs": count_task_outputs(outputs_path)},
             fsync=True,
         )
+        crashpoint("job.done_written")
 
     def cleanup(self):
         if not self.cleaned:
@@ -510,6 +512,8 @@ class TaskRunner:
                         logger.info("Released lock")
                 except Exception:
                     logger.exception("Error while releasing lock %s", lock)
+            if not env.slave:
+                crashpoint("job.lock_released")
 
             # Note: dynamic dependency locks are released via context manager
             # in the run() method, not here
@@ -536,6 +540,7 @@ class TaskRunner:
             if message:
                 failure_info["message"] = message
             atomic_write_json(self.failedpath, failure_info, fsync=True)
+            crashpoint("job.failed_written")
 
         self.cleanup()
         logger.info("Exiting")
@@ -658,6 +663,7 @@ class TaskRunner:
                     # Fix = maybe with two files
                     lock.acquire()
                     self.locks.append(lock)
+                crashpoint("job.lock_acquired")
 
             # Load and setup dynamic dependency locks from locks.json
             locks_path = workdir / "locks.json"
@@ -731,6 +737,8 @@ class TaskRunner:
                 # Acquire dynamic dependency locks while running the task
                 # Non-slave processes acquire actual locks, slaves get dummy locks
                 with self.dynamic_locks.dependency_locks():
+                    if not env.slave:
+                        crashpoint("job.running")
                     run(workdir / "params.json")
 
                 # ... remove the handlers

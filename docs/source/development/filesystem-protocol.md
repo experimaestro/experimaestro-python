@@ -333,6 +333,36 @@ holder (the job's master process) is gone.
 dynamic outputs of the run (outputs drained first), and archiving starts only
 after the run's callbacks have been dispatched.
 
+## Testing
+
+The protocol tests (`src/experimaestro/tests/protocol/`, marker `protocol`)
+run experiments in their own processes (`scenario.py`) and stop them at
+**crash points** (`utils/crashpoints.py`): `crashpoint("<name>")` calls placed
+at the write points above, inactive unless named in `XPM_CRASHPOINTS`
+(`name=action,…`, passed on to the job processes; about 30 ns per call when
+inactive). Actions: `kill` (SIGKILL itself), `raise` (`CrashPointReached`,
+in-process tests) and `pause` (wait for `<name>.resume` in
+`XPM_CRASHPOINTS_DIR`, so that the test can act as a concurrent actor).
+
+| Crash point | Location |
+|---|---|
+| `job.lock_acquired` | `TaskRunner.run`, after the master took the job lock |
+| `job.running` | `TaskRunner.run`, before the task executes |
+| `job.failed_written` | `TaskRunner.handle_error`, after `.failed` |
+| `job.lock_released` | `TaskRunner.cleanup`, after releasing the job lock |
+| `job.done_written` | `TaskRunner.write_done`, after `.done` |
+| `scheduler.job_lock_acquired` | `Scheduler.aio_start`, job lock taken |
+| `scheduler.markers_cleared` | `Scheduler.aio_start`, old markers removed |
+| `scheduler.process_started` | `CommandLineJob.aio_run`, before the pid file |
+| `scheduler.pid_written` | `CommandLineJob.aio_run`, after the pid file |
+| `scheduler.job_launched` | `Scheduler.aio_start`, before tokens record the process |
+| `scheduler.job_exited` | `Scheduler.aio_start`, exit code received |
+| `experiment.run_dir_created` | `experiment.__enter__`, before `status.json` |
+| `experiment.job_submitted` | `experiment.add_job`, after the submitted event |
+| `experiment.final_status_written` | `experiment._finalize_run`, before event archiving |
+| `folders.archived` | `_archive_job`, archive published |
+| `folders.source_removed` | `_archive_job` (MOVE), before the symlink |
+
 ## Known deviations
 
 Severity:
@@ -343,9 +373,11 @@ Severity:
   or a recovery that needs a manual action; no job output lost;
 - **low** — cosmetic, leaks, or narrow windows with harmless effects.
 
-Found by a code survey (October 2026). Each entry should be confirmed by a
-test before being fixed; the test is then marked
-`xfail(reason="D-xx")` until the fix lands.
+Found by a code survey (October 2026). Entries marked *Reproduced by* are
+confirmed by a test in `src/experimaestro/tests/protocol/`, marked
+`@pytest.mark.deviation("D-xx")`; these tests fail until the deviation is
+fixed (deselect them with `-m "not deviation"`). The others are not covered
+yet.
 
 ### Locks and liveness
 
@@ -355,6 +387,7 @@ while `BaseJob.lockpath` (`scheduler/interfaces.py`, inherited by `MockJob`)
 and cleanup (`scheduler/cleanup.py`, stale pid and job events) use
 `.experimaestro/<name>.lock`. Cleanup's lock therefore never excludes a running
 job or a starting scheduler; only the pid/marker checks protect it.
+*Reproduced by* `test_concurrent_actors.py::test_cleanup_job_lock_excludes_running_job`.
 
 **D-02 [high] — Job lock released before `.done`** (I2). On a normal return,
 `TaskRunner.cleanup()` removes `.pid` and releases the job lock, and `.done` is
@@ -363,23 +396,27 @@ can take the lock, see neither pid nor marker, and start a second run (and
 unlink the `.done` about to be written). The error paths write `.failed`
 before the cleanup, and `sys.exit(0)` from the task writes `.done` first, so
 the order also differs between the success paths.
+*Reproduced by* `test_job_lifecycle.py::test_success_marker_before_lock_release`, `test_job_lifecycle.py::test_no_second_run_after_success`.
 
 **D-03 [high] — Cancelled task marked done** (I3). A task that catches
 `TaskCancelled` and calls `sys.exit(0)` reaches `except SystemExit` with code 0,
 which writes `.done` on top of `.failed{cancelled}`; `.done` wins. In addition,
 on SIGTERM `cleanup()` (job lock release) runs in a thread while the task code
 may still run, and `cleaned` is not thread-safe.
+*Reproduced by* `test_job_lifecycle.py::test_cancelled_job_is_not_done`.
 
 **D-04 [high] — Slave ranks release tokens** (I10). Ranks > 0 load `locks.json` and
 enter `dynamic_locks.dependency_locks()` (the comment says they get dummy
 locks, but no check exists); the first rank to exit unlinks the token file
 while the master still runs. Slaves do not take the job lock and may read a
 `locks.json` from a previous run (never deleted).
+*Reproduced by* `test_job_lifecycle.py::test_slave_rank_does_not_release_token`.
 
 **D-05 [medium] — Token orphan check on a path that never exists** (I10). The job URI
 of a token holder is `target.basepath` = `<job dir>/<name>` (no extension),
 so `async_resolve_orphaned` declares orphaned every holder without process
 information older than 30 s.
+*Reproduced by* `test_tokens_folders.py::test_token_kept_by_running_job_after_scheduler_crash`.
 
 **D-06 [medium] — Re-attach ignores host and PID reuse** (I1). Re-attach and
 `MockJob` treat any live process with the recorded PID as the job; the
@@ -392,6 +429,7 @@ falls back to `status.json` and returns `"completed"` for any status other
 than done/failed — including `running` — so history pruning (run after the
 experiment lock is released) and `experiments runs prune` can delete a live
 or crashed run.
+*Reproduced by* `test_experiment_crash.py::test_crashed_run_is_not_completed`, `test_concurrent_actors.py::test_monitor_sees_crashed_run_as_not_running`.
 
 **D-08 [high] — Destructive operations without locks** (I5). Delete job, delete
 experiment (incl. `delete_jobs=True` over RPC, which does not check whether
@@ -399,6 +437,7 @@ other experiments use the jobs), kill over RPC, `workspace orphans --clean`
 (no state check at all), `runs prune` and `workspace migrate` rely on cached
 states only. `workspace stray --perform` checks `provider.is_live`, which is
 always `False` for the workspace provider.
+*Reproduced by* `test_concurrent_actors.py::test_orphan_clean_spares_running_job`.
 
 **D-09 [low] — Experiment lock leaked on `DirtyGitError`.** The error is raised
 after the lock is taken, and `__exit__` is not called.
@@ -414,6 +453,7 @@ rotation (`_write_events_count_to_status`), cleanup consolidation,
 `MockExperiment.from_disk` recovers it from the `jobs/` symlinks and writes
 it; the experiment creates the run directory before `init_status`, so a
 monitor can write a `status.json` into a run being created.
+*Reproduced by* `test_concurrent_actors.py::test_monitor_does_not_write_into_starting_run`.
 
 **D-12 [low] — "Detached" not persisted.** `_finalize_run` maps only
 completed/failed; `status.json` stays `running` while `environment.json` says
@@ -431,10 +471,9 @@ event file is `<xp>-<n>.jsonl` with `n` restarting at 0 and no run id, opened
 in append mode: a leftover file of a crashed, unconsolidated run is appended
 to and hard-linked into the new run, and `current` is re-pointed so the old
 run can no longer be consolidated.
+*Reproduced by* `test_experiment_crash.py::test_crashed_run_events_stay_in_their_run`.
 
-**D-15 [medium] — Crash between final `status.json` and event archiving.** The final
-`status.json` has no `events_count`; leftover temporary files then raise
-`OrphanedEventsError`, which needs user confirmation (violates I7a).
+**D-15 [not reproduced] — Crash between final `status.json` and event archiving.** Suspected from the code, but the cleanup consolidates this crash without asking the user (`test_experiment_crash.py::test_crash_before_event_archive_is_recovered`). Kept to preserve the numbering.
 
 **D-16 [low] — Late service events.** If `wait_for_notifications` times out, a late
 `ServiceAddedEvent` reopens the event writer after it was closed and archived,
@@ -465,6 +504,7 @@ release (a process that opened the old inode is not excluded); MOVE mode does
 `rmtree` then `symlink` without the job lock; the destination is published
 before `params.json` is rewritten; recovery is a no-op when the source
 directory exists without a marker.
+*Reproduced by* `test_tokens_folders.py::test_move_crash_during_removal_is_recovered`.
 
 **D-22 [low] — Scheduler log cleanup not exclusive.** It locks only its own
 `.scheduler/<id>/.lock` and deletes other directories by mtime, which log

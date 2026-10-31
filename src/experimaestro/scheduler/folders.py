@@ -30,6 +30,7 @@ import filelock
 
 from experimaestro.locking import create_file_lock
 from experimaestro.utils.atomic import atomic_write_json
+from experimaestro.utils.crashpoints import crashpoint
 
 from experimaestro.settings import FolderMode, FolderSettings
 
@@ -231,6 +232,7 @@ def _archive_job(job: _Job, folder: FolderSettings) -> Path | None:
                 return None
 
             os.replace(tmp, dest_root)
+            crashpoint("folders.archived")
         except Exception:
             logger.exception("Failed to archive %s to %s", job.src, folder.path)
             if tmp.exists():
@@ -246,6 +248,7 @@ def _archive_job(job: _Job, folder: FolderSettings) -> Path | None:
         if folder.mode == FolderMode.MOVE:
             try:
                 shutil.rmtree(job.src)
+                crashpoint("folders.source_removed")
                 job.src.parent.mkdir(parents=True, exist_ok=True)
                 os.symlink(dest_root, job.src, target_is_directory=True)
             except Exception:

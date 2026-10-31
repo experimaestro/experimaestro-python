@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from experimaestro.core.objects import WatchedOutput
 from experimaestro.exceptions import HandledException
+from experimaestro.utils.crashpoints import crashpoint
 
 from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
 from experimaestro.scheduler.jobs import Job
@@ -683,6 +684,7 @@ class experiment(BaseExperiment):
                 submitted_time=serialize_timestamp(time.time()),
             )
             self._event_writer.write_event(event)
+            crashpoint("experiment.job_submitted")
 
             # Track tags and dependencies directly in experiment
             if job_tags:
@@ -722,6 +724,7 @@ class experiment(BaseExperiment):
 
         # Write final status.json using write_status()
         self.write_status()
+        crashpoint("experiment.final_status_written")
 
         # Archive event files to permanent storage
         self._event_writer.archive_events()
@@ -946,6 +949,7 @@ class experiment(BaseExperiment):
             # Create the run-specific workdir
             self.workdir = self._experiment_base / self.run_id
             self.workdir.mkdir(parents=True, exist_ok=True)
+            crashpoint("experiment.run_dir_created")
 
             # Capture and save environment info
             from experimaestro.utils.git import get_git_info
