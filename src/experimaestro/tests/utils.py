@@ -2,6 +2,7 @@ import tempfile
 import shutil
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 import logging
 import signal
@@ -73,6 +74,25 @@ def get_test_timeout(multiplier: float = 1.0) -> int:
         global_multiplier = 1.0
 
     return int(base * global_multiplier * multiplier)
+
+
+def wait_for(
+    predicate: Callable[[], object],
+    what: str = "a condition",
+    timeout: float | None = None,
+    interval: float = 0.02,
+) -> None:
+    """Waits until ``predicate()`` is true, instead of sleeping a fixed time
+
+    Fails the test (``AssertionError``) after ``timeout`` seconds (default:
+    ``get_test_timeout(10)``).
+    """
+    if timeout is None:
+        timeout = get_test_timeout(10)
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, f"Timeout ({timeout}s) waiting for {what}"
+        time.sleep(interval)
 
 
 class TimeInterval:

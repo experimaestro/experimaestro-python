@@ -12,6 +12,8 @@ import pytest
 import time
 from pathlib import Path
 
+from experimaestro.tests.utils import wait_for
+
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from experimaestro.scheduler.state_status import (
     JobStateChangedEvent,
@@ -466,8 +468,13 @@ class TestEventWatcher:
             with open(events_file, "w") as f:
                 f.write(json.dumps(event_data) + "\n")
 
-            # Wait for watcher to pick up
-            time.sleep(1.0)
+            wait_for(
+                lambda: any(
+                    isinstance(e, JobStateChangedEvent) and e.job_id == "new-job-1"
+                    for e in events_received
+                ),
+                "the job event",
+            )
 
             # Check that event was detected
             job_events = [
@@ -504,7 +511,13 @@ class TestEventWatcher:
                     + "\n"
                 )
 
-            time.sleep(0.7)
+            wait_for(
+                lambda: any(
+                    isinstance(e, JobStateChangedEvent) and e.job_id == "job-1"
+                    for e in events_received
+                ),
+                "the JobStateChangedEvent of job-1",
+            )
 
             # Append second event
             with open(events_file, "a") as f:
@@ -519,7 +532,13 @@ class TestEventWatcher:
                     + "\n"
                 )
 
-            time.sleep(0.7)
+            wait_for(
+                lambda: any(
+                    isinstance(e, JobStateChangedEvent) and e.job_id == "job-2"
+                    for e in events_received
+                ),
+                "the JobStateChangedEvent of job-2",
+            )
 
             job_events = [
                 e for e in events_received if isinstance(e, JobStateChangedEvent)
@@ -560,7 +579,13 @@ class TestEventWatcher:
                     + "\n"
                 )
 
-            time.sleep(1.0)
+            wait_for(
+                lambda: any(
+                    isinstance(e, JobStateChangedEvent) and e.job_id == job_id
+                    for e in events_received
+                ),
+                f"the JobStateChangedEvent of {job_id}",
+            )
 
             # Should have received job updated event
             job_events = [
@@ -602,7 +627,13 @@ class TestEventWatcher:
                     + "\n"
                 )
 
-            time.sleep(1.0)
+            wait_for(
+                lambda: any(
+                    isinstance(e, JobProgressEvent) and e.job_id == job_id
+                    for e in events_received
+                ),
+                f"the JobProgressEvent of {job_id}",
+            )
 
             # Should have received job progress event
             job_events = [e for e in events_received if isinstance(e, JobProgressEvent)]
@@ -628,9 +659,14 @@ class TestEventWatcher:
 
             # Create then delete events file (simulates finalization)
             events_file.touch()
-            time.sleep(0.7)
+            time.sleep(0.7)  # the creation must be seen before the deletion
             events_file.unlink()
-            time.sleep(0.7)
+            wait_for(
+                lambda: any(
+                    isinstance(e, ExperimentUpdatedEvent) for e in events_received
+                ),
+                "the experiment updated event",
+            )
 
             # Should have received experiment updated event
             exp_events = [
@@ -899,7 +935,16 @@ class TestJobStateFromJobEvents:
 
         try:
             # Give EventReader time to process
-            time.sleep(0.5)
+            wait_for(
+                lambda: (
+                    [
+                        job.state.name.lower()
+                        for job in provider.get_jobs(experiment_id=experiment_id)
+                    ]
+                    == ["running"]
+                ),
+                "the job state from the event file",
+            )
 
             # Get jobs - should show "running" state from events
             jobs = provider.get_jobs(experiment_id=experiment_id)

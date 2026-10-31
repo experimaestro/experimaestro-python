@@ -22,6 +22,7 @@ from experimaestro import (
     GracefulExperimentExit,
 )
 from experimaestro.scheduler.workspace import RunMode
+from experimaestro.tests.utils import wait_for
 from experimaestro.scheduler import JobState
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
@@ -119,9 +120,8 @@ def test_stray_job_detection():
                 # Signal first task to finish
                 with open(wait_path, "w") as f:
                     f.write("done")
-
-                # Give it a moment to finish
-                time.sleep(0.5)
+                # (before the workspace is deleted, or it waits forever)
+                wait_for(task1.__xpm__.job.donepath.exists, "task1 to finish")
 
                 # After task1 finishes, it should no longer be stray (it's not running)
                 # task1 should no longer be stray (it finished)
@@ -138,13 +138,13 @@ def test_stray_job_detection():
                 task2_dry.submit(run_mode=RunMode.DRY_RUN)
                 task2_wait = task2_dry.wait
 
-            if task2_wait and task2_wait.exists() is False:
-                # task2 might have started
-                task2_touch = task2_dry.touch
-                if task2_touch.exists():
-                    with open(task2_wait, "w") as f:
-                        f.write("done")
-                    time.sleep(0.5)
+            # Release task2 whether it started or not (it may start later)
+            if not task2_wait.exists():
+                task2_wait.parent.mkdir(parents=True, exist_ok=True)
+                task2_wait.write_text("done")
+            task2_touch = task2_dry.touch
+            if task2_touch.exists():
+                time.sleep(0.5)
 
 
 def test_running_state_detection():

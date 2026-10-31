@@ -29,7 +29,7 @@ from experimaestro.scheduler.remote.client import SSHStateProviderClient
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported, RPCMethod
 from experimaestro.logs.reader import LogFile
 from experimaestro.logs.source import RemoteLogSource, RsyncLogSource
-from experimaestro.tests.utils import TemporaryExperiment
+from experimaestro.tests.utils import TemporaryExperiment, wait_for
 
 from .conftest import DRIVERS, INTERFACES, _browser_driver
 
@@ -461,13 +461,6 @@ def kill_connection(provider: SSHStateProviderClient) -> None:
     for child in process.children(recursive=True):
         child.kill()
     process.kill()
-
-
-def wait_for(predicate, timeout: float = 30.0) -> None:
-    deadline = time.time() + timeout
-    while not predicate():
-        assert time.time() < deadline, "timed out"
-        time.sleep(0.05)
 
 
 def record_connection_events(

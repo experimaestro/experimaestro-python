@@ -18,7 +18,11 @@ from experimaestro import (
 )
 from experimaestro.scheduler.interfaces import ExperimentJobInformation
 from experimaestro.tests.tasks.test_dynamic import Model, Validation, evaluate
-from experimaestro.tests.utils import TemporaryDirectory, TemporaryExperiment
+from experimaestro.tests.utils import (
+    TemporaryDirectory,
+    TemporaryExperiment,
+    wait_for,
+)
 from experimaestro.ui.graph import (
     NodeKind,
     build_experiment_graph,
@@ -345,13 +349,6 @@ class WaitingLearn(ResumableTask):
         self.validation.compute(15)
         while not (self.control / "release").exists():
             time.sleep(0.05)
-
-
-def wait_for(condition, message: str, timeout: float = 30) -> None:
-    deadline = time.time() + timeout
-    while not condition():
-        assert time.time() < deadline, f"timeout: {message}"
-        time.sleep(0.1)
 
 
 def reachable(view, source: str) -> set[str]:

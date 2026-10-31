@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from experimaestro.tests.utils import wait_for
 from experimaestro.scheduler.remote.protocol import (
     JSONRPC_VERSION,
     RPCMethod,
@@ -2028,8 +2029,13 @@ class TestWorkspaceToServerEventFlow:
         event_writer.write_event(event)
         event_writer.flush()
 
-        # Give the watcher time to detect and process the event
-        time.sleep(0.5)
+        wait_for(
+            lambda: any(
+                isinstance(e, ExperimentJobStateEvent) and e.job_id == "job123"
+                for e in received_events
+            ),
+            "the job state event",
+        )
 
         # Clean up
         provider.close()
@@ -2105,8 +2111,10 @@ class TestWorkspaceToServerEventFlow:
         event_writer.write_event(event)
         event_writer.flush()
 
-        # Give the watcher time to detect and process the event
-        time.sleep(0.5)
+        wait_for(
+            lambda: any(isinstance(e, JobProgressEvent) for e in received_events),
+            "the job progress event",
+        )
 
         # Clean up
         provider.close()

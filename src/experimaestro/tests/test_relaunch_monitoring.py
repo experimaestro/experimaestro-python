@@ -19,7 +19,7 @@ from experimaestro import Meta, Task, progress
 from experimaestro.scheduler.interfaces import JobState
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 
-from .utils import TemporaryExperiment
+from .utils import TemporaryExperiment, wait_for
 
 pytestmark = pytest.mark.tasks
 
@@ -41,16 +41,9 @@ class FailOnce(Task):
             raise RuntimeError("first run fails")
 
 
-def wait_for(condition, timeout: float = 30.0, message: str = "") -> None:
-    deadline = time.time() + timeout
-    while not condition():
-        assert time.time() < deadline, f"timeout: {message}"
-        time.sleep(0.1)
-
-
 def pid(job) -> int:
     pid_file = job.path / f"{job.task_id.rsplit('.', 1)[-1]}.pid"
-    wait_for(pid_file.exists, message="pid file")
+    wait_for(pid_file.exists, what="pid file")
     return json.loads(pid_file.read_text())["pid"]
 
 
@@ -68,11 +61,11 @@ def test_relaunched_job_is_followed(tmp_path):
         expected_pid = pid(job)
         wait_for(
             lambda: monitored() is not None and monitored().state.running(),
-            message="running state",
+            what="running state",
         )
         wait_for(
             lambda: [p.progress for p in monitored().progress] == [progress],
-            message=f"progress {progress} (got {monitored().progress})",
+            what=f"progress {progress} (got {monitored().progress})",
         )
         info = provider.get_process_info(monitored())
         assert info is not None and info.pid == expected_pid and info.running
@@ -85,17 +78,17 @@ def test_relaunched_job_is_followed(tmp_path):
         with TemporaryExperiment("relaunch", workdir=workdir, timeout_multiplier=6):
             job = FailOnce.C(control=control).submit().__xpm__.job
             try:
-                wait_for((control / "running1").exists, message="first run")
+                wait_for((control / "running1").exists, what="first run")
                 check(0.6)
             finally:
                 (control / "release1").touch()
-        wait_for(lambda: monitored().state == JobState.ERROR, message="failed state")
+        wait_for(lambda: monitored().state == JobState.ERROR, what="failed state")
 
         # Relaunch, keeping the monitor open
         with TemporaryExperiment("relaunch", workdir=workdir, timeout_multiplier=6):
             FailOnce.C(control=control).submit()
             try:
-                wait_for((control / "running2").exists, message="relaunch")
+                wait_for((control / "running2").exists, what="relaunch")
                 check(0.1)
             finally:
                 (control / "release2").touch()
