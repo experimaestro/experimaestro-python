@@ -167,7 +167,7 @@ warn_unused_ignores = true
 module = [
     "arpeggio.*", "codecarbon.*", "docutils.*", "huggingface_hub.*",
     "humanfriendly.*", "IPython.*", "ipywidgets.*", "lightning_fabric.*",
-    "psutil.*", "pynvml.*", "pyperclip.*", "pytorch_lightning.*", "rpyc.*",
+    "playwright.*", "psutil.*", "pynvml.*", "pyperclip.*", "pytorch_lightning.*", "rpyc.*",
     "sortedcontainers.*", "sphobjinv.*", "torch.*", "torchmetrics.*", "tqdm.*",
     "xpm_fake_module.*", "yaml.*", "zeus.*", "zeus_apple_silicon.*",
 ]
