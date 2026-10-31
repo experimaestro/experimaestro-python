@@ -3,6 +3,7 @@
 import os
 import shutil
 import time
+from pathlib import Path
 
 import pytest
 
@@ -73,13 +74,16 @@ def test_move_crash_before_symlink_is_recovered(move_folder):
     assert (job.src / "result.txt").read_text() == "hello\n"
 
 
-@pytest.mark.deviation("D-21")
 def test_move_crash_during_removal_is_recovered(move_folder, monkeypatch):
     """I7: a crash while the job directory is being removed (MOVE mode) is
     recovered from the archive"""
     job, folder = move_folder
+    real_rmtree = shutil.rmtree
 
     def partial_rmtree(path, *args, **kwargs):
+        path = Path(path)
+        if not (path / f"{job.name}.done").exists():
+            return real_rmtree(path, *args, **kwargs)
         # Removal order is arbitrary: the marker goes first, then a crash
         (path / f"{job.name}.done").unlink()
         raise CrashPointReached("during rmtree")
@@ -87,7 +91,7 @@ def test_move_crash_during_removal_is_recovered(move_folder, monkeypatch):
     monkeypatch.setattr(folders.shutil, "rmtree", partial_rmtree)
     with pytest.raises(CrashPointReached):
         _archive_job(job, folder)
-    monkeypatch.setattr(folders.shutil, "rmtree", shutil.rmtree)
+    monkeypatch.setattr(folders.shutil, "rmtree", real_rmtree)
 
     recover_from_folders(job.rel, job.src.parents[1], [folder])
     assert (job.src / f"{job.name}.done").exists(), (

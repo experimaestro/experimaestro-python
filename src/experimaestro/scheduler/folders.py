@@ -190,6 +190,49 @@ def _rewrite_legacy_params_json(dest: Path, src_workspace: Path) -> None:
     atomic_write_json(params, data, fsync=True)
 
 
+def _trash_dir(job: _Job) -> Path:
+    """Where MOVE mode puts job directories before removing them
+
+    In the workspace (``<workspace>/jobs/<task_id>/<hash>``), so that the
+    rename is atomic, but outside ``jobs/`` so that no reader takes them
+    for jobs.
+    """
+    return job.src.parents[2] / ".folders-trash"
+
+
+def _replace_by_symlink(job: _Job, dest_root: Path) -> None:
+    """MOVE mode: replaces the job directory by a symlink to its archive
+
+    The directory is renamed (atomically) into the trash before the symlink
+    is created, and removed afterwards: a crash leaves either the complete
+    directory, the symlink, or no directory at all (recovered from the
+    archive), never a partly removed one. Done under the job lock, so that
+    the job is not started meanwhile.
+    """
+    job_lock = create_file_lock(job.src / f"{job.name}.lock", timeout=0)
+    try:
+        job_lock.acquire()
+    except filelock.Timeout:
+        logger.info("Job %s is in use: keeping its directory", job.src)
+        return
+
+    trash = _trash_dir(job)
+    shutil.rmtree(trash, ignore_errors=True)  # Leftovers of a crash
+    removed = trash / f"{job.rel.parent.name}.{job.rel.name}"
+    try:
+        removed.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(job.src, removed)
+        crashpoint("folders.source_removed")
+        os.symlink(dest_root, job.src, target_is_directory=True)
+    except Exception:
+        logger.exception("Failed to swap %s for a symlink to %s", job.src, dest_root)
+        return
+    finally:
+        job_lock.release()
+
+    shutil.rmtree(removed, ignore_errors=True)
+
+
 def _archive_job(job: _Job, folder: FolderSettings) -> Path | None:
     """Perform a single archive operation. Returns the final dest path."""
     dest_root = folder.path / "jobs" / job.rel
@@ -246,15 +289,7 @@ def _archive_job(job: _Job, folder: FolderSettings) -> Path | None:
             logger.exception("Path rewriting failed for %s (continuing)", dest_root)
 
         if folder.mode == FolderMode.MOVE:
-            try:
-                shutil.rmtree(job.src)
-                crashpoint("folders.source_removed")
-                job.src.parent.mkdir(parents=True, exist_ok=True)
-                os.symlink(dest_root, job.src, target_is_directory=True)
-            except Exception:
-                logger.exception(
-                    "Failed to swap %s for a symlink to %s", job.src, dest_root
-                )
+            _replace_by_symlink(job, dest_root)
 
         return dest_root
     finally:

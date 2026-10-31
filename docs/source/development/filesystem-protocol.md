@@ -239,8 +239,11 @@ free: a held job lock means that the job runs or is being started).
 On a single worker thread: skip if the destination exists; sweep stale
 `.tmp.*`; take `.tmp.<hash>.lock` (timeout 0); copy into `.tmp.<hash>`
 (skipping `*.lock`, `*.pid`); `os.replace` to the destination; rewrite
-`params.json` (fsync); MOVE mode: `rmtree` the source and replace it with a
-symlink. Recovery runs the same staging in reverse.
+`params.json` (fsync); MOVE mode, under the job lock (timeout 0, skip if
+held): rename the source into `<workspace>/.folders-trash/`, create the
+symlink, then remove the renamed directory (a crash leaves the directory, the
+symlink, or nothing, which recovery restores from the archive; the trash is
+emptied by the next MOVE). Recovery runs the same staging in reverse.
 
 ## Readers
 
@@ -387,12 +390,12 @@ Severity:
   or a recovery that needs a manual action; no job output lost;
 - **low** — cosmetic, leaks, or narrow windows with harmless effects.
 
-Found by a code survey (October 2026). Entries marked *Reproduced by* are
-confirmed by a test in `src/experimaestro/tests/protocol/`, marked
-`@pytest.mark.deviation("D-xx")`; these tests fail until the deviation is
-fixed (deselect them with `-m "not deviation"`). The others are not covered
-yet. Entries marked **Fixed** are kept to preserve the numbering; their tests
-are ordinary protocol tests.
+Found by a code survey (October 2026). A deviation confirmed by a test in
+`src/experimaestro/tests/protocol/` is marked *Reproduced by*, and its test
+`@pytest.mark.deviation("D-xx")`: such tests fail until the deviation is
+fixed (deselect them with `-m "not deviation"`). Entries marked **Fixed** are
+kept to preserve the numbering; *Tested by* names the protocol tests that
+guard the fix. The other entries are not covered by a test yet.
 
 ### Locks and liveness
 
@@ -514,12 +517,12 @@ without event leave it stale.
 `asyncio.gather`: `on_completed` may run before late outputs are drained, and
 archiving may copy the directory while callbacks still run.
 
-**D-21 [medium] — Folder archive races.** The staging lock file is unlinked after
+**D-21 [medium, partly fixed] — Folder archive races.** **Fixed**: MOVE mode renames the directory away and creates the symlink under the job lock, so a crash never leaves a partly removed job directory. The other races below remain. The staging lock file is unlinked after
 release (a process that opened the old inode is not excluded); MOVE mode does
 `rmtree` then `symlink` without the job lock; the destination is published
 before `params.json` is rewritten; recovery is a no-op when the source
 directory exists without a marker.
-*Reproduced by* `test_tokens_folders.py::test_move_crash_during_removal_is_recovered`.
+*Tested by* `test_tokens_folders.py::test_move_crash_during_removal_is_recovered`.
 
 **D-22 [low] — Scheduler log cleanup not exclusive.** It locks only its own
 `.scheduler/<id>/.lock` and deletes other directories by mtime, which log
