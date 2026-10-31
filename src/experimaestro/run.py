@@ -385,10 +385,17 @@ class TaskRunner:
         env.taskpath = self.scriptpath.parent
 
         self.cleaned = False
+        self._cleanup_lock = threading.Lock()
 
         # Set when SIGTERM/SIGINT received - prevents marking task as done
         # if task catches and suppresses TaskCancelled
         self._cancelled = False
+
+        # The outcome marker (.done or .failed) published by this run: the
+        # first one wins, and .done is never written after a cancellation
+        # (see filesystem-protocol.md, I3)
+        self._outcome: str | None = None
+        self._outcome_lock = threading.Lock()
 
         # Background thread spawned by the SIGTERM handler to write the .failed
         # file and release locks. The main thread joins it before exiting so the
@@ -437,94 +444,131 @@ class TaskRunner:
         except Exception as e:
             logger.warning("Failed to write status.json: %s", e)
 
+    def _publish_outcome(self, kind: str, write) -> bool:
+        """Publish the outcome marker of this run, once
+
+        ``kind`` is ``"done"`` or ``"failed"``; ``write`` writes the marker.
+        Only the first outcome is published, and ``.done`` is refused once
+        the job has been cancelled (the SIGTERM handler runs in another
+        thread, hence the lock).
+
+        Returns:
+            Whether the marker was written
+        """
+        with self._outcome_lock:
+            if self._outcome is not None:
+                return False
+            if kind == "done" and self._cancelled:
+                logger.info("Job cancelled: not marking it as done")
+                return False
+            write()
+            self._outcome = kind
+            return True
+
     def write_done(self):
         """Write the ``.done`` marker, with the number of dynamic outputs
 
         The scheduler uses the count to know when it has read all of them,
         even if the file system shows it the end of the outputs file late.
-        Written atomically so that the marker never appears empty.
+        Written atomically so that the marker never appears empty, and
+        before the job lock is released (I2).
         """
         from experimaestro.scheduler.dynamic_outputs import count_task_outputs
 
-        outputs_path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
-        atomic_write_json(
-            self.donepath,
-            {"task_outputs": count_task_outputs(outputs_path)},
-            fsync=True,
+        def write():
+            outputs_path = taskglobals.Env.instance().xpm_path / "task-outputs.jsonl"
+            atomic_write_json(
+                self.donepath,
+                {"task_outputs": count_task_outputs(outputs_path)},
+                fsync=True,
+            )
+
+        if self._publish_outcome("done", write):
+            crashpoint("job.done_written")
+
+    def write_failed(self, code, reason: str, message: str = "") -> bool:
+        """Write the ``.failed`` marker (unless an outcome was published)"""
+        failure_info = {"code": code, "reason": reason}
+        if message:
+            failure_info["message"] = message
+        return self._publish_outcome(
+            "failed",
+            lambda: atomic_write_json(self.failedpath, failure_info, fsync=True),
         )
-        crashpoint("job.done_written")
 
     def cleanup(self):
-        if not self.cleaned:
+        with self._cleanup_lock:
+            if self.cleaned:
+                return
             self.cleaned = True
-            logger.info("Cleaning up")
-            env = taskglobals.Env.instance()
+        logger.info("Cleaning up")
+        env = taskglobals.Env.instance()
 
-            if not env.slave:
-                rmfile(self.pidfile)
+        if not env.slave:
+            rmfile(self.pidfile)
 
-            # Load MockJob for state tracking
-            self._mock_job = self._load_mock_job()
+        # Load MockJob for state tracking
+        self._mock_job = self._load_mock_job()
 
-            # Stop carbon tracking and record metrics
-            if self._carbon_tracker is not None:
-                workdir = self.scriptpath.parent
-                task_path = workdir
-                job_id = workdir.name
-                task_id = workdir.parent.name
+        # Stop carbon tracking and record metrics
+        if self._carbon_tracker is not None:
+            workdir = self.scriptpath.parent
+            task_path = workdir
+            job_id = workdir.name
+            task_id = workdir.parent.name
 
-                # Load workspace path from params if available
-                workspace_path = None
-                params_path = workdir / "params.json"
-                if params_path.exists():
-                    try:
-                        with params_path.open() as f:
-                            params = json.load(f)
-                        workspace_path = Path(params.get("workspace", ""))
-                    except Exception:
-                        pass
-
-                if workspace_path and self._job_start_time:
-                    _stop_carbon_tracking(
-                        self._carbon_tracker,
-                        self._carbon_reporter_thread,
-                        self._carbon_stop_event,
-                        workspace_path,
-                        task_path,
-                        job_id,
-                        task_id,
-                        self._job_start_time,
-                        self._mock_job,
-                        previous_carbon=self._previous_carbon,
-                        run_group_id=self._run_group_id,
-                    )
-                self._carbon_tracker = None
-
-            # Write status.json while still holding locks
-            if not env.slave:
-                self._write_status()
-
-            # Release IPC locks. These are raw filelock.FileLock objects
-            # (see create_file_lock), so the held flag is `is_locked`.
-            for lock in self.locks:
+            # Load workspace path from params if available
+            workspace_path = None
+            params_path = workdir / "params.json"
+            if params_path.exists():
                 try:
-                    if lock.is_locked:
-                        logger.info("Releasing lock")
-                        lock.release()
-                        logger.info("Released lock")
+                    with params_path.open() as f:
+                        params = json.load(f)
+                    workspace_path = Path(params.get("workspace", ""))
                 except Exception:
-                    logger.exception("Error while releasing lock %s", lock)
-            if not env.slave:
-                crashpoint("job.lock_released")
+                    pass
 
-            # Note: dynamic dependency locks are released via context manager
-            # in the run() method, not here
+            if workspace_path and self._job_start_time:
+                _stop_carbon_tracking(
+                    self._carbon_tracker,
+                    self._carbon_reporter_thread,
+                    self._carbon_stop_event,
+                    workspace_path,
+                    task_path,
+                    job_id,
+                    task_id,
+                    self._job_start_time,
+                    self._mock_job,
+                    previous_carbon=self._previous_carbon,
+                    run_group_id=self._run_group_id,
+                )
+            self._carbon_tracker = None
 
-            if self.started and not env.slave:
-                # Report final state: "error" if .failed exists, "done" otherwise
-                final_state = "error" if self.failedpath.exists() else "done"
-                report_eoj(final_state)
-            logger.info("Finished cleanup")
+        # Write status.json while still holding locks
+        if not env.slave:
+            self._write_status()
+
+        # Release IPC locks. These are raw filelock.FileLock objects
+        # (see create_file_lock), so the held flag is `is_locked`.
+        for lock in self.locks:
+            try:
+                if lock.is_locked:
+                    logger.info("Releasing lock")
+                    lock.release()
+                    logger.info("Released lock")
+            except Exception:
+                logger.exception("Error while releasing lock %s", lock)
+        if not env.slave:
+            crashpoint("job.lock_released")
+
+        # Note: dynamic dependency locks are released via context manager
+        # in the run() method, not here
+
+        if self.started and not env.slave:
+            # Report final state: "error" if .failed exists, "done" otherwise
+            final_state = "error" if self.failedpath.exists() else "done"
+            report_eoj(final_state)
+        logger.info("Finished cleanup")
 
     def handle_error(self, code, frame_type, reason: str = "failed", message: str = ""):
         """Handle task error and write failure information.
@@ -537,11 +581,7 @@ class TaskRunner:
         """
         logger.info("Error handler: finished with code %d, reason=%s", code, reason)
         env = taskglobals.Env.instance()
-        if not env.slave:
-            failure_info = {"code": code, "reason": reason}
-            if message:
-                failure_info["message"] = message
-            atomic_write_json(self.failedpath, failure_info, fsync=True)
+        if not env.slave and self.write_failed(code, reason, message):
             crashpoint("job.failed_written")
 
         self.cleanup()
@@ -550,16 +590,18 @@ class TaskRunner:
         sys.exit(1)
 
     def _background_cleanup(self, reason: str, message: str = ""):
-        """Run framework cleanup in background thread."""
+        """Publish the cancellation (in a background thread)
+
+        Only the ``.failed`` marker is written here, so that it exists even
+        if the task code never returns. The job lock and the pid file are
+        released by the main thread when it exits — or by the kernel if the
+        process is killed — never while the task code may still run (I1).
+        """
         try:
             logger.info("Background cleanup: reason=%s", reason)
             env = taskglobals.Env.instance()
             if not env.slave:
-                failure_info = {"code": signal.SIGTERM, "reason": reason}
-                if message:
-                    failure_info["message"] = message
-                atomic_write_json(self.failedpath, failure_info, fsync=True)
-            self.cleanup()
+                self.write_failed(signal.SIGTERM, reason, message)
             logger.info("Background cleanup finished")
         except Exception:
             logger.exception("Error during background cleanup")
@@ -667,9 +709,11 @@ class TaskRunner:
                     self.locks.append(lock)
                 crashpoint("job.lock_acquired")
 
-            # Load and setup dynamic dependency locks from locks.json
+            # Load and setup dynamic dependency locks from locks.json (only
+            # the master process holds them: another rank must not release
+            # them when it ends, I10)
             locks_path = workdir / "locks.json"
-            if locks_path.exists():
+            if not env.slave and locks_path.exists():
                 logger.info("Loading dynamic dependency locks from %s", locks_path)
                 with locks_path.open() as f:
                     locks_data = json.load(f)
@@ -737,7 +781,7 @@ class TaskRunner:
                     )
 
                 # Acquire dynamic dependency locks while running the task
-                # Non-slave processes acquire actual locks, slaves get dummy locks
+                # (none for the other ranks)
                 with self.dynamic_locks.dependency_locks():
                     if not env.slave:
                         crashpoint("job.running")
@@ -755,8 +799,11 @@ class TaskRunner:
                     self._join_cleanup_thread()
                     sys.exit(1)
 
-                # Everything went OK
+                # Everything went OK: the marker is published before the
+                # job lock is released (I2)
                 logger.info("Task ended successfully")
+                if not env.slave:
+                    self.write_done()
                 self.cleanup()
                 sys.exit(0)
         except GracefulTimeout as e:
@@ -777,16 +824,18 @@ class TaskRunner:
 
         except SystemExit as e:
             env = taskglobals.Env.instance()
-            if e.code == 0:
+            if self._cancelled:
+                # Cancelled, even if the task exited normally: .failed is
+                # written by the background thread
+                self._join_cleanup_thread()
+                raise
+            elif e.code == 0:
                 if not env.slave:
-                    # Normal exit, create the ".done" file
+                    # Normal exit (sys.exit(0) in the task): create the
+                    # ".done" file before the cleanup releases the job lock
                     self.write_done()
 
                 # ... and finish the exit process
-                raise
-            elif self._cancelled:
-                # Task was cancelled - .failed already written by background cleanup thread
-                # Just exit without overwriting
                 raise
             else:
                 self.handle_error(e.code, None)

@@ -54,7 +54,6 @@ def test_failure_marker_before_lock_release(actors):
     assert job.failed.exists()
 
 
-@pytest.mark.deviation("D-02")
 def test_success_marker_before_lock_release(actors):
     """I2: on success, ``.done`` exists when the job lock is released
 
@@ -73,7 +72,6 @@ def test_success_marker_before_lock_release(actors):
     )
 
 
-@pytest.mark.deviation("D-02")
 def test_no_second_run_after_success(actors):
     """I1: a job that succeeded is not run a second time by a concurrent
     experiment that starts it while the first run is ending"""
@@ -95,7 +93,6 @@ def test_no_second_run_after_success(actors):
     assert job.runs == 1
 
 
-@pytest.mark.deviation("D-03")
 def test_cancelled_job_is_not_done(actors):
     """I3: a cancelled job is never marked done, even if the task catches
     the cancellation and exits normally"""
@@ -112,7 +109,6 @@ def test_cancelled_job_is_not_done(actors):
     assert not job.done.exists()
 
 
-@pytest.mark.deviation("D-04")
 def test_slave_rank_does_not_release_token(actors):
     """I10: a token is held until the master process ends, whatever the
     other ranks of the job do"""

@@ -179,7 +179,8 @@ consolidate its previous crashed run on start**: cleanup in a monitor does
    job directory; determine the rank.
 2. Master only: **blocking** acquisition of the job lock (it is free once the
    scheduler finished step 4 above).
-3. Load `locks.json`. If `.done` exists, exit (someone else did the job).
+3. Master only: load `locks.json` (the other ranks hold no dynamic
+   dependency lock). If `.done` exists, exit (someone else did the job).
    Unlink `.failed`; `status.json` RUNNING; `start_of_job` event.
 4. Enter the dynamic dependency locks (check that the token file exists) and
    run the task.
@@ -187,11 +188,17 @@ consolidate its previous crashed run on start**: cleanup in a monitor does
 
 | Outcome | Order of writes |
 |---|---|
-| success (return) | `cleanup()` [rm `.pid`, carbon, `status.json`, **release job lock**, end-of-job event] → `.done` |
+| success (return) | `.done` → `cleanup()` [rm `.pid`, carbon, `status.json`, **release job lock**, end-of-job event] → exit 0 |
 | success (`sys.exit(0)` from the task) | `.done` → atexit `cleanup()` |
 | exception | `.failed{reason: failed}` → `cleanup()` → exit 1 |
 | `GracefulTimeout` | `.failed{reason: timeout, message}` → `cleanup()` → exit 1 |
-| SIGTERM / SIGINT | handler raises `TaskCancelled`; background thread writes `.failed{reason: cancelled}` → `cleanup()`; main thread joins it (30 s) → exit 1 |
+| SIGTERM / SIGINT | handler raises `TaskCancelled`; background thread writes `.failed{reason: cancelled}`; main thread joins it (30 s) → atexit `cleanup()` → exit 1 (even if the task exits normally) |
+
+Only the first marker of a run is written (`TaskRunner._publish_outcome`,
+under a lock shared with the SIGTERM thread), and `.done` is refused once the
+job was cancelled. The job lock and the pid file are released by the main
+thread only (or by the kernel when the process is killed), never while the
+task code may still run.
 
 On exit of the dynamic dependency locks context the job deletes its token
 files.
@@ -377,7 +384,8 @@ Found by a code survey (October 2026). Entries marked *Reproduced by* are
 confirmed by a test in `src/experimaestro/tests/protocol/`, marked
 `@pytest.mark.deviation("D-xx")`; these tests fail until the deviation is
 fixed (deselect them with `-m "not deviation"`). The others are not covered
-yet.
+yet. Entries marked **Fixed** are kept to preserve the numbering; their tests
+are ordinary protocol tests.
 
 ### Locks and liveness
 
@@ -389,28 +397,28 @@ and cleanup (`scheduler/cleanup.py`, stale pid and job events) use
 job or a starting scheduler; only the pid/marker checks protect it.
 *Reproduced by* `test_concurrent_actors.py::test_cleanup_job_lock_excludes_running_job`.
 
-**D-02 [high] — Job lock released before `.done`** (I2). On a normal return,
+**D-02 [high, fixed] — Job lock released before `.done`** (I2). **Fixed**: `.done` is written before `cleanup()` on every success path. On a normal return,
 `TaskRunner.cleanup()` removes `.pid` and releases the job lock, and `.done` is
 written afterwards in the `SystemExit` handler. In between, another scheduler
 can take the lock, see neither pid nor marker, and start a second run (and
 unlink the `.done` about to be written). The error paths write `.failed`
 before the cleanup, and `sys.exit(0)` from the task writes `.done` first, so
 the order also differs between the success paths.
-*Reproduced by* `test_job_lifecycle.py::test_success_marker_before_lock_release`, `test_job_lifecycle.py::test_no_second_run_after_success`.
+*Tested by* `test_job_lifecycle.py::test_success_marker_before_lock_release`, `test_job_lifecycle.py::test_no_second_run_after_success`.
 
-**D-03 [high] — Cancelled task marked done** (I3). A task that catches
+**D-03 [high, fixed] — Cancelled task marked done** (I3). **Fixed**: one marker per run, `.done` refused after a cancellation; the SIGTERM thread only writes `.failed`. A task that catches
 `TaskCancelled` and calls `sys.exit(0)` reaches `except SystemExit` with code 0,
 which writes `.done` on top of `.failed{cancelled}`; `.done` wins. In addition,
 on SIGTERM `cleanup()` (job lock release) runs in a thread while the task code
 may still run, and `cleaned` is not thread-safe.
-*Reproduced by* `test_job_lifecycle.py::test_cancelled_job_is_not_done`.
+*Tested by* `test_job_lifecycle.py::test_cancelled_job_is_not_done`.
 
-**D-04 [high] — Slave ranks release tokens** (I10). Ranks > 0 load `locks.json` and
+**D-04 [high, fixed] — Slave ranks release tokens** (I10). **Fixed**: ranks > 0 ignore `locks.json`. Ranks > 0 load `locks.json` and
 enter `dynamic_locks.dependency_locks()` (the comment says they get dummy
 locks, but no check exists); the first rank to exit unlinks the token file
 while the master still runs. Slaves do not take the job lock and may read a
 `locks.json` from a previous run (never deleted).
-*Reproduced by* `test_job_lifecycle.py::test_slave_rank_does_not_release_token`.
+*Tested by* `test_job_lifecycle.py::test_slave_rank_does_not_release_token`.
 
 **D-05 [medium] — Token orphan check on a path that never exists** (I10). The job URI
 of a token holder is `target.basepath` = `<job dir>/<name>` (no extension),
