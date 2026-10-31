@@ -31,6 +31,15 @@ class FilterContext:
 # --- classes for processing
 
 
+def _as_text(value) -> str | None:
+    """Text form of a value for the text operators (``=``, ``~``, ``in``)
+
+    Tags keep their type (e.g. ``int``), but queries compare them with quoted
+    strings: ``phase = '1'`` must match the tag ``phase=1``.
+    """
+    return None if value is None else str(value)
+
+
 class VarExpr:
     def __init__(self, values):
         (self.varname,) = values
@@ -58,20 +67,18 @@ class BaseInExpr:
 
 class InExpr(BaseInExpr):
     def filter(self, job: "MockJob", ctx: FilterContext):
-        value = self.var.get(job, ctx)
-        return value in self.values
+        return _as_text(self.var.get(job, ctx)) in self.values
 
     def __repr__(self):
-        return f"""IN<{self.varname}|{",".join(self.values)}>"""
+        return f"""IN<{self.var}|{",".join(self.values)}>"""
 
 
 class NotInExpr(BaseInExpr):
     def filter(self, job: "MockJob", ctx: FilterContext):
-        value = self.var.get(job, ctx)
-        return value not in self.values
+        return _as_text(self.var.get(job, ctx)) not in self.values
 
     def __repr__(self):
-        return f"""NOT_IN<{self.varname}|{",".join(self.values)}>"""
+        return f"""NOT_IN<{self.var}|{",".join(self.values)}>"""
 
 
 class RegexExpr:
@@ -80,20 +87,14 @@ class RegexExpr:
         self.regex = re.compile(expr)
 
     def __repr__(self):
-        return f"""REGEX[{self.varname}, {self.value}]"""
-
-    def matches(self, _manager, publication):
-        if self.varname == "tag":
-            return self.value in publication.tags
-
-        raise AssertionError()
+        return f"""REGEX[{self.var}, {self.regex.pattern}]"""
 
     def filter(self, job: "MockJob", ctx: FilterContext):
-        value = self.var.get(job, ctx)
-        if not value:
+        value = _as_text(self.var.get(job, ctx))
+        if value is None:
             return False
 
-        return self.regex.match(value)
+        return self.regex.match(value) is not None
 
 
 class ConstantString:
@@ -115,7 +116,7 @@ class EqExpr:
         return f"""EQ[{self.var1}, {self.var2}]"""
 
     def filter(self, job: "MockJob", ctx: FilterContext):
-        return self.var1.get(job, ctx) == self.var2.get(job, ctx)
+        return _as_text(self.var1.get(job, ctx)) == _as_text(self.var2.get(job, ctx))
 
 
 class LogicExpr:

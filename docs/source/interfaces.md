@@ -308,6 +308,9 @@ The TUI search bar (`/`) and the web *Filter* input accept the same expressions
 | `@state in ['running', 'waiting']` | Value in a list (`not in` for the converse) |
 | `... and ...`, `... or ...` | Combine conditions |
 
+Tag values are compared as text, whatever their type: a tag `phase=1` is
+matched by `phase = '1'` or `phase ~ '1'`.
+
 For example, `@state = 'error' and model = 'bm25'` selects the failed jobs whose
 `model` tag is `bm25`.
 

@@ -66,6 +66,37 @@ def test_filter_by_tag_uses_context():
     assert _ids("model = 'bm25'", tags={}) == []
 
 
+TYPED_TAGS = {
+    "j1": {"phase": 1, "lr": 0.1, "debug": True},
+    "j2": {"phase": 2, "lr": 1e-3, "debug": False},
+    "j3": {"phase": 0},
+}
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        # Regex on a non-string tag used to raise a TypeError (#308)
+        ("phase ~ '1'", ["j1"]),
+        ("phase ~ '[12]'", ["j1", "j2"]),
+        # A falsy value (0) is a value, not a missing tag
+        ("phase ~ '0'", ["j3"]),
+        ("phase = '1'", ["j1"]),
+        ("phase = '0'", ["j3"]),
+        ("phase in ['1', '0']", ["j1", "j3"]),
+        ("phase not in ['1']", ["j2", "j3"]),
+        ("lr = '0.1'", ["j1"]),
+        ("lr ~ '0\\.001'", ["j2"]),
+        ("debug = 'True'", ["j1"]),
+        # Missing tags never match a regex
+        ("lr ~ '.*'", ["j1", "j2"]),
+    ],
+)
+def test_filter_non_string_tags(query, expected):
+    """Tags are compared as text whatever their type"""
+    assert _ids(query, tags=TYPED_TAGS) == expected
+
+
 def test_filter_context_is_read_at_evaluation_time():
     """The TUI shares a context whose tags are updated after parsing"""
     ctx = FilterContext()
