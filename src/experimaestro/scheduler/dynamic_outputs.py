@@ -142,8 +142,6 @@ class TaskOutputsReader(FileSystemEventHandler):
 
     def add_watcher(self, watched: "WatchedOutput"):
         """Add a watcher for a specific output method"""
-        # watched.config is actually a Config object (method.__self__), not a
-        # ConfigInformation, despite the type annotation
         config_id = watched.config.__xpm__.identifier.all.hex()
         key = f"{config_id}/{watched.method_name}"
         logger.debug("Adding watcher for key: %s", key)

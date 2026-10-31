@@ -47,6 +47,12 @@ jobs:
         run: |
           uv run ruff check src/experimaestro
 
+      - name: Type check with mypy
+        # pyproject.toml targets the minimum version; each job also checks
+        # its own version (stdlib stubs, installed packages)
+        run: |
+          uv run mypy --python-version ${{ matrix.python-version }} src/experimaestro
+
       - name: Test with pytest
         timeout-minutes: 15
         env:

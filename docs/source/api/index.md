@@ -202,7 +202,9 @@ Type annotations are used to declare parameters in configurations and tasks.
 ### field
 
 ```{eval-rst}
-.. autoclass:: experimaestro.field
+.. autofunction:: experimaestro.field
+
+.. autoclass:: experimaestro.core.arguments.FieldSpec
    :members:
 ```
 

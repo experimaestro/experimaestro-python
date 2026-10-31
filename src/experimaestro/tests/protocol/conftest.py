@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -22,6 +23,8 @@ from experimaestro import Config
 from experimaestro.locking import create_file_lock
 from experimaestro.tests.utils import get_test_timeout
 from experimaestro.utils.crashpoints import ENV_CRASHPOINTS, ENV_CRASHPOINTS_DIR
+
+from .tasks import ProtocolTask
 
 import filelock
 
@@ -100,13 +103,13 @@ class Actors:
 
     def experiment(
         self,
-        *tasks: Config,
+        *tasks: ProtocolTask,
         crashpoints: str = "",
         token: dict | None = None,
         name: str = XP_NAME,
     ) -> subprocess.Popen:
         """Starts an experiment process submitting ``tasks``"""
-        spec = {
+        spec: dict[str, Any] = {
             "tasks": [
                 {
                     "cls": task.__xpmtype__.value_type.__name__,

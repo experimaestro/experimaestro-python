@@ -436,3 +436,40 @@ reveal_type(task)
 
     # Should NOT complain about missing output_path
     assert "Missing named argument" not in stdout
+
+
+def test_mypy_field_types():
+    """field() has the type of its default, checked against the annotation"""
+    code = """
+from pathlib import Path
+from experimaestro import Config, Meta, Param, PathGenerator, field
+
+class Settings(Config):
+    a: Param[int] = field(default=1)
+    b: Param[float] = field(default=0.5, ignore_default=True)
+    c: Meta[Path] = field(default_factory=PathGenerator("out"))
+    d: Param[list[int]] = field(default_factory=list)
+    e: Param[int] = field(groups=[])
+
+class Wrong(Config):
+    a: Param[int] = field(default="x")  # line 13
+    c: Meta[int] = field(default_factory=PathGenerator("out"))  # line 14
+
+class Legacy(Config):
+    a: Param[int] = field(ignore_default=3)  # line 17
+"""
+    _, stdout, _ = run_mypy(code)
+    errors = [line for line in stdout.splitlines() if ": error:" in line]
+    assert [line.split(":")[1] for line in errors] == ["13", "14"], stdout
+
+    # The legacy form is flagged as deprecated (when the check is enabled)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_file = Path(tmpdir) / "test_code.py"
+        test_file.write_text(code)
+        result = subprocess.run(
+            ["mypy", "--enable-error-code", "deprecated", str(test_file)],
+            capture_output=True,
+            text=True,
+        )
+    assert "test_code.py:17: error" in result.stdout, result.stdout
+    assert "deprecated" in result.stdout

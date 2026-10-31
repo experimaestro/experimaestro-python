@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from experimaestro.locking import create_file_lock
 from experimaestro.utils.atomic import atomic_write_json
 
@@ -2097,7 +2097,7 @@ class BaseService(ABC):
         """
         return self  # Default: return self (for live services)
 
-    def subservices(self) -> list["BaseService"]:
+    def subservices(self) -> Sequence["BaseService"]:
         """Startable sub-services, addressed as ``<service id>/<sub id>``
 
         The sub-service that is the service itself (by default, the only one)
@@ -2126,6 +2126,10 @@ class BaseService(ABC):
             Error message string or None if no error
         """
         return None
+
+    def set_error(self, error: str | None) -> None:
+        """Record why the service could not start (ignored by services that
+        do not keep an error)"""
 
     def set_status_change_callback(self, callback: Callable[[], None] | None) -> None:
         """Callback invoked when the service status changes outside of its state

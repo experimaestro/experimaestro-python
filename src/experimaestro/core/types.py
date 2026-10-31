@@ -583,12 +583,12 @@ class ObjectType(Type):
     @cached_property
     def field_names(self) -> frozenset[str]:
         """Names of arguments declared with field() on the value class"""
-        from experimaestro.core.arguments import field
+        from experimaestro.core.arguments import FieldSpec
 
         return frozenset(
             name
             for name in self.arguments
-            if isinstance(getattr(self.value_type, name, None), field)
+            if isinstance(getattr(self.value_type, name, None), FieldSpec)
         )
 
     def addArgument(self, argument: Argument):

@@ -29,6 +29,12 @@ repos:
     language: script
     pass_filenames: false
     always_run: true
+  - id: mypy
+    name: mypy (type check, see [tool.mypy] in pyproject.toml)
+    entry: uv run mypy src/experimaestro
+    language: system
+    types: [python]
+    pass_filenames: false
   repo: local
 - hooks:
   - id: ruff-check

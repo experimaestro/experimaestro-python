@@ -369,11 +369,11 @@ def _is_process_checkable_here(pinfo: dict) -> bool:
     """Whether a process specification can be checked from this machine"""
     from experimaestro.connectors import Process
 
-    if not isinstance(pinfo, dict):
+    if not isinstance(pinfo, dict) or not isinstance(pinfo.get("type"), str):
         return False
 
     try:
-        handler = Process.handler(pinfo.get("type"))
+        handler = Process.handler(pinfo["type"])
     except Exception as e:
         logger.debug("Could not resolve the process handler: %s", e)
         return False

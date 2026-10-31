@@ -13,9 +13,6 @@ import re
 from shlex import quote as shquote
 from contextlib import contextmanager
 from dataclasses import dataclass
-from experimaestro.launcherfinder.registry import (
-    LauncherRegistry,
-)
 from experimaestro.utils import ThreadingCondition
 from functools import cached_property
 from experimaestro.launchers import Launcher
@@ -911,12 +908,6 @@ class SlurmLauncher(Launcher):
 
     def __str__(self):
         return f"SlurmLauncher({self.options}, path={self.binpath})"
-
-    @staticmethod
-    def init_registry(registry: LauncherRegistry):
-        from .configuration import SlurmConfiguration
-
-        registry.register_launcher("slurm", SlurmConfiguration)
 
     @staticmethod
     def get_cli():

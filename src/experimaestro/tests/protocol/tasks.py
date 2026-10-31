@@ -75,4 +75,9 @@ class CatchCancel(Task):
             sys.exit(0)
 
 
-TASKS = {cls.__name__: cls for cls in (Quick, Failing, Controllable, CatchCancel)}
+#: Any of the tasks above
+ProtocolTask = Quick | Failing | Controllable | CatchCancel
+
+TASKS: dict[str, type[Task]] = {
+    cls.__name__: cls for cls in (Quick, Failing, Controllable, CatchCancel)
+}

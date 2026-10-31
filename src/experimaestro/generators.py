@@ -1,7 +1,6 @@
-import inspect
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, TypeVar
 from collections.abc import Callable
 from experimaestro.core.arguments import ArgumentOptions, TypeAnnotation
 from experimaestro.core.objects import ConfigWalkContext, Config
@@ -10,8 +9,11 @@ if TYPE_CHECKING:
     from experimaestro.core.partial import Partial
 
 
-class Generator(ABC):
-    """Base class for all generators"""
+T = TypeVar("T")
+
+
+class Generator(ABC, Generic[T]):
+    """Base class for all generators (of values of type ``T``)"""
 
     def isoutput(self):
         """Returns True if this generator is a task output (e.g. generates a
@@ -19,10 +21,10 @@ class Generator(ABC):
         return False
 
     @abstractmethod
-    def __call__(self, context: ConfigWalkContext, config: Config): ...
+    def __call__(self, context: ConfigWalkContext, config: Config) -> T: ...
 
 
-class PathGenerator(Generator):
+class PathGenerator(Generator[Path]):
     """Generate paths within the task directory.
 
     Use ``PathGenerator`` with ``field(default_factory=...)`` to create
@@ -55,14 +57,14 @@ class PathGenerator(Generator):
 
     def __init__(
         self,
-        path: str | Path | Callable[[ConfigWalkContext, Config], Path] = "",
+        path: str | Path | Callable[[ConfigWalkContext, Config], str | Path] = "",
         *,
-        partial: "Partial" = None,
+        partial: "Partial | None" = None,
     ):
         self.path = path
         self.partial = partial
 
-    def __call__(self, context: ConfigWalkContext, config: Config):
+    def __call__(self, context: ConfigWalkContext, config: Config) -> Path:
         # Determine base path: partial directory or job directory
         if self.partial is not None:
             base_path = context.partial_path(self.partial, config)
@@ -70,12 +72,9 @@ class PathGenerator(Generator):
             base_path = context.currentpath()
 
         # Generate the final path
-        if inspect.isfunction(self.path):
-            return base_path / self.path(context, config)
-        elif self.path:
-            return base_path / Path(self.path)
-        else:
-            return base_path
+        if isinstance(self.path, (str, Path)):
+            return base_path / self.path if self.path else base_path
+        return base_path / self.path(context, config)
 
     def isoutput(self):
         return True

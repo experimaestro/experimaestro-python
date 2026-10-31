@@ -21,6 +21,8 @@ import experimaestro.taskglobals as taskglobals
 import atexit
 
 if TYPE_CHECKING:
+    import filelock
+
     from experimaestro.scheduler.state_provider import CarbonMetricsData, MockJob
 
 
@@ -377,7 +379,7 @@ class TaskRunner:
         self.donepath = self.scriptpath.with_suffix(".done")
         self.failedpath = self.scriptpath.with_suffix(".failed")
         self.started = False
-        self.locks = []
+        self.locks: list[filelock.FileLock] = []
         self.dynamic_locks = JobDependencyLocks()
         env = taskglobals.Env.instance()
         env.taskpath = self.scriptpath.parent

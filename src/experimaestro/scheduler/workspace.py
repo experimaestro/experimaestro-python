@@ -46,7 +46,7 @@ class Workspace:
         settings: "Settings",
         workspace_settings: "WorkspaceSettings",
         launcher=None,
-        run_mode: RunMode = None,
+        run_mode: RunMode | None = None,
     ):
         """Initialize workspace environment
 
@@ -67,7 +67,7 @@ class Workspace:
             path = Path(path).absolute()
         self.path = path
         self.run_mode = run_mode
-        self.python_path = []
+        self.python_path: list[Path] = []
 
         from ..launchers import Launcher
 

@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from experimaestro.scheduler.interfaces import BaseService
 
 if TYPE_CHECKING:
-    from experimaestro.scheduler.experiment import Experiment
+    from experimaestro.scheduler.experiment import experiment as Experiment
 
 logger = logging.getLogger(__name__)
 

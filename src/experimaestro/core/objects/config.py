@@ -163,7 +163,7 @@ NOT_SET = object()
 @define()
 class WatchedOutput:
     #: The configuration containing the watched output
-    config: "ConfigInformation"
+    config: "Config"
 
     #: The watched output (name)
     method_name: str
@@ -2395,6 +2395,10 @@ class Config:
     __xpmtype__: ClassVar[ObjectType]
     """The object type holds all the information about a specific subclass
     experimaestro metadata"""
+
+    __xpm__: ConfigInformation
+    """Experimaestro information of this configuration (values, identifier,
+    job, ...)"""
 
     def __xpm_serialize__(
         self, context: "SerializationContext"

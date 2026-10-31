@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from experimaestro.locking import Lock
 from ..core.arguments import Param
@@ -130,7 +130,7 @@ class PrepareResource(Resource):
 
     def _is_prepared(self) -> bool:
         """Whether ``is_prepared()`` is implemented and answers True."""
-        value_type = self.config.__xpmtype__.value_type
+        value_type = cast("type[Prepare]", self.config.__xpmtype__.value_type)
         if value_type.is_prepared is Prepare.is_prepared:
             return False
         try:
@@ -167,6 +167,8 @@ class PrepareResource(Resource):
 
 class PrepareDependency(Dependency):
     """Static dependency on a ``PrepareResource`` — triggers ``prepare()`` on await."""
+
+    origin: PrepareResource
 
     def is_dynamic(self) -> bool:
         return False

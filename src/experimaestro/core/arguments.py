@@ -1,15 +1,23 @@
 """Management of the arguments (params, options, etc) associated with the XPM objects"""
 
 import warnings
-from typing import Optional, TypeVar, TYPE_CHECKING, Any
+from typing import Optional, TypeVar, TYPE_CHECKING, Any, overload
 from collections.abc import Callable
 from experimaestro.typingutils import get_optional
 from pathlib import Path
 from typing import Annotated
 
 if TYPE_CHECKING:
+    from typing_extensions import deprecated
+
     import experimaestro.core.types
     from experimaestro.core.partial import ParameterGroup
+    from experimaestro.generators import Generator
+else:
+
+    def deprecated(message):
+        return lambda function: function
+
 
 # Track deprecation warnings per module (max 10 per module)
 _deprecation_warning_counts: dict[str, int] = {}
@@ -35,7 +43,7 @@ class Argument:
         constant=False,
         is_data=False,
         overrides=False,
-        groups: set["ParameterGroup"] = None,
+        groups: set["ParameterGroup"] | None = None,
     ):
         """Creates a new argument
 
@@ -102,7 +110,7 @@ class Argument:
             assert self.generator is None, (
                 "generator and field_or_default are exclusive options"
             )
-            if isinstance(field_or_default, field):
+            if isinstance(field_or_default, FieldSpec):
                 self.ignore_generated = field_or_default.ignore_generated
                 # Allow field to override the overrides flag
                 if field_or_default.overrides:
@@ -186,7 +194,7 @@ class ArgumentOptions:
             # Skip warning for Constant parameters - they are inherently constant, not defaults
             if (
                 defaultvalue is not None
-                and not isinstance(defaultvalue, field)
+                and not isinstance(defaultvalue, FieldSpec)
                 and not self.kwargs.get("constant")
             ):
                 module = originaltype.__module__
@@ -296,8 +304,8 @@ OptionalDataPath = Annotated[Path | None, dataHint]
 """Optional version of DataPath"""
 
 
-class field:
-    """Specify additional properties for a configuration parameter.
+class FieldSpec:
+    """Properties of a configuration parameter, created by :func:`field`
 
     Use ``field()`` to control default value behavior and parameter grouping.
 
@@ -352,11 +360,11 @@ class field:
         self,
         *,
         default: Any = None,
-        default_factory: Callable = None,
+        default_factory: Callable | None = None,
         ignore_default: bool | Any = None,
         ignore_generated=False,
         overrides=False,
-        groups: list["ParameterGroup"] = None,
+        groups: list["ParameterGroup"] | None = None,
     ):
         """Create a field specification.
 
@@ -405,7 +413,7 @@ class field:
                 f"field(default={ignore_default!r}, ignore_default=True). "
                 f"The old syntax still works but will be removed in a future version.",
                 DeprecationWarning,
-                stacklevel=2,
+                stacklevel=3,  # caller of field()
             )
             default = ignore_default
             ignore_default = True
@@ -423,13 +431,69 @@ class field:
         return (self.default is not None) or (self.default_factory is not None)
 
 
+_T = TypeVar("_T")
+
+
+@overload
+def field(
+    *,
+    default: _T,
+    ignore_default: bool | None = None,
+    ignore_generated: bool = False,
+    overrides: bool = False,
+    groups: list["ParameterGroup"] | None = None,
+) -> _T: ...
+
+
+@overload
+def field(
+    *,
+    default_factory: "Callable[[], _T] | Generator[_T]",
+    ignore_default: bool | None = None,
+    ignore_generated: bool = False,
+    overrides: bool = False,
+    groups: list["ParameterGroup"] | None = None,
+) -> _T: ...
+
+
+@overload
+@deprecated("use field(default=X, ignore_default=True)")
+def field(
+    *,
+    ignore_default: _T,
+    ignore_generated: bool = False,
+    overrides: bool = False,
+    groups: list["ParameterGroup"] | None = None,
+) -> _T: ...
+
+
+@overload
+def field(
+    *,
+    ignore_generated: bool = False,
+    overrides: bool = False,
+    groups: list["ParameterGroup"] | None = None,
+) -> Any: ...
+
+
+def field(**kwargs) -> Any:
+    """Specify additional properties for a configuration parameter
+
+    Typed as returning the type of the default (as ``dataclasses.field``), so
+    that type checkers check it against the annotation, e.g.
+    ``x: Param[int] = field(default=1)``; returns a :class:`FieldSpec`.
+    See :class:`FieldSpec` for the options.
+    """
+    return FieldSpec(**kwargs)
+
+
 def has_default_value(field_or_default) -> bool:
     """True if a bare default or a field with a default is given
 
     A field without default (e.g. ``field(overrides=True)``) does not make
     the parameter optional.
     """
-    if isinstance(field_or_default, field):
+    if isinstance(field_or_default, FieldSpec):
         return field_or_default.has_default
     return field_or_default is not None
 

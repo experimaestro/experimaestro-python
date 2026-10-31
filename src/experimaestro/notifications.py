@@ -236,4 +236,4 @@ def tqdm(*args, **kwargs):
     :param kwargs: Additional arguments passed to tqdm
     :return: A progress bar iterator
     """
-    return xpm_tqdm(*args, **kwargs)  # type: ignore
+    return xpm_tqdm(*args, **kwargs)

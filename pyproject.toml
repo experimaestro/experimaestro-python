@@ -156,7 +156,151 @@ ignore = "D200,D203,D213,D406,D407"
 
 [tool.mypy]
 python_version = "3.11"
+plugins = ["experimaestro.mypy"]
+# Untyped functions are not checked: no need to say it for each of them
+disable_error_code = ["annotation-unchecked"]
 warn_unused_ignores = true
+
+# Third-party modules without type information
+[[tool.mypy.overrides]]
+module = [
+    "arpeggio.*", "codecarbon.*", "docutils.*", "huggingface_hub.*",
+    "humanfriendly.*", "IPython.*", "ipywidgets.*", "lightning_fabric.*",
+    "psutil.*", "pynvml.*", "pyperclip.*", "pytorch_lightning.*", "rpyc.*",
+    "sortedcontainers.*", "sphobjinv.*", "torch.*", "torchmetrics.*", "tqdm.*",
+    "xpm_fake_module.*", "yaml.*", "zeus.*", "zeus_apple_silicon.*",
+]
+ignore_missing_imports = true
+
+# Uses a syntax newer than the target version
+[[tool.mypy.overrides]]
+module = ["sphinx.*"]
+follow_imports = "skip"
+
+# Ratchet: modules that do not type-check yet. mypy runs on the whole package
+# (pre-commit, CI); remove a module from this list once it is clean, and never
+# add one.
+[[tool.mypy.overrides]]
+module = [
+    "experimaestro.actions",
+    "experimaestro.annotations",
+    "experimaestro.carbon",
+    "experimaestro.carbon.codecarbon",
+    "experimaestro.carbon.utils",
+    "experimaestro.carbon.zeus_apple",
+    "experimaestro.carbon.zeus_tracker",
+    "experimaestro.cli",
+    "experimaestro.cli.dag",
+    "experimaestro.cli.experiments",
+    "experimaestro.cli.filter",
+    "experimaestro.cli.jobs",
+    "experimaestro.cli.monitor",
+    "experimaestro.cli.remote",
+    "experimaestro.cli.workspace",
+    "experimaestro.commandline",
+    "experimaestro.connectors",
+    "experimaestro.connectors.local",
+    "experimaestro.connectors.ssh",
+    "experimaestro.copy_experiment",
+    "experimaestro.core.context",
+    "experimaestro.core.identifier",
+    "experimaestro.core.objects.config_utils",
+    "experimaestro.core.objects.config_walk",
+    "experimaestro.core.objects.config",
+    "experimaestro.core.partial_lock",
+    "experimaestro.core.serialization",
+    "experimaestro.core.types",
+    "experimaestro.core.utils",
+    "experimaestro.experiments.cli",
+    "experimaestro.experiments.grid",
+    "experimaestro.filewatcher",
+    "experimaestro.huggingface",
+    "experimaestro.launcherfinder.registry",
+    "experimaestro.launcherfinder.specs",
+    "experimaestro.launchers.slurm.base",
+    "experimaestro.launchers.slurm.cli",
+    "experimaestro.launchers.slurm.models",
+    "experimaestro.launchers.slurm.tui",
+    "experimaestro.locking",
+    "experimaestro.logs.reader",
+    "experimaestro.mkdocs",
+    "experimaestro.mkdocs.base",
+    "experimaestro.mypy",
+    "experimaestro.rpyc",
+    "experimaestro.scheduler.base",
+    "experimaestro.scheduler.experiment",
+    "experimaestro.scheduler.interfaces",
+    "experimaestro.scheduler.jobs",
+    "experimaestro.scheduler.remote.client",
+    "experimaestro.scheduler.remote.server",
+    "experimaestro.scheduler.state_provider",
+    "experimaestro.scheduler.state_status",
+    "experimaestro.scheduler.workspace_state_provider",
+    "experimaestro.scriptbuilder",
+    "experimaestro.tests._flaky",
+    "experimaestro.tests.conftest",
+    "experimaestro.tests.core.test_generics",
+    "experimaestro.tests.core.test_types",
+    "experimaestro.tests.fixtures.pre_experiment.pre_setup_mock",
+    "experimaestro.tests.launchers.common",
+    "experimaestro.tests.launchers.test_slurm",
+    "experimaestro.tests.partial_reschedule",
+    "experimaestro.tests.restart",
+    "experimaestro.tests.scripts.notifyandwait",
+    "experimaestro.tests.tasks.test_dynamic",
+    "experimaestro.tests.test_cleanup",
+    "experimaestro.tests.test_dependencies",
+    "experimaestro.tests.test_direct_generate",
+    "experimaestro.tests.test_dynamic_locking",
+    "experimaestro.tests.test_folders",
+    "experimaestro.tests.test_identifier",
+    "experimaestro.tests.test_job_status",
+    "experimaestro.tests.test_objects",
+    "experimaestro.tests.test_prepare",
+    "experimaestro.tests.test_progress",
+    "experimaestro.tests.test_remote_state",
+    "experimaestro.tests.test_state_cache",
+    "experimaestro.tests.test_tags",
+    "experimaestro.tests.test_tasks",
+    "experimaestro.tests.test_tui_inspect",
+    "experimaestro.tests.test_ui_graph",
+    "experimaestro.tests.test_webui_websocket",
+    "experimaestro.tests.token_reschedule",
+    "experimaestro.tests.ui.browser_driver",
+    "experimaestro.tests.ui.scenario",
+    "experimaestro.tests.ui.test_ssh",
+    "experimaestro.tests.ui.tui_driver",
+    "experimaestro.tests.ui.web_driver",
+    "experimaestro.tests.utils",
+    "experimaestro.tokens",
+    "experimaestro.tools.diff",
+    "experimaestro.tools.documentation",
+    "experimaestro.tools.inspect_params.app",
+    "experimaestro.tui.app",
+    "experimaestro.tui.dialogs",
+    "experimaestro.tui.log_viewer",
+    "experimaestro.tui.widgets.actions",
+    "experimaestro.tui.widgets.experiments",
+    "experimaestro.tui.widgets.global_services",
+    "experimaestro.tui.widgets.jobs",
+    "experimaestro.tui.widgets.log",
+    "experimaestro.tui.widgets.runs",
+    "experimaestro.tui.widgets.services",
+    "experimaestro.tui.widgets.stray_jobs",
+    "experimaestro.tui.widgets.warnings",
+    "experimaestro.typingutils",
+    "experimaestro.utils.config",
+    "experimaestro.utils.jobs",
+    "experimaestro.utils.jupyter",
+    "experimaestro.utils.logging",
+    "experimaestro.utils.psutils",
+    "experimaestro.utils.settings",
+    "experimaestro.webui.routes.proxy",
+    "experimaestro.webui.server",
+    "experimaestro.webui.state_bridge",
+    "experimaestro.webui.websocket",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 junit_family = "xunit2"

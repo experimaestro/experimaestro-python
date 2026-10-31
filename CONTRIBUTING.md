@@ -21,6 +21,7 @@ pre-commit install           # installs both the pre-commit and commit-msg hooks
 The hooks then run on every `git commit`:
 
 - **ruff** (lint with `--fix`) and **ruff-format**
+- **mypy** on the whole package (see [Type checking](#type-checking))
 - YAML check, end-of-file and trailing-whitespace fixers
 - no blanket `# noqa`, no `eval()`, no `FIXME:`/`TODO:` markers
 - **web UI build sync**: if you change `app/`, rebuild with
@@ -57,6 +58,19 @@ docs: document workspace triggers
 
 Common types: `feat`, `fix`, `docs`, `perf`, `refactor`, `test`, `chore`,
 `ci`, `build`.
+
+## Type checking
+
+mypy (with the experimaestro plugin) checks the whole package in pre-commit
+(for the minimum supported Python version) and in CI (for each supported
+version). Modules that do not type-check yet are listed in the last
+`[[tool.mypy.overrides]]` of `pyproject.toml` (`ignore_errors = true`): this
+list may only shrink. New modules must type-check; when you make a listed
+module clean, remove it from the list.
+
+```bash
+uv run mypy src/experimaestro
+```
 
 ## Tests
 

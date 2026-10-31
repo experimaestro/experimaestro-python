@@ -174,7 +174,7 @@ class RPCRequest:
     id: int | None = None  # None for notifications
 
     def to_dict(self) -> dict:
-        result = {"jsonrpc": JSONRPC_VERSION, "method": self.method}
+        result: dict[str, Any] = {"jsonrpc": JSONRPC_VERSION, "method": self.method}
         if self.params:
             result["params"] = self.params
         if self.id is not None:
@@ -224,7 +224,7 @@ class RPCNotification:
     params: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        result = {"jsonrpc": JSONRPC_VERSION, "method": self.method}
+        result: dict[str, Any] = {"jsonrpc": JSONRPC_VERSION, "method": self.method}
         if self.params:
             result["params"] = self.params
         return result

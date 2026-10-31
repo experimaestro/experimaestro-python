@@ -494,7 +494,7 @@ class MyConfig(Config):
 
 - `name` defines the name of the argument, which can be retrieved by the instance `self` (class) or passed as an argument (function)
 - `type` is the type of the argument (more details below)
-- Default values can be specified using {py:class}`~experimaestro.field`:
+- Default values can be specified using {py:func}`~experimaestro.field`:
     - `field(default=value)`: The default is `value`, always included in the signature computation.
     - `field(default=value, ignore_default=True)`: The default is `value`, and if the actual value equals the default, it won't be included in the signature computation. This allows adding new parameters without changing past experiment signatures.
     - `field(default_factory=callable)`: A callable that produces the default value, always included in the signature computation (like `default`).

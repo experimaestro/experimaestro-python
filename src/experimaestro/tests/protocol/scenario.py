@@ -16,6 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from experimaestro import experiment
 from experimaestro.tests.protocol.tasks import TASKS
@@ -38,7 +39,7 @@ def main(workdir: str, name: str, spec: dict):
             )
 
         for task_spec in spec.get("tasks", []):
-            task = TASKS[task_spec["cls"]].C(**task_spec.get("params", {}))
+            task: Any = TASKS[task_spec["cls"]].C(**task_spec.get("params", {}))
             if token is not None:
                 task.add_dependencies(token.dependency(1))
             task.submit()
