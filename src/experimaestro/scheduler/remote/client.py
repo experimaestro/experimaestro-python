@@ -1234,7 +1234,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         rapid state changes.
         """
         while self._running:
-            time.sleep(self._notify_interval)
+            # Woken up at once by disconnect()
+            self._closing.wait(self._notify_interval)
 
             if not self._running:
                 break
