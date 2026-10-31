@@ -4,6 +4,7 @@ These tests verify that the mypy plugin can be loaded and provides
 basic type inference for experimaestro types.
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -14,23 +15,40 @@ import pytest
 pytestmark = [pytest.mark.types]
 
 
-def run_mypy(code: str, use_plugin: bool = True) -> tuple[int, str, str]:
-    """Run mypy on the given code and return (exit_code, stdout, stderr)."""
+#: mypy configuration of the tests: the same for all of them, so that they
+#: share the mypy cache (a cold mypy run takes ~15 s)
+MYPY_CONFIG = """[mypy]
+plugins = experimaestro.mypy
+enable_error_code = deprecated
+"""
+
+
+def _cache_dir() -> Path:
+    """mypy cache, kept between runs; one per pytest-xdist worker"""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return Path(tempfile.gettempdir()) / f"xpm-test-mypy-cache-{worker}"
+
+
+def run_mypy(code: str) -> tuple[int, str, str]:
+    """Run mypy (with the plugin) on the given code
+
+    :return: (exit_code, stdout, stderr)
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Write test code
         test_file = Path(tmpdir) / "test_code.py"
         test_file.write_text(code)
-
-        # Write mypy config if using plugin
-        if use_plugin:
-            config_file = Path(tmpdir) / "mypy.ini"
-            config_file.write_text("[mypy]\nplugins = experimaestro.mypy\n")
-            args = ["mypy", str(test_file), "--config-file", str(config_file)]
-        else:
-            args = ["mypy", str(test_file)]
+        config_file = Path(tmpdir) / "mypy.ini"
+        config_file.write_text(MYPY_CONFIG)
 
         result = subprocess.run(
-            args,
+            [
+                "mypy",
+                str(test_file),
+                "--config-file",
+                str(config_file),
+                "--cache-dir",
+                str(_cache_dir()),
+            ],
             capture_output=True,
             text=True,
         )
@@ -460,16 +478,6 @@ class Legacy(Config):
 """
     _, stdout, _ = run_mypy(code)
     errors = [line for line in stdout.splitlines() if ": error:" in line]
-    assert [line.split(":")[1] for line in errors] == ["13", "14"], stdout
-
-    # The legacy form is flagged as deprecated (when the check is enabled)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = Path(tmpdir) / "test_code.py"
-        test_file.write_text(code)
-        result = subprocess.run(
-            ["mypy", "--enable-error-code", "deprecated", str(test_file)],
-            capture_output=True,
-            text=True,
-        )
-    assert "test_code.py:17: error" in result.stdout, result.stdout
-    assert "deprecated" in result.stdout
+    # Wrong default types, and the deprecated legacy form
+    assert [line.split(":")[1] for line in errors] == ["13", "14", "17"], stdout
+    assert "deprecated" in errors[2], stdout
