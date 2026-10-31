@@ -335,20 +335,28 @@ after the run's callbacks have been dispatched.
 
 ## Known deviations
 
+Severity:
+
+- **high** — can run a job twice, report a wrong final state (a failed or
+  cancelled job as done), or destroy data of a live or recoverable run;
+- **medium** — wrong or stale information shown, lost updates of metadata,
+  or a recovery that needs a manual action; no job output lost;
+- **low** — cosmetic, leaks, or narrow windows with harmless effects.
+
 Found by a code survey (October 2026). Each entry should be confirmed by a
 test before being fixed; the test is then marked
 `xfail(reason="D-xx")` until the fix lands.
 
 ### Locks and liveness
 
-**D-01 — Two job lock paths** (I1, I5). The scheduler and the job lock
+**D-01 [medium] — Two job lock paths** (I1, I5). The scheduler and the job lock
 `jobs/<task>/<hash>/<name>.lock` (`Job.lockpath` in `scheduler/jobs.py`),
 while `BaseJob.lockpath` (`scheduler/interfaces.py`, inherited by `MockJob`)
 and cleanup (`scheduler/cleanup.py`, stale pid and job events) use
 `.experimaestro/<name>.lock`. Cleanup's lock therefore never excludes a running
 job or a starting scheduler; only the pid/marker checks protect it.
 
-**D-02 — Job lock released before `.done`** (I2). On a normal return,
+**D-02 [high] — Job lock released before `.done`** (I2). On a normal return,
 `TaskRunner.cleanup()` removes `.pid` and releases the job lock, and `.done` is
 written afterwards in the `SystemExit` handler. In between, another scheduler
 can take the lock, see neither pid nor marker, and start a second run (and
@@ -356,28 +364,28 @@ unlink the `.done` about to be written). The error paths write `.failed`
 before the cleanup, and `sys.exit(0)` from the task writes `.done` first, so
 the order also differs between the success paths.
 
-**D-03 — Cancelled task marked done** (I3). A task that catches
+**D-03 [high] — Cancelled task marked done** (I3). A task that catches
 `TaskCancelled` and calls `sys.exit(0)` reaches `except SystemExit` with code 0,
 which writes `.done` on top of `.failed{cancelled}`; `.done` wins. In addition,
 on SIGTERM `cleanup()` (job lock release) runs in a thread while the task code
 may still run, and `cleaned` is not thread-safe.
 
-**D-04 — Slave ranks release tokens** (I10). Ranks > 0 load `locks.json` and
+**D-04 [high] — Slave ranks release tokens** (I10). Ranks > 0 load `locks.json` and
 enter `dynamic_locks.dependency_locks()` (the comment says they get dummy
 locks, but no check exists); the first rank to exit unlinks the token file
 while the master still runs. Slaves do not take the job lock and may read a
 `locks.json` from a previous run (never deleted).
 
-**D-05 — Token orphan check on a path that never exists** (I10). The job URI
+**D-05 [medium] — Token orphan check on a path that never exists** (I10). The job URI
 of a token holder is `target.basepath` = `<job dir>/<name>` (no extension),
 so `async_resolve_orphaned` declares orphaned every holder without process
 information older than 30 s.
 
-**D-06 — Re-attach ignores host and PID reuse** (I1). Re-attach and
+**D-06 [medium] — Re-attach ignores host and PID reuse** (I1). Re-attach and
 `MockJob` treat any live process with the recorded PID as the job; the
 `host` field is checked only by cleanup, and no start time is recorded.
 
-**D-07 — Liveness from status fields** (I5). Readers decide that an
+**D-07 [high] — Liveness from status fields** (I5). Readers decide that an
 experiment is running from `status.json` (`is_experiment_running`), never from
 the experiment lock; a crashed run stays `running` forever. `get_run_status`
 falls back to `status.json` and returns `"completed"` for any status other
@@ -385,80 +393,80 @@ than done/failed — including `running` — so history pruning (run after the
 experiment lock is released) and `experiments runs prune` can delete a live
 or crashed run.
 
-**D-08 — Destructive operations without locks** (I5). Delete job, delete
+**D-08 [high] — Destructive operations without locks** (I5). Delete job, delete
 experiment (incl. `delete_jobs=True` over RPC, which does not check whether
 other experiments use the jobs), kill over RPC, `workspace orphans --clean`
 (no state check at all), `runs prune` and `workspace migrate` rely on cached
 states only. `workspace stray --perform` checks `provider.is_live`, which is
 always `False` for the workspace provider.
 
-**D-09 — Experiment lock leaked on `DirtyGitError`.** The error is raised
+**D-09 [low] — Experiment lock leaked on `DirtyGitError`.** The error is raised
 after the lock is taken, and `__exit__` is not called.
 
 ### Status files
 
-**D-10 — `status.json` writers bypass `.status.json.lock`** (I6): event
+**D-10 [medium] — `status.json` writers bypass `.status.json.lock`** (I6): event
 rotation (`_write_events_count_to_status`), cleanup consolidation,
 `_persist_job_deletion`, `runs tag/untag`, and monitor-side `finalize_status`
 (which uses the experiment lock instead).
 
-**D-11 — Monitors write into a starting run.** When `status.json` is missing,
+**D-11 [medium] — Monitors write into a starting run.** When `status.json` is missing,
 `MockExperiment.from_disk` recovers it from the `jobs/` symlinks and writes
 it; the experiment creates the run directory before `init_status`, so a
 monitor can write a `status.json` into a run being created.
 
-**D-12 — "Detached" not persisted.** `_finalize_run` maps only
+**D-12 [low] — "Detached" not persisted.** `_finalize_run` maps only
 completed/failed; `status.json` stays `running` while `environment.json` says
 `detached`.
 
-**D-13 — MISSING_OUTPUTS invisible to monitors** (I4). `MockJob`
+**D-13 [medium] — MISSING_OUTPUTS invisible to monitors** (I4). `MockJob`
 overrides `load_from_disk` without the MISSING_OUTPUTS branch; the stale
 `status.json` state is shown. Cleanup marks dead jobs FAILED rather than
 MISSING_OUTPUTS. `mark_done()` writes an empty `.done` (no `task_outputs`).
 
 ### Events and runs
 
-**D-14 — Event files shared across runs** (I8). The temporary experiment
+**D-14 [high] — Event files shared across runs** (I8). The temporary experiment
 event file is `<xp>-<n>.jsonl` with `n` restarting at 0 and no run id, opened
 in append mode: a leftover file of a crashed, unconsolidated run is appended
 to and hard-linked into the new run, and `current` is re-pointed so the old
 run can no longer be consolidated.
 
-**D-15 — Crash between final `status.json` and event archiving.** The final
+**D-15 [medium] — Crash between final `status.json` and event archiving.** The final
 `status.json` has no `events_count`; leftover temporary files then raise
 `OrphanedEventsError`, which needs user confirmation (violates I7a).
 
-**D-16 — Late service events.** If `wait_for_notifications` times out, a late
+**D-16 [low] — Late service events.** If `wait_for_notifications` times out, a late
 `ServiceAddedEvent` reopens the event writer after it was closed and archived,
 creating a new orphan file.
 
-**D-17 — Partial lines consumed** (I9). `_read_events_from_file`,
+**D-17 [medium] — Partial lines consumed** (I9). `_read_events_from_file`,
 `read_new_events`, `_apply_pending_*` and `read_events_since_count` record
 `f.tell()` after iterating, so a trailing partial line is dropped and its
 bytes counted as read. `_load_from_objects_jsonl` fails on a partial line
 (unlike `read_objects`).
 
-**D-18 — Non-atomic symlink swaps.** `current` and the run's `jobs/` links
+**D-18 [low] — Non-atomic symlink swaps.** `current` and the run's `jobs/` links
 are replaced by unlink then create; a reader can see them missing. Cleanup
 creates `current` before taking the experiment lock.
 
-**D-19 — Monitor caches miss out-of-band changes.** A cached job is refreshed
+**D-19 [medium] — Monitor caches miss out-of-band changes.** A cached job is refreshed
 only by job events; a `.failed` written by cleanup, a purge, or a `.done`
 without event leave it stale.
 
 ### Hooks and folders
 
-**D-20 — Hooks run concurrently** (I11). `aio_settle` runs the hooks with
+**D-20 [medium] — Hooks run concurrently** (I11). `aio_settle` runs the hooks with
 `asyncio.gather`: `on_completed` may run before late outputs are drained, and
 archiving may copy the directory while callbacks still run.
 
-**D-21 — Folder archive races.** The staging lock file is unlinked after
+**D-21 [medium] — Folder archive races.** The staging lock file is unlinked after
 release (a process that opened the old inode is not excluded); MOVE mode does
 `rmtree` then `symlink` without the job lock; the destination is published
 before `params.json` is rewritten; recovery is a no-op when the source
 directory exists without a marker.
 
-**D-22 — Scheduler log cleanup not exclusive.** It locks only its own
+**D-22 [low] — Scheduler log cleanup not exclusive.** It locks only its own
 `.scheduler/<id>/.lock` and deletes other directories by mtime, which log
 appends do not update.
 
