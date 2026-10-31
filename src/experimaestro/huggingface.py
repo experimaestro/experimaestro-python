@@ -39,6 +39,46 @@ class ExperimaestroHFHub(ModelHubMixin):
             definition_filename=self.definition_filename,
             context=context,
         )
+        try:
+            self.generate_dag_html(save_directory)
+        except Exception as e:
+            import logging
+            logging.getLogger("experimaestro").debug(
+                "Failed to generate dag.html during save: %s", e
+            )
+
+    def generate_dag_html(
+        self, save_directory: str | Path, html_filename: str = "dag.html"
+    ) -> Path | None:
+        """Generate a standalone interactive HTML DAG view in the export directory."""
+        from experimaestro.ui.graph import load_serialized_graph, standalone_html
+
+        save_path = Path(save_directory)
+        def_file = save_path / self.definition_filename
+        if not def_file.is_file():
+            return None
+
+        graph = load_serialized_graph(def_file)
+        statuses = {n.id: "done" for n in graph.nodes.values() if n.kind.is_job}
+        html_content = standalone_html(graph, statuses)
+        out = save_path / html_filename
+        out.write_text(html_content, encoding="utf-8")
+        return out
+
+    def get_dag_mermaid(
+        self,
+        save_directory: str | Path | None = None,
+        orientation: str = "TD",
+    ) -> str | None:
+        """Generate a Mermaid flowchart markdown string for this model's DAG."""
+        from experimaestro.ui.graph import load_serialized_graph, to_mermaid
+
+        if save_directory is not None:
+            def_file = Path(save_directory) / self.definition_filename
+            if def_file.is_file():
+                graph = load_serialized_graph(def_file)
+                return to_mermaid(graph, orientation=orientation)
+        return None
 
     @classmethod
     def _from_pretrained(
