@@ -92,7 +92,9 @@ class RemoteWorkspace:
 @pytest.fixture(scope="module")
 def remote_workspace(tmp_path_factory) -> RemoteWorkspace:
     workdir = tmp_path_factory.mktemp("remote").resolve()
-    with TemporaryExperiment("greetings", workdir=workdir) as xp:
+    # Several jobs are run: more than the default (single job) timeout, which
+    # a cold start (bytecode compilation, first imports) already exceeds
+    with TemporaryExperiment("greetings", workdir=workdir, timeout_multiplier=5) as xp:
         (workdir / "data").mkdir()
         xp.add_service(DataService(workdir / "data", workdir / "service-logs"))
         tasks = {
