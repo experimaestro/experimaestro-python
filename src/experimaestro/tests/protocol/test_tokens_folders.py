@@ -18,7 +18,6 @@ from .tasks import Controllable
 
 
 @pytest.mark.skipif(not is_posix(), reason="POSIX signals and flock")
-@pytest.mark.deviation("D-05")
 def test_token_kept_by_running_job_after_scheduler_crash(actors):
     """I10: a token stays held by a running job whose scheduler died before
     recording the job process in the token"""

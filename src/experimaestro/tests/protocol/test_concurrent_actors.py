@@ -7,6 +7,7 @@ import pytest
 
 from experimaestro.cli.workspace import _orphans
 from experimaestro.locking import create_file_lock
+from experimaestro.scheduler.interfaces import BaseJob
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from experimaestro.tests.utils import is_posix
 
@@ -18,7 +19,6 @@ from .tasks import Controllable, Quick
 pytestmark = pytest.mark.skipif(not is_posix(), reason="POSIX signals and flock")
 
 
-@pytest.mark.deviation("D-01")
 def test_cleanup_job_lock_excludes_running_job(actors):
     """I1, I5: the job lock taken by the cleanup is the one held by a
     running job"""
@@ -30,7 +30,7 @@ def test_cleanup_job_lock_excludes_running_job(actors):
     assert not job.lock_is_free()
 
     # Lock taken by the stale pid and job event cleanup (cleanup.py)
-    lock = create_file_lock(job.path / ".experimaestro" / f"{job.name}.lock", 0)
+    lock = create_file_lock(BaseJob.get_lockfile(job.path, job.name), 0)
     try:
         lock.acquire()
     except filelock.Timeout:

@@ -462,8 +462,7 @@ def _cleanup_stale_pid_files(workspace_path: Path) -> int:
                 continue
 
             # Try to acquire the lock non-blocking
-            xpm_dir = BaseJob.get_xpm_dir(job_dir)
-            lock_path = xpm_dir / f"{scriptname}.lock"
+            lock_path = BaseJob.get_lockfile(job_dir, scriptname)
             try:
                 lock = create_file_lock(lock_path, timeout=0)
                 with lock:
@@ -708,8 +707,7 @@ def _check_orphaned_job_events(
         # Acquire the job lock before any cleanup. If the lock is held
         # (job is in steps 1-4 or 5-6 of its lifecycle), skip this job.
         scriptname = BaseJob.get_scriptname(task_id)
-        xpm_dir = BaseJob.get_xpm_dir(job_path)
-        lock_path = xpm_dir / f"{scriptname}.lock"
+        lock_path = BaseJob.get_lockfile(job_path, scriptname)
 
         try:
             lock = create_file_lock(lock_path, timeout=0)

@@ -229,7 +229,8 @@ A token is a directory of holder files. A waiting scheduler is woken by a
 watchdog on the token folder, with a polling fallback (0.1 s → 30 s backoff).
 Holders are released by (a) the scheduler after the process exits, (b) the job
 on context exit, (c) any scheduler that sees the holder's process dead, or
-(d) orphan purge (no process info and older than 30 s).
+(d) orphan purge (no process info, older than 30 s, and the job lock is
+free: a held job lock means that the job runs or is being started).
 
 ### Folder archive (`scheduler/folders.py`)
 
@@ -389,13 +390,13 @@ are ordinary protocol tests.
 
 ### Locks and liveness
 
-**D-01 [medium] — Two job lock paths** (I1, I5). The scheduler and the job lock
+**D-01 [medium, fixed] — Two job lock paths** (I1, I5). **Fixed**: `BaseJob.get_lockfile` gives the one job lock path, used by `MockJob` and cleanup. The scheduler and the job lock
 `jobs/<task>/<hash>/<name>.lock` (`Job.lockpath` in `scheduler/jobs.py`),
 while `BaseJob.lockpath` (`scheduler/interfaces.py`, inherited by `MockJob`)
 and cleanup (`scheduler/cleanup.py`, stale pid and job events) use
 `.experimaestro/<name>.lock`. Cleanup's lock therefore never excludes a running
 job or a starting scheduler; only the pid/marker checks protect it.
-*Reproduced by* `test_concurrent_actors.py::test_cleanup_job_lock_excludes_running_job`.
+*Tested by* `test_concurrent_actors.py::test_cleanup_job_lock_excludes_running_job`.
 
 **D-02 [high, fixed] — Job lock released before `.done`** (I2). **Fixed**: `.done` is written before `cleanup()` on every success path. On a normal return,
 `TaskRunner.cleanup()` removes `.pid` and releases the job lock, and `.done` is
@@ -420,11 +421,11 @@ while the master still runs. Slaves do not take the job lock and may read a
 `locks.json` from a previous run (never deleted).
 *Tested by* `test_job_lifecycle.py::test_slave_rank_does_not_release_token`.
 
-**D-05 [medium] — Token orphan check on a path that never exists** (I10). The job URI
+**D-05 [medium, fixed] — Token orphan check on a path that never exists** (I10). **Fixed**: the check uses the job directory and never purges a holder whose job lock is held. The job URI
 of a token holder is `target.basepath` = `<job dir>/<name>` (no extension),
 so `async_resolve_orphaned` declares orphaned every holder without process
 information older than 30 s.
-*Reproduced by* `test_tokens_folders.py::test_token_kept_by_running_job_after_scheduler_crash`.
+*Tested by* `test_tokens_folders.py::test_token_kept_by_running_job_after_scheduler_crash`.
 
 **D-06 [medium] — Re-attach ignores host and PID reuse** (I1). Re-attach and
 `MockJob` treat any live process with the recorded PID as the job; the

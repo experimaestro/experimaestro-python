@@ -925,8 +925,11 @@ class DynamicLockFile(ABC):
             if not self.job_uri:
                 return True  # No job URI - definitely orphaned
 
+            # The job URI is the job's base path (<job dir>/<name>)
             job_path = Path(self.job_uri)
-            if not job_path.exists():
+            if not job_path.is_dir():
+                job_path = job_path.parent
+            if not job_path.is_dir():
                 return True  # Job directory doesn't exist - orphaned
 
             # Extract task_id and job_id from lock file path
@@ -945,8 +948,17 @@ class DynamicLockFile(ABC):
 
                 job = MockJob.from_disk(job_path, task_id, job_id)
 
-                # Lock the job directory using lockpath
-                with create_file_lock(job.lockpath):
+                # The job lock is held by the job's master process while it
+                # runs (or by a scheduler starting it): never orphaned then
+                job_lock = create_file_lock(job.lockpath, timeout=0)
+                try:
+                    job_lock.acquire()
+                except filelock.Timeout:
+                    if (process := job.getprocess()) is not None:
+                        self.write_process(process)
+                    return False
+
+                try:
                     # Get process from job (reads PID file and creates Process object)
                     process = job.getprocess()
                     if process is None:
@@ -957,6 +969,8 @@ class DynamicLockFile(ABC):
 
                     # Not orphaned - process info was found
                     return False
+                finally:
+                    job_lock.release()
             except Exception as e:
                 # If we can't load the job or get process, consider it orphaned
                 logger.debug("Error resolving orphaned lock for %s: %s", self.path, e)

@@ -713,6 +713,12 @@ class BaseJob:
         return job_path / f"{scriptname}.pid"
 
     @staticmethod
+    def get_lockfile(job_path: Path, scriptname: str) -> Path:
+        """Get the job lock path (held by the scheduler while starting the
+        job, and by the job's master process while it runs)"""
+        return job_path / f"{scriptname}.lock"
+
+    @staticmethod
     def get_donefile(job_path: Path, scriptname: str) -> Path:
         """Get done marker file path"""
         return job_path / f"{scriptname}.done"
@@ -758,8 +764,8 @@ class BaseJob:
 
     @property
     def lockpath(self) -> Path:
-        """Path to the .lock file for job locking"""
-        return self.xpm_dir / f"{self.scriptname}.lock"
+        """Path to the job lock (see :meth:`get_lockfile`)"""
+        return BaseJob.get_lockfile(self.path, self.scriptname)
 
     # -------------------------------------------------------------------------
     # State I/O (unified state_dict pattern)
