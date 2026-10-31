@@ -17,7 +17,6 @@ from experimaestro.connectors import Process  # noqa: E402
 
 # Set shorter poll interval for tests (before any imports that read it)
 os.environ.setdefault("XPM_POLL_INTERVAL_MAX", "5.0")
-os.environ.setdefault("XPM_PROCESS_POLL_INTERVAL", "0.01")
 
 
 class MockProcess(Process):
