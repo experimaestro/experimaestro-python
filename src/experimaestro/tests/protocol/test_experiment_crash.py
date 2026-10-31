@@ -65,7 +65,6 @@ def test_crashed_run_events_stay_in_their_run(actors):
     assert not leaked, f"events of the crashed run found in {last_run.name}"
 
 
-@pytest.mark.deviation("D-07")
 def test_crashed_run_is_not_completed(actors):
     """I5: a crashed run is not reported as completed (history pruning and
     ``experiments runs prune`` rely on this status to delete runs)"""

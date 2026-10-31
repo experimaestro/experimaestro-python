@@ -6,7 +6,6 @@ __lazy_modules__ = ["yaml", "experimaestro.scheduler"]  # PEP 810 (Python 3.15+)
 import logging
 from dataclasses import asdict
 from pathlib import Path
-from shutil import rmtree
 
 import click
 import yaml
@@ -79,6 +78,7 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
 
     Uses the same orphan detection as the TUI (WorkspaceStateProvider.get_orphan_jobs).
     """
+    from experimaestro.scheduler.liveness import JobInUseError, remove_job_directory
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
     from experimaestro.utils.disk_usage import folder_size, format_size
 
@@ -102,8 +102,10 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
         show(job)
         if clean:
             logging.info("Removing data in %s", job.path)
-            if job.path and job.path.exists():
-                rmtree(job.path)
+            try:
+                remove_job_directory(job)
+            except JobInUseError as e:
+                print(f"  skipped: {e}")
 
 
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")

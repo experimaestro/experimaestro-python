@@ -301,13 +301,23 @@ class TestGetExperimentRuns:
         """Run should contain correct metadata"""
         from experimaestro.scheduler.interfaces import ExperimentStatus
 
-        provider = WorkspaceStateProvider(mock_workspace)
-        runs = provider.get_experiment_runs("v2-multi-run")
+        from experimaestro.locking import create_file_lock
 
-        current_run = next(r for r in runs if r.run_id == "20260101_120000")
-        assert current_run.status == ExperimentStatus.RUNNING
-        assert current_run.hostname == "test-host"
-        assert current_run.total_jobs == 3
+        def current_run():
+            provider = WorkspaceStateProvider(mock_workspace)
+            runs = provider.get_experiment_runs("v2-multi-run")
+            return next(r for r in runs if r.run_id == "20260101_120000")
+
+        # Recorded as running, but no process holds the experiment lock
+        run = current_run()
+        assert run.status == ExperimentStatus.ABORTED
+        assert run.hostname == "test-host"
+        assert run.total_jobs == 3
+
+        lock_path = mock_workspace / "experiments" / "v2-multi-run" / "lock"
+        lock_path.touch()
+        with create_file_lock(lock_path):
+            assert current_run().status == ExperimentStatus.RUNNING
 
     def test_v1_synthetic_run(self, mock_workspace):
         """v1 experiment should return synthetic 'v1' run"""

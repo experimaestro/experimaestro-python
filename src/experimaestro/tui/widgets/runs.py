@@ -105,6 +105,8 @@ class RunsList(Widget):
                     status = "✓ Done"
                 case ExperimentStatus.FAILED:
                     status = "❌ Failed"
+                case ExperimentStatus.ABORTED:
+                    status = "⚠ Aborted"
                 case _:  # The "else" or default case
                     status = str(run.status.value) if run.status else "-"
 

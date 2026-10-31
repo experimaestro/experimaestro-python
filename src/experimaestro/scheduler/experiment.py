@@ -1404,12 +1404,18 @@ class experiment(BaseExperiment):
 def get_run_status(run_dir: Path) -> str | None:
     """Get the status of a run from its status.json or environment.json.
 
+    A run recorded as running is ``running`` only if it is the live run of
+    its experiment (experiment lock held), and ``aborted`` otherwise.
+
     Args:
         run_dir: Path to the run directory
 
     Returns:
-        'completed', 'failed', or None if status cannot be determined.
+        'completed', 'failed', 'running', 'aborted', or None if status cannot
+        be determined.
     """
+    from experimaestro.scheduler.liveness import run_is_live
+
     # Try environment.json first (most reliable - written on exit)
     env_path = run_dir / "environment.json"
     if env_path.exists():
@@ -1430,10 +1436,13 @@ def get_run_status(run_dir: Path) -> str | None:
                 status = json.load(f)
                 # Check the experiment status field
                 exp_status = status.get("status")
-                if exp_status == "done":
-                    return "completed"
-                elif exp_status == "failed":
-                    return "failed"
+                match exp_status:
+                    case "done":
+                        return "completed"
+                    case "failed":
+                        return "failed"
+                    case "running" | None:
+                        return "running" if run_is_live(run_dir) else "aborted"
                 # Check job states as fallback
                 jobs = status.get("jobs", {})
                 if any(j.get("state") == "error" for j in jobs.values()):

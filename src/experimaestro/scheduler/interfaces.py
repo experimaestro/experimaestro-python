@@ -422,6 +422,11 @@ class ExperimentStatus(enum.Enum):
     #: Experiment failed
     FAILED = "failed"
 
+    #: The run is recorded as running, but its process is gone (crashed or
+    #: killed). Derived by the readers from the experiment lock, never
+    #: written to ``status.json`` (where the run stays ``running``).
+    ABORTED = "aborted"
+
 
 class JobStateError(JobState):
     """Job has failed
@@ -1731,6 +1736,9 @@ class BaseExperiment:
 
         data = self.state_dict()
         data["last_updated"] = datetime.now().isoformat()
+        if data["status"] == ExperimentStatus.ABORTED.value:
+            # Derived by the readers, never stored
+            data["status"] = ExperimentStatus.RUNNING.value
 
         with create_file_lock(lock_path):
             atomic_write_json(status_path, data, indent=2)

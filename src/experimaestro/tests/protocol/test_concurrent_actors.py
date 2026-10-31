@@ -43,7 +43,6 @@ def test_cleanup_job_lock_excludes_running_job(actors):
         actors.wait_exit(xp)
 
 
-@pytest.mark.deviation("D-08")
 def test_orphan_clean_spares_running_job(actors):
     """I5: ``workspace orphans --clean`` never deletes a running job
 
@@ -83,7 +82,6 @@ def test_monitor_does_not_write_into_starting_run(actors):
     assert actors.wait_exit(xp) == 0, actors.logs()
 
 
-@pytest.mark.deviation("D-07")
 def test_monitor_sees_crashed_run_as_not_running(actors):
     """I5: a monitor started after an experiment crashed does not show it as
     running"""

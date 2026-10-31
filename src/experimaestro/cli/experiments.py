@@ -392,6 +392,10 @@ def history_prune(
         run_id = run_dir.name
         run_status = get_run_status(run_dir)
 
+        # Never remove the live run
+        if run_status == "running":
+            continue
+
         # Check status filter
         if status and run_status != status:
             continue

@@ -325,6 +325,11 @@ experimaestro experiments [OPTIONS] COMMAND
 | `actions list` / `actions run` | Experiment actions (alpha) |
 | `carbon summary` / `carbon stats` | Carbon tracking |
 
+A run's status is `completed`, `failed`, `running` (its experiment is still
+running) or `aborted` (the experiment process died before the end of the run,
+e.g. killed or crashed). `runs prune` never removes the running run, and
+`--status aborted` selects the aborted runs.
+
 ### List Command
 
 List experiments with their status and metadata:

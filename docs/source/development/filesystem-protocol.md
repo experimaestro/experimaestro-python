@@ -264,8 +264,12 @@ deletion of its event files.
 ### Experiment state
 
 Current run: `current` symlink, else the newest run directory. Running vs
-finished comes from `status.json` `status` plus replayed events. The
-experiment lock is **not** consulted by readers.
+finished comes from `status.json` `status` plus replayed events. A run
+recorded as running is live only if the experiment lock is held and the run
+is the newest run directory (`scheduler/liveness.py`: `run_is_live`); the
+workspace provider shows it otherwise as ABORTED (derived, never written:
+`write_status` stores it as `running`), and `get_run_status` returns
+`aborted`. `is_experiment_running` tests the experiment lock.
 
 ### Cleanup (monitor start)
 
@@ -273,7 +277,7 @@ experiment lock is **not** consulted by readers.
   temporary events, hard-link/copy them into `<run>/events/`, unlink the
   temporary files, rewrite `status.json`.
 - **Stale pid files and job events**: take the lock
-  `.experimaestro/<name>.lock` (timeout 0), probe the process; a `None` probe
+  job lock `<name>.lock` (timeout 0), probe the process; a `None` probe
   (other host, unknown launcher) counts as alive; files of other users are
   never touched. Dead process → unlink `.pid`, write `.failed` if no marker,
   rewrite `status.json`.
@@ -282,11 +286,11 @@ experiment lock is **not** consulted by readers.
 
 | Operation | Guard |
 |---|---|
-| delete job (`jobs clean`, TUI, web) | cached state finished/unscheduled |
-| delete experiment | cached/`status.json` status not RUNNING |
+| delete job (`jobs clean`, TUI, web) | cached state finished/unscheduled, then job lock (timeout 0) and no live process (`liveness.remove_job_directory`) |
+| delete experiment | experiment lock free; its jobs (`delete_jobs=True`) as delete job |
 | kill job | cached state; RPC path skips the check |
-| `workspace orphans --clean` | none |
-| `experiments runs prune` | `get_run_status` |
+| `workspace orphans --clean` | as delete job |
+| `experiments runs prune` | `get_run_status`, never the `running` run |
 | `runs tag/untag` | none (read-modify-write of `status.json`) |
 | `workspace migrate` (v1→v2) | none |
 
@@ -431,22 +435,22 @@ information older than 30 s.
 `MockJob` treat any live process with the recorded PID as the job; the
 `host` field is checked only by cleanup, and no start time is recorded.
 
-**D-07 [high] — Liveness from status fields** (I5). Readers decide that an
+**D-07 [high, fixed] — Liveness from status fields** (I5). **Fixed**: readers test the experiment lock; a crashed run is shown ABORTED and never pruned. Readers decide that an
 experiment is running from `status.json` (`is_experiment_running`), never from
 the experiment lock; a crashed run stays `running` forever. `get_run_status`
 falls back to `status.json` and returns `"completed"` for any status other
 than done/failed — including `running` — so history pruning (run after the
 experiment lock is released) and `experiments runs prune` can delete a live
 or crashed run.
-*Reproduced by* `test_experiment_crash.py::test_crashed_run_is_not_completed`, `test_concurrent_actors.py::test_monitor_sees_crashed_run_as_not_running`.
+*Tested by* `test_experiment_crash.py::test_crashed_run_is_not_completed`, `test_concurrent_actors.py::test_monitor_sees_crashed_run_as_not_running`.
 
-**D-08 [high] — Destructive operations without locks** (I5). Delete job, delete
+**D-08 [high, partly fixed] — Destructive operations without locks** (I5). **Fixed** for job deletion, experiment deletion and `orphans --clean` (`liveness.remove_job_directory`); `runs prune` never removes the running run. Kill over RPC and `workspace migrate` are unchanged. Delete job, delete
 experiment (incl. `delete_jobs=True` over RPC, which does not check whether
 other experiments use the jobs), kill over RPC, `workspace orphans --clean`
 (no state check at all), `runs prune` and `workspace migrate` rely on cached
 states only. `workspace stray --perform` checks `provider.is_live`, which is
 always `False` for the workspace provider.
-*Reproduced by* `test_concurrent_actors.py::test_orphan_clean_spares_running_job`.
+*Tested by* `test_concurrent_actors.py::test_orphan_clean_spares_running_job`.
 
 **D-09 [low] — Experiment lock leaked on `DirtyGitError`.** The error is raised
 after the lock is taken, and `__exit__` is not called.

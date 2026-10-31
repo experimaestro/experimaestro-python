@@ -24,6 +24,7 @@ from experimaestro.scheduler.interfaces import (
     BaseJob,
     BaseService,
     ExperimentJobInformation,
+    ExperimentStatus,
     JobFailureStatus,
     JobStateError,
     STATE_NAME_TO_JOBSTATE,
@@ -48,7 +49,21 @@ from experimaestro.scheduler.state_status import (
     task_id_hash,
 )
 
+from experimaestro.scheduler.liveness import (
+    JobInUseError,
+    experiment_is_live,
+    remove_job_directory,
+    run_is_live,
+)
+
 logger = logging.getLogger("xpm.workspace_state")
+
+
+def _mark_aborted(exp: MockExperiment, run_dir: Path) -> None:
+    """A run recorded as running whose process is gone is shown as aborted
+    (I5: liveness from the experiment lock, not from status.json)"""
+    if exp.status == ExperimentStatus.RUNNING and not run_is_live(run_dir):
+        exp.status = ExperimentStatus.ABORTED
 
 
 class WorkspaceStateProvider(OfflineStateProvider):
@@ -711,6 +726,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     self._apply_pending_experiment_events(exp, experiment_id)
                     if events:
                         exp.apply_events(events)
+                    _mark_aborted(exp, run_dir)
                     cache_key = (experiment_id, run_id)
                     with self._experiment_cache_lock:
                         self._experiment_cache[cache_key] = exp
@@ -1000,6 +1016,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 run_id=run_id,
             )
         self._apply_pending_experiment_events(exp, experiment_id)
+        _mark_aborted(exp, run_dir)
         return exp
 
     def _on_cached_experiment_found(
@@ -1591,6 +1608,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             # Use MockExperiment.from_disk to load the experiment
             mock_exp = MockExperiment.from_disk(run_dir, self.workspace_path)
             if mock_exp is not None:
+                _mark_aborted(mock_exp, run_dir)
                 runs.append(mock_exp)
 
         return runs
@@ -1879,6 +1897,10 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Job operations
     # =========================================================================
 
+    def is_experiment_running(self, experiment_id: str) -> bool:
+        """Whether a run of the experiment is live (its lock is held)"""
+        return experiment_is_live(self.workspace_path / "experiments" / experiment_id)
+
     def kill_job(self, job: MockJob, perform: bool = False) -> bool:
         """Kill a running job.
 
@@ -1908,10 +1930,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
             return True
 
         try:
-            import shutil
-
-            if job.path.exists():
-                shutil.rmtree(job.path)
+            try:
+                remove_job_directory(job)
+            except JobInUseError as e:
+                logger.warning("Not deleting job %s: %s", job.identifier, e)
+                return False
 
             # Clear job from cache — the job disappears from every query
             with self._job_cache_lock:
@@ -2341,15 +2364,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
         import shutil
 
         # Check if experiment is still running
-        from experimaestro.scheduler.interfaces import ExperimentStatus
-
-        exp = self.get_experiment(experiment_id)
-        if exp is not None:
-            try:
-                if exp.status == ExperimentStatus.RUNNING:
-                    return False, "Cannot delete: experiment is still running"
-            except (NotImplementedError, AttributeError):
-                pass
+        if self.is_experiment_running(experiment_id):
+            return False, "Cannot delete: experiment is still running"
 
         jobs = self.get_jobs(experiment_id=experiment_id)
 
@@ -2373,8 +2389,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
             for job in jobs:
                 if job.path and job.path.exists():
                     try:
-                        shutil.rmtree(job.path)
-                    except OSError as e:
+                        remove_job_directory(job)
+                    except (OSError, JobInUseError) as e:
                         errors.append(f"Failed to delete job {job.identifier}: {e}")
 
         # Delete v2 experiment directory
