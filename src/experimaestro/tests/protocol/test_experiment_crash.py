@@ -48,7 +48,6 @@ def test_experiment_killed_job_continues(actors):
     assert job.runs == 1
 
 
-@pytest.mark.deviation("D-14")
 def test_crashed_run_events_stay_in_their_run(actors):
     """I8: the events of a crashed run never end up in the next run"""
     crashed_task, task = Quick.C(x=1), Quick.C(x=2)
@@ -60,9 +59,12 @@ def test_crashed_run_events_stay_in_their_run(actors):
     second = actors.experiment(task)
     assert actors.wait_exit(second) == 0, actors.logs()
 
-    _, last_run = run_dirs(actors)
+    crashed_run, last_run = run_dirs(actors)
     leaked = [e for e in run_events(last_run) if e.get("job_id") == crashed_id]
     assert not leaked, f"events of the crashed run found in {last_run.name}"
+    assert any(e.get("job_id") == crashed_id for e in run_events(crashed_run)), (
+        "the crashed run lost its events"
+    )
 
 
 def test_crashed_run_is_not_completed(actors):

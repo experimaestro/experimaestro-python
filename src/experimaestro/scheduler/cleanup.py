@@ -320,6 +320,75 @@ def _consolidate_experiment_events_with_count(
         logger.warning(f"Failed to consolidate experiment {experiment_id}: {e}")
 
 
+def consolidate_leftover_experiment_events(
+    workspace_path: Path, experiment_id: str
+) -> None:
+    """Moves the live event files left by a crashed run into that run
+
+    Called by a new run of the experiment while it holds the experiment
+    lock, before it creates its run directory and opens its own event
+    files, so that the events of two runs are never mixed (I8). The files
+    are consolidated into the run ``current`` points to (the crashed run);
+    those that cannot be consolidated without asking the user are set aside
+    in that run's ``events/unconsolidated/`` directory.
+    """
+    from experimaestro.locking import OrphanedEventsError
+    from experimaestro.scheduler.liveness import latest_run_dir
+    from experimaestro.scheduler.state_provider import MockExperiment
+
+    experiments_dir = workspace_path / ".events" / "experiments"
+    if not experiments_dir.is_dir():
+        return
+    event_files = _collect_experiment_event_files(experiments_dir).get(experiment_id)
+    if not event_files:
+        return
+
+    experiment_dir = workspace_path / "experiments" / experiment_id
+    current = experiment_dir / "current"
+    run_dir = current.resolve() if current.is_symlink() else None
+    if run_dir is None or not run_dir.is_dir():
+        run_dir = latest_run_dir(experiment_dir) if experiment_dir.is_dir() else None
+
+    if run_dir is not None:
+        logger.info("Consolidating the events left by run %s", run_dir.name)
+        events_count = None
+        try:
+            events_count = json.loads((run_dir / "status.json").read_text()).get(
+                "events_count"
+            )
+        except (OSError, ValueError):
+            pass
+
+        if events_count is not None:
+            _consolidate_experiment_events_with_count(
+                workspace_path, experiment_id, run_dir, experiments_dir, event_files
+            )
+        else:
+            try:
+                if exp := MockExperiment.from_disk(run_dir, workspace_path):
+                    exp._cleanup_experiment_event_files()
+            except OrphanedEventsError:
+                pass
+
+    remaining = [path for path in event_files if path.exists()]
+    if not remaining:
+        return
+    target = (
+        run_dir / "events" / "unconsolidated"
+        if run_dir is not None
+        else experiment_dir / ".unconsolidated-events"
+    )
+    target.mkdir(parents=True, exist_ok=True)
+    for path in remaining:
+        path.rename(target / path.name)
+    logger.warning(
+        "Moved %d event file(s) left by a previous run of %s to %s",
+        len(remaining),
+        experiment_id,
+        target,
+    )
+
+
 #: Whether the shared-workspace hint has already been given
 _permission_hint_given = False
 

@@ -128,7 +128,9 @@ writes or checks a layout version (`WORKSPACE_VERSION` and `status.json`
 
 1. Touch `.__experimaestro__`; acquire `experiments/<xp>/lock` (non-blocking
    attempt, then a hint from the latest `environment.json`, then **blocking**).
-2. Under the lock: allocate `run_id`, create the run directory, write
+2. Under the lock: consolidate the temporary event files left by a crashed
+   run into that run (`current`), or set them aside in its
+   `events/unconsolidated/`; allocate `run_id`, create the run directory, write
    `environment.json`, truncate `objects.jsonl`, open the event writer
    (`.events/experiments/<xp>-0.jsonl`, hard-linked to `events/event-0.jsonl`),
    write `status.json` (`init_status`), re-point `current`.
@@ -148,9 +150,9 @@ writes or checks a layout version (`WORKSPACE_VERSION` and `status.json`
    prune the run history.
 
 After a crash (`kill -9`), the kernel releases the lock; `status.json` still
-says `running`; temporary event files remain. **The experiment does not
-consolidate its previous crashed run on start**: cleanup in a monitor does
-(see below).
+says `running` (readers show the run as aborted); temporary event files
+remain until the next run of the experiment, or cleanup in a monitor (see
+below), consolidates them.
 
 ### Job start (scheduler)
 
@@ -276,7 +278,7 @@ workspace provider shows it otherwise as ABORTED (derived, never written:
 - **Experiment events**: under the experiment lock (skip if held), replay the
   temporary events, hard-link/copy them into `<run>/events/`, unlink the
   temporary files, rewrite `status.json`.
-- **Stale pid files and job events**: take the lock
+- **Stale pid files and job events**: take the
   job lock `<name>.lock` (timeout 0), probe the process; a `None` probe
   (other host, unknown launcher) counts as alive; files of other users are
   never touched. Dead process → unlink `.pid`, write `.failed` if no marker,
@@ -462,11 +464,11 @@ rotation (`_write_events_count_to_status`), cleanup consolidation,
 `_persist_job_deletion`, `runs tag/untag`, and monitor-side `finalize_status`
 (which uses the experiment lock instead).
 
-**D-11 [medium] — Monitors write into a starting run.** When `status.json` is missing,
+**D-11 [medium, fixed] — Monitors write into a starting run.** **Fixed**: the state recovered by `MockExperiment.from_disk` is kept in memory only. When `status.json` is missing,
 `MockExperiment.from_disk` recovers it from the `jobs/` symlinks and writes
 it; the experiment creates the run directory before `init_status`, so a
 monitor can write a `status.json` into a run being created.
-*Reproduced by* `test_concurrent_actors.py::test_monitor_does_not_write_into_starting_run`.
+*Tested by* `test_concurrent_actors.py::test_monitor_does_not_write_into_starting_run`.
 
 **D-12 [low] — "Detached" not persisted.** `_finalize_run` maps only
 completed/failed; `status.json` stays `running` while `environment.json` says
@@ -479,12 +481,12 @@ MISSING_OUTPUTS. `mark_done()` writes an empty `.done` (no `task_outputs`).
 
 ### Events and runs
 
-**D-14 [high] — Event files shared across runs** (I8). The temporary experiment
+**D-14 [high, fixed] — Event files shared across runs** (I8). **Fixed**: a new run consolidates the files left by a crashed run before creating its own. The temporary experiment
 event file is `<xp>-<n>.jsonl` with `n` restarting at 0 and no run id, opened
 in append mode: a leftover file of a crashed, unconsolidated run is appended
 to and hard-linked into the new run, and `current` is re-pointed so the old
 run can no longer be consolidated.
-*Reproduced by* `test_experiment_crash.py::test_crashed_run_events_stay_in_their_run`.
+*Tested by* `test_experiment_crash.py::test_crashed_run_events_stay_in_their_run`.
 
 **D-15 [not reproduced] — Crash between final `status.json` and event archiving.** Suspected from the code, but the cleanup consolidates this crash without asking the user (`test_experiment_crash.py::test_crash_before_event_archive_is_recovered`). Kept to preserve the numbering.
 

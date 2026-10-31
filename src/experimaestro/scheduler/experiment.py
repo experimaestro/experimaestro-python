@@ -936,6 +936,14 @@ class experiment(BaseExperiment):
             self.xplock = lock
             logger.info("Experiment locked")
 
+            # Events left by a crashed run go to that run, before this run
+            # creates its directory and its own event files (I8)
+            from experimaestro.scheduler.cleanup import (
+                consolidate_leftover_experiment_events,
+            )
+
+            consolidate_leftover_experiment_events(self.workspace.path, self.name)
+
             # Generate run_id with collision detection
             now = datetime.now()
             base_run_id = now.strftime("%Y%m%d_%H%M%S")

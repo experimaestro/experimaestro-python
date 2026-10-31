@@ -2442,19 +2442,8 @@ class MockExperiment(BaseExperiment):
             len(exp._job_infos),
         )
 
-        # Write status.json so future loads don't need expensive recovery
-        try:
-            exp.write_status()
-            logger.info(
-                "Wrote status.json for recovered experiment %s/%s",
-                experiment_id,
-                run_id,
-            )
-        except OSError as e:
-            logger.warning(
-                "Failed to write status.json for %s/%s: %s", experiment_id, run_id, e
-            )
-
+        # Not written to status.json: readers never write, and the run may
+        # be being created (its status.json not written yet)
         return exp
 
     @classmethod

@@ -63,7 +63,6 @@ def test_orphan_clean_spares_running_job(actors):
     assert job.path.is_dir(), "running job deleted"
 
 
-@pytest.mark.deviation("D-11")
 def test_monitor_does_not_write_into_starting_run(actors):
     """A monitor never writes the status of a run being created"""
     xp = actors.experiment(Quick.C(x=3), crashpoints="experiment.run_dir_created=pause")
