@@ -88,6 +88,15 @@ LEARN_FAILED_MARKER = {
     "message": "ValueError: the learning rate must be positive",
     "location": "pkg/learn.py:42 in execute",
 }
+#: Stopped by SLURM at its time limit (the job wrote it was cancelled)
+LEARN_TIMEOUT = "a7learntimeout"
+#: Its .failed marker, as rewritten by the scheduler
+LEARN_TIMEOUT_MARKER = {
+    "code": 143,
+    "reason": "timeout",
+    "message": "SLURM job time limit reached",
+    "job": {"code": 15, "reason": "cancelled", "message": "Job terminated by SIGTERM"},
+}
 #: Failed because its dependency (LEARN_FAILED) failed
 EVAL_DEP_FAILED = "a6evaldepfailed"
 OLD_LEARN = "a0oldlearn"
@@ -133,6 +142,16 @@ EXPERIMENTS = [
                         [LEARN_FAILED],
                         2,
                         "DEPENDENCY",
+                    ),
+                    JobSpec(
+                        LEARN_TIMEOUT,
+                        "pkg.Learn",
+                        "error",
+                        {"model": "bm25"},
+                        [],
+                        3,
+                        "TIMEOUT",
+                        LEARN_TIMEOUT_MARKER,
                     ),
                 ],
             ),

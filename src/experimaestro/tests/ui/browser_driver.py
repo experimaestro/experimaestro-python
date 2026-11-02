@@ -438,7 +438,13 @@ class BrowserDriver:
             dependency_failures=dependency_failures,
             failure_message=await self._text_or_none(modal, ".failure-message"),
             failure_location=await self._text_or_none(modal, ".failure-location code"),
+            failure_job_message=await self._job_message(modal),
         )
+
+    @classmethod
+    async def _job_message(cls, modal: Locator) -> str | None:
+        text = await cls._text_or_none(modal, ".failure-job-message")
+        return text.removeprefix("the job reported: ") if text else None
 
     @staticmethod
     async def _text_or_none(container: Locator, selector: str) -> str | None:

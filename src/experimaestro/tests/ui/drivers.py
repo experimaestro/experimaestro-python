@@ -83,6 +83,8 @@ class JobDetail:
     failure_message: str | None = None
     #: Where the exception was raised, None if not shown
     failure_location: str | None = None
+    #: What the job reported, when the launcher explained the failure
+    failure_job_message: str | None = None
 
 
 @dataclass

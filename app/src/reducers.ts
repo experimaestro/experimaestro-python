@@ -114,6 +114,9 @@ export type FailureDetails = {
   message: string | null;
   // Where the exception was raised, e.g. "task.py:12 in execute"
   location: string | null;
+  // What the job recorded, when the launcher explained the failure better
+  // (e.g. "Job terminated by SIGTERM" for a SLURM timeout)
+  job_message?: string | null;
 };
 
 export type Jobs = {

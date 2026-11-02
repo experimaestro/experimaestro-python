@@ -585,7 +585,10 @@ from the `.failed` marker in the job folder:
   raised (`file.py:42 in execute`) — the full traceback is in the job logs;
 - for a timeout, a cancellation or a crashed process, the recorded message;
 - for a job the launcher refused to start (e.g. a SLURM pending reason such as
-  `PartitionTimeLimit`), the reason given by the launcher;
+  `PartitionTimeLimit`) or stopped (e.g. the SLURM time limit), the reason
+  given by the launcher, followed by what the job reported (a job SLURM stops
+  at its time limit receives SIGTERM and reports it was cancelled: it is shown
+  as timed out, and a resumable task is retried);
 - the exit code of the job process.
 
 Jobs that failed with an older experimaestro only show their exit code. Over

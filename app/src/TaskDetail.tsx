@@ -90,6 +90,11 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
                 {job.failure.message && (
                   <div className="failure-message">{job.failure.message}</div>
                 )}
+                {job.failure.job_message && (
+                  <div className="failure-job-message small">
+                    the job reported: {job.failure.job_message}
+                  </div>
+                )}
                 <div className="text-muted small">
                   {job.failure.location && (
                     <span className="failure-location">

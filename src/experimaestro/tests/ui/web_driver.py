@@ -289,6 +289,7 @@ class WebDriver:
             },
             failure_message=(job.get("failure") or {}).get("message"),
             failure_location=(job.get("failure") or {}).get("location"),
+            failure_job_message=(job.get("failure") or {}).get("job_message"),
         )
 
     async def follow_dependency(self, job_id: str, dependency_id: str) -> JobDetail:

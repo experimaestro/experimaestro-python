@@ -1,5 +1,8 @@
 from pathlib import Path
+import os
+import signal
 import sys
+import time
 import asyncio
 import threading
 import concurrent.futures
@@ -17,7 +20,7 @@ from experimaestro.launchers.slurm.base import (
 )
 from experimaestro.scheduler.base import Scheduler
 from experimaestro.scheduler.interfaces import FailureDetails, JobFailureStatus
-from experimaestro import field, ResumableTask, Param
+from experimaestro import field, ResumableTask, Param, Task
 from experimaestro.scheduler import JobState
 import shutil
 import pytest
@@ -102,6 +105,19 @@ def test_slurm_takeback(slurmlauncher, tmp_path):
     takeback(slurmlauncher, datapath, txp1, txp2)
 
 
+def sigterm_self():
+    """Terminate the task as SLURM does (the job is then marked cancelled)"""
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(30)  # Interrupted by TaskCancelled
+
+
+class SigtermTask(Task):
+    """A task terminated with SIGTERM, e.g. by scancel"""
+
+    def execute(self):
+        sigterm_self()
+
+
 class SlurmResumableTask(ResumableTask):
     """ResumableTask that simulates timeout on first N attempts for SLURM testing"""
 
@@ -109,6 +125,8 @@ class SlurmResumableTask(ResumableTask):
     timeout_count: Param[int] = field(default=2, ignore_default=True)
     slurm_jobs_dir: Param[Path]  # Path to mock SLURM jobs directory
     output_file: Param[Path] = field(default=None, ignore_default=True)
+    #: Simulate the timeout as SLURM does: SIGTERM (otherwise, by failing)
+    sigterm: Param[bool] = field(default=False, ignore_default=True)
 
     def execute(self):
         import os
@@ -133,6 +151,9 @@ class SlurmResumableTask(ResumableTask):
             if job_id:
                 timeout_marker = self.slurm_jobs_dir / f"{job_id}.timeout"
                 timeout_marker.write_text(f"timeout on attempt {attempt}")
+            if self.sigterm:
+                # SLURM sends SIGTERM when the time limit is reached
+                sigterm_self()
             # Exit with error to trigger SLURM timeout handling
             raise RuntimeError(f"Simulated timeout on attempt {attempt}")
 
@@ -180,6 +201,61 @@ def test_slurm_resumable_task(tmp_path: Path, slurmlauncher: SlurmLauncher):
         # Verify output file was created on success
         assert output_file.exists(), "Output file was not created"
         assert "Completed after 3 attempts" in output_file.read_text()
+
+
+@pytest.mark.timeout(30)
+def test_slurm_timeout_sigterm(tmp_path: Path, slurmlauncher: SlurmLauncher):
+    """At the time limit, SLURM terminates the job with SIGTERM: the job is
+    marked cancelled, but it timed out — a resumable task is retried, and the
+    marker records the timeout"""
+    with TemporaryExperiment(
+        "slurm-timeout-sigterm", workdir=tmp_path / "xp", timeout_multiplier=10.0
+    ):
+        checkpoint = tmp_path / "checkpoint.txt"
+        task = SlurmResumableTask.C(
+            checkpoint=checkpoint,
+            timeout_count=1,
+            slurm_jobs_dir=slurmlauncher.binpath.parent / "slurm" / "jobs",
+            sigterm=True,
+            output_file=tmp_path / "output.txt",
+        ).submit(launcher=slurmlauncher, max_retries=3)
+        assert task.__xpm__.job.wait() == JobState.DONE
+        assert task.__xpm__.job.retry_count == 1
+        assert int(checkpoint.read_text()) == 2
+
+        # Out of retries: the timeout is recorded in the marker
+        checkpoint.unlink()
+        task = SlurmResumableTask.C(
+            checkpoint=checkpoint,
+            timeout_count=10,
+            slurm_jobs_dir=slurmlauncher.binpath.parent / "slurm" / "jobs",
+            sigterm=True,
+            output_file=tmp_path / "output-2.txt",
+        ).submit(launcher=slurmlauncher, max_retries=1)
+        job = task.__xpm__.job
+        state = job.wait()
+        assert state.failure_reason == JobFailureStatus.TIMEOUT
+        assert JobState.from_path(job.path, job.name).failure_reason == (
+            JobFailureStatus.TIMEOUT
+        )
+        details = FailureDetails.from_path(job.path, job.name)
+        assert details.message == "SLURM job time limit reached"
+        assert details.job_message == "Job terminated by SIGTERM"
+
+
+@pytest.mark.timeout(30)
+def test_slurm_sigterm_cancelled(tmp_path: Path, slurmlauncher: SlurmLauncher):
+    """A job terminated by SIGTERM for another reason (e.g. scancel) stays
+    cancelled"""
+    with TemporaryExperiment(
+        "slurm-sigterm", workdir=tmp_path / "xp", timeout_multiplier=10.0
+    ):
+        task = SigtermTask.C().submit(launcher=slurmlauncher)
+        job = task.__xpm__.job
+        assert job.wait().failure_reason == JobFailureStatus.CANCELLED
+        details = FailureDetails.from_path(job.path, job.name)
+        assert details.message == "Job terminated by SIGTERM"
+        assert details.job_message is None
 
 
 @pytest.mark.timeout(30)

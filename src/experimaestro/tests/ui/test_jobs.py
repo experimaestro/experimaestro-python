@@ -10,6 +10,8 @@ from .scenario import (
     LEARN_ERROR,
     LEARN_FAILED,
     LEARN_FAILED_MARKER,
+    LEARN_TIMEOUT,
+    LEARN_TIMEOUT_MARKER,
     LEARN_RUNNING,
     LEARN_STUCK,
     OLD_LEARN,
@@ -130,7 +132,12 @@ async def test_run_history(ui):
     assert await ui.runs("baseline") == ["20260101_100000", "20260102_090000"]
 
     await ui.open_experiment("baseline", "20260101_100000")
-    assert await ui.visible_jobs() == {OLD_LEARN, LEARN_FAILED, EVAL_DEP_FAILED}
+    assert await ui.visible_jobs() == {
+        OLD_LEARN,
+        LEARN_FAILED,
+        EVAL_DEP_FAILED,
+        LEARN_TIMEOUT,
+    }
 
 
 async def test_filter_by_tag_and_state(ui):
@@ -251,6 +258,16 @@ async def test_job_detail_failure_details(ui):
     detail = await ui.job_detail(LEARN_FAILED)
     assert detail.failure_message == LEARN_FAILED_MARKER["message"]
     assert detail.failure_location == LEARN_FAILED_MARKER["location"]
+    assert detail.failure_job_message is None
+
+
+async def test_job_detail_launcher_failure(ui):
+    # The reason given by the launcher, and what the job itself reported
+    await ui.open_experiment("baseline", "20260101_100000")
+    detail = await ui.job_detail(LEARN_TIMEOUT)
+    assert (detail.state, detail.failure) == ("error", "TIMEOUT")
+    assert detail.failure_message == LEARN_TIMEOUT_MARKER["message"]
+    assert detail.failure_job_message == LEARN_TIMEOUT_MARKER["job"]["message"]
 
 
 async def test_job_detail_follow_dependency(ui):

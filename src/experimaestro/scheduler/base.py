@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import (
+    Any,
     Optional,
     ClassVar,
     TYPE_CHECKING,
@@ -1280,33 +1281,8 @@ class Scheduler(StateProvider, threading.Thread):
         if code is not None:
             job.exit_code = code
 
-        # Read state from .done/.failed files (contains detailed failure reason)
-        state = JobState.from_path(job.path, job.name)
-
-        # If state is a generic FAILED error, let the process determine
-        # the state (it may detect launcher-specific failures like SLURM timeout)
-        if (
-            state is not None
-            and state.is_error()
-            and state.failure_reason == JobFailureStatus.FAILED
-            and code is not None
-        ):
-            process_state = process.get_job_state(code)
-            if (
-                process_state.is_error()
-                and process_state.failure_reason != JobFailureStatus.FAILED
-            ):
-                # Process detected a more specific failure reason
-                state = process_state
-
-        if state is None:
-            if code is not None:
-                # Fall back to process-specific state detection
-                state = process.get_job_state(code)
-            else:
-                logger.error("No .done or .failed file found for job %s", job)
-                state = JobState.ERROR
-
+        # Not holding the job lock: the marker is left as it is
+        state = self._final_state(job, process, code)
         job.set_scheduler_state(state)
         self.notify_job_state(job)  # Notify listeners of final state
 
@@ -1543,41 +1519,15 @@ class Scheduler(StateProvider, threading.Thread):
                 else:
                     logger.info("Job %s ended, reading state from files", job)
 
-                # Read state from .done/.failed files (contains detailed failure reason)
-                state = JobState.from_path(job.path, job.name)
+                state = self._final_state(job, process, code)
                 logger.debug(
-                    "State from marker files for job %s: %s (code=%s, donepath=%s, failedpath=%s)",
+                    "Final state of job %s: %s (code=%s)",
                     job.identifier[:8],
                     state,
                     code,
-                    job.donepath.exists(),
-                    job.failedpath.exists(),
                 )
-
-                # If state is a generic FAILED error, let the process determine
-                # the state (it may detect launcher-specific failures like SLURM timeout)
-                if (
-                    state is not None
-                    and state.is_error()
-                    and state.failure_reason == JobFailureStatus.FAILED
-                    and code is not None
-                ):
-                    process_state = process.get_job_state(code)
-                    if (
-                        process_state.is_error()
-                        and process_state.failure_reason != JobFailureStatus.FAILED
-                    ):
-                        # Process detected a more specific failure reason
-                        state = process_state
-
-                if state is None:
-                    if code is not None:
-                        # Fall back to process-specific state detection
-                        state = process.get_job_state(code)
-                        self._write_launcher_failure(job, code, state)
-                    else:
-                        logger.error("No .done or .failed file found for job %s", job)
-                        state = JobState.ERROR
+                # The job lock is held: the launcher's explanation is recorded
+                self._write_launcher_failure(job, code, state)
 
             except JobError:
                 logger.error(
@@ -1638,26 +1588,73 @@ class Scheduler(StateProvider, threading.Thread):
         return state
 
     @staticmethod
-    def _write_launcher_failure(job: Job, code: int, state: JobState) -> None:
+    def _final_state(job: Job, process: "Process", code: int | None) -> JobState:
+        """State of a job whose process ended
+
+        The ``.done``/``.failed`` markers written by the job process give the
+        state, unless the launcher knows better: a job that failed or was
+        cancelled may have been stopped by the launcher (e.g. SLURM sends
+        SIGTERM when the time limit is reached, so the job writes that it was
+        cancelled while it timed out).
+        """
+        state = JobState.from_path(job.path, job.name)
+
+        if (
+            state is not None
+            and state.is_error()
+            and state.failure_reason
+            in (JobFailureStatus.FAILED, JobFailureStatus.CANCELLED)
+            and code is not None
+        ):
+            process_state = process.get_job_state(code)
+            if (
+                process_state.is_error()
+                and process_state.failure_reason is not None
+                and process_state.failure_reason != JobFailureStatus.FAILED
+            ):
+                # The launcher detected a more specific failure reason
+                state = process_state
+
+        if state is None:
+            if code is not None:
+                # Fall back to process-specific state detection
+                state = process.get_job_state(code)
+            else:
+                logger.error("No .done or .failed file found for job %s", job)
+                state = JobState.ERROR
+        return state
+
+    @staticmethod
+    def _write_launcher_failure(job: Job, code: int | None, state: JobState) -> None:
         """Record a failure explained by the launcher in the ``.failed`` marker
 
-        Called for a job whose process ended without writing a marker (e.g. a
-        job SLURM refused to start), while the job lock is held: the marker
-        keeps the reason after the experiment ends, and its message is shown
-        in the job details.
+        Called while the job lock is held, when the launcher explains the
+        failure (``state.message``): for a job SLURM refused to start (which
+        wrote no marker) or terminated at its time limit (which wrote that it
+        was cancelled). The marker then keeps the reason after the experiment
+        ends, and its message is shown in the job details; what the job wrote
+        is kept under ``job``.
         """
         if not (state.is_error() and state.message) or state.failure_reason is None:
             return
+        reason = state.failure_reason.name.lower()
         try:
-            atomic_write_json(
-                job.failedpath,
-                {
-                    "code": code,
-                    "reason": state.failure_reason.name.lower(),
-                    "message": state.message,
-                },
-                fsync=True,
-            )
+            previous = json.loads(job.failedpath.read_text())
+        except (OSError, ValueError):
+            previous = None
+        if isinstance(previous, dict) and previous.get("reason") == reason:
+            # Already recorded (by the job itself or an earlier call)
+            return
+
+        marker: dict[str, Any] = {
+            "code": code,
+            "reason": reason,
+            "message": state.message,
+        }
+        if isinstance(previous, dict):
+            marker["job"] = previous
+        try:
+            atomic_write_json(job.failedpath, marker, fsync=True)
         except OSError:
             logger.warning(
                 "Could not write the failure marker of %s", job, exc_info=True

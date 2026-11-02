@@ -311,6 +311,8 @@ class JobDetailView(Widget):
         if failure.message:
             text.append(failure.message, style="bold red")
             text.append("\n")
+        if failure.job_message:
+            text.append(f"the job reported: {failure.job_message}\n")
         details = []
         if failure.location:
             details.append(f"raised at {failure.location}")

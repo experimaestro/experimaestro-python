@@ -306,8 +306,9 @@ class FailureDetails:
     """Details of a job failure, read from its ``.failed`` marker
 
     The marker is written by the job process (the exception raised by the
-    task, a timeout or a cancellation), by the scheduler (a job the launcher
-    refused, e.g. a SLURM pending reason) or by the cleanup of crashed jobs.
+    task, a timeout or a cancellation), by the scheduler (the reason given by
+    the launcher, e.g. a SLURM pending reason or time limit, keeping what the
+    job wrote under ``job``) or by the cleanup of crashed jobs.
     """
 
     #: Exit code of the job process
@@ -316,6 +317,9 @@ class FailureDetails:
     message: str | None = None
     #: Where the exception was raised, e.g. ``task.py:12 in execute``
     location: str | None = None
+    #: What the job itself recorded, when the launcher explained the failure
+    #: better (e.g. "Job terminated by SIGTERM" for a SLURM timeout)
+    job_message: str | None = None
 
     @staticmethod
     def from_path(basepath: Path, scriptname: str) -> "FailureDetails | None":
@@ -336,14 +340,23 @@ class FailureDetails:
         if not isinstance(data, dict):
             return None
         code = data.get("code")
+        # What the job wrote, when the scheduler recorded the launcher's reason
+        job = data.get("job")
+        job = job if isinstance(job, dict) else {}
         return FailureDetails(
             code=code if isinstance(code, int) else None,
             message=data.get("message") or None,
-            location=data.get("location") or None,
+            location=data.get("location") or job.get("location") or None,
+            job_message=job.get("message") or None,
         )
 
     def state_dict(self) -> dict[str, Any]:
-        return {"code": self.code, "message": self.message, "location": self.location}
+        return {
+            "code": self.code,
+            "message": self.message,
+            "location": self.location,
+            "job_message": self.job_message,
+        }
 
     @staticmethod
     def from_state_dict(data: dict[str, Any]) -> "FailureDetails":
@@ -351,6 +364,7 @@ class FailureDetails:
             code=data.get("code"),
             message=data.get("message"),
             location=data.get("location"),
+            job_message=data.get("job_message"),
         )
 
 
